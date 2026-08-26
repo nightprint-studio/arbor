@@ -64,7 +64,9 @@ fn bare_field_reference() {
     let p = single();
     let s = p.source("A.java").to_string();
     // `count + 1` in readBare() — a bare reference to the field.
-    let d = p.goto("A.java", at(&s, "count + 1")).expect("goto bare field");
+    let d = p
+        .goto("A.java", at(&s, "count + 1"))
+        .expect("goto bare field");
     assert_eq!(d.file, "A.java");
     assert_eq!(d.label, "field app.A.count");
     assert_eq!(d.line, line_of(&s, "int count;"));
@@ -104,7 +106,10 @@ fn field_via_object_receiver_cross_file() {
     // `h.value` — a field accessed through another object's receiver, in a different file.
     let off = at(&u, "h.value") + "h.".len();
     let d = p.goto("User.java", off).expect("goto receiver field");
-    assert_eq!(d.file, "Holder.java", "field resolves into the owning type's file");
+    assert_eq!(
+        d.file, "Holder.java",
+        "field resolves into the owning type's file"
+    );
     assert_eq!(d.label, "field app.Holder.value");
     assert_eq!(d.line, line_of(p.source("Holder.java"), "int value;"));
 }
@@ -118,8 +123,13 @@ fn field_inherited_one_level() {
     let p = chain();
     let c = p.source("Child.java").to_string();
     // `parentField` used bare in Child — declared one level up, in Parent.
-    let d = p.goto("Child.java", at(&c, "parentField")).expect("goto inherited (1 level)");
-    assert_eq!(d.file, "Parent.java", "an inherited field resolves into the declaring parent's file");
+    let d = p
+        .goto("Child.java", at(&c, "parentField"))
+        .expect("goto inherited (1 level)");
+    assert_eq!(
+        d.file, "Parent.java",
+        "an inherited field resolves into the declaring parent's file"
+    );
     assert_eq!(d.label, "field app.Parent.parentField");
     assert_eq!(d.line, line_of(p.source("Parent.java"), "int parentField;"));
 }
@@ -129,8 +139,13 @@ fn field_inherited_two_levels() {
     let p = chain();
     let c = p.source("Child.java").to_string();
     // `grandField` used bare in Child — declared two levels up, in Grand.
-    let d = p.goto("Child.java", at(&c, "grandField")).expect("goto inherited (2 levels)");
-    assert_eq!(d.file, "Grand.java", "a two-level inherited field resolves into the grandparent's file");
+    let d = p
+        .goto("Child.java", at(&c, "grandField"))
+        .expect("goto inherited (2 levels)");
+    assert_eq!(
+        d.file, "Grand.java",
+        "a two-level inherited field resolves into the grandparent's file"
+    );
     assert_eq!(d.label, "field app.Grand.grandField");
     assert_eq!(d.line, line_of(p.source("Grand.java"), "int grandField;"));
 }
@@ -171,9 +186,13 @@ fn constant_from_implemented_interface() {
     ]);
     let b = p.source("Bounded.java").to_string();
     // `MAX` — an implicitly `public static final` constant inherited from the interface.
-    let d = p.goto("Bounded.java", at(&b, "return MAX") + "return ".len())
+    let d = p
+        .goto("Bounded.java", at(&b, "return MAX") + "return ".len())
         .expect("goto interface constant");
-    assert_eq!(d.file, "Limits.java", "an interface constant resolves into the interface's file");
+    assert_eq!(
+        d.file, "Limits.java",
+        "an interface constant resolves into the interface's file"
+    );
     assert_eq!(d.label, "field app.Limits.MAX");
     assert_eq!(d.line, line_of(p.source("Limits.java"), "int MAX ="));
 }
@@ -199,7 +218,9 @@ fn constant_via_interface_type_qualifier() {
     let r = p.source("Runner.java").to_string();
     // `Config.TIMEOUT` — qualified by the interface type from a non-implementing class.
     let off = at(&r, "Config.TIMEOUT") + "Config.".len();
-    let d = p.goto("Runner.java", off).expect("goto qualified interface constant");
+    let d = p
+        .goto("Runner.java", off)
+        .expect("goto qualified interface constant");
     assert_eq!(d.file, "Config.java");
     assert_eq!(d.label, "field app.Config.TIMEOUT");
     assert_eq!(d.line, line_of(p.source("Config.java"), "int TIMEOUT ="));
@@ -221,7 +242,9 @@ fn static_field_bare_same_class() {
     )]);
     let s = p.source("Counter.java").to_string();
     // bare `total` in the same class — a static field.
-    let d = p.goto("Counter.java", at(&s, "total + 1")).expect("goto static field");
+    let d = p
+        .goto("Counter.java", at(&s, "total + 1"))
+        .expect("goto static field");
     assert_eq!(d.file, "Counter.java");
     assert_eq!(d.label, "field app.Counter.total");
     assert_eq!(d.line, line_of(&s, "static int total;"));
@@ -248,10 +271,15 @@ fn static_field_via_type_qualifier_cross_file() {
     let pr = p.source("Probe.java").to_string();
     // `Registry.size` — static field qualified by the class name, cross-file.
     let off = at(&pr, "Registry.size") + "Registry.".len();
-    let d = p.goto("Probe.java", off).expect("goto qualified static field");
+    let d = p
+        .goto("Probe.java", off)
+        .expect("goto qualified static field");
     assert_eq!(d.file, "Registry.java");
     assert_eq!(d.label, "field app.Registry.size");
-    assert_eq!(d.line, line_of(p.source("Registry.java"), "static int size;"));
+    assert_eq!(
+        d.line,
+        line_of(p.source("Registry.java"), "static int size;")
+    );
 }
 
 #[test]
@@ -275,8 +303,13 @@ fn inherited_static_field() {
     let d2 = p.source("Derived.java").to_string();
     // bare `seed` in the subclass — a static field inherited from the parent.
     let off = at(&d2, "return seed") + "return ".len();
-    let d = p.goto("Derived.java", off).expect("goto inherited static field");
-    assert_eq!(d.file, "Origin.java", "an inherited static field resolves into the declaring parent's file");
+    let d = p
+        .goto("Derived.java", off)
+        .expect("goto inherited static field");
+    assert_eq!(
+        d.file, "Origin.java",
+        "an inherited static field resolves into the declaring parent's file"
+    );
     assert_eq!(d.label, "field app.Origin.seed");
     assert_eq!(d.line, line_of(p.source("Origin.java"), "static int seed;"));
 }
@@ -294,7 +327,10 @@ fn field_shadowed_by_local_resolves_to_local() {
     let off = at(&s, "return count + mirror") + "return ".len();
     let d = p.goto("A.java", off).expect("goto shadowed name -> local");
     assert_eq!(d.file, "A.java");
-    assert_eq!(d.label, "local `count`", "a local shadows the same-named field for a bare use");
+    assert_eq!(
+        d.label, "local `count`",
+        "a local shadows the same-named field for a bare use"
+    );
     assert_eq!(d.line, line_of(&s, "int count = 5;"));
 }
 
@@ -346,7 +382,10 @@ fn find_usages_of_inherited_field() {
     // in practice, and is counted.
     let off = at(&pr, "int parentField;") + "int ".len();
     let n = p.usage_count("Parent.java", off);
-    assert_eq!(n, 1, "the bare read in Child.sum() is a use of Parent.parentField");
+    assert_eq!(
+        n, 1,
+        "the bare read in Child.sum() is a use of Parent.parentField"
+    );
 }
 
 #[test]
@@ -355,5 +394,9 @@ fn find_usages_of_local_is_zero() {
     let s = p.source("A.java").to_string();
     // A local is scope-exact and not bucketed → usage_count is 0 even though the name recurs.
     let off = at(&s, "int count = 5") + "int ".len();
-    assert_eq!(p.usage_count("A.java", off), 0, "a local is not counted by find-usages");
+    assert_eq!(
+        p.usage_count("A.java", off),
+        0,
+        "a local is not counted by find-usages"
+    );
 }

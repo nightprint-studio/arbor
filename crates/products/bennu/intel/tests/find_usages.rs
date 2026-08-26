@@ -59,7 +59,10 @@ fn method_usage_count_stable_from_use_site() {
     let s = p.source("Service.java").to_string();
     let from_decl = p.usage_count("Service.java", at(&s, "compute(int param)"));
     let from_use = p.usage_count("Service.java", at(&s, "compute(2)"));
-    assert_eq!(from_decl, from_use, "count is a property of the member, not the caret");
+    assert_eq!(
+        from_decl, from_use,
+        "count is a property of the member, not the caret"
+    );
     assert_eq!(from_use, 2);
 }
 
@@ -68,7 +71,10 @@ fn inherited_method_used_across_files() {
     let p = proj();
     let b = p.source("Base.java").to_string();
     let n = p.usage_count("Base.java", at(&b, "baseMethod() { return 1; }"));
-    assert_eq!(n, 2, "baseMethod() is used in Service.compute() and Consumer.use()");
+    assert_eq!(
+        n, 2,
+        "baseMethod() is used in Service.compute() and Consumer.use()"
+    );
 }
 
 #[test]
@@ -130,7 +136,10 @@ fn method_used_only_cross_file() {
     ]);
     let a = p.source("Api.java").to_string();
     let n = p.usage_count("Api.java", at(&a, "ping()"));
-    assert_eq!(n, 2, "ping() is used once in each of two cross-file clients");
+    assert_eq!(
+        n, 2,
+        "ping() is used once in each of two cross-file clients"
+    );
 }
 
 // ── Fields (qualified access is what find-usages buckets) ────────────────────────────────────
@@ -149,8 +158,14 @@ fn field_usage_count_stable_from_use_site() {
     let p = proj();
     let s = p.source("Service.java").to_string();
     let from_decl = p.usage_count("Service.java", at(&s, "int localField") + "int ".len());
-    let from_use = p.usage_count("Service.java", at_last(&s, "this.localField") + "this.".len());
-    assert_eq!(from_decl, from_use, "field count is stable regardless of caret site");
+    let from_use = p.usage_count(
+        "Service.java",
+        at_last(&s, "this.localField") + "this.".len(),
+    );
+    assert_eq!(
+        from_decl, from_use,
+        "field count is stable regardless of caret site"
+    );
     assert_eq!(from_use, 2);
 }
 
@@ -258,7 +273,10 @@ fn fields_declared_below_the_methods_that_read_them_are_counted() {
          }\n",
     )]);
     let s = p.source("Service.java").to_string();
-    assert_eq!(p.usage_count("Service.java", at(&s, "int limit") + "int ".len()), 2);
+    assert_eq!(
+        p.usage_count("Service.java", at(&s, "int limit") + "int ".len()),
+        2
+    );
     assert_eq!(
         p.usage_count("Service.java", at(&s, "helper =")),
         1,
@@ -285,7 +303,10 @@ fn a_nested_class_counts_its_own_members() {
          }\n",
     )]);
     let s = p.source("Outer.java").to_string();
-    assert_eq!(p.usage_count("Outer.java", at(&s, "int depth") + "int ".len()), 2);
+    assert_eq!(
+        p.usage_count("Outer.java", at(&s, "int depth") + "int ".len()),
+        2
+    );
     assert_eq!(
         p.usage_count("Outer.java", at(&s, "int step()") + "int ".len()),
         1,
@@ -305,7 +326,10 @@ fn a_field_declaration_is_not_a_use_of_itself() {
          }\n",
     )]);
     let s = p.source("Only.java").to_string();
-    assert_eq!(p.usage_count("Only.java", at(&s, "int seen") + "int ".len()), 0);
+    assert_eq!(
+        p.usage_count("Only.java", at(&s, "int seen") + "int ".len()),
+        0
+    );
 }
 
 /// A local (or parameter) of the same name IS the name — the field it hides is untouched. The
@@ -324,7 +348,10 @@ fn a_local_shadowing_a_field_is_not_a_use_of_it() {
     )]);
     let s = p.source("Shadow.java").to_string();
     let n = p.usage_count("Shadow.java", at(&s, "int value;") + "int ".len());
-    assert_eq!(n, 2, "only `this.value` in the setter and the bare read in real()");
+    assert_eq!(
+        n, 2,
+        "only `this.value` in the setter and the bare read in real()"
+    );
 }
 
 /// Names that are not expressions at all: a label, an import segment, an annotation element.
@@ -345,8 +372,16 @@ fn labels_imports_and_annotation_elements_are_not_field_uses() {
          }\n",
     )]);
     let s = p.source("Odd.java").to_string();
-    assert_eq!(p.usage_count("Odd.java", at(&s, "int util") + "int ".len()), 0, "`java.util` is a package");
-    assert_eq!(p.usage_count("Odd.java", at(&s, "int outer") + "int ".len()), 0, "`outer:` is a label");
+    assert_eq!(
+        p.usage_count("Odd.java", at(&s, "int util") + "int ".len()),
+        0,
+        "`java.util` is a package"
+    );
+    assert_eq!(
+        p.usage_count("Odd.java", at(&s, "int outer") + "int ".len()),
+        0,
+        "`outer:` is a label"
+    );
     assert_eq!(
         p.usage_count("Odd.java", at(&s, "int value") + "int ".len()),
         0,
@@ -384,7 +419,10 @@ fn type_referenced_from_multiple_files() {
     ]);
     let w = p.source("Widget.java").to_string();
     let n = p.usage_count("Widget.java", at(&w, "class Widget") + "class ".len());
-    assert!(n >= 3, "Widget is referenced from Panel and Screen (>=3 sites), got {n}");
+    assert!(
+        n >= 3,
+        "Widget is referenced from Panel and Screen (>=3 sites), got {n}"
+    );
 }
 
 #[test]
@@ -425,7 +463,10 @@ fn same_simple_name_types_counted_independently() {
     // Two same-simple-name types collide in the simple→binary index, so find-usages cannot
     // split their counts precisely (a known limitation); the reference is recorded under one of
     // the two `Item` bindings, and neither caret panics.
-    assert!(na + nb >= 1, "a.Item's references are recorded somewhere (na={na}, nb={nb})");
+    assert!(
+        na + nb >= 1,
+        "a.Item's references are recorded somewhere (na={na}, nb={nb})"
+    );
 }
 
 // ── Locals / non-symbols are never bucketed ─────────────────────────────────────────────────
@@ -435,7 +476,10 @@ fn local_variable_yields_zero() {
     let p = proj();
     let s = p.source("Service.java").to_string();
     let on_decl = p.usage_count("Service.java", at(&s, "int local =") + "int ".len());
-    assert_eq!(on_decl, 0, "a local variable is not bucketed → usage_count 0");
+    assert_eq!(
+        on_decl, 0,
+        "a local variable is not bucketed → usage_count 0"
+    );
     let on_use = p.usage_count("Service.java", at(&s, "return local") + "return ".len());
     assert_eq!(on_use, 0, "a local's use site is also not bucketed → 0");
 }
@@ -454,5 +498,8 @@ fn keyword_and_literal_carets_count_zero() {
     let s = p.source("Service.java").to_string();
     assert_eq!(p.usage_count("Service.java", at(&s, "public class")), 0);
     let b = p.source("Base.java").to_string();
-    assert_eq!(p.usage_count("Base.java", at(&b, "return 1") + "return ".len()), 0);
+    assert_eq!(
+        p.usage_count("Base.java", at(&b, "return 1") + "return ".len()),
+        0
+    );
 }

@@ -26,7 +26,10 @@ pub struct TypeRef {
 impl TypeRef {
     /// A type reference with no generic arguments.
     pub fn simple(binary_name: impl Into<String>) -> Self {
-        Self { binary_name: binary_name.into(), type_args: Vec::new() }
+        Self {
+            binary_name: binary_name.into(),
+            type_args: Vec::new(),
+        }
     }
 }
 
@@ -74,6 +77,18 @@ pub struct Member {
     /// index persisted before this field existed still deserializes (empty).
     #[serde(default)]
     pub throws: Vec<String>,
+    /// The member's annotations, as written (`@Bean`, `@Transactional`, `@Value("${a.b}")`).
+    ///
+    /// Carried through to the persisted index so a question about annotations can be asked of the
+    /// PROJECT rather than of one buffer. Everything that needed one used to re-parse the source
+    /// and walk it itself, so the framework extensions each kept a second reading of the same file,
+    /// blind to what the engine knew and vice versa.
+    ///
+    /// Empty for a member decoded from bytecode: a `.class` does carry runtime-visible annotations,
+    /// but this seam is fed from source. `#[serde(default)]` so an index persisted before this
+    /// field existed still loads.
+    #[serde(default)]
+    pub annotations: Vec<crate::symbols::Annotation>,
 }
 
 impl Member {
@@ -95,6 +110,7 @@ impl Member {
             visibility: Visibility::Public,
             raw_signature,
             throws: Vec::new(),
+            annotations: Vec::new(),
         }
     }
 
@@ -114,6 +130,7 @@ impl Member {
             visibility: Visibility::Public,
             raw_signature,
             throws: Vec::new(),
+            annotations: Vec::new(),
         }
     }
 

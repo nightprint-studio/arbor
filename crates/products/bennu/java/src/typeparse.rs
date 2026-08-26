@@ -42,7 +42,10 @@ pub fn parse_type_text(text: &str) -> Option<SimpleTypeRef> {
     // Keep the full dotted name (if any) — the resolver handles both dotted and
     // simple forms and decides how to bind it.
     let args = args_part.map(parse_arg_list).unwrap_or_default();
-    Some(SimpleTypeRef { name: name.to_string(), args })
+    Some(SimpleTypeRef {
+        name: name.to_string(),
+        args,
+    })
 }
 
 /// Split `Foo<...>` into (`Foo`, Some("...")) or (`Foo`, None).
@@ -97,7 +100,10 @@ fn parse_arg(s: &str) -> Option<SimpleTypeRef> {
         return parse_type_text(rest.trim());
     }
     if s == "?" {
-        return Some(SimpleTypeRef { name: "Object".to_string(), args: Vec::new() });
+        return Some(SimpleTypeRef {
+            name: "Object".to_string(),
+            args: Vec::new(),
+        });
     }
     parse_type_text(s)
 }

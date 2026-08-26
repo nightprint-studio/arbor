@@ -52,13 +52,19 @@ fn edit_at(p: &Project, needle: &str, new_name: &str) -> Option<String> {
 #[test]
 fn the_generated_getter_call_is_renamed_with_the_field() {
     let p = project();
-    assert_eq!(edit_at(&p, "getCustomer_name", "customerName").as_deref(), Some("getCustomerName"));
+    assert_eq!(
+        edit_at(&p, "getCustomer_name", "customerName").as_deref(),
+        Some("getCustomerName")
+    );
 }
 
 #[test]
 fn the_generated_setter_call_is_renamed_too() {
     let p = project();
-    assert_eq!(edit_at(&p, "setCustomer_name", "customerName").as_deref(), Some("setCustomerName"));
+    assert_eq!(
+        edit_at(&p, "setCustomer_name", "customerName").as_deref(),
+        Some("setCustomerName")
+    );
 }
 
 #[test]
@@ -66,7 +72,9 @@ fn the_field_declaration_still_comes_along() {
     let p = project();
     let order = p.source("p/Order.java");
     let edits = p.rename_edits("p/Order.java", at(order, "customer_name"), "customerName");
-    assert!(edits.iter().any(|e| e.file == "p/Order.java" && e.reason.label() == "declaration"));
+    assert!(edits
+        .iter()
+        .any(|e| e.file == "p/Order.java" && e.reason.label() == "declaration"));
 }
 
 /// A primitive `boolean` gets an `isX` getter, and Lombok strips a name's own leading `is` before
@@ -105,7 +113,9 @@ fn a_hand_written_accessor_is_left_alone() {
     let report = p.source("p/Report.java");
     let call = at(report, "o.getCustomer_name()") + "o.".len();
     assert!(
-        !edits.iter().any(|e| e.file == "p/Report.java" && e.start == call),
+        !edits
+            .iter()
+            .any(|e| e.file == "p/Report.java" && e.start == call),
         "renamed a call to a hand-written method that Lombok never generated"
     );
 }

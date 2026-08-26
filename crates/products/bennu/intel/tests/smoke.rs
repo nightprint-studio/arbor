@@ -42,7 +42,9 @@ fn proj() -> Project {
 fn local_variable() {
     let p = proj();
     let s = p.source("Service.java").to_string();
-    let d = p.goto("Service.java", at(&s, "local + localField")).expect("goto local");
+    let d = p
+        .goto("Service.java", at(&s, "local + localField"))
+        .expect("goto local");
     assert_eq!(d.file, "Service.java");
     assert_eq!(d.label, "local `local`");
     assert_eq!(d.line, line_of(&s, "int local ="));
@@ -52,7 +54,9 @@ fn local_variable() {
 fn method_parameter() {
     let p = proj();
     let s = p.source("Service.java").to_string();
-    let d = p.goto("Service.java", at(&s, "param + 1")).expect("goto param");
+    let d = p
+        .goto("Service.java", at(&s, "param + 1"))
+        .expect("goto param");
     assert_eq!(d.file, "Service.java");
     assert_eq!(d.label, "local `param`");
     assert_eq!(d.line, line_of(&s, "int param"));
@@ -75,7 +79,10 @@ fn field_inherited_from_parent() {
     let s = p.source("Service.java").to_string();
     let off = at(&s, "+ baseField") + "+ ".len();
     let d = p.goto("Service.java", off).expect("goto inherited field");
-    assert_eq!(d.file, "Base.java", "an inherited field resolves into the PARENT's file");
+    assert_eq!(
+        d.file, "Base.java",
+        "an inherited field resolves into the PARENT's file"
+    );
     assert_eq!(d.label, "field app.Base.baseField");
 }
 
@@ -83,7 +90,9 @@ fn field_inherited_from_parent() {
 fn method_bare_call_inherited() {
     let p = proj();
     let s = p.source("Service.java").to_string();
-    let d = p.goto("Service.java", at(&s, "baseMethod();")).expect("goto inherited method");
+    let d = p
+        .goto("Service.java", at(&s, "baseMethod();"))
+        .expect("goto inherited method");
     assert_eq!(d.file, "Base.java");
     assert_eq!(d.label, "method app.Base.baseMethod()");
 }
@@ -92,7 +101,9 @@ fn method_bare_call_inherited() {
 fn method_bare_call_same_class() {
     let p = proj();
     let s = p.source("Service.java").to_string();
-    let d = p.goto("Service.java", at(&s, "compute(2)")).expect("goto same-class method");
+    let d = p
+        .goto("Service.java", at(&s, "compute(2)"))
+        .expect("goto same-class method");
     assert_eq!(d.file, "Service.java");
     assert_eq!(d.label, "method app.Service.compute()");
     assert_eq!(d.line, line_of(&s, "compute(int param)"));
@@ -102,7 +113,9 @@ fn method_bare_call_same_class() {
 fn method_via_receiver_cross_file() {
     let p = proj();
     let c = p.source("Consumer.java").to_string();
-    let d = p.goto("Consumer.java", at(&c, "compute(3)")).expect("goto receiver method");
+    let d = p
+        .goto("Consumer.java", at(&c, "compute(3)"))
+        .expect("goto receiver method");
     assert_eq!(d.file, "Service.java");
     assert_eq!(d.label, "method app.Service.compute()");
 }
@@ -111,7 +124,9 @@ fn method_via_receiver_cross_file() {
 fn method_via_receiver_inherited_cross_file() {
     let p = proj();
     let c = p.source("Consumer.java").to_string();
-    let d = p.goto("Consumer.java", at(&c, "baseMethod()")).expect("goto receiver inherited method");
+    let d = p
+        .goto("Consumer.java", at(&c, "baseMethod()"))
+        .expect("goto receiver inherited method");
     assert_eq!(d.file, "Base.java");
     assert_eq!(d.label, "method app.Base.baseMethod()");
 }
@@ -120,7 +135,9 @@ fn method_via_receiver_inherited_cross_file() {
 fn type_reference_cross_file() {
     let p = proj();
     let c = p.source("Consumer.java").to_string();
-    let d = p.goto("Consumer.java", at(&c, "Service s")).expect("goto type");
+    let d = p
+        .goto("Consumer.java", at(&c, "Service s"))
+        .expect("goto type");
     assert_eq!(d.file, "Service.java");
     assert_eq!(d.label, "class app.Service");
     assert_eq!(d.line, line_of(p.source("Service.java"), "class Service"));

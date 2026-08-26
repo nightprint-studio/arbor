@@ -14,18 +14,14 @@
 
 use bennu_java::prelude::{extract_symbols, FileSymbols, MemberKind, TypeRef, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::members::simple_name;
 use crate::resolve::type_binary;
 
 /// Flag constructors that must call `super(...)` but don't (and classes lacking a needed constructor).
 pub fn super_constructor_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let symbols = extract_symbols(source);

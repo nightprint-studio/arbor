@@ -29,7 +29,44 @@ use crate::refs::{DeclKey, UsageLocation};
 
 /// Bumped whenever the on-disk shape (or the walk's edge semantics) changes — a mismatch
 /// drops the cache and rebuilds, since there is no migration.
-pub const CACHE_VERSION: u32 = 5;
+///
+/// 6: the walk resolves four things it used to drop — a method reference qualified by an
+/// EXPRESSION (`this::run`, `service::fetch`: the receiver search knew `a.b()` and `a.b` and not
+/// `a::b`, so none of them were ever indexed), a qualifier that names a NESTED type
+/// (`Outer.Nested::method`), and a lambda parameter target-typed from a static factory / a `return`
+/// / a declared variable, and a STATIC field read as a receiver (`Headers.USERNAME.name()` — an
+/// enum constant is a static field, and field access had no type-name fallback where a static call
+/// already did). All four add edges for files whose bytes never changed, so without a
+/// bump an existing project keeps serving the old, incomplete index and the fix looks like it did
+/// nothing.
+///
+/// 12: `Outer.this` types to the enclosing class, so an inner class's calls on it are indexed.
+///
+/// 11: `@Ann` is recorded as a use of the type `Ann`. An annotation's name is not a
+/// `type_identifier`, so every annotation use in every project was missing from the index.
+///
+/// 10: an enum constant's body is an anonymous subclass of its own enum, so the overrides written
+/// there move with the method they override.
+///
+/// 9: a VARARGS parameter is finally a binding. tree-sitter gives `T... xs` no `name` field, so
+/// every scope lookup in the walk answered `None` for one — and a bare use of it was attributed to
+/// whatever else carried the name, typically a field of the enclosing class.
+///
+/// 8: the walk reads a written type name through the workspace's shared reader
+/// (`bennu_java::typename`) in Java's own order — the file's own types, then inherited member
+/// types, then imports, then the package — instead of consulting the project-wide simple→binary map
+/// first. That map keeps ONE binary per simple name, so every file in a package that declares both
+/// a top-level `Builder` and a nested one had bound the wrong one.
+///
+/// 7: each file also records the qualified member accesses whose receiver the walk could NOT type,
+/// which the rename planner needs to refuse a rename it cannot prove complete. A cache without them
+/// would let a rename through on exactly the evidence it is missing.
+/// 13: a type named as the QUALIFIER of a static access (`Holder.VALUE`) is recorded as a use of
+/// that type, and a reference written inside an ANONYMOUS class body is recorded at all — its
+/// owner key (`p/Outer/1`) did not read as a project type, so every one of them was dropped. Both
+/// change what the walk emits, so a cache written before this holds an index that is missing them
+/// and looks complete.
+pub const CACHE_VERSION: u32 = 13;
 
 /// One file's cached contribution to the reference index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +79,11 @@ pub struct CachedFile {
     pub symbols: FileSymbols,
     pub attempted: usize,
     pub resolved: usize,
+    /// Qualified member accesses whose receiver the walk could not type — `(member name, where)`.
+    /// The rename planner reads these to refuse a rename it cannot prove complete.
+    /// `#[serde(default)]` so a cache written before they existed still loads.
+    #[serde(default)]
+    pub unresolved: Vec<(String, UsageLocation)>,
 }
 
 /// The whole persisted cache: a version + the type-set guard + one entry per file.

@@ -23,8 +23,8 @@ use bennu_classpath::prelude::{
 };
 use bennu_index::prelude::PersistedIndex;
 use bennu_intel::prelude::{
-    build_project_index_from_sources, rename_apply, CompletionItem, DeclarationLocation,
-    Edit, HoverInfo, ReferencesResult, RenameEngine, RenamePlan,
+    build_project_index_from_sources, rename_apply, CompletionItem, DeclarationLocation, Edit,
+    HoverInfo, ReferencesResult, RenameEngine, RenamePlan,
 };
 use bennu_query::prelude::{completion, IndexResolver, InheritedMember};
 
@@ -110,15 +110,22 @@ impl Project {
         let index_dir = temp.path().join("g000");
         std::fs::create_dir_all(&index_dir).expect("create index dir");
 
-        let disk_sources: Vec<(PathBuf, String)> =
-            files.iter().map(|(p, s)| (PathBuf::from(*p), s.to_string())).collect();
+        let disk_sources: Vec<(PathBuf, String)> = files
+            .iter()
+            .map(|(p, s)| (PathBuf::from(*p), s.to_string()))
+            .collect();
         let built = build_project_index_from_sources(&disk_sources, &index_dir);
         built.builder.persist().expect("persist symbol index");
 
-        let pairs: Vec<(String, String)> =
-            built.type_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let java_sources: Vec<(String, String)> =
-            files.iter().map(|(p, s)| (p.to_string(), s.to_string())).collect();
+        let pairs: Vec<(String, String)> = built
+            .type_map
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let java_sources: Vec<(String, String)> = files
+            .iter()
+            .map(|(p, s)| (p.to_string(), s.to_string()))
+            .collect();
 
         let blob = index_dir.join("symbols.blob");
         let fst = index_dir.join("names.fst");
@@ -135,9 +142,16 @@ impl Project {
                 Arc::new(r) as Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>
             });
 
-        let engine =
-            RenameEngine::for_project(&index_dir, jdk, &pairs, java_sources, vec![], shared, &|_, _| {})
-                .expect("build rename engine");
+        let engine = RenameEngine::for_project(
+            &index_dir,
+            jdk,
+            &pairs,
+            java_sources,
+            vec![],
+            shared,
+            &|_, _| {},
+        )
+        .expect("build rename engine");
 
         // A completion resolver over the same on-disk index (JDK-free — project types only).
         let persisted = PersistedIndex::open(&blob, &fst).expect("open index for completion");
@@ -146,8 +160,16 @@ impl Project {
             completion_resolver.add_simple_hint(simple, binary);
         }
 
-        let sources = files.iter().map(|(p, s)| (p.to_string(), s.to_string())).collect();
-        Self { engine, completion_resolver, sources, _temp: temp }
+        let sources = files
+            .iter()
+            .map(|(p, s)| (p.to_string(), s.to_string()))
+            .collect();
+        Self {
+            engine,
+            completion_resolver,
+            sources,
+            _temp: temp,
+        }
     }
 
     /// Whether the project index recognises `binary` as a type this project declares.
@@ -162,7 +184,9 @@ impl Project {
 
     /// The source text of `file` (for computing expected offsets / lines).
     pub fn source(&self, file: &str) -> &str {
-        self.sources.get(file).unwrap_or_else(|| panic!("no such file: {file}"))
+        self.sources
+            .get(file)
+            .unwrap_or_else(|| panic!("no such file: {file}"))
     }
 
     /// Go-to-declaration for the symbol at `file`:`offset`.
@@ -182,7 +206,9 @@ impl Project {
 
     /// The number of recorded use sites for the symbol at `file`:`offset` (0 if unresolved).
     pub fn usage_count(&self, file: &str, offset: usize) -> usize {
-        self.find_usages(file, offset).map(|r| r.usages.len()).unwrap_or(0)
+        self.find_usages(file, offset)
+            .map(|r| r.usages.len())
+            .unwrap_or(0)
     }
 
     /// Member-access completion at `file`:`offset` — the caret is expected to sit just after a
@@ -194,7 +220,10 @@ impl Project {
 
     /// Just the completion labels (member names) offered at `file`:`offset`.
     pub fn complete_labels(&self, file: &str, offset: usize) -> Vec<String> {
-        self.complete(file, offset).into_iter().map(|c| c.label).collect()
+        self.complete(file, offset)
+            .into_iter()
+            .map(|c| c.label)
+            .collect()
     }
 
     /// `true` if a completion candidate named `name` is offered at `file`:`offset`.
@@ -214,7 +243,9 @@ impl Project {
 
     /// The flat edit list a rename would apply (empty when the caret isn't renameable).
     pub fn rename_edits(&self, file: &str, offset: usize, new_name: &str) -> Vec<Edit> {
-        self.rename(file, offset, new_name).map(|p| rename_apply(&p)).unwrap_or_default()
+        self.rename(file, offset, new_name)
+            .map(|p| rename_apply(&p))
+            .unwrap_or_default()
     }
 
     /// The inherited ("super") members of the type named `type_name` declared at `file`:`line`
@@ -227,12 +258,14 @@ impl Project {
 
 /// Byte offset of the FIRST occurrence of `needle` in `src`.
 pub fn at(src: &str, needle: &str) -> usize {
-    src.find(needle).unwrap_or_else(|| panic!("needle {needle:?} not found in source"))
+    src.find(needle)
+        .unwrap_or_else(|| panic!("needle {needle:?} not found in source"))
 }
 
 /// Byte offset of the LAST occurrence of `needle` in `src`.
 pub fn at_last(src: &str, needle: &str) -> usize {
-    src.rfind(needle).unwrap_or_else(|| panic!("needle {needle:?} not found in source"))
+    src.rfind(needle)
+        .unwrap_or_else(|| panic!("needle {needle:?} not found in source"))
 }
 
 /// 1-based line number of the FIRST occurrence of `needle` in `src` (to assert go-to landed
@@ -264,7 +297,11 @@ fn iface(type_params: &[&str], methods: Vec<CpMember>) -> CpClassMembers {
         interfaces: Vec::new(),
         methods,
         fields: Vec::new(),
-        flags: CpClassFlags { is_interface: true, is_abstract: true, ..Default::default() },
+        flags: CpClassFlags {
+            is_interface: true,
+            is_abstract: true,
+            ..Default::default()
+        },
         type_params: type_params.iter().map(|s| s.to_string()).collect(),
     }
 }
@@ -297,9 +334,14 @@ impl CpMemberIndex for StreamJdk {
     fn members_of(&self, binary_name: &str) -> Option<CpClassMembers> {
         Some(match binary_name {
             // `interface List<E> { Stream<E> stream(); }`
-            "java/util/List" => {
-                iface(&["E"], vec![method("stream", vec![], applied("java/util/stream/Stream", &["E"]))])
-            }
+            "java/util/List" => iface(
+                &["E"],
+                vec![method(
+                    "stream",
+                    vec![],
+                    applied("java/util/stream/Stream", &["E"]),
+                )],
+            ),
             // `interface Stream<T> { <R> Stream<R> map(Function<? super T, ? extends R> f); }`
             "java/util/stream/Stream" => iface(
                 &["T"],
@@ -311,9 +353,14 @@ impl CpMemberIndex for StreamJdk {
             ),
             // `interface Function<T, R> { R apply(T t); }` — the functional interface whose single
             // abstract method's parameter type IS the lambda parameter's type.
-            "java/util/function/Function" => {
-                iface(&["T", "R"], vec![method("apply", vec![CpTypeRef::plain("T")], CpTypeRef::plain("R"))])
-            }
+            "java/util/function/Function" => iface(
+                &["T", "R"],
+                vec![method(
+                    "apply",
+                    vec![CpTypeRef::plain("T")],
+                    CpTypeRef::plain("R"),
+                )],
+            ),
             // Every enum implicitly extends this, and `name()` / `ordinal()` are declared nowhere in
             // the project — so a project enum's `e.name()` resolves only if the walk can see it.
             "java/lang/Enum" => CpClassMembers {
@@ -330,7 +377,11 @@ impl CpMemberIndex for StreamJdk {
             "java/lang/Object" => CpClassMembers {
                 superclass: None,
                 interfaces: Vec::new(),
-                methods: vec![method("toString", vec![], CpTypeRef::plain("java/lang/String"))],
+                methods: vec![method(
+                    "toString",
+                    vec![],
+                    CpTypeRef::plain("java/lang/String"),
+                )],
                 fields: Vec::new(),
                 flags: CpClassFlags::default(),
                 type_params: Vec::new(),

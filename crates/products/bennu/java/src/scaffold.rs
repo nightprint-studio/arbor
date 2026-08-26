@@ -126,7 +126,11 @@ fn last_subsequence_end(hay: &[&str], needle: &[&str]) -> Option<usize> {
     }
     let mut found = None;
     for start in 0..=hay.len() - needle.len() {
-        if hay[start..start + needle.len()].iter().zip(needle).all(|(a, b)| a == b) {
+        if hay[start..start + needle.len()]
+            .iter()
+            .zip(needle)
+            .all(|(a, b)| a == b)
+        {
             found = Some(start + needle.len());
         }
     }
@@ -199,7 +203,8 @@ pub fn scaffold_new_file(kind: NewFileKind, dir: &Path, name: &str) -> ScaffoldR
             let base = strip_ext(name, "jsp");
             ScaffoldResult {
                 file_name: format!("{base}.jsp"),
-                content: "<%@ page contentType=\"text/html;charset=UTF-8\" language=\"java\" %>\n".to_string(),
+                content: "<%@ page contentType=\"text/html;charset=UTF-8\" language=\"java\" %>\n"
+                    .to_string(),
             }
         }
         NewFileKind::Xml => {
@@ -209,7 +214,10 @@ pub fn scaffold_new_file(kind: NewFileKind, dir: &Path, name: &str) -> ScaffoldR
                 content: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n".to_string(),
             }
         }
-        NewFileKind::PlainFile => ScaffoldResult { file_name: name.to_string(), content: String::new() },
+        NewFileKind::PlainFile => ScaffoldResult {
+            file_name: name.to_string(),
+            content: String::new(),
+        },
     }
 }
 
@@ -224,23 +232,35 @@ mod tests {
 
     #[test]
     fn infer_package_under_maven_main_java() {
-        assert_eq!(infer_package(&p("/proj/src/main/java/com/acme/web")).as_deref(), Some("com.acme.web"));
+        assert_eq!(
+            infer_package(&p("/proj/src/main/java/com/acme/web")).as_deref(),
+            Some("com.acme.web")
+        );
     }
 
     #[test]
     fn infer_package_under_test_java() {
-        assert_eq!(infer_package(&p("/proj/src/test/java/com/acme")).as_deref(), Some("com.acme"));
+        assert_eq!(
+            infer_package(&p("/proj/src/test/java/com/acme")).as_deref(),
+            Some("com.acme")
+        );
     }
 
     #[test]
     fn infer_package_prefers_deepest_source_root() {
         // Both `src` and `src/main/java` are present — the specific one wins (no `main.java.` prefix).
-        assert_eq!(infer_package(&p("/x/src/main/java/a/b")).as_deref(), Some("a.b"));
+        assert_eq!(
+            infer_package(&p("/x/src/main/java/a/b")).as_deref(),
+            Some("a.b")
+        );
     }
 
     #[test]
     fn infer_package_plain_src_root() {
-        assert_eq!(infer_package(&p("/x/src/com/acme")).as_deref(), Some("com.acme"));
+        assert_eq!(
+            infer_package(&p("/x/src/com/acme")).as_deref(),
+            Some("com.acme")
+        );
     }
 
     #[test]
@@ -251,10 +271,16 @@ mod tests {
 
     #[test]
     fn source_root_of_strips_the_package_path() {
-        assert_eq!(source_root_of(&p("/proj/src/main/java/com/acme/web")), Some(p("/proj/src/main/java")));
+        assert_eq!(
+            source_root_of(&p("/proj/src/main/java/com/acme/web")),
+            Some(p("/proj/src/main/java"))
+        );
         assert_eq!(source_root_of(&p("/x/src/com/acme")), Some(p("/x/src")));
         // At the source root already (default package) → the root itself.
-        assert_eq!(source_root_of(&p("/x/src/main/java")), Some(p("/x/src/main/java")));
+        assert_eq!(
+            source_root_of(&p("/x/src/main/java")),
+            Some(p("/x/src/main/java"))
+        );
         // No source root → None.
         assert_eq!(source_root_of(&p("/x/random/dir")), None);
     }
@@ -267,7 +293,10 @@ mod tests {
             Some(p("/proj/src/main/java/com/acme/model"))
         );
         // Default (empty) package → the source root.
-        assert_eq!(package_dir(&p("/proj/src/main/java/com/x"), ""), Some(p("/proj/src/main/java")));
+        assert_eq!(
+            package_dir(&p("/proj/src/main/java/com/x"), ""),
+            Some(p("/proj/src/main/java"))
+        );
         // No source root → can't compute.
         assert_eq!(package_dir(&p("/nope/here"), "com.x"), None);
     }
@@ -301,14 +330,22 @@ mod tests {
     fn java_enum_and_record_and_annotation() {
         assert!(java_template(NewFileKind::JavaEnum, None, "E").contains("public enum E {"));
         assert!(java_template(NewFileKind::JavaRecord, None, "R").contains("public record R() {"));
-        assert!(java_template(NewFileKind::JavaAnnotation, None, "A").contains("public @interface A {"));
+        assert!(
+            java_template(NewFileKind::JavaAnnotation, None, "A").contains("public @interface A {")
+        );
     }
 
     #[test]
     fn scaffold_java_class_infers_package_and_extension() {
-        let r = scaffold_new_file(NewFileKind::JavaClass, &p("/x/src/main/java/com/acme"), "LoginAction");
+        let r = scaffold_new_file(
+            NewFileKind::JavaClass,
+            &p("/x/src/main/java/com/acme"),
+            "LoginAction",
+        );
         assert_eq!(r.file_name, "LoginAction.java");
-        assert!(r.content.starts_with("package com.acme;\n\npublic class LoginAction {"));
+        assert!(r
+            .content
+            .starts_with("package com.acme;\n\npublic class LoginAction {"));
     }
 
     #[test]

@@ -16,8 +16,8 @@
 use std::time::Instant;
 
 use bennu_classpath::prelude::ClassSource;
-use bennu_query::prelude::JdkMemberIndex;
 use bennu_classpath::prelude::MemberIndex;
+use bennu_query::prelude::JdkMemberIndex;
 
 /// A source that has NO class — every lookup is a definitive miss, exactly like a dependency type
 /// that isn't on the (unindexed) classpath. Cheap, so the measured cost is the index's own
@@ -55,14 +55,22 @@ fn persistent_jdk_index_scales_flat_over_many_misses() {
     idx.flush();
 
     let file_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    eprintln!("\n════════ jdk_flush_scale: {QUERIES} distinct missing lookups (persistent) ════════");
-    eprintln!("  total {total:.0} ms   persisted file = {} KB", file_bytes / 1024);
+    eprintln!(
+        "\n════════ jdk_flush_scale: {QUERIES} distinct missing lookups (persistent) ════════"
+    );
+    eprintln!(
+        "  total {total:.0} ms   persisted file = {} KB",
+        file_bytes / 1024
+    );
     let first = bucket_ms[0] / PER_BUCKET as f64;
     for (b, sum) in bucket_ms.iter().enumerate() {
         let avg = sum / PER_BUCKET as f64;
         let lo = b * PER_BUCKET;
         let hi = (b + 1) * PER_BUCKET;
-        eprintln!("    q {lo:>6}..{hi:<6}  {avg:>7.4} ms/lookup   ({:+.0}% vs bucket 0)", (avg / first - 1.0) * 100.0);
+        eprintln!(
+            "    q {lo:>6}..{hi:<6}  {avg:>7.4} ms/lookup   ({:+.0}% vs bucket 0)",
+            (avg / first - 1.0) * 100.0
+        );
     }
     let last = bucket_ms[BUCKETS - 1] / PER_BUCKET as f64;
     let drift = (last / first - 1.0) * 100.0;
@@ -74,5 +82,8 @@ fn persistent_jdk_index_scales_flat_over_many_misses() {
     // After the fix (dependency misses no longer bloat the persisted memo / drive O(K²) flushes),
     // the last bucket must not be dramatically slower than the first. Generous ceiling so a loaded
     // box isn't flaky, but a quadratic regression (which was hundreds of %) trips it.
-    assert!(drift < 150.0, "per-lookup time drifts upward over the run (persistent-flush O(K^2)?): {drift:+.0}%");
+    assert!(
+        drift < 150.0,
+        "per-lookup time drifts upward over the run (persistent-flush O(K^2)?): {drift:+.0}%"
+    );
 }

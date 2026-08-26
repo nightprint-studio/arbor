@@ -85,10 +85,15 @@ fn rename_local_does_not_touch_field_of_same_name() {
     let p = proj();
     let s = p.source("UseCounter.java").to_string();
     let off = at(&s, "int total = 9") + "int ".len();
-    let plan = p.rename("UseCounter.java", off, "n").expect("rename shadow local");
+    let plan = p
+        .rename("UseCounter.java", off, "n")
+        .expect("rename shadow local");
     assert_eq!(plan.target_label, "local `total`");
     assert_eq!(plan.files.len(), 1);
-    assert_eq!(plan.files[0].file, "UseCounter.java", "stays in the declaring file");
+    assert_eq!(
+        plan.files[0].file, "UseCounter.java",
+        "stays in the declaring file"
+    );
     assert_eq!(plan.total_edits(), 2, "decl + `return total` only");
     assert_old_matches_buffer(&p, &plan);
 }
@@ -100,11 +105,17 @@ fn rename_field_rewrites_qualified_accesses() {
     let p = proj();
     let s = p.source("Counter.java").to_string();
     let off = at(&s, "int total;") + "int ".len();
-    let plan = p.rename("Counter.java", off, "count").expect("rename field");
+    let plan = p
+        .rename("Counter.java", off, "count")
+        .expect("rename field");
     assert_eq!(plan.old_name, "total");
     assert_eq!(plan.target_label, "field app.Counter.total");
     // Decl + the `this.total` accesses (>= 3): 2 in add(), 1 in get().
-    assert!(plan.total_edits() >= 4, "field decl + several this.total accesses, got {}", plan.total_edits());
+    assert!(
+        plan.total_edits() >= 4,
+        "field decl + several this.total accesses, got {}",
+        plan.total_edits()
+    );
     for fe in &plan.files {
         assert!(fe.edits.iter().all(|e| e.new_text == "count"));
     }
@@ -117,7 +128,9 @@ fn rename_field_does_not_touch_unrelated_local_total() {
     let p = proj();
     let s = p.source("Counter.java").to_string();
     let off = at(&s, "int total;") + "int ".len();
-    let plan = p.rename("Counter.java", off, "count").expect("rename field");
+    let plan = p
+        .rename("Counter.java", off, "count")
+        .expect("rename field");
     let us = p.source("UseCounter.java");
     let local_decl = at(us, "int total = 9") + "int ".len();
     for fe in &plan.files {
@@ -139,13 +152,21 @@ fn rename_method_rewrites_call_sites_cross_file() {
     let p = proj();
     let s = p.source("Counter.java").to_string();
     let off = at(&s, "int add(int delta)") + "int ".len();
-    let plan = p.rename("Counter.java", off, "increment").expect("rename method");
+    let plan = p
+        .rename("Counter.java", off, "increment")
+        .expect("rename method");
     assert_eq!(plan.old_name, "add");
     assert_eq!(plan.target_label, "method app.Counter.add()");
     // Decl (Counter.java) + call site `c.add(2)` (UseCounter.java).
     let files: Vec<&str> = plan.files.iter().map(|f| f.file.as_str()).collect();
-    assert!(files.contains(&"Counter.java"), "declaring file edited, got {files:?}");
-    assert!(files.contains(&"UseCounter.java"), "caller file edited, got {files:?}");
+    assert!(
+        files.contains(&"Counter.java"),
+        "declaring file edited, got {files:?}"
+    );
+    assert!(
+        files.contains(&"UseCounter.java"),
+        "caller file edited, got {files:?}"
+    );
     for fe in &plan.files {
         assert!(fe.edits.iter().all(|e| e.new_text == "increment"));
     }
@@ -169,7 +190,10 @@ fn rename_type_rewrites_references_and_new() {
         .filter(|f| f.file == "UseCounter.java")
         .map(|f| f.edits.len())
         .sum();
-    assert!(use_edits >= 3, "type used as param + return + new(), got {use_edits}");
+    assert!(
+        use_edits >= 3,
+        "type used as param + return + new(), got {use_edits}"
+    );
     for fe in &plan.files {
         assert!(fe.edits.iter().all(|e| e.new_text == "Tally"));
     }
@@ -183,9 +207,15 @@ fn rename_apply_flattens_every_file() {
     let p = proj();
     let s = p.source("Counter.java").to_string();
     let off = at(&s, "int add(int delta)") + "int ".len();
-    let plan = p.rename("Counter.java", off, "increment").expect("rename method");
+    let plan = p
+        .rename("Counter.java", off, "increment")
+        .expect("rename method");
     let flat = p.rename_edits("Counter.java", off, "increment");
-    assert_eq!(flat.len(), plan.total_edits(), "apply flattens exactly the plan's edits");
+    assert_eq!(
+        flat.len(),
+        plan.total_edits(),
+        "apply flattens exactly the plan's edits"
+    );
     assert!(!flat.is_empty());
 }
 
@@ -193,14 +223,22 @@ fn rename_apply_flattens_every_file() {
 fn rename_on_keyword_is_none() {
     let p = proj();
     let s = p.source("Counter.java").to_string();
-    assert!(p.rename("Counter.java", at(&s, "return this.total;"), "x").is_none(), "keyword not renameable");
+    assert!(
+        p.rename("Counter.java", at(&s, "return this.total;"), "x")
+            .is_none(),
+        "keyword not renameable"
+    );
 }
 
 #[test]
 fn rename_on_literal_is_none() {
     let p = proj();
     let s = p.source("Counter.java").to_string();
-    assert!(p.rename("Counter.java", at(&s, "delta + 1") + "delta + ".len(), "x").is_none(), "literal not renameable");
+    assert!(
+        p.rename("Counter.java", at(&s, "delta + 1") + "delta + ".len(), "x")
+            .is_none(),
+        "literal not renameable"
+    );
 }
 
 #[test]
@@ -208,11 +246,23 @@ fn rename_from_use_site_matches_from_decl() {
     // Renaming a method from a call site yields the same plan as from its declaration.
     let p = proj();
     let cs = p.source("UseCounter.java").to_string();
-    let from_use = p.rename("UseCounter.java", at(&cs, "c.add(2)") + "c.".len(), "increment");
+    let from_use = p.rename(
+        "UseCounter.java",
+        at(&cs, "c.add(2)") + "c.".len(),
+        "increment",
+    );
     let ds = p.source("Counter.java").to_string();
-    let from_decl = p.rename("Counter.java", at(&ds, "int add(int delta)") + "int ".len(), "increment");
+    let from_decl = p.rename(
+        "Counter.java",
+        at(&ds, "int add(int delta)") + "int ".len(),
+        "increment",
+    );
     let (u, d) = (from_use.expect("from use"), from_decl.expect("from decl"));
-    assert_eq!(u.total_edits(), d.total_edits(), "same symbol → same edit count");
+    assert_eq!(
+        u.total_edits(),
+        d.total_edits(),
+        "same symbol → same edit count"
+    );
     assert_eq!(u.target_label, d.target_label);
 }
 
@@ -229,7 +279,10 @@ fn rename_from_use_site_matches_from_decl() {
 /// correct while the real code stayed broken.
 fn record_lambda_project() -> Project {
     Project::new(&[
-        ("Fn.java", "package app;\npublic interface Fn<T, R> {\n    R apply(T t);\n}\n"),
+        (
+            "Fn.java",
+            "package app;\npublic interface Fn<T, R> {\n    R apply(T t);\n}\n",
+        ),
         (
             "Seq.java",
             "package app;\n\
@@ -282,7 +335,9 @@ fn renaming_a_record_component_reaches_an_accessor_on_a_lambda_parameter() {
 
     let accessor = at(&s, "failure.source_path()") + "failure.".len();
     assert!(
-        edits.iter().any(|e| e.file == "Outer.java" && e.start == accessor),
+        edits
+            .iter()
+            .any(|e| e.file == "Outer.java" && e.start == accessor),
         "the accessor call must be renamed, got {edits:?}"
     );
 }
@@ -297,10 +352,14 @@ fn go_to_a_record_accessor_lands_in_the_record_not_in_a_generated_stub() {
     let s = p.source("Outer.java").to_string();
     let off = at(&s, "failure.source_path()") + "failure.".len();
     let d = p.goto("Outer.java", off).expect("the accessor resolves");
-    assert_eq!(d.file, "Outer.java", "it must land in the file that declares the record");
+    assert_eq!(
+        d.file, "Outer.java",
+        "it must land in the file that declares the record"
+    );
     let component = at(&s, "String source_path)") + "String ".len();
     assert_eq!(
-        d.start, component,
+        d.start,
+        component,
         "it must land on the component in the header, got {:?}",
         &s[d.start..d.end.min(s.len())]
     );
@@ -314,7 +373,10 @@ fn a_nested_project_type_is_recognised_as_project_code() {
     // class from `target/classes` — the user's own code, shown as `throw new
     // RuntimeException("compiled code")`.
     let p = record_lambda_project();
-    assert!(p.is_project_type("app/Outer"), "the outer class is obviously project code");
+    assert!(
+        p.is_project_type("app/Outer"),
+        "the outer class is obviously project code"
+    );
     assert!(
         p.is_project_type("app/Outer/Failure"),
         "a nested type is project code too — source spelling"
@@ -323,5 +385,8 @@ fn a_nested_project_type_is_recognised_as_project_code() {
         p.is_project_type("app/Outer$Failure"),
         "…and under the JVM spelling, which is what comes back from its own compiled classes"
     );
-    assert!(!p.is_project_type("java/util/Map"), "a real library type is not project code");
+    assert!(
+        !p.is_project_type("java/util/Map"),
+        "a real library type is not project code"
+    );
 }

@@ -16,17 +16,13 @@
 
 use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::members::simple_name;
 
 /// Parse `source` and flag control-flow conditions whose inferred type is definitely non-boolean.
 pub fn condition_type_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let symbols = bennu_java::prelude::extract_symbols(source);

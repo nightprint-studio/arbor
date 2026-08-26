@@ -61,7 +61,10 @@ impl ClasspathIndex {
         dep_source: Box<dyn ClassSource>,
         _dep_memo_path: PathBuf,
     ) -> Self {
-        Self { jdk, deps: Some(JdkMemberIndex::new(dep_source)) }
+        Self {
+            jdk,
+            deps: Some(JdkMemberIndex::new(dep_source)),
+        }
     }
 
     /// Whether a dependency tier is present (a project with resolvable dep jars).
@@ -111,9 +114,18 @@ mod tests {
     /// name never resolves, so `members_of` for an absent name is `None` regardless of tiers.
     #[test]
     fn absent_name_resolves_to_none_across_both_tiers() {
-        let jdk = JdkMemberIndex::new(Box::new(OneClass { binary: "java/lang/X", bytes: vec![] }));
-        let deps = JdkMemberIndex::new(Box::new(OneClass { binary: "dep/Y", bytes: vec![] }));
-        let idx = ClasspathIndex { jdk: Arc::new(jdk), deps: Some(deps) };
+        let jdk = JdkMemberIndex::new(Box::new(OneClass {
+            binary: "java/lang/X",
+            bytes: vec![],
+        }));
+        let deps = JdkMemberIndex::new(Box::new(OneClass {
+            binary: "dep/Y",
+            bytes: vec![],
+        }));
+        let idx = ClasspathIndex {
+            jdk: Arc::new(jdk),
+            deps: Some(deps),
+        };
         // Neither tier has `p/Z`, and the one-class sources return empty (undecodable) bytes for their
         // own name → every lookup is a definitive miss. The point: composition never panics and a
         // miss stays a miss.
@@ -123,7 +135,10 @@ mod tests {
 
     #[test]
     fn jdk_only_has_no_dep_tier() {
-        let jdk = JdkMemberIndex::new(Box::new(OneClass { binary: "java/lang/X", bytes: vec![] }));
+        let jdk = JdkMemberIndex::new(Box::new(OneClass {
+            binary: "java/lang/X",
+            bytes: vec![],
+        }));
         let idx = ClasspathIndex::jdk_only(Arc::new(jdk));
         assert!(!idx.has_deps());
         assert!(idx.members_of("dep/Y").is_none());

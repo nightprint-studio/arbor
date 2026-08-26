@@ -121,6 +121,12 @@ fn bennu_project_diagnostics(
     if !svc.has_resolver(&args.root) {
         return Ok(None);
     }
+    // A whole-project sweep is already running → same answer, for the same reason. Queueing behind
+    // it would park a worker thread per save for as long as the sweep lasts, and the sweep is about
+    // to produce a fresher panel than this call could.
+    if svc.sweep_busy(&args.root) {
+        return Ok(None);
+    }
     let encoding = crate::index_service::encoding_plan(&args.root);
     let mut out = svc.validate_project_collect(&args.root, &encoding, &|_done, _total| {});
     out.diagnostics.truncate(MAX_DIAG_FILES);

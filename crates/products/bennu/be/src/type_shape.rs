@@ -212,6 +212,7 @@ mod tests {
             visibility: Visibility::Private,
             raw_signature: name.to_string(),
             throws: Vec::new(),
+            annotations: Vec::new(),
         }
     }
 

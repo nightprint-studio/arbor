@@ -54,7 +54,9 @@ fn goto_method_on_new_line_from_receiver() {
     let s = p.source("Helper.java").to_string();
     // The `.add_step` inside build(), on its own line after `stepper`.
     let off = at(&s, ".add_step(\"a\", \"b\", \"c\");") + ".".len();
-    let d = p.goto("Helper.java", off).expect("go-to resolves across the newline");
+    let d = p
+        .goto("Helper.java", off)
+        .expect("go-to resolves across the newline");
     assert_eq!(d.file, "Fluent.java");
     assert_eq!(d.label, "method w.Fluent.add_step()");
 }
@@ -65,7 +67,9 @@ fn goto_first_call_of_multiline_chain() {
     let s = p.source("Helper.java").to_string();
     // The first `.add_step` of the chain() fluent chain.
     let off = at(&s, ".add_step(\"a\", \"b\", \"c\")\n") + ".".len();
-    let d = p.goto("Helper.java", off).expect("first chained call resolves");
+    let d = p
+        .goto("Helper.java", off)
+        .expect("first chained call resolves");
     assert_eq!(d.file, "Fluent.java");
     assert_eq!(d.label, "method w.Fluent.add_step()");
 }
@@ -76,7 +80,9 @@ fn goto_second_call_of_multiline_chain() {
     let s = p.source("Helper.java").to_string();
     // The second `.add_step` — its receiver is the first call's return value, also on a prior line.
     let off = at(&s, ".add_step(\"d\", \"e\", \"f\")") + ".".len();
-    let d = p.goto("Helper.java", off).expect("second chained call resolves");
+    let d = p
+        .goto("Helper.java", off)
+        .expect("second chained call resolves");
     assert_eq!(d.file, "Fluent.java");
     assert_eq!(d.label, "method w.Fluent.add_step()");
 }
@@ -87,7 +93,9 @@ fn goto_field_style_method_on_new_line() {
     let s = p.source("Helper.java").to_string();
     // `stepper\n  .size()` — a no-arg call split across lines.
     let off = at(&s, ".size()") + ".".len();
-    let d = p.goto("Helper.java", off).expect("newline no-arg call resolves");
+    let d = p
+        .goto("Helper.java", off)
+        .expect("newline no-arg call resolves");
     assert_eq!(d.file, "Fluent.java");
     assert_eq!(d.label, "method w.Fluent.size()");
 }
@@ -98,5 +106,9 @@ fn find_usages_counts_multiline_calls() {
     let p = fluent();
     let f = p.source("Fluent.java").to_string();
     let off = at(&f, "add_step(String") + 0;
-    assert_eq!(p.usage_count("Fluent.java", off), 3, "multiline calls are still indexed");
+    assert_eq!(
+        p.usage_count("Fluent.java", off),
+        3,
+        "multiline calls are still indexed"
+    );
 }

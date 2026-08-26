@@ -91,10 +91,24 @@ impl GrammarWalk for JavaPack {
             "formal_parameter" if is_record_component(node) => {
                 push_named(node, source, Target::Field, out)
             }
+            // A VARARGS parameter is a parameter. Its name lives in a `variable_declarator`, not a
+            // `name` field, so it needs `parameter_name_node` — and without this arm it was never
+            // checked against the convention at all.
+            "spread_parameter" => {
+                if let Some(nm) = spread_parameter_name(node) {
+                    if let Ok(text) = nm.utf8_text(source.as_bytes()) {
+                        out.push(Declared {
+                            target: Target::Parameter,
+                            name: text.to_string(),
+                            start: nm.start_byte(),
+                            end: nm.end_byte(),
+                        });
+                    }
+                }
+            }
             "formal_parameter" | "catch_formal_parameter" => {
                 push_named(node, source, Target::Parameter, out)
             }
-            "spread_parameter" => push_declarators(node, source, Target::Parameter, out),
             // `(a, b) -> …`: untyped lambda parameters are bare identifiers.
             "inferred_parameters" => {
                 let mut cursor = node.walk();
@@ -308,4 +322,20 @@ mod tests {
         let src = "class A { void m() { java.util.function.BiFunction<String,String,String> f = (a_one, b_two) -> a_one; } }";
         assert_eq!(names_of(src, Target::Parameter), ["a_one", "b_two"]);
     }
+}
+
+/// The name node of a `spread_parameter` (`T... xs`).
+///
+/// tree-sitter gives a varargs parameter no `name` field — the identifier lives inside a
+/// `variable_declarator` child — so asking for one returns `None` and the parameter simply vanishes
+/// from every walk that assumes otherwise. It did, everywhere, until a rename of one turned into a
+/// rename of a same-named field.
+///
+/// A local copy of `bennu_java::prelude::parameter_name_node` on purpose: this crate depends on the
+/// grammar and on `bennu-proto` and nothing else, which is what keeps a language pack cheap to add.
+/// Six lines is a smaller price than an edge to the whole Java front-end.
+fn spread_parameter_name<'a>(param: Node<'a>) -> Option<Node<'a>> {
+    let mut c = param.walk();
+    let declarator = param.named_children(&mut c).find(|ch| ch.kind() == "variable_declarator")?;
+    Some(declarator.child_by_field_name("name").unwrap_or(declarator))
 }

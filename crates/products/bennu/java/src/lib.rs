@@ -30,6 +30,7 @@ pub mod seam;
 pub mod spans;
 pub mod static_import;
 pub mod symbols;
+pub mod typename;
 pub mod typeparse;
 
 #[cfg(test)]
@@ -74,7 +75,10 @@ mod tests {
                     interfaces: vec!["java/util/Collection".into()],
                     methods: vec![
                         m("get", TypeRef::simple("E")),
-                        m("iterator", gen("java/util/Iterator", vec![TypeRef::simple("E")])),
+                        m(
+                            "iterator",
+                            gen("java/util/Iterator", vec![TypeRef::simple("E")]),
+                        ),
                         m("size", tr("int")),
                     ],
                     fields: vec![],
@@ -117,7 +121,10 @@ mod tests {
                     type_params: vec!["X".into(), "Y".into()],
                     superclass: Some("java/lang/Object".into()),
                     interfaces: vec![],
-                    methods: vec![m("left", TypeRef::simple("X")), m("right", TypeRef::simple("Y"))],
+                    methods: vec![
+                        m("left", TypeRef::simple("X")),
+                        m("right", TypeRef::simple("Y")),
+                    ],
                     fields: vec![],
                     flags: Default::default(),
                 },
@@ -153,7 +160,10 @@ mod tests {
 
     impl TypeResolver for FakeResolver {
         fn members_of(&self, binary_name: &str) -> Option<std::sync::Arc<ClassMembers>> {
-            self.classes.get(binary_name).cloned().map(std::sync::Arc::new)
+            self.classes
+                .get(binary_name)
+                .cloned()
+                .map(std::sync::Arc::new)
         }
         fn resolve_simple_name(&self, name: &str, _imports: &[Import]) -> Option<String> {
             self.simple.get(name).cloned()
@@ -164,7 +174,10 @@ mod tests {
         TypeRef::simple(bn)
     }
     fn gen(bn: &str, args: Vec<TypeRef>) -> TypeRef {
-        TypeRef { binary_name: bn.into(), type_args: args }
+        TypeRef {
+            binary_name: bn.into(),
+            type_args: args,
+        }
     }
     fn m(name: &str, ret: TypeRef) -> Member {
         Member::method(name, ret, vec![]).sig(String::new())
@@ -239,7 +252,8 @@ mod tests {
 
     #[test]
     fn this_field_access() {
-        let src = r#"package com.acme; class Foo { private Customer bar; void run() { this.bar. } }"#;
+        let src =
+            r#"package com.acme; class Foo { private Customer bar; void run() { this.bar. } }"#;
         assert_eq!(infer(src).binary_name, "com/acme/Customer");
     }
 
@@ -254,7 +268,8 @@ mod tests {
     #[test]
     fn try_with_resources_typed_resource_resolves() {
         // A conventionally-typed resource is visible too.
-        let src = r#"package com.acme; class Foo { void run() { try (Customer c = null) { c. } } }"#;
+        let src =
+            r#"package com.acme; class Foo { void run() { try (Customer c = null) { c. } } }"#;
         assert_eq!(infer(src).binary_name, "com/acme/Customer");
     }
 
@@ -355,14 +370,19 @@ mod tests {
         let src = std::fs::read_to_string(&rc).expect("read RequestContext");
         let fs = extract_symbols(&src);
         assert_eq!(fs.package.as_deref(), Some("com.agiletec.aps.system"));
-        let td =
-            fs.types.iter().find(|t| t.name == "RequestContext").expect("RequestContext type");
+        let td = fs
+            .types
+            .iter()
+            .find(|t| t.name == "RequestContext")
+            .expect("RequestContext type");
         assert!(td
             .methods
             .iter()
             .any(|m| m.name == "getRequest" && m.return_type_text == "HttpServletRequest"));
-        assert!(td.fields.iter().any(|f| f.name == "_request"
-            && f.type_text == "HttpServletRequest"));
+        assert!(td
+            .fields
+            .iter()
+            .any(|f| f.name == "_request" && f.type_text == "HttpServletRequest"));
         assert!(td
             .fields
             .iter()
@@ -389,7 +409,9 @@ mod tests {
 
     #[cfg(test)]
     fn walk_java(dir: &std::path::Path, f: &mut impl FnMut(&std::path::Path)) {
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
         for e in rd.flatten() {
             let p = e.path();
             if p.is_dir() {

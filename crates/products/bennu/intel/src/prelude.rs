@@ -56,10 +56,9 @@ pub use bennu_query::prelude::{ProjectView, RecordedDeps};
 // Plus go-to-declaration (`resolve_declaration` + `DeclarationLocation`), which reuses the
 // same caret classifier + decl-site name-span finders.
 pub use crate::rename::{
-    find_member_name_span, find_member_name_spans, rename_apply, rename_plan, resolve_declaration,
-    DeclarationLocation, file_rename_for, plan_types, Edit, EditReason, FileEdits, FileRename,
-    HoverInfo,
-    RenameEngine, RenamePlan, TypeRename,
+    file_rename_for, find_member_name_span, find_member_name_spans, plan_types, rename_apply,
+    rename_plan, resolve_declaration, DeclarationLocation, Edit, EditReason, FileEdits, FileRename,
+    HoverInfo, RenameEngine, RenamePlan, TypeRename,
 };
 // The rename planner's project-source input unit + the type-declaration name-span finder now live
 // in the base crates (`bennu-query` / `bennu-java`); re-surfaced here as part of the rename API.
@@ -80,8 +79,8 @@ pub use crate::spell::{
 // consumers (provider / be / tests) import them from `bennu_query::prelude` directly (clean cut,
 // no facade re-export).
 pub use crate::java_index::{
-    build_project_index, build_project_index_from_sources, collect_java, file_records_from_source,
-    background_workers, parallel_map, parallel_map_capped, project_type_map, read_java_sources,
-    read_source_for_index, set_background_workers, ClassDecl,
+    background_workers, build_project_index, build_project_index_from_sources, collect_java,
+    file_records_from_source, parallel_map, parallel_map_capped, project_type_map,
+    read_java_sources, read_source_for_index, set_background_workers, ClassDecl,
     NonCompliantSource, ProjectBuild, ProjectSources,
 };

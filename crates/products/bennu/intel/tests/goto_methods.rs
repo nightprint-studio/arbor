@@ -78,7 +78,9 @@ fn proj() -> Project {
 fn bare_same_class_call() {
     let p = proj();
     let s = p.source("Service.java").to_string();
-    let d = p.goto("Service.java", at(&s, "local();")).expect("goto bare same-class method");
+    let d = p
+        .goto("Service.java", at(&s, "local();"))
+        .expect("goto bare same-class method");
     assert_eq!(d.file, "Service.java");
     assert_eq!(d.label, "method app.Service.local()");
     assert_eq!(d.line, line_of(&s, "int local()"));
@@ -89,7 +91,8 @@ fn call_via_field_receiver() {
     let p = proj();
     let s = p.source("Service.java").to_string();
     // `util.shared()` — the no-arg overload through the `util` field receiver.
-    let d = p.goto("Service.java", at(&s, "util.shared();") + "util.".len())
+    let d = p
+        .goto("Service.java", at(&s, "util.shared();") + "util.".len())
         .expect("goto field-receiver method");
     assert_eq!(d.file, "Util.java");
     assert_eq!(d.label, "method app.Util.shared()");
@@ -100,7 +103,8 @@ fn call_via_local_receiver() {
     let p = proj();
     let s = p.source("Service.java").to_string();
     // `loc.shared()` — through a local variable receiver.
-    let d = p.goto("Service.java", at(&s, "loc.shared();") + "loc.".len())
+    let d = p
+        .goto("Service.java", at(&s, "loc.shared();") + "loc.".len())
         .expect("goto local-receiver method");
     assert_eq!(d.file, "Util.java");
     assert_eq!(d.label, "method app.Util.shared()");
@@ -111,7 +115,8 @@ fn call_via_parameter_receiver() {
     let p = proj();
     let s = p.source("Service.java").to_string();
     // `other.local()` — through the `other` parameter receiver → back into Service.
-    let d = p.goto("Service.java", at(&s, "other.local();") + "other.".len())
+    let d = p
+        .goto("Service.java", at(&s, "other.local();") + "other.".len())
         .expect("goto parameter-receiver method");
     assert_eq!(d.file, "Service.java");
     assert_eq!(d.label, "method app.Service.local()");
@@ -122,8 +127,13 @@ fn call_via_parameter_receiver() {
 fn inherited_method_resolves_into_parent_file() {
     let p = proj();
     let s = p.source("Service.java").to_string();
-    let d = p.goto("Service.java", at(&s, "baseMethod();")).expect("goto inherited method");
-    assert_eq!(d.file, "Base.java", "an inherited method resolves into the PARENT's file");
+    let d = p
+        .goto("Service.java", at(&s, "baseMethod();"))
+        .expect("goto inherited method");
+    assert_eq!(
+        d.file, "Base.java",
+        "an inherited method resolves into the PARENT's file"
+    );
     assert_eq!(d.label, "method app.Base.baseMethod()");
 }
 
@@ -131,8 +141,13 @@ fn inherited_method_resolves_into_parent_file() {
 fn interface_default_method() {
     let p = proj();
     let s = p.source("Service.java").to_string();
-    let d = p.goto("Service.java", at(&s, "greet();")).expect("goto interface default method");
-    assert_eq!(d.file, "Greeter.java", "a default method resolves into the interface's file");
+    let d = p
+        .goto("Service.java", at(&s, "greet();"))
+        .expect("goto interface default method");
+    assert_eq!(
+        d.file, "Greeter.java",
+        "a default method resolves into the interface's file"
+    );
     assert_eq!(d.label, "method app.Greeter.greet()");
 }
 
@@ -141,7 +156,8 @@ fn static_method_call() {
     let p = proj();
     let s = p.source("Service.java").to_string();
     // `Util.helper()` — the static call through a type name.
-    let d = p.goto("Service.java", at(&s, "Util.helper();") + "Util.".len())
+    let d = p
+        .goto("Service.java", at(&s, "Util.helper();") + "Util.".len())
         .expect("goto static method");
     assert_eq!(d.file, "Util.java");
     assert_eq!(d.label, "method app.Util.helper()");
@@ -152,7 +168,8 @@ fn overloaded_method_resolves_by_name() {
     let p = proj();
     let s = p.source("Service.java").to_string();
     // `util.shared(3)` — the arity-1 overload. Any overload is acceptable; assert by name/file.
-    let d = p.goto("Service.java", at(&s, "util.shared(3)") + "util.".len())
+    let d = p
+        .goto("Service.java", at(&s, "util.shared(3)") + "util.".len())
         .expect("goto overloaded method");
     assert_eq!(d.file, "Util.java");
     assert_eq!(d.label, "method app.Util.shared()");
@@ -163,7 +180,8 @@ fn cross_file_receiver_call() {
     let p = proj();
     let c = p.source("Consumer.java").to_string();
     // `s.run(s)` — cross-file call through a Service receiver.
-    let d = p.goto("Consumer.java", at(&c, "s.run(s)") + "s.".len())
+    let d = p
+        .goto("Consumer.java", at(&c, "s.run(s)") + "s.".len())
         .expect("goto cross-file receiver method");
     assert_eq!(d.file, "Service.java");
     assert_eq!(d.label, "method app.Service.run()");
@@ -175,7 +193,8 @@ fn cross_file_inherited_receiver_call() {
     let p = proj();
     let c = p.source("Consumer.java").to_string();
     // `s.baseMethod()` — cross-file call resolving into the parent file.
-    let d = p.goto("Consumer.java", at(&c, "s.baseMethod()") + "s.".len())
+    let d = p
+        .goto("Consumer.java", at(&c, "s.baseMethod()") + "s.".len())
         .expect("goto cross-file inherited receiver method");
     assert_eq!(d.file, "Base.java");
     assert_eq!(d.label, "method app.Base.baseMethod()");
@@ -186,7 +205,8 @@ fn caret_on_method_declaration_name_resolves_to_itself() {
     let p = proj();
     let s = p.source("Service.java").to_string();
     // Clicking the method's own declaration name resolves to that method decl.
-    let d = p.goto("Service.java", at(&s, "int run(Service") + "int ".len())
+    let d = p
+        .goto("Service.java", at(&s, "int run(Service") + "int ".len())
         .expect("goto on method decl name");
     assert_eq!(d.file, "Service.java");
     assert_eq!(d.label, "method app.Service.run()");
@@ -199,7 +219,10 @@ fn find_usages_of_bare_method() {
     let s = p.source("Service.java").to_string();
     // caret on the `local()` DECLARATION → its use sites: viaBare + other.local() = 2.
     let n = p.usage_count("Service.java", at(&s, "int local()") + "int ".len());
-    assert_eq!(n, 2, "local() is called bare and via the parameter receiver");
+    assert_eq!(
+        n, 2,
+        "local() is called bare and via the parameter receiver"
+    );
 }
 
 #[test]
@@ -226,7 +249,9 @@ fn call_on_keyword_or_literal_is_none() {
     let s = p.source("Service.java").to_string();
     // caret on the `return` keyword and on a numeric literal — never a panic, never a target.
     assert!(p.goto("Service.java", at(&s, "return viaBare")).is_none());
-    assert!(p.goto("Service.java", at(&s, "return 5;") + "return ".len()).is_none());
+    assert!(p
+        .goto("Service.java", at(&s, "return 5;") + "return ".len())
+        .is_none());
 }
 
 #[test]
@@ -255,9 +280,13 @@ fn interface_default_via_cross_file_receiver() {
         ),
     ]);
     let c = p.source("Caller.java").to_string();
-    let d = p.goto("Caller.java", at(&c, "i.greet()") + "i.".len())
+    let d = p
+        .goto("Caller.java", at(&c, "i.greet()") + "i.".len())
         .expect("goto default method via cross-file receiver");
-    assert_eq!(d.file, "Greeter.java", "resolves into the interface that declares the default");
+    assert_eq!(
+        d.file, "Greeter.java",
+        "resolves into the interface that declares the default"
+    );
     assert_eq!(d.label, "method app.Greeter.greet()");
 }
 
@@ -273,7 +302,9 @@ fn static_method_bare_call_within_declaring_type() {
          }\n",
     )]);
     let s = p.source("Tools.java").to_string();
-    let d = p.goto("Tools.java", at(&s, "base() + 1")).expect("goto bare static call");
+    let d = p
+        .goto("Tools.java", at(&s, "base() + 1"))
+        .expect("goto bare static call");
     assert_eq!(d.file, "Tools.java");
     assert_eq!(d.label, "method app.Tools.base()");
     assert_eq!(d.line, line_of(&s, "int base()"));
@@ -284,9 +315,11 @@ fn overload_selection_does_not_panic_either_arity() {
     // Both overloads are valid targets; assert each resolves by name into the Util file.
     let p = proj();
     let s = p.source("Service.java").to_string();
-    let no_arg = p.goto("Service.java", at(&s, "util.shared();") + "util.".len())
+    let no_arg = p
+        .goto("Service.java", at(&s, "util.shared();") + "util.".len())
         .expect("goto no-arg overload");
-    let with_arg = p.goto("Service.java", at(&s, "util.shared(3)") + "util.".len())
+    let with_arg = p
+        .goto("Service.java", at(&s, "util.shared(3)") + "util.".len())
         .expect("goto arity-1 overload");
     assert_eq!(no_arg.file, "Util.java");
     assert_eq!(with_arg.file, "Util.java");
@@ -314,7 +347,8 @@ fn cross_file_static_method_call() {
         ),
     ]);
     let c = p2.source("Client.java").to_string();
-    let d = p2.goto("Client.java", at(&c, "Util.helper()") + "Util.".len())
+    let d = p2
+        .goto("Client.java", at(&c, "Util.helper()") + "Util.".len())
         .expect("goto cross-file static method");
     assert_eq!(d.file, "Util.java");
     assert_eq!(d.label, "method app.Util.helper()");

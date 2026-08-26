@@ -64,7 +64,15 @@ pub fn binary_of_type_at(source: &str, simple: &str, line: i64) -> Option<String
     // Package + nested-type context tracked as we descend, so `Outer.Inner` binds correctly.
     let package = package_name(&root, bytes);
     let mut found: Option<String> = None;
-    walk_types(&root, bytes, package.as_deref(), None, simple, line, &mut found);
+    walk_types(
+        &root,
+        bytes,
+        package.as_deref(),
+        None,
+        simple,
+        line,
+        &mut found,
+    );
     found
 }
 
@@ -94,8 +102,12 @@ fn walk_types(
                 | "record_declaration"
                 | "annotation_type_declaration"
         ) {
-            let Some(name_node) = child.child_by_field_name("name") else { continue };
-            let Ok(name) = name_node.utf8_text(bytes) else { continue };
+            let Some(name_node) = child.child_by_field_name("name") else {
+                continue;
+            };
+            let Ok(name) = name_node.utf8_text(bytes) else {
+                continue;
+            };
             let binary = match outer_binary {
                 Some(o) => format!("{o}/{name}"),
                 None => match package {
@@ -138,7 +150,14 @@ pub fn enclosing_type_binary(source: &str, byte_offset: usize) -> Option<String>
     let root = tree.root_node();
     let package = package_name(&root, bytes);
     let mut found: Option<String> = None;
-    walk_enclosing(&root, bytes, package.as_deref(), None, byte_offset, &mut found);
+    walk_enclosing(
+        &root,
+        bytes,
+        package.as_deref(),
+        None,
+        byte_offset,
+        &mut found,
+    );
     found
 }
 
@@ -162,8 +181,12 @@ fn walk_enclosing(
                 | "record_declaration"
                 | "annotation_type_declaration"
         ) {
-            let Some(name_node) = child.child_by_field_name("name") else { continue };
-            let Ok(name) = name_node.utf8_text(bytes) else { continue };
+            let Some(name_node) = child.child_by_field_name("name") else {
+                continue;
+            };
+            let Ok(name) = name_node.utf8_text(bytes) else {
+                continue;
+            };
             let binary = match outer_binary {
                 Some(o) => format!("{o}/{name}"),
                 None => match package {
@@ -236,7 +259,9 @@ mod tests {
     #[test]
     fn binary_of_type_at_finds_a_nested_annotation_type() {
         let src = "package com.acme;\npublic class Holder {\n    public @interface Marker {}\n}\n";
-        let line = src[..src.find("@interface Marker").unwrap()].lines().count() as i64;
+        let line = src[..src.find("@interface Marker").unwrap()]
+            .lines()
+            .count() as i64;
         assert_eq!(
             binary_of_type_at(src, "Marker", line),
             Some("com/acme/Holder/Marker".to_string())
@@ -247,18 +272,27 @@ mod tests {
     fn binary_of_type_at_matches_by_line() {
         let src = "package com.acme;\npublic class Order {\n}\n";
         // `Order` name token is on line 2.
-        assert_eq!(binary_of_type_at(src, "Order", 2).as_deref(), Some("com/acme/Order"));
+        assert_eq!(
+            binary_of_type_at(src, "Order", 2).as_deref(),
+            Some("com/acme/Order")
+        );
         // A wrong line yields no match.
         assert!(binary_of_type_at(src, "Order", 99).is_none());
         // line <= 0 → first same-named decl wins.
-        assert_eq!(binary_of_type_at(src, "Order", 0).as_deref(), Some("com/acme/Order"));
+        assert_eq!(
+            binary_of_type_at(src, "Order", 0).as_deref(),
+            Some("com/acme/Order")
+        );
     }
 
     #[test]
     fn binary_of_nested_type_uses_slash_separator() {
         let src = "package com.acme;\nclass Outer {\n  class Inner {\n  }\n}\n";
         // Inner's name token is on line 3.
-        assert_eq!(binary_of_type_at(src, "Inner", 3).as_deref(), Some("com/acme/Outer/Inner"));
+        assert_eq!(
+            binary_of_type_at(src, "Inner", 3).as_deref(),
+            Some("com/acme/Outer/Inner")
+        );
     }
 
     #[test]
@@ -272,10 +306,16 @@ mod tests {
         let src = "package com.acme;\nclass Outer {\n  void m() {\n    int x = 0;\n  }\n  class Inner {\n    int y = 1;\n  }\n}\n";
         // Offset inside `m()`'s body (the `int x` line) → Outer.
         let in_m = src.find("int x").unwrap();
-        assert_eq!(enclosing_type_binary(src, in_m).as_deref(), Some("com/acme/Outer"));
+        assert_eq!(
+            enclosing_type_binary(src, in_m).as_deref(),
+            Some("com/acme/Outer")
+        );
         // Offset inside Inner's body (`int y`) → the nested binary.
         let in_inner = src.find("int y").unwrap();
-        assert_eq!(enclosing_type_binary(src, in_inner).as_deref(), Some("com/acme/Outer/Inner"));
+        assert_eq!(
+            enclosing_type_binary(src, in_inner).as_deref(),
+            Some("com/acme/Outer/Inner")
+        );
         // Offset in the file header (the package line) → not inside any type.
         assert!(enclosing_type_binary(src, 3).is_none());
     }

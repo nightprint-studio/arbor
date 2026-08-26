@@ -21,7 +21,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::seam::{Member, MemberKind, TypeRef, TypeResolver};
 use crate::symbols::{node_text, FileSymbols};
@@ -159,7 +159,10 @@ fn walk_methods(resolver: &dyn TypeResolver, binary: &str, name: &str) -> Method
             }
         }
     }
-    MethodResolution { candidates, complete }
+    MethodResolution {
+        candidates,
+        complete,
+    }
 }
 
 /// Infer the static type of the expression immediately LEFT of the `.` at
@@ -197,9 +200,7 @@ pub fn infer_receiver_type(
         (source.to_string(), byte_offset)
     };
 
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-    let tree = parser.parse(&buf, None)?;
+    let tree = crate::grammar::parse_java(&buf)?;
     let symbols = crate::symbols::extract_symbols(&buf);
     infer_receiver_type_at(&tree.root_node(), &buf, &symbols, off, resolver)
 }
@@ -215,9 +216,7 @@ pub fn infer_expression_type(
     end: usize,
     resolver: &dyn TypeResolver,
 ) -> Option<TypeRef> {
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-    let tree = parser.parse(source, None)?;
+    let tree = crate::grammar::parse_java(source)?;
     let symbols = crate::symbols::extract_symbols(source);
     infer_expression_type_at(&tree.root_node(), source, &symbols, start, end, resolver)
 }
@@ -233,7 +232,15 @@ pub fn infer_expression_type_at(
     end: usize,
     resolver: &dyn TypeResolver,
 ) -> Option<TypeRef> {
-    infer_expression_type_cached(root, source, symbols, start, end, resolver, &InferCache::new())
+    infer_expression_type_cached(
+        root,
+        source,
+        symbols,
+        start,
+        end,
+        resolver,
+        &InferCache::new(),
+    )
 }
 
 /// [`infer_expression_type_at`] backed by a shared per-file [`InferCache`] — the hot path for
@@ -255,11 +262,18 @@ pub fn infer_expression_type_cached(
     let result = root
         .named_descendant_for_byte_range(start, end)
         .and_then(|node| {
-            let ctx = Ctx { root: *root, bytes, resolver, symbols, cache, depth: Cell::new(0) };
+            let ctx = Ctx {
+                root: *root,
+                bytes,
+                resolver,
+                symbols,
+                cache,
+                depth: Cell::new(0),
+            };
             let enclosing = enclosing_type_fqn(&node, bytes, symbols);
             ctx.infer_expr(&node, enclosing.as_deref())
         })
-        .filter(is_resolved);
+        .filter(|t| is_resolved(t, resolver));
     cache.expr.borrow_mut().insert((start, end), result.clone());
     result
 }
@@ -268,8 +282,10 @@ pub fn infer_expression_type_cached(
 /// is not: it names a binding Phase-1 didn't resolve, and handing it out as a type invites the
 /// caller to look members up on a class called `S`. Every public entry filters it out, so
 /// "unknown" arrives as `None` rather than as a type that happens to resolve to nothing.
-fn is_resolved(t: &TypeRef) -> bool {
-    !t.binary_name.is_empty() && !is_type_var(&t.binary_name)
+/// Whether a [`TypeRef`] names a type we actually resolved — see
+/// [`crate::typename::is_resolved_binary`], which is the same question every consumer asks.
+fn is_resolved(t: &TypeRef, resolver: &dyn TypeResolver) -> bool {
+    crate::typename::is_resolved_binary(&t.binary_name, resolver)
 }
 
 /// Infer the type of an **already-located** node — the caller found it during its own tree walk, so
@@ -290,9 +306,18 @@ pub fn infer_node_type_cached(
         return hit.clone();
     }
     let bytes = source.as_bytes();
-    let ctx = Ctx { root: *root, bytes, resolver, symbols, cache, depth: Cell::new(0) };
+    let ctx = Ctx {
+        root: *root,
+        bytes,
+        resolver,
+        symbols,
+        cache,
+        depth: Cell::new(0),
+    };
     let enclosing = enclosing_type_fqn(node, bytes, symbols);
-    let result = ctx.infer_expr(node, enclosing.as_deref()).filter(is_resolved);
+    let result = ctx
+        .infer_expr(node, enclosing.as_deref())
+        .filter(|t| is_resolved(t, resolver));
     cache.expr.borrow_mut().insert(key, result.clone());
     result
 }
@@ -313,7 +338,14 @@ pub fn infer_receiver_type_at(
     byte_offset: usize,
     resolver: &dyn TypeResolver,
 ) -> Option<TypeRef> {
-    infer_receiver_type_cached(root, source, symbols, byte_offset, resolver, &InferCache::new())
+    infer_receiver_type_cached(
+        root,
+        source,
+        symbols,
+        byte_offset,
+        resolver,
+        &InferCache::new(),
+    )
 }
 
 /// [`infer_receiver_type_at`] backed by a shared per-file [`InferCache`] — the hot path for
@@ -333,12 +365,22 @@ pub fn infer_receiver_type_cached(
     let bytes = source.as_bytes();
     let result = find_receiver(root, byte_offset)
         .and_then(|receiver| {
-            let ctx = Ctx { root: *root, bytes, resolver, symbols, cache, depth: Cell::new(0) };
+            let ctx = Ctx {
+                root: *root,
+                bytes,
+                resolver,
+                symbols,
+                cache,
+                depth: Cell::new(0),
+            };
             let enclosing = enclosing_type_fqn(&receiver, bytes, symbols);
             ctx.infer_expr(&receiver, enclosing.as_deref())
         })
-        .filter(is_resolved);
-    cache.receiver.borrow_mut().insert(byte_offset, result.clone());
+        .filter(|t| is_resolved(t, resolver));
+    cache
+        .receiver
+        .borrow_mut()
+        .insert(byte_offset, result.clone());
     result
 }
 
@@ -462,7 +504,9 @@ impl Ctx<'_> {
             "string_literal" | "text_block" => Some(TypeRef::simple("java/lang/String")),
             "character_literal" => Some(TypeRef::simple("char")),
             "true" | "false" => Some(TypeRef::simple("boolean")),
-            "decimal_integer_literal" | "hex_integer_literal" | "octal_integer_literal"
+            "decimal_integer_literal"
+            | "hex_integer_literal"
+            | "octal_integer_literal"
             | "binary_integer_literal" => {
                 let t = node_text(node, self.bytes).unwrap_or_default();
                 let is_long = t.ends_with('l') || t.ends_with('L');
@@ -486,7 +530,9 @@ impl Ctx<'_> {
     /// Type a `+` binary expression as `String` when either operand is a `String` (concatenation);
     /// everything else is left untyped.
     fn infer_binary(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
-        let op = node.child_by_field_name("operator").and_then(|o| node_text(&o, self.bytes));
+        let op = node
+            .child_by_field_name("operator")
+            .and_then(|o| node_text(&o, self.bytes));
         if op.as_deref() != Some("+") {
             return None;
         }
@@ -523,7 +569,7 @@ impl Ctx<'_> {
             LambdaParam::NotParam => {}
         }
         if let Some(fqn) = enclosing {
-            if let Some(tr) = self.field_type_of_source_type(fqn, &name) {
+            if let Some(tr) = self.field_in_enclosing_scope(fqn, &name) {
                 return Some(tr);
             }
         }
@@ -622,8 +668,9 @@ impl Ctx<'_> {
                 let mut c = params.walk();
                 for ch in params.named_children(&mut c) {
                     if matches!(ch.kind(), "formal_parameter" | "spread_parameter") {
-                        if let Some(n) =
-                            ch.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))
+                        if let Some(n) = ch
+                            .child_by_field_name("name")
+                            .and_then(|n| node_text(&n, self.bytes))
                         {
                             out.push(n);
                         }
@@ -635,14 +682,20 @@ impl Ctx<'_> {
         }
     }
 
-    /// The functional-interface type a lambda is assigned to, when it is passed as an argument to a
-    /// method call or a constructor (the common case, and the only one modelled): the type of the
-    /// parameter at the lambda's argument position. `None` for any other position (declared variable,
-    /// return, cast) or when the callee / position is ambiguous.
+    /// The functional-interface type a lambda is assigned to: the type of the parameter at its
+    /// argument position, the declared type of the variable it initialises, or the return type of
+    /// the method it is returned from. `None` for anything else (a cast, an array initialiser) or
+    /// when the callee / position is ambiguous.
+    ///
+    /// Getting this wrong is not a missing nicety. A lambda parameter with no target type is a
+    /// receiver with no type, so **every member use on it disappears from the reference index** —
+    /// and a rename of that member then leaves each of those call sites spelling a name that no
+    /// longer exists. On a real project the argument position alone accounted for ~57 broken call
+    /// sites, all on one record read inside a lambda.
     fn lambda_target_type(&self, lambda: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
         let arg_list = lambda.parent()?;
         if arg_list.kind() != "argument_list" {
-            return None;
+            return self.lambda_target_from_context(lambda, enclosing);
         }
         let call = arg_list.parent()?;
         // The lambda's index among the REAL arguments (comments are named children — skip them).
@@ -664,10 +717,18 @@ impl Ctx<'_> {
         }
         match call.kind() {
             "method_invocation" => {
-                let name =
-                    call.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))?;
+                let name = call
+                    .child_by_field_name("name")
+                    .and_then(|n| node_text(&n, self.bytes))?;
                 let recv = match call.child_by_field_name("object") {
-                    Some(obj) => self.infer_expr(&obj, enclosing)?,
+                    Some(obj) => match self.infer_expr(&obj, enclosing) {
+                        Some(t) => t,
+                        // A STATIC call is qualified by a TYPE name, and a type name is not an
+                        // expression — `infer_expr` has nothing to say about it. Without this
+                        // fallback every lambda passed to a static factory (`Checker.build(x -> …)`,
+                        // the shape half a codebase uses) had no target type at all.
+                        None => self.resolve_type_text(&node_text(&obj, self.bytes)?)?,
+                    },
                     None => TypeRef::simple(to_binary(enclosing?)),
                 };
                 self.param_at(&recv, &name, idx)
@@ -677,6 +738,53 @@ impl Ctx<'_> {
                 let text = node_text(&ty, self.bytes)?;
                 let recv = self.resolve_type_text(&text)?;
                 self.param_at(&recv, "<init>", idx)
+            }
+            _ => None,
+        }
+    }
+
+    /// The target type of a lambda that is NOT an argument: the declared type of the variable it
+    /// initialises, or the return type of the method it is returned from.
+    ///
+    /// Both are written down in the source a line or two away, which is what makes them worth
+    /// reading — no inference, just the type the author already spelled.
+    fn lambda_target_from_context(
+        &self,
+        lambda: &Node,
+        _enclosing: Option<&str>,
+    ) -> Option<TypeRef> {
+        let parent = lambda.parent()?;
+        match parent.kind() {
+            // `Creator c = confirm -> …;`, and the field form of the same thing.
+            "variable_declarator" => {
+                let decl = parent.parent()?;
+                if !matches!(
+                    decl.kind(),
+                    "local_variable_declaration" | "field_declaration"
+                ) {
+                    return None;
+                }
+                let text = node_text(&decl.child_by_field_name("type")?, self.bytes)?;
+                self.resolve_type_text(&text)
+            }
+            // `return confirm -> …;` — the enclosing method's return type. The walk stops at an
+            // intervening lambda: a `return` inside a lambda BODY answers to that lambda's
+            // interface, not to the method, and guessing the method's type there would be wrong.
+            "return_statement" => {
+                let mut cur = parent.parent();
+                while let Some(n) = cur {
+                    match n.kind() {
+                        "lambda_expression" => return None,
+                        "method_declaration" => {
+                            let ty = n.child_by_field_name("type")?;
+                            let text = node_text(&ty, self.bytes)?;
+                            return self.resolve_type_text(&text);
+                        }
+                        _ => {}
+                    }
+                    cur = n.parent();
+                }
+                None
             }
             _ => None,
         }
@@ -751,7 +859,10 @@ impl Ctx<'_> {
         // → give up rather than guess.)
         let mut uniq: Vec<&Member> = Vec::new();
         for m in &abstracts {
-            if !uniq.iter().any(|u| u.name == m.name && u.params == m.params) {
+            if !uniq
+                .iter()
+                .any(|u| u.name == m.name && u.params == m.params)
+            {
                 uniq.push(m);
             }
         }
@@ -765,16 +876,47 @@ impl Ctx<'_> {
         let obj = node.child_by_field_name("object")?;
         let field = node.child_by_field_name("field")?;
         let field_name = node_text(&field, self.bytes)?;
+        // `Outer.this` — the qualified `this` an INNER class uses to reach its enclosing instance.
+        // It is spelled as a field access whose "field" is the keyword `this`, and there is no such
+        // field: the expression's type is simply the qualifying type. Without this,
+        // `Outer.this.member(…)` typed to nothing — and that is how an inner class calls its outer
+        // one throughout Apache Commons, so those calls were invisible to the index and a rename of
+        // the member left every one of them behind.
+        if field_name == "this" {
+            let text = node_text(&obj, self.bytes)?;
+            let binary =
+                self.simple_to_binary_resolved(text.split('<').next().unwrap_or(&text).trim())?;
+            return Some(TypeRef::simple(binary));
+        }
 
-        let obj_type = self.infer_expr(&obj, enclosing)?;
-        self.field_type_on(&obj_type, &field_name)
+        let obj_type = match self.infer_expr(&obj, enclosing) {
+            Some(t) => t,
+            // Not a value — so it may be a TYPE, and this a STATIC field read: `Headers.USERNAME`,
+            // `Integer.MAX_VALUE`. The same fallback (and the same order) as a static CALL, which
+            // had it and this did not: an enum constant is a static field of its enum, so
+            // `Headers.USERNAME.header_name()` dead-ended at the constant and every accessor
+            // reached through one was missing from the index.
+            None => self.type_receiver(&obj)?,
+        };
+        if let Some(t) = self.field_type_on(&obj_type, &field_name) {
+            return Some(t);
+        }
+        // `Outer.Nested` — the "field" is a nested TYPE, and the expression denotes that type
+        // rather than a value. Needed for anything reached through one: `Dto.Fields.file_name` is
+        // two field accesses, and the first one is this.
+        let nested = format!("{}/{field_name}", obj_type.binary_name);
+        self.resolver
+            .members_of(&nested)
+            .is_some()
+            .then(|| TypeRef::simple(nested))
     }
 
     /// `recv.foo(args)` or bare `foo(args)`. Resolves `foo`'s return type (arity-aware overload
     /// selection), applying generics carry-through from the receiver.
     fn infer_method_invocation(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
-        let name =
-            node.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))?;
+        let name = node
+            .child_by_field_name("name")
+            .and_then(|n| node_text(&n, self.bytes))?;
         let args = self.call_arg_nodes(node);
 
         let recv_type = match node.child_by_field_name("object") {
@@ -819,7 +961,10 @@ impl Ctx<'_> {
     /// "resolved" as a phantom type whose members then fail to match — turning a clean miss into
     /// a confusing one. A name that resolves to no known type still yields nothing.
     fn type_receiver(&self, obj: &Node) -> Option<TypeRef> {
-        if !matches!(obj.kind(), "identifier" | "scoped_identifier" | "field_access") {
+        if !matches!(
+            obj.kind(),
+            "identifier" | "scoped_identifier" | "field_access"
+        ) {
             return None;
         }
         let text = node_text(obj, self.bytes)?;
@@ -834,7 +979,9 @@ impl Ctx<'_> {
     /// comments (which ARE named children in tree-sitter). Their count + inferred types drive
     /// arity/argument overload selection.
     fn call_arg_nodes<'t>(&self, call: &Node<'t>) -> Vec<Node<'t>> {
-        let Some(list) = call.child_by_field_name("arguments") else { return Vec::new() };
+        let Some(list) = call.child_by_field_name("arguments") else {
+            return Vec::new();
+        };
         let mut out = Vec::new();
         let mut c = list.walk();
         for a in list.named_children(&mut c) {
@@ -857,7 +1004,10 @@ impl Ctx<'_> {
             return Some(tr);
         }
         let member = self.resolve_and_walk(&recv.binary_name, |cm| {
-            cm.fields.iter().find(|m| m.name == field_name).map(|m| m.return_type.clone())
+            cm.fields
+                .iter()
+                .find(|m| m.name == field_name)
+                .map(|m| m.return_type.clone())
         })?;
         Some(self.substitute_generics(&member, recv))
     }
@@ -873,14 +1023,14 @@ impl Ctx<'_> {
         args: &[Node],
         enclosing: Option<&str>,
     ) -> Option<TypeRef> {
-        if let Some(tr) = self.method_return_of_source_type(
-            &from_binary(&recv.binary_name),
-            method_name,
-            args,
-        ) {
+        if let Some(tr) =
+            self.method_return_of_source_type(&from_binary(&recv.binary_name), method_name, args)
+        {
             return Some(tr);
         }
-        let res = self.cache.resolve_methods(self.resolver, &recv.binary_name, method_name);
+        let res = self
+            .cache
+            .resolve_methods(self.resolver, &recv.binary_name, method_name);
         let ret = self.select_overload_return(&res.candidates, args, enclosing)?;
         Some(self.substitute_generics(&ret, recv))
     }
@@ -934,8 +1084,10 @@ impl Ctx<'_> {
         // Return types disagree → narrow by argument types (each inferred once; unknown args abstain).
         let arg_types: Vec<Option<TypeRef>> =
             args.iter().map(|a| self.infer_expr(a, enclosing)).collect();
-        let applicable: Vec<&Member> =
-            arity_ok.into_iter().filter(|m| args_admissible(&m.params, &arg_types)).collect();
+        let applicable: Vec<&Member> = arity_ok
+            .into_iter()
+            .filter(|m| args_admissible(&m.params, &arg_types))
+            .collect();
         unique_return(&applicable)
     }
 
@@ -982,12 +1134,23 @@ impl Ctx<'_> {
             return member_ret.clone();
         }
         let bn = &member_ret.binary_name;
-        if is_type_var(bn) {
-            // Position of `bn` in the receiver CLASS's real declared type-parameter list (from source
-            // `<…>` or the bytecode signature).
-            let cm = self.resolver.members_of(&recv.binary_name);
-            let type_params_known = cm.as_ref().is_some_and(|c| !c.type_params.is_empty());
-            let declared_idx = cm.and_then(|c| c.type_params.iter().position(|p| p == bn));
+        // Position of `bn` in the receiver CLASS's real declared type-parameter list (from source
+        // `<…>` or the bytecode signature).
+        let cm = self.resolver.members_of(&recv.binary_name);
+        let type_params_known = cm.as_ref().is_some_and(|c| !c.type_params.is_empty());
+        let declared_idx = cm
+            .as_ref()
+            .and_then(|c| c.type_params.iter().position(|p| p == bn));
+        // Whether `bn` IS a type variable here. The receiver class's own `<…>` list is the exact
+        // answer and the only one that works for a variable named `Param`: a type variable is an
+        // identifier, not a letter, and `record Edit<Source, Param>` is ordinary Java. Judging by
+        // shape alone — an uppercase letter plus digits — silently declined to substitute every
+        // multi-letter variable, so `edit.param()` typed as the literal `Param` and every member
+        // read off it disappeared from the index.
+        //
+        // The shape test survives as the fallback for a library class whose declared list we could
+        // not decode, where there is nothing else to go on.
+        if declared_idx.is_some() || (!type_params_known && is_type_var(bn)) {
             let idx = if type_params_known {
                 // The receiver class's real `<…>` list is known. A variable IN it maps to the actual
                 // type argument by position (`Pair<X,Y>.getRight() -> Y`, exact for any naming). A
@@ -1033,8 +1196,52 @@ impl Ctx<'_> {
     // ---- source-declared type lookups ----
 
     /// Look up a field on a source-declared type by its FQN (or bare name).
+    /// A field named `name` visible from inside `fqn` — declared there, inherited there, or
+    /// declared by any class `fqn` is written INSIDE.
+    ///
+    /// A nested class sees its enclosing classes' members and writes them unqualified (JLS §8.1.3),
+    /// and an anonymous body is a nested class. Stopping at the innermost type left the whole
+    /// expression untyped, so everything read off it disappeared: Guava writes
+    /// `upperBoundWindow.upperBound.isLessThan(…)` inside an anonymous iterator, and renaming
+    /// `isLessThan` could not see that call at all.
+    ///
+    /// The climb is over the FQN because nesting IS the FQN here, and it stops as soon as the
+    /// trimmed prefix is no longer a type — what is above the outermost one is the package.
+    fn field_in_enclosing_scope(&self, fqn: &str, name: &str) -> Option<TypeRef> {
+        let mut scope = fqn;
+        loop {
+            if let Some(tr) = self.field_type_of_source_type(scope, name) {
+                return Some(tr);
+            }
+            // Inherited by this level, too — the enclosing class's own supertypes are in scope for
+            // everything written inside it.
+            if let Some(tr) = self.field_type_on(&TypeRef::simple(to_binary(scope)), name) {
+                return Some(tr);
+            }
+            let Some(i) = scope.rfind('.') else {
+                return None;
+            };
+            let outer = &scope[..i];
+            if !self.is_type_fqn(outer) {
+                return None;
+            }
+            scope = outer;
+        }
+    }
+
+    /// Whether `fqn` names a type — this file's own declarations first, then the resolver, so a
+    /// chain that crosses files still climbs.
+    fn is_type_fqn(&self, fqn: &str) -> bool {
+        self.symbols.types.iter().any(|t| t.fqn == fqn)
+            || self.resolver.members_of(&to_binary(fqn)).is_some()
+    }
+
     fn field_type_of_source_type(&self, fqn: &str, field_name: &str) -> Option<TypeRef> {
-        let td = self.symbols.types.iter().find(|t| t.fqn == fqn || t.name == fqn)?;
+        let td = self
+            .symbols
+            .types
+            .iter()
+            .find(|t| t.fqn == fqn || t.name == fqn)?;
         let fd = td.fields.iter().find(|f| f.name == field_name)?;
         self.resolve_type_text(&fd.type_text)
     }
@@ -1043,7 +1250,11 @@ impl Ctx<'_> {
     /// the type has no `extends` clause (implicit `Object`, which the project-only engine won't
     /// decode anyway) or its declaration isn't in this file's symbols.
     fn superclass_type(&self, fqn: &str) -> Option<TypeRef> {
-        let td = self.symbols.types.iter().find(|t| t.fqn == fqn || t.name == fqn)?;
+        let td = self
+            .symbols
+            .types
+            .iter()
+            .find(|t| t.fqn == fqn || t.name == fqn)?;
         let ext = td.extends.as_ref()?;
         self.resolve_type_text(ext)
     }
@@ -1058,9 +1269,16 @@ impl Ctx<'_> {
         method_name: &str,
         args: &[Node],
     ) -> Option<TypeRef> {
-        let td = self.symbols.types.iter().find(|t| t.fqn == fqn || t.name == fqn)?;
-        let same_named: Vec<&crate::symbols::MethodDecl> =
-            td.methods.iter().filter(|m| m.name == method_name).collect();
+        let td = self
+            .symbols
+            .types
+            .iter()
+            .find(|t| t.fqn == fqn || t.name == fqn)?;
+        let same_named: Vec<&crate::symbols::MethodDecl> = td
+            .methods
+            .iter()
+            .filter(|m| m.name == method_name)
+            .collect();
         // A single method of this name isn't an overload → trust it (behavior identical to before).
         if let [only] = same_named.as_slice() {
             return self.resolve_type_text(&only.return_type_text);
@@ -1068,13 +1286,10 @@ impl Ctx<'_> {
         let argc = args.len();
         let mut ret_text: Option<&str> = None;
         for md in same_named.iter().copied() {
-            let last_array = md
-                .params
-                .last()
-                .is_some_and(|p| {
-                    let t = p.type_text.trim_end();
-                    t.ends_with("...") || t.ends_with("[]")
-                });
+            let last_array = md.params.last().is_some_and(|p| {
+                let t = p.type_text.trim_end();
+                t.ends_with("...") || t.ends_with("[]")
+            });
             if !arity_admits(md.params.len(), last_array, argc) {
                 continue;
             }
@@ -1099,7 +1314,10 @@ impl Ctx<'_> {
             // method / lambda / constructor parameters. Only these scopes HAVE a `parameters` field;
             // gating here avoids an O(children) `child_by_field_name` scan on every block / if / try /
             // catch ancestor (a huge method body has hundreds of statements, scanned per identifier).
-            if matches!(s.kind(), "method_declaration" | "constructor_declaration" | "lambda_expression") {
+            if matches!(
+                s.kind(),
+                "method_declaration" | "constructor_declaration" | "lambda_expression"
+            ) {
                 if let Some(tr) = self.param_type(&s, name) {
                     return LocalLookup::Typed(tr);
                 }
@@ -1134,7 +1352,9 @@ impl Ctx<'_> {
                 .and_then(|n| node_text(&n, self.bytes))
                 .is_some_and(|pn| pn == name);
             if matches {
-                let t = p.child_by_field_name("type").and_then(|n| node_text(&n, self.bytes))?;
+                let t = p
+                    .child_by_field_name("type")
+                    .and_then(|n| node_text(&n, self.bytes))?;
                 return self.resolve_type_text(&t);
             }
         }
@@ -1164,18 +1384,22 @@ impl Ctx<'_> {
         for c in scope.named_children(&mut cw) {
             match c.kind() {
                 "local_variable_declaration" => {
-                    let type_text =
-                        c.child_by_field_name("type").and_then(|n| node_text(&n, self.bytes));
+                    let type_text = c
+                        .child_by_field_name("type")
+                        .and_then(|n| node_text(&n, self.bytes));
                     let start = c.start_byte();
                     let mut dw = c.walk();
                     for d in c.named_children(&mut dw) {
                         if d.kind() != "variable_declarator" {
                             continue;
                         }
-                        let name =
-                            d.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes));
+                        let name = d
+                            .child_by_field_name("name")
+                            .and_then(|n| node_text(&n, self.bytes));
                         let value = d.child_by_field_name("value");
-                        if let (Some(vn), Some(ty)) = (name, self.local_ty_of(type_text.as_deref(), value)) {
+                        if let (Some(vn), Some(ty)) =
+                            (name, self.local_ty_of(type_text.as_deref(), value))
+                        {
                             map.entry(vn).or_default().push(LocalDecl { start, ty });
                         }
                     }
@@ -1190,13 +1414,20 @@ impl Ctx<'_> {
                         if r.kind() != "resource" {
                             continue;
                         }
-                        let type_text =
-                            r.child_by_field_name("type").and_then(|n| node_text(&n, self.bytes));
-                        let name =
-                            r.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes));
+                        let type_text = r
+                            .child_by_field_name("type")
+                            .and_then(|n| node_text(&n, self.bytes));
+                        let name = r
+                            .child_by_field_name("name")
+                            .and_then(|n| node_text(&n, self.bytes));
                         let value = r.child_by_field_name("value");
-                        if let (Some(vn), Some(ty)) = (name, self.local_ty_of(type_text.as_deref(), value)) {
-                            map.entry(vn).or_default().push(LocalDecl { start: r.start_byte(), ty });
+                        if let (Some(vn), Some(ty)) =
+                            (name, self.local_ty_of(type_text.as_deref(), value))
+                        {
+                            map.entry(vn).or_default().push(LocalDecl {
+                                start: r.start_byte(),
+                                ty,
+                            });
                         }
                     }
                 }
@@ -1205,10 +1436,11 @@ impl Ctx<'_> {
                 // instead of a `type` field. A multi-catch union (`A | B`) binds the LUB, which we
                 // don't compute → left unresolved rather than typed as its first alternative.
                 "catch_formal_parameter" => {
-                    let name = c.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes));
+                    let name = c
+                        .child_by_field_name("name")
+                        .and_then(|n| node_text(&n, self.bytes));
                     let mut tw = c.walk();
-                    let catch_type =
-                        c.named_children(&mut tw).find(|n| n.kind() == "catch_type");
+                    let catch_type = c.named_children(&mut tw).find(|n| n.kind() == "catch_type");
                     // A single alternative is the binding's type. A union has none we can name, so
                     // the binding is recorded as OPAQUE rather than skipped: skipping it would let
                     // the name fall through to a field it shadows and be typed as that instead.
@@ -1221,7 +1453,10 @@ impl Ctx<'_> {
                         None => None,
                     };
                     if let (Some(vn), Some(ty)) = (name, ty) {
-                        map.entry(vn).or_default().push(LocalDecl { start: c.start_byte(), ty });
+                        map.entry(vn).or_default().push(LocalDecl {
+                            start: c.start_byte(),
+                            ty,
+                        });
                     }
                 }
                 _ => {}
@@ -1239,11 +1474,15 @@ impl Ctx<'_> {
     /// the body, so a same-named identifier inside `xs` (`for (Foo x : x.getKids())`) still resolves
     /// to the outer binding it actually refers to.
     fn add_for_each_var(&self, loop_node: &Node, map: &mut HashMap<String, Vec<LocalDecl>>) {
-        let Some(name) = loop_node.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes))
+        let Some(name) = loop_node
+            .child_by_field_name("name")
+            .and_then(|n| node_text(&n, self.bytes))
         else {
             return;
         };
-        let type_text = loop_node.child_by_field_name("type").and_then(|n| node_text(&n, self.bytes));
+        let type_text = loop_node
+            .child_by_field_name("type")
+            .and_then(|n| node_text(&n, self.bytes));
         let value = loop_node.child_by_field_name("value");
         let start = value.map_or_else(|| loop_node.start_byte(), |v| v.end_byte());
         let ty = match type_text.as_deref() {
@@ -1304,7 +1543,10 @@ impl Ctx<'_> {
             // `case Foo f ->` / `case Foo f:` — the label's bindings hold in the case body.
             "switch_rule" | "switch_block_statement_group" => {
                 let mut lw = scope.walk();
-                for l in scope.named_children(&mut lw).filter(|l| l.kind() == "switch_label") {
+                for l in scope
+                    .named_children(&mut lw)
+                    .filter(|l| l.kind() == "switch_label")
+                {
                     self.collect_true_bindings(&l, &mut binds);
                 }
             }
@@ -1315,7 +1557,10 @@ impl Ctx<'_> {
         // Anchored at the guard's end, so the negative branch itself (where `f` is NOT in scope, and
         // the name may legitimately mean a field) is excluded.
         let mut gw = scope.walk();
-        for st in scope.named_children(&mut gw).filter(|s| s.kind() == "if_statement") {
+        for st in scope
+            .named_children(&mut gw)
+            .filter(|s| s.kind() == "if_statement")
+        {
             let is_guard = st
                 .child_by_field_name("consequence")
                 .is_some_and(|c| completes_abruptly(&c))
@@ -1335,7 +1580,10 @@ impl Ctx<'_> {
         }
 
         for (name, type_text, start) in binds {
-            map.entry(name).or_default().push(LocalDecl { start, ty: LocalTy::Declared(type_text) });
+            map.entry(name).or_default().push(LocalDecl {
+                start,
+                ty: LocalTy::Declared(type_text),
+            });
         }
     }
 
@@ -1361,8 +1609,10 @@ impl Ctx<'_> {
             // components are picked up by the descent below.
             "instanceof_expression" => {
                 if let (Some(n), Some(t)) = (
-                    expr.child_by_field_name("name").and_then(|n| node_text(&n, self.bytes)),
-                    expr.child_by_field_name("right").and_then(|t| node_text(&t, self.bytes)),
+                    expr.child_by_field_name("name")
+                        .and_then(|n| node_text(&n, self.bytes)),
+                    expr.child_by_field_name("right")
+                        .and_then(|t| node_text(&t, self.bytes)),
                 ) {
                     out.push((n, t, expr.end_byte()));
                 }
@@ -1437,7 +1687,10 @@ impl Ctx<'_> {
             return hit.clone();
         }
         let result = parse_type_text(text).map(|parsed| self.to_binary_ref(&parsed));
-        self.cache.type_text.borrow_mut().insert(text.to_string(), result.clone());
+        self.cache
+            .type_text
+            .borrow_mut()
+            .insert(text.to_string(), result.clone());
         result
     }
 
@@ -1453,12 +1706,31 @@ impl Ctx<'_> {
     /// the resolver (project types / star imports / java.lang), with a java.lang
     /// fallback for the common bare names.
     fn simple_to_binary(&self, simple: &str) -> String {
-        if simple.contains('.') {
-            return simple.replace('.', "/");
-        }
+        // The unbound spelling is kept deliberately: a `TypeRef` carries it so the walk can go on
+        // and `is_resolved` decides later whether anything may be concluded from it. Taking the
+        // TEXT rather than a slashed guess is what makes that later test honest — an unbound
+        // `Outer.Nested` stays dotted, and a dotted name is visibly not a binary one.
+        crate::typename::resolve_written_type(simple, self)
+            .text()
+            .to_string()
+    }
+
+    /// [`Self::simple_to_binary`] for the callers that must not act on a guess.
+    fn simple_to_binary_resolved(&self, simple: &str) -> Option<String> {
+        crate::typename::resolve_written_type(simple, self).resolved()
+    }
+}
+
+/// The inference walk's view of what binds a simple type name: the file's imports, the types the
+/// file itself declares, its package, then the resolver.
+///
+/// The ORDER is Java's and the shape of the lookup is shared — see [`crate::typename`], which
+/// exists because three copies of this had drifted and carried the same bug.
+impl crate::typename::NameScope for Ctx<'_> {
+    fn simple(&self, simple: &str) -> Option<String> {
         for imp in &self.symbols.imports {
             if imp.simple_name() == Some(simple) {
-                return imp.path.replace('.', "/");
+                return Some(imp.path.replace('.', "/"));
             }
         }
         // A type declared in THIS file (or a nested type of it) is authoritative: its FQN
@@ -1466,7 +1738,7 @@ impl Ctx<'_> {
         // even when the resolver's simple→binary hints weren't seeded for it yet (e.g. a
         // freshly-added type before the next full reindex).
         if let Some(td) = self.symbols.types.iter().find(|t| t.name == simple) {
-            return td.fqn.replace('.', "/");
+            return Some(td.fqn.replace('.', "/"));
         }
         // A type in the file's OWN package is in scope without an import. Resolve it to its exact
         // binary (`com/acme/C`, a unique key) BEFORE the resolver's flat simple-name lookup, which
@@ -1476,21 +1748,29 @@ impl Ctx<'_> {
             if !pkg.is_empty() {
                 let candidate = format!("{}/{}", pkg.replace('.', "/"), simple);
                 if self.resolver.members_of(&candidate).is_some() {
-                    return candidate;
+                    return Some(candidate);
                 }
             }
         }
-        if let Some(bn) = self.resolver.resolve_simple_name(simple, &self.symbols.imports) {
-            return bn;
+        // A member type INHERITED from a supertype — `Entry` inside a `Map` implementation. Ahead of
+        // the resolver's flat simple-name lookup, which collapses same-named nested types across the
+        // whole project and would answer with an unrelated one.
+        if let Some(bn) =
+            crate::typename::inherited_member_type(self.symbols, self.resolver, simple)
+        {
+            return Some(bn);
         }
-        match simple {
-            "String" | "Object" | "Integer" | "Long" | "Boolean" | "Double" | "Float"
-            | "Character" | "Byte" | "Short" | "Number" | "CharSequence" | "Iterable"
-            | "Comparable" | "Runnable" | "Thread" | "Class" | "Exception" | "Throwable" => {
-                format!("java/lang/{simple}")
-            }
-            _ => simple.to_string(),
+        if let Some(bn) = self
+            .resolver
+            .resolve_simple_name(simple, &self.symbols.imports)
+        {
+            return Some(bn);
         }
+        crate::typename::java_lang_implicit(simple)
+    }
+
+    fn is_type(&self, binary: &str) -> bool {
+        self.resolver.members_of(binary).is_some()
     }
 }
 
@@ -1524,6 +1804,27 @@ fn find_receiver<'t>(root: &Node<'t>, byte_offset: usize) -> Option<Node<'t>> {
                     }
                 }
             }
+            // `obj::member` — the same question as `obj.member(…)`, and it used to get no answer
+            // at all: the grammar gives a method reference's parts no field names, so neither arm
+            // above matched and every reference qualified by an EXPRESSION (`this::run`,
+            // `service::fetch`) was invisible to the index. A rename then rewrote the declaration
+            // and left every `::` site spelling a method that no longer exists.
+            //
+            // Only a type-qualified reference survived, through the caller's separate
+            // "resolve the text as a type" fallback — which is why the gap looked partial.
+            "method_reference" => {
+                let mut walk = n.walk();
+                let children: Vec<Node<'t>> = n.named_children(&mut walk).collect();
+                if let (Some(qualifier), Some(name)) = (children.first(), children.last()) {
+                    // `Foo::new` has one named child; the qualifier would BE the "name".
+                    if qualifier.id() != name.id()
+                        && name.start_byte() <= byte_offset
+                        && byte_offset <= name.end_byte()
+                    {
+                        return Some(*qualifier);
+                    }
+                }
+            }
             _ => {}
         }
         cur = n.parent();
@@ -1533,32 +1834,37 @@ fn find_receiver<'t>(root: &Node<'t>, byte_offset: usize) -> Option<Node<'t>> {
 
 /// The FQN of the type enclosing a node (for `this` / field / local resolution).
 ///
-/// ## An anonymous class body stops the walk
+/// ## An anonymous class body is a type of its own
 ///
-/// `new Foo<>() { private Bar b; … this.b … }` declares a type with **no name**, so there is no FQN
-/// to return and nothing in `symbols.types` to match. Walking past its body to the enclosing *named*
-/// class is the tempting thing to do and it is wrong in the way that hurts most: `this` then means
-/// the outer class, `this.b` is looked up on a type that has no `b`, and correct code is reported as
-/// "Cannot resolve field `b`" — for every field an anonymous class declares.
+/// `new Foo<>() { private Bar b; … this.b … }` declares a type with no name in the source, and this
+/// used to answer `None` for anything inside it — on the grounds that its members were not indexed,
+/// so `this.b` would be looked up on the enclosing class, which has no `b`, and correct code would
+/// be reported as a missing field.
 ///
-/// `None` is the honest answer: the anonymous type's members aren't indexed, so nothing downstream
-/// can assert anything about them. Every consumer gates on a known receiver type (the field / method
-/// checks bail when `members_of` is `None`), so the effect is silence inside an anonymous body
-/// rather than a wrong verdict — the same discipline `bennu-check`'s `undefined_var` already applies
-/// by refusing to analyse across an intervening `class_body`.
+/// They ARE indexed now: the extractor files an anonymous body under the ordinal javac gives it
+/// (`p.Outer.1`), members and all. So the honest answer is that ordinal, and `None` became the
+/// costly one — with no enclosing type, a bare name written inside an anonymous body could not be
+/// typed at all, and neither could anything read off it. Guava writes
+/// `upperBoundWindow.upperBound.isLessThan(…)` inside an anonymous iterator; the whole chain went
+/// untyped and a rename of `isLessThan` could not see the call.
 ///
-/// Detected by the body's PARENT: an anonymous `class_body` hangs directly off the
-/// `object_creation_expression` that creates it, whereas a named type's body hangs off its
-/// declaration. So the two are told apart structurally, with no name guessing.
-fn enclosing_type_fqn(node: &Node, bytes: &[u8], symbols: &FileSymbols) -> Option<String> {
+/// Derived exactly as the reference index derives it (`anonymous_type_name` + the outer FQN), so
+/// the two cannot disagree about what an anonymous type is called — which would be worse than
+/// either answer, since a key nothing looks up is silence that looks like success.
+pub fn enclosing_type_fqn(node: &Node, bytes: &[u8], symbols: &FileSymbols) -> Option<String> {
     let mut cur = node.parent();
     while let Some(n) = cur {
         // An anonymous class body — see the doc above. Must be tested BEFORE the declaration arm,
         // which is automatic walking bottom-up: the body is always crossed first.
-        if n.kind() == "class_body"
-            && n.parent().map(|p| p.kind()) == Some("object_creation_expression")
-        {
-            return None;
+        if crate::symbols::is_anonymous_body(&n) {
+            let name = crate::symbols::anonymous_type_name(&n, bytes)?;
+            let outer = n
+                .parent()
+                .and_then(|p| enclosing_type_fqn(&p, bytes, symbols));
+            return Some(match outer {
+                Some(outer) => format!("{outer}.{name}"),
+                None => name,
+            });
         }
         if matches!(
             n.kind(),
@@ -1569,7 +1875,9 @@ fn enclosing_type_fqn(node: &Node, bytes: &[u8], symbols: &FileSymbols) -> Optio
                 | "enum_declaration"
                 | "record_declaration"
         ) {
-            let name = n.child_by_field_name("name").and_then(|x| node_text(&x, bytes))?;
+            let name = n
+                .child_by_field_name("name")
+                .and_then(|x| node_text(&x, bytes))?;
             // Recover the FQN by matching the extracted TypeDecl on simple name.
             if let Some(td) = symbols.types.iter().find(|t| t.name == name) {
                 return Some(td.fqn.clone());
@@ -1588,12 +1896,18 @@ fn field_is(parent: &Node, field: &str, node: &Node) -> bool {
 
 /// The operand of a `!` — `!(o instanceof Foo f)` → `(o instanceof Foo f)`. `None` for anything else.
 fn unwrap_negation<'t>(cond: &Node<'t>) -> Option<Node<'t>> {
-    let inner = if cond.kind() == "parenthesized_expression" { cond.named_child(0)? } else { *cond };
+    let inner = if cond.kind() == "parenthesized_expression" {
+        cond.named_child(0)?
+    } else {
+        *cond
+    };
     if inner.kind() != "unary_expression" {
         return None;
     }
     let op = inner.child_by_field_name("operator")?;
-    (op.kind() == "!").then(|| inner.child_by_field_name("operand")).flatten()
+    (op.kind() == "!")
+        .then(|| inner.child_by_field_name("operand"))
+        .flatten()
 }
 
 /// Whether a statement always completes abruptly (`return` / `throw` / `break` / `continue`), or is a
@@ -1652,7 +1966,9 @@ fn arity_admits(nparams: usize, last_is_array: bool, argc: usize) -> bool {
 /// Whether a member's last parameter is an array type (`T[]`) — the resolved shape of a `T...` varargs
 /// parameter (no explicit flag on the seam).
 fn last_is_array(m: &Member) -> bool {
-    m.params.last().is_some_and(|p| p.binary_name.ends_with("[]"))
+    m.params
+        .last()
+        .is_some_and(|p| p.binary_name.ends_with("[]"))
 }
 
 /// The single return type shared by every member in `members`, or `None` when the set is empty or its
@@ -1765,7 +2081,11 @@ mod generic_tests {
     #[test]
     fn single_arg_maps_any_var_to_the_sole_argument() {
         assert_eq!(type_var_index("E", 1), Some(0));
-        assert_eq!(type_var_index("V", 1), Some(0), "Future<V>.get() → V even though V is 'second'");
+        assert_eq!(
+            type_var_index("V", 1),
+            Some(0),
+            "Future<V>.get() → V even though V is 'second'"
+        );
         assert_eq!(type_var_index("R", 1), Some(0));
     }
 
@@ -1775,7 +2095,11 @@ mod generic_tests {
         assert_eq!(type_var_index("K", 2), Some(0));
         assert_eq!(type_var_index("V", 2), Some(1));
         assert_eq!(type_var_index("L", 2), Some(0));
-        assert_eq!(type_var_index("R", 2), Some(1), "Pair<L,R>.getRight() → the 2nd arg");
+        assert_eq!(
+            type_var_index("R", 2),
+            Some(1),
+            "Pair<L,R>.getRight() → the 2nd arg"
+        );
     }
 
     #[test]
@@ -1797,7 +2121,10 @@ mod generic_tests {
         assert!(is_type_var("T"));
         assert!(is_type_var("R"));
         assert!(is_type_var("T1"));
-        assert!(!is_type_var("KK"), "two letters is not a type var (could be a class)");
+        assert!(
+            !is_type_var("KK"),
+            "two letters is not a type var (could be a class)"
+        );
         assert!(!is_type_var("java/lang/String"));
         assert!(!is_type_var("Foo"));
         assert!(!is_type_var(""));
@@ -1841,13 +2168,21 @@ mod test_support {
     }
 
     pub(super) fn meth(name: &str, ret: &str, params: &[&str]) -> Member {
-        Member::method(name, TypeRef::simple(ret), params.iter().map(|p| TypeRef::simple(*p)).collect())
+        Member::method(
+            name,
+            TypeRef::simple(ret),
+            params.iter().map(|p| TypeRef::simple(*p)).collect(),
+        )
     }
 
     /// The inferred binary type of the (unique) `expr` substring of `src`.
     pub(super) fn infer_call(src: &str, expr: &str, r: &MapResolver) -> Option<String> {
         let start = src.find(expr).expect("expression substring present");
-        assert_eq!(src.matches(expr).count(), 1, "`{expr}` must occur once in the fixture");
+        assert_eq!(
+            src.matches(expr).count(),
+            1,
+            "`{expr}` must occur once in the fixture"
+        );
         infer_expression_type(src, start, start + expr.len(), r).map(|t| t.binary_name)
     }
 }
@@ -1873,7 +2208,11 @@ mod overload_tests {
                 meth(
                     "format",
                     "java/lang/StringBuffer",
-                    &["java/lang/Object", "java/lang/StringBuffer", "acme/FieldPosition"],
+                    &[
+                        "java/lang/Object",
+                        "java/lang/StringBuffer",
+                        "acme/FieldPosition",
+                    ],
                 ),
             ]),
         );
@@ -1910,7 +2249,10 @@ mod overload_tests {
         // This expression is exactly what a `val`'s initializer re-descends into, so typing it
         // is what gives the `val` its type — and its tooltip.
         let src = "class C { void m() { val s = Fmt.format(null); } }";
-        assert_eq!(infer_call(src, "Fmt.format(null)", &r).as_deref(), Some("java/lang/String"));
+        assert_eq!(
+            infer_call(src, "Fmt.format(null)", &r).as_deref(),
+            Some("java/lang/String")
+        );
         // A qualified receiver works the same way.
         let qualified = "class C { void m() { Object o = acme.Fmt.format(null); } }";
         assert_eq!(
@@ -1925,7 +2267,10 @@ mod overload_tests {
         // must run only after value resolution has failed.
         let r = resolver();
         let src = "class C { void m(acme.Fmt Fmt) { Object o = Fmt.format(Fmt); } }";
-        assert_eq!(infer_call(src, "Fmt.format(Fmt)", &r).as_deref(), Some("java/lang/String"));
+        assert_eq!(
+            infer_call(src, "Fmt.format(Fmt)", &r).as_deref(),
+            Some("java/lang/String")
+        );
     }
 
     #[test]
@@ -1943,7 +2288,10 @@ mod overload_tests {
         // `format(…) -> StringBuffer` the old first-by-name pick returned (the reported false positive).
         let r = resolver();
         let src = "class C { void m(acme.Fmt f) { Object o = f.format(f); } }";
-        assert_eq!(infer_call(src, "f.format(f)", &r).as_deref(), Some("java/lang/String"));
+        assert_eq!(
+            infer_call(src, "f.format(f)", &r).as_deref(),
+            Some("java/lang/String")
+        );
     }
 
     #[test]
@@ -1952,7 +2300,10 @@ mod overload_tests {
         // the primitive/reference clash → `pick(String) -> B`.
         let r = resolver();
         let src = "class C { void m(acme.Ov v) { Object o = v.pick(\"s\"); } }";
-        assert_eq!(infer_call(src, "v.pick(\"s\")", &r).as_deref(), Some("acme/B"));
+        assert_eq!(
+            infer_call(src, "v.pick(\"s\")", &r).as_deref(),
+            Some("acme/B")
+        );
     }
 
     #[test]
@@ -1970,15 +2321,30 @@ mod overload_tests {
         assert!(!arity_admits(2, false, 1), "fixed arity, wrong count");
         assert!(arity_admits(1, true, 0), "varargs with zero variadic args");
         assert!(arity_admits(2, true, 5), "varargs with many variadic args");
-        assert!(!arity_admits(3, true, 1), "varargs needs at least the fixed prefix");
+        assert!(
+            !arity_admits(3, true, 1),
+            "varargs needs at least the fixed prefix"
+        );
     }
 
     #[test]
     fn primitive_reference_clash_is_definite_only() {
-        assert!(primitive_ref_clash("int", "java/lang/String"), "int param vs String arg");
-        assert!(primitive_ref_clash("java/lang/String", "int"), "String param vs int arg");
-        assert!(!primitive_ref_clash("int", "java/lang/Integer"), "autoboxing bridge, not a clash");
-        assert!(!primitive_ref_clash("java/lang/Object", "java/lang/String"), "both references");
+        assert!(
+            primitive_ref_clash("int", "java/lang/String"),
+            "int param vs String arg"
+        );
+        assert!(
+            primitive_ref_clash("java/lang/String", "int"),
+            "String param vs int arg"
+        );
+        assert!(
+            !primitive_ref_clash("int", "java/lang/Integer"),
+            "autoboxing bridge, not a clash"
+        );
+        assert!(
+            !primitive_ref_clash("java/lang/Object", "java/lang/String"),
+            "both references"
+        );
         assert!(!primitive_ref_clash("int", "long"), "both primitives");
     }
 
@@ -1987,8 +2353,14 @@ mod overload_tests {
         let a = meth("x", "acme/A", &[]);
         let b = meth("x", "acme/B", &[]);
         let a2 = meth("x", "acme/A", &["int"]);
-        assert_eq!(unique_return(&[&a, &a2]).map(|t| t.binary_name), Some("acme/A".to_string()));
-        assert!(unique_return(&[&a, &b]).is_none(), "different returns → no unique");
+        assert_eq!(
+            unique_return(&[&a, &a2]).map(|t| t.binary_name),
+            Some("acme/A".to_string())
+        );
+        assert!(
+            unique_return(&[&a, &b]).is_none(),
+            "different returns → no unique"
+        );
         assert!(unique_return(&[]).is_none(), "empty → none");
     }
 }
@@ -2032,7 +2404,10 @@ mod shadowing_tests {
                 ),
             ]),
         );
-        MapResolver { members, simple: HashMap::new() }
+        MapResolver {
+            members,
+            simple: HashMap::new(),
+        }
     }
 
     /// A class with a field `impresa` of the DECOY type, wrapping `body` in a method.
@@ -2043,26 +2418,37 @@ mod shadowing_tests {
     #[test]
     fn for_each_variable_shadows_a_same_named_field() {
         let r = resolver();
-        let src = with_field(
-            "for (acme.Impresa impresa : impresa.list()) { Object x = impresa.id(); }",
+        let src =
+            with_field("for (acme.Impresa impresa : impresa.list()) { Object x = impresa.id(); }");
+        assert_eq!(
+            infer_call(&src, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
         );
-        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
         // …and the ITERABLE, evaluated before the variable exists, still means the field.
-        assert_eq!(infer_call(&src, "impresa.list()", &r).as_deref(), Some("java/util/List"));
+        assert_eq!(
+            infer_call(&src, "impresa.list()", &r).as_deref(),
+            Some("java/util/List")
+        );
     }
 
     #[test]
     fn for_each_var_takes_the_element_type_not_the_collection() {
         let r = resolver();
         let src = with_field("for (var impresa : impresa.list()) { Object x = impresa.id(); }");
-        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        assert_eq!(
+            infer_call(&src, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
+        );
     }
 
     #[test]
     fn catch_parameter_shadows_a_same_named_field() {
         let r = resolver();
         let src = with_field("try { hop(); } catch (acme.Ex impresa) { Object x = impresa.id(); }");
-        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        assert_eq!(
+            infer_call(&src, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
+        );
     }
 
     #[test]
@@ -2070,8 +2456,9 @@ mod shadowing_tests {
         // The binding's type is the LUB of `Ex | Ex2`, which we don't compute — and it must NOT fall
         // back to the shadowed field either. Unresolved keeps the member checks silent.
         let r = resolver();
-        let src =
-            with_field("try { hop(); } catch (acme.Ex | acme.Ex2 impresa) { Object x = impresa.id(); }");
+        let src = with_field(
+            "try { hop(); } catch (acme.Ex | acme.Ex2 impresa) { Object x = impresa.id(); }",
+        );
         assert_eq!(infer_call(&src, "impresa.id()", &r), None);
     }
 
@@ -2079,28 +2466,40 @@ mod shadowing_tests {
     fn classic_for_init_shadows_a_same_named_field() {
         let r = resolver();
         let src = with_field("for (acme.Impresa impresa = null; ; ) { Object x = impresa.id(); }");
-        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        assert_eq!(
+            infer_call(&src, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
+        );
     }
 
     #[test]
     fn try_with_resources_shadows_a_same_named_field() {
         let r = resolver();
         let src = with_field("try (acme.Impresa impresa = null) { Object x = impresa.id(); }");
-        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        assert_eq!(
+            infer_call(&src, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
+        );
     }
 
     #[test]
     fn local_declaration_shadows_a_same_named_field() {
         let r = resolver();
         let src = with_field("acme.Impresa impresa = null; Object x = impresa.id();");
-        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        assert_eq!(
+            infer_call(&src, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
+        );
     }
 
     #[test]
     fn instanceof_pattern_shadows_a_same_named_field_in_the_true_branch() {
         let r = resolver();
         let src = with_field("if (o instanceof acme.Impresa impresa) { Object x = impresa.id(); }");
-        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        assert_eq!(
+            infer_call(&src, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
+        );
     }
 
     #[test]
@@ -2108,7 +2507,10 @@ mod shadowing_tests {
         let r = resolver();
         let src =
             with_field("boolean b = o instanceof acme.Impresa impresa && impresa.id() != null;");
-        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        assert_eq!(
+            infer_call(&src, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
+        );
     }
 
     #[test]
@@ -2118,7 +2520,10 @@ mod shadowing_tests {
         let src = with_field(
             "if (!(o instanceof acme.Impresa impresa)) { return; } Object x = impresa.id();",
         );
-        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        assert_eq!(
+            infer_call(&src, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
+        );
     }
 
     #[test]
@@ -2129,35 +2534,52 @@ mod shadowing_tests {
         let src = with_field(
             "if (o instanceof acme.Impresa impresa) { hop(); } else { Object x = impresa.id(); }",
         );
-        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/B"));
+        assert_eq!(
+            infer_call(&src, "impresa.id()", &r).as_deref(),
+            Some("acme/B")
+        );
     }
 
     #[test]
     fn instanceof_pattern_does_not_leak_past_a_non_abrupt_if() {
         // No early exit → after the `if`, `impresa` is the field again.
         let r = resolver();
-        let src =
-            with_field("if (!(o instanceof acme.Impresa impresa)) { hop(); } Object x = impresa.id();");
-        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/B"));
+        let src = with_field(
+            "if (!(o instanceof acme.Impresa impresa)) { hop(); } Object x = impresa.id();",
+        );
+        assert_eq!(
+            infer_call(&src, "impresa.id()", &r).as_deref(),
+            Some("acme/B")
+        );
     }
 
     #[test]
     fn switch_case_pattern_shadows_a_same_named_field() {
         let r = resolver();
         let arrow = with_field("switch (o) { case acme.Impresa impresa -> { Object x = impresa.id(); } default -> { hop(); } }");
-        assert_eq!(infer_call(&arrow, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        assert_eq!(
+            infer_call(&arrow, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
+        );
 
         let colon = with_field(
             "switch (o) { case acme.Impresa impresa: Object x = impresa.id(); break; default: break; }",
         );
-        assert_eq!(infer_call(&colon, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        assert_eq!(
+            infer_call(&colon, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
+        );
     }
 
     #[test]
     fn while_pattern_binds_in_the_loop_body() {
         let r = resolver();
-        let src = with_field("while (o instanceof acme.Impresa impresa) { Object x = impresa.id(); }");
-        assert_eq!(infer_call(&src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        let src =
+            with_field("while (o instanceof acme.Impresa impresa) { Object x = impresa.id(); }");
+        assert_eq!(
+            infer_call(&src, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
+        );
     }
 
     /// The reported bug: a fluent builder reached through a wildcard. `get()` hands back
@@ -2195,7 +2617,10 @@ mod shadowing_tests {
     fn method_parameter_shadows_a_same_named_field() {
         let r = resolver();
         let src = "class C { private acme.Holder impresa; void m(acme.Impresa impresa) { Object x = impresa.id(); } }";
-        assert_eq!(infer_call(src, "impresa.id()", &r).as_deref(), Some("acme/A"));
+        assert_eq!(
+            infer_call(src, "impresa.id()", &r).as_deref(),
+            Some("acme/A")
+        );
     }
 
     #[test]
@@ -2219,7 +2644,10 @@ mod depth_tests {
         let mut members = HashMap::new();
         members.insert("java/lang/Object".to_string(), cm(vec![]));
         members.insert("java/lang/String".to_string(), cm(vec![]));
-        MapResolver { members, simple: HashMap::new() }
+        MapResolver {
+            members,
+            simple: HashMap::new(),
+        }
     }
 
     /// `"x" + "x" + …` nests one level per operand, so a machine-generated

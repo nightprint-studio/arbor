@@ -248,7 +248,9 @@ fn switch_selector_parameter() {
     )]);
     let s = p.source("A.java").to_string();
     let off = at(&s, "switch (selector") + "switch (".len();
-    let d = p.goto("A.java", off).expect("goto switch selector parameter");
+    let d = p
+        .goto("A.java", off)
+        .expect("goto switch selector parameter");
     assert_eq!(d.file, "A.java");
     assert_eq!(d.label, "local `selector`");
     assert_eq!(d.line, line_of(&s, "int selector"));
@@ -301,7 +303,9 @@ fn try_with_resources_variable() {
     )]);
     let s = p.source("A.java").to_string();
     let off = at(&s, "return res.read") + "return ".len();
-    let d = p.goto("A.java", off).expect("goto try-with-resources variable");
+    let d = p
+        .goto("A.java", off)
+        .expect("goto try-with-resources variable");
     assert_eq!(d.file, "A.java");
     assert_eq!(d.label, "local `res`");
     assert_eq!(d.line, line_of(&s, "StringReader res ="));
@@ -412,12 +416,17 @@ fn same_name_distinct_locals_in_two_methods() {
 
     // Use in second() → second()'s declaration line (a DIFFERENT line).
     let off_second = at_last(&s, "return value;") + "return ".len();
-    let d2 = p.goto("A.java", off_second).expect("goto value in second()");
+    let d2 = p
+        .goto("A.java", off_second)
+        .expect("goto value in second()");
     assert_eq!(d2.file, "A.java");
     assert_eq!(d2.label, "local `value`");
     assert_eq!(d2.line, line_of(&s, "int value = 2"));
 
-    assert_ne!(d1.line, d2.line, "the two locals are scope-exact, on different lines");
+    assert_ne!(
+        d1.line, d2.line,
+        "the two locals are scope-exact, on different lines"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -439,7 +448,10 @@ fn find_usages_of_local_is_zero() {
     let s = p.source("A.java").to_string();
     // Caret on the local declaration: locals are not bucketed by find-usages → 0.
     let n = p.usage_count("A.java", at(&s, "int local ="));
-    assert_eq!(n, 0, "a local is scope-exact and not counted by find-usages");
+    assert_eq!(
+        n, 0,
+        "a local is scope-exact and not counted by find-usages"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -461,7 +473,9 @@ fn caret_on_local_declaration_name() {
     let s = p.source("A.java").to_string();
     // Land directly on the declared name `target` in `int target = 8;`.
     let off = at(&s, "target = 8");
-    let d = p.goto("A.java", off).expect("goto on the declaration name itself");
+    let d = p
+        .goto("A.java", off)
+        .expect("goto on the declaration name itself");
     assert_eq!(d.file, "A.java");
     assert_eq!(d.label, "local `target`");
     assert_eq!(d.line, line_of(&s, "int target ="));
@@ -486,7 +500,9 @@ fn captured_local_from_lambda_body() {
     )]);
     let s = p.source("A.java").to_string();
     let off = at(&s, "-> captured") + "-> ".len();
-    let d = p.goto("A.java", off).expect("goto captured local from lambda body");
+    let d = p
+        .goto("A.java", off)
+        .expect("goto captured local from lambda body");
     assert_eq!(d.file, "A.java");
     assert_eq!(d.label, "local `captured`");
     assert_eq!(d.line, line_of(&s, "int captured ="));

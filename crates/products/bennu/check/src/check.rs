@@ -3,7 +3,6 @@
 
 use bennu_java::prelude::TypeResolver;
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::Parser;
 
 /// Cap on diagnostics returned for one file — a badly-broken buffer shouldn't paint the whole
 /// gutter red (or flood the Problems panel). Ordered by position, so the cap keeps the earliest.
@@ -86,11 +85,7 @@ pub struct FileContext {
 /// by start offset and capped at [`MAX_DIAGNOSTICS`]. Never errors: an unparseable grammar handle or
 /// a failed parse yields `[]`.
 pub fn check_file(source: &str, ctx: &FileContext) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let root = tree.root_node();
@@ -171,11 +166,7 @@ pub fn check_file_resolved(
     // tree; a second parse (and a third from `extract_symbols`) per file was pure waste — costly on a
     // 2.8k-line class validated across a whole project.
     let t_parse = prof.then(std::time::Instant::now);
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return check_file(source, ctx);
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return check_file(source, ctx);
     };
     let root = tree.root_node();
@@ -195,6 +186,20 @@ pub fn check_file_resolved(
     let mut out = check_file_in(root, &nodes, source, ctx);
     if let Some(t) = t_pure {
         times.push(("pure-AST", t.elapsed()));
+    }
+    // A file that did not PARSE gets its syntax error and nothing else.
+    //
+    // Everything below reads the tree as if it meant something, and a broken parse does not: on one
+    // real file — a fuzzer test whose payload is a 16 KB string literal — recovery ended the literal
+    // early, so its CONTENTS were read as code and the checks reported 199 undefined symbols with
+    // names like `t` and `Ë`. That is what javac does too: a parse error stops attribution, because
+    // there is nothing left to attribute. Reporting on a tree we do not believe is the one way to
+    // produce a page of errors about code that compiles.
+    if root.has_error() {
+        if let Some(t) = t_total {
+            log_profile(ctx, t.elapsed(), &times);
+        }
+        return out;
     }
     if jdk_available {
         // ONE symbol extraction + ONE shared inference cache for every resolver-backed check. The
@@ -221,6 +226,7 @@ pub fn check_file_resolved(
             }};
         }
         timed!("unresolved_imports", crate::imports::unresolved_imports(root, source, resolver, ctx.classpath_complete));
+        timed!("unresolved_static_imports", crate::imports::unresolved_static_imports(root, source, resolver));
         timed!("unknown_members", crate::members::unknown_members_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("unknown_fields", crate::fields::unknown_fields_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("arity", crate::arity::arity_errors_in(root, &nodes, source, &symbols, resolver, &cache));

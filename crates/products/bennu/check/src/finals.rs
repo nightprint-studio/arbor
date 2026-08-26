@@ -19,18 +19,16 @@ use std::collections::HashMap;
 
 use bennu_java::prelude::{FileSymbols, MemberKind, TypeResolver, Visibility};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
+#[cfg(test)]
+use tree_sitter::Parser;
 
 use crate::resolve::type_binary;
 use crate::walk::for_each_supertype;
 
 /// Parse `source` and flag illegal reassignment of `final` locals and fields.
 pub fn final_reassignment_errors(source: &str) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    match parser.parse(source, None) {
+    match bennu_java::prelude::parse_java(source) {
         Some(tree) => final_reassignment_errors_in(tree.root_node(), source),
         None => Vec::new(),
     }

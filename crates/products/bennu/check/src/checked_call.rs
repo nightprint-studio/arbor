@@ -39,7 +39,7 @@ use bennu_java::prelude::{
     infer_node_type_cached, FileSymbols, InferCache, MemberKind, TypeResolver,
 };
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::checked_throw::{
     callable_in_synthetic_type, callable_sneaky_throws, caught_by_enclosing_try,
@@ -51,11 +51,7 @@ use crate::walk::hierarchy_fully_known;
 
 /// Parse `source` and flag calls that can throw an unhandled checked exception.
 pub fn checked_call_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let symbols = bennu_java::prelude::extract_symbols(source);
@@ -124,7 +120,6 @@ fn check_invocation(
     if ty.binary_name.is_empty() {
         return;
     }
-
     // The overload set for this name across the receiver's hierarchy (memoized walk shared with the
     // member/arity/argument checks). `complete` is the hierarchy-fully-known gate.
     let res = cache.resolve_methods(resolver, &ty.binary_name, method);
@@ -141,6 +136,21 @@ fn check_invocation(
     }
 
     let thrown = intersected_throws(&res.candidates);
+    // `x.clone()` reaching `Object.clone()` is not evidence of a checked exception.
+    //
+    // `Object.clone()` is `protected`, so a call on a plain receiver only compiles when the receiver
+    // is an ARRAY — every array type overrides it public, covariant and `throws`-free (JLS §10.7),
+    // and an array has no `ClassMembers` for the walk to find — or when some class overrode it with
+    // its own `throws`, which the intersection would then carry. A class calling its own inherited
+    // one writes `super.clone()`, a different receiver. So the shape below is the false positive and
+    // nothing else, and it fired on `array.clone()` — which every Java program writes.
+    let only_object_clone = method == "clone"
+        && n.child_by_field_name("arguments").map(|a| a.named_child_count() == 0).unwrap_or(true)
+        && thrown.len() == 1
+        && thrown.iter().any(|t| t == "java/lang/CloneNotSupportedException");
+    if only_object_clone {
+        return;
+    }
     flag_unhandled(n, name, &thrown, bytes, symbols, resolver, out);
 }
 

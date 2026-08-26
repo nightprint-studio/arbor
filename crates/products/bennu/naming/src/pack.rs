@@ -83,6 +83,25 @@ pub struct Pack {
 }
 
 impl Pack {
+    /// Whether `name` is a word the language reserves, so it can never be an identifier.
+    ///
+    /// A convention renders a name mechanically, and mechanically it can land on one: `CONST` under
+    /// `snake_case` is `const`. Suggesting it is not a bad suggestion, it is a file that stops
+    /// parsing — so the scan drops the violation rather than offering it.
+    ///
+    /// The list is per-pack because the languages differ, and deliberately includes the words Java
+    /// reserves WITHOUT using (`const`, `goto`) and the three literals, which are not keywords but
+    /// are equally unavailable as identifiers.
+    pub fn is_reserved_word(&self, name: &str) -> bool {
+        match self.id {
+            "java" => JAVA_RESERVED.contains(&name),
+            "rust" => RUST_RESERVED.contains(&name),
+            // TypeScript / JavaScript: a reserved word is contextual and a member name may legally
+            // be one. Nothing is claimed rather than guessing wrong in either direction.
+            _ => false,
+        }
+    }
+
     /// Whether this pack can ever report `target`.
     ///
     /// A grammar sees every declaration in the file. An outline sees the kinds the server reports,
@@ -253,3 +272,24 @@ mod tests {
         }
     }
 }
+
+/// Java's reserved words (JLS §3.9), plus the three literals — none can be an identifier.
+/// `const` and `goto` are reserved and unused, which is exactly why a mechanical rename lands on
+/// them: `CONST` is an ordinary constant name.
+static JAVA_RESERVED: &[&str] = &[
+    "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
+    "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float",
+    "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long", "native",
+    "new", "package", "private", "protected", "public", "return", "short", "static", "strictfp",
+    "super", "switch", "synchronized", "this", "throw", "throws", "transient", "try", "void",
+    "volatile", "while", "_", "true", "false", "null",
+];
+
+/// Rust's strict keywords, plus the reserved-for-future set — the same rule for the same reason.
+static RUST_RESERVED: &[&str] = &[
+    "as", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "false", "fn",
+    "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return",
+    "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where",
+    "while", "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof",
+    "unsized", "virtual", "yield", "try", "async", "await",
+];

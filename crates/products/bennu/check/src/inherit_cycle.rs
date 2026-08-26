@@ -27,7 +27,7 @@ use std::collections::HashSet;
 
 use bennu_java::prelude::{FileSymbols, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::check_id::CheckId;
 use crate::members::simple_name;
@@ -279,11 +279,7 @@ fn is_type_node(kind: &str) -> bool {
 }
 
 fn with_parse(source: &str, f: impl FnOnce(Node) -> Vec<Diagnostic>) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    match parser.parse(source, None) {
+    match bennu_java::prelude::parse_java(source) {
         Some(tree) => f(tree.root_node()),
         None => Vec::new(),
     }

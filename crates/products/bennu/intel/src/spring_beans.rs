@@ -53,12 +53,16 @@ pub fn stereotype_bean(type_decl: &TypeDecl, source_file: &str) -> Option<Annota
         .find(|a| STEREOTYPES.contains(&a.name.as_str()))?;
 
     let name = stereotype
-        .value
-        .clone()
+        .value_str()
         .filter(|v| !v.is_empty())
+        .map(str::to_string)
         .unwrap_or_else(|| decapitalize(&type_decl.name));
 
-    Some(AnnotationBean { name, fqcn: type_decl.fqn.clone(), source_file: source_file.to_string() })
+    Some(AnnotationBean {
+        name,
+        fqcn: type_decl.fqn.clone(),
+        source_file: source_file.to_string(),
+    })
 }
 
 /// Scan `sources` for annotation-declared Spring beans — the project-wide collector the index
@@ -119,7 +123,15 @@ mod tests {
     }
 
     fn marker(name: &str) -> Annotation {
-        Annotation { name: name.to_string(), value: None, args: Vec::new(), positional: None }
+        Annotation {
+            name: name.to_string(),
+            qualified: String::new(),
+            start: 0,
+            end: 0,
+            strings: Vec::new(),
+            args: Vec::new(),
+            positional: Vec::new(),
+        }
     }
 
     #[test]
@@ -136,7 +148,20 @@ mod tests {
         let td = typed(
             "FooService",
             "com.x.FooService",
-            vec![Annotation { name: "Service".into(), value: Some("custom".into()), args: Vec::new(), positional: None }],
+            vec![Annotation {
+                name: "Service".into(),
+                qualified: String::new(),
+                start: 0,
+                end: 0,
+                strings: vec![bennu_java::prelude::AnnString {
+                    element: String::new(),
+                    value: "custom".into(),
+                    start: 0,
+                    end: 0,
+                }],
+                args: Vec::new(),
+                positional: Vec::new(),
+            }],
         );
         assert_eq!(stereotype_bean(&td, "f.java").unwrap().name, "custom");
     }

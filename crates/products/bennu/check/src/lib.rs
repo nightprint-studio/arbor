@@ -84,4 +84,5 @@ pub mod undefined_var;
 pub mod var_target;
 pub mod version;
 pub mod visibility;
+pub mod type_scope;
 pub mod walk;

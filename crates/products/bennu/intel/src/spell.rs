@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 
 use spellbook::Dictionary;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 /// Max suggestions computed per misspelled word.
 const MAX_SUGGESTIONS: usize = 5;
@@ -56,32 +56,183 @@ pub struct SpellHit {
 /// method named `getDto` or a field `ctx` never trips the checker.
 pub static TECH_ALLOWLIST: &[&str] = &[
     // identifiers / accessors
-    "idx", "ctx", "req", "res", "resp", "btn", "arg", "args", "param", "params", "cfg",
-    "config", "init", "env", "repo", "repos", "svc", "dir", "dirs", "src", "dest", "tmp",
-    "temp", "buf", "ptr", "len", "num", "str", "msg", "err", "ok", "fn", "obj", "val",
-    "vals", "arr", "kv", "kvs", "fmt", "calc", "ref", "refs", "impl", "util", "utils",
-    "id", "ids", "iter", "iterator", "prev", "curr", "cur", "acc", "attr", "attrs", "elem",
-    "elems", "func", "expr", "stmt", "cmd", "opt", "opts", "prop", "props", "ctor", "dtor",
-    "min", "max", "avg", "sum", "cnt", "count",
+    "idx",
+    "ctx",
+    "req",
+    "res",
+    "resp",
+    "btn",
+    "arg",
+    "args",
+    "param",
+    "params",
+    "cfg",
+    "config",
+    "init",
+    "env",
+    "repo",
+    "repos",
+    "svc",
+    "dir",
+    "dirs",
+    "src",
+    "dest",
+    "tmp",
+    "temp",
+    "buf",
+    "ptr",
+    "len",
+    "num",
+    "str",
+    "msg",
+    "err",
+    "ok",
+    "fn",
+    "obj",
+    "val",
+    "vals",
+    "arr",
+    "kv",
+    "kvs",
+    "fmt",
+    "calc",
+    "ref",
+    "refs",
+    "impl",
+    "util",
+    "utils",
+    "id",
+    "ids",
+    "iter",
+    "iterator",
+    "prev",
+    "curr",
+    "cur",
+    "acc",
+    "attr",
+    "attrs",
+    "elem",
+    "elems",
+    "func",
+    "expr",
+    "stmt",
+    "cmd",
+    "opt",
+    "opts",
+    "prop",
+    "props",
+    "ctor",
+    "dtor",
+    "min",
+    "max",
+    "avg",
+    "sum",
+    "cnt",
+    "count",
     // async / concurrency
-    "async", "await", "sync", "mutex", "atomic", "thread", "threads",
+    "async",
+    "await",
+    "sync",
+    "mutex",
+    "atomic",
+    "thread",
+    "threads",
     // web / net
-    "http", "https", "url", "uri", "urls", "uris", "api", "apis", "json", "xml", "html",
-    "css", "js", "dom", "sse", "ws", "cors", "csrf", "http2",
+    "http",
+    "https",
+    "url",
+    "uri",
+    "urls",
+    "uris",
+    "api",
+    "apis",
+    "json",
+    "xml",
+    "html",
+    "css",
+    "js",
+    "dom",
+    "sse",
+    "ws",
+    "cors",
+    "csrf",
+    "http2",
     // persistence
-    "sql", "db", "jdbc", "dto", "vo", "bo", "pojo", "dao", "orm", "jpa", "crud", "mybatis",
-    "hibernate", "sqlite",
+    "sql",
+    "db",
+    "jdbc",
+    "dto",
+    "vo",
+    "bo",
+    "pojo",
+    "dao",
+    "orm",
+    "jpa",
+    "crud",
+    "mybatis",
+    "hibernate",
+    "sqlite",
     // platform / runtime
-    "jvm", "jre", "jdk", "sdk", "cli", "gui", "ui", "ux", "os", "io", "nio", "vm",
+    "jvm",
+    "jre",
+    "jdk",
+    "sdk",
+    "cli",
+    "gui",
+    "ui",
+    "ux",
+    "os",
+    "io",
+    "nio",
+    "vm",
     // security / auth
-    "auth", "oauth", "jwt", "uuid", "guid", "regex", "mvc", "dsl", "ast", "cst", "hmac",
-    "sha", "md5", "tls", "ssl", "acl", "rbac",
+    "auth",
+    "oauth",
+    "jwt",
+    "uuid",
+    "guid",
+    "regex",
+    "mvc",
+    "dsl",
+    "ast",
+    "cst",
+    "hmac",
+    "sha",
+    "md5",
+    "tls",
+    "ssl",
+    "acl",
+    "rbac",
     // struts / spring / entando stack
-    "struts", "ognl", "xwork", "taglib", "tld", "jsp", "servlet", "spring", "beans", "bean",
-    "entando", "japs", "tiles", "webapp",
+    "struts",
+    "ognl",
+    "xwork",
+    "taglib",
+    "tld",
+    "jsp",
+    "servlet",
+    "spring",
+    "beans",
+    "bean",
+    "entando",
+    "japs",
+    "tiles",
+    "webapp",
     // filler / misc
-    "etc", "lorem", "ipsum", "todo", "fixme", "impl", "iface", "enum", "boolean", "bool",
-    "char", "int", "long", "byte",
+    "etc",
+    "lorem",
+    "ipsum",
+    "todo",
+    "fixme",
+    "impl",
+    "iface",
+    "enum",
+    "boolean",
+    "bool",
+    "char",
+    "int",
+    "long",
+    "byte",
 ];
 
 /// Whether `word` (case-insensitive) is in the built-in tech allow-list.
@@ -153,7 +304,9 @@ pub struct SpellEngine {
 impl SpellEngine {
     /// A handle bound to `data_dir` (the be layer passes `bennu_data_dir()`).
     pub fn new(data_dir: impl Into<PathBuf>) -> Self {
-        Self { data_dir: data_dir.into() }
+        Self {
+            data_dir: data_dir.into(),
+        }
     }
 
     /// Ensure the dictionaries are loaded (lazy, once). Reloads if the cached load was for
@@ -161,7 +314,10 @@ impl SpellEngine {
     fn ensure_loaded(&self) {
         {
             let g = cell().read().unwrap_or_else(|p| p.into_inner());
-            if g.as_ref().map(|l| l.data_dir == self.data_dir).unwrap_or(false) {
+            if g.as_ref()
+                .map(|l| l.data_dir == self.data_dir)
+                .unwrap_or(false)
+            {
                 return;
             }
         }
@@ -192,7 +348,9 @@ impl SpellEngine {
     pub fn any_dictionary(&self) -> bool {
         self.ensure_loaded();
         let g = cell().read().unwrap_or_else(|p| p.into_inner());
-        g.as_ref().map(|l| l.en.is_some() || l.it.is_some()).unwrap_or(false)
+        g.as_ref()
+            .map(|l| l.en.is_some() || l.it.is_some())
+            .unwrap_or(false)
     }
 
     /// Whether `word` is considered correct: allow-list OR custom OR EN OR IT (all
@@ -205,11 +363,16 @@ impl SpellEngine {
         }
         let lower = word.to_ascii_lowercase();
         let g = cell().read().unwrap_or_else(|p| p.into_inner());
-        let Some(loaded) = g.as_ref() else { return true }; // unloaded → never flag
+        let Some(loaded) = g.as_ref() else {
+            return true;
+        }; // unloaded → never flag
         if loaded.custom.contains(&lower) {
             return true;
         }
-        for dict in [loaded.en.as_ref(), loaded.it.as_ref()].into_iter().flatten() {
+        for dict in [loaded.en.as_ref(), loaded.it.as_ref()]
+            .into_iter()
+            .flatten()
+        {
             if dict.check(word) || dict.check(&lower) {
                 return true;
             }
@@ -221,9 +384,14 @@ impl SpellEngine {
     /// when no dictionary can suggest.
     fn suggest(&self, word: &str) -> Vec<String> {
         let g = cell().read().unwrap_or_else(|p| p.into_inner());
-        let Some(loaded) = g.as_ref() else { return Vec::new() };
+        let Some(loaded) = g.as_ref() else {
+            return Vec::new();
+        };
         let mut out = Vec::new();
-        for dict in [loaded.en.as_ref(), loaded.it.as_ref()].into_iter().flatten() {
+        for dict in [loaded.en.as_ref(), loaded.it.as_ref()]
+            .into_iter()
+            .flatten()
+        {
             let mut sug = Vec::new();
             dict.suggest(word, &mut sug);
             for s in sug {
@@ -249,11 +417,9 @@ impl SpellEngine {
         if !self.any_dictionary() {
             return Vec::new();
         }
-        let mut parser = Parser::new();
-        if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
+        let Some(tree) = bennu_java::prelude::parse_java(source) else {
             return Vec::new();
-        }
-        let Some(tree) = parser.parse(source, None) else { return Vec::new() };
+        };
         let bytes = source.as_bytes();
         let mut out = Vec::new();
 
@@ -279,7 +445,9 @@ impl SpellEngine {
     /// Tokenize a declaration-name identifier and push a hit per misspelled sub-word (byte
     /// span within the whole source).
     fn check_identifier(&self, node: &Node, bytes: &[u8], out: &mut Vec<SpellHit>) {
-        let Ok(text) = node.utf8_text(bytes) else { return };
+        let Ok(text) = node.utf8_text(bytes) else {
+            return;
+        };
         let base = node.start_byte();
         for sw in tokenize_identifier(text) {
             if is_trivially_skippable(&sw.text) || self.is_correct(&sw.text) {
@@ -298,7 +466,9 @@ impl SpellEngine {
     /// Byte spans are computed by scanning the comment text (so offsets land inside the
     /// original source).
     fn check_comment(&self, node: &Node, bytes: &[u8], out: &mut Vec<SpellHit>) {
-        let Ok(text) = node.utf8_text(bytes) else { return };
+        let Ok(text) = node.utf8_text(bytes) else {
+            return;
+        };
         let base = node.start_byte();
         for word in comment_words(text) {
             if is_trivially_skippable(&word.text) || self.is_correct(&word.text) {
@@ -318,7 +488,11 @@ impl SpellEngine {
 /// `bennu-naming` (see the re-export above) and comments do not want it — `getUserName` written in
 /// a sentence is one word to a dictionary.
 fn sub_word(text: &str, start: usize, end: usize) -> SubWord {
-    SubWord { text: text[start..end].to_string(), start, end }
+    SubWord {
+        text: text[start..end].to_string(),
+        start,
+        end,
+    }
 }
 
 /// Split a comment into letter-run words with byte spans (relative to the comment start).
@@ -349,14 +523,22 @@ fn comment_words(text: &str) -> Vec<SubWord> {
 /// `is_declaration_name` / `decl_name_key`, extended to the authored-name kinds we
 /// spell-check (fields, locals, params).
 fn is_declaration_name(node: &Node) -> bool {
-    let Some(parent) = node.parent() else { return false };
+    let Some(parent) = node.parent() else {
+        return false;
+    };
     let is_name_field = || {
-        parent.child_by_field_name("name").map(|nm| nm.id() == node.id()).unwrap_or(false)
+        parent
+            .child_by_field_name("name")
+            .map(|nm| nm.id() == node.id())
+            .unwrap_or(false)
     };
     match parent.kind() {
         // type declarations: the `name` field.
-        "class_declaration" | "interface_declaration" | "enum_declaration"
-        | "annotation_type_declaration" | "record_declaration" => is_name_field(),
+        "class_declaration"
+        | "interface_declaration"
+        | "enum_declaration"
+        | "annotation_type_declaration"
+        | "record_declaration" => is_name_field(),
         // method / constructor: the `name` field.
         "method_declaration" | "constructor_declaration" => is_name_field(),
         // field + local declarations declare via a `variable_declarator` whose `name` is
@@ -364,7 +546,9 @@ fn is_declaration_name(node: &Node) -> bool {
         // one or more declarators).
         "variable_declarator" => is_name_field(),
         // method / constructor / lambda / catch parameters.
-        "formal_parameter" | "spread_parameter" | "catch_formal_parameter"
+        "formal_parameter"
+        | "spread_parameter"
+        | "catch_formal_parameter"
         | "inferred_parameter" => is_name_field(),
         // enum constant names.
         "enum_constant" => is_name_field(),
@@ -381,7 +565,12 @@ fn load_from(data_dir: &Path) -> Loaded {
     let en = load_lang(&dict_dir, "en_US");
     let it = load_lang(&dict_dir, "it_IT");
     let custom = load_custom(data_dir, None);
-    Loaded { en, it, custom, data_dir: data_dir.to_path_buf() }
+    Loaded {
+        en,
+        it,
+        custom,
+        data_dir: data_dir.to_path_buf(),
+    }
 }
 
 /// Load one language's `<lang>.aff` + `<lang>.dic` from `dict_dir`. `None` when either file
@@ -421,7 +610,9 @@ fn load_custom(data_dir: &Path, root: Option<&Path>) -> HashSet<String> {
 
 /// Append each non-empty, lowercased line of `path` (one word per line) into `set`.
 fn read_words_into(path: &Path, set: &mut HashSet<String>) {
-    let Ok(text) = std::fs::read_to_string(path) else { return };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return;
+    };
     for line in text.lines() {
         let w = line.trim();
         if !w.is_empty() {
@@ -455,32 +646,67 @@ mod tests {
 
     #[test]
     fn splits_camel_case() {
-        assert_eq!(texts(&tokenize_identifier("getUserName")), vec!["get", "User", "Name"]);
+        assert_eq!(
+            texts(&tokenize_identifier("getUserName")),
+            vec!["get", "User", "Name"]
+        );
     }
 
     #[test]
     fn splits_snake_and_kebab() {
-        assert_eq!(texts(&tokenize_identifier("user_name")), vec!["user", "name"]);
-        assert_eq!(texts(&tokenize_identifier("user-name")), vec!["user", "name"]);
+        assert_eq!(
+            texts(&tokenize_identifier("user_name")),
+            vec!["user", "name"]
+        );
+        assert_eq!(
+            texts(&tokenize_identifier("user-name")),
+            vec!["user", "name"]
+        );
     }
 
     #[test]
     fn splits_acronym_run() {
-        assert_eq!(texts(&tokenize_identifier("parseXMLFile")), vec!["parse", "XML", "File"]);
-        assert_eq!(texts(&tokenize_identifier("HTTPServer")), vec!["HTTP", "Server"]);
+        assert_eq!(
+            texts(&tokenize_identifier("parseXMLFile")),
+            vec!["parse", "XML", "File"]
+        );
+        assert_eq!(
+            texts(&tokenize_identifier("HTTPServer")),
+            vec!["HTTP", "Server"]
+        );
     }
 
     #[test]
     fn splits_digit_runs() {
-        assert_eq!(texts(&tokenize_identifier("md5Hash")), vec!["md", "5", "Hash"]);
-        assert_eq!(texts(&tokenize_identifier("utf8Encoder")), vec!["utf", "8", "Encoder"]);
+        assert_eq!(
+            texts(&tokenize_identifier("md5Hash")),
+            vec!["md", "5", "Hash"]
+        );
+        assert_eq!(
+            texts(&tokenize_identifier("utf8Encoder")),
+            vec!["utf", "8", "Encoder"]
+        );
     }
 
     #[test]
     fn subword_spans_are_correct() {
         let ws = tokenize_identifier("getUser");
-        assert_eq!(ws[0], SubWord { text: "get".into(), start: 0, end: 3 });
-        assert_eq!(ws[1], SubWord { text: "User".into(), start: 3, end: 7 });
+        assert_eq!(
+            ws[0],
+            SubWord {
+                text: "get".into(),
+                start: 0,
+                end: 3
+            }
+        );
+        assert_eq!(
+            ws[1],
+            SubWord {
+                text: "User".into(),
+                start: 3,
+                end: 7
+            }
+        );
     }
 
     #[test]

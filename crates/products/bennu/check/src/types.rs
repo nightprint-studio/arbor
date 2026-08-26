@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 
 use bennu_java::prelude::{extract_symbols, FileSymbols, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 /// The bare `java.lang` names an unqualified program may use without importing — always resolvable,
 /// so never flag them even if a minimal resolver doesn't seed them.
@@ -34,11 +34,7 @@ const JAVA_LANG: &[&str] = &[
 
 /// Parse `source` and flag unresolved simple type names.
 pub fn unresolved_types(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let symbols = extract_symbols(source);

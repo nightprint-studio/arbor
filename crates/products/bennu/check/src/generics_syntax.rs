@@ -28,7 +28,7 @@ pub fn generics_syntax_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnos
     let mut out = Vec::new();
     for &n in nodes {
         match n.kind() {
-            "array_creation_expression" => check_generic_array_creation(n, &mut out),
+            "array_creation_expression" => check_generic_array_creation(n, bytes, &mut out),
             "object_creation_expression" => check_type_param_instantiation(n, bytes, &mut out),
             "instanceof_expression" => check_instanceof_generics(n, &mut out),
             "catch_type" => check_catch_generics(n, &mut out),
@@ -55,13 +55,38 @@ fn err(node: Node, message: impl Into<String>) -> Diagnostic {
 /// `generic_type` (it CARRIES type arguments). A raw `new List[]` has a plain `type_identifier`
 /// element type, `new String[]` / `new int[]` likewise, and `new @Ann String[]` keeps the annotation
 /// on the `array_creation_expression` (not inside the element type) — none is a `generic_type`, so
-/// none is flagged. Only the explicit-type-arguments shape is ever a `generic_type` here.
-fn check_generic_array_creation(n: Node, out: &mut Vec<Diagnostic>) {
+/// none is flagged.
+///
+/// **A REIFIABLE element type is legal**, and that is the exception this missed: JLS §15.10.1 bars
+/// array creation only for a non-reifiable type, and `List<?>` — every type argument an unbounded
+/// wildcard — IS reifiable. `new Class<?>[] { null }` is ordinary Java (Apache Commons writes it),
+/// and reporting it is an error about code that compiles.
+fn check_generic_array_creation(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     if let Some(ty) = n.child_by_field_name("type") {
-        if ty.kind() == "generic_type" {
+        if ty.kind() == "generic_type" && !is_reifiable_generic(ty, bytes) {
             out.push(err(ty, "Generic array creation is not allowed"));
         }
     }
+}
+
+/// Whether a `generic_type` is REIFIABLE — every one of its type arguments an unbounded wildcard
+/// (`?`), at every level. `List<?>` and `Map<?, ?>` are; `List<String>` and `List<? extends Number>`
+/// are not.
+fn is_reifiable_generic(ty: Node, bytes: &[u8]) -> bool {
+    let mut c = ty.walk();
+    let Some(args) = ty.named_children(&mut c).find(|n| n.kind() == "type_arguments") else {
+        // No argument list at all — nothing non-reifiable was written.
+        return true;
+    };
+    let mut ac = args.walk();
+    let children: Vec<Node> = args.named_children(&mut ac).collect();
+    if children.is_empty() {
+        return true; // the diamond `new List<>[]` carries no element type to judge
+    }
+    children.iter().all(|arg| {
+        arg.kind() == "wildcard"
+            && arg.utf8_text(bytes).map(|t| t.trim() == "?").unwrap_or(false)
+    })
 }
 
 // ── 2. instantiating a type parameter ────────────────────────────────────────
@@ -415,5 +440,35 @@ mod tests {
             "class C { static void m(java.util.List<? super Integer> l) {} }",
             "static context",
         ));
+    }
+}
+
+#[cfg(test)]
+mod reifiable_tests {
+    use super::*;
+
+    fn run(src: &str) -> Vec<String> {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_java::LANGUAGE.into()).unwrap();
+        let tree = parser.parse(src, None).unwrap();
+        let nodes = crate::check::collect_nodes(tree.root_node());
+        generics_syntax_errors_nodes(&nodes, src).into_iter().map(|d| d.message).collect()
+    }
+
+    /// `new Class<?>[] {…}` is legal: an unbounded wildcard is reifiable (JLS §15.10.1). Apache
+    /// Commons writes it, and flagging it is an error about code that compiles.
+    #[test]
+    fn an_unbounded_wildcard_array_is_allowed() {
+        assert!(run("class A { Object f() { return new Class<?>[] { null }; } }").is_empty());
+        assert!(run("class A { Object f() { return new java.util.Map<?, ?>[0]; } }").is_empty());
+    }
+
+    /// A real generic array creation is still an error.
+    #[test]
+    fn a_parameterised_array_is_still_flagged() {
+        let out = run("class A { Object f() { return new java.util.List<String>[0]; } }");
+        assert_eq!(out.len(), 1, "{out:?}");
+        let out = run("class A { Object f() { return new java.util.List<? extends Number>[0]; } }");
+        assert_eq!(out.len(), 1, "{out:?}");
     }
 }

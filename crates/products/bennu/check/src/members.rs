@@ -13,15 +13,11 @@
 
 use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 /// Parse `source` and flag calls to non-existent methods on their inferred receiver types.
 pub fn unknown_members(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let symbols = bennu_java::prelude::extract_symbols(source);
@@ -43,11 +39,79 @@ pub fn unknown_members_in(
     let bytes = source.as_bytes();
     let mut out = Vec::new();
     for &n in nodes {
-        if n.kind() == "method_invocation" {
-            check_call(n, &root, source, bytes, symbols, resolver, cache, &mut out);
+        match n.kind() {
+            "method_invocation" => {
+                check_call(n, &root, source, bytes, symbols, resolver, cache, &mut out)
+            }
+            // `Type::method` / `obj::method` — the same question, and one nothing asked. It is also
+            // the construct a half-applied rename breaks most often, because the reference index
+            // did not see method references at all until recently: the declaration moved and every
+            // `::` site was left naming something gone, silently.
+            "method_reference" => {
+                check_reference(n, &root, source, bytes, symbols, resolver, cache, &mut out)
+            }
+            _ => {}
         }
     }
     out
+}
+
+/// `Qualifier::member` — flag when the qualifier's type is KNOWN and declares no such method.
+///
+/// As conservative as [`check_call`]: an unresolved qualifier, an unknown type, or an unknown
+/// supertype in the walk all stay silent. `Foo::new` names a constructor, not a method, and is
+/// skipped.
+#[allow(clippy::too_many_arguments)]
+fn check_reference(
+    n: Node,
+    root: &Node,
+    source: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+    out: &mut Vec<Diagnostic>,
+) {
+    let mut c = n.walk();
+    let children: Vec<Node> = n.named_children(&mut c).collect();
+    let (Some(qualifier), Some(name)) = (children.first(), children.last()) else { return };
+    // One named child means `Foo::new`: the "name" would be the qualifier itself.
+    if qualifier.id() == name.id() || name.kind() != "identifier" || name.has_error() {
+        return;
+    }
+    let Ok(method) = name.utf8_text(bytes) else { return };
+    // The qualifier as a VALUE (`obj::run`), else as a TYPE (`Util::create`).
+    let inferred = infer_node_type_cached(root, source, symbols, qualifier, resolver, cache)
+        .or_else(|| {
+            let text = qualifier.utf8_text(bytes).ok()?;
+            let owner = bennu_java::prelude::enclosing_type_fqn(qualifier, bytes, symbols)
+                .map(|fqn| fqn.replace('.', "/"));
+            let binary = bennu_java::prelude::resolve_written_type(
+                text,
+                &crate::type_scope::FileScope { symbols, resolver, owner },
+            )
+            .resolved()?;
+            resolver
+                .members_of(&binary)
+                .is_some()
+                .then(|| bennu_java::prelude::TypeRef::simple(binary))
+        });
+    let Some(ty) = inferred else { return };
+    if resolver.members_of(&ty.binary_name).is_none() {
+        return;
+    }
+    let has = crate::walk::hierarchy_has(resolver, &ty.binary_name, &|cm| {
+        cm.methods.iter().any(|m| m.name == method)
+    });
+    if !has {
+        out.push(crate::check_id::CheckId::UnknownMember.at(
+            *name,
+            format!(
+                "Cannot resolve method `{method}` in `{}`",
+                ty.binary_name.rsplit('/').next().unwrap_or(&ty.binary_name)
+            ),
+        ));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -364,5 +428,70 @@ mod tests {
         let d2: Vec<String> = unknown_members(bad, &resolver).into_iter().map(|x| x.message).collect();
         assert_eq!(d2.len(), 1, "nope() is not on Attachment → one diagnostic, got {d2:?}");
         assert!(d2[0].contains("nope"), "{d2:?}");
+    }
+}
+
+#[cfg(test)]
+mod method_reference_tests {
+    use super::*;
+    use bennu_java::prelude::{ClassMembers, Import, Member, TypeRef};
+    use std::collections::HashMap;
+
+    struct Res(HashMap<String, ClassMembers>);
+    impl TypeResolver for Res {
+        fn members_of(&self, b: &str) -> Option<std::sync::Arc<ClassMembers>> {
+            self.0.get(b).cloned().map(std::sync::Arc::new)
+        }
+        fn resolve_simple_name(&self, n: &str, _i: &[Import]) -> Option<String> {
+            (n == "Util").then(|| "p/Util".to_string())
+        }
+        fn is_project_type(&self, b: &str) -> bool {
+            self.0.contains_key(b)
+        }
+    }
+
+    fn resolver() -> Res {
+        let mut m = HashMap::new();
+        m.insert(
+            "p/Util".to_string(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: None,
+                interfaces: Vec::new(),
+                methods: vec![Member::method(
+                    "validazioneStandard",
+                    TypeRef::simple("boolean"),
+                    Vec::new(),
+                )],
+                fields: Vec::new(),
+                flags: Default::default(),
+            },
+        );
+        Res(m)
+    }
+
+    fn run(src: &str) -> Vec<String> {
+        unknown_members(src, &resolver()).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn a_method_reference_to_something_that_exists_is_silent() {
+        let out = run("package p;\nclass A { Object f() { return Util::validazioneStandard; } }\n");
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    /// What a half-applied rename leaves: the declaration moved, the `::` site did not.
+    #[test]
+    fn a_method_reference_to_a_gone_method_is_reported() {
+        let out = run("package p;\nclass A { Object f() { return Util::validazione_standard; } }\n");
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(out[0].contains("validazione_standard"), "{out:?}");
+    }
+
+    /// A constructor reference names no method, and an unresolvable qualifier stays silent.
+    #[test]
+    fn constructor_references_and_unknown_qualifiers_are_left_alone() {
+        assert!(run("package p;\nclass A { Object f() { return Util::new; } }\n").is_empty());
+        assert!(run("package p;\nclass A { Object f() { return Mystery::whatever; } }\n").is_empty());
     }
 }

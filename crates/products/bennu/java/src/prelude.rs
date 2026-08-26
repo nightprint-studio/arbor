@@ -7,9 +7,9 @@
 // The type-inference entry points: the one-off caret query (parses + extracts) and the
 // reuse-an-existing-tree variant for the hot reference-walk path.
 pub use crate::infer::{
-    infer_expression_type, infer_expression_type_at, infer_expression_type_cached,
-    infer_node_type_cached, infer_receiver_type, infer_receiver_type_at, infer_receiver_type_cached,
-    InferCache, MethodResolution,
+    enclosing_type_fqn, infer_expression_type, infer_expression_type_at,
+    infer_expression_type_cached, infer_node_type_cached, infer_receiver_type,
+    infer_receiver_type_at, infer_receiver_type_cached, InferCache, MethodResolution,
 };
 pub use crate::symbols::{extract_symbols, extract_symbols_from_root};
 
@@ -25,7 +25,14 @@ pub use crate::grammar::{language as java_language, parse_java};
 // Anonymous-class identity: the synthetic name an unnamed `new X() { … }` body is filed under,
 // and the test that recognises one. Shared so the extractor and the caret query derive it the
 // same way rather than each having its own idea.
-pub use crate::symbols::{anonymous_type_name, is_anonymous_body};
+pub use crate::symbols::{
+    anonymous_supertype_name, anonymous_type_name, is_anonymous_body, parameter_name_node,
+};
+pub use crate::typename::{
+    inherited_member_type, inherited_member_type_of, is_primitive, is_resolved_binary,
+    java_lang_implicit, known_spelling, resolve_written_type, same_binary_type, NameScope,
+    TypeName,
+};
 
 pub use crate::import_hint::simple_type_needing_import;
 
@@ -34,7 +41,8 @@ pub use crate::static_import::{static_import_targets, StaticImportTarget};
 
 // The structural model produced by `extract_symbols`.
 pub use crate::symbols::{
-    Annotation, FieldDecl, FileSymbols, Import, MethodDecl, ParamDecl, Span, TypeDecl, TypeKind,
+    collect_annotations, AnnString, Annotation, FieldDecl, FileSymbols, Import, MethodDecl,
+    ParamDecl, Span, TypeDecl, TypeKind,
 };
 
 // The resolver seam the type-walk consumes + the member shapes it resolves against.

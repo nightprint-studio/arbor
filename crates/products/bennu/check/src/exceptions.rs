@@ -23,7 +23,7 @@
 
 use bennu_java::prelude::{FileSymbols, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::check_id::CheckId;
 use crate::members::simple_name;
@@ -38,11 +38,7 @@ const CLOSEABLE: &str = "java/io/Closeable";
 
 /// Parse `source` and flag try/catch exception errors.
 pub fn exception_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let symbols = bennu_java::prelude::extract_symbols(source);

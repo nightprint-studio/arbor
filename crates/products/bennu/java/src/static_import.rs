@@ -29,7 +29,10 @@ pub fn static_import_targets(imports: &[Import]) -> Vec<StaticImportTarget> {
         .filter_map(|i| {
             let binary = i.path.replace('.', "/");
             if i.star {
-                Some(StaticImportTarget { owner_binary: binary, member: None })
+                Some(StaticImportTarget {
+                    owner_binary: binary,
+                    member: None,
+                })
             } else {
                 let (owner, member) = binary.rsplit_once('/')?;
                 Some(StaticImportTarget {
@@ -46,26 +49,37 @@ mod tests {
     use super::*;
 
     fn imp(path: &str, star: bool, static_: bool) -> Import {
-        Import { span: None, path: path.to_string(), star, static_ }
+        Import {
+            span: None,
+            path: path.to_string(),
+            star,
+            static_,
+        }
     }
 
     #[test]
     fn specific_and_wildcard_targets_only_from_static_imports() {
         let imports = vec![
-            imp("java.lang.Math.max", false, true),      // specific static
-            imp("java.util.Collections", true, true),    // wildcard static
-            imp("java.util.List", false, false),         // non-static → ignored
+            imp("java.lang.Math.max", false, true),   // specific static
+            imp("java.util.Collections", true, true), // wildcard static
+            imp("java.util.List", false, false),      // non-static → ignored
             imp("java.util.stream.Collectors", true, false), // non-static wildcard → ignored
         ];
         let t = static_import_targets(&imports);
         assert_eq!(t.len(), 2);
         assert_eq!(
             t[0],
-            StaticImportTarget { owner_binary: "java/lang/Math".into(), member: Some("max".into()) }
+            StaticImportTarget {
+                owner_binary: "java/lang/Math".into(),
+                member: Some("max".into())
+            }
         );
         assert_eq!(
             t[1],
-            StaticImportTarget { owner_binary: "java/util/Collections".into(), member: None }
+            StaticImportTarget {
+                owner_binary: "java/util/Collections".into(),
+                member: None
+            }
         );
     }
 }

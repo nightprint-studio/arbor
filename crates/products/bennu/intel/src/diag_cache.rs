@@ -33,7 +33,17 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped whenever the on-disk shape (or the freshness semantics) changes — a mismatch drops the
 /// cache and re-validates from scratch, since there is no migration.
-pub const CACHE_VERSION: u32 = 1;
+///
+/// **And whenever a CHECK changes.** The cache is keyed by source content and by the project view
+/// the diagnostics were computed against; neither moves when the engine that produced them does. So
+/// a build that fixes a false positive leaves every project that has already been validated showing
+/// it, with nothing to suggest the answer is old — the same trap the reference cache has, and the
+/// reason that one is versioned too.
+///
+/// 2: name resolution inside a check now follows Java's order (what a type inherits, then the
+/// file's imports) instead of asking every type the file declares, and the covariant-return check
+/// resolves the names it reads in the scope of the class that wrote them.
+pub const CACHE_VERSION: u32 = 2;
 
 /// A deterministic content hash of a source buffer — the file's `own_hash`. Shares the
 /// reference cache's FNV-1a so the whole product hashes source the same way.
@@ -62,12 +72,20 @@ impl FileDeps {
         let mut members: Vec<(String, u64)> =
             deps.members.iter().map(|(k, v)| (k.clone(), *v)).collect();
         members.sort_unstable();
-        let mut simple_hits: Vec<(String, String)> =
-            deps.simple_hits.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut simple_hits: Vec<(String, String)> = deps
+            .simple_hits
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         simple_hits.sort_unstable();
         let mut misses: Vec<String> = deps.misses.iter().cloned().collect();
         misses.sort_unstable();
-        Self { own_hash, members, simple_hits, misses }
+        Self {
+            own_hash,
+            members,
+            simple_hits,
+            misses,
+        }
     }
 
     /// Whether a cached entry with these dependencies is still valid for the current `own_hash`,
@@ -116,7 +134,11 @@ pub struct DiagCache {
 impl DiagCache {
     /// A fresh, empty cache for `epoch`.
     pub fn new(epoch: u64) -> Self {
-        Self { version: CACHE_VERSION, epoch, files: HashMap::new() }
+        Self {
+            version: CACHE_VERSION,
+            epoch,
+            files: HashMap::new(),
+        }
     }
 
     /// Load the cache for `epoch` from `path`, or start empty. An entry set is only reused when the
@@ -131,15 +153,24 @@ impl DiagCache {
 
     /// The cached diagnostics for `file` when its entry is still fresh against `view` for the
     /// current `own_hash`; `None` on a miss (absent / stale entry → the caller re-validates).
-    pub fn get_fresh(&self, file: &str, own_hash: u64, view: &dyn ProjectView) -> Option<&[Diagnostic]> {
+    pub fn get_fresh(
+        &self,
+        file: &str,
+        own_hash: u64,
+        view: &dyn ProjectView,
+    ) -> Option<&[Diagnostic]> {
         let entry = self.files.get(file)?;
-        entry.deps.is_fresh(own_hash, view).then(|| entry.diagnostics.as_slice())
+        entry
+            .deps
+            .is_fresh(own_hash, view)
+            .then(|| entry.diagnostics.as_slice())
     }
 
     /// Store (or replace) `file`'s freshly-computed diagnostics + the deps they were computed
     /// under, so the next unchanged run serves them without re-validating.
     pub fn put(&mut self, file: &str, deps: FileDeps, diagnostics: Vec<Diagnostic>) {
-        self.files.insert(file.to_string(), CacheEntry { deps, diagnostics });
+        self.files
+            .insert(file.to_string(), CacheEntry { deps, diagnostics });
     }
 }
 
@@ -159,7 +190,10 @@ pub fn save(path: &Path, cache: &DiagCache) {
                 let _ = std::fs::create_dir_all(dir);
             }
             if let Err(e) = std::fs::write(path, bytes) {
-                eprintln!("bennu-be: diagnostic cache write failed ({}): {e}", path.display());
+                eprintln!(
+                    "bennu-be: diagnostic cache write failed ({}): {e}",
+                    path.display()
+                );
             }
         }
         Err(e) => eprintln!("bennu-be: diagnostic cache serialize failed: {e}"),
@@ -211,36 +245,71 @@ mod tests {
         }
     }
 
-    fn recorded(members: &[(&str, u64)], simple_hits: &[(&str, &str)], misses: &[&str]) -> RecordedDeps {
+    fn recorded(
+        members: &[(&str, u64)],
+        simple_hits: &[(&str, &str)],
+        misses: &[&str],
+    ) -> RecordedDeps {
         RecordedDeps {
             members: members.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
-            simple_hits: simple_hits.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            simple_hits: simple_hits
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
             misses: misses.iter().map(|s| s.to_string()).collect::<HashSet<_>>(),
         }
     }
 
     fn diag(msg: &str) -> Diagnostic {
-        Diagnostic { message: msg.to_string(), severity: "error".to_string(), code: String::new(), start: 0, end: 1 }
+        Diagnostic {
+            message: msg.to_string(),
+            severity: "error".to_string(),
+            code: String::new(),
+            start: 0,
+            end: 1,
+        }
     }
 
     #[test]
     fn from_recorded_sorts_for_determinism() {
-        let d = recorded(&[("b/B", 2), ("a/A", 1)], &[("Z", "z/Z"), ("A", "a/A")], &["y", "x"]);
+        let d = recorded(
+            &[("b/B", 2), ("a/A", 1)],
+            &[("Z", "z/Z"), ("A", "a/A")],
+            &["y", "x"],
+        );
         let fd = FileDeps::from_recorded(99, &d);
         assert_eq!(fd.own_hash, 99);
-        assert_eq!(fd.members, vec![("a/A".to_string(), 1), ("b/B".to_string(), 2)]);
-        assert_eq!(fd.simple_hits, vec![("A".to_string(), "a/A".to_string()), ("Z".to_string(), "z/Z".to_string())]);
+        assert_eq!(
+            fd.members,
+            vec![("a/A".to_string(), 1), ("b/B".to_string(), 2)]
+        );
+        assert_eq!(
+            fd.simple_hits,
+            vec![
+                ("A".to_string(), "a/A".to_string()),
+                ("Z".to_string(), "z/Z".to_string())
+            ]
+        );
         assert_eq!(fd.misses, vec!["x".to_string(), "y".to_string()]);
         // Same deps in a different iteration order → identical FileDeps (stable serialization).
-        let d2 = recorded(&[("a/A", 1), ("b/B", 2)], &[("A", "a/A"), ("Z", "z/Z")], &["x", "y"]);
+        let d2 = recorded(
+            &[("a/A", 1), ("b/B", 2)],
+            &[("A", "a/A"), ("Z", "z/Z")],
+            &["x", "y"],
+        );
         assert_eq!(fd, FileDeps::from_recorded(99, &d2));
     }
 
     #[test]
     fn fresh_when_nothing_changed() {
-        let view = MockView::default().with_type("a/A", "A", 1).with_type("b/B", "B", 2);
+        let view = MockView::default()
+            .with_type("a/A", "A", 1)
+            .with_type("b/B", "B", 2);
         let fd = FileDeps::from_recorded(7, &recorded(&[("a/A", 1)], &[("B", "b/B")], &["Ghost"]));
-        assert!(fd.is_fresh(7, &view), "same content + same deps + still-absent miss ⇒ reuse");
+        assert!(
+            fd.is_fresh(7, &view),
+            "same content + same deps + still-absent miss ⇒ reuse"
+        );
     }
 
     #[test]
@@ -255,7 +324,10 @@ mod tests {
         // Cached under A's members hash = 1; the live view now reports A with hash = 999.
         let view = MockView::default().with_type("a/A", "A", 999);
         let fd = FileDeps::from_recorded(7, &recorded(&[("a/A", 1)], &[], &[]));
-        assert!(!fd.is_fresh(7, &view), "a dependency's members changed ⇒ re-validate");
+        assert!(
+            !fd.is_fresh(7, &view),
+            "a dependency's members changed ⇒ re-validate"
+        );
     }
 
     #[test]
@@ -271,7 +343,10 @@ mod tests {
         // The file resolved `A` → a/A; now `A` maps to a DIFFERENT binary (a moved/renamed type).
         let view = MockView::default().with_type("other/A", "A", 5);
         let fd = FileDeps::from_recorded(7, &recorded(&[], &[("A", "a/A")], &[]));
-        assert!(!fd.is_fresh(7, &view), "a bare name now binds a different type ⇒ re-validate");
+        assert!(
+            !fd.is_fresh(7, &view),
+            "a bare name now binds a different type ⇒ re-validate"
+        );
     }
 
     #[test]
@@ -280,7 +355,10 @@ mod tests {
         // A project type `Widget` is now added → the cached (error) diagnostics MUST be dropped.
         let view = MockView::default().with_type("w/Widget", "Widget", 3);
         let fd = FileDeps::from_recorded(7, &recorded(&[], &[], &["Widget"]));
-        assert!(!fd.is_fresh(7, &view), "a formerly-absent type now exists ⇒ re-validate (no stale error)");
+        assert!(
+            !fd.is_fresh(7, &view),
+            "a formerly-absent type now exists ⇒ re-validate (no stale error)"
+        );
     }
 
     #[test]
@@ -290,7 +368,9 @@ mod tests {
         let fd = FileDeps::from_recorded(7, &recorded(&[("a/A", 1)], &[], &[]));
         cache.put("src/F.java", fd, vec![diag("boom")]);
         // Hit while fresh.
-        let hit = cache.get_fresh("src/F.java", 7, &view).expect("fresh entry");
+        let hit = cache
+            .get_fresh("src/F.java", 7, &view)
+            .expect("fresh entry");
         assert_eq!(hit.len(), 1);
         assert_eq!(hit[0].message, "boom");
         // Miss when the content changed.
@@ -304,7 +384,10 @@ mod tests {
         let path = cache_path(&dir);
         save(&path, &cache);
         let reloaded = DiagCache::load_or_new(&path, 100);
-        assert!(reloaded.get_fresh("src/F.java", 7, &view).is_some(), "same epoch reloads entries");
+        assert!(
+            reloaded.get_fresh("src/F.java", 7, &view).is_some(),
+            "same epoch reloads entries"
+        );
         // Reload at a DIFFERENT epoch (classpath/JDK changed) → empty (nothing stale served).
         let reset = DiagCache::load_or_new(&path, 101);
         assert!(reset.files.is_empty(), "epoch change drops the whole cache");
@@ -313,7 +396,8 @@ mod tests {
 
     #[test]
     fn load_or_new_handles_missing_and_corrupt_files() {
-        let dir = std::env::temp_dir().join(format!("bennu-diagcache-corrupt-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("bennu-diagcache-corrupt-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = cache_path(&dir);
         // Missing file → empty.
@@ -357,7 +441,9 @@ mod integration {
     /// Build a real resolver over a persisted index of `sources`. Returns the resolver, the
     /// project's simple→binary type map (to seed incremental patches), and the temp dir (kept for
     /// the mmap's lifetime; the caller removes it at the end).
-    fn build(sources: &[(PathBuf, String)]) -> (IndexResolver<NoJdk>, BTreeMap<String, String>, PathBuf) {
+    fn build(
+        sources: &[(PathBuf, String)],
+    ) -> (IndexResolver<NoJdk>, BTreeMap<String, String>, PathBuf) {
         let dir = std::env::temp_dir().join(format!(
             "bennu-diagcache-e2e-{}-{:?}",
             std::process::id(),
@@ -367,7 +453,8 @@ mod integration {
         std::fs::create_dir_all(&dir).unwrap();
         let built = build_project_index_from_sources(sources, &dir);
         built.builder.persist().unwrap();
-        let project = PersistedIndex::open(built.builder.blob_path(), built.builder.fst_path()).unwrap();
+        let project =
+            PersistedIndex::open(built.builder.blob_path(), built.builder.fst_path()).unwrap();
         let type_map = built.type_map;
         let mut resolver = IndexResolver::new(project, NoJdk);
         for (simple, binary) in &type_map {
@@ -378,7 +465,11 @@ mod integration {
 
     /// Validate `src` while recording its project dependencies → `(diagnostics, FileDeps)`, exactly
     /// as the be layer's parallel whole-project validation does per file.
-    fn validate(resolver: &IndexResolver<NoJdk>, src: &str, stem: &str) -> (Vec<Diagnostic>, FileDeps) {
+    fn validate(
+        resolver: &IndexResolver<NoJdk>,
+        src: &str,
+        stem: &str,
+    ) -> (Vec<Diagnostic>, FileDeps) {
         let ctx = FileContext {
             file_stem: Some(stem.to_string()),
             expected_package: None,
@@ -390,7 +481,12 @@ mod integration {
     }
 
     /// Apply an edited file to the resolver's overlay (mirrors `IndexService::patch_file`).
-    fn patch(resolver: &IndexResolver<NoJdk>, file: &str, src: &str, type_map: &BTreeMap<String, String>) {
+    fn patch(
+        resolver: &IndexResolver<NoJdk>,
+        file: &str,
+        src: &str,
+        type_map: &BTreeMap<String, String>,
+    ) {
         use bennu_java::prelude::TypeResolver;
         let is_project = |b: &str| resolver.is_project_type(b);
         let symbols: Vec<Symbol> =
@@ -418,7 +514,10 @@ mod integration {
                 || a_deps.simple_hits.iter().any(|(s, _)| s == "B"),
             "A must depend on B: {a_deps:?}",
         );
-        assert!(a_deps.is_fresh(source_hash(a_src), &resolver), "fresh immediately after validation");
+        assert!(
+            a_deps.is_fresh(source_hash(a_src), &resolver),
+            "fresh immediately after validation"
+        );
 
         // Edit B's members (foo gains a parameter) → A's cached result must go stale.
         let b_src2 = "package p;\npublic class B { public int foo(int x) { return x; } }\n";
@@ -470,7 +569,10 @@ mod integration {
             a2_deps.misses.iter().any(|m| m == "Widget"),
             "A2 must record a negative dependency on the absent Widget: {a2_deps:?}",
         );
-        assert!(a2_deps.is_fresh(source_hash(a2_src), &resolver), "fresh while Widget is absent");
+        assert!(
+            a2_deps.is_fresh(source_hash(a2_src), &resolver),
+            "fresh while Widget is absent"
+        );
 
         // A project type `Widget` now exists → A2 is no longer reusable.
         let w_src = "package p;\npublic class Widget { }\n";
@@ -492,7 +594,10 @@ mod integration {
         assert!(a_deps.is_fresh(source_hash(a_src), &resolver));
         // A different buffer for the same file → the own-hash guard alone forces re-validation.
         let a_src2 = "package p;\npublic class A { int x = 2; }\n";
-        assert!(!a_deps.is_fresh(source_hash(a_src2), &resolver), "own content change ⇒ re-validate");
+        assert!(
+            !a_deps.is_fresh(source_hash(a_src2), &resolver),
+            "own content change ⇒ re-validate"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

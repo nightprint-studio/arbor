@@ -16,9 +16,19 @@ fn both_overloads_of_a_method_are_renamed() {
         "package p;\npublic class Marshal {\n    public <T> T sneaky_unmarshal(Source source, T... values) { return null; }\n    public <T> T sneaky_unmarshal(Source source, Class<T> de) { return null; }\n}\n",
     ), ("p/Source.java", "package p;\npublic class Source {}\n")]);
     let src = p.source("p/Marshal.java");
-    let edits = p.rename_edits("p/Marshal.java", at(src, "sneaky_unmarshal"), "sneakyUnmarshal");
-    let decls = edits.iter().filter(|e| e.reason.label() == "declaration").count();
-    assert_eq!(decls, 2, "only {decls} of the 2 overload declarations were renamed");
+    let edits = p.rename_edits(
+        "p/Marshal.java",
+        at(src, "sneaky_unmarshal"),
+        "sneakyUnmarshal",
+    );
+    let decls = edits
+        .iter()
+        .filter(|e| e.reason.label() == "declaration")
+        .count();
+    assert_eq!(
+        decls, 2,
+        "only {decls} of the 2 overload declarations were renamed"
+    );
 }
 
 /// An abstract method and its implementation in a subclass are the same method to a caller.
@@ -101,7 +111,9 @@ fn a_call_through_a_subclass_typed_receiver_is_renamed() {
 fn renaming_a_top_level_type_moves_its_file() {
     let p = Project::new(&[("p/Order.java", "package p;\npublic class Order { }\n")]);
     let src = p.source("p/Order.java");
-    let plan = p.rename("p/Order.java", at(src, "Order"), "Invoice").expect("a plan");
+    let plan = p
+        .rename("p/Order.java", at(src, "Order"), "Invoice")
+        .expect("a plan");
     let mv = plan.file_rename.expect("the file rename was not proposed");
     assert_eq!(mv.from, "p/Order.java");
     assert_eq!(mv.to, "p/Invoice.java");
@@ -115,8 +127,13 @@ fn renaming_a_nested_type_leaves_the_file_alone() {
         "package p;\npublic class Order {\n    public static class Line { }\n}\n",
     )]);
     let src = p.source("p/Order.java");
-    let plan = p.rename("p/Order.java", at(src, "Line"), "Row").expect("a plan");
-    assert!(plan.file_rename.is_none(), "a nested type must not move its outer type's file");
+    let plan = p
+        .rename("p/Order.java", at(src, "Line"), "Row")
+        .expect("a plan");
+    assert!(
+        plan.file_rename.is_none(),
+        "a nested type must not move its outer type's file"
+    );
 }
 
 /// A second, non-public type sharing a file is not what the file is named after either.
@@ -127,7 +144,9 @@ fn a_type_whose_file_is_named_after_something_else_does_not_move_it() {
         "package p;\npublic class Order { }\nclass Helper { }\n",
     )]);
     let src = p.source("p/Order.java");
-    let plan = p.rename("p/Order.java", at(src, "Helper"), "Support").expect("a plan");
+    let plan = p
+        .rename("p/Order.java", at(src, "Helper"), "Support")
+        .expect("a plan");
     assert!(plan.file_rename.is_none());
 }
 
@@ -139,7 +158,9 @@ fn renaming_a_member_never_moves_a_file() {
         "package p;\npublic class Order {\n    void do_work() { }\n}\n",
     )]);
     let src = p.source("p/Order.java");
-    let plan = p.rename("p/Order.java", at(src, "do_work"), "doWork").expect("a plan");
+    let plan = p
+        .rename("p/Order.java", at(src, "do_work"), "doWork")
+        .expect("a plan");
     assert!(plan.file_rename.is_none());
 }
 
@@ -158,8 +179,12 @@ fn overriding_a_library_method_blocks_the_rename() {
         "package p;\nimport java.util.function.Function;\npublic class Impl implements Function<String, String> {\n    @Override\n    public String apply(String s) { return s; }\n}\n",
     )]);
     let src = p.source("p/Impl.java");
-    let plan = p.rename("p/Impl.java", at(src, "apply"), "run").expect("a plan is still produced");
-    let reason = plan.blocked.expect("renaming a library override must be refused");
+    let plan = p
+        .rename("p/Impl.java", at(src, "apply"), "run")
+        .expect("a plan is still produced");
+    let reason = plan
+        .blocked
+        .expect("renaming a library override must be refused");
     assert!(
         reason.contains("java.util.function.Function"),
         "the refusal should name the library type: {reason}"
@@ -178,6 +203,12 @@ fn overriding_a_project_method_is_not_blocked() {
         ),
     ]);
     let src = p.source("p/Impl.java");
-    let plan = p.rename("p/Impl.java", at(src, "run"), "execute").expect("a plan");
-    assert!(plan.blocked.is_none(), "a project-only override is renameable: {:?}", plan.blocked);
+    let plan = p
+        .rename("p/Impl.java", at(src, "run"), "execute")
+        .expect("a plan");
+    assert!(
+        plan.blocked.is_none(),
+        "a project-only override is renameable: {:?}",
+        plan.blocked
+    );
 }

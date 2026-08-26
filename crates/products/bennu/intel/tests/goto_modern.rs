@@ -29,7 +29,9 @@ fn constructor_body_local_resolves() {
     )]);
     let s = p.source("Ctor.java").to_string();
     // `scratch` in `scratch + arg` → its declaration in the same file.
-    let d = p.goto("Ctor.java", at(&s, "scratch + arg")).expect("goto ctor local");
+    let d = p
+        .goto("Ctor.java", at(&s, "scratch + arg"))
+        .expect("goto ctor local");
     assert_eq!(d.file, "Ctor.java");
     assert_eq!(d.label, "local `scratch`");
     assert_eq!(d.line, line_of(&s, "int scratch ="));
@@ -50,7 +52,9 @@ fn constructor_parameter_resolves() {
     )]);
     let s = p.source("Ctor.java").to_string();
     // `arg` in `arg + 1` → the constructor parameter.
-    let d = p.goto("Ctor.java", at(&s, "arg + 1")).expect("goto ctor param");
+    let d = p
+        .goto("Ctor.java", at(&s, "arg + 1"))
+        .expect("goto ctor param");
     assert_eq!(d.file, "Ctor.java");
     assert_eq!(d.label, "local `arg`");
     assert_eq!(d.line, line_of(&s, "Ctor(int arg)"));
@@ -96,7 +100,9 @@ fn record_component_in_compact_ctor_resolves_at_17() {
     let s = p.source("Point.java").to_string();
     // `x` in `x + y` → the record component, treated like a local inside the compact ctor.
     let off = at(&s, "int sum = x + y") + "int sum = ".len();
-    let d = p.goto("Point.java", off).expect("record component resolves at 17");
+    let d = p
+        .goto("Point.java", off)
+        .expect("record component resolves at 17");
     assert_eq!(d.file, "Point.java");
     assert!(
         d.label.contains('x'),
@@ -116,9 +122,15 @@ fn record_component_resolves_even_when_the_declared_jdk_says_otherwise() {
     let p = Project::with_jdk(&[("Point.java", RECORD_SRC)], "11");
     let s = p.source("Point.java").to_string();
     let off = at(&s, "int sum = x + y") + "int sum = ".len();
-    let d = p.goto("Point.java", off).expect("the component still resolves");
+    let d = p
+        .goto("Point.java", off)
+        .expect("the component still resolves");
     assert_eq!(d.file, "Point.java");
-    assert!(d.label.contains('x'), "expected the component `x`, got {:?}", d.label);
+    assert!(
+        d.label.contains('x'),
+        "expected the component `x`, got {:?}",
+        d.label
+    );
 }
 
 #[test]
@@ -134,7 +146,9 @@ fn record_type_reference_resolves() {
         ),
     ]);
     let u = p.source("UsePoint.java").to_string();
-    let d = p.goto("UsePoint.java", at(&u, "Point make")).expect("goto record type");
+    let d = p
+        .goto("UsePoint.java", at(&u, "Point make"))
+        .expect("goto record type");
     assert_eq!(d.file, "Point.java");
     assert_eq!(d.label, "class app.Point");
 }
@@ -158,7 +172,9 @@ fn instanceof_pattern_var_resolves_at_17() {
     let p = Project::with_jdk(&[("Pat.java", PATTERN_SRC)], "17");
     let s = p.source("Pat.java").to_string();
     // `s` in `s.length()` → the pattern variable declared in the instanceof.
-    let d = p.goto("Pat.java", at(&s, "s.length()")).expect("pattern var resolves at 17");
+    let d = p
+        .goto("Pat.java", at(&s, "s.length()"))
+        .expect("pattern var resolves at 17");
     assert_eq!(d.file, "Pat.java");
     assert_eq!(d.label, "local `s`");
     assert_eq!(d.line, line_of(&s, "instanceof String s"));
@@ -210,7 +226,9 @@ fn inferred_lambda_param_resolves_at_8() {
     let s = p.source("Lam.java").to_string();
     // `a` in `a + b` → the inferred lambda parameter.
     let off = at(&s, "-> a + b") + "-> ".len();
-    let d = p.goto("Lam.java", off).expect("inferred lambda param resolves at 8");
+    let d = p
+        .goto("Lam.java", off)
+        .expect("inferred lambda param resolves at 8");
     assert_eq!(d.file, "Lam.java");
     assert_eq!(d.label, "local `a`");
 }
@@ -221,7 +239,9 @@ fn inferred_lambda_second_param_resolves_at_8() {
     let s = p.source("Lam.java").to_string();
     // `b` in `a + b` → the second inferred lambda parameter.
     let off = at(&s, "a + b") + "a + ".len();
-    let d = p.goto("Lam.java", off).expect("second inferred lambda param resolves at 8");
+    let d = p
+        .goto("Lam.java", off)
+        .expect("second inferred lambda param resolves at 8");
     assert_eq!(d.file, "Lam.java");
     assert_eq!(d.label, "local `b`");
 }
@@ -297,7 +317,9 @@ fn sealed_class_resolves_like_normal_class() {
         "17",
     );
     let u = p.source("UseShape.java").to_string();
-    let d = p.goto("UseShape.java", at(&u, "Shape pick")).expect("goto sealed type");
+    let d = p
+        .goto("UseShape.java", at(&u, "Shape pick"))
+        .expect("goto sealed type");
     assert_eq!(d.file, "Shape.java");
     assert_eq!(d.label, "class app.Shape");
     assert_eq!(d.line, line_of(p.source("Shape.java"), "class Shape"));
@@ -331,7 +353,9 @@ fn sealed_class_method_resolves() {
         "17",
     );
     let u = p.source("UseShape.java").to_string();
-    let d = p.goto("UseShape.java", at(&u, "sh.sides()") + "sh.".len()).expect("goto sealed method");
+    let d = p
+        .goto("UseShape.java", at(&u, "sh.sides()") + "sh.".len())
+        .expect("goto sealed method");
     assert_eq!(d.file, "Shape.java");
     assert_eq!(d.label, "method app.Shape.sides()");
 }
@@ -410,7 +434,9 @@ fn try_with_resources_variable_resolves() {
     )]);
     let s = p.source("Res.java").to_string();
     let off = at(&s, "return r.read()") + "return ".len();
-    let d = p.goto("Res.java", off).expect("try-with-resources var resolves");
+    let d = p
+        .goto("Res.java", off)
+        .expect("try-with-resources var resolves");
     assert_eq!(d.file, "Res.java");
     assert_eq!(d.label, "local `r`");
     assert_eq!(d.line, line_of(&s, "StringReader r ="));
@@ -449,7 +475,11 @@ fn caret_on_arrow_token_is_none() {
     let s = p.source("Lam.java").to_string();
     // Caret on the `->` arrow operator resolves to nothing (not a symbol) — must not panic.
     let got = p.goto("Lam.java", at(&s, "-> a + b"));
-    assert!(got.is_none(), "arrow token is not resolvable, got {:?}", got.map(|d| d.label));
+    assert!(
+        got.is_none(),
+        "arrow token is not resolvable, got {:?}",
+        got.map(|d| d.label)
+    );
 }
 
 #[test]
@@ -458,5 +488,9 @@ fn caret_on_record_keyword_is_none() {
     let s = p.source("Point.java").to_string();
     // Caret on the `record` keyword itself → None (a keyword, not a symbol).
     let got = p.goto("Point.java", at(&s, "record Point"));
-    assert!(got.is_none(), "the `record` keyword is not resolvable, got {:?}", got.map(|d| d.label));
+    assert!(
+        got.is_none(),
+        "the `record` keyword is not resolvable, got {:?}",
+        got.map(|d| d.label)
+    );
 }

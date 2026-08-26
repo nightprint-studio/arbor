@@ -74,7 +74,11 @@ impl JdkMemberIndex {
     /// empty and `project_only` resolvers, which never resolve the JDK.
     pub fn new(source: Box<dyn ClassSource>) -> Self {
         Self {
-            inner: Mutex::new(Inner { source: SourceMemberIndex::new(source), memo: HashMap::new(), unsaved: 0 }),
+            inner: Mutex::new(Inner {
+                source: SourceMemberIndex::new(source),
+                memo: HashMap::new(),
+                unsaved: 0,
+            }),
             path: None,
         }
     }
@@ -85,7 +89,11 @@ impl JdkMemberIndex {
     pub fn persistent(source: Box<dyn ClassSource>, path: PathBuf) -> Self {
         let memo = load_memo(&path);
         Self {
-            inner: Mutex::new(Inner { source: SourceMemberIndex::new(source), memo, unsaved: 0 }),
+            inner: Mutex::new(Inner {
+                source: SourceMemberIndex::new(source),
+                memo,
+                unsaved: 0,
+            }),
             path: Some(path),
         }
     }
@@ -176,7 +184,9 @@ fn write_memo(path: &Path, memo: &HashMap<String, Option<ClassMembers>>) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let Ok(bytes) = serde_json::to_vec(memo) else { return };
+    let Ok(bytes) = serde_json::to_vec(memo) else {
+        return;
+    };
     let tmp = path.with_extension("json.tmp");
     if std::fs::write(&tmp, &bytes).is_ok() {
         let _ = std::fs::rename(&tmp, path);
@@ -198,7 +208,12 @@ mod tests {
 
     impl ClassSource for CountingSource {
         fn class_bytes(&self, binary_name: &str) -> Result<Option<Vec<u8>>, String> {
-            *self.hits.lock().unwrap().entry(binary_name.to_string()).or_insert(0) += 1;
+            *self
+                .hits
+                .lock()
+                .unwrap()
+                .entry(binary_name.to_string())
+                .or_insert(0) += 1;
             Ok(None)
         }
     }
@@ -254,7 +269,11 @@ mod tests {
         let loaded = load_memo(&path);
         assert_eq!(loaded.len(), 2);
         assert!(loaded.get("com/acme/Absent").unwrap().is_none());
-        let foo = loaded.get("com/acme/Foo").unwrap().as_ref().expect("Foo present");
+        let foo = loaded
+            .get("com/acme/Foo")
+            .unwrap()
+            .as_ref()
+            .expect("Foo present");
         assert_eq!(foo.methods[0].name, "bar");
         assert_eq!(foo.superclass.as_deref(), Some("java/lang/Object"));
 

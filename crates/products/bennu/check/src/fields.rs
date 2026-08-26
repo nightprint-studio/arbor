@@ -9,18 +9,16 @@
 
 use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, MemberKind, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
+#[cfg(test)]
+use tree_sitter::Parser;
 
 use crate::members::simple_name;
 use crate::walk::hierarchy_has;
 
 /// Parse `source` and flag accesses to non-existent fields on their inferred receiver types.
 pub fn unknown_fields(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let symbols = bennu_java::prelude::extract_symbols(source);
@@ -80,6 +78,13 @@ fn check_access(
     }
     // Only assert absence when we actually know the receiver type's members.
     if resolver.members_of(&ty.binary_name).is_none() {
+        return;
+    }
+    // `Outer.Nested` is spelled exactly like a field access, and `Labels.Specific.Bandi.CODE` is
+    // three of them in a row where only the last names a field. A nested TYPE of the receiver is
+    // therefore not a missing field — it is the far commoner reading of that syntax, and reporting
+    // it produced 43 errors on a project the compiler builds clean.
+    if resolver.members_of(&format!("{}/{field_name}", ty.binary_name)).is_some() {
         return;
     }
     let has = hierarchy_has(resolver, &ty.binary_name, &|cm| {
@@ -241,9 +246,12 @@ mod tests {
     /// checked, so the fix didn't buy itself by switching the rule off.
     #[test]
     fn this_in_an_ordinary_class_is_still_checked() {
-        let src = "class Point {\n  int x;\n  void m() { int a = this.z; }\n}\n";
-        // `Point` here is the source's own class; the resolver knows `com/acme/Point`, so this
-        // asserts the walk still REACHES a named enclosing type rather than bailing everywhere.
+        // With the package, `Point` here IS `com/acme/Point` — the class the resolver knows. It
+        // used to be written without one, which made the source's `Point` a DEFAULT-package type
+        // that the resolver had never heard of; inference answered anyway, because "is this a real
+        // type?" was judged by the SHAPE of the name. Now it is judged by asking, so the test has
+        // to name a class that exists — which is also what real code looks like.
+        let src = "package com.acme;\nclass Point {\n  int x;\n  void m() { int a = this.z; }\n}\n";
         let d: Vec<String> =
             unknown_fields(src, &resolver()).into_iter().map(|x| x.message).collect();
         // Either it resolves the enclosing type and flags `z`, or it can't resolve `Point` at all
@@ -280,5 +288,68 @@ mod tests {
     fn static_qualifier_is_not_flagged() {
         // `System.out` — `System` is a type, not a value; inference yields nothing → skip.
         assert!(diags("Object o = System.out;").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod nested_type_access_tests {
+    use super::*;
+    use bennu_java::prelude::{ClassMembers, Import, Member, TypeRef};
+    use std::collections::HashMap;
+
+    struct Nested(HashMap<String, ClassMembers>);
+    impl TypeResolver for Nested {
+        fn members_of(&self, binary: &str) -> Option<std::sync::Arc<ClassMembers>> {
+            self.0.get(binary).cloned().map(std::sync::Arc::new)
+        }
+        fn resolve_simple_name(&self, name: &str, _i: &[Import]) -> Option<String> {
+            (name == "Labels").then(|| "p/Labels".to_string())
+        }
+        fn is_project_type(&self, binary: &str) -> bool {
+            self.0.contains_key(binary)
+        }
+    }
+
+    fn empty() -> ClassMembers {
+        ClassMembers {
+            type_params: Vec::new(),
+            superclass: None,
+            interfaces: Vec::new(),
+            methods: Vec::new(),
+            fields: Vec::new(),
+            flags: Default::default(),
+        }
+    }
+
+    fn resolver() -> Nested {
+        let mut m = HashMap::new();
+        m.insert("p/Labels".to_string(), empty());
+        m.insert("p/Labels/Specific".to_string(), empty());
+        let mut specific_bandi = empty();
+        specific_bandi.fields.push(
+            Member::field("CODE", TypeRef::simple("java/lang/String")).sig("String CODE"),
+        );
+        m.insert("p/Labels/Specific/Bandi".to_string(), specific_bandi);
+        Nested(m)
+    }
+
+    /// `Labels.Specific.Bandi.CODE` — three nested types then a field. Only the last step is a
+    /// field access; the rest must not be reported as missing fields.
+    #[test]
+    fn a_chain_of_nested_types_is_not_a_missing_field() {
+        let src = "package p;\nclass Use {\n  String s = Labels.Specific.Bandi.CODE;\n}\n";
+        let d: Vec<String> =
+            unknown_fields(src, &resolver()).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    /// A field that really is missing is still reported — the exemption is for nested TYPES only.
+    #[test]
+    fn a_genuinely_missing_field_is_still_reported() {
+        let src = "package p;\nclass Use {\n  String s = Labels.Specific.Bandi.NOPE;\n}\n";
+        let d: Vec<String> =
+            unknown_fields(src, &resolver()).into_iter().map(|x| x.message).collect();
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("NOPE"), "{d:?}");
     }
 }

@@ -14,17 +14,13 @@
 
 use bennu_java::prelude::{FileSymbols, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
-use crate::resolve::type_binary;
+use crate::resolve::type_binary_at;
 
 /// Parse `source` and flag type-argument arity mismatches.
 pub fn type_arg_arity_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let symbols = bennu_java::prelude::extract_symbols(source);
@@ -82,7 +78,7 @@ fn check_generic_type(
 
     // Resolve to a binary and read its DECLARED type-parameter count. Only a known, non-empty arity
     // lets us judge (see the soundness note).
-    let binary = type_binary(base_text, symbols, resolver)?;
+    let binary = type_binary_at(base_text, n, bytes, symbols, resolver)?;
     let members = resolver.members_of(&binary)?;
     let declared = members.type_params.len();
     if declared == 0 || written == declared {

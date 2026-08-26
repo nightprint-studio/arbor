@@ -21,9 +21,71 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **The bulk naming fix is now a review you can argue with.** Group the names by file or by kind of declaration, switch a whole kind off, untick a group or a single name, and filter by name — the footer counts what Apply will actually do. The list is windowed, so a project-wide fix running to thousands of names opens and scrolls like a small one.
 
+- **A rename that would collide with a name already in use is refused, not applied.** Renaming a method onto a supertype's signature makes it an override, a field onto an inherited one hides it, a local onto a name already in its scope captures it, and a type onto a sibling in its package declares that name twice — none of which an edit list can show, because every edit in it is individually correct. Each now stops with the name it would clash with and where.
+
 - **Renaming a top-level type renames its file too.** Java ties a public type to its filename, so the two had to move together by hand. A nested type, whose file is named after its outer type, still leaves the file alone.
 
 ### Fixed
+
+- **An override family is now a closure, so both sides of an inherited implementation move together.** A superclass method can satisfy an interface on behalf of a subclass — the connection runs down and then back up — and a family gathered by walking up and then down never crossed it. Each side was renamed on its own, and a class stopped implementing the interface it declares. It also means a rename refused from one member is refused from every member, instead of going through from a different starting point.
+
+- **A method's and a parameter's annotations are part of the symbol model.** A type's and a field's always were; a method's and a parameter's were not, so anything that needed one — a framework reading its configuration, a plugin cross-checking `@Value` against a properties file — had to parse the source a second time and walk it itself.
+
+- **A type-use annotation on a varargs parameter no longer blanks the file it is in.** `Object @Nullable ... args` is legal Java the grammar cannot parse, and the resulting syntax error suppressed every other check in the file — eight whole sources on Guava, `Preconditions` among them. The construct is now recovered, so the parameter has a type and a name again rather than merely going unreported.
+
+- **One annotation model, and the project index carries it.** There were two: a thin one in the engine (a name and at most one string) and a rich one in the framework layer — with its own parse of the same file to fill it. So what an annotation said depended on who asked, and the rich reading, the one Spring and JPA actually use, never reached the index. There is one now, and a method's and a parameter's annotations are part of it.
+
+- **One Java parse, not two.** Framework detection kept its own parser and its own reading of every file, so it was blind to a construct the engine could recover and paid for a second parse of everything it looked at. Thirty-odd places across validation, the reference index, rename and spellcheck now share the one parse, its cache, and its recovery.
+
+- **A validation result is no longer served from a cache older than the checks that produced it.** Diagnostics were keyed by file content and by the project they were computed against, and neither moves when the engine does — so a build that fixed a false positive left every already-validated project still showing it, with nothing to suggest the answer was stale.
+
+- **A nested type is one type however it is spelled.** `java.util.Map$Entry` from a compiled class and `java.util.Map.Entry` from an import are the same type, and the two spellings were compared as strings — so a return type was reported as incompatible with itself, 32 times in Guava's sorted maps alone.
+
+- **Every reference written inside an anonymous class was missing from the index.** An anonymous body is filed under the ordinal javac gives it (`Outer.1`), and that name did not read as project code — so each call, field read and type use inside one was dropped. Anonymous classes are where most callback implementations live, so find-usages under-reported them and a rename left them behind.
+
+- **A type naming a static member is a use of that type.** `Hashing.MURMUR3_32` reads the qualifier as an ordinary identifier, not a type name, so renaming the class moved its declaration and its file and left every static access spelling the old name — 3 classes and 15 sites on Guava alone.
+
+- **An override family finds every subtype, not one per name.** Subclasses were searched through a map that keeps a single type per simple name, so a project with several nested `Builder` or `Entry` classes moved whichever one that map happened to hold. On Guava this was the single largest cause of a broken build after a project-wide rename.
+
+- **A nested class resolves names against its own package.** The package was taken to be the owner's name minus its last segment, which for a nested class is its outer class — so a same-package type it named without an import was not found, and a project-wide map answered instead. Guava declares `AbstractIterator` in two packages, and every nested class in one of them recorded the other's as its superclass.
+
+- **Two static imports of the same member name no longer trip over each other.** A file that imports `Collections2.safeRemove` and `Maps.safeRemove` had both bound to whichever import came first: renaming either rewrote the wrong line, and calls went to the wrong method. The import is now matched by its owner, and a bare call by its argument count — which is how Java tells them apart.
+
+- **A name is resolved in Java's order, so an import is not overruled by an unrelated class.** What a type inherits is in scope before the file's imports, but that was being asked of *every* type the file declares — a scope Java does not have. In a file declaring dozens of nested classes, one sibling's supertype answered for a name the file imports outright: Guava's `Maps.java` says `import java.util.Map.Entry` and every `Entry` in it was judged against a different type with a different arity.
+
+- **Ten more ways a rename could break a build, found by running one over four public Java projects.** `@Ann` was not recorded as a use of the type `Ann`, so renaming an annotation moved its declaration and its imports and left every use behind. A varargs parameter was invisible to every scope lookup — tree-sitter gives `T... xs` no name field — so renaming one renamed a same-named field instead. A type rename left its constructors alone. `Outer.this.member()`, the way an inner class calls its outer one, typed to nothing. An override written in an enum constant's body, or in an anonymous class in another file, was never moved. A suggested name that is a Java reserved word (`CONST` → `const`) was offered. And a method overriding a library one was only refused when the caret was on the type that declares it, not when a sibling in the same override family did.
+
+- **Validation no longer reports errors on code that compiles, in eight more shapes.** A file that does not parse gets its syntax error and nothing else, instead of a page of symbols read out of a broken tree. A nested type is not a missing field. An unbounded wildcard array (`new Class<?>[]`) is legal. `array.clone()` throws nothing. A `default` method discharges the abstract one it overrides, so an interface that gives one a body is still functional. And a name is resolved the way Java resolves it — the file's own types, then what it inherits, then imports, then its package — instead of through a project-wide map that keeps one binary per simple name.
+
+- **A project-wide naming fix no longer breaks the build.** Renaming every violating declaration in a 750-file project — 4,919 names, 16,233 edits — used to leave 262 compile errors behind; it now compiles clean, main sources and tests. What was missing was never one thing: method references, lambda parameters, nested types, anonymous overrides, enum constants, Lombok's generated classes, and members read from an enclosing class were each invisible to the engine in their own way.
+
+- **A rename the engine cannot prove complete is refused, by name.** Where a receiver cannot be resolved, there is no way to tell whether `x.foo()` is a use of the method being renamed — so the rename stops and says which file and line it could not account for, instead of rewriting the declaration and leaving that call behind.
+
+- **Two things a type variable is not.** A variable named `Param` or `Source` was not recognised as one (only `T`, `E`, `T1`… were), so a generic accessor returned the literal name and every member read through it disappeared. And a name that resolved to nothing was reported as resolved, so a fluent builder's self-type looked like a real class.
+
+- **A member's name no longer answers as a type.** The index registers a type under its simple name and every member under its own; asking for "the symbol called `x`" therefore answered a FIELD name with the class declaring it. A call into a dependency was recorded as a use of an unrelated project method, and renaming rewrote it.
+
+- **Nested types are told apart from qualified ones.** `Outer.Nested` was read as an already-qualified name, producing a binary name with no package that matched nothing — in three separate copies of the same lookup, which are now one.
+
+- **A statically-imported field, and a nested type reached through another, are resolved.** The first was invisible to rename (the method path already handled it, the field path did not); the second was reported as a missing field.
+
+- **Validation flags what the compiler flags, in two places it was silent.** A static import that names nothing its owner declares, and a `Type::method` reference to a method that does not exist. On a deliberately broken project these lift what Bennu sees from 5% of the affected files to 71%, with no false positives.
+
+- **Find-usages and rename now see method references.** `service::fetch` and `this::run` were never recorded as uses of the method they name, so a rename rewrote the declaration and left every `::` site calling a name that no longer existed. A qualifier that names a nested type (`Outer.Inner::run`) was missing for a second reason and is fixed too.
+
+- **Renaming a field carries the calls made on it through a lambda.** A lambda parameter is typed by the interface it is passed as, and that was only worked out when the lambda was an argument to an instance call — not to a static factory, not when returned, not when assigned to a declared variable. Everything read off such a parameter was invisible, so renaming a record component or a Lombok-backed field left its call sites behind.
+
+- **Renaming an interface method renames the override an anonymous class declares.** `new Checker() { … }` was matched against the name javac gives it (`1`), never against the interface it implements, so its override kept the old name and the class stopped compiling.
+
+- **A member reached through an enum constant is found.** `Headers.USERNAME.name()` dead-ended at the constant, because a static field read had no "the qualifier is a type" fallback where a static call already did.
+
+- **A nested type name binds to its own outer type.** Two classes can each declare a `Checker`, and a member declared with that name took whichever the project-wide name map happened to keep — giving callers the wrong signature, and reporting arguments as the wrong type on code that compiles.
+
+- **A partly-resolved dependency classpath is no longer cached as if complete, and says so.** Dependency resolution runs offline, so an artifact never downloaded is simply missing; the jars that did resolve were then saved keyed to the poms, which do not change when the missing one finally arrives. Until a pom was edited, every type from the missing jars read as unresolved — thousands of errors on a project that builds clean.
+
+- **Opening a project no longer validates it twice.** The background analysis and the first explicit *Validate* ran at the same time over the same files, competing for cores, and neither could see the other's results. The explicit run now serves the analysis it waited for: on a 750-file project, 590 ms of duplicated work became 6 ms.
+
+- **The bulk naming fix says why it skipped a name.** Package segments cannot be renamed by editing text — the name is the directory — and they were reported as "the index may still be building", which on a real project was 850 of 1001 refusals pointing at the wrong cause.
 
 - **Classes declared inside a method, and anonymous classes, are understood.** Local classes — and, since Java 16, local interfaces, enums and records — were invisible to the engine: not in the index, so every use of one read as an unknown type, with no go-to, no find-usages and no rename. They now work like any nested type, including ones declared in a constructor, in an initializer block, or inside another local class.
 

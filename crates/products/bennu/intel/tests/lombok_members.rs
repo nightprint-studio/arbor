@@ -43,13 +43,26 @@ fn completion_offers_lombok_getters_and_setters() {
     let s = p.source("Use.java").to_string();
     let off = at(&s, "o.\n") + "o.".len();
     let labels = p.complete_labels("Use.java", off);
-    for expected in ["getId", "setId", "getCustomer", "setCustomer", "isShipped", "setShipped"] {
-        assert!(labels.contains(&expected.to_string()), "expected {expected:?} in {labels:?}");
+    for expected in [
+        "getId",
+        "setId",
+        "getCustomer",
+        "setCustomer",
+        "isShipped",
+        "setShipped",
+    ] {
+        assert!(
+            labels.contains(&expected.to_string()),
+            "expected {expected:?} in {labels:?}"
+        );
     }
     // The fields themselves are `private`, and the receiver is in another class — so they are
     // hidden here for the same reason any private is. The accessors above are the whole point of
     // `@Data`: they are what this class CAN reach.
-    assert!(!labels.contains(&"id".to_string()), "a private field stays private, got {labels:?}");
+    assert!(
+        !labels.contains(&"id".to_string()),
+        "a private field stays private, got {labels:?}"
+    );
 }
 
 #[test]
@@ -58,8 +71,14 @@ fn boolean_field_uses_is_getter_not_get() {
     let s = p.source("Use.java").to_string();
     let off = at(&s, "o.\n") + "o.".len();
     let labels = p.complete_labels("Use.java", off);
-    assert!(labels.contains(&"isShipped".to_string()), "primitive boolean → isX, got {labels:?}");
-    assert!(!labels.contains(&"getShipped".to_string()), "no getX for a boolean, got {labels:?}");
+    assert!(
+        labels.contains(&"isShipped".to_string()),
+        "primitive boolean → isX, got {labels:?}"
+    );
+    assert!(
+        !labels.contains(&"getShipped".to_string()),
+        "no getX for a boolean, got {labels:?}"
+    );
 }
 
 #[test]
@@ -67,10 +86,16 @@ fn hover_on_generated_getter_reports_owner() {
     let p = data_project();
     let s = p.source("Use.java").to_string();
     let off = at(&s, "a.getId()") + "a.".len();
-    let h = p.hover("Use.java", off).expect("hover resolves a Lombok getter");
+    let h = p
+        .hover("Use.java", off)
+        .expect("hover resolves a Lombok getter");
     assert_eq!(h.kind, "method");
     assert_eq!(h.container.as_deref(), Some("shop.Order"));
-    assert!(h.signature.contains("getId"), "signature names the getter, got {:?}", h.signature);
+    assert!(
+        h.signature.contains("getId"),
+        "signature names the getter, got {:?}",
+        h.signature
+    );
 }
 
 #[test]
@@ -90,9 +115,14 @@ fn goto_on_generated_getter_redirects_to_backing_field() {
     let p = data_project();
     let s = p.source("Use.java").to_string();
     let off = at(&s, "a.getId()") + "a.".len();
-    let d = p.goto("Use.java", off).expect("generated getter redirects to its field");
+    let d = p
+        .goto("Use.java", off)
+        .expect("generated getter redirects to its field");
     assert_eq!(d.file, "Order.java");
-    assert_eq!(d.label, "field shop.Order.id", "landed on the backing field");
+    assert_eq!(
+        d.label, "field shop.Order.id",
+        "landed on the backing field"
+    );
     assert_eq!(d.line, line_of(p.source("Order.java"), "long id;"));
 }
 
@@ -118,7 +148,9 @@ fn goto_on_generated_setter_redirects_to_backing_field() {
     ]);
     let s = p.source("Use.java").to_string();
     let off = at(&s, "o.setCustomer(") + "o.".len();
-    let d = p.goto("Use.java", off).expect("generated setter redirects to its field");
+    let d = p
+        .goto("Use.java", off)
+        .expect("generated setter redirects to its field");
     assert_eq!(d.file, "Order.java");
     assert_eq!(d.label, "field shop.Order.customer");
 }
@@ -165,12 +197,20 @@ fn boolean_is_underscore_getter_resolves_on_an_enum() {
     let src = p.source("Use.java").to_string();
     let off = at(&src, "s.\n") + "s.".len();
     let labels = p.complete_labels("Use.java", off);
-    assert!(labels.contains(&"is_attivo".to_string()), "getter keeps the field's name, got {labels:?}");
-    assert!(!labels.contains(&"isIs_attivo".to_string()), "no doubled `is`, got {labels:?}");
+    assert!(
+        labels.contains(&"is_attivo".to_string()),
+        "getter keeps the field's name, got {labels:?}"
+    );
+    assert!(
+        !labels.contains(&"isIs_attivo".to_string()),
+        "no doubled `is`, got {labels:?}"
+    );
 
     // Go-to on the generated getter redirects to the field it wraps — which here is named identically.
     let call = at(&src, "s.is_attivo()") + "s.".len();
-    let d = p.goto("Use.java", call).expect("the generated getter redirects to its field");
+    let d = p
+        .goto("Use.java", call)
+        .expect("the generated getter redirects to its field");
     assert_eq!(d.file, "StatoElenco.java");
     assert_eq!(d.label, "field shop.StatoElenco.is_attivo");
 }
@@ -219,13 +259,17 @@ fn fluent_accessors_offer_both_the_getter_and_the_setter() {
     );
     // `chain = true` → the setter returns the owner, so `o.customer("x").customer("y")` chains.
     assert!(
-        accessors.iter().any(|d| d.contains("customer(String) : Order")),
+        accessors
+            .iter()
+            .any(|d| d.contains("customer(String) : Order")),
         "chained setter returns the owner, got {accessors:?}"
     );
     // No get/set-prefixed names exist at all under `fluent`.
     let labels = p.complete_labels("Use.java", off);
     assert!(
-        !labels.iter().any(|l| l.starts_with("get") || l.starts_with("set")),
+        !labels
+            .iter()
+            .any(|l| l.starts_with("get") || l.starts_with("set")),
         "fluent accessors have no prefix, got {labels:?}"
     );
 }
@@ -291,7 +335,11 @@ fn an_override_is_still_offered_once() {
     ]);
     let src = p.source("UseSub.java").to_string();
     let off = at(&src, "s.\n") + "s.".len();
-    let n = p.complete_labels("UseSub.java", off).iter().filter(|l| *l == "describe").count();
+    let n = p
+        .complete_labels("UseSub.java", off)
+        .iter()
+        .filter(|l| *l == "describe")
+        .count();
     assert_eq!(n, 1, "the override collapses with the method it overrides");
 }
 
@@ -319,8 +367,14 @@ fn value_annotation_is_getters_only() {
     let s = p.source("UsePoint.java").to_string();
     let off = at(&s, "p.\n") + "p.".len();
     let labels = p.complete_labels("UsePoint.java", off);
-    assert!(labels.contains(&"getX".to_string()), "@Value has getters, got {labels:?}");
-    assert!(!labels.iter().any(|l| l.starts_with("set")), "@Value is immutable, got {labels:?}");
+    assert!(
+        labels.contains(&"getX".to_string()),
+        "@Value has getters, got {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|l| l.starts_with("set")),
+        "@Value is immutable, got {labels:?}"
+    );
 }
 
 #[test]
@@ -383,9 +437,14 @@ fn slf4j_injects_a_log_field() {
     let s = p.source("Svc.java").to_string();
     let off = at(&s, "this.\n") + "this.".len();
     let labels = p.complete_labels("Svc.java", off);
-    assert!(labels.contains(&"log".to_string()), "@Slf4j injects a `log` field, got {labels:?}");
+    assert!(
+        labels.contains(&"log".to_string()),
+        "@Slf4j injects a `log` field, got {labels:?}"
+    );
     let outside = p.source("UseSvc.java").to_string();
-    let from_outside =
-        p.complete_labels("UseSvc.java", at(&outside, "svc.log") + "svc.".len());
-    assert!(!from_outside.contains(&"log".to_string()), "…and it is private: {from_outside:?}");
+    let from_outside = p.complete_labels("UseSvc.java", at(&outside, "svc.log") + "svc.".len());
+    assert!(
+        !from_outside.contains(&"log".to_string()),
+        "…and it is private: {from_outside:?}"
+    );
 }

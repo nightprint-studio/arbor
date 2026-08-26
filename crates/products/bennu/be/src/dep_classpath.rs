@@ -64,6 +64,14 @@ pub struct DepClasspath {
     /// The resolved dep jar paths (absolute) — surfaced to the index inspector's Jars list, so
     /// the count reflects exactly what the resolver loaded (not the Build's `target/` artifact).
     pub jars: Vec<String>,
+    /// Set when Maven did NOT resolve everything: the reason, for the user.
+    ///
+    /// A partial tier is worse than no tier for one reason — it looks like a working one. Every
+    /// type from a jar that is missing reads as "cannot resolve", and on a real project that was
+    /// **3308 errors on a tree the compiler builds without a warning**. The list is also not
+    /// cached in that state (see [`resolve_dep_classpath`]), so a later `mvn install` is picked up
+    /// on the next open instead of being shadowed until a pom changes.
+    pub partial: Option<String>,
 }
 
 /// What resolving the dependency tier produced. The three cases are genuinely different to the user,
@@ -91,12 +99,20 @@ pub fn resolve_dep_classpath(root: &Path, jdk_version: &str) -> DepOutcome {
     };
 
     // Fresh cached jar list → skip Maven entirely; else resolve once and persist the list.
-    let jars = match load_list(root, pom_mtime) {
-        Some(jars) => jars,
+    //
+    // Only a COMPLETE resolve is persisted. A partial one is keyed by the pom's mtime like any
+    // other, and a pom does not change when the missing artifact finally lands in `~/.m2` — so
+    // caching it pinned the project to a half-classpath until someone edited a pom or deleted the
+    // cache file by hand. Re-running Maven on the next open is a few seconds; being wrong about
+    // the classpath costs every library type in the project.
+    let (jars, partial) = match load_list(root, pom_mtime) {
+        Some(jars) => (jars, None),
         None => match resolve_via_maven(root, jdk_version) {
-            Ok(jars) => {
-                save_list(root, pom_mtime, &jars);
-                jars
+            Ok((jars, partial)) => {
+                if partial.is_none() {
+                    save_list(root, pom_mtime, &jars);
+                }
+                (jars, partial)
             }
             Err(reason) => return DepOutcome::Failed(reason),
         },
@@ -108,7 +124,7 @@ pub fn resolve_dep_classpath(root: &Path, jdk_version: &str) -> DepOutcome {
     let paths: Vec<PathBuf> = jars.iter().map(PathBuf::from).collect();
     let source: Box<dyn ClassSource> = Box::new(source_from_jars(&paths));
     let memo_path = memo_path_for(root, &jars);
-    DepOutcome::Resolved(DepClasspath { source, memo_path, jars })
+    DepOutcome::Resolved(DepClasspath { source, memo_path, jars, partial })
 }
 
 /// The dependency jars **already resolved** for `root`, without running Maven.
@@ -130,7 +146,7 @@ pub(crate) fn cached_dep_jars(root: &Path) -> Vec<PathBuf> {
 /// Run Maven's `dependency:build-classpath` (offline, pointed at the project's JDK) and return the
 /// resolved jar paths as strings. `Err` carries a short user-facing reason — a "0 jars" state has to be
 /// diagnosable from the UI, not only from the process's stderr.
-fn resolve_via_maven(root: &Path, jdk_version: &str) -> Result<Vec<String>, String> {
+fn resolve_via_maven(root: &Path, jdk_version: &str) -> Result<(Vec<String>, Option<String>), String> {
     let mut opts = MavenResolveOpts::default(); // offline
     // Resolve the REAL launcher: on Windows Maven ships `mvn.cmd`, and a bare `Command::new("mvn")`
     // only finds `mvn.exe` — so `"mvn"` silently fails to spawn (this is why deps showed 0 jars).
@@ -140,7 +156,22 @@ fn resolve_via_maven(root: &Path, jdk_version: &str) -> Result<Vec<String>, Stri
     }
     match resolve_maven_classpath(root, &opts) {
         Ok(cp) if !cp.jars.is_empty() => {
-            Ok(cp.jars.iter().map(|p| p.display().to_string()).collect())
+            // Maven wrote something, but did it write EVERYTHING? A non-zero exit or an entry that
+            // is not on disk both mean no: the resolve runs offline, so an artifact never
+            // downloaded is simply absent, and the goal reports the ones it could find anyway.
+            let missing = cp.unresolved.len();
+            let partial = (!cp.mvn_ok || missing > 0).then(|| {
+                format!(
+                    "Maven resolved {} of this project's dependency jars but could not resolve {missing} \
+                     more (the resolve runs offline). Types from those jars will read as unresolved \
+                     until the project is built once.",
+                    cp.jars.len()
+                )
+            });
+            if let Some(reason) = &partial {
+                eprintln!("bennu-be: partial dependency classpath for {}: {reason}", root.display());
+            }
+            Ok((cp.jars.iter().map(|p| p.display().to_string()).collect(), partial))
         }
         Ok(cp) => {
             eprintln!(

@@ -85,7 +85,11 @@ pub fn ingest_config_graph(
             owner_id: u32::MAX,
             source: Source::StrutsAction,
             signature: format!("action {} class={}", a.qualified_name, a.class_ref),
-            modifiers: if a.is_wildcard { "wildcard".into() } else { String::new() },
+            modifiers: if a.is_wildcard {
+                "wildcard".into()
+            } else {
+                String::new()
+            },
             loc_file: a.source_file.clone(),
             // The `<action>` element offset → go-to lands on the declaration, not line 1.
             loc_start: a.decl_offset as u32,
@@ -125,7 +129,10 @@ pub fn ingest_config_graph(
         bean_ids.insert(b.id.clone(), id);
         symbols.insert(id, sym);
     }
-    sw.finish(&index_dir.join(CONFIG_SYMBOL_BLOB), &index_dir.join(CONFIG_SYMBOL_FST))?;
+    sw.finish(
+        &index_dir.join(CONFIG_SYMBOL_BLOB),
+        &index_dir.join(CONFIG_SYMBOL_FST),
+    )?;
 
     // 3) Relations → resolve each endpoint to a symbol id where it names a known
     //    action/bean. `ActionToClass` (action → bean) is the load-bearing C1 edge; the
@@ -136,9 +143,10 @@ pub fn ingest_config_graph(
     let mut relations: Vec<Relation> = Vec::new();
     for r in &graph.relations {
         let resolved = match r.kind {
-            RelKind::ActionToClass => {
-                (action_ids.get(&r.from).copied(), bean_ids.get(&r.to).copied())
-            }
+            RelKind::ActionToClass => (
+                action_ids.get(&r.from).copied(),
+                bean_ids.get(&r.to).copied(),
+            ),
             RelKind::BeanIdToImpl => (bean_ids.get(&r.from).copied(), Some(u32::MAX)),
             RelKind::ActionToResult | RelKind::ResultToView => {
                 (action_ids.get(&r.from).copied(), None)
@@ -166,7 +174,10 @@ pub fn ingest_config_graph(
             relations.push(rel);
         }
     }
-    rw.finish(&index_dir.join(CONFIG_REL_BLOB), &index_dir.join(CONFIG_REL_FST))?;
+    rw.finish(
+        &index_dir.join(CONFIG_REL_BLOB),
+        &index_dir.join(CONFIG_REL_FST),
+    )?;
 
     // 4) Compile wildcard patterns for the conservative diagnostic (namespace kept so a
     //    reference is matched only within the wildcard action's own namespace).
@@ -250,7 +261,9 @@ impl ConfigResolver {
             return Some(bean_sym.fqn.clone());
         }
         // Bean declares only `parent=` → walk the Spring parent chain via the shared map.
-        resolve_bean_map(&self.graph.beans).get(&bean_sym.simple_name).cloned()
+        resolve_bean_map(&self.graph.beans)
+            .get(&bean_sym.simple_name)
+            .cloned()
     }
 
     /// The raw `class=` attribute (the Spring bean id) of the action with the given
@@ -390,7 +403,11 @@ impl ConfigResolver {
         if self.action_ids.contains_key(&norm) {
             return Some(norm);
         }
-        let segs: Vec<&str> = norm.trim_start_matches('/').split('/').filter(|s| !s.is_empty()).collect();
+        let segs: Vec<&str> = norm
+            .trim_start_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
         // 3. Longest known-action suffix: drop 1..n leading segments (e.g. the `/ExtStr2`
         //    servlet prefix) and take the first (= longest) suffix that is a stored qname.
         for start in 1..segs.len() {
@@ -548,7 +565,10 @@ impl ConfigResolver {
     /// that only needs the raw out-edges of a node id, e.g. a references query). The
     /// full resolver (with the string maps) is built by [`ingest_config_graph`].
     pub fn open_edges(index_dir: &Path) -> Result<RelationReader, StoreError> {
-        RelationReader::open(&index_dir.join(CONFIG_REL_BLOB), &index_dir.join(CONFIG_REL_FST))
+        RelationReader::open(
+            &index_dir.join(CONFIG_REL_BLOB),
+            &index_dir.join(CONFIG_REL_FST),
+        )
     }
 }
 
@@ -674,7 +694,10 @@ mod tests {
         );
 
         // diagnostic: the concrete action exists.
-        assert_eq!(cfg.diagnose_action("/do/Cat/viewTree"), ActionVerdict::Exists);
+        assert_eq!(
+            cfg.diagnose_action("/do/Cat/viewTree"),
+            ActionVerdict::Exists
+        );
         // a reference the `edit*` wildcard would match → Inconclusive, NEVER Missing.
         match cfg.diagnose_action("/do/Cat/editUser") {
             ActionVerdict::Inconclusive { .. } => {}
@@ -693,10 +716,19 @@ mod tests {
     #[test]
     fn view_path_and_jsp_predicates() {
         // Segment-aligned suffix match (the reverse-lookup path compare).
-        assert!(view_path_matches("c:/p/webapp/WEB-INF/cat/tree.jsp", "/WEB-INF/cat/tree.jsp"));
-        assert!(view_path_matches("c:/p/webapp/WEB-INF/cat/tree.jsp", "WEB-INF/cat/tree.jsp"));
+        assert!(view_path_matches(
+            "c:/p/webapp/WEB-INF/cat/tree.jsp",
+            "/WEB-INF/cat/tree.jsp"
+        ));
+        assert!(view_path_matches(
+            "c:/p/webapp/WEB-INF/cat/tree.jsp",
+            "WEB-INF/cat/tree.jsp"
+        ));
         // `tree.jsp` must NOT match `subtree.jsp` (the `/`-anchor guards the substring trap).
-        assert!(!view_path_matches("c:/p/webapp/WEB-INF/cat/subtree.jsp", "/WEB-INF/cat/tree.jsp"));
+        assert!(!view_path_matches(
+            "c:/p/webapp/WEB-INF/cat/subtree.jsp",
+            "/WEB-INF/cat/tree.jsp"
+        ));
         assert!(!view_path_matches("c:/p/x.jsp", ""));
         // JSP-path recognition (direct dispatcher result vs a Tiles def name / action ref).
         assert!(is_jsp_path("/WEB-INF/x.jsp"));
@@ -757,17 +789,23 @@ mod tests {
         // Tiles-resolved view → its action + class.
         let tiles_hit = cfg.actions_for_view("C:/proj/webapp/WEB-INF/cat/tree.jsp");
         assert!(
-            tiles_hit.iter().any(|(q, c)| q == "/do/viewTree" && c.as_deref() == Some("com.x.CatAction")),
+            tiles_hit
+                .iter()
+                .any(|(q, c)| q == "/do/viewTree" && c.as_deref() == Some("com.x.CatAction")),
             "tiles reverse-lookup: {tiles_hit:?}"
         );
         // DIRECT dispatcher result → its action + class (the fixed case).
         let direct_hit = cfg.actions_for_view("C:/proj/webapp/WEB-INF/list.jsp");
         assert!(
-            direct_hit.iter().any(|(q, c)| q == "/do/list" && c.as_deref() == Some("com.x.ListAction")),
+            direct_hit
+                .iter()
+                .any(|(q, c)| q == "/do/list" && c.as_deref() == Some("com.x.ListAction")),
             "direct reverse-lookup: {direct_hit:?}"
         );
         // A JSP that no action renders → no candidates.
-        assert!(cfg.actions_for_view("C:/proj/webapp/WEB-INF/nope.jsp").is_empty());
+        assert!(cfg
+            .actions_for_view("C:/proj/webapp/WEB-INF/nope.jsp")
+            .is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -821,24 +859,43 @@ mod tests {
         let (graph, _report) = build_web_graph(&inputs);
         let cfg = ingest_config_graph(&graph, &dir, &[]).unwrap();
 
-        let fqcn = |cfg: &ConfigResolver, r: &str| cfg.action_class_ref(r).and_then(|t| t.class_fqcn);
+        let fqcn =
+            |cfg: &ConfigResolver, r: &str| cfg.action_class_ref(r).and_then(|t| t.class_fqcn);
 
         // 1. exact absolute qname (already worked).
-        assert_eq!(fqcn(&cfg, "/do/Cat/viewTree").as_deref(), Some("com.x.CategoryAction"));
+        assert_eq!(
+            fqcn(&cfg, "/do/Cat/viewTree").as_deref(),
+            Some("com.x.CategoryAction")
+        );
         // 2. trailing `.action` / `.do` stripped.
-        assert_eq!(fqcn(&cfg, "/do/Cat/viewTree.action").as_deref(), Some("com.x.CategoryAction"));
+        assert_eq!(
+            fqcn(&cfg, "/do/Cat/viewTree.action").as_deref(),
+            Some("com.x.CategoryAction")
+        );
         // 3. query string dropped.
         assert_eq!(
             fqcn(&cfg, "/do/Cat/viewTree.action?x=1&y=2").as_deref(),
             Some("com.x.CategoryAction")
         );
         // 4. bare name with a UNIQUE `…/viewTree` action → resolves (namespace inferred).
-        assert_eq!(fqcn(&cfg, "viewTree").as_deref(), Some("com.x.CategoryAction"));
-        assert_eq!(fqcn(&cfg, "viewTree.action").as_deref(), Some("com.x.CategoryAction"));
+        assert_eq!(
+            fqcn(&cfg, "viewTree").as_deref(),
+            Some("com.x.CategoryAction")
+        );
+        assert_eq!(
+            fqcn(&cfg, "viewTree.action").as_deref(),
+            Some("com.x.CategoryAction")
+        );
         // 5. bare name that is AMBIGUOUS (`edit` in both /do/Sec and /do/Usr) → no guess.
-        assert!(cfg.action_class_ref("edit").is_none(), "ambiguous bare name must not resolve");
+        assert!(
+            cfg.action_class_ref("edit").is_none(),
+            "ambiguous bare name must not resolve"
+        );
         // …but the absolute form disambiguates.
-        assert_eq!(fqcn(&cfg, "/do/Sec/edit").as_deref(), Some("com.x.SecAction"));
+        assert_eq!(
+            fqcn(&cfg, "/do/Sec/edit").as_deref(),
+            Some("com.x.SecAction")
+        );
         // 6. a genuinely-unknown ref stays unresolved.
         assert!(cfg.action_class_ref("/do/Cat/ghost").is_none());
         // 7. servlet/filter-prefixed URL (Entando `<wp:action path="/ExtStr2/...">`): the
@@ -857,12 +914,18 @@ mod tests {
         assert!(tgt.config_offset > 0, "action decl offset must be captured");
         assert!(tgt.config_file.ends_with("s.xml"));
         // A struts `class="beanId"` resolves to its impl FQCN (config-XML go-to).
-        assert_eq!(cfg.resolve_bean_class("categoryAction").as_deref(), Some("com.x.CategoryAction"));
+        assert_eq!(
+            cfg.resolve_bean_class("categoryAction").as_deref(),
+            Some("com.x.CategoryAction")
+        );
         assert_eq!(cfg.resolve_bean_class("nope").as_deref(), None);
 
         // diagnose_action is now as tolerant as go-to: the concrete action (with a raw `.action`)
         // is Exists; a dangling absolute ref is Missing.
-        assert_eq!(cfg.diagnose_action("/do/Cat/viewTree.action"), ActionVerdict::Exists);
+        assert_eq!(
+            cfg.diagnose_action("/do/Cat/viewTree.action"),
+            ActionVerdict::Exists
+        );
         assert_eq!(cfg.diagnose_action("/do/Cat/ghost"), ActionVerdict::Missing);
         // REGRESSION: an Entando `/ExtStr2`-prefixed URL that go-to resolves must NOT be a false
         // "action does not exist" — being stricter than go-to here was the bug.
@@ -947,7 +1010,10 @@ mod tests {
         );
 
         // The bean is retrievable by name (for the future @Autowired go-to + inspector).
-        assert_eq!(cfg.resolve_bean("fooService").map(|b| b.fqcn.as_str()), Some("com.x.FooService"));
+        assert_eq!(
+            cfg.resolve_bean("fooService").map(|b| b.fqcn.as_str()),
+            Some("com.x.FooService")
+        );
         assert!(cfg.resolve_bean("nope").is_none());
 
         // End-to-end: the go-to target struct carries the annotation FQCN (the FE path).
@@ -1017,7 +1083,9 @@ mod tests {
         assert_eq!(def.class, Some("com.x.AuthInterceptor"));
 
         // go-to a stack ref → the stack def (no class).
-        let stack = cfg.resolve_interceptor("secureStack").expect("stack resolves");
+        let stack = cfg
+            .resolve_interceptor("secureStack")
+            .expect("stack resolves");
         assert!(stack.is_stack);
         assert_eq!(stack.class, None);
 
@@ -1089,15 +1157,21 @@ mod tests {
         assert!(target.offset > 0);
         assert!(target.file.ends_with("FooMapper.xml"));
         // an unknown method / unknown interface → no target.
-        assert!(cfg.statement_for_method("com.x.FooMapper", "ghost").is_none());
-        assert!(cfg.statement_for_method("com.x.Unknown", "findById").is_none());
+        assert!(cfg
+            .statement_for_method("com.x.FooMapper", "ghost")
+            .is_none());
+        assert!(cfg
+            .statement_for_method("com.x.Unknown", "findById")
+            .is_none());
 
         // find-usages / outline: every statement in the mapper.
         assert_eq!(cfg.methods_for_mapper("com.x.FooMapper").len(), 4);
 
         // the conservative diagnostic: known project type + matching method → Exists.
-        let methods: HashSet<String> =
-            ["findById", "insert", "update", "deleteById"].iter().map(|s| s.to_string()).collect();
+        let methods: HashSet<String> = ["findById", "insert", "update", "deleteById"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         assert_eq!(
             cfg.diagnose_orphan_statement("com.x.FooMapper", "findById", Some(&methods)),
             ActionVerdict::Exists

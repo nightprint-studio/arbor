@@ -11,4 +11,7 @@ description  = "The Java facts a framework extension reads — an annotation-sha
 # The same versions the rest of the workspace pins (one shared `links = "tree-sitter"`
 # native lib), so this crate can be linked alongside every other tree-sitter consumer.
 tree-sitter      = "0.25"
-tree-sitter-java = "0.23"
+# The grammar comes through `bennu-java`, which owns the workspace's single pin and the parse
+# cache. A second pin here would be a second version of a `links = "tree-sitter"` native library —
+# and, before this, a second parse of every file plus a blind spot the engine did not have.
+bennu-java       = { path = "../java" }

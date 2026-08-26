@@ -21,6 +21,7 @@
 
 pub mod class_names;
 pub mod config;
+pub mod conflict;
 pub mod diag_cache;
 pub mod java_index;
 // Internal: Lombok generated-member synthesis, an implementation detail of index-building

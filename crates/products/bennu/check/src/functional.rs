@@ -19,7 +19,7 @@ use std::collections::HashSet;
 
 use bennu_java::prelude::{extract_symbols, FileSymbols, MemberKind, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::inheritance::{is_abstract_requirement, is_ctor, object_method_names};
 use crate::members::simple_name;
@@ -28,11 +28,7 @@ use crate::walk::{for_each_supertype, hierarchy_fully_known};
 
 /// Parse `source` and flag lambda / functional-interface mismatches.
 pub fn functional_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let symbols = extract_symbols(source);
@@ -111,6 +107,12 @@ fn single_abstract_method(
 ) -> Sam {
     // name → arity, deduped (a functional interface has no overloaded abstract method).
     let mut abstracts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    // Names some type in the hierarchy IMPLEMENTS. A `default` that overrides an inherited abstract
+    // method discharges it — `org.apache.commons.collections4.Predicate` extends
+    // `java.util.function.Predicate` and gives `test` a default body, leaving `evaluate` as its only
+    // requirement. Counting the inherited `test` as well made it "not a functional interface", and
+    // every lambda written against it was reported on code that compiles.
+    let mut implemented: HashSet<String> = HashSet::new();
     for_each_supertype(resolver, binary, &mut |_bn, cm| {
         for m in &cm.methods {
             if m.kind != MemberKind::Method || is_ctor(&m.name) || objects.contains(&m.name) {
@@ -118,9 +120,20 @@ fn single_abstract_method(
             }
             if is_abstract_requirement(cm, m) {
                 abstracts.entry(m.name.clone()).or_insert(m.params.len());
+            } else {
+                implemented.insert(m.name.clone());
             }
         }
     });
+    // Subtract the discharged names — but never down to nothing. An interface reached through this
+    // check HAS a lambda written against it, so "zero abstract methods" is a conclusion about our
+    // member model, not about the code; keeping the unsubtracted set there leaves the check where it
+    // was rather than turning a silent case into a false positive.
+    let before = abstracts.clone();
+    abstracts.retain(|name, _| !implemented.contains(name));
+    if abstracts.is_empty() {
+        abstracts = before;
+    }
     match abstracts.len() {
         1 => Sam::One { arity: *abstracts.values().next().unwrap() },
         _ => Sam::NotFunctional,
@@ -339,5 +352,70 @@ mod tests {
     #[test]
     fn unknown_target_is_not_flagged() {
         assert!(diags("Mystery mp = x -> x;").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod default_override_tests {
+    use super::*;
+    use bennu_java::prelude::{ClassMembers, Import, Member, TypeRef};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    struct R(HashMap<String, ClassMembers>);
+    impl TypeResolver for R {
+        fn members_of(&self, b: &str) -> Option<Arc<ClassMembers>> {
+            self.0.get(b).cloned().map(Arc::new)
+        }
+        fn resolve_simple_name(&self, n: &str, _i: &[Import]) -> Option<String> {
+            (n == "Pred").then(|| "p/Pred".to_string())
+        }
+        fn is_project_type(&self, b: &str) -> bool {
+            self.0.contains_key(b)
+        }
+    }
+
+    /// `p.Pred extends java.util.function.Predicate` and gives `test` a DEFAULT body, so its only
+    /// requirement is `evaluate` — one abstract method, a functional interface. Counting the
+    /// inherited-and-overridden `test` as a second one is how Apache Commons' `Predicate` came to be
+    /// reported as not functional at every lambda written against it.
+    #[test]
+    fn a_default_override_discharges_the_inherited_abstract_method() {
+        let mut m = HashMap::new();
+        let mut pred = ClassMembers {
+            type_params: vec!["T".to_string()],
+            superclass: None,
+            interfaces: vec!["java/util/function/Predicate".to_string()],
+            methods: vec![
+                Member::method("evaluate", TypeRef::simple("boolean"), vec![TypeRef::simple("T")])
+                    .abstract_(),
+                Member::method("test", TypeRef::simple("boolean"), vec![TypeRef::simple("T")])
+                    .default_(),
+            ],
+            fields: Vec::new(),
+            flags: Default::default(),
+        };
+        pred.flags.is_interface = true;
+        m.insert("p/Pred".to_string(), pred);
+        let mut jdk = ClassMembers {
+            type_params: vec!["T".to_string()],
+            superclass: None,
+            interfaces: Vec::new(),
+            methods: vec![Member::method(
+                "test",
+                TypeRef::simple("boolean"),
+                vec![TypeRef::simple("T")],
+            )
+            .abstract_()],
+            fields: Vec::new(),
+            flags: Default::default(),
+        };
+        jdk.flags.is_interface = true;
+        m.insert("java/util/function/Predicate".to_string(), jdk);
+        let r = R(m);
+        let src = "class A { void f() { Pred<String> p = s -> s.isEmpty(); } }";
+        let out: Vec<String> =
+            functional_errors(src, &r).into_iter().map(|d| d.message).collect();
+        assert!(out.is_empty(), "{out:?}");
     }
 }

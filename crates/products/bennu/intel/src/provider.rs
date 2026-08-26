@@ -89,7 +89,11 @@ pub struct TextEdit {
 /// name plus its generic arguments (`java/util/List<com/acme/Foo>` → `List<Foo>`). For the hover
 /// card, which wants the written-Java shape, not the binary name.
 fn render_type_ref(t: &bennu_java::prelude::TypeRef) -> String {
-    let simple = t.binary_name.rsplit(['/', '$']).next().unwrap_or(&t.binary_name);
+    let simple = t
+        .binary_name
+        .rsplit(['/', '$'])
+        .next()
+        .unwrap_or(&t.binary_name);
     if t.type_args.is_empty() {
         simple.to_string()
     } else {
@@ -166,7 +170,11 @@ fn summarize_expr(node: tree_sitter::Node, bytes: &[u8]) -> String {
     loop {
         let link = match current.kind() {
             "method_invocation" => {
-                format!("{}{}", field(current, "name", bytes).unwrap_or_default(), call_args(current))
+                format!(
+                    "{}{}",
+                    field(current, "name", bytes).unwrap_or_default(),
+                    call_args(current)
+                )
             }
             "field_access" => field(current, "field", bytes).unwrap_or_default(),
             _ => break,
@@ -187,8 +195,14 @@ fn summarize_expr(node: tree_sitter::Node, bytes: &[u8]) -> String {
             field(current, "type", bytes).unwrap_or_default(),
             call_args(current)
         ),
-        "identifier" | "this" | "super" | "scoped_identifier" | "type_identifier"
-        | "string_literal" | "decimal_integer_literal" | "null_literal" => text(current, bytes),
+        "identifier"
+        | "this"
+        | "super"
+        | "scoped_identifier"
+        | "type_identifier"
+        | "string_literal"
+        | "decimal_integer_literal"
+        | "null_literal" => text(current, bytes),
         _ => ellipsize(&text(current, bytes), 60),
     };
 
@@ -199,7 +213,11 @@ fn summarize_expr(node: tree_sitter::Node, bytes: &[u8]) -> String {
         trimmed = true;
     }
     let joined = ellipsize(&parts.join("."), MAX_SHAPE_CHARS);
-    if trimmed { format!("…{joined}") } else { joined }
+    if trimmed {
+        format!("…{joined}")
+    } else {
+        joined
+    }
 }
 
 /// The `(written type, initializer)` of the local named `name`, searched outwards from `node`
@@ -220,9 +238,13 @@ fn local_declaration_of<'t>(
         bytes: &[u8],
         name: &str,
     ) -> Option<(String, Option<tree_sitter::Node<'t>>)> {
-        let declared = decl.child_by_field_name("type").and_then(|t| text(&t, bytes))?;
+        let declared = decl
+            .child_by_field_name("type")
+            .and_then(|t| text(&t, bytes))?;
         if decl.kind() == "enhanced_for_statement" {
-            let n = decl.child_by_field_name("name").and_then(|n| text(&n, bytes))?;
+            let n = decl
+                .child_by_field_name("name")
+                .and_then(|n| text(&n, bytes))?;
             return (n == name).then(|| (declared, decl.child_by_field_name("value")));
         }
         let mut w = decl.walk();
@@ -230,7 +252,11 @@ fn local_declaration_of<'t>(
             if d.kind() != "variable_declarator" {
                 continue;
             }
-            if d.child_by_field_name("name").and_then(|n| text(&n, bytes)).as_deref() == Some(name) {
+            if d.child_by_field_name("name")
+                .and_then(|n| text(&n, bytes))
+                .as_deref()
+                == Some(name)
+            {
                 return Some((declared, d.child_by_field_name("value")));
             }
         }
@@ -239,7 +265,10 @@ fn local_declaration_of<'t>(
 
     let mut scope = Some(node);
     while let Some(s) = scope {
-        if matches!(s.kind(), "local_variable_declaration" | "enhanced_for_statement") {
+        if matches!(
+            s.kind(),
+            "local_variable_declaration" | "enhanced_for_statement"
+        ) {
             if let Some(hit) = declares(&s, bytes, name) {
                 return Some(hit);
             }
@@ -247,7 +276,10 @@ fn local_declaration_of<'t>(
         let mut w = s.walk();
         let mut found = None;
         for c in s.named_children(&mut w) {
-            if matches!(c.kind(), "local_variable_declaration" | "enhanced_for_statement") {
+            if matches!(
+                c.kind(),
+                "local_variable_declaration" | "enhanced_for_statement"
+            ) {
                 if let Some(hit) = declares(&c, bytes, name) {
                     found = Some(hit);
                     break;
@@ -281,11 +313,14 @@ fn ellipsize(s: &str, max: usize) -> String {
 /// question", so the shape is checked before it is asked.
 fn reads_as_type_name(text: &str) -> bool {
     let mut chars = text.chars();
-    let Some(first) = chars.next() else { return false };
+    let Some(first) = chars.next() else {
+        return false;
+    };
     if !(first.is_alphabetic() || first == '_' || first == '$') {
         return false;
     }
-    text.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.')
+    text.chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.')
         && !text.contains("..")
         && !text.ends_with('.')
 }
@@ -316,7 +351,9 @@ fn render_stub(binary: &str, cm: &bennu_java::prelude::ClassMembers) -> String {
     let type_name = |b: &str| b.rsplit(['/', '$']).next().unwrap_or(b).to_string();
 
     let mut s = String::new();
-    s.push_str("// Decompiled from bytecode — no source attached. Signatures only (method bodies\n");
+    s.push_str(
+        "// Decompiled from bytecode — no source attached. Signatures only (method bodies\n",
+    );
     s.push_str("// are not present in a .class file). Generated by Bennu.\n\n");
     if let Some((pkg, _)) = binary.rsplit_once('/') {
         s.push_str(&format!("package {};\n\n", pkg.replace('/', ".")));
@@ -331,12 +368,20 @@ fn render_stub(binary: &str, cm: &bennu_java::prelude::ClassMembers) -> String {
         s.push_str(&format!("<{}>", cm.type_params.join(", ")));
     }
     if !cm.flags.is_interface {
-        if let Some(sc) = cm.superclass.as_deref().filter(|sc| *sc != "java/lang/Object") {
+        if let Some(sc) = cm
+            .superclass
+            .as_deref()
+            .filter(|sc| *sc != "java/lang/Object")
+        {
             s.push_str(&format!(" extends {}", type_name(sc)));
         }
     }
     if !cm.interfaces.is_empty() {
-        let word = if cm.flags.is_interface { "extends" } else { "implements" };
+        let word = if cm.flags.is_interface {
+            "extends"
+        } else {
+            "implements"
+        };
         let list: Vec<String> = cm.interfaces.iter().map(|i| type_name(i)).collect();
         s.push_str(&format!(" {word} {}", list.join(", ")));
     }
@@ -378,7 +423,10 @@ fn render_stub(binary: &str, cm: &bennu_java::prelude::ClassMembers) -> String {
                 let (ret, name) = if is_ctor {
                     (String::new(), simple.to_string())
                 } else {
-                    (format!("{} ", render_type_ref(&m.return_type)), m.name.clone())
+                    (
+                        format!("{} ", render_type_ref(&m.return_type)),
+                        m.name.clone(),
+                    )
                 };
                 format!("{ret}{name}({}){throws}", params.join(", "))
             });
@@ -407,7 +455,11 @@ fn render_stub(binary: &str, cm: &bennu_java::prelude::ClassMembers) -> String {
 /// renders as `Simple(...)` without a return type. This is what makes the decompiled stub match
 /// IntelliJ's `<X extends Throwable> T orElseThrow(Supplier<? extends X> arg0) throws X` instead of the
 /// erased `T orElseThrow(Supplier<X> arg0) throws Throwable`.
-fn generic_method_core(raw_signature: &str, name: &str, ctor_simple: Option<&str>) -> Option<String> {
+fn generic_method_core(
+    raw_signature: &str,
+    name: &str,
+    ctor_simple: Option<&str>,
+) -> Option<String> {
     let ms = bennu_classpath::prelude::parse_method_signature(raw_signature).ok()?;
     let type_params = if ms.type_params.is_empty() {
         String::new()
@@ -415,8 +467,12 @@ fn generic_method_core(raw_signature: &str, name: &str, ctor_simple: Option<&str
         let ps: Vec<String> = ms.type_params.iter().map(render_sig_type_param).collect();
         format!("<{}> ", ps.join(", "))
     };
-    let params: Vec<String> =
-        ms.params.iter().enumerate().map(|(i, p)| format!("{} arg{i}", render_sig_type(p))).collect();
+    let params: Vec<String> = ms
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| format!("{} arg{i}", render_sig_type(p)))
+        .collect();
     let throws = if ms.throws.is_empty() {
         String::new()
     } else {
@@ -616,7 +672,10 @@ impl NativeJavaProvider {
     /// (JDK + optional dependency) member index — the Phase-1 completion path. The class-name index
     /// (for "Import class") is empty here; [`for_project`](Self::for_project) populates it.
     pub fn with_resolver(resolver: IndexResolver<ClasspathIndex>) -> Self {
-        Self { resolver: Some(Arc::new(resolver)), ..Default::default() }
+        Self {
+            resolver: Some(Arc::new(resolver)),
+            ..Default::default()
+        }
     }
 
     /// Candidate importable FQNs (dotted, sorted) for a simple type name — the "Import class"
@@ -630,7 +689,9 @@ impl NativeJavaProvider {
     /// package when a simple name collides across packages. `false` for the pre-index provider.
     pub fn is_project_type(&self, binary: &str) -> bool {
         use bennu_java::prelude::TypeResolver; // brings `is_project_type` into scope
-        self.resolver.as_ref().is_some_and(|r| r.is_project_type(binary))
+        self.resolver
+            .as_ref()
+            .is_some_and(|r| r.is_project_type(binary))
     }
 
     /// Type-name completion candidates at `offset` in `text`: distinct simple type names from the
@@ -745,7 +806,12 @@ impl NativeJavaProvider {
             Arc::new(r)
         });
 
-        Ok(Self { resolver: Some(Arc::new(resolver)), walk_resolver: walk, class_names, jdk_sources })
+        Ok(Self {
+            resolver: Some(Arc::new(resolver)),
+            walk_resolver: walk,
+            class_names,
+            jdk_sources,
+        })
     }
 
     /// Persist the classpath member index's memos now (best-effort; no-op for the empty provider or
@@ -781,7 +847,9 @@ impl NativeJavaProvider {
     /// lambdas, anonymous classes), when the JDK ships sources and holds this type. `None` on a
     /// bare-JRE install or a non-JDK type — the be then tries dependency sources, then a stub.
     pub fn jdk_source_text(&self, binary: &str) -> Option<String> {
-        self.jdk_sources.as_ref().and_then(|z| z.source_text(binary))
+        self.jdk_sources
+            .as_ref()
+            .and_then(|z| z.source_text(binary))
     }
 
     /// A signatures-only **decompiled-from-bytecode stub** for `binary` — the fallback when no real
@@ -800,7 +868,10 @@ impl NativeJavaProvider {
     /// The raw answer, deliberately: callers that want a *rendering* of it have one
     /// ([`stub_for`](Self::stub_for)), and callers that want to walk it — "what is inside this
     /// DTO" — need the structure rather than a page of Java to parse back apart.
-    pub fn members_of(&self, binary: &str) -> Option<std::sync::Arc<bennu_java::prelude::ClassMembers>> {
+    pub fn members_of(
+        &self,
+        binary: &str,
+    ) -> Option<std::sync::Arc<bennu_java::prelude::ClassMembers>> {
         use bennu_java::prelude::TypeResolver;
         self.resolver.as_deref()?.members_of(binary)
     }
@@ -823,7 +894,9 @@ impl NativeJavaProvider {
     pub fn ast_of(&self, source: &str) -> bennu_java::prelude::AstNode {
         bennu_java::prelude::lower_ast(
             source,
-            self.resolver.as_ref().map(|r| r.as_ref() as &dyn bennu_java::prelude::TypeResolver),
+            self.resolver
+                .as_ref()
+                .map(|r| r.as_ref() as &dyn bennu_java::prelude::TypeResolver),
         )
     }
 
@@ -876,7 +949,9 @@ impl NativeJavaProvider {
 
         let normalise = |n: &str| n.replace('.', "/");
         let wanted = normalise(wanted);
-        let Some(resolver) = self.resolver.as_deref() else { return false };
+        let Some(resolver) = self.resolver.as_deref() else {
+            return false;
+        };
 
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut queue = vec![(normalise(candidate), 0usize)];
@@ -887,7 +962,9 @@ impl NativeJavaProvider {
             if binary == wanted {
                 return true;
             }
-            let Some(cm) = resolver.members_of(&binary) else { continue };
+            let Some(cm) = resolver.members_of(&binary) else {
+                continue;
+            };
             if let Some(sup) = &cm.superclass {
                 queue.push((sup.clone(), depth + 1));
             }
@@ -902,7 +979,9 @@ impl NativeJavaProvider {
     /// serving code the user wrote.
     pub fn owns_type(&self, binary: &str) -> bool {
         use bennu_java::prelude::TypeResolver;
-        self.resolver.as_ref().is_some_and(|r| r.is_project_type(binary))
+        self.resolver
+            .as_ref()
+            .is_some_and(|r| r.is_project_type(binary))
     }
 
     /// This provider's fully-resolving (project + JDK + dependency) resolver, type-erased and
@@ -914,7 +993,9 @@ impl NativeJavaProvider {
     /// JDK those `x.foo()` edges are never recorded and a rename silently misses them. Shared
     /// rather than rebuilt: one classpath index, one warmed memo, one set of decoded classes for
     /// both completion and find-usages/rename.
-    pub fn shared_resolver(&self) -> Option<Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>> {
+    pub fn shared_resolver(
+        &self,
+    ) -> Option<Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>> {
         self.resolver
             .as_ref()
             .map(|r| Arc::clone(r) as Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>)
@@ -929,7 +1010,9 @@ impl NativeJavaProvider {
     /// large project's index crawl with every core busy.
     ///
     /// `None` before a project index exists, and then the caller falls back to project-only.
-    pub fn walk_resolver(&self) -> Option<Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>> {
+    pub fn walk_resolver(
+        &self,
+    ) -> Option<Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>> {
         self.walk_resolver
             .as_ref()
             .map(|r| Arc::clone(r) as Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>)
@@ -943,11 +1026,11 @@ impl NativeJavaProvider {
     /// isn't on a resolvable navigable anchor (e.g. a bare same-class call, a local — the be handles
     /// those, or they stay in-file). Works on any `.java` text (project or library).
     pub fn library_target_at(&self, source: &str, offset: usize) -> Option<LibraryTarget> {
-        let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-        let tree = parser.parse(source, None)?;
+        let tree = bennu_java::prelude::parse_java(source)?;
         let bytes = source.as_bytes();
-        let node = tree.root_node().named_descendant_for_byte_range(offset, offset)?;
+        let node = tree
+            .root_node()
+            .named_descendant_for_byte_range(offset, offset)?;
         if !matches!(node.kind(), "identifier" | "type_identifier") {
             return None;
         }
@@ -956,9 +1039,12 @@ impl NativeJavaProvider {
         // The binary name of a member-access RECEIVER: infer its value type, else (a static access
         // like `Foo.bar()`) resolve the receiver as a type name.
         let receiver_binary = |obj: tree_sitter::Node| -> Option<String> {
-            self.infer_type_binary(source, obj.start_byte(), obj.end_byte()).or_else(|| {
-                obj.utf8_text(bytes).ok().and_then(|t| self.library_binary(source, t))
-            })
+            self.infer_type_binary(source, obj.start_byte(), obj.end_byte())
+                .or_else(|| {
+                    obj.utf8_text(bytes)
+                        .ok()
+                        .and_then(|t| self.library_binary(source, t))
+                })
         };
 
         if let Some(p) = node.parent() {
@@ -969,7 +1055,10 @@ impl NativeJavaProvider {
                     let binary = receiver_binary(obj)?;
                     return Some(LibraryTarget {
                         binary,
-                        member: Some(LibraryMember { name: text.to_string(), is_field: false }),
+                        member: Some(LibraryMember {
+                            name: text.to_string(),
+                            is_field: false,
+                        }),
                     });
                 }
                 // `recv.field` — caret on the field name.
@@ -978,7 +1067,10 @@ impl NativeJavaProvider {
                     let binary = receiver_binary(obj)?;
                     return Some(LibraryTarget {
                         binary,
-                        member: Some(LibraryMember { name: text.to_string(), is_field: true }),
+                        member: Some(LibraryMember {
+                            name: text.to_string(),
+                            is_field: true,
+                        }),
                     });
                 }
                 _ => {}
@@ -987,7 +1079,10 @@ impl NativeJavaProvider {
 
         // Otherwise a TYPE reference (a `type_identifier`, or a bare name used as a type / scope).
         let binary = self.library_binary(source, text)?;
-        Some(LibraryTarget { binary, member: None })
+        Some(LibraryTarget {
+            binary,
+            member: None,
+        })
     }
 
     /// Validate a Java `source` (AST checks always; the resolver-backed unknown-member check when a
@@ -1000,7 +1095,9 @@ impl NativeJavaProvider {
         jdk_available: bool,
     ) -> Vec<Diagnostic> {
         match self.resolver.as_deref() {
-            Some(resolver) => bennu_check::prelude::check_file_resolved(source, ctx, resolver, jdk_available),
+            Some(resolver) => {
+                bennu_check::prelude::check_file_resolved(source, ctx, resolver, jdk_available)
+            }
             None => bennu_check::prelude::check_file(source, ctx),
         }
     }
@@ -1049,13 +1146,13 @@ impl NativeJavaProvider {
         use bennu_java::prelude::infer_expression_type;
         let resolver = self.resolver.as_deref()?;
 
-        let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-        let tree = parser.parse(source, None)?;
+        let tree = bennu_java::prelude::parse_java(source)?;
         let bytes = source.as_bytes();
 
         // The identifier leaf under the caret.
-        let node = tree.root_node().named_descendant_for_byte_range(offset, offset)?;
+        let node = tree
+            .root_node()
+            .named_descendant_for_byte_range(offset, offset)?;
         if node.kind() != "identifier" {
             return None;
         }
@@ -1064,9 +1161,9 @@ impl NativeJavaProvider {
         // The declaration forms whose binding the ordinary inference can't see from the name
         // itself, then the ordinary path — which covers locals (`var` included), parameters,
         // `catch` and try-with-resources, at their declaration AND at every use.
-        let ty = self
-            .declared_binding_type(source, bytes, node)
-            .or_else(|| infer_expression_type(source, node.start_byte(), node.end_byte(), resolver));
+        let ty = self.declared_binding_type(source, bytes, node).or_else(|| {
+            infer_expression_type(source, node.start_byte(), node.end_byte(), resolver)
+        });
 
         let Some(ty) = ty else {
             // Nothing resolved. Returning `None` here — which is what this used to do — makes
@@ -1111,8 +1208,12 @@ impl NativeJavaProvider {
                 let written = parent.child_by_field_name("type")?.utf8_text(bytes).ok()?;
                 if written == "var" || written == "val" {
                     let value = parent.child_by_field_name("value")?;
-                    let it =
-                        infer_expression_type(source, value.start_byte(), value.end_byte(), resolver)?;
+                    let it = infer_expression_type(
+                        source,
+                        value.start_byte(),
+                        value.end_byte(),
+                        resolver,
+                    )?;
                     // `List<Foo>` → `Foo`. A raw or multi-argument iterable says nothing about the
                     // element, and a guess here would be shown to the user as fact.
                     (it.type_args.len() == 1).then(|| it.type_args[0].clone())
@@ -1144,7 +1245,10 @@ impl NativeJavaProvider {
             let imports = bennu_java::prelude::extract_symbols(source).imports;
             resolver.resolve_simple_name(base, &imports)?
         };
-        Some(TypeRef { binary_name: binary, type_args: Vec::new() })
+        Some(TypeRef {
+            binary_name: binary,
+            type_args: Vec::new(),
+        })
     }
 
     /// `(dotted FQCN, what the type IS)` for the hover's meta line. A primitive or a type variable
@@ -1173,7 +1277,10 @@ impl NativeJavaProvider {
                 }
             })
             .unwrap_or("variable");
-        (Some(ty.binary_name.replace('/', ".").replace('$', ".")), kind.to_string())
+        (
+            Some(ty.binary_name.replace('/', ".").replace('$', ".")),
+            kind.to_string(),
+        )
     }
 
     /// Validate `source` while RECORDING the project types the validation reads — the fingerprint
@@ -1432,22 +1539,33 @@ mod local_hover_tests {
     /// Parse `src` and return the identifier node at the first occurrence of `needle`.
     fn ident_at(src: &str, needle: &str) -> (tree_sitter::Tree, usize) {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_java::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_java::LANGUAGE.into())
+            .unwrap();
         let tree = parser.parse(src, None).unwrap();
         (tree, src.find(needle).unwrap())
     }
 
     fn declaration(src: &str, needle: &str, name: &str) -> Option<(String, Option<String>)> {
         let (tree, at) = ident_at(src, needle);
-        let node = tree.root_node().named_descendant_for_byte_range(at, at).unwrap();
+        let node = tree
+            .root_node()
+            .named_descendant_for_byte_range(at, at)
+            .unwrap();
         let (written, init) = local_declaration_of(node, src.as_bytes(), name)?;
-        Some((written, init.map(|n| n.utf8_text(src.as_bytes()).unwrap().to_string())))
+        Some((
+            written,
+            init.map(|n| n.utf8_text(src.as_bytes()).unwrap().to_string()),
+        ))
     }
 
     /// The initializer of `name`, rendered as the shape the hover card shows.
     fn shape(src: &str, needle: &str, name: &str) -> String {
         let (tree, at) = ident_at(src, needle);
-        let node = tree.root_node().named_descendant_for_byte_range(at, at).unwrap();
+        let node = tree
+            .root_node()
+            .named_descendant_for_byte_range(at, at)
+            .unwrap();
         let (_, init) = local_declaration_of(node, src.as_bytes(), name).expect("declared");
         super::summarize_expr(init.expect("has an initializer"), src.as_bytes())
     }
@@ -1455,7 +1573,8 @@ mod local_hover_tests {
     #[test]
     fn a_lombok_val_is_found_from_its_own_name() {
         let src = "class C { void m() { val properties = Retriever.properties(svc); } }";
-        let (written, init) = declaration(src, "properties =", "properties").expect("declared here");
+        let (written, init) =
+            declaration(src, "properties =", "properties").expect("declared here");
         assert_eq!(written, "val");
         assert_eq!(init.as_deref(), Some("Retriever.properties(svc)"));
     }
@@ -1479,14 +1598,20 @@ mod local_hover_tests {
     #[test]
     fn a_name_that_is_not_a_local_yields_nothing() {
         let src = "class C { int field; void m() { use(field); } }";
-        assert!(declaration(src, "field);", "field").is_none(), "a field is not this function's business");
+        assert!(
+            declaration(src, "field);", "field").is_none(),
+            "a field is not this function's business"
+        );
     }
 
     #[test]
     fn the_card_says_what_is_certain_and_admits_the_rest() {
         let src = "class C { void m() { val properties = Retriever.properties(svc); } }";
         let (tree, at) = ident_at(src, "properties =");
-        let node = tree.root_node().named_descendant_for_byte_range(at, at).unwrap();
+        let node = tree
+            .root_node()
+            .named_descendant_for_byte_range(at, at)
+            .unwrap();
         let info = unresolved_local_hover(src.as_bytes(), node, "properties").expect("a card");
         assert_eq!(info.signature, "val properties");
         assert_eq!(info.kind, "variable");
@@ -1509,7 +1634,10 @@ mod local_hover_tests {
                        ).map(it -> Pair.of(it.getId(), factory.builder(it).get()))\n\
                         .orElseGet(() -> create(root));\n\
                    } }";
-        assert_eq!(shape(src, "pair =", "pair"), "service.search(…).map(…).orElseGet(…)");
+        assert_eq!(
+            shape(src, "pair =", "pair"),
+            "service.search(…).map(…).orElseGet(…)"
+        );
     }
 
     /// A chain that stands on something other than a name still reads, and a chain longer than the
@@ -1521,11 +1649,16 @@ mod local_hover_tests {
 
         let long = format!(
             "class C {{ void m() {{ val y = seed{}.last(); }} }}",
-            (0..30).map(|i| format!(".step{i}(arg)")).collect::<String>()
+            (0..30)
+                .map(|i| format!(".step{i}(arg)"))
+                .collect::<String>()
         );
         let cut = shape(&long, "y =", "y");
         assert!(cut.starts_with('…'), "the head is what was dropped: {cut}");
-        assert!(cut.ends_with(".last()"), "the call that decides the type survived: {cut}");
+        assert!(
+            cut.ends_with(".last()"),
+            "the call that decides the type survived: {cut}"
+        );
     }
 
     #[test]
@@ -1547,10 +1680,26 @@ mod tests {
     /// question. Its job is to say no to everything that is not a name.
     #[test]
     fn only_a_bare_or_dotted_identifier_reads_as_a_type_name() {
-        for yes in ["Files", "java.nio.file.Files", "_x", "Outer.Inner", "Map$Entry"] {
+        for yes in [
+            "Files",
+            "java.nio.file.Files",
+            "_x",
+            "Outer.Inner",
+            "Map$Entry",
+        ] {
             assert!(reads_as_type_name(yes), "{yes}");
         }
-        for no in ["", "\"hello\"", "a.b()", "1", "a + b", "a..b", "a.", "new Foo()", "x[0]"] {
+        for no in [
+            "",
+            "\"hello\"",
+            "a.b()",
+            "1",
+            "a + b",
+            "a..b",
+            "a.",
+            "new Foo()",
+            "x[0]",
+        ] {
             assert!(!reads_as_type_name(no), "{no}");
         }
     }
@@ -1568,7 +1717,8 @@ mod tests {
                     vec![TypeRef::simple("int")],
                 )
                 .vis(Visibility::Public),
-                Member::method("<init>", TypeRef::simple("void"), Vec::new()).vis(Visibility::Public),
+                Member::method("<init>", TypeRef::simple("void"), Vec::new())
+                    .vis(Visibility::Public),
             ],
             fields: vec![Member::field("MAX", TypeRef::simple("int"))
                 .vis(Visibility::Public)
@@ -1576,14 +1726,23 @@ mod tests {
             flags: ClassFlags::default(),
         };
         let s = render_stub("com/acme/Registry", &cm);
-        assert!(s.contains("Decompiled from bytecode"), "header warning: {s}");
+        assert!(
+            s.contains("Decompiled from bytecode"),
+            "header warning: {s}"
+        );
         assert!(s.contains("package com.acme;"), "package: {s}");
         assert!(s.contains("public class Registry"), "class decl: {s}");
         assert!(s.contains("implements Iterable"), "interfaces: {s}");
         assert!(!s.contains("extends Object"), "Object super is elided: {s}");
         assert!(s.contains("public static int MAX;"), "field: {s}");
-        assert!(s.contains("public Item get(int arg0)"), "method w/ synthesized arg name: {s}");
-        assert!(s.contains("public Registry("), "constructor rendered by simple name: {s}");
+        assert!(
+            s.contains("public Item get(int arg0)"),
+            "method w/ synthesized arg name: {s}"
+        );
+        assert!(
+            s.contains("public Registry("),
+            "constructor rendered by simple name: {s}"
+        );
     }
 
     #[test]
@@ -1601,7 +1760,10 @@ mod tests {
             flags: ClassFlags::default(),
         };
         let s = render_stub("com/acme/Reader", &cm);
-        assert!(s.contains("int read() throws IOException"), "throws clause rendered: {s}");
+        assert!(
+            s.contains("int read() throws IOException"),
+            "throws clause rendered: {s}"
+        );
     }
 
     #[test]
@@ -1631,7 +1793,10 @@ mod tests {
             s.contains("<X extends Throwable> T orElseThrow(Supplier<? extends X> arg0) throws X"),
             "generic signature rendered like IntelliJ: {s}"
         );
-        assert!(!s.contains("throws Throwable"), "erased Throwable must not appear: {s}");
+        assert!(
+            !s.contains("throws Throwable"),
+            "erased Throwable must not appear: {s}"
+        );
     }
 
     #[test]
@@ -1644,12 +1809,21 @@ mod tests {
                 Member::method("run", TypeRef::simple("void"), Vec::new()).vis(Visibility::Public)
             ],
             fields: Vec::new(),
-            flags: ClassFlags { is_interface: true, ..Default::default() },
+            flags: ClassFlags {
+                is_interface: true,
+                ..Default::default()
+            },
         };
         let s = render_stub("com/acme/Task", &cm);
         assert!(s.contains("public interface Task"), "{s}");
-        assert!(s.contains("void run();"), "interface method has no body: {s}");
-        assert!(!s.contains("throw new RuntimeException"), "no placeholder body in an interface: {s}");
+        assert!(
+            s.contains("void run();"),
+            "interface method has no body: {s}"
+        );
+        assert!(
+            !s.contains("throw new RuntimeException"),
+            "no placeholder body in an interface: {s}"
+        );
     }
 
     // ── Type-name completion helpers ─────────────────────────────────────────────
@@ -1676,7 +1850,10 @@ mod tests {
 
     #[test]
     fn type_detail_prefers_java_and_counts_extras() {
-        assert_eq!(super::type_detail(&["java.util.List".to_string()]), Some("java.util.List".to_string()));
+        assert_eq!(
+            super::type_detail(&["java.util.List".to_string()]),
+            Some("java.util.List".to_string())
+        );
         // Multiple packages: prefer java.*, note the rest.
         let d = super::type_detail(&["com.acme.List".to_string(), "java.util.List".to_string()]);
         assert_eq!(d, Some("java.util.List (+1 more)".to_string()));

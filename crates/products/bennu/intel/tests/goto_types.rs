@@ -14,7 +14,10 @@ use common::*;
 #[test]
 fn type_as_field_type() {
     let p = Project::new(&[
-        ("Widget.java", "package app;\npublic class Widget { public int id; }\n"),
+        (
+            "Widget.java",
+            "package app;\npublic class Widget { public int id; }\n",
+        ),
         (
             "Holder.java",
             "package app;\n\
@@ -33,7 +36,10 @@ fn type_as_field_type() {
 #[test]
 fn type_as_local_variable_type() {
     let p = Project::new(&[
-        ("Widget.java", "package app;\npublic class Widget { public int id; }\n"),
+        (
+            "Widget.java",
+            "package app;\npublic class Widget { public int id; }\n",
+        ),
         (
             "Use.java",
             "package app;\n\
@@ -54,7 +60,10 @@ fn type_as_local_variable_type() {
 #[test]
 fn type_as_parameter_type() {
     let p = Project::new(&[
-        ("Widget.java", "package app;\npublic class Widget { public int id; }\n"),
+        (
+            "Widget.java",
+            "package app;\npublic class Widget { public int id; }\n",
+        ),
         (
             "Use.java",
             "package app;\n\
@@ -73,7 +82,10 @@ fn type_as_parameter_type() {
 #[test]
 fn type_as_return_type() {
     let p = Project::new(&[
-        ("Widget.java", "package app;\npublic class Widget { public int id; }\n"),
+        (
+            "Widget.java",
+            "package app;\npublic class Widget { public int id; }\n",
+        ),
         (
             "Factory.java",
             "package app;\n\
@@ -94,8 +106,14 @@ fn type_as_return_type() {
 #[test]
 fn type_in_extends_clause() {
     let p = Project::new(&[
-        ("Widget.java", "package app;\npublic class Widget { public int id; }\n"),
-        ("Sub.java", "package app;\npublic class Sub extends Widget { }\n"),
+        (
+            "Widget.java",
+            "package app;\npublic class Widget { public int id; }\n",
+        ),
+        (
+            "Sub.java",
+            "package app;\npublic class Sub extends Widget { }\n",
+        ),
     ]);
     let s = p.source("Sub.java").to_string();
     let off = at(&s, "extends Widget") + "extends ".len();
@@ -107,7 +125,10 @@ fn type_in_extends_clause() {
 #[test]
 fn type_in_implements_clause() {
     let p = Project::new(&[
-        ("Shape.java", "package app;\npublic interface Shape { int sides(); }\n"),
+        (
+            "Shape.java",
+            "package app;\npublic interface Shape { int sides(); }\n",
+        ),
         (
             "Circle.java",
             "package app;\n\
@@ -128,7 +149,10 @@ fn type_in_implements_clause() {
 #[test]
 fn type_in_new_expression() {
     let p = Project::new(&[
-        ("Widget.java", "package app;\npublic class Widget { public int id; }\n"),
+        (
+            "Widget.java",
+            "package app;\npublic class Widget { public int id; }\n",
+        ),
         (
             "Use.java",
             "package app;\n\
@@ -147,7 +171,10 @@ fn type_in_new_expression() {
 #[test]
 fn type_in_cast_expression() {
     let p = Project::new(&[
-        ("Widget.java", "package app;\npublic class Widget { public int id; }\n"),
+        (
+            "Widget.java",
+            "package app;\npublic class Widget { public int id; }\n",
+        ),
         (
             "Use.java",
             "package app;\n\
@@ -167,7 +194,10 @@ fn type_in_cast_expression() {
 #[test]
 fn type_as_array_element_type() {
     let p = Project::new(&[
-        ("Widget.java", "package app;\npublic class Widget { public int id; }\n"),
+        (
+            "Widget.java",
+            "package app;\npublic class Widget { public int id; }\n",
+        ),
         (
             "Use.java",
             "package app;\n\
@@ -343,7 +373,10 @@ fn nested_type_reference() {
     // Caret on `Inner` in the qualified nested reference.
     let off = at(&s, "Outer.Inner ref") + "Outer.".len();
     let d = p.goto("Use.java", off).expect("goto nested-type");
-    assert_eq!(d.file, "Outer.java", "nested type resolves into the enclosing type's file");
+    assert_eq!(
+        d.file, "Outer.java",
+        "nested type resolves into the enclosing type's file"
+    );
     // The binary name of a nested type is `app.Outer.Inner`; assert the robust file invariant and
     // that a label is present (exact nested-label formatting is not guaranteed by the rules).
     assert!(p.goto_label("Use.java", off).is_some());
@@ -392,7 +425,10 @@ fn caret_on_jdk_type_returns_none() {
     )]);
     let s = p.source("Use.java").to_string();
     let off = at(&s, "String s");
-    assert!(p.goto("Use.java", off).is_none(), "a JDK type has no project decl to navigate to");
+    assert!(
+        p.goto("Use.java", off).is_none(),
+        "a JDK type has no project decl to navigate to"
+    );
 }
 
 #[test]
@@ -415,7 +451,10 @@ fn type_declaration_self_reference() {
 #[test]
 fn interface_type_uses_class_prefix_label() {
     let p = Project::new(&[
-        ("Shape.java", "package app;\npublic interface Shape { int sides(); }\n"),
+        (
+            "Shape.java",
+            "package app;\npublic interface Shape { int sides(); }\n",
+        ),
         (
             "Use.java",
             "package app;\n\
@@ -428,18 +467,21 @@ fn interface_type_uses_class_prefix_label() {
     let off = at(&s, "Shape s");
     let d = p.goto("Use.java", off).expect("goto interface-type");
     assert_eq!(d.file, "Shape.java");
-    assert_eq!(d.label, "class app.Shape", "interfaces use the 'class' label prefix too");
+    assert_eq!(
+        d.label, "class app.Shape",
+        "interfaces use the 'class' label prefix too"
+    );
 }
 
 #[test]
 fn find_usages_of_type_across_files() {
     // A type used in two consumers → find-usages from its declaration counts both use sites.
     let p = Project::new(&[
-        ("Widget.java", "package app;\npublic class Widget { public int id; }\n"),
         (
-            "A.java",
-            "package app;\npublic class A { Widget w; }\n",
+            "Widget.java",
+            "package app;\npublic class Widget { public int id; }\n",
         ),
+        ("A.java", "package app;\npublic class A { Widget w; }\n"),
         (
             "B.java",
             "package app;\npublic class B { Widget make() { return new Widget(); } }\n",
@@ -449,5 +491,8 @@ fn find_usages_of_type_across_files() {
     // Caret on the Widget declaration.
     let off = at(&s, "class Widget") + "class ".len();
     let n = p.usage_count("Widget.java", off);
-    assert!(n >= 1, "Widget is referenced from A and B; use-site count should be positive (got {n})");
+    assert!(
+        n >= 1,
+        "Widget is referenced from A and B; use-site count should be positive (got {n})"
+    );
 }

@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use bennu_index::prelude::{IndexBuilder, IndexRecord, Source, Symbol, SymbolKind};
 use bennu_java::prelude::{
-    extract_symbols, ClassFlags, ClassMembers, FileSymbols, Import, Member, MemberKind, MethodDecl,
+    extract_symbols, ClassFlags, ClassMembers, FileSymbols, Member, MemberKind, MethodDecl,
     TypeDecl, TypeKind,
 };
 use bennu_project::prelude::{decode_for_index, source_encoding_label, EncodingPlan, IndexDecode};
@@ -33,10 +33,7 @@ use crate::typemap::type_text_to_ref;
 /// pom's `sourceEncoding`, else UTF-8). When the caller has already read the sources (the be
 /// layer reads them once and shares the text with the rename engine — no second disk pass),
 /// prefer [`build_project_index_from_sources`].
-pub fn build_project_index(
-    root: &Path,
-    index_dir: &Path,
-) -> (IndexBuilder, usize, usize) {
+pub fn build_project_index(root: &Path, index_dir: &Path) -> (IndexBuilder, usize, usize) {
     let plan = EncodingPlan::uniform(source_encoding_label(root, "UTF-8"));
     let ProjectSources { sources, .. } = read_java_sources(root, &plan);
     let built = build_project_index_from_sources(&sources, index_dir);
@@ -93,7 +90,8 @@ pub fn build_project_index_from_sources(
     // so it can't answer "is `com/x/Foo` a project type?" when several packages declare a `Foo`; the
     // set can, which is what lets a wildcard import (`import com.x.*;`) resolve to the right package.
     let mut project_types: BTreeMap<String, String> = BTreeMap::new();
-    let mut project_binaries: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut project_binaries: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
     for (_p, fs) in &parsed {
         for td in &fs.types {
             let binary = td.fqn.replace('.', "/");
@@ -136,7 +134,13 @@ pub fn build_project_index_from_sources(
         builder.set_file(path.clone(), records);
     }
 
-    ProjectBuild { builder, type_count, member_count, classes, type_map: project_types }
+    ProjectBuild {
+        builder,
+        type_count,
+        member_count,
+        classes,
+        type_map: project_types,
+    }
 }
 
 /// A source file whose bytes weren't valid in the project's declared (Maven) encoding — it
@@ -176,8 +180,9 @@ pub fn read_java_sources(root: &Path, encoding: &EncodingPlan) -> ProjectSources
 /// Each is decoded via [`read_source_for_index`] under `encoding`; non-compliant files are
 /// collected, IO-unreadable files dropped (and logged). (No rayon: not a workspace dep.)
 fn read_sources_parallel(paths: &[PathBuf], encoding: &EncodingPlan) -> ProjectSources {
-    let decoded =
-        parallel_map(paths, |p| read_source_for_index(p, encoding).map(|d| (p.clone(), d)));
+    let decoded = parallel_map(paths, |p| {
+        read_source_for_index(p, encoding).map(|d| (p.clone(), d))
+    });
     let mut sources = Vec::with_capacity(decoded.len());
     let mut non_compliant = Vec::new();
     for (p, d) in decoded.into_iter().flatten() {
@@ -190,7 +195,10 @@ fn read_sources_parallel(paths: &[PathBuf], encoding: &EncodingPlan) -> ProjectS
         }
         sources.push((p, d.text));
     }
-    ProjectSources { sources, non_compliant }
+    ProjectSources {
+        sources,
+        non_compliant,
+    }
 }
 
 /// Read a `.java` file for INDEXING, decoded in the project's declared `encoding_label`.
@@ -215,7 +223,10 @@ pub fn read_source_for_index(path: &Path, encoding: &EncodingPlan) -> Option<Ind
             Some(d)
         }
         Err(e) => {
-            eprintln!("bennu-intel: skipping unreadable source {}: {e}", path.display());
+            eprintln!(
+                "bennu-intel: skipping unreadable source {}: {e}",
+                path.display()
+            );
             None
         }
     }
@@ -285,7 +296,9 @@ where
     F: Fn(&T) -> R + Sync,
 {
     let n = items.len();
-    let cores = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1);
+    let cores = std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(1);
     let workers = if max_workers == 0 {
         cores.saturating_sub(2).max(1)
     } else {
@@ -325,7 +338,9 @@ where
         }
     });
 
-    out.into_iter().map(|o| o.expect("every slot filled")).collect()
+    out.into_iter()
+        .map(|o| o.expect("every slot filled"))
+        .collect()
 }
 
 /// Find the 1-based line of a type declaration by locating the first
@@ -351,10 +366,7 @@ fn line_declares_type(line: &str, name: &str) -> bool {
                 || !rest.as_bytes()[pos - 1].is_ascii_alphanumeric()
                     && rest.as_bytes()[pos - 1] != b'_';
             let name_after = after.trim_start();
-            if before_ok
-                && after.len() != name_after.len()
-                && name_after.starts_with(name)
-            {
+            if before_ok && after.len() != name_after.len() && name_after.starts_with(name) {
                 let tail = &name_after[name.len()..];
                 let bounded = tail
                     .chars()
@@ -403,6 +415,15 @@ fn file_records(
     let mut type_count = 0usize;
     let mut member_count = 0usize;
     let file_str = path.to_string_lossy().into_owned();
+    // What binds a simple type name in THIS file — the package included, which is what makes the
+    // same-package rule work for a nested type (see `FileNames`).
+    let names = crate::typemap::FileNames {
+        package: fs.package.as_deref().unwrap_or(""),
+        imports: &fs.imports,
+        project_types,
+        is_project,
+        file_types: &fs.types,
+    };
 
     for td in &fs.types {
         let binary = td.fqn.replace('.', "/");
@@ -410,7 +431,7 @@ fn file_records(
         next_id += 1;
         type_count += 1;
 
-        let members = build_class_members(td, &fs.imports, project_types, is_project);
+        let members = build_class_members(td, &names);
         let members_json = serde_json::to_string(&members).unwrap_or_default();
 
         let class_sym = Symbol {
@@ -434,8 +455,16 @@ fn file_records(
 
         for m in &td.methods {
             records.push(IndexRecord::new(
-                member_symbol(next_id, class_id, &binary, &m.name, SymbolKind::Method,
-                    &render_method(m), &file_str, m.is_static),
+                member_symbol(
+                    next_id,
+                    class_id,
+                    &binary,
+                    &m.name,
+                    SymbolKind::Method,
+                    &render_method(m),
+                    &file_str,
+                    m.is_static,
+                ),
                 m.name.clone(),
             ));
             next_id += 1;
@@ -443,12 +472,84 @@ fn file_records(
         }
         for f in &td.fields {
             records.push(IndexRecord::new(
-                member_symbol(next_id, class_id, &binary, &f.name, SymbolKind::Field,
-                    &format!("{} {}", f.type_text, f.name), &file_str, f.is_static),
+                member_symbol(
+                    next_id,
+                    class_id,
+                    &binary,
+                    &f.name,
+                    SymbolKind::Field,
+                    &format!("{} {}", f.type_text, f.name),
+                    &file_str,
+                    f.is_static,
+                ),
                 f.name.clone(),
             ));
             next_id += 1;
             member_count += 1;
+        }
+
+        // The nested types Lombok generates (`Fields`, `<Type>Builder`) — real types in the index,
+        // because their members carry a copy of every field NAME and a rename has to move those too.
+        //
+        // Keyed by BINARY NAME ONLY, deliberately. Every `@FieldNameConstants` class in a project
+        // generates something called `Fields`, so registering the simple name would put hundreds of
+        // types under one key and `resolve_simple_name` keeps exactly one — the collision this file
+        // already fights elsewhere. Nothing needs the simple key: these are only ever reached
+        // through their outer type (`Dto.Fields`, `Dto.builder()`), which yields the binary directly.
+        for synth in crate::lombok::synthesize_nested_types(td, &names) {
+            let synth_binary = format!("{binary}/{}", synth.name);
+            let synth_id = next_id;
+            next_id += 1;
+            type_count += 1;
+            let member_names: Vec<(String, bool)> = synth
+                .members
+                .methods
+                .iter()
+                .map(|m| (m.name.clone(), m.is_static))
+                .chain(
+                    synth
+                        .members
+                        .fields
+                        .iter()
+                        .map(|f| (f.name.clone(), f.is_static)),
+                )
+                .collect();
+            let sym = Symbol {
+                id: synth_id,
+                kind: SymbolKind::Class,
+                simple_name: synth.name.clone(),
+                fqn: synth_binary.clone(),
+                owner_id: class_id,
+                source: Source::ProjectSource,
+                signature: format!("class {}.{}", td.fqn, synth.name),
+                modifiers: String::new(),
+                loc_file: file_str.clone(),
+                loc_start: 0,
+                loc_end: 0,
+                loc_container: String::new(),
+                loc_class: String::new(),
+                members_json: serde_json::to_string(&synth.members).unwrap_or_default(),
+            };
+            records.push(IndexRecord::new(sym, synth_binary.clone()));
+            // Its members under their own names, like any other type's: this is what makes
+            // `Dto.Fields.file_name` a symbol the navigator and the reference walk can see.
+            for (name, is_static) in member_names {
+                records.push(IndexRecord::new(
+                    member_symbol(
+                        next_id,
+                        synth_id,
+                        &synth_binary,
+                        &name,
+                        SymbolKind::Field,
+                        &name,
+                        &file_str,
+                        is_static,
+                    ),
+                    name.clone(),
+                ));
+                next_id += 1;
+                member_count += 1;
+            }
         }
     }
 
@@ -457,17 +558,17 @@ fn file_records(
 
 /// Build a resolved [`ClassMembers`] (java seam shape) from a source [`TypeDecl`],
 /// resolving each written type text to a binary name via imports + project types.
-fn build_class_members(
-    td: &TypeDecl,
-    imports: &[Import],
-    project_types: &BTreeMap<String, String>,
-    is_project: &dyn Fn(&str) -> bool,
-) -> ClassMembers {
-    let superclass = td.extends.as_ref().map(|s| resolve_binary(s, imports, project_types, is_project));
+fn build_class_members(td: &TypeDecl, names: &crate::typemap::FileNames) -> ClassMembers {
+    // Every simple type name written INSIDE this type resolves against this type's scope first.
+    let owner = td.fqn.replace('.', "/");
+    let superclass = td
+        .extends
+        .as_ref()
+        .map(|s| resolve_binary(names, &owner, s));
     let interfaces = td
         .implements
         .iter()
-        .map(|i| resolve_binary(i, imports, project_types, is_project))
+        .map(|i| resolve_binary(names, &owner, i))
         .collect();
 
     let mut methods: Vec<Member> = td
@@ -476,11 +577,11 @@ fn build_class_members(
         .map(|m| Member {
             name: m.name.clone(),
             kind: MemberKind::Method,
-            return_type: type_text_to_ref(&m.return_type_text, imports, project_types, is_project),
+            return_type: type_text_to_ref(names, &owner, &m.return_type_text),
             params: m
                 .params
                 .iter()
-                .map(|p| type_text_to_ref(&p.type_text, imports, project_types, is_project))
+                .map(|p| type_text_to_ref(names, &owner, &p.type_text))
                 .collect(),
             is_static: m.is_static,
             // Carried from the source symbol model (an explicit `abstract` modifier or a bodyless
@@ -497,8 +598,9 @@ fn build_class_members(
             throws: m
                 .throws
                 .iter()
-                .map(|t| resolve_binary(t, imports, project_types, is_project))
+                .map(|t| resolve_binary(names, &owner, t))
                 .collect(),
+            annotations: m.annotations.clone(),
         })
         .collect();
 
@@ -508,7 +610,7 @@ fn build_class_members(
         .map(|f| Member {
             name: f.name.clone(),
             kind: MemberKind::Field,
-            return_type: type_text_to_ref(&f.type_text, imports, project_types, is_project),
+            return_type: type_text_to_ref(names, &owner, &f.type_text),
             params: Vec::new(),
             is_static: f.is_static,
             is_abstract: false,
@@ -517,6 +619,7 @@ fn build_class_members(
             visibility: f.visibility,
             raw_signature: format!("{} {}", f.type_text, f.name),
             throws: Vec::new(),
+            annotations: f.annotations.clone(),
         })
         .collect();
 
@@ -524,9 +627,11 @@ fn build_class_members(
     // so they resolve like real declarations. A user-declared method suppresses the synthetic one —
     // keyed by NAME AND PARAMETER COUNT, which is Lombok's own rule and the only key that works
     // when a getter and a setter share a name (`@Accessors(fluent = true)`).
-    let existing_methods: std::collections::HashSet<(String, usize)> =
-        methods.iter().map(|m| (m.name.clone(), m.params.len())).collect();
-    let synth = crate::lombok::synthesize(td, imports, project_types, &existing_methods, is_project);
+    let existing_methods: std::collections::HashSet<(String, usize)> = methods
+        .iter()
+        .map(|m| (m.name.clone(), m.params.len()))
+        .collect();
+    let synth = crate::lombok::synthesize(td, names, &existing_methods);
     methods.extend(synth.methods);
     fields.extend(synth.fields);
 
@@ -537,7 +642,7 @@ fn build_class_members(
     //
     // Without it, `MyUtils.helper()` on a `@UtilityClass` resolved to an *instance* method and was
     // reported as a non-static member referenced from a static context: correct code, flagged.
-    let utility = crate::lombok::is_utility_class(td, imports);
+    let utility = crate::lombok::is_utility_class(td, names.imports);
     if utility {
         for m in &mut methods {
             // The generated constructor is the one member that stays an instance member — a `static`
@@ -598,114 +703,16 @@ fn class_flags(td: &TypeDecl, is_utility: bool) -> ClassFlags {
 ///      it a project method's `throws Exception` stayed the raw `"Exception"`, never equal to the
 ///      resolved `java/lang/Exception` a call site sees → a false "does not permit `Exception`"). Only
 ///      a KNOWN java.lang name is mapped, so a genuine typo stays raw rather than a fake `java/lang/Typo`.
-fn resolve_binary(
-    simple: &str,
-    imports: &[Import],
-    project_types: &BTreeMap<String, String>,
-    is_project: &dyn Fn(&str) -> bool,
-) -> String {
-    let base = simple.split('<').next().unwrap_or(simple).trim();
-    if base.contains('.') {
-        return base.replace('.', "/");
-    }
-    // An explicit single-type import wins over the collision-prone global project map.
-    for imp in imports {
-        if imp.simple_name() == Some(base) {
-            return imp.path.replace('.', "/");
-        }
-    }
-    // A non-static wildcard import that brings in a PROJECT type of this simple name pins its exact
-    // package — the fix for a supertype (`extends`/`implements`) or a `throws` whose simple name
-    // collides across packages (JAXB `*Type`) and would otherwise bind whichever binary the collapsed
-    // map kept, mis-walking the hierarchy (a false `@Override`-overrides-nothing on an inherited method).
-    for imp in imports {
-        if imp.star && !imp.static_ {
-            let candidate = format!("{}/{base}", imp.path.replace('.', "/"));
-            if is_project(&candidate) {
-                return candidate;
-            }
-        }
-    }
-    if let Some(b) = project_types.get(base) {
-        return b.clone();
-    }
-    // `java.lang` is implicitly imported: a bare name that's a known java.lang type resolves there.
-    if is_java_lang_implicit(base) {
-        return format!("java/lang/{base}");
-    }
-    base.to_string()
-}
-
-/// Whether `name` is a public top-level `java.lang` type — implicitly imported (JLS §7.3), so a bare
-/// use of it in a project's `extends` / `implements` / `throws` resolves to `java/lang/<name>`. Kept
-/// to the ubiquitous exception hierarchy + the common interfaces/classes a project subclasses,
-/// implements, or throws (the cases `resolve_binary` feeds). Deliberately a curated set, not every
-/// java.lang class: a name NOT here stays raw (unresolvable) rather than risk mapping a typo /
-/// same-package type to a fake `java/lang/…` binary. The resolver-backed checks additionally SKIP on
-/// any still-unresolved throws entry, so a name this set happens to miss can never cause a false
-/// positive — it only means that one check stays silent for it.
-fn is_java_lang_implicit(name: &str) -> bool {
-    matches!(
-        name,
-        // Throwable roots + the exception/error hierarchy (the `throws` case).
-        "Throwable"
-            | "Exception"
-            | "Error"
-            | "RuntimeException"
-            | "InterruptedException"
-            | "ClassNotFoundException"
-            | "CloneNotSupportedException"
-            | "NoSuchMethodException"
-            | "NoSuchFieldException"
-            | "IllegalAccessException"
-            | "InstantiationException"
-            | "ReflectiveOperationException"
-            | "NullPointerException"
-            | "IllegalArgumentException"
-            | "IllegalStateException"
-            | "IndexOutOfBoundsException"
-            | "ArrayIndexOutOfBoundsException"
-            | "StringIndexOutOfBoundsException"
-            | "ClassCastException"
-            | "NumberFormatException"
-            | "UnsupportedOperationException"
-            | "ArithmeticException"
-            | "NegativeArraySizeException"
-            | "ArrayStoreException"
-            | "SecurityException"
-            | "IllegalMonitorStateException"
-            | "IllegalThreadStateException"
-            | "EnumConstantNotPresentException"
-            | "TypeNotPresentException"
-            | "AssertionError"
-            | "StackOverflowError"
-            | "OutOfMemoryError"
-            | "NoClassDefFoundError"
-            | "ExceptionInInitializerError"
-            | "VirtualMachineError"
-            | "LinkageError"
-            // Common interfaces/classes a project extends / implements.
-            | "Object"
-            | "Runnable"
-            | "Comparable"
-            | "Iterable"
-            | "Cloneable"
-            | "CharSequence"
-            | "Appendable"
-            | "AutoCloseable"
-            | "Readable"
-            | "Thread"
-            | "Number"
-            | "Enum"
-            | "Record"
-            | "String"
-            | "ThreadLocal"
-    )
+fn resolve_binary(names: &crate::typemap::FileNames, owner: &str, simple: &str) -> String {
+    crate::typemap::resolve_binary_name(names, owner, simple)
 }
 
 fn render_method(m: &MethodDecl) -> String {
-    let params: Vec<String> =
-        m.params.iter().map(|p| format!("{} {}", p.type_text, p.name)).collect();
+    let params: Vec<String> = m
+        .params
+        .iter()
+        .map(|p| format!("{} {}", p.type_text, p.name))
+        .collect();
     format!("{} {}({})", m.return_type_text, m.name, params.join(", "))
 }
 
@@ -728,7 +735,11 @@ fn member_symbol(
         owner_id: owner,
         source: Source::ProjectSource,
         signature: signature.to_string(),
-        modifiers: if is_static { "static".into() } else { String::new() },
+        modifiers: if is_static {
+            "static".into()
+        } else {
+            String::new()
+        },
         loc_file: file.to_string(),
         loc_start: 0,
         loc_end: 0,
@@ -762,7 +773,10 @@ pub fn collect_java(dir: &Path, out: &mut Vec<PathBuf>) {
         Err(e) => {
             // A directory we can't read (permissions) would otherwise drop its whole
             // subtree of classes silently — log it so the gap is visible.
-            eprintln!("bennu-intel: skipping unreadable directory {}: {e}", dir.display());
+            eprintln!(
+                "bennu-intel: skipping unreadable directory {}: {e}",
+                dir.display()
+            );
             return;
         }
     };
@@ -817,6 +831,19 @@ fn collect_generated(target: &Path, out: &mut Vec<PathBuf>) {
 
 #[cfg(test)]
 mod tests {
+    /// The file-level name scope these tests resolve against: this file's own imports and types,
+    /// with nothing outside the project.
+    fn names_of(fs: &FileSymbols) -> crate::typemap::FileNames<'_> {
+        static EMPTY: std::sync::OnceLock<BTreeMap<String, String>> = std::sync::OnceLock::new();
+        crate::typemap::FileNames {
+            package: fs.package.as_deref().unwrap_or(""),
+            imports: &fs.imports,
+            project_types: EMPTY.get_or_init(BTreeMap::new),
+            is_project: &|_: &str| false,
+            file_types: &fs.types,
+        }
+    }
+
     use super::*;
 
     /// The JPA static metamodel and its neighbours live under `target/generated-sources` and
@@ -849,8 +876,14 @@ mod tests {
         assert!(names.contains("Order.java"));
         assert!(names.contains("Order_.java"), "the JPA metamodel is source");
         assert!(names.contains("OrderTest_.java"));
-        assert!(!names.contains("Stale.java"), "target/classes is output, not source");
-        assert!(!names.contains("Unpacked.java"), "somebody else's sources, unpacked");
+        assert!(
+            !names.contains("Stale.java"),
+            "target/classes is output, not source"
+        );
+        assert!(
+            !names.contains("Unpacked.java"),
+            "somebody else's sources, unpacked"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -875,7 +908,8 @@ mod tests {
         // decode recovers it and flags it non-compliant — the class stays discoverable.
         let bad = dir.join("Foo.java");
         std::fs::write(&bad, b"// caff\xE0\nclass Foo {}\n").expect("write");
-        let decoded = read_source_for_index(&bad, &EncodingPlan::uniform("UTF-8")).expect("readable");
+        let decoded =
+            read_source_for_index(&bad, &EncodingPlan::uniform("UTF-8")).expect("readable");
         assert!(decoded.non_compliant);
         assert_eq!(decl_line(&decoded.text, "Foo"), Some(2));
 
@@ -907,16 +941,19 @@ mod tests {
         // project supertypes (not only bytecode ones).
         let fs = extract_symbols("package p;\npublic interface Repo { void save(); }\n");
         let td = fs.types.iter().find(|t| t.name == "Repo").unwrap();
-        let cm = build_class_members(td, &fs.imports, &BTreeMap::new(), &|_: &str| false);
+        let cm = build_class_members(td, &names_of(&fs));
         assert!(cm.flags.is_interface, "interface flag carried");
         assert!(cm.flags.is_abstract, "interface is implicitly abstract");
         let save = cm.methods.iter().find(|m| m.name == "save").unwrap();
-        assert!(save.is_abstract, "bodyless interface method carried as abstract");
+        assert!(
+            save.is_abstract,
+            "bodyless interface method carried as abstract"
+        );
 
         // A `final` class → is_final; a plain class → no flags.
         let ff = extract_symbols("package p;\npublic final class Utils {}\n");
         let ftd = ff.types.iter().find(|t| t.name == "Utils").unwrap();
-        assert!(build_class_members(ftd, &ff.imports, &BTreeMap::new(), &|_: &str| false).flags.is_final);
+        assert!(build_class_members(ftd, &names_of(&ff)).flags.is_final);
     }
 
     #[test]
@@ -929,27 +966,46 @@ mod tests {
             "package p;\npublic class Base { public void init() throws Exception {} }\n",
         );
         let td = fs.types.iter().find(|t| t.name == "Base").unwrap();
-        let cm = build_class_members(td, &fs.imports, &BTreeMap::new(), &|_: &str| false);
+        let cm = build_class_members(td, &names_of(&fs));
         let init = cm.methods.iter().find(|m| m.name == "init").unwrap();
-        assert_eq!(init.throws, vec!["java/lang/Exception".to_string()], "{:?}", init.throws);
+        assert_eq!(
+            init.throws,
+            vec!["java/lang/Exception".to_string()],
+            "{:?}",
+            init.throws
+        );
 
         // A bare `extends RuntimeException` / `implements Runnable` resolve to their java.lang binary.
         let ex = extract_symbols("package p;\npublic class Boom extends RuntimeException {}\n");
         let etd = ex.types.iter().find(|t| t.name == "Boom").unwrap();
-        let ecm = build_class_members(etd, &ex.imports, &BTreeMap::new(), &|_: &str| false);
-        assert_eq!(ecm.superclass.as_deref(), Some("java/lang/RuntimeException"));
+        let ecm = build_class_members(etd, &names_of(&ex));
+        assert_eq!(
+            ecm.superclass.as_deref(),
+            Some("java/lang/RuntimeException")
+        );
 
-        let rn = extract_symbols("package p;\npublic class Job implements Runnable { public void run() {} }\n");
+        let rn = extract_symbols(
+            "package p;\npublic class Job implements Runnable { public void run() {} }\n",
+        );
         let rtd = rn.types.iter().find(|t| t.name == "Job").unwrap();
-        let rcm = build_class_members(rtd, &rn.imports, &BTreeMap::new(), &|_: &str| false);
-        assert!(rcm.interfaces.iter().any(|i| i == "java/lang/Runnable"), "{:?}", rcm.interfaces);
+        let rcm = build_class_members(rtd, &names_of(&rn));
+        assert!(
+            rcm.interfaces.iter().any(|i| i == "java/lang/Runnable"),
+            "{:?}",
+            rcm.interfaces
+        );
 
         // A genuinely unknown bare name is NOT coerced to a fake `java/lang/…` — it stays raw so the
         // checks treat it as unresolved (SKIP), never as a real java.lang type.
-        let tp = extract_symbols("package p;\npublic class C { public void m() throws Wibble {} }\n");
+        let tp =
+            extract_symbols("package p;\npublic class C { public void m() throws Wibble {} }\n");
         let ctd = tp.types.iter().find(|t| t.name == "C").unwrap();
-        let ccm = build_class_members(ctd, &tp.imports, &BTreeMap::new(), &|_: &str| false);
-        assert_eq!(ccm.methods[0].throws, vec!["Wibble".to_string()], "unknown stays raw");
+        let ccm = build_class_members(ctd, &names_of(&tp));
+        assert_eq!(
+            ccm.methods[0].throws,
+            vec!["Wibble".to_string()],
+            "unknown stays raw"
+        );
     }
 
     #[test]
@@ -970,13 +1026,23 @@ mod tests {
         assert_eq!(built.type_count, 2);
         // Class navigator: both types captured, with a recovered decl line (line 2 each).
         assert_eq!(built.classes.len(), 2);
-        let order = built.classes.iter().find(|c| c.simple == "Order").expect("Order");
+        let order = built
+            .classes
+            .iter()
+            .find(|c| c.simple == "Order")
+            .expect("Order");
         assert_eq!(order.fqcn, "a.Order");
         assert_eq!(order.line, 2);
         assert!(order.file.contains("a/Order.java")); // forward-slash normalized
-        // Type map: simple → binary for both project types.
-        assert_eq!(built.type_map.get("Order").map(String::as_str), Some("a/Order"));
-        assert_eq!(built.type_map.get("Repo").map(String::as_str), Some("a/Repo"));
+                                                      // Type map: simple → binary for both project types.
+        assert_eq!(
+            built.type_map.get("Order").map(String::as_str),
+            Some("a/Order")
+        );
+        assert_eq!(
+            built.type_map.get("Repo").map(String::as_str),
+            Some("a/Repo")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

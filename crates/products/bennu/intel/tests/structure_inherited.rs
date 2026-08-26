@@ -7,8 +7,8 @@
 //! yields nothing) — which makes the set deterministic without a live JDK.
 
 mod common;
-use common::*;
 use bennu_query::prelude::InheritedMember;
+use common::*;
 
 fn zoo() -> Project {
     Project::new(&[
@@ -73,7 +73,10 @@ fn lists_superclass_members() {
     let p = zoo();
     let ms = dog_inherited(&p);
     for name in ["name", "speak", "legs"] {
-        assert!(find(&ms, name).is_some(), "expected inherited {name:?} from Animal, got {ms:?}");
+        assert!(
+            find(&ms, name).is_some(),
+            "expected inherited {name:?} from Animal, got {ms:?}"
+        );
     }
 }
 
@@ -82,7 +85,10 @@ fn lists_interface_members() {
     let p = zoo();
     let ms = dog_inherited(&p);
     let owner = find(&ms, "owner").expect("interface member owner present");
-    assert_eq!(owner.declaring_type, "zoo.Pet", "owner is declared on the interface");
+    assert_eq!(
+        owner.declaring_type, "zoo.Pet",
+        "owner is declared on the interface"
+    );
 }
 
 #[test]
@@ -99,16 +105,29 @@ fn override_dedup_keeps_nearest_declaration() {
     let p = zoo();
     let ms = dog_inherited(&p);
     let alives: Vec<&InheritedMember> = ms.iter().filter(|m| m.name == "alive").collect();
-    assert_eq!(alives.len(), 1, "overridden alive() appears once, got {alives:?}");
-    assert_eq!(alives[0].declaring_type, "zoo.Animal", "nearest declaration wins");
+    assert_eq!(
+        alives.len(),
+        1,
+        "overridden alive() appears once, got {alives:?}"
+    );
+    assert_eq!(
+        alives[0].declaring_type, "zoo.Animal",
+        "nearest declaration wins"
+    );
 }
 
 #[test]
 fn excludes_the_types_own_members() {
     let p = zoo();
     let ms = dog_inherited(&p);
-    assert!(find(&ms, "bark").is_none(), "Dog's own bark() is not an inherited member");
-    assert!(find(&ms, "barks").is_none(), "Dog's own field is not inherited");
+    assert!(
+        find(&ms, "bark").is_none(),
+        "Dog's own bark() is not an inherited member"
+    );
+    assert!(
+        find(&ms, "barks").is_none(),
+        "Dog's own field is not inherited"
+    );
 }
 
 #[test]
@@ -128,9 +147,15 @@ fn inherited_member_carries_project_source() {
     let p = zoo();
     let ms = dog_inherited(&p);
     let name = find(&ms, "name").expect("field name inherited");
-    let src = name.source.as_ref().expect("project source location present");
+    let src = name
+        .source
+        .as_ref()
+        .expect("project source location present");
     assert_eq!(src.file, "Animal.java", "name is declared in Animal.java");
-    assert_eq!(src.line, line_of(p.source("Animal.java"), "class Animal") as i64);
+    assert_eq!(
+        src.line,
+        line_of(p.source("Animal.java"), "class Animal") as i64
+    );
 }
 
 #[test]
@@ -150,7 +175,10 @@ fn type_without_project_supertype_has_no_inherited() {
     let p = zoo();
     let s = p.source("Loner.java").to_string();
     let ms = p.inherited("Loner.java", "Loner", line_of(&s, "class Loner") as i64);
-    assert!(ms.is_empty(), "no project supertype → empty inherited bucket, got {ms:?}");
+    assert!(
+        ms.is_empty(),
+        "no project supertype → empty inherited bucket, got {ms:?}"
+    );
 }
 
 #[test]

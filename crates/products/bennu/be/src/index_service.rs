@@ -408,6 +408,19 @@ struct ProjectSlot {
     /// must NOT run once per keystroke. This gates it to at most one running + one pending
     /// rebuild per slot, off the request thread. See [`IndexService::schedule_config_rebuild`].
     config_rebuild: ConfigRebuild,
+    /// Held for the duration of a WHOLE-PROJECT validation sweep, so only one runs per project.
+    ///
+    /// Two sweeps used to race on every open. The build thread marks the project `ready` and then
+    /// starts the background warm-up; the FE (or a user pressing Validate) reacts to `ready` and
+    /// starts its own. Neither could see the other's cache — the warm-up saves at the END — so both
+    /// validated every file, competing for the same cores, and whichever finished last overwrote
+    /// the other's work. Measured on a 748-file project: 593 ms of duplicated work with **0 of 748
+    /// files served from the cache**, where the same call one moment later takes 6 ms.
+    ///
+    /// Serializing them makes the second one a cache read instead of a second pass. It waits rather
+    /// than being refused, because a refused Validate is a click the user has to repeat, and the
+    /// wait is bounded by work that was going to happen anyway.
+    sweep: Mutex<()>,
 }
 
 /// Coalescing state for a slot's config-graph rebuild — see [`ProjectSlot::config_rebuild`].
@@ -686,6 +699,7 @@ impl IndexService {
             ready: AtomicBool::new(false),
             indexed_hashes: Mutex::new(HashMap::new()),
             config_rebuild: ConfigRebuild::default(),
+            sweep: Mutex::new(()),
         });
         self.slots.lock().unwrap_or_else(|p| p.into_inner()).insert(root_path.clone(), slot.clone());
 
@@ -792,6 +806,13 @@ impl IndexService {
                         root_path.display(),
                         d.jars.len()
                     );
+                    // A PARTIAL tier is told about too, and for the same reason a missing one is:
+                    // the visible symptom is identical — every type from an unresolved jar reads
+                    // as "cannot resolve" — and a warning that only fires on the all-or-nothing
+                    // case leaves the commoner half of the problem looking like a Bennu bug.
+                    if let Some(reason) = &d.partial {
+                        notify(&sink, "Some dependencies not resolved", reason, "warning");
+                    }
                     // Record the resolved jars on the slot so the index inspector's Jars count reflects
                     // what the resolver loaded — independent of whether `mvn` re-ran (the jar list is
                     // disk-cached, so a cached open skips mvn but still indexes the same jars).
@@ -1218,6 +1239,25 @@ impl IndexService {
         slot.is_some_and(|s| s.rename.read().unwrap_or_else(|p| p.into_inner()).is_some())
     }
 
+    /// Whether a whole-project validation sweep is running for `root`.
+    ///
+    /// For the callers that must not QUEUE behind one. The explicit Validate waits — the user asked
+    /// for it, and waiting is what turns its pass into a cache read. The silent on-save refresh must
+    /// not: a warm-up over a big project runs for minutes, and a save every few seconds would park a
+    /// worker thread apiece for all of it. Its documented degradation (leave the panel as it is)
+    /// is the right answer, and the sweep it is waiting for is about to refresh the panel anyway.
+    pub fn sweep_busy(&self, root: &str) -> bool {
+        let Some(slot) = self.slot_for_root(root) else { return false };
+        let busy = slot.sweep.try_lock().is_err();
+        busy
+    }
+
+    /// The slot for a project root, if it is open.
+    fn slot_for_root(&self, root: &str) -> Option<Arc<ProjectSlot>> {
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        slots.get(&PathBuf::from(root)).map(Arc::clone)
+    }
+
     pub fn has_resolver(&self, root: &str) -> bool {
         let slot = {
             let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
@@ -1248,6 +1288,11 @@ impl IndexService {
         // two before validating, or a file edited outside the editor produces diagnostics computed
         // against its own new text but everyone else's OLD view of the types it declares.
         self.sync_external_changes(&sources);
+        // One sweep at a time per project — see `ProjectSlot::sweep`. Taken BEFORE the cache is
+        // loaded: a warm-up that is still running has not saved yet, and loading first is exactly
+        // how both passes ended up validating everything.
+        let slot = self.slot_for_root(root);
+        let _sweep = slot.as_ref().map(|s| s.sweep.lock().unwrap_or_else(|p| p.into_inner()));
         let mut cache = self.diag_cache_load(root);
         let run = std::time::Instant::now();
         let results = self.validate_project_batch(root, &sources, &cache, on_progress);
@@ -3065,6 +3110,8 @@ fn warm_up_validation_cache(
     if !svc.has_resolver(root) {
         return; // pre-index / no JDK — validating pure-AST with nothing to cache would be waste
     }
+    let Some(slot) = svc.slot_for_root(root) else { return };
+    let _sweep = slot.sweep.lock().unwrap_or_else(|p| p.into_inner());
     let mut cache = svc.diag_cache_load(root);
     // `usize::MAX` and not 0: a project whose first callback really is 0% should still print
     // it, and a sentinel that collides with a real value swallows the first line.

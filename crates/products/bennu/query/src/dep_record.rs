@@ -87,7 +87,8 @@ pub fn note_type(binary: &str, members_hash: Option<u64>) {
 pub fn note_simple_hit(simple: &str, binary: &str) {
     RECORDER.with(|r| {
         if let Some(rec) = r.borrow_mut().as_mut() {
-            rec.simple_hits.insert(simple.to_string(), binary.to_string());
+            rec.simple_hits
+                .insert(simple.to_string(), binary.to_string());
         }
     });
 }
@@ -108,9 +109,7 @@ pub fn note_simple_miss(simple: &str) {
 pub fn record<R>(f: impl FnOnce() -> R) -> (R, RecordedDeps) {
     let prev = RECORDER.with(|r| r.borrow_mut().replace(RecordedDeps::default()));
     let out = f();
-    let deps = RECORDER.with(|r| {
-        std::mem::replace(&mut *r.borrow_mut(), prev).unwrap_or_default()
-    });
+    let deps = RECORDER.with(|r| std::mem::replace(&mut *r.borrow_mut(), prev).unwrap_or_default());
     (out, deps)
 }
 
@@ -151,7 +150,10 @@ mod tests {
         assert_eq!(deps.members.get("com/acme/Order"), Some(&42));
         assert!(deps.misses.contains("com/acme/Missing"));
         assert!(deps.misses.contains("Ghost"));
-        assert_eq!(deps.simple_hits.get("Order").map(String::as_str), Some("com/acme/Order"));
+        assert_eq!(
+            deps.simple_hits.get("Order").map(String::as_str),
+            Some("com/acme/Order")
+        );
         // Scope is torn down after `record` returns.
         assert!(!recording());
     }
@@ -171,6 +173,9 @@ mod tests {
         });
         assert!(outer.members.contains_key("A"));
         assert!(outer.members.contains_key("C"));
-        assert!(!outer.members.contains_key("B"), "inner-scope dep never leaked out");
+        assert!(
+            !outer.members.contains_key("B"),
+            "inner-scope dep never leaked out"
+        );
     }
 }

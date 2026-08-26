@@ -93,7 +93,14 @@ pub fn inherited_members(
         collect_supertype(resolver, java_files, sc, &mut out, &mut seen, &mut visited);
     }
     for iface in &cm.interfaces {
-        collect_supertype(resolver, java_files, iface, &mut out, &mut seen, &mut visited);
+        collect_supertype(
+            resolver,
+            java_files,
+            iface,
+            &mut out,
+            &mut seen,
+            &mut visited,
+        );
     }
     // Deterministic order: fields then methods, alphabetical within (matches completion).
     out.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.name.cmp(&b.name)));
@@ -154,7 +161,10 @@ fn resolve_target_binary(
     type_name: &str,
     decl_line: i64,
 ) -> Option<String> {
-    let source = java_files.iter().find(|f| f.path == file).map(|f| f.source.as_str())?;
+    let source = java_files
+        .iter()
+        .find(|f| f.path == file)
+        .map(|f| f.source.as_str())?;
     binary_of_type_at(source, type_name, decl_line)
 }
 
@@ -166,7 +176,10 @@ fn project_source_of(java_files: &[PlanFile], binary: &str) -> Option<InheritedS
     for f in java_files {
         if let Some((start, _end)) = find_type_name_span(&f.source, simple) {
             let line = line_1based(&f.source, start);
-            return Some(InheritedSource { file: f.path.clone(), line });
+            return Some(InheritedSource {
+                file: f.path.clone(),
+                line,
+            });
         }
     }
     None
@@ -175,7 +188,10 @@ fn project_source_of(java_files: &[PlanFile], binary: &str) -> Option<InheritedS
 /// 1-based line of byte `start` in `source` (1 + count of `'\n'` before it).
 fn line_1based(source: &str, start: usize) -> i64 {
     let clamped = start.min(source.len());
-    1 + source.as_bytes()[..clamped].iter().filter(|&&b| b == b'\n').count() as i64
+    1 + source.as_bytes()[..clamped]
+        .iter()
+        .filter(|&&b| b == b'\n')
+        .count() as i64
 }
 
 fn kind_tag(k: MemberKind) -> &'static str {
@@ -253,11 +269,16 @@ mod tests {
     }
 
     fn field(name: &str, ty: &str, vis: Visibility) -> Member {
-        Member::field(name, TypeRef::simple(ty.to_string())).vis(vis).sig(format!("{ty} {name}"))
+        Member::field(name, TypeRef::simple(ty.to_string()))
+            .vis(vis)
+            .sig(format!("{ty} {name}"))
     }
 
     fn plan_file(path: &str, source: &str) -> PlanFile {
-        PlanFile { path: path.to_string(), source: source.to_string() }
+        PlanFile {
+            path: path.to_string(),
+            source: source.to_string(),
+        }
     }
 
     #[test]
@@ -266,7 +287,10 @@ mod tests {
         // carries a source pointing at Base.java, and Sub's own members are excluded.
         let base_src = "package com.acme;\npublic class Base {\n  public String greet() { return \"hi\"; }\n}\n";
         let sub_src = "package com.acme;\npublic class Sub extends Base {\n  public int own() { return 1; }\n}\n";
-        let java = vec![plan_file("Base.java", base_src), plan_file("Sub.java", sub_src)];
+        let java = vec![
+            plan_file("Base.java", base_src),
+            plan_file("Sub.java", sub_src),
+        ];
 
         let mut members = HashMap::new();
         members.insert(
@@ -341,21 +365,30 @@ mod tests {
                 flags: Default::default(),
             },
         );
-        let resolver = MapResolver { members, simple: HashMap::new() };
+        let resolver = MapResolver {
+            members,
+            simple: HashMap::new(),
+        };
 
         let got = inherited_members(&resolver, &java, "Sub.java", "Sub", 2);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].name, "size");
         assert_eq!(got[0].declaring_type, "java.util.AbstractList");
         // No project source declares AbstractList → source is None.
-        assert!(got[0].source.is_none(), "JDK supertype member has null source");
+        assert!(
+            got[0].source.is_none(),
+            "JDK supertype member has null source"
+        );
     }
 
     #[test]
     fn override_dedups_to_lowest_declaration() {
         // Both Base and Mid declare `run()`; the walk starts at Sub's supertype Mid, so Mid's `run`
         // claims the name+kind and Base's is shadowed (deduped).
-        let java = vec![plan_file("Sub.java", "package com.acme;\npublic class Sub {\n}\n")];
+        let java = vec![plan_file(
+            "Sub.java",
+            "package com.acme;\npublic class Sub {\n}\n",
+        )];
         let mut members = HashMap::new();
         members.insert(
             "com/acme/Sub".to_string(),
@@ -390,7 +423,10 @@ mod tests {
                 flags: Default::default(),
             },
         );
-        let resolver = MapResolver { members, simple: HashMap::new() };
+        let resolver = MapResolver {
+            members,
+            simple: HashMap::new(),
+        };
         let got = inherited_members(&resolver, &java, "Sub.java", "Sub", 2);
         // Exactly one `run` — Mid's (the nearer declaration), Base's is deduped.
         assert_eq!(got.len(), 1);
@@ -401,15 +437,24 @@ mod tests {
 
     #[test]
     fn unresolved_target_returns_empty() {
-        let java = vec![plan_file("Sub.java", "package com.acme;\npublic class Sub {\n}\n")];
-        let resolver = MapResolver { members: HashMap::new(), simple: HashMap::new() };
+        let java = vec![plan_file(
+            "Sub.java",
+            "package com.acme;\npublic class Sub {\n}\n",
+        )];
+        let resolver = MapResolver {
+            members: HashMap::new(),
+            simple: HashMap::new(),
+        };
         // Unknown type name → empty (not a panic).
         assert!(inherited_members(&resolver, &java, "Sub.java", "Nope", 2).is_empty());
     }
 
     #[test]
     fn field_and_method_ordering_is_deterministic() {
-        let java = vec![plan_file("Sub.java", "package com.acme;\npublic class Sub {\n}\n")];
+        let java = vec![plan_file(
+            "Sub.java",
+            "package com.acme;\npublic class Sub {\n}\n",
+        )];
         let mut members = HashMap::new();
         members.insert(
             "com/acme/Sub".to_string(),
@@ -428,12 +473,18 @@ mod tests {
                 type_params: Vec::new(),
                 superclass: None,
                 interfaces: Vec::new(),
-                methods: vec![method("zeta", "void", Visibility::Public), method("alpha", "void", Visibility::Public)],
+                methods: vec![
+                    method("zeta", "void", Visibility::Public),
+                    method("alpha", "void", Visibility::Public),
+                ],
                 fields: vec![field("count", "int", Visibility::Protected)],
                 flags: Default::default(),
             },
         );
-        let resolver = MapResolver { members, simple: HashMap::new() };
+        let resolver = MapResolver {
+            members,
+            simple: HashMap::new(),
+        };
         let got = inherited_members(&resolver, &java, "Sub.java", "Sub", 2);
         // fields before methods, alphabetical within.
         let names: Vec<&str> = got.iter().map(|m| m.name.as_str()).collect();

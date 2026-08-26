@@ -27,7 +27,7 @@ use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
 use crate::members::simple_name;
-use crate::resolve::type_binary;
+use crate::resolve::type_binary_at;
 use crate::walk::{for_each_supertype, hierarchy_fully_known, reaches};
 
 /// Flag every method whose return type is an illegal (non-covariant) override of an inherited method.
@@ -59,14 +59,17 @@ fn check_type(
     // Supertypes to scan: the explicit `extends` (if resolvable) + every `implements` interface. We do
     // NOT seed `java/lang/Object` — its methods (`toString`/`equals`/…) are the covariant-legal cases a
     // real override wants; only a declared supertype gives us a return type worth comparing.
+    // Resolved AT the class declaration, so a name written inside it is read in that class's scope.
+    // Without the node this asked the file at large, and a file that declares several types with
+    // several `Entry` in reach answered with whichever came first.
     let mut supers: Vec<String> = Vec::new();
     if let Some(ext) = superclass_text(n, bytes) {
-        if let Some(bin) = type_binary(&ext, symbols, resolver) {
+        if let Some(bin) = type_binary_at(&ext, n, bytes, symbols, resolver) {
             supers.push(bin);
         }
     }
     for iface in implements_texts(n, bytes) {
-        if let Some(bin) = type_binary(&iface, symbols, resolver) {
+        if let Some(bin) = type_binary_at(&iface, n, bytes, symbols, resolver) {
             supers.push(bin);
         }
     }
@@ -122,7 +125,9 @@ fn check_type(
             // SKIP unless the overridden return type is ALSO a concrete reference class we can reason
             // about. A type variable / primitive / array / unresolved super return → skip.
             let Some(super_ret) = concrete_ref(super_ret, resolver) else { continue };
-            if super_ret == sub_ret {
+            // The SAME type, however each side happens to spell it — one came from this file's
+            // import, the other from the member index, and a nested type has two binary spellings.
+            if bennu_java::prelude::same_binary_type(&super_ret, &sub_ret) {
                 continue; // identical return → a legal (non-covariant) override
             }
             // Both fully known, and the sub return is NOT a subtype of the super return → illegal.
@@ -154,7 +159,7 @@ fn method_return_binary(
 ) -> Option<String> {
     let ty = md.child_by_field_name("type")?;
     let text = ty.utf8_text(bytes).ok()?;
-    type_binary(text, symbols, resolver)
+    type_binary_at(text, ty, bytes, symbols, resolver)
 }
 
 /// Validate a binary name as a concrete reference class the resolver knows: not a primitive, `void`, a
@@ -194,7 +199,7 @@ fn method_param_binaries(
             "formal_parameter" => {
                 let ty = p.child_by_field_name("type")?;
                 let text = ty.utf8_text(bytes).ok()?;
-                out.push(type_binary(text, symbols, resolver)?);
+                out.push(type_binary_at(text, ty, bytes, symbols, resolver)?);
             }
             "spread_parameter" => return None, // varargs — skip
             _ => {}

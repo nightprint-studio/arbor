@@ -304,7 +304,7 @@ impl Run {
                         violation,
                         binary,
                     }),
-                    None => self.refuse(file, line, &violation, NOTHING_TO_RENAME.to_string()),
+                    None => self.refuse(file, line, &violation, nothing_to_rename(violation.target)),
                 }
                 continue;
             }
@@ -371,7 +371,7 @@ impl Run {
         )
         .map(|r| bennu_proto::prelude::RenameFileMove { from: r.from, to: r.to });
         if edits.is_empty() {
-            self.refuse(file, line, violation, NOTHING_TO_RENAME.to_string());
+            self.refuse(file, line, violation, nothing_to_rename(violation.target));
             return;
         }
         // Every planner marks the definition site `declaration` — a local's declarator, a member's
@@ -515,8 +515,25 @@ const NON_COMPLIANT_ENCODING: &str =
     "this file is not valid in the project's declared encoding — the editor and the index read it \
      differently, so an edit planned here would land on the wrong bytes. Fix its encoding first";
 
-const NOTHING_TO_RENAME: &str =
-    "nothing here can be renamed — the index may still be building";
+/// Why the engine came back with no edits for `target`.
+///
+/// One sentence used to cover every case, and it named the wrong one: on a real project **850 of
+/// 1001 refusals** read "the index may still be building" with the index built minutes earlier.
+/// They were package segments — `package it.foo.portale_appalti;` breaks a `lowercase` rule once
+/// per FILE, so a 750-file project produces 750 of them — and no engine renames a package with an
+/// edit, because a package's name is the directory it lives in. A refusal reason is the only thing
+/// the user has to act on; pointing it at the wrong cause sends them to look at the wrong thing.
+fn nothing_to_rename(target: Target) -> String {
+    match target {
+        Target::Package => "a package segment is not renamed by editing text — its name IS the \
+             directory holding the file. Move the files (Project tree → Move) and the package \
+             declarations follow"
+            .to_string(),
+        _ => "the engine found no editable site for this declaration — it resolved to a symbol the \
+              project index does not own, or the index is still building"
+            .to_string(),
+    }
+}
 
 const NO_DECLARATION_EDIT: &str =
     "the rename would rewrite its uses but not its declaration — refused as incomplete";

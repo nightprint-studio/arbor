@@ -96,7 +96,9 @@ fn reaches_go(
     visited: &mut HashSet<String>,
     depth: usize,
 ) -> bool {
-    if from == target {
+    // A nested type has two binary spellings and both are in circulation — see
+    // `bennu_java::prelude::same_binary_type`.
+    if bennu_java::prelude::same_binary_type(from, target) {
         return true;
     }
     if depth > MAX_DEPTH || !visited.insert(from.to_string()) {

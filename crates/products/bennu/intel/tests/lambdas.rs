@@ -73,7 +73,9 @@ fn fp() -> Project {
 fn functional_interface_type_goto() {
     let p = fp();
     let s = p.source("Calc.java").to_string();
-    let d = p.goto("Calc.java", at(&s, "Transformer t")).expect("goto functional interface type");
+    let d = p
+        .goto("Calc.java", at(&s, "Transformer t"))
+        .expect("goto functional interface type");
     assert_eq!(d.file, "Transformer.java");
     assert_eq!(d.label, "class fn.Transformer");
 }
@@ -83,8 +85,14 @@ fn functional_interface_type_find_usages() {
     let p = fp();
     let t = p.source("Transformer.java").to_string();
     // `Transformer t/f/g/h` = 4 type-reference sites across Calc.
-    let n = p.usage_count("Transformer.java", at(&t, "interface Transformer") + "interface ".len());
-    assert!(n >= 4, "Transformer is used as a type at >= 4 sites, got {n}");
+    let n = p.usage_count(
+        "Transformer.java",
+        at(&t, "interface Transformer") + "interface ".len(),
+    );
+    assert!(
+        n >= 4,
+        "Transformer is used as a type at >= 4 sites, got {n}"
+    );
 }
 
 // ── The single abstract method ───────────────────────────────────────────────────────────────
@@ -95,7 +103,9 @@ fn functional_interface_method_goto() {
     let s = p.source("Calc.java").to_string();
     // `t.apply(...)` → the interface's abstract method (t : Transformer, a project type).
     let off = at(&s, "t.apply(t.apply(2))") + "t.".len();
-    let d = p.goto("Calc.java", off).expect("goto interface method via lambda-typed receiver");
+    let d = p
+        .goto("Calc.java", off)
+        .expect("goto interface method via lambda-typed receiver");
     assert_eq!(d.file, "Transformer.java");
     assert_eq!(d.label, "method fn.Transformer.apply()");
 }
@@ -116,7 +126,10 @@ fn functional_interface_method_count_stable_from_use() {
     let from_use = p.usage_count("Calc.java", at(&s, "f.apply(3)") + "f.".len());
     let t = p.source("Transformer.java").to_string();
     let from_decl = p.usage_count("Transformer.java", at(&t, "int apply") + "int ".len());
-    assert_eq!(from_use, from_decl, "count is a property of the member, not the caret");
+    assert_eq!(
+        from_use, from_decl,
+        "count is a property of the member, not the caret"
+    );
 }
 
 // ── Lambda parameters — scope-exact locals ───────────────────────────────────────────────────
@@ -126,7 +139,9 @@ fn inferred_lambda_param_goto() {
     let p = fp();
     let s = p.source("Calc.java").to_string();
     let off = at(&s, "x -> x + 1") + "x -> ".len(); // the `x` USE
-    let d = p.goto("Calc.java", off).expect("inferred lambda param resolves");
+    let d = p
+        .goto("Calc.java", off)
+        .expect("inferred lambda param resolves");
     assert_eq!(d.file, "Calc.java");
     assert_eq!(d.label, "local `x`");
     assert_eq!(d.line, line_of(&s, "Transformer t = x"));
@@ -137,7 +152,9 @@ fn explicit_lambda_param_goto() {
     let p = fp();
     let s = p.source("Calc.java").to_string();
     let off = at(&s, "y * 2") + 0; // the `y` USE
-    let d = p.goto("Calc.java", off).expect("explicit-typed lambda param resolves");
+    let d = p
+        .goto("Calc.java", off)
+        .expect("explicit-typed lambda param resolves");
     assert_eq!(d.file, "Calc.java");
     assert_eq!(d.label, "local `y`");
 }
@@ -148,7 +165,9 @@ fn lambda_captures_enclosing_parameter() {
     let p = fp();
     let s = p.source("Calc.java").to_string();
     let off = at(&s, "z + cap") + "z + ".len();
-    let d = p.goto("Calc.java", off).expect("enclosing capture resolves");
+    let d = p
+        .goto("Calc.java", off)
+        .expect("enclosing capture resolves");
     assert_eq!(d.label, "local `cap`");
     assert_eq!(d.line, line_of(&s, "outer(int cap)"));
 }
@@ -170,7 +189,9 @@ fn block_body_lambda_local_resolves() {
     let p = fp();
     let s = p.source("Calc.java").to_string();
     let off = at(&s, "return q; }") + "return ".len();
-    let d = p.goto("Calc.java", off).expect("block-body lambda local resolves");
+    let d = p
+        .goto("Calc.java", off)
+        .expect("block-body lambda local resolves");
     assert_eq!(d.label, "local `q`");
     assert_eq!(d.line, line_of(&s, "int q = w + 1"));
 }
@@ -181,7 +202,9 @@ fn block_body_lambda_param_resolves() {
     let p = fp();
     let s = p.source("Calc.java").to_string();
     let off = at(&s, "w + 1") + 0;
-    let d = p.goto("Calc.java", off).expect("block-body lambda param resolves");
+    let d = p
+        .goto("Calc.java", off)
+        .expect("block-body lambda param resolves");
     assert_eq!(d.label, "local `w`");
     assert_eq!(d.line, line_of(&s, "Transformer h = w"));
 }
@@ -192,7 +215,11 @@ fn lambda_param_is_not_bucketed_by_find_usages() {
     let p = fp();
     let s = p.source("Calc.java").to_string();
     let off = at(&s, "x -> x + 1") + "x -> ".len();
-    assert_eq!(p.usage_count("Calc.java", off), 0, "lambda param is not a bucketed symbol");
+    assert_eq!(
+        p.usage_count("Calc.java", off),
+        0,
+        "lambda param is not a bucketed symbol"
+    );
 }
 
 // ── Gating — inferred lambda params require JDK >= 8 ──────────────────────────────────────────
@@ -200,7 +227,10 @@ fn lambda_param_is_not_bucketed_by_find_usages() {
 #[test]
 fn inferred_lambda_param_disabled_pre_8() {
     let files = &[
-        ("Transformer.java", "package fn;\npublic interface Transformer { int apply(int v); }\n"),
+        (
+            "Transformer.java",
+            "package fn;\npublic interface Transformer { int apply(int v); }\n",
+        ),
         (
             "Old.java",
             "package fn;\n\
@@ -216,7 +246,11 @@ fn inferred_lambda_param_disabled_pre_8() {
     let s = p.source("Old.java").to_string();
     let off = at(&s, "x -> x + 1") + "x -> ".len();
     let got = p.goto("Old.java", off);
-    assert!(got.is_none(), "inferred lambda param must not resolve at JDK 7, got {:?}", got.map(|d| d.label));
+    assert!(
+        got.is_none(),
+        "inferred lambda param must not resolve at JDK 7, got {:?}",
+        got.map(|d| d.label)
+    );
 }
 
 // ── Method references + lambda-body completion — soft (resolve if at all, never panic) ────────

@@ -36,7 +36,7 @@
 
 use std::collections::HashSet;
 
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::infer::{infer_node_type_cached, InferCache};
 use crate::seam::TypeResolver;
@@ -100,12 +100,14 @@ impl AstNode {
 /// class or a value. That is the difference between "what the parser built" and "what Bennu
 /// understood", and it is why the panel showing this is worth having beside the parse.
 pub fn lower(source: &str, resolver: Option<&dyn TypeResolver>) -> AstNode {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return AstNode::new("compilation unit", Span { start: 0, end: source.len() });
-    }
-    let Some(tree) = parser.parse(source, None) else {
-        return AstNode::new("compilation unit", Span { start: 0, end: source.len() });
+    let Some(tree) = crate::grammar::parse_java(source) else {
+        return AstNode::new(
+            "compilation unit",
+            Span {
+                start: 0,
+                end: source.len(),
+            },
+        );
     };
     let root = tree.root_node();
     let symbols = extract_symbols_from_root(&root, source);
@@ -132,7 +134,11 @@ impl<'a> Lowering<'a> {
     fn file(&self, root: Node<'a>) -> AstNode {
         let mut out = AstNode::new("compilation unit", span(root));
         out.label = self.symbols.package.clone();
-        out.children = self.named_children(root).into_iter().filter_map(|c| self.node(c, None)).collect();
+        out.children = self
+            .named_children(root)
+            .into_iter()
+            .filter_map(|c| self.node(c, None))
+            .collect();
         out
     }
 
@@ -147,7 +153,10 @@ impl<'a> Lowering<'a> {
             return self.node(inner, role);
         }
         // Consumed by whoever asked for them, or of no interest at all.
-        if matches!(kind, "modifiers" | "comment" | "line_comment" | "block_comment") {
+        if matches!(
+            kind,
+            "modifiers" | "comment" | "line_comment" | "block_comment"
+        ) {
             return None;
         }
 
@@ -186,16 +195,43 @@ impl<'a> Lowering<'a> {
             "annotation_type_element_declaration" => self.callable(node, "element"),
             "field_declaration" | "constant_declaration" => self.variables(node, "field"),
             "local_variable_declaration" => self.variables(node, "local variable"),
-            "formal_parameter" | "spread_parameter" | "receiver_parameter"
+            "formal_parameter"
+            | "spread_parameter"
+            | "receiver_parameter"
             | "catch_formal_parameter" => self.parameter(node),
             "method_invocation" => self.call(node),
 
-            "if_statement" => self.roles(node, "if", &[("condition", "condition"), ("consequence", "then"), ("alternative", "else")]),
-            "while_statement" => self.roles(node, "while", &[("condition", "condition"), ("body", "body")]),
-            "do_statement" => self.roles(node, "do", &[("body", "body"), ("condition", "condition")]),
-            "for_statement" => self.roles(node, "for", &[("init", "init"), ("condition", "condition"), ("update", "update"), ("body", "body")]),
+            "if_statement" => self.roles(
+                node,
+                "if",
+                &[
+                    ("condition", "condition"),
+                    ("consequence", "then"),
+                    ("alternative", "else"),
+                ],
+            ),
+            "while_statement" => self.roles(
+                node,
+                "while",
+                &[("condition", "condition"), ("body", "body")],
+            ),
+            "do_statement" => {
+                self.roles(node, "do", &[("body", "body"), ("condition", "condition")])
+            }
+            "for_statement" => self.roles(
+                node,
+                "for",
+                &[
+                    ("init", "init"),
+                    ("condition", "condition"),
+                    ("update", "update"),
+                    ("body", "body"),
+                ],
+            ),
             "enhanced_for_statement" => self.for_each(node),
-            "switch_expression" => self.roles(node, "switch", &[("condition", "on"), ("body", "body")]),
+            "switch_expression" => {
+                self.roles(node, "switch", &[("condition", "on"), ("body", "body")])
+            }
 
             "field_access" => self
                 .roles(node, "field access", &[("object", "receiver")])
@@ -207,12 +243,26 @@ impl<'a> Lowering<'a> {
             "binary_expression" => self
                 .roles(node, "binary", &[("left", "left"), ("right", "right")])
                 .labelled(self.operator(node)),
-            "ternary_expression" => self.roles(node, "ternary", &[("condition", "condition"), ("consequence", "then"), ("alternative", "else")]),
-            "cast_expression" => self.roles(node, "cast", &[("value", "value")]).labelled(self.field_text(node, "type")),
+            "ternary_expression" => self.roles(
+                node,
+                "ternary",
+                &[
+                    ("condition", "condition"),
+                    ("consequence", "then"),
+                    ("alternative", "else"),
+                ],
+            ),
+            "cast_expression" => self
+                .roles(node, "cast", &[("value", "value")])
+                .labelled(self.field_text(node, "type")),
             "instanceof_expression" => self
                 .roles(node, "instanceof", &[("left", "value")])
                 .labelled(self.field_text(node, "right")),
-            "lambda_expression" => self.roles(node, "lambda", &[("parameters", "parameters"), ("body", "body")]),
+            "lambda_expression" => self.roles(
+                node,
+                "lambda",
+                &[("parameters", "parameters"), ("body", "body")],
+            ),
 
             _ => return None,
         })
@@ -237,7 +287,9 @@ impl<'a> Lowering<'a> {
             "return_statement" => AstNode::new("return", span(node)),
             "throw_statement" => AstNode::new("throw", span(node)),
             "yield_statement" => AstNode::new("yield", span(node)),
-            "break_statement" => AstNode::new("break", span(node)).labelled(self.first_identifier(node)),
+            "break_statement" => {
+                AstNode::new("break", span(node)).labelled(self.first_identifier(node))
+            }
             "continue_statement" => {
                 AstNode::new("continue", span(node)).labelled(self.first_identifier(node))
             }
@@ -258,7 +310,9 @@ impl<'a> Lowering<'a> {
             "unary_expression" | "update_expression" => {
                 AstNode::new("unary", span(node)).labelled(self.operator(node))
             }
-            "method_reference" => AstNode::new("method reference", span(node)).labelled(Some(text())),
+            "method_reference" => {
+                AstNode::new("method reference", span(node)).labelled(Some(text()))
+            }
             "identifier" | "type_identifier" | "scoped_identifier" => {
                 AstNode::new("name", span(node)).labelled(Some(text()))
             }
@@ -268,8 +322,11 @@ impl<'a> Lowering<'a> {
                 AstNode::new("string", span(node)).labelled(Some(text()))
             }
             "character_literal" => AstNode::new("char", span(node)).labelled(Some(text())),
-            "decimal_integer_literal" | "hex_integer_literal" | "octal_integer_literal"
-            | "binary_integer_literal" | "decimal_floating_point_literal"
+            "decimal_integer_literal"
+            | "hex_integer_literal"
+            | "octal_integer_literal"
+            | "binary_integer_literal"
+            | "decimal_floating_point_literal"
             | "hex_floating_point_literal" => {
                 AstNode::new("number", span(node)).labelled(Some(text()))
             }
@@ -286,7 +343,10 @@ impl<'a> Lowering<'a> {
 
     /// Children with no role of their own — everything named, lowered in order.
     fn plain_children(&self, node: Node<'a>) -> Vec<AstNode> {
-        self.named_children(node).into_iter().filter_map(|c| self.node(c, None)).collect()
+        self.named_children(node)
+            .into_iter()
+            .filter_map(|c| self.node(c, None))
+            .collect()
     }
 
     /// Lower the children named by `fields` under the roles given, then everything else in order.
@@ -342,7 +402,9 @@ impl<'a> Lowering<'a> {
         if node.kind() != "record_declaration" {
             return Vec::new();
         }
-        let Some(params) = node.child_by_field_name("parameters") else { return Vec::new() };
+        let Some(params) = node.child_by_field_name("parameters") else {
+            return Vec::new();
+        };
         let mut cursor = params.walk();
         let names = params
             .named_children(&mut cursor)
@@ -395,16 +457,25 @@ impl<'a> Lowering<'a> {
         // panel wants the first fact; rename and navigation want the second. Asking the record for
         // its component names keeps the two apart without a flag on every symbol in the product.
         let components = self.record_component_names(node);
-        let is_synthesized =
-            |name: &str, span: &Option<Span>| span.is_none() || components.iter().any(|c| c == name);
+        let is_synthesized = |name: &str, span: &Option<Span>| {
+            span.is_none() || components.iter().any(|c| c == name)
+        };
         if let Some(declared) = declared {
-            for method in declared.methods.iter().filter(|m| is_synthesized(&m.name, &m.span)) {
+            for method in declared
+                .methods
+                .iter()
+                .filter(|m| is_synthesized(&m.name, &m.span))
+            {
                 let mut row = AstNode::new("method", span(node));
                 row.label = Some(format!("{}({})", method.name, method.params.len()));
                 row.synthesized = true;
                 out.children.push(row);
             }
-            for field in declared.fields.iter().filter(|f| is_synthesized(&f.name, &f.span)) {
+            for field in declared
+                .fields
+                .iter()
+                .filter(|f| is_synthesized(&f.name, &f.span))
+            {
                 let mut row = AstNode::new("field", span(node));
                 row.label = Some(format!("{}: {}", field.name, field.type_text));
                 row.synthesized = true;
@@ -480,8 +551,11 @@ impl<'a> Lowering<'a> {
         // The modifiers are on the declaration, the names are on the declarators — so each row
         // has to be handed what it does not carry itself.
         let modifiers = self.modifiers(node);
-        let declarators: Vec<Node> =
-            self.named_children(node).into_iter().filter(|c| c.kind() == "variable_declarator").collect();
+        let declarators: Vec<Node> = self
+            .named_children(node)
+            .into_iter()
+            .filter(|c| c.kind() == "variable_declarator")
+            .collect();
 
         // The common case is one, and wrapping it in a group row would add a level to every
         // field in the project to serve the rare case.
@@ -490,8 +564,10 @@ impl<'a> Lowering<'a> {
         }
         let mut out = AstNode::new(format!("{kind}s"), span(node)).labelled(Some(ty.clone()));
         out.modifiers = modifiers.clone();
-        out.children =
-            declarators.iter().map(|d| self.declarator(*d, kind, &ty, modifiers.clone())).collect();
+        out.children = declarators
+            .iter()
+            .map(|d| self.declarator(*d, kind, &ty, modifiers.clone()))
+            .collect();
         out
     }
 
@@ -538,19 +614,29 @@ impl<'a> Lowering<'a> {
     /// guessed a type would be worse than one that admits it does not know, because everything
     /// downstream would then be reasoning from an invented fact.
     fn annotate(&self, node: Node<'a>, out: &mut AstNode) {
-        let Some(resolver) = self.resolver else { return };
+        let Some(resolver) = self.resolver else {
+            return;
+        };
         if !is_expression(node.kind()) {
             return;
         }
-        if let Some(ty) =
-            infer_node_type_cached(&self.root, self.source, self.symbols, &node, resolver, &self.cache)
-        {
+        if let Some(ty) = infer_node_type_cached(
+            &self.root,
+            self.source,
+            self.symbols,
+            &node,
+            resolver,
+            &self.cache,
+        ) {
             out.type_name = Some(ty.binary_name.replace('/', "."));
             return;
         }
         // No type, but it might be a **class name** — `Files.copy(a, b)`. That is the whole
         // static-versus-instance distinction, and it is invisible in the shape.
-        if matches!(node.kind(), "identifier" | "type_identifier" | "scoped_identifier") {
+        if matches!(
+            node.kind(),
+            "identifier" | "type_identifier" | "scoped_identifier"
+        ) {
             let text = self.text(node);
             if let Some(binary) = resolver.resolve_simple_name(&text, &self.symbols.imports) {
                 out.type_name = Some(binary.replace('/', "."));
@@ -574,7 +660,10 @@ impl<'a> Lowering<'a> {
     }
 
     fn text(&self, node: Node<'a>) -> String {
-        self.source.get(node.start_byte()..node.end_byte()).unwrap_or_default().to_string()
+        self.source
+            .get(node.start_byte()..node.end_byte())
+            .unwrap_or_default()
+            .to_string()
     }
 
     fn field_text(&self, node: Node<'a>, field: &str) -> Option<String> {
@@ -588,10 +677,15 @@ impl<'a> Lowering<'a> {
     /// the line.
     fn modifiers(&self, node: Node<'a>) -> Option<String> {
         let mut cursor = node.walk();
-        let mods = node.children(&mut cursor).find(|c| c.kind() == "modifiers")?;
+        let mods = node
+            .children(&mut cursor)
+            .find(|c| c.kind() == "modifiers")?;
         let mut inner = mods.walk();
-        let words: Vec<String> =
-            mods.children(&mut inner).filter(|c| !c.is_named()).map(|c| self.text(c)).collect();
+        let words: Vec<String> = mods
+            .children(&mut inner)
+            .filter(|c| !c.is_named())
+            .map(|c| self.text(c))
+            .collect();
         let joined = (!words.is_empty()).then(|| words.join(" "));
         joined
     }
@@ -610,7 +704,10 @@ impl<'a> Lowering<'a> {
     }
 
     fn first_identifier(&self, node: Node<'a>) -> Option<String> {
-        self.named_children(node).into_iter().find(|c| c.kind() == "identifier").map(|c| self.text(c))
+        self.named_children(node)
+            .into_iter()
+            .find(|c| c.kind() == "identifier")
+            .map(|c| self.text(c))
     }
 
     fn for_each(&self, node: Node<'a>) -> AstNode {
@@ -650,7 +747,10 @@ fn is_expression(kind: &str) -> bool {
 }
 
 fn span(node: Node<'_>) -> Span {
-    Span { start: node.start_byte(), end: node.end_byte() }
+    Span {
+        start: node.start_byte(),
+        end: node.end_byte(),
+    }
 }
 
 #[cfg(test)]
@@ -684,7 +784,11 @@ mod tests {
     fn the_parts_of_a_statement_are_named() {
         let root = ast("class A { void m() { if (a) b(); else c(); } }");
         let branch = find(&root, "if").expect("the if");
-        let roles: Vec<&str> = branch.children.iter().filter_map(|c| c.role.as_deref()).collect();
+        let roles: Vec<&str> = branch
+            .children
+            .iter()
+            .filter_map(|c| c.role.as_deref())
+            .collect();
         assert_eq!(roles, ["condition", "then", "else"]);
     }
 
@@ -717,7 +821,10 @@ mod tests {
         assert_eq!(by_role("returns"), ["List<Order>"]);
         assert_eq!(by_role("parameter"), ["page: int", "q: String"]);
         assert_eq!(by_role("throws"), ["SQLException"]);
-        assert!(method.children.iter().any(|c| c.role.as_deref() == Some("body")));
+        assert!(method
+            .children
+            .iter()
+            .any(|c| c.role.as_deref() == Some("body")));
     }
 
     /// The receiver is a child with a role, not part of the call's name — which is what lets the
@@ -729,13 +836,22 @@ mod tests {
         assert_eq!(call.label.as_deref(), Some("place"));
         assert_eq!(call.children[0].role.as_deref(), Some("receiver"));
         assert_eq!(call.children[0].label.as_deref(), Some("svc"));
-        assert_eq!(call.children.iter().filter(|c| c.role.as_deref() == Some("argument")).count(), 2);
+        assert_eq!(
+            call.children
+                .iter()
+                .filter(|c| c.role.as_deref() == Some("argument"))
+                .count(),
+            2
+        );
     }
 
     #[test]
     fn one_declaration_per_declarator() {
         let root = ast("class A { void m() { int a = 1, b = 2; } }");
-        let labels: Vec<&str> = collect(&root, "local variable").iter().filter_map(|n| n.label.as_deref()).collect();
+        let labels: Vec<&str> = collect(&root, "local variable")
+            .iter()
+            .filter_map(|n| n.label.as_deref())
+            .collect();
         assert_eq!(labels, ["a: int", "b: int"]);
     }
 
@@ -754,16 +870,29 @@ mod tests {
     /// first thing on the line — so it gets its own column rather than being buried.
     #[test]
     fn a_declaration_carries_its_modifiers_apart_from_its_name() {
-        let root = ast("public abstract class A { private final int x = 1; public static void m() {} }");
-        assert_eq!(find(&root, "class").and_then(|c| c.modifiers.as_deref()), Some("public abstract"));
-        assert_eq!(find(&root, "field").and_then(|c| c.modifiers.as_deref()), Some("private final"));
-        assert_eq!(find(&root, "method").and_then(|c| c.modifiers.as_deref()), Some("public static"));
+        let root =
+            ast("public abstract class A { private final int x = 1; public static void m() {} }");
+        assert_eq!(
+            find(&root, "class").and_then(|c| c.modifiers.as_deref()),
+            Some("public abstract")
+        );
+        assert_eq!(
+            find(&root, "field").and_then(|c| c.modifiers.as_deref()),
+            Some("private final")
+        );
+        assert_eq!(
+            find(&root, "method").and_then(|c| c.modifiers.as_deref()),
+            Some("public static")
+        );
     }
 
     #[test]
     fn a_type_carries_its_fully_qualified_name() {
         let root = ast("package com.acme;\nclass OrderDao {}");
-        assert_eq!(find(&root, "class").and_then(|c| c.label.as_deref()), Some("com.acme.OrderDao"));
+        assert_eq!(
+            find(&root, "class").and_then(|c| c.label.as_deref()),
+            Some("com.acme.OrderDao")
+        );
         assert_eq!(root.label.as_deref(), Some("com.acme"));
     }
 
@@ -777,8 +906,14 @@ mod tests {
             .filter(|m| m.synthesized)
             .filter_map(|m| m.label.as_deref())
             .collect();
-        assert!(generated.iter().any(|l| l.starts_with("x(")), "{generated:?}");
-        assert!(generated.iter().any(|l| l.starts_with("toString(")), "{generated:?}");
+        assert!(
+            generated.iter().any(|l| l.starts_with("x(")),
+            "{generated:?}"
+        );
+        assert!(
+            generated.iter().any(|l| l.starts_with("toString(")),
+            "{generated:?}"
+        );
     }
 
     /// The failure mode a table over someone else's grammar must have: a construct it has never
@@ -787,7 +922,10 @@ mod tests {
     #[test]
     fn an_unmapped_construct_keeps_its_children_and_reads_as_words() {
         let root = ast("class A { void m() { synchronized (lock) { f(); } } }");
-        assert!(find(&root, "call").is_some(), "nothing is swallowed on the way down");
+        assert!(
+            find(&root, "call").is_some(),
+            "nothing is swallowed on the way down"
+        );
         let mut every = Vec::new();
         walk(&root, &mut every);
         assert!(

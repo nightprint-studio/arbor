@@ -30,7 +30,10 @@ fn click_on_whitespace_is_none() {
     let s = p.source("A.java").to_string();
     // The blank spaces of the indentation before `return total;`.
     let off = at(&s, "       return total;");
-    assert!(p.goto("A.java", off).is_none(), "whitespace resolves to nothing");
+    assert!(
+        p.goto("A.java", off).is_none(),
+        "whitespace resolves to nothing"
+    );
 }
 
 #[test]
@@ -38,7 +41,10 @@ fn click_on_keyword_public_is_none() {
     let p = one();
     let s = p.source("A.java").to_string();
     let off = at(&s, "public class A") + "pub".len();
-    assert!(p.goto("A.java", off).is_none(), "the `public` keyword is not navigable");
+    assert!(
+        p.goto("A.java", off).is_none(),
+        "the `public` keyword is not navigable"
+    );
 }
 
 #[test]
@@ -46,7 +52,10 @@ fn click_on_keyword_return_is_none() {
     let p = one();
     let s = p.source("A.java").to_string();
     let off = at(&s, "return total;") + "ret".len();
-    assert!(p.goto("A.java", off).is_none(), "the `return` keyword is not navigable");
+    assert!(
+        p.goto("A.java", off).is_none(),
+        "the `return` keyword is not navigable"
+    );
 }
 
 #[test]
@@ -54,7 +63,10 @@ fn click_on_keyword_class_is_none() {
     let p = one();
     let s = p.source("A.java").to_string();
     let off = at(&s, "class A {") + "cl".len();
-    assert!(p.goto("A.java", off).is_none(), "the `class` keyword is not navigable");
+    assert!(
+        p.goto("A.java", off).is_none(),
+        "the `class` keyword is not navigable"
+    );
 }
 
 #[test]
@@ -63,7 +75,10 @@ fn click_inside_line_comment_is_none() {
     let s = p.source("A.java").to_string();
     // Land inside the word "comment" in the leading `//` line comment.
     let off = at(&s, "comment about") + "com".len();
-    assert!(p.goto("A.java", off).is_none(), "a comment is not navigable");
+    assert!(
+        p.goto("A.java", off).is_none(),
+        "a comment is not navigable"
+    );
 }
 
 #[test]
@@ -72,7 +87,10 @@ fn click_inside_string_literal_is_none() {
     let s = p.source("A.java").to_string();
     // The word "world" lives inside the "hello world" string literal.
     let off = at(&s, "world\"");
-    assert!(p.goto("A.java", off).is_none(), "text inside a string literal is not navigable");
+    assert!(
+        p.goto("A.java", off).is_none(),
+        "text inside a string literal is not navigable"
+    );
 }
 
 #[test]
@@ -80,7 +98,10 @@ fn click_on_number_literal_is_none() {
     let p = one();
     let s = p.source("A.java").to_string();
     let off = at(&s, "42;");
-    assert!(p.goto("A.java", off).is_none(), "a numeric literal is not navigable");
+    assert!(
+        p.goto("A.java", off).is_none(),
+        "a numeric literal is not navigable"
+    );
 }
 
 #[test]
@@ -89,7 +110,10 @@ fn click_on_operator_is_none() {
     let s = p.source("A.java").to_string();
     // The `+` operator between `count` and `delta`.
     let off = at(&s, "count + delta") + "count ".len();
-    assert!(p.goto("A.java", off).is_none(), "an operator token is not navigable");
+    assert!(
+        p.goto("A.java", off).is_none(),
+        "an operator token is not navigable"
+    );
 }
 
 #[test]
@@ -186,7 +210,10 @@ fn partial_expression_file_does_not_panic() {
 fn empty_file_does_not_panic() {
     let p = Project::new(&[("Empty.java", "")]);
     // Offset 0 on a zero-length source: must be None, never a panic.
-    assert!(p.goto("Empty.java", 0).is_none(), "empty file has nothing to resolve");
+    assert!(
+        p.goto("Empty.java", 0).is_none(),
+        "empty file has nothing to resolve"
+    );
 }
 
 #[test]
@@ -256,11 +283,13 @@ fn semicolon_and_braces_are_none() {
     // Operators / braces are not navigable — None, never a panic. (A caret ON a `;` right after
     // an identifier biases left onto that identifier by design, so probe an operator instead.)
     assert!(
-        p.goto("A.java", at(&s, "count + delta") + "count ".len()).is_none(),
+        p.goto("A.java", at(&s, "count + delta") + "count ".len())
+            .is_none(),
         "operator not navigable"
     );
     assert!(
-        p.goto("A.java", at(&s, "class A {") + "class A ".len()).is_none(),
+        p.goto("A.java", at(&s, "class A {") + "class A ".len())
+            .is_none(),
         "open brace not navigable"
     );
 }
@@ -270,7 +299,11 @@ fn find_usages_on_junk_caret_is_zero_not_panic() {
     // find-usages must be as robust as go-to: an unresolvable caret yields 0, not a panic.
     let p = one();
     let s = p.source("A.java").to_string();
-    assert_eq!(p.usage_count("A.java", at(&s, "42;")), 0, "a literal has no usages");
+    assert_eq!(
+        p.usage_count("A.java", at(&s, "42;")),
+        0,
+        "a literal has no usages"
+    );
     assert_eq!(
         p.usage_count("A.java", at(&s, "return total;") + "ret".len()),
         0,

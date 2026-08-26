@@ -48,7 +48,10 @@ fn renaming_a_record_component_reaches_the_accessor_inside_a_stream_lambda() {
     assert!(
         edits.iter().any(|e| e.start == in_lambda),
         "the accessor call inside the stream lambda was not renamed; edits: {:?}",
-        edits.iter().map(|e| (e.start, e.reason.label())).collect::<Vec<_>>()
+        edits
+            .iter()
+            .map(|e| (e.start, e.reason.label()))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -63,7 +66,10 @@ fn the_declaration_and_the_plain_call_site_come_too() {
         "no declaration edit — the component itself was left as it was"
     );
     let direct = at(src, "f.source_path()") + "f.".len();
-    assert!(edits.iter().any(|e| e.start == direct), "the direct accessor call was not renamed");
+    assert!(
+        edits.iter().any(|e| e.start == direct),
+        "the direct accessor call was not renamed"
+    );
     assert!(edits.iter().all(|e| e.new_text == "sourcePath"));
 }
 

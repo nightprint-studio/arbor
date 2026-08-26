@@ -44,7 +44,7 @@ use bennu_java::prelude::{
     extract_symbols, static_import_targets, FileSymbols, MemberKind, TypeResolver,
 };
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::resolve::type_binary;
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
@@ -63,11 +63,7 @@ const JAVA_LANG_TYPES: &[&str] = &[
 
 /// Parse `source` and flag bare-identifier value references that resolve to nothing.
 pub fn undefined_var(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let symbols = extract_symbols(source);

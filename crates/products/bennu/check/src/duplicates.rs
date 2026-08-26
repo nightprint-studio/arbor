@@ -39,15 +39,11 @@
 use std::collections::HashMap;
 
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 /// Flag duplicate method / constructor signatures within each type.
 pub fn duplicate_signatures(source: &str) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     duplicate_signatures_in(tree.root_node(), source)

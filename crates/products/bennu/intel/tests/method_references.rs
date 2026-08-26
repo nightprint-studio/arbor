@@ -39,7 +39,10 @@ fn a_method_reference_to_a_record_accessor_is_renamed() {
     assert!(
         edits.iter().any(|e| e.start == at_ref),
         "the method reference was not renamed; edits: {:?}",
-        edits.iter().map(|e| (e.start, e.reason.label())).collect::<Vec<_>>()
+        edits
+            .iter()
+            .map(|e| (e.start, e.reason.label()))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -47,12 +50,19 @@ fn a_method_reference_to_a_record_accessor_is_renamed() {
 fn a_method_reference_to_a_static_method_is_renamed() {
     let p = project();
     let src = p.source("p/Reports.java");
-    let edits = p.rename_edits("p/Reports.java", at(src, "static String helper") + "static String ".len(), "convert");
+    let edits = p.rename_edits(
+        "p/Reports.java",
+        at(src, "static String helper") + "static String ".len(),
+        "convert",
+    );
     let at_ref = at(src, "Reports::helper") + "Reports::".len();
     assert!(
         edits.iter().any(|e| e.start == at_ref),
         "the static method reference was not renamed; edits: {:?}",
-        edits.iter().map(|e| (e.start, e.reason.label())).collect::<Vec<_>>()
+        edits
+            .iter()
+            .map(|e| (e.start, e.reason.label()))
+            .collect::<Vec<_>>()
     );
 }
 

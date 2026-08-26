@@ -40,7 +40,7 @@ use std::hash::Hasher;
 
 use bennu_java::prelude::{extract_symbols_from_root, FileSymbols, InferCache, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::check::{check_file, check_file_in, collect_nodes, finish, FileContext};
 
@@ -81,12 +81,7 @@ pub fn check_file_resolved_incremental(
     resolver_rev: u64,
     cache: &mut IncrementalCache,
 ) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        *cache = IncrementalCache::default();
-        return check_file(source, ctx);
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         *cache = IncrementalCache::default();
         return check_file(source, ctx);
     };
@@ -95,6 +90,14 @@ pub fn check_file_resolved_incremental(
 
     // Pure-AST checks: always fresh (cheap, and their offsets must be current).
     let mut out = check_file_in(root, &nodes, source, ctx);
+
+    // A file that did not PARSE gets its syntax error and nothing else — same rule, and the same
+    // reason, as the whole-file path (`check::check_file_resolved`). Drop the cache too: entries
+    // keyed to a tree we do not believe would be served back once the file parses again.
+    if root.has_error() {
+        *cache = IncrementalCache::default();
+        return finish(out);
+    }
 
     // No JDK → the resolver checks would all resolve to "unknown" and stay silent; skip them (and drop
     // any stale cache, so a later JDK-available run rebuilds from scratch).
@@ -207,6 +210,7 @@ fn run_wholefile_checks<'a>(
 ) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     out.extend(crate::imports::unresolved_imports(root, source, resolver, ctx.classpath_complete));
+    out.extend(crate::imports::unresolved_static_imports(root, source, resolver));
     out.extend(crate::types::unresolved_types_in(nodes, source, symbols, resolver));
     out.extend(crate::type_arg_arity::type_arg_arity_errors_in(nodes, source, symbols, resolver));
     out.extend(crate::undefined_var::undefined_var_errors_in(root, nodes, source, symbols, resolver));

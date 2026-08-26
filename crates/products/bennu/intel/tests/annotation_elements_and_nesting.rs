@@ -31,27 +31,43 @@ public class Handler {
 
 #[test]
 fn an_annotation_element_renames_its_declaration_and_its_calls() {
-    let p = Project::new(&[("p/Customizer.java", ANNOTATION), ("p/Handler.java", USES_ANNOTATION)]);
+    let p = Project::new(&[
+        ("p/Customizer.java", ANNOTATION),
+        ("p/Handler.java", USES_ANNOTATION),
+    ]);
     let src = p.source("p/Customizer.java");
     let edits = p.rename_edits("p/Customizer.java", at(src, "with_check"), "withCheck");
 
     assert!(
-        edits.iter().any(|e| e.reason == bennu_intel::prelude::EditReason::Declaration),
+        edits
+            .iter()
+            .any(|e| e.reason == bennu_intel::prelude::EditReason::Declaration),
         "no declaration edit — the element was not recognised as a member it can edit: {:?}",
-        edits.iter().map(|e| (e.file.as_str(), e.start, e.reason.label())).collect::<Vec<_>>()
+        edits
+            .iter()
+            .map(|e| (e.file.as_str(), e.start, e.reason.label()))
+            .collect::<Vec<_>>()
     );
     let uses = p.source("p/Handler.java");
     let call = at(uses, "c.with_check()") + "c.".len();
     assert!(
-        edits.iter().any(|e| e.file.ends_with("Handler.java") && e.start == call),
+        edits
+            .iter()
+            .any(|e| e.file.ends_with("Handler.java") && e.start == call),
         "the call through the annotation instance was not renamed: {:?}",
-        edits.iter().map(|e| (e.file.as_str(), e.start)).collect::<Vec<_>>()
+        edits
+            .iter()
+            .map(|e| (e.file.as_str(), e.start))
+            .collect::<Vec<_>>()
     );
 }
 
 #[test]
 fn an_annotation_element_is_found_from_its_use_site() {
-    let p = Project::new(&[("p/Customizer.java", ANNOTATION), ("p/Handler.java", USES_ANNOTATION)]);
+    let p = Project::new(&[
+        ("p/Customizer.java", ANNOTATION),
+        ("p/Handler.java", USES_ANNOTATION),
+    ]);
     let uses = p.source("p/Handler.java");
     let found = p.find_usages("p/Handler.java", at(uses, "c.with_check()") + "c.".len());
     let label = found.map(|r| r.target.label()).unwrap_or_default();
@@ -88,9 +104,14 @@ fn same_named_nested_classes_keep_their_own_members() {
     let edits = p.rename_edits("p/AlphaTest.java", at(a, "run_case"), "runCase");
 
     assert!(
-        edits.iter().any(|e| e.reason == bennu_intel::prelude::EditReason::Declaration),
+        edits
+            .iter()
+            .any(|e| e.reason == bennu_intel::prelude::EditReason::Declaration),
         "no declaration edit — the caret resolved to a type in another file: {:?}",
-        edits.iter().map(|e| (e.file.as_str(), e.start, e.reason.label())).collect::<Vec<_>>()
+        edits
+            .iter()
+            .map(|e| (e.file.as_str(), e.start, e.reason.label()))
+            .collect::<Vec<_>>()
     );
     assert!(
         edits.iter().all(|e| e.file.ends_with("AlphaTest.java")),

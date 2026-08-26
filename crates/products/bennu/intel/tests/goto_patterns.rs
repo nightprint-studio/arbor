@@ -76,7 +76,9 @@ fn static_method_via_type_resolves() {
     let p = proj();
     let s = p.source("Sub.java").to_string();
     let off = at(&s, "Util.create()") + "Util.".len();
-    let d = p.goto("Sub.java", off).expect("static method via type resolves");
+    let d = p
+        .goto("Sub.java", off)
+        .expect("static method via type resolves");
     assert_eq!(d.file, "Util.java");
     assert_eq!(d.label, "method p.Util.create()");
 }
@@ -86,7 +88,9 @@ fn static_field_via_type_resolves() {
     let p = proj();
     let s = p.source("Sub.java").to_string();
     let off = at(&s, "Util.CONST") + "Util.".len();
-    let d = p.goto("Sub.java", off).expect("static field via type resolves");
+    let d = p
+        .goto("Sub.java", off)
+        .expect("static field via type resolves");
     assert_eq!(d.file, "Util.java");
     assert_eq!(d.label, "field p.Util.CONST");
 }
@@ -174,7 +178,11 @@ fn find_usages_super_call_is_bucketed() {
     let p = proj();
     let b = p.source("Base.java").to_string();
     let off = at(&b, "int baseVal()") + "int ".len();
-    assert_eq!(p.usage_count("Base.java", off), 1, "the super.baseVal() call is bucketed");
+    assert_eq!(
+        p.usage_count("Base.java", off),
+        1,
+        "the super.baseVal() call is bucketed"
+    );
 }
 
 #[test]

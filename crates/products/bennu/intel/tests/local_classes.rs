@@ -49,15 +49,25 @@ fn find_usages_of_the_local_class_sees_both_mentions() {
     let p = project();
     let src = p.source("p/Outer.java");
     // From the declaration: `Helper h` and `new Helper()`.
-    assert_eq!(p.usage_count("p/Outer.java", at(src, "class Helper") + "class ".len()), 2);
+    assert_eq!(
+        p.usage_count("p/Outer.java", at(src, "class Helper") + "class ".len()),
+        2
+    );
 }
 
 #[test]
 fn renaming_the_local_class_moves_every_mention() {
     let p = project();
     let src = p.source("p/Outer.java");
-    let edits = p.rename_edits("p/Outer.java", at(src, "class Helper") + "class ".len(), "Aide");
-    assert!(edits.iter().any(|e| e.reason.label() == "declaration"), "declaration edit");
+    let edits = p.rename_edits(
+        "p/Outer.java",
+        at(src, "class Helper") + "class ".len(),
+        "Aide",
+    );
+    assert!(
+        edits.iter().any(|e| e.reason.label() == "declaration"),
+        "declaration edit"
+    );
     assert_eq!(edits.len(), 3, "declaration + the two uses: {edits:?}");
     assert!(edits.iter().all(|e| e.new_text == "Aide"));
 }
@@ -66,9 +76,16 @@ fn renaming_the_local_class_moves_every_mention() {
 fn renaming_a_member_of_a_local_class_reaches_its_use() {
     let p = project();
     let src = p.source("p/Outer.java");
-    let edits = p.rename_edits("p/Outer.java", at(src, "int twice()") + "int ".len(), "doubled");
+    let edits = p.rename_edits(
+        "p/Outer.java",
+        at(src, "int twice()") + "int ".len(),
+        "doubled",
+    );
     let call = at_last(src, "h.twice()") + "h.".len();
-    assert!(edits.iter().any(|e| e.start == call), "the call was not renamed: {edits:?}");
+    assert!(
+        edits.iter().any(|e| e.start == call),
+        "the call was not renamed: {edits:?}"
+    );
 }
 
 /// A local class does not move its file: the file is named after the top-level type.
@@ -77,7 +94,11 @@ fn renaming_a_local_class_leaves_the_file_alone() {
     let p = project();
     let src = p.source("p/Outer.java");
     let plan = p
-        .rename("p/Outer.java", at(src, "class Helper") + "class ".len(), "Aide")
+        .rename(
+            "p/Outer.java",
+            at(src, "class Helper") + "class ".len(),
+            "Aide",
+        )
         .expect("a plan");
     assert!(plan.file_rename.is_none());
 }
@@ -116,7 +137,11 @@ fn an_anonymous_method_is_not_a_use_of_the_outer_classes_method() {
         Some("method p.Host.run()"),
         "the outer method should still be its own",
     );
-    assert_eq!(p.usage_count("p/Host.java", outer_run), 0, "nobody calls Host.run()");
+    assert_eq!(
+        p.usage_count("p/Host.java", outer_run),
+        0,
+        "nobody calls Host.run()"
+    );
 }
 
 /// A field read inside an anonymous body resolves against the anonymous class, not the host.
@@ -125,7 +150,10 @@ fn a_field_of_the_anonymous_class_resolves_to_it() {
     let p = anon();
     let src = p.source("p/Host.java");
     let read = at(src, "int t = tag;") + "int t = ".len();
-    assert_eq!(p.goto_label("p/Host.java", read).as_deref(), Some("field p.Host.1.tag"));
+    assert_eq!(
+        p.goto_label("p/Host.java", read).as_deref(),
+        Some("field p.Host.1.tag")
+    );
 }
 
 /// Numbered by source order within the enclosing type, the way javac names them.
@@ -136,6 +164,8 @@ fn anonymous_classes_are_numbered_in_source_order() {
     let read = at(src, "int t = tag;") + "int t = ".len();
     // The field initializer's anonymous class comes first in the file, so it is `1`.
     let label = p.goto_label("p/Host.java", read).expect("resolved");
-    assert!(label.ends_with("Host.1.tag"), "expected the first anonymous class: {label}");
+    assert!(
+        label.ends_with("Host.1.tag"),
+        "expected the first anonymous class: {label}"
+    );
 }
-

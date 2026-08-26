@@ -120,7 +120,10 @@ mod tests {
         idx.add_binary("java/util/List");
         idx.add_binary("java/awt/List");
         idx.add_binary("java/util/List"); // dup — collapses
-        assert_eq!(idx.candidates("List"), &["java.awt.List".to_string(), "java.util.List".to_string()]);
+        assert_eq!(
+            idx.candidates("List"),
+            &["java.awt.List".to_string(), "java.util.List".to_string()]
+        );
         assert_eq!(idx.candidates("Set"), &[] as &[String]);
     }
 
@@ -131,7 +134,10 @@ mod tests {
         idx.add_binary("module-info");
         idx.add_binary("com/acme/package-info");
         idx.add_binary("DefaultPkgClass"); // default package
-        assert!(idx.is_empty(), "none of these are importable top-level types");
+        assert!(
+            idx.is_empty(),
+            "none of these are importable top-level types"
+        );
     }
 
     #[test]

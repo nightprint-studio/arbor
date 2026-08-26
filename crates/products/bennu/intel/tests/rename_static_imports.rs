@@ -24,9 +24,14 @@ fn the_static_import_of_a_renamed_method_is_rewritten() {
     let caller = p.source("p/Caller.java");
     let import_at = at(caller, "import static p.Util.join_all") + "import static p.Util.".len();
     assert!(
-        edits.iter().any(|e| e.file == "p/Caller.java" && e.start == import_at),
+        edits
+            .iter()
+            .any(|e| e.file == "p/Caller.java" && e.start == import_at),
         "the static import was not rewritten; edits: {:?}",
-        edits.iter().map(|e| (e.file.as_str(), e.start, e.reason.label())).collect::<Vec<_>>()
+        edits
+            .iter()
+            .map(|e| (e.file.as_str(), e.start, e.reason.label()))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -38,7 +43,9 @@ fn the_call_through_a_static_import_is_rewritten() {
     let caller = p.source("p/Caller.java");
     let call_at = at(caller, "return join_all(") + "return ".len();
     assert!(
-        edits.iter().any(|e| e.file == "p/Caller.java" && e.start == call_at),
+        edits
+            .iter()
+            .any(|e| e.file == "p/Caller.java" && e.start == call_at),
         "the bare call through the static import was not renamed"
     );
 }
@@ -51,7 +58,9 @@ fn the_static_import_of_a_renamed_field_is_rewritten() {
     let caller = p.source("p/Caller.java");
     let import_at = at(caller, "import static p.Util.MAX_SIZE") + "import static p.Util.".len();
     assert!(
-        edits.iter().any(|e| e.file == "p/Caller.java" && e.start == import_at),
+        edits
+            .iter()
+            .any(|e| e.file == "p/Caller.java" && e.start == import_at),
         "the static import of the field was not rewritten"
     );
 }

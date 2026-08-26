@@ -49,17 +49,28 @@ fn ui() -> Project {
 fn hover_method_reports_signature_and_owner() {
     let p = ui();
     let s = p.source("Screen.java").to_string();
-    let h = p.hover("Screen.java", at(&s, "w.render(2)") + "w.".len()).expect("hover on method");
+    let h = p
+        .hover("Screen.java", at(&s, "w.render(2)") + "w.".len())
+        .expect("hover on method");
     assert_eq!(h.kind, "method");
     assert_eq!(h.container.as_deref(), Some("ui.Widget"));
-    assert!(h.signature.contains("render"), "signature names the method, got {:?}", h.signature);
+    assert!(
+        h.signature.contains("render"),
+        "signature names the method, got {:?}",
+        h.signature
+    );
 }
 
 #[test]
 fn hover_field_reports_owner() {
     let p = ui();
     let s = p.source("Widget.java").to_string();
-    let h = p.hover("Widget.java", at(&s, "this.size * this.size") + "this.".len()).expect("hover field");
+    let h = p
+        .hover(
+            "Widget.java",
+            at(&s, "this.size * this.size") + "this.".len(),
+        )
+        .expect("hover field");
     assert_eq!(h.kind, "field");
     assert_eq!(h.container.as_deref(), Some("ui.Widget"));
 }
@@ -68,10 +79,16 @@ fn hover_field_reports_owner() {
 fn hover_type_reads_like_its_declaration_with_the_package_beside_it() {
     let p = ui();
     let s = p.source("Screen.java").to_string();
-    let h = p.hover("Screen.java", at(&s, "Widget w")).expect("hover on type");
+    let h = p
+        .hover("Screen.java", at(&s, "Widget w"))
+        .expect("hover on type");
     assert_eq!(h.kind, "class");
     assert_eq!(h.signature, "class Widget");
-    assert_eq!(h.container.as_deref(), Some("ui"), "the package, not the whole FQCN again");
+    assert_eq!(
+        h.container.as_deref(),
+        Some("ui"),
+        "the package, not the whole FQCN again"
+    );
 }
 
 /// An interface must not report itself as a class — the card would be stating something false
@@ -79,14 +96,19 @@ fn hover_type_reads_like_its_declaration_with_the_package_beside_it() {
 #[test]
 fn hover_interface_says_interface() {
     let p = Project::new(&[
-        ("Shape.java", "package ui;\npublic interface Shape { int area(); }\n"),
+        (
+            "Shape.java",
+            "package ui;\npublic interface Shape { int area(); }\n",
+        ),
         (
             "Use.java",
             "package ui;\npublic class Use { public int go(Shape s) { return s.area(); } }\n",
         ),
     ]);
     let s = p.source("Use.java").to_string();
-    let h = p.hover("Use.java", at(&s, "Shape s")).expect("hover on interface");
+    let h = p
+        .hover("Use.java", at(&s, "Shape s"))
+        .expect("hover on interface");
     assert_eq!(h.kind, "interface");
     assert_eq!(h.signature, "interface Shape");
 }
@@ -96,25 +118,38 @@ fn hover_inherited_method_owner_is_declaring_type() {
     // `w.baseM()` on a Widget receiver → the member is DECLARED on Base; hover reports Base.
     let p = ui();
     let s = p.source("Screen.java").to_string();
-    let h = p.hover("Screen.java", at(&s, "w.baseM()") + "w.".len()).expect("hover inherited method");
+    let h = p
+        .hover("Screen.java", at(&s, "w.baseM()") + "w.".len())
+        .expect("hover inherited method");
     assert_eq!(h.kind, "method");
-    assert_eq!(h.container.as_deref(), Some("ui.Base"), "owner is the declaring supertype");
+    assert_eq!(
+        h.container.as_deref(),
+        Some("ui.Base"),
+        "owner is the declaring supertype"
+    );
 }
 
 #[test]
 fn hover_attaches_leading_javadoc() {
     let p = ui();
     let s = p.source("Screen.java").to_string();
-    let h = p.hover("Screen.java", at(&s, "w.render(2)") + "w.".len()).expect("hover on documented method");
+    let h = p
+        .hover("Screen.java", at(&s, "w.render(2)") + "w.".len())
+        .expect("hover on documented method");
     let doc = h.doc.unwrap_or_default();
-    assert!(doc.contains("Render the widget"), "javadoc attached, got {doc:?}");
+    assert!(
+        doc.contains("Render the widget"),
+        "javadoc attached, got {doc:?}"
+    );
 }
 
 #[test]
 fn hover_without_javadoc_has_no_doc() {
     let p = ui();
     let s = p.source("Screen.java").to_string();
-    let h = p.hover("Screen.java", at(&s, "w.plain()") + "w.".len()).expect("hover on plain method");
+    let h = p
+        .hover("Screen.java", at(&s, "w.plain()") + "w.".len())
+        .expect("hover on plain method");
     assert_eq!(h.doc, None, "a method with no Javadoc carries no doc");
 }
 
@@ -124,21 +159,31 @@ fn hover_on_local_is_none() {
     let s = p.source("Screen.java").to_string();
     // `local` is a local variable — not keyed for hover.
     let off = at(&s, "return local +") + "return ".len();
-    assert!(p.hover("Screen.java", off).is_none(), "a local is not keyed for hover");
+    assert!(
+        p.hover("Screen.java", off).is_none(),
+        "a local is not keyed for hover"
+    );
 }
 
 #[test]
 fn hover_on_keyword_is_none() {
     let p = ui();
     let s = p.source("Screen.java").to_string();
-    assert!(p.hover("Screen.java", at(&s, "return local +")).is_none(), "keyword has no hover");
+    assert!(
+        p.hover("Screen.java", at(&s, "return local +")).is_none(),
+        "keyword has no hover"
+    );
 }
 
 #[test]
 fn hover_on_literal_is_none() {
     let p = ui();
     let s = p.source("Widget.java").to_string();
-    assert!(p.hover("Widget.java", at(&s, "return 0;") + "return ".len()).is_none(), "literal has no hover");
+    assert!(
+        p.hover("Widget.java", at(&s, "return 0;") + "return ".len())
+            .is_none(),
+        "literal has no hover"
+    );
 }
 
 #[test]

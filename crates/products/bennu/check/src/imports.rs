@@ -103,6 +103,72 @@ fn resolves_import(dotted: &str, resolver: &dyn TypeResolver) -> bool {
     false
 }
 
+/// Flag `import static a.b.C.member;` whose OWNER is a project type that declares no such member.
+///
+/// javac reports this as `cannot find symbol: static <member>` at the import line, and it is what a
+/// half-applied rename leaves behind: the declaration moves, the import that named it does not.
+/// It was the single largest class of breakage the validator could not see — on a deliberately
+/// broken project, 792 errors across 143 files that Bennu was silent about.
+///
+/// Adjudicated ONLY when the owner is a type the PROJECT declares and whose members are therefore
+/// known exactly. A library owner is left alone for the same reason [`unresolved_imports`] gates on
+/// `classpath_complete`: an incomplete member view would report an import that is perfectly valid.
+/// A wildcard static import names no member and is skipped.
+pub fn unresolved_static_imports(
+    root: Node,
+    source: &str,
+    resolver: &dyn TypeResolver,
+) -> Vec<Diagnostic> {
+    let bytes = source.as_bytes();
+    let symbols = bennu_java::prelude::extract_symbols(source);
+    let mut out = Vec::new();
+    for target in bennu_java::prelude::static_import_targets(&symbols.imports) {
+        // `import static a.b.C.*;` names no single member.
+        let Some(member) = target.member.clone() else { continue };
+        if !resolver.is_project_type(&target.owner_binary) {
+            continue;
+        }
+        let Some(cm) = resolver.members_of(&target.owner_binary) else { continue };
+        let declared = cm.methods.iter().any(|m| m.name == member)
+            || cm.fields.iter().any(|f| f.name == member);
+        if declared {
+            continue;
+        }
+        let Some(span) = static_import_member_span(root, bytes, &member) else { continue };
+        out.push(CheckId::UnresolvedImport.span(
+            span.0,
+            span.1,
+            format!(
+                "Cannot resolve `{member}` in `{}` — the static import names nothing it declares",
+                target.owner_binary.rsplit('/').next().unwrap_or(&target.owner_binary)
+            ),
+        ));
+    }
+    out
+}
+
+/// The byte span of `member` inside the `import static …` declaration that names it — the LAST
+/// segment of the path, which is the member.
+fn static_import_member_span(root: Node, bytes: &[u8], member: &str) -> Option<(usize, usize)> {
+    let mut c = root.walk();
+    for child in root.children(&mut c) {
+        if child.kind() != "import_declaration" {
+            continue;
+        }
+        let Ok(text) = child.utf8_text(bytes) else { continue };
+        if !text.contains("static") {
+            continue;
+        }
+        let path = text.trim_end_matches(';').trim_end();
+        if path.rsplit('.').next().map(str::trim) != Some(member) {
+            continue;
+        }
+        let rel = text.rfind(member)?;
+        return Some((child.start_byte() + rel, child.start_byte() + rel + member.len()));
+    }
+    None
+}
+
 /// Flag a **redundant wildcard import** — `import java.lang.*;` (always implicitly imported) or
 /// `import <own package>.*;` (the file's own package is implicitly in scope). A `warning`; purely
 /// syntactic (the file's own package is read straight off the tree), so it needs no resolver and can
@@ -505,5 +571,88 @@ mod tests {
         // `java.lang.reflect` is NOT implicitly imported — only `java.lang` itself is.
         let src = "package a;\nimport java.lang.reflect.*;\nclass Foo {}\n";
         assert!(redundant(src).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod static_import_tests {
+    use super::*;
+    use bennu_java::prelude::{ClassMembers, Import, Member, TypeRef};
+    use std::collections::HashMap;
+
+    struct Res(HashMap<String, ClassMembers>);
+    impl TypeResolver for Res {
+        fn members_of(&self, b: &str) -> Option<std::sync::Arc<ClassMembers>> {
+            self.0.get(b).cloned().map(std::sync::Arc::new)
+        }
+        fn resolve_simple_name(&self, _n: &str, _i: &[Import]) -> Option<String> {
+            None
+        }
+        /// `p/…` is the project; `lib/…` stands for a dependency the resolver can read but does
+        /// not own.
+        fn is_project_type(&self, b: &str) -> bool {
+            b.starts_with("p/") && self.0.contains_key(b)
+        }
+    }
+
+    fn resolver() -> Res {
+        let mut m = HashMap::new();
+        let fixture = ClassMembers {
+            type_params: Vec::new(),
+            superclass: None,
+            interfaces: Vec::new(),
+            methods: vec![Member::method("tabellato_exist", TypeRef::simple("boolean"), Vec::new())],
+            fields: vec![Member::field("DB_ROW", TypeRef::simple("java/lang/String"))],
+            flags: Default::default(),
+        };
+        m.insert("p/Fixture".to_string(), fixture);
+        // A LIBRARY owner: known to the resolver but not a project type.
+        m.insert(
+            "lib/Other".to_string(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: None,
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: Vec::new(),
+                flags: Default::default(),
+            },
+        );
+        Res(m)
+    }
+
+    fn run(src: &str) -> Vec<String> {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_java::LANGUAGE.into()).unwrap();
+        let tree = parser.parse(src, None).unwrap();
+        unresolved_static_imports(tree.root_node(), src, &resolver())
+            .into_iter()
+            .map(|d| d.message)
+            .collect()
+    }
+
+    #[test]
+    fn a_static_import_of_something_the_owner_declares_is_silent() {
+        let out = run("package q;\nimport static p.Fixture.tabellato_exist;\nclass A {}\n");
+        assert!(out.is_empty(), "{out:?}");
+        let out = run("package q;\nimport static p.Fixture.DB_ROW;\nclass A {}\n");
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    /// What a half-applied rename leaves behind.
+    #[test]
+    fn a_static_import_naming_nothing_is_reported() {
+        let out = run("package q;\nimport static p.Fixture.tabellatoExist;\nclass A {}\n");
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(out[0].contains("tabellatoExist"), "{out:?}");
+    }
+
+    /// A wildcard names no member, and a LIBRARY owner is never adjudicated — its member view may
+    /// be incomplete, and a false import error is worse than a missing one.
+    #[test]
+    fn wildcards_and_library_owners_are_left_alone() {
+        assert!(run("package q;\nimport static p.Fixture.*;\nclass A {}\n").is_empty());
+        assert!(run("package q;\nimport static lib.Other.whatever;\nclass A {}\n").is_empty());
+        assert!(run("package q;\nimport static unknown.Thing.whatever;\nclass A {}\n").is_empty());
     }
 }

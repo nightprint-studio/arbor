@@ -21,67 +21,15 @@
 //! counts as a bean, what an endpoint path joins to, which repository method is well-formed —
 //! that is each extension's own business.
 
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
-/// One string literal written inside an annotation's argument list, with the span of its
-/// **contents** (inside the quotes) — the span a `${…}` inside it is offset against.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AnnString {
-    /// The annotation element it was written for: `""` for a bare positional value
-    /// (`@Value("x")`, which means `value`), else the pair's name (`cron` in
-    /// `@Scheduled(cron = "…")`).
-    pub element: String,
-    /// The literal's contents, with the quotes stripped.
-    pub value: String,
-    /// Byte span of the contents in the file.
-    pub start: usize,
-    pub end: usize,
-}
-
-/// One annotation written on a declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AnnFacts {
-    /// Simple name — the last segment (`org.springframework.stereotype.Service` → `Service`).
-    pub name: String,
-    /// The name **exactly as written**, which is dotted only when the source qualified it
-    /// (`@org.springframework.stereotype.Service`). Load-bearing: a simple name alone says
-    /// nothing about which annotation this is — anyone may declare their own `@Service` —
-    /// so [`crate::known`] resolves it through this plus the file's imports.
-    pub qualified: String,
-    /// Byte span of the whole `@Name(...)`.
-    pub start: usize,
-    pub end: usize,
-    /// Every string literal in the argument list, in source order.
-    pub strings: Vec<AnnString>,
-    /// `element = value` pairs as raw source text, for the non-string arguments that
-    /// matter (`method = RequestMethod.POST`, `required = false`).
-    pub pairs: Vec<(String, String)>,
-    /// Positional arguments that are NOT string literals, as raw source text —
-    /// `@ConditionalOnBean(DataSource.class)` → `["DataSource.class"]`. A class literal is the
-    /// normal way to write half the `@ConditionalOn…` family, and it is neither a pair nor a
-    /// string, so without this it was simply invisible.
-    pub positional: Vec<String>,
-}
-
-impl AnnFacts {
-    /// The annotation's `value` element as a string literal — written bare
-    /// (`@Value("x")`) or named (`@Value(value = "x")`).
-    pub fn value(&self) -> Option<&AnnString> {
-        self.strings.iter().find(|s| s.element.is_empty() || s.element == "value")
-    }
-
-    /// Every string literal written for `element` (an array element like
-    /// `@RequestMapping(path = {"/a", "/b"})` yields several).
-    pub fn strings_for<'a>(&'a self, element: &str) -> impl Iterator<Item = &'a AnnString> + 'a {
-        let element = element.to_string();
-        self.strings.iter().filter(move |s| s.element == element)
-    }
-
-    /// The raw text of the `element = …` pair, if written.
-    pub fn pair(&self, element: &str) -> Option<&str> {
-        self.pairs.iter().find(|(k, _)| k == element).map(|(_, v)| v.as_str())
-    }
-}
+/// The workspace's annotation model, re-exported under the name this crate's consumers use.
+///
+/// This crate used to declare its own, richer than the engine's, and fill it from its own parse of
+/// the same file. Two models meant two answers to "what does this annotation say", and the richer
+/// one — the one the frameworks actually read — was the one the project index never saw. There is
+/// one now: see [`bennu_java::prelude::Annotation`].
+pub use bennu_java::prelude::{AnnString, Annotation as AnnFacts};
 
 /// A method parameter, with its annotations (`@PathVariable`, `@Qualifier`, `@Value`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,9 +114,12 @@ pub fn mentions_any(source: &str, markers: &[&str]) -> bool {
 /// A file with syntax errors still yields whatever parsed — tree-sitter recovers, and a
 /// half-written file mid-keystroke must not blank the panel.
 pub fn scan_java(file: &str, source: &str) -> Option<JavaFacts> {
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-    let tree = parser.parse(source, None)?;
+    // The workspace's one Java parse — see `bennu_java::grammar`. Not a private parser, for three
+    // reasons that all bit at once: the grammar pin belongs in one place, the parse cache means a
+    // file the engine already read is not read again, and a construct the grammar cannot handle is
+    // recovered there (`Object @Nullable ... args`) — so a Spring `@Value` in such a file was
+    // invisible to this scan while being perfectly visible to everything else.
+    let tree = bennu_java::prelude::parse_java(source)?;
     let bytes = source.as_bytes();
     let root = tree.root_node();
 
@@ -250,7 +201,7 @@ fn collect_type(node: &Node, bytes: &[u8], owner: &str, out: &mut Vec<TypeFacts>
         is_abstract: has_modifier(node, "abstract"),
         extends: clause_text(node, bytes, "superclass", "extends"),
         implements: interfaces_of(node, bytes),
-        annotations: annotations_of(node, bytes),
+        annotations: bennu_java::prelude::collect_annotations(node, bytes),
         name_offset: name_node.start_byte(),
         methods: Vec::new(),
         fields: Vec::new(),
@@ -292,7 +243,7 @@ fn record_components(node: &Node, bytes: &[u8], out: &mut Vec<FieldFacts>) {
             is_static: false,
             is_final: true,
             is_public: true,
-            annotations: annotations_of(&p, bytes),
+            annotations: bennu_java::prelude::collect_annotations(&p, bytes),
         });
     }
 }
@@ -336,7 +287,7 @@ fn method_facts(node: &Node, bytes: &[u8], is_constructor: bool) -> Option<Metho
             .and_then(|n| text(&n, bytes))
             .unwrap_or_else(|| "void".to_string()),
         params: params_of(node, bytes),
-        annotations: annotations_of(node, bytes),
+        annotations: bennu_java::prelude::collect_annotations(node, bytes),
         name_offset: name_node.start_byte(),
         is_static: has_modifier(node, "static"),
         is_public: has_modifier(node, "public"),
@@ -368,7 +319,7 @@ fn params_of(node: &Node, bytes: &[u8]) -> Vec<ParamFacts> {
                 .and_then(|n| text(&n, bytes))
                 .unwrap_or_default(),
             name_offset: name_node.start_byte(),
-            annotations: annotations_of(&p, bytes),
+            annotations: bennu_java::prelude::collect_annotations(&p, bytes),
         });
     }
     out
@@ -377,7 +328,7 @@ fn params_of(node: &Node, bytes: &[u8]) -> Vec<ParamFacts> {
 fn field_facts(node: &Node, bytes: &[u8], out: &mut Vec<FieldFacts>) {
     let type_text =
         node.child_by_field_name("type").and_then(|n| text(&n, bytes)).unwrap_or_default();
-    let annotations = annotations_of(node, bytes);
+    let annotations = bennu_java::prelude::collect_annotations(node, bytes);
     let is_static = has_modifier(node, "static");
     let is_final = has_modifier(node, "final");
     let is_public = has_modifier(node, "public");
@@ -491,130 +442,9 @@ fn has_modifier(node: &Node, keyword: &str) -> bool {
     found
 }
 
-/// The annotations written in a declaration's `modifiers` child.
-fn annotations_of(node: &Node, bytes: &[u8]) -> Vec<AnnFacts> {
-    let mut out = Vec::new();
-    let mut w = node.walk();
-    for c in node.children(&mut w) {
-        if c.kind() != "modifiers" {
-            continue;
-        }
-        let mut mw = c.walk();
-        for a in c.children(&mut mw) {
-            if !matches!(a.kind(), "marker_annotation" | "annotation") {
-                continue;
-            }
-            let Some(raw) = a.child_by_field_name("name").and_then(|n| text(&n, bytes)) else {
-                continue;
-            };
-            let mut ann = AnnFacts {
-                name: raw.rsplit('.').next().unwrap_or(&raw).to_string(),
-                qualified: raw.clone(),
-                start: a.start_byte(),
-                end: a.end_byte(),
-                strings: Vec::new(),
-                pairs: Vec::new(),
-                positional: Vec::new(),
-            };
-            if let Some(args) = a.child_by_field_name("arguments") {
-                collect_args(&args, bytes, &mut ann);
-            }
-            out.push(ann);
-        }
-    }
-    out
-}
 
-/// Walk an `annotation_argument_list`, collecting string literals (with the element they
-/// belong to) and `element = raw` pairs.
-fn collect_args(args: &Node, bytes: &[u8], ann: &mut AnnFacts) {
-    let mut w = args.walk();
-    for arg in args.named_children(&mut w) {
-        match arg.kind() {
-            "element_value_pair" => {
-                let key = arg
-                    .child_by_field_name("key")
-                    .and_then(|k| text(&k, bytes))
-                    .unwrap_or_default();
-                if let Some(v) = arg.child_by_field_name("value") {
-                    if let Some(raw) = text(&v, bytes) {
-                        ann.pairs.push((key.clone(), raw.trim().to_string()));
-                    }
-                    collect_strings(&v, bytes, &key, &mut ann.strings);
-                }
-            }
-            // A bare positional argument — `@Value("x")` / `@RequestMapping({"/a","/b"})` /
-            // `@ConditionalOnBean(DataSource.class)`. Strings are collected as such; anything
-            // else is kept as raw text, which is the only way a class literal survives.
-            _ => {
-                let before = ann.strings.len();
-                collect_strings(&arg, bytes, "", &mut ann.strings);
-                if ann.strings.len() == before {
-                    if let Some(raw) = text(&arg, bytes) {
-                        ann.positional.push(raw.trim().to_string());
-                    }
-                }
-            }
-        }
-    }
-}
 
-/// Collect every string literal at or under `node` (an array initializer holds several),
-/// tagging each with the annotation element it was written for.
-fn collect_strings(node: &Node, bytes: &[u8], element: &str, out: &mut Vec<AnnString>) {
-    // A text block is a string literal with different delimiters, and it is how anyone writes a
-    // multi-line one — a JPQL query, a SQL statement, a long cron description. Treating it as
-    // "not a string" made exactly the annotations that most need reading invisible.
-    if matches!(node.kind(), "string_literal" | "text_block") {
-        if let Some((value, start, end)) = string_contents(node, bytes) {
-            out.push(AnnString { element: element.to_string(), value, start, end });
-        }
-        return;
-    }
-    let mut w = node.walk();
-    for c in node.named_children(&mut w) {
-        collect_strings(&c, bytes, element, out);
-    }
-}
 
-/// The contents of a string literal — a `"…"` or a `"""…"""` — and their byte span, which is
-/// what a `${…}` or a `:param` span inside it must be relative to.
-///
-/// The contents are **raw**, exactly as written in the file, and that is deliberate in two ways:
-///
-/// - an escape (`\n`, `\"`) is not expanded, because the spans have to index the file as written
-///   and un-escaping would desynchronise them from it;
-/// - a text block's **incidental indentation is not stripped**, even though the JLS strips it
-///   before the program sees the value. Stripping it here would shorten the text and every span
-///   computed against it would point at the wrong characters. Nothing downstream cares: the
-///   scanners that read these strings tokenize, and leading whitespace is not a token.
-fn string_contents(node: &Node, bytes: &[u8]) -> Option<(String, usize, usize)> {
-    let start = node.start_byte();
-    let end = node.end_byte();
-    let raw = std::str::from_utf8(bytes.get(start..end)?).ok()?;
-
-    let (inner_start, inner_end) = if raw.starts_with("\"\"\"") {
-        // A text block's content begins on the line AFTER the opening delimiter — the JLS
-        // requires a line terminator there, so the first newline is the boundary, not part of
-        // the value.
-        if end < start + 6 {
-            return None; // `""""""`, or something truncated mid-edit
-        }
-        let after_open = raw.get(3..)?;
-        let first_break = after_open.find('\n')? + 1;
-        (start + 3 + first_break, end - 3)
-    } else {
-        if end <= start + 1 {
-            return None; // not even a pair of quotes
-        }
-        (start + 1, end - 1)
-    };
-    if inner_end < inner_start {
-        return None;
-    }
-    let value = std::str::from_utf8(bytes.get(inner_start..inner_end)?).ok()?.to_string();
-    Some((value, inner_start, inner_end))
-}
 
 fn text(node: &Node, bytes: &[u8]) -> Option<String> {
     node.utf8_text(bytes).ok().map(|s| s.to_string())

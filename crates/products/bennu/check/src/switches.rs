@@ -15,7 +15,7 @@
 //!     un-modelled control flow (loops, nested switches, `try`) yields — so it never false-flags.
 
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 // ── selector type (pure AST) ─────────────────────────────────────────────────
 //
@@ -277,11 +277,7 @@ fn err(message: String, node: Node) -> Diagnostic {
 }
 
 fn with_parse(source: &str, f: impl FnOnce(Node) -> Vec<Diagnostic>) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    match parser.parse(source, None) {
+    match bennu_java::prelude::parse_java(source) {
         Some(tree) => f(tree.root_node()),
         None => Vec::new(),
     }

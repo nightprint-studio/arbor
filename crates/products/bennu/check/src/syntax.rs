@@ -94,6 +94,29 @@ mod tests {
         syntax_errors(tree.root_node(), src)
     }
 
+    /// Through the crate's real entry point, which is where a parse that failed for OUR reasons is
+    /// retried — see `bennu_java::grammar`.
+    fn errors_via_engine(src: &str) -> Vec<Diagnostic> {
+        let tree = bennu_java::prelude::parse_java(src).expect("a parse");
+        syntax_errors(tree.root_node(), src)
+    }
+
+    /// `Object @Nullable ... args` is legal Java the grammar cannot parse. Reporting it calls the
+    /// user's code broken when ours is, and a syntax error suppresses every semantic check in the
+    /// file — so one parameter blanked eight whole sources on Guava.
+    #[test]
+    fn a_type_use_annotation_on_varargs_is_not_reported() {
+        let src = "class A {\n  static String g(String t, Object @Nullable ... a) { return t; }\n}\n";
+        assert!(errors_via_engine(src).is_empty(), "{:?}", errors_via_engine(src));
+    }
+
+    /// The guard is narrow: a real syntax error in the same file is still reported.
+    #[test]
+    fn an_ordinary_syntax_error_is_still_reported() {
+        let src = "class A {\n  static String g(String t, Object @Nullable ... a) { return t }\n}\n";
+        assert!(!errors_via_engine(src).is_empty());
+    }
+
     #[test]
     fn well_formed_source_has_no_errors() {
         let src = "package com.acme;\npublic class Foo {\n  int x = 3;\n  void run() { x++; }\n}\n";
@@ -124,4 +147,53 @@ mod tests {
             assert!(!span.contains(&b'\n'), "error span must not cross a newline");
         }
     }
+}
+
+#[cfg(test)]
+mod parse_gate_tests {
+    use crate::check::{check_file_resolved, FileContext};
+    use bennu_java::prelude::{ClassMembers, Import, TypeResolver};
+    use std::collections::HashMap;
+
+    struct Empty;
+    impl TypeResolver for Empty {
+        fn members_of(&self, _b: &str) -> Option<std::sync::Arc<ClassMembers>> {
+            None
+        }
+        fn resolve_simple_name(&self, _n: &str, _i: &[Import]) -> Option<String> {
+            None
+        }
+        fn is_project_type(&self, _b: &str) -> bool {
+            false
+        }
+    }
+
+    fn run(src: &str) -> Vec<String> {
+        let ctx = FileContext::default();
+        check_file_resolved(src, &ctx, &Empty, true).into_iter().map(|d| d.code).collect()
+    }
+
+    /// A file that does not parse reports its syntax error and stops. Reading a broken tree as if it
+    /// meant something is how one fuzzer-test file produced 199 undefined symbols named after the
+    /// CONTENTS of a string literal.
+    #[test]
+    fn a_file_that_does_not_parse_reports_only_syntax() {
+        let codes = run("package p;\nclass A { void m( { int x = ; } }\n");
+        assert!(codes.contains(&"syntax-error".to_string()), "{codes:?}");
+        // Syntactic findings are fine — they are about the text. What must not appear is anything
+        // that read the tree as if it meant something.
+        assert!(
+            codes.iter().all(|c| matches!(c.as_str(), "syntax-error" | "missing-token")),
+            "a broken parse must not produce semantic diagnostics: {codes:?}"
+        );
+    }
+
+    /// A file that parses is checked normally — the gate must not switch the checks off wholesale.
+    #[test]
+    fn a_file_that_parses_is_still_checked() {
+        let codes = run("package p;\nclass A { void m() { int x = 1; } }\n");
+        assert!(!codes.contains(&"syntax-error".to_string()), "{codes:?}");
+    }
+    #[allow(dead_code)]
+    fn _unused(_: HashMap<String, ClassMembers>) {}
 }

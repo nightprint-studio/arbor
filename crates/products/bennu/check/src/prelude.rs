@@ -16,7 +16,9 @@ pub use crate::declarations::declaration_errors;
 pub use crate::duplicates::duplicate_signatures;
 pub use crate::fields::unknown_fields;
 pub use crate::functional::functional_errors;
-pub use crate::imports::{duplicate_imports, unresolved_imports, unused_imports};
+pub use crate::imports::{
+    duplicate_imports, unresolved_imports, unresolved_static_imports, unused_imports,
+};
 pub use crate::incremental::{check_file_resolved_incremental, IncrementalCache};
 pub use crate::inheritance::{inheritance_errors, missing_abstract_impls};
 pub use crate::lambdas::lambda_capture_errors;

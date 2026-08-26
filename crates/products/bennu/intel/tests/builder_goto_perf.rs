@@ -45,8 +45,13 @@ fn goto_add_step_on_field_receiver_inherited() {
     let p = inherited_builder();
     let s = p.source("Helper.java").to_string();
     let off = at(&s, "stepper.add_step(") + "stepper.".len();
-    let d = p.goto("Helper.java", off).expect("go-to resolves the inherited builder method");
-    assert_eq!(d.file, "BaseStepper.java", "add_step is declared on the base builder");
+    let d = p
+        .goto("Helper.java", off)
+        .expect("go-to resolves the inherited builder method");
+    assert_eq!(
+        d.file, "BaseStepper.java",
+        "add_step is declared on the base builder"
+    );
     assert_eq!(d.label, "method w.BaseStepper.add_step()");
 }
 
@@ -58,7 +63,10 @@ fn find_usages_add_step_inherited_from_subtype_receiver() {
     let b = p.source("BaseStepper.java").to_string();
     let off = at(&b, "add_step(String") + 0;
     let n = p.usage_count("BaseStepper.java", off);
-    assert_eq!(n, 1, "the one stepper.add_step(...) call is found from the declaration");
+    assert_eq!(
+        n, 1,
+        "the one stepper.add_step(...) call is found from the declaration"
+    );
 }
 
 #[test]
@@ -84,7 +92,9 @@ fn goto_add_step_on_local_receiver() {
     ]);
     let s = p.source("Helper.java").to_string();
     let off = at(&s, "stepper.add_step(") + "stepper.".len();
-    let d = p.goto("Helper.java", off).expect("go-to resolves via the local receiver");
+    let d = p
+        .goto("Helper.java", off)
+        .expect("go-to resolves via the local receiver");
     assert_eq!(d.file, "WizardStepper.java");
     assert_eq!(d.label, "method w.WizardStepper.add_step()");
 }
@@ -115,7 +125,9 @@ fn goto_add_step_chained_return_this() {
     let s = p.source("Helper.java").to_string();
     // The SECOND add_step (after the `)` of the first call).
     let off = at_last(&s, ".add_step(") + ".".len();
-    let d = p.goto("Helper.java", off).expect("go-to resolves the chained builder method");
+    let d = p
+        .goto("Helper.java", off)
+        .expect("go-to resolves the chained builder method");
     assert_eq!(d.file, "WizardStepper.java");
     assert_eq!(d.label, "method w.WizardStepper.add_step()");
 }
@@ -207,7 +219,13 @@ fn repeated_gotos_stay_cheap() {
         let _ = p.goto("Big.java", off);
     }
     let elapsed = start.elapsed();
-    eprintln!("repeated_gotos: 10 go-tos took {elapsed:?} (avg {:?})", elapsed / 10);
+    eprintln!(
+        "repeated_gotos: 10 go-tos took {elapsed:?} (avg {:?})",
+        elapsed / 10
+    );
     // Old re-parse path: ~3.6s for 10. Post-fix: ~0.7s. This catches a regression to the former.
-    assert!(elapsed.as_millis() < 1800, "10 go-tos took {elapsed:?} — compounding cost");
+    assert!(
+        elapsed.as_millis() < 1800,
+        "10 go-tos took {elapsed:?} — compounding cost"
+    );
 }

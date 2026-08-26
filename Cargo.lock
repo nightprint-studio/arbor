@@ -1084,8 +1084,8 @@ dependencies = [
 name = "bennu-facts"
 version = "0.3.0"
 dependencies = [
+ "bennu-java",
  "tree-sitter",
- "tree-sitter-java",
 ]
 
 [[package]]

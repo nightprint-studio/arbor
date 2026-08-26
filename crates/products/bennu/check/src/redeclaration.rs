@@ -11,15 +11,11 @@
 use std::collections::HashSet;
 
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 /// Parse `source` and flag illegal redeclarations.
 pub fn redeclaration_errors(source: &str) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    match parser.parse(source, None) {
+    match bennu_java::prelude::parse_java(source) {
         Some(tree) => redeclaration_errors_in(tree.root_node(), source),
         None => Vec::new(),
     }

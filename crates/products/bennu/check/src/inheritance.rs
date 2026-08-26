@@ -24,7 +24,7 @@ use std::collections::HashSet;
 
 use bennu_java::prelude::{extract_symbols, ClassMembers, FileSymbols, Member, MemberKind, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::check_id::CheckId;
 use crate::members::simple_name;
@@ -336,11 +336,7 @@ fn binary_of(text: &str, symbols: &FileSymbols, resolver: &dyn TypeResolver) -> 
 }
 
 fn with_parse(source: &str, f: impl FnOnce(Node) -> Vec<Diagnostic>) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    match parser.parse(source, None) {
+    match bennu_java::prelude::parse_java(source) {
         Some(tree) => f(tree.root_node()),
         None => Vec::new(),
     }

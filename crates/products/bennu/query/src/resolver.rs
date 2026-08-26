@@ -93,7 +93,8 @@ impl<M: CpMemberIndex> IndexResolver<M> {
 
     /// Seed a simple→binary hint (e.g. the project's own declared types).
     pub fn add_simple_hint(&mut self, simple: &str, binary: &str) {
-        self.simple_hints.insert(simple.to_string(), binary.to_string());
+        self.simple_hints
+            .insert(simple.to_string(), binary.to_string());
     }
 
     /// The persisted project index (for the completion query's prefix search).
@@ -142,7 +143,8 @@ impl<M: CpMemberIndex> IndexResolver<M> {
     /// the project branch of [`members_of`](TypeResolver::members_of) (overlay → persisted, no
     /// JDK), so a recorded dependency and its freshness check read the same source of truth.
     pub fn dep_signature(&self, binary: &str) -> Option<u64> {
-        self.project_members_json(binary).map(|j| dep_record::fnv1a(j.as_bytes()))
+        self.project_members_json(binary)
+            .map(|j| dep_record::fnv1a(j.as_bytes()))
     }
 
     /// The project binary a bare `simple` name resolves to (an overlay-added type wins, else a
@@ -158,7 +160,8 @@ impl<M: CpMemberIndex> IndexResolver<M> {
             }
         }
         let sym = self.project.get(simple)?;
-        (!sym.fqn.is_empty()).then_some(sym.fqn)
+        // Types only — see `is_type_symbol`.
+        (is_type_symbol(&sym) && !sym.fqn.is_empty()).then_some(sym.fqn)
     }
 
     /// Whether `key` names a PROJECT type — as a binary name OR a simple name. The diagnostic
@@ -176,6 +179,16 @@ impl<M: CpMemberIndex> IndexResolver<M> {
     pub fn project_contains(&self, key: &str) -> bool {
         if self.dep_signature(key).is_some() || self.project_simple(key).is_some() {
             return true;
+        }
+        // An ANONYMOUS class is a project type exactly when the type it is written inside is. Its
+        // own key carries no signature of its own — it is filed under an ordinal javac assigns
+        // (`p/Outer/1`), which nothing looks up — so asking for it directly always answered "not a
+        // project type", and every reference the walk attributed to an anonymous body was dropped.
+        // A Java identifier is never all digits, so the last segment settles it with no ambiguity.
+        if let Some((outer, last)) = key.rsplit_once('/') {
+            if !last.is_empty() && last.bytes().all(|b| b.is_ascii_digit()) {
+                return self.project_contains(outer);
+            }
         }
         if !key.contains('$') {
             return false;
@@ -229,12 +242,15 @@ impl<M: CpMemberIndex> IndexResolver<M> {
                 ov.by_file.insert(file.to_string(), contributed);
             }
         } // release the overlay lock before touching the memo (never hold both at once)
-        // SCOPED memo invalidation: drop only the edited file's own types (positive AND negative
-        // entries), keeping every JDK, dependency and other-project-file resolution warm. This is
-        // what stops a Ctrl+click / completion right after a keystroke from re-decoding the world —
-        // the previous behaviour cleared the ENTIRE memo on every debounced patch.
+          // SCOPED memo invalidation: drop only the edited file's own types (positive AND negative
+          // entries), keeping every JDK, dependency and other-project-file resolution warm. This is
+          // what stops a Ctrl+click / completion right after a keystroke from re-decoding the world —
+          // the previous behaviour cleared the ENTIRE memo on every debounced patch.
         if !touched.is_empty() {
-            let mut cache = self.members_cache.write().unwrap_or_else(|p| p.into_inner());
+            let mut cache = self
+                .members_cache
+                .write()
+                .unwrap_or_else(|p| p.into_inner());
             for binary in &touched {
                 cache.remove(binary);
             }
@@ -272,7 +288,10 @@ impl<M: CpMemberIndex> IndexResolver<M> {
                     // Only for the full resolver (validation/completion): the project-only reference/
                     // rename engine never resolves JDK types, so a synthesized Object ancestor would
                     // just be an unresolvable link on every walk — leave its hierarchy as declared.
-                    if !self.project_only && cm.superclass.is_none() && binary_name != "java/lang/Object" {
+                    if !self.project_only
+                        && cm.superclass.is_none()
+                        && binary_name != "java/lang/Object"
+                    {
                         // Mirror the bytecode convention: in a `.class` the `super_class` of a plain
                         // class, an interface, AND an annotation is `java/lang/Object`; an enum's is
                         // `java/lang/Enum`, a record's is `java/lang/Record`. (An interface reference
@@ -411,9 +430,10 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
                 }
             }
         }
-        // Then a project type of that simple name, then the common-JDK table.
+        // Then a project TYPE of that simple name (a member of that name is not one — see
+        // `is_type_symbol`), then the common-JDK table.
         if let Some(sym) = self.project.get(name) {
-            if !sym.fqn.is_empty() {
+            if is_type_symbol(&sym) && !sym.fqn.is_empty() {
                 if recording {
                     dep_record::note_simple_hit(name, &sym.fqn);
                 }
@@ -524,6 +544,9 @@ fn convert_member(m: &bennu_classpath::prelude::Member) -> JMember {
         },
         raw_signature: m.raw_signature.clone(),
         throws: m.throws.clone(),
+        // A member decoded from BYTECODE. A `.class` does carry runtime-visible annotations, but
+        // this decoder does not read them yet — so empty here means "not read", not "none".
+        annotations: Vec::new(),
     }
 }
 
@@ -563,14 +586,23 @@ mod tests {
 
     #[test]
     fn nested_bytecode_name_rejoins_type_segments() {
-        assert_eq!(nested_bytecode_name("pkg/Outer/Inner").as_deref(), Some("pkg/Outer$Inner"));
+        assert_eq!(
+            nested_bytecode_name("pkg/Outer/Inner").as_deref(),
+            Some("pkg/Outer$Inner")
+        );
         assert_eq!(
             nested_bytecode_name("java/util/Map/Entry").as_deref(),
             Some("java/util/Map$Entry")
         );
-        assert_eq!(nested_bytecode_name("a/b/Outer/Inner/Deep").as_deref(), Some("a/b/Outer$Inner$Deep"));
+        assert_eq!(
+            nested_bytecode_name("a/b/Outer/Inner/Deep").as_deref(),
+            Some("a/b/Outer$Inner$Deep")
+        );
         // No package prefix.
-        assert_eq!(nested_bytecode_name("Outer/Inner").as_deref(), Some("Outer$Inner"));
+        assert_eq!(
+            nested_bytecode_name("Outer/Inner").as_deref(),
+            Some("Outer$Inner")
+        );
         // Nothing nested (single or zero type segment) → None, keep the original miss.
         assert!(nested_bytecode_name("java/util/List").is_none());
         assert!(nested_bytecode_name("pkg/sub").is_none());
@@ -590,15 +622,17 @@ mod tests {
     struct FakeJdk;
     impl CpMemberIndex for FakeJdk {
         fn members_of(&self, binary_name: &str) -> Option<CpClassMembers> {
-            matches!(binary_name, "java/lang/Runnable" | "java/util/LinkedHashMap").then(|| {
-                CpClassMembers {
-                    type_params: Vec::new(),
-                    superclass: None,
-                    interfaces: Vec::new(),
-                    methods: Vec::new(),
-                    fields: Vec::new(),
-                    flags: Default::default(),
-                }
+            matches!(
+                binary_name,
+                "java/lang/Runnable" | "java/util/LinkedHashMap"
+            )
+            .then(|| CpClassMembers {
+                type_params: Vec::new(),
+                superclass: None,
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: Vec::new(),
+                flags: Default::default(),
             })
         }
     }
@@ -623,7 +657,10 @@ mod tests {
     fn resolves_java_lang_type_via_bytecode_probe() {
         let r = empty_resolver_with_jdk(FakeJdk);
         // `Runnable` isn't in COMMON_SIMPLE → only the java.lang bytecode probe resolves it.
-        assert_eq!(r.resolve_simple_name("Runnable", &[]).as_deref(), Some("java/lang/Runnable"));
+        assert_eq!(
+            r.resolve_simple_name("Runnable", &[]).as_deref(),
+            Some("java/lang/Runnable")
+        );
         // A genuinely unknown name → None. This is the DEFINITIVE answer the validator relies on.
         assert!(r.resolve_simple_name("Nope", &[]).is_none());
     }
@@ -631,7 +668,12 @@ mod tests {
     #[test]
     fn resolves_type_via_non_static_star_import() {
         let r = empty_resolver_with_jdk(FakeJdk);
-        let imports = vec![Import { span: None, path: "java.util".into(), star: true, static_: false }];
+        let imports = vec![Import {
+            span: None,
+            path: "java.util".into(),
+            star: true,
+            static_: false,
+        }];
         assert_eq!(
             r.resolve_simple_name("LinkedHashMap", &imports).as_deref(),
             Some("java/util/LinkedHashMap"),
@@ -639,8 +681,15 @@ mod tests {
         // Without the star import, java.util.LinkedHashMap isn't implicitly available → None.
         assert!(r.resolve_simple_name("LinkedHashMap", &[]).is_none());
         // A STATIC star import doesn't bind a type name → still None.
-        let static_star = vec![Import { span: None, path: "java.util".into(), star: true, static_: true }];
-        assert!(r.resolve_simple_name("LinkedHashMap", &static_star).is_none());
+        let static_star = vec![Import {
+            span: None,
+            path: "java.util".into(),
+            star: true,
+            static_: true,
+        }];
+        assert!(r
+            .resolve_simple_name("LinkedHashMap", &static_star)
+            .is_none());
     }
 
     #[test]
@@ -682,7 +731,10 @@ mod tests {
             fields: vec![JMember {
                 name: field.to_string(),
                 kind: JMemberKind::Field,
-                return_type: JTypeRef { binary_name: "int".into(), type_args: Vec::new() },
+                return_type: JTypeRef {
+                    binary_name: "int".into(),
+                    type_args: Vec::new(),
+                },
                 params: Vec::new(),
                 is_static: false,
                 is_abstract: false,
@@ -691,6 +743,7 @@ mod tests {
                 visibility: JVisibility::Public,
                 raw_signature: format!("int {field}"),
                 throws: Vec::new(),
+                annotations: Vec::new(),
             }],
             flags: Default::default(),
         })
@@ -709,8 +762,11 @@ mod tests {
         let mut b = IndexBuilder::new(&dir);
         b.set_file(
             PathBuf::from("Order.java"),
-            vec![IndexRecord::new(class_symbol(simple, binary, members_json), simple.to_string())
-                .with_key(binary.to_string())],
+            vec![IndexRecord::new(
+                class_symbol(simple, binary, members_json),
+                simple.to_string(),
+            )
+            .with_key(binary.to_string())],
         );
         b.persist().unwrap();
         let project = PersistedIndex::open(b.blob_path(), b.fst_path()).unwrap();
@@ -720,15 +776,26 @@ mod tests {
     #[test]
     fn overlay_shadows_persisted_members() {
         // Persisted index says `com/acme/Order` has field `oldField`.
-        let r = resolver_with("com/acme/Order", "Order", &members_json_with_field("oldField"));
+        let r = resolver_with(
+            "com/acme/Order",
+            "Order",
+            &members_json_with_field("oldField"),
+        );
         let before = r.members_of("com/acme/Order").expect("persisted members");
         assert_eq!(before.fields[0].name, "oldField");
 
         // A keystroke adds `newField` to Order (a new members-JSON) via the overlay.
-        let patched = class_symbol("Order", "com/acme/Order", &members_json_with_field("newField"));
+        let patched = class_symbol(
+            "Order",
+            "com/acme/Order",
+            &members_json_with_field("newField"),
+        );
         r.apply_file_patch("src/Order.java", &[patched]);
         let after = r.members_of("com/acme/Order").expect("overlay members");
-        assert_eq!(after.fields[0].name, "newField", "overlay wins over the mmap");
+        assert_eq!(
+            after.fields[0].name, "newField",
+            "overlay wins over the mmap"
+        );
     }
 
     #[test]
@@ -737,7 +804,11 @@ mod tests {
         // First patch registers Order under the file.
         r.apply_file_patch(
             "src/Order.java",
-            &[class_symbol("Order", "com/acme/Order", &members_json_with_field("f"))],
+            &[class_symbol(
+                "Order",
+                "com/acme/Order",
+                &members_json_with_field("f"),
+            )],
         );
         assert!(r.members_of("com/acme/Order").is_some());
         // Second patch of the SAME file renames the type to Invoice → Order's overlay
@@ -745,17 +816,32 @@ mod tests {
         // and the new binary resolves from the overlay.
         r.apply_file_patch(
             "src/Order.java",
-            &[class_symbol("Invoice", "com/acme/Invoice", &members_json_with_field("g"))],
+            &[class_symbol(
+                "Invoice",
+                "com/acme/Invoice",
+                &members_json_with_field("g"),
+            )],
         );
         // Invoice resolves via overlay simple-name hint.
-        assert_eq!(r.resolve_simple_name("Invoice", &[]).as_deref(), Some("com/acme/Invoice"));
-        let inv = r.members_of("com/acme/Invoice").expect("renamed type in overlay");
+        assert_eq!(
+            r.resolve_simple_name("Invoice", &[]).as_deref(),
+            Some("com/acme/Invoice")
+        );
+        let inv = r
+            .members_of("com/acme/Invoice")
+            .expect("renamed type in overlay");
         assert_eq!(inv.fields[0].name, "g");
     }
 
     /// A member `Symbol` (method or field) keyed by its simple name, mirroring what the
     /// java-index build emits for the search-everywhere axis.
-    fn member_symbol(id: u32, kind: SymbolKind, name: &str, owner_binary: &str, sig: &str) -> Symbol {
+    fn member_symbol(
+        id: u32,
+        kind: SymbolKind,
+        name: &str,
+        owner_binary: &str,
+        sig: &str,
+    ) -> Symbol {
         Symbol {
             id,
             kind,
@@ -798,7 +884,13 @@ mod tests {
                 .with_key("com/acme/Order".to_string()),
                 // A method + a field record.
                 IndexRecord::new(
-                    member_symbol(1, SymbolKind::Method, "getId", "com/acme/Order", "long getId()"),
+                    member_symbol(
+                        1,
+                        SymbolKind::Method,
+                        "getId",
+                        "com/acme/Order",
+                        "long getId()",
+                    ),
                     "getId".to_string(),
                 ),
                 IndexRecord::new(
@@ -813,7 +905,11 @@ mod tests {
 
         let mut members = r.member_symbols();
         members.sort_by(|a, b| a.simple_name.cmp(&b.simple_name));
-        assert_eq!(members.len(), 2, "only the method + field, not the Class type");
+        assert_eq!(
+            members.len(),
+            2,
+            "only the method + field, not the Class type"
+        );
         assert_eq!(members[0].simple_name, "getId");
         assert!(matches!(members[0].kind, SymbolKind::Method));
         assert_eq!(members[0].fqn, "com/acme/Order");
@@ -829,12 +925,19 @@ mod tests {
         let r = resolver_with("com/acme/Order", "Order", &members_json_with_field("f"));
         r.apply_file_patch(
             "src/Order.java",
-            &[class_symbol("Order2", "com/acme/Order2", &members_json_with_field("h"))],
+            &[class_symbol(
+                "Order2",
+                "com/acme/Order2",
+                &members_json_with_field("h"),
+            )],
         );
         assert!(r.members_of("com/acme/Order2").is_some());
         // Delete (empty records) drops the file's overlay contributions.
         r.apply_file_patch("src/Order.java", &[]);
-        assert!(r.members_of("com/acme/Order2").is_none(), "deleted file's overlay cleared");
+        assert!(
+            r.members_of("com/acme/Order2").is_none(),
+            "deleted file's overlay cleared"
+        );
     }
 
     // ── project-view queries (the diagnostic cache's freshness source of truth) ──────────────
@@ -863,9 +966,15 @@ mod tests {
         // re-validate any file depending on Order).
         r.apply_file_patch(
             "src/Order.java",
-            &[class_symbol("Order", "com/acme/Order", &members_json_with_field("g"))],
+            &[class_symbol(
+                "Order",
+                "com/acme/Order",
+                &members_json_with_field("g"),
+            )],
         );
-        let sig2 = r.dep_signature("com/acme/Order").expect("still a project type");
+        let sig2 = r
+            .dep_signature("com/acme/Order")
+            .expect("still a project type");
         assert_ne!(sig1, sig2, "changed members ⇒ changed dependency signature");
     }
 
@@ -882,7 +991,10 @@ mod tests {
             r.dep_signature("com/acme/Order"),
             "recorded members hash matches the live dep_signature",
         );
-        assert!(deps.misses.contains("com/acme/Ghost"), "absent type recorded as a negative dep");
+        assert!(
+            deps.misses.contains("com/acme/Ghost"),
+            "absent type recorded as a negative dep"
+        );
     }
 
     #[test]
@@ -890,19 +1002,51 @@ mod tests {
         let r = resolver_with("com/acme/Order", "Order", &members_json_with_field("f"));
         let (_out, deps) = crate::dep_record::record(|| {
             // Resolves to a project type → simple hit.
-            assert_eq!(r.resolve_simple_name("Order", &[]).as_deref(), Some("com/acme/Order"));
+            assert_eq!(
+                r.resolve_simple_name("Order", &[]).as_deref(),
+                Some("com/acme/Order")
+            );
             // No project type named `Widget` → a negative dep (adding one later must invalidate).
             assert!(r.resolve_simple_name("Widget", &[]).is_none());
         });
-        assert_eq!(deps.simple_hits.get("Order").map(String::as_str), Some("com/acme/Order"));
+        assert_eq!(
+            deps.simple_hits.get("Order").map(String::as_str),
+            Some("com/acme/Order")
+        );
         assert!(deps.misses.contains("Widget"));
         // An import-bound name is project-independent → NOT recorded (neither hit nor miss).
         let (_o2, deps2) = crate::dep_record::record(|| {
-            let imports =
-                vec![Import { span: None, path: "com.other.Order".into(), star: false, static_: false }];
+            let imports = vec![Import {
+                span: None,
+                path: "com.other.Order".into(),
+                star: false,
+                static_: false,
+            }];
             let _ = r.resolve_simple_name("Order", &imports);
         });
-        assert!(deps2.simple_hits.is_empty(), "import-bound name not recorded as a project hit");
-        assert!(deps2.misses.is_empty(), "import-bound name not recorded as a miss");
+        assert!(
+            deps2.simple_hits.is_empty(),
+            "import-bound name not recorded as a project hit"
+        );
+        assert!(
+            deps2.misses.is_empty(),
+            "import-bound name not recorded as a miss"
+        );
     }
+}
+
+/// Whether a [`Symbol`] is a TYPE, as opposed to one of its members.
+///
+/// The index registers a type under its simple name **and** every member under its own name, and a
+/// member symbol carries its OWNER's binary in `fqn` — so "the symbol called `x`" answers a field
+/// name with a perfectly well-formed class name. Reading that as a type turned
+/// `gare_genere_repository.get_genere(…)` — a call into a dependency — into a use of the enclosing
+/// class's own `get_genere`, and a rename then rewrote it to a name the jar does not declare. In
+/// one case the answer was not even the enclosing class, but whichever class happened to declare a
+/// field of that name.
+fn is_type_symbol(sym: &Symbol) -> bool {
+    matches!(
+        sym.kind,
+        SymbolKind::Class | SymbolKind::Interface | SymbolKind::Enum | SymbolKind::Record
+    )
 }

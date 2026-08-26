@@ -53,7 +53,10 @@ pub struct Span {
 impl Span {
     /// The span of a node.
     pub fn of(node: &Node) -> Self {
-        Span { start: node.start_byte(), end: node.end_byte() }
+        Span {
+            start: node.start_byte(),
+            end: node.end_byte(),
+        }
     }
 }
 
@@ -82,32 +85,87 @@ impl Import {
     }
 }
 
-/// A single annotation on a declaration: its simple name plus the optional single-string
-/// argument. `@Service` → `{name:"Service", value:None}`; `@Service("foo")` /
-/// `@Service(value="foo")` → `{name:"Service", value:Some("foo")}`. A non-string argument
-/// (`@RequestMapping(method=POST)`) leaves `value` `None` — only a plain string literal is
-/// captured (the bean-name / stereotype value case).
+/// One string literal written inside an annotation's argument list, with the span of its
+/// **contents** (inside the quotes) — the span a `${…}` or a `:param` inside it is offset against.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnnString {
+    /// The annotation element it was written for: `""` for a bare positional value
+    /// (`@Value("x")`, which means `value`), else the pair's name (`cron` in
+    /// `@Scheduled(cron = "…")`).
+    pub element: String,
+    /// The literal's contents, with the quotes stripped and **nothing else changed** — no escape
+    /// expansion, no text-block indentation stripping — because every span is measured against the
+    /// file as written and normalising here would desynchronise them from it.
+    pub value: String,
+    /// Byte span of the contents in the file.
+    pub start: usize,
+    pub end: usize,
+}
+
+/// One annotation written on a declaration.
+///
+/// This is the workspace's ONE annotation model. There used to be two: a thin one here (a name and
+/// at most one string) and a rich one in `bennu-facts` that the framework extensions read — with
+/// its own parse of the same file to build it. So a question about annotations had two answers
+/// depending on who asked, the engine could not answer the ones the frameworks care about, and
+/// nothing an annotation said ever reached the project index.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Annotation {
     /// The annotation's simple name — its type name's last segment (`lombok.Getter` → `Getter`).
     pub name: String,
-    /// The unquoted contents of the annotation's first string-literal argument, if any.
-    pub value: Option<String>,
-    /// The `name = value` pairs of the annotation, with each value kept as raw source text
+    /// The name **exactly as written**, dotted only when the source qualified it
+    /// (`@org.springframework.stereotype.Service`). Load-bearing: a simple name alone says nothing
+    /// about WHICH annotation this is — anyone may declare their own `@Service` — so resolving it
+    /// needs this plus the file's imports.
+    #[serde(default)]
+    pub qualified: String,
+    /// Byte span of the whole `@Name(...)`.
+    #[serde(default)]
+    pub start: usize,
+    #[serde(default)]
+    pub end: usize,
+    /// Every string literal in the argument list, in source order.
+    #[serde(default)]
+    pub strings: Vec<AnnString>,
+    /// The `name = value` pairs, with each value kept as raw source text
     /// (`@Accessors(fluent = true, prefix = "m")` → `[("fluent","true"),("prefix","\"m\"")]`).
-    /// Lets consumers read non-string flags (Lombok `@Accessors` `fluent`/`chain`/`prefix`) that
-    /// the single-string `value` can't carry. Empty for a marker or bare-value annotation.
+    /// Carries the non-string flags a string value cannot (`method = RequestMethod.POST`).
     #[serde(default)]
     pub args: Vec<(String, String)>,
-    /// The annotation's first **positional** argument as raw source text, when it isn't a string
-    /// literal — `@Setter(AccessLevel.PACKAGE)` → `AccessLevel.PACKAGE`.
-    ///
-    /// [`Self::value`] only carries a string literal and [`Self::args`] only carries `name =`
-    /// pairs, so this shape fell between them and an `AccessLevel` was simply not visible: every
-    /// Lombok accessor read as public, and `AccessLevel.NONE` — which generates nothing at all —
-    /// read as "there is a public one".
+    /// Positional arguments that are NOT string literals, as raw source text —
+    /// `@Setter(AccessLevel.PACKAGE)`, `@ConditionalOnBean(DataSource.class)`. Neither a pair nor a
+    /// string, so without this an `AccessLevel` was simply invisible and every Lombok accessor read
+    /// as public — `AccessLevel.NONE`, which generates nothing at all, included.
     #[serde(default)]
-    pub positional: Option<String>,
+    pub positional: Vec<String>,
+}
+
+impl Annotation {
+    /// The annotation's `value` element as a string literal — written bare (`@Value("x")`) or
+    /// named (`@Value(value = "x")`).
+    pub fn value(&self) -> Option<&AnnString> {
+        self.strings.iter().find(|s| s.element.is_empty() || s.element == "value")
+    }
+
+    /// The `value` element's contents, for a caller that wants the text and not the span.
+    pub fn value_str(&self) -> Option<&str> {
+        self.value().map(|s| s.value.as_str())
+    }
+
+    /// Every string literal written for `element` — an array (`path = {"/a", "/b"}`) yields several.
+    pub fn strings_for<'a>(&'a self, element: &'a str) -> impl Iterator<Item = &'a AnnString> + 'a {
+        self.strings.iter().filter(move |s| s.element == element)
+    }
+
+    /// The raw text of the `element = …` pair, if written.
+    pub fn pair(&self, element: &str) -> Option<&str> {
+        self.args.iter().find(|(k, _)| k == element).map(|(_, v)| v.as_str())
+    }
+
+    /// The first positional argument that is not a string literal.
+    pub fn first_positional(&self) -> Option<&str> {
+        self.positional.first().map(String::as_str)
+    }
 }
 
 /// A field of a type: its name and its declared type (as written in source).
@@ -154,6 +212,13 @@ impl FieldDecl {
 pub struct ParamDecl {
     pub name: String,
     pub type_text: String,
+    /// The parameter's annotations — `@Value("${app.name}")`, `@RequestParam`, `@NonNull`.
+    ///
+    /// A framework reads its configuration off these, and until they were here the symbol model
+    /// simply did not have them: every consumer that needed one had to parse the source a second
+    /// time and walk it itself. `#[serde(default)]` so a symbol persisted before this still loads.
+    #[serde(default)]
+    pub annotations: Vec<Annotation>,
 }
 
 /// A method of a type.
@@ -188,6 +253,18 @@ pub struct MethodDecl {
     /// `#[serde(default)]` for backward-compatible deserialization of a pre-existing persisted symbol.
     #[serde(default)]
     pub throws: Vec<String>,
+    /// The method's annotations (`@Override`, `@Bean`, `@Transactional`, …). A type and a field
+    /// already carried theirs; a method did not, so the one model that knows what a file declares
+    /// could not answer the commonest question asked about a method.
+    #[serde(default)]
+    pub annotations: Vec<Annotation>,
+}
+
+impl MethodDecl {
+    /// Whether this method carries an annotation with the given simple name.
+    pub fn has_annotation(&self, name: &str) -> bool {
+        self.annotations.iter().any(|a| a.name == name)
+    }
 }
 
 /// A type declaration (class / interface / enum).
@@ -306,7 +383,12 @@ pub fn extract_symbols_from_root(root: &Node, source: &str) -> FileSymbols {
         }
     }
 
-    FileSymbols { package, package_span, imports, types }
+    FileSymbols {
+        package,
+        package_span,
+        imports,
+        types,
+    }
 }
 
 /// Parse an `import_declaration` node.
@@ -322,7 +404,12 @@ fn parse_import(node: &Node, bytes: &[u8]) -> Option<Import> {
         .named_children(&mut cur)
         .find(|n| matches!(n.kind(), "scoped_identifier" | "identifier"));
     let path = path_node.and_then(|n| node_text(&n, bytes))?;
-    Some(Import { span: Some(Span::of(node)), path, star, static_ })
+    Some(Import {
+        span: Some(Span::of(node)),
+        path,
+        star,
+        static_,
+    })
 }
 
 /// Collect a type declaration (recursing into nested types).
@@ -333,7 +420,10 @@ fn collect_type(
     outer_fqn: Option<&str>,
     out: &mut Vec<TypeDecl>,
 ) {
-    let Some(name) = node.child_by_field_name("name").and_then(|n| node_text(&n, bytes)) else {
+    let Some(name) = node
+        .child_by_field_name("name")
+        .and_then(|n| node_text(&n, bytes))
+    else {
         return;
     };
     let fqn = match (outer_fqn, package) {
@@ -383,7 +473,16 @@ fn collect_type(
             if m.kind() == "enum_body_declarations" {
                 let mut ew = m.walk();
                 for em in m.named_children(&mut ew) {
-                    collect_body_member(&em, bytes, is_interface, package, &fqn, &mut methods, &mut fields, out);
+                    collect_body_member(
+                        &em,
+                        bytes,
+                        is_interface,
+                        package,
+                        &fqn,
+                        &mut methods,
+                        &mut fields,
+                        out,
+                    );
                 }
             } else if m.kind() == "enum_constant" {
                 // A constant IS a member: `public static final E NAME`, exactly how the compiler
@@ -392,7 +491,9 @@ fn collect_type(
                 // undefined-variable check then called correct code undefined), completion after
                 // `E.` offered nothing, and the switch-exhaustiveness check bailed on every project
                 // enum because "no visible constants" means "our view is incomplete".
-                if let Some(cname) = m.child_by_field_name("name").and_then(|n| node_text(&n, bytes))
+                if let Some(cname) = m
+                    .child_by_field_name("name")
+                    .and_then(|n| node_text(&n, bytes))
                 {
                     fields.push(FieldDecl {
                         span: Some(Span::of(&m)),
@@ -406,7 +507,16 @@ fn collect_type(
                     });
                 }
             } else {
-                collect_body_member(&m, bytes, is_interface, package, &fqn, &mut methods, &mut fields, out);
+                collect_body_member(
+                    &m,
+                    bytes,
+                    is_interface,
+                    package,
+                    &fqn,
+                    &mut methods,
+                    &mut fields,
+                    out,
+                );
             }
         }
     }
@@ -497,6 +607,30 @@ fn collect_inner_types(
     }
 }
 
+/// The identifier a PARAMETER binds — the one question every scope walk asks about a parameter,
+/// and the one that has a trap in it.
+///
+/// `formal_parameter` and `catch_formal_parameter` expose their name as a `name` field, so asking
+/// for it works. A **varargs** parameter does not: tree-sitter models `T... xs` as a
+/// `spread_parameter` whose name lives inside a `variable_declarator` child. Asking it for a `name`
+/// field returns `None` — silently — so a varargs parameter was invisible to every binding lookup
+/// in the workspace. A caret on one then classified as whatever ELSE carried that name, and on
+/// Apache Commons that was an instance field: renaming the parameter renamed the field and every
+/// use of it, leaving a static method reading an instance field.
+pub fn parameter_name_node<'a>(param: &Node<'a>) -> Option<Node<'a>> {
+    if let Some(nm) = param.child_by_field_name("name") {
+        return Some(nm);
+    }
+    if param.kind() != "spread_parameter" {
+        return None;
+    }
+    let mut c = param.walk();
+    let declarator = param
+        .named_children(&mut c)
+        .find(|ch| ch.kind() == "variable_declarator")?;
+    Some(declarator.child_by_field_name("name").unwrap_or(declarator))
+}
+
 /// Whether this `class_body` is the body of an anonymous class — i.e. it hangs off a
 /// `new X() { … }` or an enum constant with a body, rather than off a type declaration.
 pub fn is_anonymous_body(body: &Node) -> bool {
@@ -505,6 +639,55 @@ pub fn is_anonymous_body(body: &Node) -> bool {
             .parent()
             .map(|p| matches!(p.kind(), "object_creation_expression" | "enum_constant"))
             .unwrap_or(false)
+}
+
+/// The **simple name of the type an anonymous class implements or extends** — the `X` of
+/// `new X() { … }`, without type arguments or qualifier.
+///
+/// Not the same question as [`anonymous_type_name`], which answers what the anonymous class is
+/// *called*: that is an ordinal (`"1"`), and it is the right answer for filing the type in an
+/// index and the wrong one for anything that asks what contract the body implements. A rename of an
+/// interface method has to move the override an anonymous class declares, and the only thing tying
+/// the two together is this name — matched against the ordinal, it never matched, so those
+/// overrides were silently left declaring the old name.
+///
+/// `None` when `body` is not an anonymous body, or when it hangs off an enum constant (whose
+/// supertype is the enum itself, written nowhere in the `new`).
+pub fn anonymous_supertype_name(body: &Node, bytes: &[u8]) -> Option<String> {
+    if !is_anonymous_body(body) {
+        return None;
+    }
+    let creation = body.parent()?;
+    // An ENUM CONSTANT with a body is an anonymous subclass of its own enum — `enum State { OPEN {
+    // … } }` overrides the enum's abstract methods inside that body. There is no `new` to read the
+    // type from: the supertype is the enclosing enum, and without this those overrides were left
+    // behind by a rename of the method they override.
+    if creation.kind() == "enum_constant" {
+        let mut cur = creation.parent();
+        while let Some(n) = cur {
+            if n.kind() == "enum_declaration" {
+                return n
+                    .child_by_field_name("name")?
+                    .utf8_text(bytes)
+                    .ok()
+                    .map(str::to_string);
+            }
+            cur = n.parent();
+        }
+        return None;
+    }
+    if creation.kind() != "object_creation_expression" {
+        return None;
+    }
+    let text = creation
+        .child_by_field_name("type")?
+        .utf8_text(bytes)
+        .ok()?;
+    // `p.Outer.Inner<T>` → `Inner`: type arguments first (they can contain dots of their own),
+    // then the qualifier.
+    let bare = text.split('<').next().unwrap_or(text).trim();
+    let simple = bare.rsplit('.').next().unwrap_or(bare).trim();
+    (!simple.is_empty()).then(|| simple.to_string())
 }
 
 /// The name javac would give the anonymous class whose body this is — `"1"`, `"2"`, … in source
@@ -568,7 +751,9 @@ fn collect_anonymous_type(
     outer_fqn: &str,
     out: &mut Vec<TypeDecl>,
 ) {
-    let Some(name) = anonymous_type_name(body, bytes) else { return };
+    let Some(name) = anonymous_type_name(body, bytes) else {
+        return;
+    };
     let fqn = format!("{outer_fqn}.{name}");
 
     // Whether the instantiated type is a class or an interface is a question only the compiler can
@@ -587,7 +772,16 @@ fn collect_anonymous_type(
     let mut fields = Vec::new();
     let mut bw = body.walk();
     for m in body.named_children(&mut bw) {
-        collect_body_member(&m, bytes, false, package, &fqn, &mut methods, &mut fields, out);
+        collect_body_member(
+            &m,
+            bytes,
+            false,
+            package,
+            &fqn,
+            &mut methods,
+            &mut fields,
+            out,
+        );
     }
 
     out.push(TypeDecl {
@@ -675,7 +869,9 @@ fn collect_body_member(
 /// `["L", "R"]`). Reads the node's `type_parameters` field; each `type_parameter`'s name is its first
 /// `type_identifier` child. Empty for a non-generic type.
 fn type_param_names(node: &Node, bytes: &[u8]) -> Vec<String> {
-    let Some(tps) = node.child_by_field_name("type_parameters") else { return Vec::new() };
+    let Some(tps) = node.child_by_field_name("type_parameters") else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     let mut c = tps.walk();
     for tp in tps.named_children(&mut c) {
@@ -695,7 +891,12 @@ fn type_param_names(node: &Node, bytes: &[u8]) -> Vec<String> {
     out
 }
 
-fn collect_annotations(node: &Node, bytes: &[u8]) -> Vec<Annotation> {
+/// Collect a declaration's annotations from its `modifiers` child.
+///
+/// Public because it is the workspace's one annotation reading: the framework extensions used to
+/// keep a second copy of this walk over a second parse of the same file, so what an annotation said
+/// depended on who asked and never reached the project index at all.
+pub fn collect_annotations(node: &Node, bytes: &[u8]) -> Vec<Annotation> {
     let mut out = Vec::new();
     let mut cw = node.walk();
     for c in node.children(&mut cw) {
@@ -705,12 +906,23 @@ fn collect_annotations(node: &Node, bytes: &[u8]) -> Vec<Annotation> {
         let mut mw = c.walk();
         for a in c.children(&mut mw) {
             if matches!(a.kind(), "marker_annotation" | "annotation") {
-                if let Some(name) = a.child_by_field_name("name").and_then(|n| node_text(&n, bytes)) {
-                    let simple = name.rsplit('.').next().unwrap_or(&name).to_string();
-                    let value = annotation_string_value(&a, bytes);
-                    let args = annotation_arg_pairs(&a, bytes);
-                    let positional = annotation_positional_value(&a, bytes);
-                    out.push(Annotation { name: simple, value, args, positional });
+                if let Some(name) = a
+                    .child_by_field_name("name")
+                    .and_then(|n| node_text(&n, bytes))
+                {
+                    let mut ann = Annotation {
+                        name: name.rsplit('.').next().unwrap_or(&name).to_string(),
+                        qualified: name,
+                        start: a.start_byte(),
+                        end: a.end_byte(),
+                        strings: Vec::new(),
+                        args: Vec::new(),
+                        positional: Vec::new(),
+                    };
+                    if let Some(args) = a.child_by_field_name("arguments") {
+                        collect_annotation_args(&args, bytes, &mut ann);
+                    }
+                    out.push(ann);
                 }
             }
         }
@@ -718,96 +930,103 @@ fn collect_annotations(node: &Node, bytes: &[u8]) -> Vec<Annotation> {
     out
 }
 
-/// The unquoted contents of an annotation's FIRST string-literal argument, whether written as
-/// `@X("v")` (a bare value) or `@X(value="v")` (an `element_value_pair`). `None` for a marker
-/// annotation, an empty arg list, or a non-string argument (`@RequestMapping(method=POST)`).
-fn annotation_string_value(annotation: &Node, bytes: &[u8]) -> Option<String> {
-    let args = annotation.child_by_field_name("arguments")?;
-    let mut aw = args.walk();
-    for arg in args.named_children(&mut aw) {
+/// Walk an `annotation_argument_list`, collecting string literals (with the element they belong
+/// to), `element = raw` pairs, and the positional arguments that are not strings.
+fn collect_annotation_args(args: &Node, bytes: &[u8], ann: &mut Annotation) {
+    let mut w = args.walk();
+    for arg in args.named_children(&mut w) {
         match arg.kind() {
-            "string_literal" => return string_literal_text(&arg, bytes),
-            // `@X(value="v")` — take the string on the RHS of the pair (any pair, since a
-            // single-element annotation's only pair IS `value`).
             "element_value_pair" => {
+                let key = arg
+                    .child_by_field_name("key")
+                    .and_then(|k| node_text(&k, bytes))
+                    .unwrap_or_default();
                 if let Some(v) = arg.child_by_field_name("value") {
-                    if v.kind() == "string_literal" {
-                        return string_literal_text(&v, bytes);
+                    if let Some(raw) = node_text(&v, bytes) {
+                        ann.args.push((key.clone(), raw.trim().to_string()));
+                    }
+                    collect_annotation_strings(&v, bytes, &key, &mut ann.strings);
+                }
+            }
+            // A bare positional argument — `@Value("x")`, `@RequestMapping({"/a","/b"})`,
+            // `@ConditionalOnBean(DataSource.class)`. Strings are collected as such; anything else
+            // is kept as raw text, which is the only way a class literal survives.
+            _ => {
+                let before = ann.strings.len();
+                collect_annotation_strings(&arg, bytes, "", &mut ann.strings);
+                if ann.strings.len() == before {
+                    if let Some(raw) = node_text(&arg, bytes) {
+                        ann.positional.push(raw.trim().to_string());
                     }
                 }
             }
-            _ => {}
         }
     }
-    None
 }
 
-/// The first **positional** (non-`name =`) argument of an annotation, as raw source text, skipping
-/// a string literal (which [`annotation_string_value`] already carries): `@Setter(AccessLevel.PACKAGE)`
-/// → `AccessLevel.PACKAGE`, `@Getter(onMethod_ = @X)` → the annotation text. `None` for a marker, an
-/// empty list, or an all-pairs argument list.
-fn annotation_positional_value(annotation: &Node, bytes: &[u8]) -> Option<String> {
-    let args = annotation.child_by_field_name("arguments")?;
-    let mut aw = args.walk();
-    for arg in args.named_children(&mut aw) {
-        if matches!(arg.kind(), "element_value_pair" | "string_literal") {
-            continue;
+/// Every string literal at or under `node` (an array initializer holds several), each tagged with
+/// the annotation element it was written for.
+fn collect_annotation_strings(node: &Node, bytes: &[u8], element: &str, out: &mut Vec<AnnString>) {
+    // A text block is a string literal with different delimiters, and it is how anyone writes a
+    // multi-line one — a JPQL query, a SQL statement, a long cron description. Treating it as "not
+    // a string" made exactly the annotations that most need reading invisible.
+    if matches!(node.kind(), "string_literal" | "text_block") {
+        if let Some((value, start, end)) = annotation_string_contents(node, bytes) {
+            out.push(AnnString { element: element.to_string(), value, start, end });
         }
-        return node_text(&arg, bytes).map(|t| t.trim().to_string());
+        return;
     }
-    None
+    let mut w = node.walk();
+    for c in node.named_children(&mut w) {
+        collect_annotation_strings(&c, bytes, element, out);
+    }
 }
 
-/// The `name = value` pairs of an annotation, each value kept as raw source text (so a boolean,
-/// enum-constant or string reads back verbatim). Positional / string-only arguments are ignored —
-/// only `element_value_pair`s are captured. Used for Lombok `@Accessors(fluent = true, …)`.
-fn annotation_arg_pairs(annotation: &Node, bytes: &[u8]) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    let Some(args) = annotation.child_by_field_name("arguments") else { return out };
-    let mut aw = args.walk();
-    for arg in args.named_children(&mut aw) {
-        if arg.kind() != "element_value_pair" {
-            continue;
+/// The contents of a `"…"` or `"""…"""` and their byte span — which is what a `${…}` or a `:param`
+/// span inside it must be relative to.
+///
+/// The contents are RAW, exactly as written, and that is deliberate twice over: an escape is not
+/// expanded, and a text block's incidental indentation is not stripped (as the JLS would before the
+/// program sees it). Either would shorten the text and desynchronise every span computed against
+/// it. Nothing downstream cares — the scanners that read these strings tokenize, and leading
+/// whitespace is not a token.
+fn annotation_string_contents(node: &Node, bytes: &[u8]) -> Option<(String, usize, usize)> {
+    let start = node.start_byte();
+    let end = node.end_byte();
+    let raw = std::str::from_utf8(bytes.get(start..end)?).ok()?;
+
+    let (inner_start, inner_end) = if raw.starts_with("\"\"\"") {
+        // A text block's content begins on the line AFTER the opening delimiter — the JLS requires
+        // a line terminator there, so the first newline is the boundary, not part of the value.
+        if end < start + 6 {
+            return None; // `""""""`, or something truncated mid-edit
         }
-        // `key` is the LHS identifier; fall back to the first identifier child if the grammar names
-        // the field differently, so the capture never silently yields nothing.
-        let key = arg
-            .child_by_field_name("key")
-            .or_else(|| arg.named_child(0).filter(|n| n.kind() == "identifier"))
-            .and_then(|k| node_text(&k, bytes));
-        let val = arg.child_by_field_name("value").and_then(|v| node_text(&v, bytes));
-        if let (Some(k), Some(v)) = (key, val) {
-            out.push((k.trim().to_string(), v.trim().to_string()));
+        let after_open = raw.get(3..)?;
+        let first_break = after_open.find('\n')? + 1;
+        (start + 3 + first_break, end - 3)
+    } else {
+        if end <= start + 1 {
+            return None; // not even a pair of quotes
         }
+        (start + 1, end - 1)
+    };
+    if inner_end < inner_start {
+        return None;
     }
-    out
+    let value = std::str::from_utf8(bytes.get(inner_start..inner_end)?).ok()?.to_string();
+    Some((value, inner_start, inner_end))
 }
 
-/// The contents of a `string_literal` node with the surrounding quotes stripped. Robust across
-/// grammar shapes: prefer the concatenated `string_fragment` children, falling back to trimming
-/// the literal's own `"` delimiters.
-fn string_literal_text(literal: &Node, bytes: &[u8]) -> Option<String> {
-    let mut fragments = String::new();
-    let mut lw = literal.walk();
-    for part in literal.children(&mut lw) {
-        if part.kind() == "string_fragment" {
-            if let Some(t) = node_text(&part, bytes) {
-                fragments.push_str(&t);
-            }
-        }
-    }
-    if !fragments.is_empty() {
-        return Some(fragments);
-    }
-    // Empty string literal (`""`) or a grammar without `string_fragment` nodes: trim the quotes.
-    let raw = node_text(literal, bytes)?;
-    Some(raw.trim_matches('"').to_string())
-}
+
+
+
 
 /// Extract a method_declaration. `enclosing_is_interface` lets a bodyless method be recognised as
 /// implicitly abstract (an interface method with no `default`/`static` body).
 fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Option<MethodDecl> {
-    let name = node.child_by_field_name("name").and_then(|n| node_text(&n, bytes))?;
+    let name = node
+        .child_by_field_name("name")
+        .and_then(|n| node_text(&n, bytes))?;
     let return_type_text = node
         .child_by_field_name("type")
         .and_then(|n| node_text(&n, bytes))
@@ -841,6 +1060,7 @@ fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Opti
         is_default,
         is_final,
         throws,
+        annotations: collect_annotations(node, bytes),
     })
 }
 
@@ -861,7 +1081,11 @@ fn parse_params(node: &Node, bytes: &[u8]) -> Vec<ParamDecl> {
                         .child_by_field_name("type")
                         .and_then(|n| node_text(&n, bytes))
                         .unwrap_or_default();
-                    params.push(ParamDecl { name: pname, type_text: ptype });
+                    params.push(ParamDecl {
+                        name: pname,
+                        type_text: ptype,
+                        annotations: collect_annotations(&p, bytes),
+                    });
                 }
                 // A varargs parameter `T... xs` — which IS a `T[]` array. Unlike `formal_parameter`,
                 // tree-sitter gives its type as an UNNAMED child (before `...`) and its name inside a
@@ -908,7 +1132,11 @@ fn parse_spread_parameter(p: &Node, bytes: &[u8]) -> ParamDecl {
         let erased = type_text.split('<').next().unwrap_or("").trim().to_string();
         type_text = format!("{erased}[]");
     }
-    ParamDecl { name, type_text }
+    ParamDecl {
+        name,
+        type_text,
+        annotations: collect_annotations(p, bytes),
+    }
 }
 
 /// The `throws` clause exception type names (written text; resolved to binary names when the class
@@ -954,16 +1182,19 @@ fn parse_throws(node: &Node, bytes: &[u8]) -> Vec<String> {
 /// is what keeps a record that declares an extra `x(int)` overload from suppressing its own
 /// zero-arg accessor.
 /// Each record component's name, mapped to the span of that name in the header.
-fn component_name_spans(
-    record: &Node,
-    bytes: &[u8],
-) -> std::collections::HashMap<String, Span> {
+fn component_name_spans(record: &Node, bytes: &[u8]) -> std::collections::HashMap<String, Span> {
     let mut out = std::collections::HashMap::new();
-    let Some(params) = record.child_by_field_name("parameters") else { return out };
+    let Some(params) = record.child_by_field_name("parameters") else {
+        return out;
+    };
     let mut cursor = params.walk();
     for param in params.named_children(&mut cursor) {
-        let Some(name_node) = param.child_by_field_name("name") else { continue };
-        let Some(name) = node_text(&name_node, bytes) else { continue };
+        let Some(name_node) = param.child_by_field_name("name") else {
+            continue;
+        };
+        let Some(name) = node_text(&name_node, bytes) else {
+            continue;
+        };
         out.insert(name, Span::of(&name_node));
     }
     out
@@ -1016,6 +1247,7 @@ fn synthesize_record_members(
                 is_default: false,
                 is_final: false,
                 throws: Vec::new(),
+                annotations: Vec::new(),
             });
         }
     }
@@ -1035,6 +1267,7 @@ fn synthesize_record_members(
             is_default: false,
             is_final: false,
             throws: Vec::new(),
+            annotations: Vec::new(),
         });
     }
 
@@ -1047,7 +1280,15 @@ fn synthesize_record_members(
     for (name, ret, params) in [
         ("toString", "String", Vec::new()),
         ("hashCode", "int", Vec::new()),
-        ("equals", "boolean", vec![ParamDecl { name: "o".into(), type_text: "Object".into() }]),
+        (
+            "equals",
+            "boolean",
+            vec![ParamDecl {
+                name: "o".into(),
+                type_text: "Object".into(),
+                annotations: Vec::new(),
+            }],
+        ),
     ] {
         if is_declared(methods, name, params.len()) {
             continue;
@@ -1063,6 +1304,7 @@ fn synthesize_record_members(
             is_default: false,
             is_final: false,
             throws: Vec::new(),
+            annotations: Vec::new(),
         });
     }
 }
@@ -1071,7 +1313,9 @@ fn synthesize_record_members(
 /// Arity as well as name, so a record declaring an extra `x(int)` overload doesn't suppress the
 /// zero-arg accessor the language owes it.
 fn is_declared(methods: &[MethodDecl], name: &str, arity: usize) -> bool {
-    methods.iter().any(|m| m.name == name && m.params.len() == arity)
+    methods
+        .iter()
+        .any(|m| m.name == name && m.params.len() == arity)
 }
 
 fn parse_constructor(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
@@ -1087,6 +1331,7 @@ fn parse_constructor(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
         is_default: false,
         is_final: false,
         throws: parse_throws(node, bytes),
+        annotations: collect_annotations(node, bytes),
     })
 }
 
@@ -1097,7 +1342,9 @@ fn parse_constructor(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
 /// from bytecode. Without this, accessing an element on a project annotation (`ann.value()`) can't
 /// resolve its method and would be wrongly flagged "cannot resolve method".
 fn parse_annotation_element(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
-    let name = node.child_by_field_name("name").and_then(|n| node_text(&n, bytes))?;
+    let name = node
+        .child_by_field_name("name")
+        .and_then(|n| node_text(&n, bytes))?;
     let return_type_text = node
         .child_by_field_name("type")
         .and_then(|n| node_text(&n, bytes))
@@ -1113,6 +1360,7 @@ fn parse_annotation_element(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
         is_default: false,
         is_final: false,
         throws: Vec::new(),
+        annotations: collect_annotations(node, bytes),
     })
 }
 
@@ -1120,7 +1368,9 @@ fn parse_annotation_element(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
 /// marks an interface's `constant_declaration` (`int MAX = 100;`) — implicitly `public static final`,
 /// so its visibility is public, not the class-default package-private.
 fn parse_field(node: &Node, bytes: &[u8], in_interface: bool, out: &mut Vec<FieldDecl>) {
-    let Some(type_text) = node.child_by_field_name("type").and_then(|n| node_text(&n, bytes))
+    let Some(type_text) = node
+        .child_by_field_name("type")
+        .and_then(|n| node_text(&n, bytes))
     else {
         return;
     };
@@ -1131,7 +1381,10 @@ fn parse_field(node: &Node, bytes: &[u8], in_interface: bool, out: &mut Vec<Fiel
     let mut cw = node.walk();
     for c in node.named_children(&mut cw) {
         if c.kind() == "variable_declarator" {
-            if let Some(name) = c.child_by_field_name("name").and_then(|n| node_text(&n, bytes)) {
+            if let Some(name) = c
+                .child_by_field_name("name")
+                .and_then(|n| node_text(&n, bytes))
+            {
                 out.push(FieldDecl {
                     // The DECLARATOR, not the whole `int a, b, c;` — two fields on one line are
                     // two rows, and each has to select its own.
@@ -1244,20 +1497,20 @@ mod tests {
         let ann = type_annotations("@Service(\"fooService\") class FooService {}");
         assert_eq!(ann.len(), 1);
         assert_eq!(ann[0].name, "Service");
-        assert_eq!(ann[0].value.as_deref(), Some("fooService"));
+        assert_eq!(ann[0].value_str(), Some("fooService"));
         assert!(ann[0].args.is_empty(), "positional arg isn't a pair");
     }
 
     #[test]
     fn captures_value_named_argument() {
         let ann = type_annotations("@Service(value=\"bar\") class FooService {}");
-        assert_eq!(ann[0].value.as_deref(), Some("bar"));
+        assert_eq!(ann[0].value_str(), Some("bar"));
     }
 
     #[test]
     fn marker_annotation_has_no_value() {
         let ann = type_annotations("@Service class FooService {}");
-        assert_eq!(ann[0].value, None);
+        assert_eq!(ann[0].value_str(), None);
         assert!(ann[0].args.is_empty());
     }
 
@@ -1266,7 +1519,7 @@ mod tests {
         // `@RequestMapping(method=POST)` — the argument isn't a plain string literal.
         let ann = type_annotations("@RequestMapping(method=POST) class C {}");
         assert_eq!(ann[0].name, "RequestMapping");
-        assert_eq!(ann[0].value, None);
+        assert_eq!(ann[0].value_str(), None);
     }
 
     #[test]
@@ -1274,7 +1527,11 @@ mod tests {
         // `@Accessors(fluent = true, prefix = "m")` — non-string flags land in `args` verbatim.
         let ann = type_annotations("@Accessors(fluent = true, prefix = \"m\") class C {}");
         assert_eq!(ann[0].name, "Accessors");
-        let fluent = ann[0].args.iter().find(|(k, _)| k == "fluent").map(|(_, v)| v.as_str());
+        let fluent = ann[0]
+            .args
+            .iter()
+            .find(|(k, _)| k == "fluent")
+            .map(|(_, v)| v.as_str());
         assert_eq!(fluent, Some("true"), "got {:?}", ann[0].args);
     }
 
@@ -1282,7 +1539,7 @@ mod tests {
     fn qualified_annotation_name_is_simple() {
         let ann = type_annotations("@lombok.Getter class C {}");
         assert_eq!(ann[0].name, "Getter");
-        assert_eq!(ann[0].value, None);
+        assert_eq!(ann[0].value_str(), None);
     }
 
     #[test]
@@ -1290,11 +1547,15 @@ mod tests {
         let fs = extract_symbols("class C { @Qualifier(\"db\") private DataSource ds; }");
         let f = &fs.types[0].fields[0];
         assert!(f.has_annotation("Qualifier"));
-        assert_eq!(f.annotations[0].value.as_deref(), Some("db"));
+        assert_eq!(f.annotations[0].value_str(), Some("db"));
     }
 
     fn one_type(src: &str) -> TypeDecl {
-        extract_symbols(src).types.into_iter().next().expect("one type")
+        extract_symbols(src)
+            .types
+            .into_iter()
+            .next()
+            .expect("one type")
     }
 
     // ── spans ────────────────────────────────────────────────────────────────────
@@ -1309,7 +1570,10 @@ mod tests {
         assert!(src[span.start..span.end].starts_with("class C"));
 
         let field = t.fields.iter().find(|f| f.name == "total").expect("total");
-        assert_eq!(&src[field.span.expect("a span").start..field.span.unwrap().end], "total");
+        assert_eq!(
+            &src[field.span.expect("a span").start..field.span.unwrap().end],
+            "total"
+        );
 
         let method = t.methods.iter().find(|m| m.name == "go").expect("go");
         let span = method.span.expect("a span");
@@ -1342,15 +1606,27 @@ mod tests {
         let t = one_type(src);
         let component = src.find("int x").unwrap() + "int ".len();
 
-        let accessor = t.methods.iter().find(|m| m.name == "x").expect("the accessor");
+        let accessor = t
+            .methods
+            .iter()
+            .find(|m| m.name == "x")
+            .expect("the accessor");
         assert_eq!(accessor.span.map(|s| s.start), Some(component));
-        let field = t.fields.iter().find(|f| f.name == "x").expect("the backing field");
+        let field = t
+            .fields
+            .iter()
+            .find(|f| f.name == "x")
+            .expect("the backing field");
         assert_eq!(field.span.map(|s| s.start), Some(component));
         assert_eq!(field.span.map(|s| &src[s.start..s.end]), Some("x"));
 
         // A member with genuinely nothing written for it still has none — the canonical
         // constructor is not spelled anywhere in `record P(int x) {}`.
-        let ctor = t.methods.iter().find(|m| m.name == "<init>").expect("the canonical ctor");
+        let ctor = t
+            .methods
+            .iter()
+            .find(|m| m.name == "<init>")
+            .expect("the canonical ctor");
         assert!(ctor.span.is_none());
 
         // ...while the record itself is very much written down.
@@ -1367,11 +1643,19 @@ mod tests {
         assert_eq!(t.kind, TypeKind::Record);
 
         // An accessor per component, named AFTER the component (not `getX`), returning its type.
-        let x = t.methods.iter().find(|m| m.name == "x").expect("x() accessor");
+        let x = t
+            .methods
+            .iter()
+            .find(|m| m.name == "x")
+            .expect("x() accessor");
         assert_eq!(x.return_type_text, "int");
         assert!(x.params.is_empty());
         assert_eq!(x.visibility, Visibility::Public);
-        let label = t.methods.iter().find(|m| m.name == "label").expect("label() accessor");
+        let label = t
+            .methods
+            .iter()
+            .find(|m| m.name == "label")
+            .expect("label() accessor");
         assert_eq!(label.return_type_text, "String");
 
         // A private final backing field per component.
@@ -1381,19 +1665,39 @@ mod tests {
         assert_eq!(fx.visibility, Visibility::Private);
 
         // The canonical constructor, components in order.
-        let ctor = t.methods.iter().find(|m| m.name == "<init>").expect("canonical constructor");
+        let ctor = t
+            .methods
+            .iter()
+            .find(|m| m.name == "<init>")
+            .expect("canonical constructor");
         assert_eq!(
-            ctor.params.iter().map(|p| p.type_text.as_str()).collect::<Vec<_>>(),
+            ctor.params
+                .iter()
+                .map(|p| p.type_text.as_str())
+                .collect::<Vec<_>>(),
             vec!["int", "String"],
         );
 
         // The Object overrides a record implements for you.
-        for (name, ret) in [("toString", "String"), ("hashCode", "int"), ("equals", "boolean")] {
-            let m = t.methods.iter().find(|m| m.name == name).unwrap_or_else(|| panic!("{name}()"));
+        for (name, ret) in [
+            ("toString", "String"),
+            ("hashCode", "int"),
+            ("equals", "boolean"),
+        ] {
+            let m = t
+                .methods
+                .iter()
+                .find(|m| m.name == name)
+                .unwrap_or_else(|| panic!("{name}()"));
             assert_eq!(m.return_type_text, ret);
         }
         assert_eq!(
-            t.methods.iter().find(|m| m.name == "equals").unwrap().params.len(),
+            t.methods
+                .iter()
+                .find(|m| m.name == "equals")
+                .unwrap()
+                .params
+                .len(),
             1,
             "equals takes one Object",
         );
@@ -1409,10 +1713,22 @@ mod tests {
                @Override public String toString() { return \"p\"; }\n\
              }",
         );
-        assert_eq!(t.methods.iter().filter(|m| m.name == "x").count(), 1, "{:?}", t.methods);
+        assert_eq!(
+            t.methods.iter().filter(|m| m.name == "x").count(),
+            1,
+            "{:?}",
+            t.methods
+        );
         assert_eq!(t.methods.iter().filter(|m| m.name == "toString").count(), 1);
         // The user's accessor is the one kept — the body is theirs.
-        assert_eq!(t.methods.iter().find(|m| m.name == "x").unwrap().return_type_text, "int");
+        assert_eq!(
+            t.methods
+                .iter()
+                .find(|m| m.name == "x")
+                .unwrap()
+                .return_type_text,
+            "int"
+        );
     }
 
     /// An explicitly declared canonical constructor suppresses the synthetic one; an extra
@@ -1424,8 +1740,16 @@ mod tests {
 
         // A convenience constructor of another arity leaves the canonical one owed.
         let two = one_type("record R(int x) { R() { this(0); } }");
-        assert_eq!(two.methods.iter().filter(|m| m.name == "<init>").count(), 2, "{:?}", two.methods);
-        assert!(two.methods.iter().any(|m| m.name == "<init>" && m.params.len() == 1));
+        assert_eq!(
+            two.methods.iter().filter(|m| m.name == "<init>").count(),
+            2,
+            "{:?}",
+            two.methods
+        );
+        assert!(two
+            .methods
+            .iter()
+            .any(|m| m.name == "<init>" && m.params.len() == 1));
     }
 
     /// A component-less record still gets its constructor and the Object overrides.
@@ -1433,7 +1757,10 @@ mod tests {
     fn an_empty_record_still_gets_its_overrides() {
         let t = one_type("record Unit() {}");
         assert!(t.fields.is_empty());
-        assert!(t.methods.iter().any(|m| m.name == "<init>" && m.params.is_empty()));
+        assert!(t
+            .methods
+            .iter()
+            .any(|m| m.name == "<init>" && m.params.is_empty()));
         assert!(t.methods.iter().any(|m| m.name == "hashCode"));
     }
 
@@ -1460,7 +1787,11 @@ mod tests {
         assert_eq!(t.name, "Foo");
         assert_eq!(t.extends.as_deref(), Some("AbstractBar"), "{:?}", t.extends);
         assert_eq!(t.implements, vec!["Baz", "Qux"], "{:?}", t.implements);
-        assert!(t.methods.iter().any(|m| m.name == "run"), "member indexed: {:?}", t.methods);
+        assert!(
+            t.methods.iter().any(|m| m.name == "run"),
+            "member indexed: {:?}",
+            t.methods
+        );
     }
 
     #[test]
@@ -1479,23 +1810,45 @@ mod tests {
         let m = t.methods.iter().find(|m| m.name == "fmt").expect("fmt");
         assert_eq!(m.params.len(), 2, "{:?}", m.params);
         assert_eq!(m.params[0].type_text, "String");
-        assert_eq!(m.params[1].name, "rest", "varargs name captured: {:?}", m.params[1]);
-        assert_eq!(m.params[1].type_text, "Object[]", "varargs recorded as array: {:?}", m.params[1]);
+        assert_eq!(
+            m.params[1].name, "rest",
+            "varargs name captured: {:?}",
+            m.params[1]
+        );
+        assert_eq!(
+            m.params[1].type_text, "Object[]",
+            "varargs recorded as array: {:?}",
+            m.params[1]
+        );
 
         // A GENERIC varargs erases to a bare array (`List<T>` → `List[]`), so the array suffix
         // survives binary-name resolution and the arity check still recognises the varargs.
         let g = one_type("class C { <T> void addAll(java.util.List<T>... lists) {} }");
-        let gm = g.methods.iter().find(|m| m.name == "addAll").expect("addAll");
+        let gm = g
+            .methods
+            .iter()
+            .find(|m| m.name == "addAll")
+            .expect("addAll");
         assert_eq!(gm.params.len(), 1, "{:?}", gm.params);
-        assert_eq!(gm.params[0].type_text, "java.util.List[]", "generic varargs erased: {:?}", gm.params[0]);
+        assert_eq!(
+            gm.params[0].type_text, "java.util.List[]",
+            "generic varargs erased: {:?}",
+            gm.params[0]
+        );
     }
 
     #[test]
     fn generic_type_parameters_are_captured_in_order() {
         assert_eq!(one_type("class Pair<L, R> {}").type_params, vec!["L", "R"]);
-        assert_eq!(one_type("interface Repo<T, ID> {}").type_params, vec!["T", "ID"]);
+        assert_eq!(
+            one_type("interface Repo<T, ID> {}").type_params,
+            vec!["T", "ID"]
+        );
         // A bounded parameter keeps just the name.
-        assert_eq!(one_type("class Box<T extends Number> {}").type_params, vec!["T"]);
+        assert_eq!(
+            one_type("class Box<T extends Number> {}").type_params,
+            vec!["T"]
+        );
         assert!(one_type("class Plain {}").type_params.is_empty());
     }
 
@@ -1503,27 +1856,47 @@ mod tests {
     fn interface_method_without_modifier_is_public() {
         // Interface members are implicitly public (JLS §9.4) — NOT package-private.
         let t = one_type("interface I { String get(); }");
-        assert_eq!(t.methods[0].visibility, Visibility::Public, "{:?}", t.methods[0]);
+        assert_eq!(
+            t.methods[0].visibility,
+            Visibility::Public,
+            "{:?}",
+            t.methods[0]
+        );
     }
 
     #[test]
     fn interface_constant_is_public() {
         let t = one_type("interface I { int MAX = 100; }");
-        assert_eq!(t.fields[0].visibility, Visibility::Public, "{:?}", t.fields[0]);
+        assert_eq!(
+            t.fields[0].visibility,
+            Visibility::Public,
+            "{:?}",
+            t.fields[0]
+        );
     }
 
     #[test]
     fn private_interface_method_stays_private() {
         // A Java 9+ `private` interface helper keeps its explicit visibility.
         let t = one_type("interface I { private void helper() {} }");
-        assert_eq!(t.methods[0].visibility, Visibility::Private, "{:?}", t.methods[0]);
+        assert_eq!(
+            t.methods[0].visibility,
+            Visibility::Private,
+            "{:?}",
+            t.methods[0]
+        );
     }
 
     #[test]
     fn class_method_without_modifier_is_package() {
         // The class default is unchanged: no modifier → package-private.
         let t = one_type("class C { void m() {} }");
-        assert_eq!(t.methods[0].visibility, Visibility::Package, "{:?}", t.methods[0]);
+        assert_eq!(
+            t.methods[0].visibility,
+            Visibility::Package,
+            "{:?}",
+            t.methods[0]
+        );
     }
 
     #[test]
@@ -1534,25 +1907,43 @@ mod tests {
         let inits: Vec<_> = t.methods.iter().filter(|m| m.name == "<init>").collect();
         assert_eq!(inits.len(), 1, "{:?}", t.methods);
         assert_eq!(inits[0].params.len(), 1, "{:?}", inits[0]);
-        assert!(t.methods.iter().any(|m| m.name == "m"), "the normal method is still there");
+        assert!(
+            t.methods.iter().any(|m| m.name == "m"),
+            "the normal method is still there"
+        );
     }
 
     #[test]
     fn constructor_throws_are_captured() {
         let t = one_type("class C { C() throws java.io.IOException {} }");
-        let init = t.methods.iter().find(|m| m.name == "<init>").expect("<init>");
-        assert!(init.throws.iter().any(|x| x.contains("IOException")), "{:?}", init.throws);
+        let init = t
+            .methods
+            .iter()
+            .find(|m| m.name == "<init>")
+            .expect("<init>");
+        assert!(
+            init.throws.iter().any(|x| x.contains("IOException")),
+            "{:?}",
+            init.throws
+        );
     }
 
     #[test]
     fn annotation_elements_are_indexed_as_methods() {
         // `@interface` elements are public abstract no-arg methods — a `value()` access must resolve.
         let t = one_type("@interface Route { String value(); int count() default 3; }");
-        let value = t.methods.iter().find(|m| m.name == "value").expect("value()");
+        let value = t
+            .methods
+            .iter()
+            .find(|m| m.name == "value")
+            .expect("value()");
         assert!(value.params.is_empty(), "annotation element takes no args");
         assert_eq!(value.visibility, Visibility::Public, "{value:?}");
         assert!(value.return_type_text.contains("String"), "{value:?}");
-        assert!(t.methods.iter().any(|m| m.name == "count"), "element with a default is indexed too");
+        assert!(
+            t.methods.iter().any(|m| m.name == "count"),
+            "element with a default is indexed too"
+        );
     }
 
     #[test]
@@ -1577,11 +1968,20 @@ mod tests {
         // A bodyless interface method is abstract; a `default` one is not; a `static` one is not.
         let t = one_type("interface I { void run(); default void ok() {} static void s() {} }");
         let run = t.methods.iter().find(|m| m.name == "run").unwrap();
-        assert!(run.is_abstract && !run.is_default, "bodyless interface method is abstract");
+        assert!(
+            run.is_abstract && !run.is_default,
+            "bodyless interface method is abstract"
+        );
         let ok = t.methods.iter().find(|m| m.name == "ok").unwrap();
-        assert!(!ok.is_abstract && ok.is_default, "default method is not abstract");
+        assert!(
+            !ok.is_abstract && ok.is_default,
+            "default method is not abstract"
+        );
         let s = t.methods.iter().find(|m| m.name == "s").unwrap();
-        assert!(!s.is_abstract && !s.is_default, "static interface method is neither");
+        assert!(
+            !s.is_abstract && !s.is_default,
+            "static interface method is neither"
+        );
     }
 
     #[test]
@@ -1591,9 +1991,21 @@ mod tests {
         let src = "enum OrderCriteria {\n  ASC(\"asc\"), DESC(\"desc\");\n  private final String sqlCriteriaValue;\n  OrderCriteria(String v) { this.sqlCriteriaValue = v; }\n  public String getSql() { return sqlCriteriaValue; }\n}";
         let t = one_type(src);
         assert_eq!(t.kind, TypeKind::Enum);
-        assert!(t.fields.iter().any(|f| f.name == "sqlCriteriaValue"), "enum field indexed: {:?}", t.fields);
-        assert!(t.methods.iter().any(|m| m.name == "getSql"), "enum method indexed: {:?}", t.methods);
-        assert!(t.methods.iter().any(|m| m.name == "<init>"), "enum constructor indexed: {:?}", t.methods);
+        assert!(
+            t.fields.iter().any(|f| f.name == "sqlCriteriaValue"),
+            "enum field indexed: {:?}",
+            t.fields
+        );
+        assert!(
+            t.methods.iter().any(|m| m.name == "getSql"),
+            "enum method indexed: {:?}",
+            t.methods
+        );
+        assert!(
+            t.methods.iter().any(|m| m.name == "<init>"),
+            "enum constructor indexed: {:?}",
+            t.methods
+        );
     }
 
     /// The constants themselves are members too — `public static final E NAME`, as the compiler
@@ -1619,15 +2031,31 @@ mod tests {
     fn a_constant_body_does_not_leak_members_onto_the_enum() {
         let t = one_type("enum E { A { void hidden() {} }; void real() {} }");
         assert!(t.methods.iter().any(|m| m.name == "real"));
-        assert!(!t.methods.iter().any(|m| m.name == "hidden"), "{:?}", t.methods);
+        assert!(
+            !t.methods.iter().any(|m| m.name == "hidden"),
+            "{:?}",
+            t.methods
+        );
     }
 
     #[test]
     fn class_abstract_method_is_abstract() {
         let t = one_type("abstract class C { abstract void run(); void done() {} }");
-        assert!(t.methods.iter().find(|m| m.name == "run").unwrap().is_abstract);
+        assert!(
+            t.methods
+                .iter()
+                .find(|m| m.name == "run")
+                .unwrap()
+                .is_abstract
+        );
         // A concrete class method (with a body) is never marked abstract.
-        assert!(!t.methods.iter().find(|m| m.name == "done").unwrap().is_abstract);
+        assert!(
+            !t.methods
+                .iter()
+                .find(|m| m.name == "done")
+                .unwrap()
+                .is_abstract
+        );
     }
 
     /// A class declared inside a method body — a **local class**, legal since Java 1.1. The walk
@@ -1653,7 +2081,11 @@ mod tests {
     fn a_record_declared_inside_a_method_is_extracted() {
         let src = "package p;\npublic class Outer {\n    void run() {\n        record Point(int x, int y) {}\n        new Point(1, 2);\n    }\n}\n";
         let fs = extract_symbols(src);
-        let point = fs.types.iter().find(|t| t.name == "Point").expect("the local record");
+        let point = fs
+            .types
+            .iter()
+            .find(|t| t.name == "Point")
+            .expect("the local record");
         assert_eq!(point.kind, TypeKind::Record);
         assert!(point.fields.iter().any(|f| f.name == "x"));
     }
@@ -1664,16 +2096,22 @@ mod tests {
     fn local_types_nest_and_appear_in_constructors_too() {
         let src = "package p;\npublic class Outer {\n    Outer() {\n        class A {\n            void go() {\n                class B { }\n            }\n        }\n    }\n}\n";
         let fs = extract_symbols(src);
-        assert!(fs.types.iter().any(|t| t.fqn == "p.Outer.A"), "local class in a constructor");
-        assert!(fs.types.iter().any(|t| t.fqn == "p.Outer.A.B"), "local class inside a local class");
+        assert!(
+            fs.types.iter().any(|t| t.fqn == "p.Outer.A"),
+            "local class in a constructor"
+        );
+        assert!(
+            fs.types.iter().any(|t| t.fqn == "p.Outer.A.B"),
+            "local class inside a local class"
+        );
     }
 
     /// A static initializer block is a body too.
     #[test]
     fn a_local_class_in_a_static_initializer_is_extracted() {
-        let src = "package p;\npublic class Outer {\n    static {\n        class Boot { }\n    }\n}\n";
+        let src =
+            "package p;\npublic class Outer {\n    static {\n        class Boot { }\n    }\n}\n";
         let fs = extract_symbols(src);
         assert!(fs.types.iter().any(|t| t.name == "Boot"));
     }
-
 }

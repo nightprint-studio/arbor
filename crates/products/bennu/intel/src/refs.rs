@@ -21,11 +21,10 @@
 use std::collections::HashMap;
 
 use bennu_java::prelude::{
-    extract_symbols_from_root, infer_receiver_type_at, FileSymbols,
-    TypeResolver,
+    extract_symbols_from_root, infer_receiver_type_at, FileSymbols, TypeResolver,
 };
 use serde::{Deserialize, Serialize};
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 /// The project's Java language level — gates recognition of version-specific binding forms
 /// (a Java-8 project has no records or pattern variables). Level `0` means "unknown" (the
@@ -87,7 +86,9 @@ impl DeclKey {
     pub fn label(&self) -> String {
         match self {
             DeclKey::Type { binary } => format!("type {}", binary.replace('/', ".")),
-            DeclKey::Method { owner, name } => format!("method {}.{}()", owner.replace('/', "."), name),
+            DeclKey::Method { owner, name } => {
+                format!("method {}.{}()", owner.replace('/', "."), name)
+            }
             DeclKey::Field { owner, name } => format!("field {}.{}", owner.replace('/', "."), name),
         }
     }
@@ -131,12 +132,46 @@ pub struct ReferenceIndex {
     /// Use sites attempted / resolved (the resolve rate, for logging).
     pub attempted: usize,
     pub resolved: usize,
+    /// Every qualified member access the walk could not type, grouped by the MEMBER NAME written
+    /// at the site. Keyed by name because that is the question a rename asks: "is there anywhere
+    /// spelling this name that I cannot see?" — see [`ReferenceIndex::unresolved_named`].
+    unresolved_by_name: HashMap<String, Vec<UsageLocation>>,
 }
 
 impl ReferenceIndex {
     /// Every usage of a declaration key (empty when none / unknown key).
     pub fn usages_of(&self, key: &DeclKey) -> &[UsageLocation] {
         self.by_decl.get(key).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Every place this project writes `.<name>` on a receiver the walk could not type.
+    ///
+    /// These are the sites a rename of `name` cannot account for. The code is almost certainly
+    /// correct — it is the walk that fell short — which is exactly why they matter: an edit plan
+    /// built without them looks complete and is not.
+    pub fn unresolved_named(&self, name: &str) -> &[UsageLocation] {
+        self.unresolved_by_name
+            .get(name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Every type this project declares, as a binary name — nested and ANONYMOUS ones included.
+    ///
+    /// The project's simple→binary map cannot answer this: it keeps one binary per simple name, so
+    /// a project with thirty classes called `Builder` offers exactly one of them. Anything that
+    /// searches the project's types (an override family, say) and reads that map is searching a
+    /// list with twenty-nine types missing, and the ones it misses are precisely the ones whose
+    /// name repeats — which is what a nested helper class IS.
+    pub fn project_type_binaries(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .file_symbols
+            .values()
+            .flat_map(|fs| fs.types.iter().map(|t| t.fqn.replace('.', "/")))
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
     }
 
     /// The number of distinct declarations that have at least one recorded usage.
@@ -233,6 +268,15 @@ struct FileContribution {
     edges: Vec<(DeclKey, UsageLocation)>,
     attempted: usize,
     resolved: usize,
+    /// Qualified member accesses whose OWNER could not be typed — `(member name, where)`.
+    ///
+    /// Not a diagnostic: the code is almost certainly fine and it is the walk that fell short. It
+    /// is recorded because a rename has to know about it. `x.foo()` on a receiver we could not type
+    /// might be a use of the very `foo` being renamed, and the plan cannot see it — so renaming
+    /// would rewrite the declaration and leave that call spelling a name nothing declares. With
+    /// this, the engine refuses and says where, which is the one outcome a refactor must never
+    /// trade for silence.
+    unresolved: Vec<(String, UsageLocation)>,
 }
 
 /// Parse + walk ONE file (parse once, reuse the tree for both the symbol map and the walk —
@@ -244,26 +288,25 @@ fn walk_file(
     project_types: &HashMap<String, String>,
 ) -> FileContribution {
     let mut walker = FileWalker::new(path, source, resolver, project_types);
-    let symbols = {
-        let mut parser = Parser::new();
-        if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_ok() {
-            if let Some(tree) = parser.parse(source, None) {
-                let root = tree.root_node();
-                let symbols = extract_symbols_from_root(&root, source);
-                walker.walk(&root, &symbols);
-                symbols
-            } else {
-                FileSymbols::default()
-            }
-        } else {
-            FileSymbols::default()
+    // The workspace's one parse — thread-local parser, shared cache, and the recovery of the one
+    // construct the grammar cannot handle. Keeping a private parser here made this walk blind to
+    // every file containing it, which is how the index and the rest of the product came to
+    // disagree about what a file declares.
+    let symbols = match bennu_java::prelude::parse_java(source) {
+        Some(tree) => {
+            let root = tree.root_node();
+            let symbols = extract_symbols_from_root(&root, source);
+            walker.walk(&root, &symbols);
+            symbols
         }
+        None => FileSymbols::default(),
     };
     FileContribution {
         symbols,
         edges: walker.edges,
         attempted: walker.attempted,
         resolved: walker.resolved,
+        unresolved: walker.unresolved,
     }
 }
 
@@ -278,6 +321,7 @@ fn assemble(
     let mut file_symbols: HashMap<String, FileSymbols> = HashMap::new();
     let mut attempted = 0usize;
     let mut resolved = 0usize;
+    let mut unresolved_by_name: HashMap<String, Vec<UsageLocation>> = HashMap::new();
     for (path, cf) in &files_map {
         attempted += cf.attempted;
         resolved += cf.resolved;
@@ -285,8 +329,20 @@ fn assemble(
         for (key, usage) in &cf.edges {
             by_decl.entry(key.clone()).or_default().push(usage.clone());
         }
+        for (name, usage) in &cf.unresolved {
+            unresolved_by_name
+                .entry(name.clone())
+                .or_default()
+                .push(usage.clone());
+        }
     }
-    let index = ReferenceIndex { by_decl, file_symbols, attempted, resolved };
+    let index = ReferenceIndex {
+        by_decl,
+        file_symbols,
+        attempted,
+        resolved,
+        unresolved_by_name,
+    };
     let cache = crate::refcache::RefCache {
         version: crate::refcache::CACHE_VERSION,
         type_map_hash: tm_hash,
@@ -317,7 +373,10 @@ pub fn build_reference_index_incremental(
         prior.filter(|c| c.version == crate::refcache::CACHE_VERSION && c.type_map_hash == tm_hash);
     let prior_valid = prior.is_some();
 
-    let hashes: Vec<u64> = files.iter().map(|f| crate::refcache::content_hash(&f.source)).collect();
+    let hashes: Vec<u64> = files
+        .iter()
+        .map(|f| crate::refcache::content_hash(&f.source))
+        .collect();
     let cur_paths: HashSet<&str> = files.iter().map(|f| f.path.as_str()).collect();
 
     // Which files must be (re)walked?
@@ -403,6 +462,7 @@ pub fn build_reference_index_incremental(
                 symbols: contrib.symbols,
                 attempted: contrib.attempted,
                 resolved: contrib.resolved,
+                unresolved: contrib.unresolved,
             },
         );
     }
@@ -417,8 +477,15 @@ pub fn build_reference_index_incremental(
     );
     // Nothing re-walked and the prior cache was valid → the on-disk copy is already current;
     // don't rewrite it (it can be tens of MB).
-    let cache_to_save = if prior_valid && total == 0 { None } else { Some(cache) };
-    IncrementalBuild { index, cache_to_save }
+    let cache_to_save = if prior_valid && total == 0 {
+        None
+    } else {
+        Some(cache)
+    };
+    IncrementalBuild {
+        index,
+        cache_to_save,
+    }
 }
 
 /// The outcome of a references query.
@@ -445,7 +512,10 @@ pub fn references(
     // uses), so no separate guard is needed here.
     let key = classify_caret(index, file, source, offset, resolver, project_types)?;
     let usages = index.usages_of(&key).to_vec();
-    Some(ReferencesResult { target: key, usages })
+    Some(ReferencesResult {
+        target: key,
+        usages,
+    })
 }
 
 // ── the per-file reference walk ────────────────────────────────────────────────────
@@ -466,6 +536,14 @@ struct FileWalker<'a> {
     owner_is_project: HashMap<String, bool>,
     attempted: usize,
     resolved: usize,
+    /// Qualified member accesses this file makes on a receiver the walk could not type — see
+    /// [`FileContribution::unresolved`].
+    unresolved: Vec<(String, UsageLocation)>,
+    /// The types THIS FILE declares, simple name → binary. Authoritative for a bare name written in
+    /// it, and set before the walk starts.
+    file_types: HashMap<String, String>,
+    /// The file's `package`, for the same-package rule.
+    package: Option<String>,
     /// The file's `import`s, set by [`walk`](Self::walk) before it starts. A dependency type
     /// is reachable by its simple name **only** through these — see `resolve_type_simple`.
     imports: Vec<bennu_java::prelude::Import>,
@@ -507,6 +585,9 @@ impl<'a> FileWalker<'a> {
             owner_is_project: HashMap::new(),
             attempted: 0,
             resolved: 0,
+            unresolved: Vec::new(),
+            file_types: HashMap::new(),
+            package: None,
             imports: Vec::new(),
             local_names: std::collections::HashSet::new(),
             field_owners: HashMap::new(),
@@ -543,12 +624,23 @@ impl<'a> FileWalker<'a> {
         // The file's imports, for the whole walk: they are what turns a bare `SharedService`
         // into `com/acme/SharedService` when the class lives in a dependency.
         self.imports = symbols.imports.clone();
+        self.file_types = symbols
+            .types
+            .iter()
+            .map(|t| (t.name.clone(), t.fqn.replace('.', "/")))
+            .collect();
+        self.package = symbols.package.clone();
         self.local_names = collect_bound_names(root, self.bytes);
         // What the BUFFER declares, which is not the same question as what the index holds.
         self.file_fields = symbols
             .types
             .iter()
-            .map(|t| (t.name.clone(), t.fields.iter().map(|f| f.name.clone()).collect()))
+            .map(|t| {
+                (
+                    t.name.clone(),
+                    t.fields.iter().map(|f| f.name.clone()).collect(),
+                )
+            })
             .collect();
         self.walk_static_imports(symbols);
         let mut stack = vec![*root];
@@ -561,6 +653,12 @@ impl<'a> FileWalker<'a> {
                 "method_invocation" => self.on_method_invocation(&n, root, symbols),
                 "method_reference" => self.on_method_reference(&n, root, symbols),
                 "element_value_pair" => self.on_annotation_element(&n),
+                // `@Ann` is a use of the TYPE `Ann`. Its name is the `name` field of an
+                // `annotation` / `marker_annotation`, never a `type_identifier`, so the arm below
+                // never saw one: every annotation use in the project was missing from the index.
+                // A rename of the annotation then moved its declaration and its imports — both
+                // found by a source walk — and left every `@Ann` spelling the old name.
+                "annotation" | "marker_annotation" => self.on_annotation_name(&n),
                 "field_access" => self.on_field_access(&n, root, symbols),
                 "identifier" => self.on_bare_identifier(&n),
                 "type_identifier" => self.on_type_identifier(&n),
@@ -578,8 +676,12 @@ impl<'a> FileWalker<'a> {
     /// reference names no method of its own, and the type it names is already recorded as a type
     /// use by the walk.
     fn on_method_reference(&mut self, node: &Node, root: &Node, symbols: &FileSymbols) {
-        let Some((qualifier, name_node)) = method_reference_parts(node) else { return };
-        let Some(name) = self.node_text(&name_node) else { return };
+        let Some((qualifier, name_node)) = method_reference_parts(node) else {
+            return;
+        };
+        let Some(name) = self.node_text(&name_node) else {
+            return;
+        };
         self.attempted += 1;
         let Some(owner) = self.resolve_receiver_owner(
             &qualifier,
@@ -589,12 +691,38 @@ impl<'a> FileWalker<'a> {
             root,
             symbols,
         ) else {
+            self.note_unresolved(&name, &name_node);
             return;
         };
         self.resolved += 1;
         let usage = self.usage_at(&name_node);
         if self.records_owner(&owner) {
             self.edges.push((DeclKey::Method { owner, name }, usage));
+        }
+    }
+
+    /// `@Ann` / `@a.b.Ann(…)` — the annotation's own NAME, recorded as a use of its type.
+    ///
+    /// The name is a `scoped_identifier` when written qualified, and only its last segment is the
+    /// type; the rest is the package, which a rename of the type must not touch.
+    fn on_annotation_name(&mut self, node: &Node) {
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return;
+        };
+        let Some(text) = self.node_text(&name_node) else {
+            return;
+        };
+        let simple = text.rsplit('.').next().unwrap_or(&text).to_string();
+        self.attempted += 1;
+        let Some(binary) = self.resolve_type_simple(&text) else {
+            return;
+        };
+        self.resolved += 1;
+        // Anchor on the SIMPLE name only — the trailing segment of the written name.
+        let start = name_node.end_byte() - simple.len();
+        let usage = self.usage_span(start, name_node.end_byte());
+        if self.records_owner(&binary) {
+            self.edges.push((DeclKey::Type { binary }, usage));
         }
     }
 
@@ -609,9 +737,15 @@ impl<'a> FileWalker<'a> {
     /// refusals, the single largest reason. Recording the use and finding the declaration have to
     /// land together: either alone renames one half of a pair and stops the code compiling.
     fn on_annotation_element(&mut self, node: &Node) {
-        let Some(key) = node.child_by_field_name("key") else { return };
-        let Some(name) = self.node_text(&key) else { return };
-        let Some(owner) = self.enclosing_annotation_binary(node) else { return };
+        let Some(key) = node.child_by_field_name("key") else {
+            return;
+        };
+        let Some(name) = self.node_text(&key) else {
+            return;
+        };
+        let Some(owner) = self.enclosing_annotation_binary(node) else {
+            return;
+        };
         self.attempted += 1;
         self.resolved += 1;
         let usage = self.usage_at(&key);
@@ -637,19 +771,34 @@ impl<'a> FileWalker<'a> {
     }
 
     fn on_method_invocation(&mut self, node: &Node, root: &Node, symbols: &FileSymbols) {
-        let Some(name_node) = node.child_by_field_name("name") else { return };
-        let Some(name) = self.node_text(&name_node) else { return };
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return;
+        };
+        let Some(name) = self.node_text(&name_node) else {
+            return;
+        };
 
         let owner = match node.child_by_field_name("object") {
             Some(obj) => {
+                self.note_type_qualifier(&obj);
                 self.attempted += 1;
                 let dot_off = name_node.start_byte();
-                match self.resolve_receiver_owner(&obj, dot_off, &name, MemberSort::Method, root, symbols) {
+                match self.resolve_receiver_owner(
+                    &obj,
+                    dot_off,
+                    &name,
+                    MemberSort::Method,
+                    root,
+                    symbols,
+                ) {
                     Some(o) => {
                         self.resolved += 1;
                         o
                     }
-                    None => return,
+                    None => {
+                        self.note_unresolved(&name, &name_node);
+                        return;
+                    }
                 }
             }
             None => {
@@ -669,20 +818,81 @@ impl<'a> FileWalker<'a> {
         }
     }
 
+    /// Remember a qualified member access whose owner we could not type — see
+    /// [`FileContribution::unresolved`].
+    fn note_unresolved(&mut self, name: &str, name_node: &Node) {
+        let usage = self.usage_at(name_node);
+        self.unresolved.push((name.to_string(), usage));
+    }
+
     fn on_field_access(&mut self, node: &Node, root: &Node, symbols: &FileSymbols) {
-        let Some(field_node) = node.child_by_field_name("field") else { return };
-        let Some(name) = self.node_text(&field_node) else { return };
-        let Some(obj) = node.child_by_field_name("object") else { return };
+        let Some(field_node) = node.child_by_field_name("field") else {
+            return;
+        };
+        let Some(name) = self.node_text(&field_node) else {
+            return;
+        };
+        let Some(obj) = node.child_by_field_name("object") else {
+            return;
+        };
+        // Before the member is resolved, not after: whether we can say what `VALUE` is has no
+        // bearing on `Holder` being a use of the type `Holder`, and tying the two together lost
+        // every qualifier whose member the walk happened not to type.
+        self.note_type_qualifier(&obj);
         self.attempted += 1;
         let dot_off = field_node.start_byte();
-        let Some(owner) = self.resolve_receiver_owner(&obj, dot_off, &name, MemberSort::Field, root, symbols)
+        let Some(owner) =
+            self.resolve_receiver_owner(&obj, dot_off, &name, MemberSort::Field, root, symbols)
         else {
+            self.note_unresolved(&name, &field_node);
             return;
         };
         self.resolved += 1;
         let usage = self.usage_at(&field_node);
         if self.records_owner(&owner) {
             self.edges.push((DeclKey::Field { owner, name }, usage));
+        }
+    }
+
+    /// A TYPE named as the qualifier of a static access — the `Holder` of `Holder.VALUE` or
+    /// `Holder.make()`.
+    ///
+    /// It is a use of that type, and it was invisible to this walk. The walk records type uses by
+    /// node KIND, and tree-sitter reads a static qualifier as a plain `identifier` inside the
+    /// access — a `type_identifier` is what a declaration, a cast or a `new` produces, not this. So
+    /// renaming the type moved its declaration and its file and left every static access in the
+    /// project spelling the old name: on Guava, `Murmur3_32HashFunction.MURMUR3_32`.
+    ///
+    /// A variable can perfectly well be named like a type, so a name bound as a LOCAL is left
+    /// alone: it is a value here, whatever it is called.
+    fn note_type_qualifier(&mut self, obj: &Node) {
+        if obj.kind() != "identifier" {
+            return;
+        }
+        let Some(text) = self.node_text(obj) else {
+            return;
+        };
+        // Cheapest question first: this runs on every qualified access in the project, and the
+        // overwhelming majority of qualifiers are variables. A hashed miss on the local names, then
+        // a name lookup, and only for a name that really is a type do we pay for the scope walk.
+        if self.local_names.contains(&text)
+            && find_local_binding(obj, self.bytes, &text, LangLevel(0)).is_some()
+        {
+            return;
+        }
+        let Some(binary) = self.resolve_type_simple(&text) else {
+            return;
+        };
+        // A FIELD of the enclosing type shadows a same-named type for a value read, and this
+        // position is a value read whenever such a field exists.
+        if let Some(enclosing) = self.enclosing_type_binary(obj) {
+            if self.field_owner(&enclosing, &text, obj).is_some() {
+                return;
+            }
+        }
+        let usage = self.usage_at(obj);
+        if self.records_owner(&binary) {
+            self.edges.push((DeclKey::Type { binary }, usage));
         }
     }
 
@@ -704,9 +914,15 @@ impl<'a> FileWalker<'a> {
         if is_member_selector_node(node) || is_bound_name(node) {
             return;
         }
-        let Some(name) = self.node_text(node) else { return };
-        let Some(enclosing) = self.enclosing_type_binary(node) else { return };
-        let Some(owner) = self.field_owner(&enclosing, &name, node) else { return };
+        let Some(name) = self.node_text(node) else {
+            return;
+        };
+        let Some(enclosing) = self.enclosing_type_binary(node) else {
+            return;
+        };
+        let Some(owner) = self.field_owner(&enclosing, &name, node) else {
+            return;
+        };
         self.attempted += 1;
         // A local or parameter of the same name shadows the field. `classify_caret` refuses to
         // classify those at all, so indexing them here would file a local's reads under a field
@@ -757,24 +973,58 @@ impl<'a> FileWalker<'a> {
         let declared = enclosing_type_simple(node, self.bytes)
             .and_then(|simple| self.file_fields.get(&simple))
             .is_some_and(|fields| fields.contains(name));
-        declared.then(|| binary.to_string())
+        if declared {
+            return Some(binary.to_string());
+        }
+        // A bare name can also be bound by an `import static`, which is how a shared test fixture's
+        // constants are read: `import static p.Fixture.*;` then `db_dettaglio` on its own. The
+        // METHOD path already asked this question (see `enclosing_owner`); the field path did not,
+        // so those uses were filed under nobody and a rename of the field left every one of them
+        // behind — in test sources, where one fixture is star-imported by half a dozen classes.
+        self.static_import_owner(name, MemberSort::Field, None)
     }
 
-    /// `field name → declaring type` for `start` and its supertypes.
-    ///
-    /// Walks in the same order [`declaring_owner`](Self::declaring_owner) does, keeping the
-    /// first declaration of each name — so the owner this names is byte-identical to the one the
-    /// query side computes for the same caret. A different answer would be a key that matches
-    /// nothing, which is the failure mode this whole arm exists to fix.
+    /// `field name → declaring type` for every scope a bare field read inside `start` can bind to:
+    /// `start` and its supertypes, then each lexically enclosing type and its supertypes.
     fn build_field_owners(&self, start: &str) -> HashMap<String, String> {
         let mut out: HashMap<String, String> = HashMap::new();
+        // The type's OWN hierarchy first: a field it inherits is in a nearer scope than one an
+        // enclosing class declares, so it must win the name.
+        self.collect_field_owners(start, &mut out);
+        // Then every class this one is written INSIDE, each with its own hierarchy. A nested class
+        // reads the outer class's fields unqualified (JLS §8.1.3) — `z_offset` inside
+        // `Mapper.Deserializer` is `Mapper.z_offset` — and without this those reads were filed
+        // under the inner class, a key no rename looks up. The stop condition is the same as
+        // everywhere else in this walk: climb while the trimmed prefix is still a project TYPE,
+        // because what is above the outermost one is the package.
+        let mut scope = start;
+        while let Some(i) = scope.rfind('/') {
+            let outer = &scope[..i];
+            if !self.resolver.is_project_type(outer) {
+                break;
+            }
+            self.collect_field_owners(outer, &mut out);
+            scope = outer;
+        }
+        out
+    }
+
+    /// Fold `start` and its supertypes' fields into `out`, keeping the first declaration of a name.
+    ///
+    /// Walks in the same order [`declaring_owner`](Self::declaring_owner) does, so the owner this
+    /// names is byte-identical to the one the query side computes for the same caret. A different
+    /// answer would be a key that matches nothing, which is the failure mode this whole arm exists
+    /// to fix.
+    fn collect_field_owners(&self, start: &str, out: &mut HashMap<String, String>) {
         let mut visited = std::collections::HashSet::new();
         let mut stack = vec![start.to_string()];
         while let Some(bn) = stack.pop() {
             if !visited.insert(bn.clone()) {
                 continue;
             }
-            let Some(cm) = self.resolver.members_of(&bn) else { continue };
+            let Some(cm) = self.resolver.members_of(&bn) else {
+                continue;
+            };
             for f in &cm.fields {
                 out.entry(f.name.clone()).or_insert_with(|| bn.clone());
             }
@@ -783,16 +1033,19 @@ impl<'a> FileWalker<'a> {
             }
             stack.extend(cm.interfaces.iter().cloned());
         }
-        out
     }
 
     fn on_type_identifier(&mut self, node: &Node) {
-        let Some(simple) = self.node_text(node) else { return };
+        let Some(simple) = self.node_text(node) else {
+            return;
+        };
         if self.is_declaration_name(node) {
             return;
         }
         self.attempted += 1;
-        let Some(binary) = self.resolve_type_simple(&simple) else { return };
+        let Some(binary) = self.resolve_type_simple(&simple) else {
+            return;
+        };
         self.resolved += 1;
         let usage = self.usage_at(node);
         self.edges.push((DeclKey::Type { binary }, usage));
@@ -808,7 +1061,9 @@ impl<'a> FileWalker<'a> {
         symbols: &FileSymbols,
     ) -> Option<String> {
         // Reuse the file's already-parsed tree + symbols — NOT a per-call-site re-parse.
-        if let Some(recv) = infer_receiver_type_at(root, self.source, symbols, dot_off, self.resolver) {
+        if let Some(recv) =
+            infer_receiver_type_at(root, self.source, symbols, dot_off, self.resolver)
+        {
             if let Some(owner) = self.declaring_owner(&recv.binary_name, member, sort) {
                 return Some(owner);
             }
@@ -818,6 +1073,23 @@ impl<'a> FileWalker<'a> {
         // look the member up there — otherwise static call/field USE SITES are never indexed and
         // find-usages / rename on a static member silently report nothing. The interactive query
         // path (`receiver_owner`) already has this fallback, so the two MUST agree.
+        //
+        // Only for a receiver that could BE a type name. A type name is spelled as an identifier or
+        // a dotted chain of them, never as a call or an index — and the fallback below happily
+        // slashes whatever text it is given, so `m.thing()` became the "type" `m/thing()` and the
+        // member was filed under it. That is not a resolution, it is a name nothing will ever look
+        // up: the use was lost, and — worse — the walk counted it as resolved, so the rename engine
+        // had no way to know it was blind there.
+        if !matches!(
+            obj.kind(),
+            "identifier"
+                | "scoped_identifier"
+                | "field_access"
+                | "type_identifier"
+                | "scoped_type_identifier"
+        ) {
+            return None;
+        }
         let obj_text = self.node_text(obj)?;
         let binary = self.resolve_type_simple(&obj_text)?;
         self.declaring_owner(&binary, member, sort)
@@ -836,52 +1108,87 @@ impl<'a> FileWalker<'a> {
     /// is recorded under both keys. Only one of them is ever the target of a given rename.
     fn walk_static_imports(&mut self, symbols: &FileSymbols) {
         for target in bennu_java::prelude::static_import_targets(&symbols.imports) {
-            let Some(member) = target.member.clone() else { continue };
+            let Some(member) = target.member.clone() else {
+                continue;
+            };
             if !self.records_owner(&target.owner_binary) {
                 continue;
             }
-            let Some(cm) = self.resolver.members_of(&target.owner_binary) else { continue };
+            let Some(cm) = self.resolver.members_of(&target.owner_binary) else {
+                continue;
+            };
             let is_method = cm.methods.iter().any(|m| m.name == member);
             let is_field = cm.fields.iter().any(|f| f.name == member);
             if !is_method && !is_field {
                 continue;
             }
-            let Some(span) = self.static_import_member_span(&symbols.imports, &member) else {
+            let Some(span) =
+                self.static_import_member_span(&symbols.imports, &target.owner_binary, &member)
+            else {
                 continue;
             };
             let usage = self.usage_span(span.0, span.1);
             if is_method {
                 self.edges.push((
-                    DeclKey::Method { owner: target.owner_binary.clone(), name: member.clone() },
+                    DeclKey::Method {
+                        owner: target.owner_binary.clone(),
+                        name: member.clone(),
+                    },
                     usage.clone(),
                 ));
             }
             if is_field {
                 self.edges.push((
-                    DeclKey::Field { owner: target.owner_binary.clone(), name: member.clone() },
+                    DeclKey::Field {
+                        owner: target.owner_binary.clone(),
+                        name: member.clone(),
+                    },
                     usage,
                 ));
             }
         }
     }
 
-    /// The byte span of `member` inside the `import static …` declaration that names it. The member
-    /// is the path's last segment, so the LAST occurrence within the declaration is it.
+    /// The byte span of `member` inside the `import static …` declaration that names it — the one
+    /// belonging to `owner_binary`.
+    ///
+    /// Matching the trailing NAME alone is not enough, and the difference is a broken build: a file
+    /// may statically import the same member name from two owners, and Guava's `AbstractTable` does
+    /// exactly that (`Collections2.safeRemove` and `Maps.safeRemove`). Renaming either then rewrote
+    /// whichever import came first — so one import named a method its owner no longer declares and
+    /// the other still named the old spelling.
+    ///
+    /// The name-only match survives as a fallback for the single unambiguous import, where the
+    /// owner we resolved and the path as written can legitimately be spelled differently.
     fn static_import_member_span(
         &self,
         imports: &[bennu_java::prelude::Import],
+        owner_binary: &str,
         member: &str,
     ) -> Option<(usize, usize)> {
-        for imp in imports.iter().filter(|i| i.static_ && !i.star) {
-            let span = imp.span.as_ref()?;
-            let text = self.source.get(span.start..span.end)?;
-            if !imp.path.ends_with(member) {
-                continue;
-            }
-            let at = text.rfind(member)?;
-            return Some((span.start + at, span.start + at + member.len()));
-        }
-        None
+        let wanted = format!("{owner_binary}/{member}");
+        let candidates = || imports.iter().filter(|i| i.static_ && !i.star);
+        let exact = candidates().find(|i| i.path.replace('.', "/") == wanted);
+        let named: Vec<_> = candidates().filter(|i| i.path.ends_with(member)).collect();
+        let imp = match exact {
+            Some(i) => i,
+            // Ambiguous by name and unmatched by owner: saying nothing costs one import edit;
+            // guessing costs the wrong file.
+            None if named.len() == 1 => named[0],
+            None => return None,
+        };
+        let span = imp.span.as_ref()?;
+        let text = self.source.get(span.start..span.end)?;
+        let at = text.rfind(member)?;
+        Some((span.start + at, span.start + at + member.len()))
+    }
+
+    /// The number of arguments a `method_invocation` passes, for telling apart two statically
+    /// imported methods of the same name — which is how Java itself tells them apart.
+    fn call_arity(node: &Node) -> Option<usize> {
+        let args = node.child_by_field_name("arguments")?;
+        let mut c = args.walk();
+        Some(args.named_children(&mut c).count())
     }
 
     fn enclosing_owner(&self, node: &Node, member: &str, sort: MemberSort) -> Option<String> {
@@ -889,18 +1196,68 @@ impl<'a> FileWalker<'a> {
         if let Some(found) = self.declaring_owner_strict(&fqn, member, sort) {
             return Some(found);
         }
-        // Not on the enclosing type or anything it inherits from. A bare name can also be bound by
+        // Not on the INNERMOST type or anything it inherits — but Java's scope does not stop there.
+        // A nested class sees the members of every class it is written inside (JLS §8.1.3) and
+        // writes them unqualified: `z_offset` inside `Mapper.Deserializer` is `Mapper.z_offset`.
+        //
+        // Stopping at the innermost type filed those uses under the INNER class, a key no rename
+        // ever looks up, so renaming the outer member rewrote its declaration and left every use
+        // inside a nested class spelling the old name — code that does not compile.
+        //
+        // The climb is over the binary name rather than the AST because nesting IS the binary name
+        // here (`pkg/Outer/Inner`, and `pkg/Outer/1` for an anonymous body), and it stops the moment
+        // the trimmed prefix is no longer a project type: what is above the outermost type is the
+        // package, whose types are not in scope unqualified.
+        let mut scope = fqn.as_str();
+        while let Some(i) = scope.rfind('/') {
+            let outer = &scope[..i];
+            if !self.resolver.is_project_type(outer) {
+                break;
+            }
+            if let Some(found) = self.declaring_owner_strict(outer, member, sort) {
+                return Some(found);
+            }
+            scope = outer;
+        }
+        // A bare name can also be bound by
         // an `import static`, which is precisely how a statically-imported helper is called — and
         // without this the call was filed under the CALLER's own type, a key no rename looks up, so
         // renaming the helper left every such call spelling the old name.
-        if let Some(owner) = self.static_import_owner(member, sort) {
+        let arity = (node.kind() == "method_invocation")
+            .then(|| Self::call_arity(node))
+            .flatten();
+        if let Some(owner) = self.static_import_owner(member, sort, arity) {
             return Some(owner);
         }
         Some(fqn)
     }
 
     /// The static-import owner that binds a bare `member` into this file, if one does.
-    fn static_import_owner(&self, member: &str, sort: MemberSort) -> Option<String> {
+    fn static_import_owner(
+        &self,
+        member: &str,
+        sort: MemberSort,
+        arity: Option<usize>,
+    ) -> Option<String> {
+        // Two static imports can name the same member from different owners; Java picks between
+        // them by the call's shape, and arity is the part of that we can see. Without it the first
+        // import won every call, and the calls to the OTHER method were filed under a method that
+        // does not have them.
+        if let Some(n) = arity {
+            let mut matching = bennu_java::prelude::static_import_targets(&self.imports)
+                .into_iter()
+                .filter(|t| t.member.as_deref() == Some(member))
+                .filter(|t| {
+                    self.resolver.members_of(&t.owner_binary).is_some_and(|cm| {
+                        cm.methods
+                            .iter()
+                            .any(|m| m.name == member && m.params.len() == n)
+                    })
+                });
+            if let (Some(only), None) = (matching.next(), matching.next()) {
+                return Some(only.owner_binary);
+            }
+        }
         for target in bennu_java::prelude::static_import_targets(&self.imports) {
             match &target.member {
                 // `import static a.b.C.member;` — named outright.
@@ -908,7 +1265,9 @@ impl<'a> FileWalker<'a> {
                 Some(_) => continue,
                 // `import static a.b.C.*;` — binds it only if the owner declares it.
                 None => {
-                    let Some(cm) = self.resolver.members_of(&target.owner_binary) else { continue };
+                    let Some(cm) = self.resolver.members_of(&target.owner_binary) else {
+                        continue;
+                    };
                     let declares = match sort {
                         MemberSort::Method => cm.methods.iter().any(|m| m.name == member),
                         MemberSort::Field => cm.fields.iter().any(|f| f.name == member),
@@ -922,7 +1281,12 @@ impl<'a> FileWalker<'a> {
         None
     }
 
-    fn declaring_owner(&self, start_binary: &str, member: &str, sort: MemberSort) -> Option<String> {
+    fn declaring_owner(
+        &self,
+        start_binary: &str,
+        member: &str,
+        sort: MemberSort,
+    ) -> Option<String> {
         self.declaring_owner_strict(start_binary, member, sort)
             .or_else(|| Some(start_binary.to_string()))
     }
@@ -976,23 +1340,18 @@ impl<'a> FileWalker<'a> {
         enclosing_type_binary(node, self.bytes, self.project_types)
     }
 
-    fn resolve_type_simple(&self, simple: &str) -> Option<String> {
-        if simple.contains('.') {
-            return Some(simple.replace('.', "/"));
-        }
-        if let Some(b) = self.project_types.get(simple) {
-            return Some(b.clone());
-        }
-        // WITH the file's imports. A project type resolves off `project_types` above, but a
-        // **dependency** type only ever resolves through the `import` that named it — the
-        // resolver's simple-name hints hold the project's own types and common JDK names, not
-        // every class on the classpath. Passing an empty list here meant no use of a library
-        // class was ever indexed, so find-usages on one reported nothing at all.
-        self.resolver.resolve_simple_name(simple, &self.imports)
+    /// The binary name a type EXPRESSION denotes — see [`bennu_java::prelude::resolve_written_type`],
+    /// the one reading of a written type name this workspace has.
+    fn resolve_type_simple(&self, text: &str) -> Option<String> {
+        bennu_java::prelude::resolve_written_type(text, self)
+            .resolved()
+            .filter(|b| bennu_java::prelude::is_resolved_binary(b, self.resolver))
     }
 
     fn is_declaration_name(&self, node: &Node) -> bool {
-        let Some(parent) = node.parent() else { return false };
+        let Some(parent) = node.parent() else {
+            return false;
+        };
         // Must list EVERY kind that declares a type. A kind missing here is indexed as a *use* of
         // itself, and the rename planner adds the declaration edit separately — so the same byte
         // range would be rewritten twice, once from the index and once from the walk.
@@ -1006,7 +1365,10 @@ impl<'a> FileWalker<'a> {
         ) {
             return false;
         }
-        parent.child_by_field_name("name").map(|nm| nm.id() == node.id()).unwrap_or(false)
+        parent
+            .child_by_field_name("name")
+            .map(|nm| nm.id() == node.id())
+            .unwrap_or(false)
     }
 
     fn usage_at(&self, node: &Node) -> UsageLocation {
@@ -1038,7 +1400,11 @@ impl<'a> FileWalker<'a> {
 
     fn line_text(&self, line: usize) -> String {
         let start = self.line_starts.get(line - 1).copied().unwrap_or(0);
-        let end = self.line_starts.get(line).copied().unwrap_or(self.source.len());
+        let end = self
+            .line_starts
+            .get(line)
+            .copied()
+            .unwrap_or(self.source.len());
         self.source[start..end].trim().to_string()
     }
 
@@ -1065,7 +1431,15 @@ pub fn classify_caret(
     project_types: &HashMap<String, String>,
 ) -> Option<DeclKey> {
     let tree = bennu_java::prelude::parse_java(source)?;
-    classify_caret_at(index, file, source, &tree.root_node(), offset, resolver, project_types)
+    classify_caret_at(
+        index,
+        file,
+        source,
+        &tree.root_node(),
+        offset,
+        resolver,
+        project_types,
+    )
 }
 
 /// The core of [`classify_caret`] over an ALREADY-PARSED `root`, so a caller that has already
@@ -1143,7 +1517,10 @@ fn classify_caret_at(
                     declaring_owner(resolver, &fqn, &ident_text, true)?
                 }
             };
-            Some(DeclKey::Method { owner, name: ident_text })
+            Some(DeclKey::Method {
+                owner,
+                name: ident_text,
+            })
         }
         "field_access" => {
             let field_node = parent.child_by_field_name("field")?;
@@ -1172,13 +1549,19 @@ fn classify_caret_at(
                 resolver,
                 project_types,
             )?;
-            Some(DeclKey::Field { owner, name: ident_text })
+            Some(DeclKey::Field {
+                owner,
+                name: ident_text,
+            })
         }
         "type_identifier" | "scoped_type_identifier" | "generic_type" => {
             // Use the FULL type expression (the parent), not just the clicked segment, so a
             // fully-qualified `alpha.Widget` resolves by its package (never the ambiguous bare
             // `Widget` shared with another package). `type_key` strips generics.
-            let text = parent.utf8_text(bytes).map(str::to_string).unwrap_or_else(|_| ident_text.clone());
+            let text = parent
+                .utf8_text(bytes)
+                .map(str::to_string)
+                .unwrap_or_else(|_| ident_text.clone());
             let symbols = extract_symbols_from_root(root, source);
             type_key(&text, project_types, resolver, &symbols.imports)
         }
@@ -1196,7 +1579,10 @@ fn classify_caret_at(
             if ident.kind() == "identifier" && !is_member_selector_node(&ident) {
                 let fqn = enclosing_type_binary(&ident, bytes, project_types)?;
                 let owner = declaring_owner(resolver, &fqn, &ident_text, false)?;
-                return Some(DeclKey::Field { owner, name: ident_text });
+                return Some(DeclKey::Field {
+                    owner,
+                    name: ident_text,
+                });
             }
             None
         }
@@ -1287,7 +1673,10 @@ fn receiver_side_key(
     let bytes = source.as_bytes();
     if let Some(fqn) = enclosing_type_binary(ident, bytes, project_types) {
         if let Some(owner) = declaring_owner(resolver, &fqn, ident_text, false) {
-            return Some(DeclKey::Field { owner, name: ident_text.to_string() });
+            return Some(DeclKey::Field {
+                owner,
+                name: ident_text.to_string(),
+            });
         }
     }
     type_key(ident_text, project_types, resolver, imports)
@@ -1346,7 +1735,9 @@ fn type_key(
                 return Some(DeclKey::Type { binary: b.clone() });
             }
         }
-        return Some(DeclKey::Type { binary: base.replace('.', "/") });
+        return Some(DeclKey::Type {
+            binary: base.replace('.', "/"),
+        });
     }
     if let Some(b) = project_types.get(base) {
         return Some(DeclKey::Type { binary: b.clone() });
@@ -1355,7 +1746,9 @@ fn type_key(
     // that lives in a dependency. The key produced here has to be byte-identical to the one the
     // walker indexed the use sites under, so this and `resolve_type_simple` must resolve the
     // same way; an empty list here made find-usages silent even once the edges existed.
-    resolver.resolve_simple_name(base, imports).map(|binary| DeclKey::Type { binary })
+    resolver
+        .resolve_simple_name(base, imports)
+        .map(|binary| DeclKey::Type { binary })
 }
 
 fn declaring_owner(
@@ -1412,7 +1805,9 @@ fn enclosing_type_binary(
         // that class's own `run()` reported a method nobody had called.
         if bennu_java::prelude::is_anonymous_body(&n) {
             if let Some(name) = bennu_java::prelude::anonymous_type_name(&n, bytes) {
-                let outer = n.parent().and_then(|p| enclosing_type_binary(&p, bytes, project_types));
+                let outer = n
+                    .parent()
+                    .and_then(|p| enclosing_type_binary(&p, bytes, project_types));
                 if let Some(outer) = outer {
                     return Some(join_binary(&outer, &name, &chain));
                 }
@@ -1429,7 +1824,11 @@ fn enclosing_type_binary(
                 | "record_declaration"
                 | "annotation_type_declaration"
         ) {
-            let name = n.child_by_field_name("name")?.utf8_text(bytes).ok()?.to_string();
+            let name = n
+                .child_by_field_name("name")?
+                .utf8_text(bytes)
+                .ok()?
+                .to_string();
             chain.push(name);
         }
         cur = n.parent();
@@ -1440,7 +1839,11 @@ fn enclosing_type_binary(
     if let Some(pkg) = buffer_package(bytes) {
         let outermost = chain.last().cloned().unwrap_or_else(|| innermost.clone());
         let rest = &chain[..chain.len().saturating_sub(1)];
-        return Some(join_binary(&format!("{}/{outermost}", pkg.replace('.', "/")), "", rest));
+        return Some(join_binary(
+            &format!("{}/{outermost}", pkg.replace('.', "/")),
+            "",
+            rest,
+        ));
     }
     if let Some(b) = project_types.get(&innermost) {
         return Some(b.clone());
@@ -1469,11 +1872,17 @@ fn join_binary(outer: &str, next: &str, rest_innermost_first: &[String]) -> Stri
 /// it at all (a library source view is under no project). Scans only the head: a package
 /// declaration precedes every type, so anything after the first `{` is past the point.
 fn buffer_package(bytes: &[u8]) -> Option<String> {
-    let head_len = bytes.iter().position(|b| *b == b'{').unwrap_or(bytes.len()).min(4096);
+    let head_len = bytes
+        .iter()
+        .position(|b| *b == b'{')
+        .unwrap_or(bytes.len())
+        .min(4096);
     let head = std::str::from_utf8(&bytes[..head_len]).ok()?;
     for line in head.lines() {
         let line = line.trim();
-        let Some(rest) = line.strip_prefix("package ") else { continue };
+        let Some(rest) = line.strip_prefix("package ") else {
+            continue;
+        };
         // Cut at the `;`, not at the end of the line: the declaration ends at the semicolon, and
         // `package p; class C {}` on one line is legal Java (and is how fixtures are written).
         // Trimming only a trailing `;` swallowed the rest of the line into the package name.
@@ -1493,7 +1902,11 @@ fn buffer_package(bytes: &[u8]) -> Option<String> {
 pub enum RenameTarget {
     /// A local variable or parameter: single-file, scope-exact. `def_start`/`def_end` is
     /// its declarator name span (the anchor the scope walk keys off).
-    Local { name: String, def_start: usize, def_end: usize },
+    Local {
+        name: String,
+        def_start: usize,
+        def_end: usize,
+    },
     /// A method or field — the reference index buckets its cross-file uses.
     Member { key: DeclKey },
     /// A type — refs + imports + Spring bean XML.
@@ -1522,22 +1935,29 @@ pub fn classify_target(
         // A real local wins first: Java lets a local inside a record's method shadow a component,
         // and that one genuinely is scope-exact.
         if let Some((ds, de)) = find_local_binding(&ident, bytes, &name, level) {
-            return Some(RenameTarget::Local { name, def_start: ds, def_end: de });
+            return Some(RenameTarget::Local {
+                name,
+                def_start: ds,
+                def_end: de,
+            });
         }
         // Then a record component — its declaration in the header, or a bare reference to it from
         // the record's body. Neither reaches the member classifier below on its own: that one
         // reads *uses on a receiver*, and both of these are unqualified.
         if let Some(owner) = record_component_owner(&ident, source, &name) {
-            return Some(RenameTarget::Member { key: DeclKey::Field { owner, name } });
+            return Some(RenameTarget::Member {
+                key: DeclKey::Field { owner, name },
+            });
         }
     }
 
     // Reuse the tree this function already parsed — no second parse on the go-to hot path.
     let key = classify_caret_at(index, file, source, &root, offset, resolver, project_types)?;
     match &key {
-        DeclKey::Type { binary } => {
-            Some(RenameTarget::Type { key: key.clone(), binary: binary.clone() })
-        }
+        DeclKey::Type { binary } => Some(RenameTarget::Type {
+            key: key.clone(),
+            binary: binary.clone(),
+        }),
         DeclKey::Method { .. } | DeclKey::Field { .. } => Some(RenameTarget::Member { key }),
     }
 }
@@ -1554,7 +1974,9 @@ pub fn classify_target(
 /// The two member-selector shapes (`x.f`, `f()`) also carry a `name` field; they are filtered
 /// ahead of this by [`is_member_selector_node`].
 fn is_bound_name(node: &Node) -> bool {
-    let Some(parent) = node.parent() else { return false };
+    let Some(parent) = node.parent() else {
+        return false;
+    };
     match parent.kind() {
         // Labels are a namespace of their own: `outer:`, `break outer`, `continue outer`.
         "labeled_statement" | "break_statement" | "continue_statement" => true,
@@ -1563,10 +1985,14 @@ fn is_bound_name(node: &Node) -> bool {
         "scoped_identifier" | "package_declaration" | "import_declaration" => true,
         // `@Retention(value = RUNTIME)` — an annotation element is not a field of the enclosing
         // class, however identically the two are named.
-        "element_value_pair" => {
-            parent.child_by_field_name("key").map(|n| n.id() == node.id()).unwrap_or(false)
-        }
-        _ => parent.child_by_field_name("name").map(|n| n.id() == node.id()).unwrap_or(false),
+        "element_value_pair" => parent
+            .child_by_field_name("key")
+            .map(|n| n.id() == node.id())
+            .unwrap_or(false),
+        _ => parent
+            .child_by_field_name("name")
+            .map(|n| n.id() == node.id())
+            .unwrap_or(false),
     }
 }
 
@@ -1578,8 +2004,15 @@ fn is_bound_name(node: &Node) -> bool {
 fn enclosing_type_simple(node: &Node, bytes: &[u8]) -> Option<String> {
     let mut cur = Some(*node);
     while let Some(n) = cur {
-        if matches!(n.kind(), "class_declaration" | "interface_declaration" | "enum_declaration") {
-            return n.child_by_field_name("name")?.utf8_text(bytes).ok().map(str::to_string);
+        if matches!(
+            n.kind(),
+            "class_declaration" | "interface_declaration" | "enum_declaration"
+        ) {
+            return n
+                .child_by_field_name("name")?
+                .utf8_text(bytes)
+                .ok()
+                .map(str::to_string);
         }
         cur = n.parent();
     }
@@ -1609,13 +2042,14 @@ fn collect_bound_names(root: &Node, bytes: &[u8]) -> std::collections::HashSet<S
                 Some("field_declaration") => None,
                 _ => n.child_by_field_name("name"),
             },
-            "formal_parameter"
-            | "spread_parameter"
-            | "catch_formal_parameter"
-            | "resource"
-            | "enhanced_for_statement"
-            | "type_pattern"
-            | "instanceof_expression" => n.child_by_field_name("name"),
+            // A varargs parameter keeps its name in a `variable_declarator`, not a `name` field —
+            // see `parameter_name_node`.
+            "formal_parameter" | "spread_parameter" | "catch_formal_parameter" => {
+                bennu_java::prelude::parameter_name_node(&n)
+            }
+            "resource" | "enhanced_for_statement" | "type_pattern" | "instanceof_expression" => {
+                n.child_by_field_name("name")
+            }
             // `(x, y) -> …` and `x -> …`: inferred lambda parameters are bare identifiers with
             // no `name` field to ask for.
             "inferred_parameters" => {
@@ -1644,14 +2078,18 @@ fn collect_bound_names(root: &Node, bytes: &[u8]) -> std::collections::HashSet<S
 /// Whether an `identifier` is a member selector (`x.name`, `foo.bar()`) — a local rename
 /// must not treat these as the variable.
 pub(crate) fn is_member_selector_node(node: &Node) -> bool {
-    let Some(parent) = node.parent() else { return false };
+    let Some(parent) = node.parent() else {
+        return false;
+    };
     match parent.kind() {
-        "field_access" => {
-            parent.child_by_field_name("field").map(|f| f.id() == node.id()).unwrap_or(false)
-        }
-        "method_invocation" => {
-            parent.child_by_field_name("name").map(|n| n.id() == node.id()).unwrap_or(false)
-        }
+        "field_access" => parent
+            .child_by_field_name("field")
+            .map(|f| f.id() == node.id())
+            .unwrap_or(false),
+        "method_invocation" => parent
+            .child_by_field_name("name")
+            .map(|n| n.id() == node.id())
+            .unwrap_or(false),
         // `Failure::source_path` — the name after `::` selects a member of the qualifier, exactly
         // like the name after a `.`. The grammar gives it no field name, so it is the LAST named
         // child; the first is the qualifier. Without this it read as a bare identifier and was
@@ -1661,8 +2099,14 @@ pub(crate) fn is_member_selector_node(node: &Node) -> bool {
             let mut cur = parent.walk();
             let children: Vec<Node> = parent.named_children(&mut cur).collect();
             children.len() >= 2
-                && children.last().map(|n| n.id() == node.id()).unwrap_or(false)
-                && children.first().map(|n| n.id() != node.id()).unwrap_or(false)
+                && children
+                    .last()
+                    .map(|n| n.id() == node.id())
+                    .unwrap_or(false)
+                && children
+                    .first()
+                    .map(|n| n.id() != node.id())
+                    .unwrap_or(false)
         }
         _ => false,
     }
@@ -1719,12 +2163,16 @@ fn record_component_owner(ident: &Node, source: &str, name: &str) -> Option<Stri
 
 /// Whether `record_declaration` declares a component called `name`.
 fn has_component(record: &Node, bytes: &[u8], name: &str) -> bool {
-    let Some(params) = record.child_by_field_name("parameters") else { return false };
+    let Some(params) = record.child_by_field_name("parameters") else {
+        return false;
+    };
     let mut cursor = params.walk();
     // Bound rather than returned directly: the iterator borrows `cursor`, and as a tail expression
     // its temporary would outlive it.
     let found = params.named_children(&mut cursor).any(|p| {
-        p.child_by_field_name("name").and_then(|nm| nm.utf8_text(bytes).ok()) == Some(name)
+        p.child_by_field_name("name")
+            .and_then(|nm| nm.utf8_text(bytes).ok())
+            == Some(name)
     });
     found
 }
@@ -1780,7 +2228,10 @@ fn find_local_binding(
         // Stop at the enclosing TYPE boundary — a field of the type is NOT a local.
         if matches!(
             n.kind(),
-            "class_declaration" | "interface_declaration" | "enum_declaration" | "annotation_type_declaration"
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "annotation_type_declaration"
         ) {
             break;
         }
@@ -1789,7 +2240,12 @@ fn find_local_binding(
     None
 }
 
-fn find_param_decl(node: &Node, bytes: &[u8], name: &str, level: LangLevel) -> Option<(usize, usize)> {
+fn find_param_decl(
+    node: &Node,
+    bytes: &[u8],
+    name: &str,
+    level: LangLevel,
+) -> Option<(usize, usize)> {
     let params = node.child_by_field_name("parameters")?;
     // Lambda with INFERRED parameters — `(x, y) -> …` (`inferred_parameters` of bare
     // identifiers) or a single unparenthesized `x -> …` (the `parameters` field IS the
@@ -1812,7 +2268,7 @@ fn find_param_decl(node: &Node, bytes: &[u8], name: &str, level: LangLevel) -> O
     let mut cw = params.walk();
     for p in params.named_children(&mut cw) {
         if matches!(p.kind(), "formal_parameter" | "spread_parameter") {
-            if let Some(nm) = p.child_by_field_name("name") {
+            if let Some(nm) = bennu_java::prelude::parameter_name_node(&p) {
                 if nm.utf8_text(bytes).ok() == Some(name) {
                     return Some((nm.start_byte(), nm.end_byte()));
                 }
@@ -1822,7 +2278,12 @@ fn find_param_decl(node: &Node, bytes: &[u8], name: &str, level: LangLevel) -> O
     None
 }
 
-fn find_local_decl(node: &Node, bytes: &[u8], name: &str, level: LangLevel) -> Option<(usize, usize)> {
+fn find_local_decl(
+    node: &Node,
+    bytes: &[u8],
+    name: &str,
+    level: LangLevel,
+) -> Option<(usize, usize)> {
     let mut stack: Vec<Node> = vec![*node];
     while let Some(n) = stack.pop() {
         let mut cw = n.walk();
@@ -1860,11 +2321,10 @@ fn find_local_decl(node: &Node, bytes: &[u8], name: &str, level: LangLevel) -> O
                     n.child_by_field_name("name")
                 }
             }
-            "enhanced_for_statement"
-            | "catch_formal_parameter"
-            | "resource"
-            | "formal_parameter"
-            | "spread_parameter" => n.child_by_field_name("name"),
+            "enhanced_for_statement" | "resource" => n.child_by_field_name("name"),
+            "catch_formal_parameter" | "formal_parameter" | "spread_parameter" => {
+                bennu_java::prelude::parameter_name_node(&n)
+            }
             // A pattern variable is a `type_pattern` in some grammar versions and a `name`
             // field on the `instanceof_expression` in others — accept both. (No `name` field
             // when there's no binding, e.g. a plain `o instanceof String`, so this is inert.)
@@ -1909,12 +2369,19 @@ fn smallest_named_at<'t>(root: &Node<'t>, offset: usize) -> Option<Node<'t>> {
     }
     // Not on a name either side — hand back whatever covers the caret (the caret byte first,
     // then one left) so type/expression classification still has a node to work with.
-    on.or_else(|| offset.checked_sub(1).and_then(|o| root.named_descendant_for_byte_range(o, o)))
+    on.or_else(|| {
+        offset
+            .checked_sub(1)
+            .and_then(|o| root.named_descendant_for_byte_range(o, o))
+    })
 }
 
 /// A leaf the caret can "sit on" for go-to: a name token, `this`/`super`.
 fn is_ident_like(n: &Node) -> bool {
-    matches!(n.kind(), "identifier" | "type_identifier" | "this" | "super")
+    matches!(
+        n.kind(),
+        "identifier" | "type_identifier" | "this" | "super"
+    )
 }
 
 #[cfg(test)]
@@ -1951,7 +2418,10 @@ mod tests {
                         .map(|m| Member {
                             name: m.name.clone(),
                             kind: MemberKind::Method,
-                            return_type: TypeRef { binary_name: String::new(), type_args: vec![] },
+                            return_type: TypeRef {
+                                binary_name: String::new(),
+                                type_args: vec![],
+                            },
                             params: vec![],
                             is_static: m.is_static,
                             is_abstract: false,
@@ -1960,6 +2430,7 @@ mod tests {
                             visibility: Visibility::Public,
                             raw_signature: String::new(),
                             throws: Vec::new(),
+                            annotations: Vec::new(),
                         })
                         .collect();
                     let fields = td
@@ -1970,7 +2441,13 @@ mod tests {
                             kind: MemberKind::Field,
                             return_type: TypeRef {
                                 binary_name: project_types
-                                    .get(f.type_text.split('<').next().unwrap_or(&f.type_text).trim())
+                                    .get(
+                                        f.type_text
+                                            .split('<')
+                                            .next()
+                                            .unwrap_or(&f.type_text)
+                                            .trim(),
+                                    )
                                     .cloned()
                                     .unwrap_or_else(|| f.type_text.replace('.', "/")),
                                 type_args: vec![],
@@ -1983,6 +2460,7 @@ mod tests {
                             visibility: Visibility::Public,
                             raw_signature: String::new(),
                             throws: Vec::new(),
+                            annotations: Vec::new(),
                         })
                         .collect();
                     project.insert(
@@ -2004,7 +2482,10 @@ mod tests {
     }
 
     impl TypeResolver for SrcResolver {
-        fn members_of(&self, binary: &str) -> Option<std::sync::Arc<bennu_java::prelude::ClassMembers>> {
+        fn members_of(
+            &self,
+            binary: &str,
+        ) -> Option<std::sync::Arc<bennu_java::prelude::ClassMembers>> {
             self.project.get(binary).cloned().map(std::sync::Arc::new)
         }
         fn resolve_simple_name(
@@ -2023,8 +2504,13 @@ mod tests {
 
     fn index_of(files: &[(&str, &str)]) -> (ReferenceIndex, SrcResolver, HashMap<String, String>) {
         let (resolver, project_types) = SrcResolver::build(files);
-        let src: Vec<SourceFile> =
-            files.iter().map(|(p, s)| SourceFile { path: p.to_string(), source: s.to_string() }).collect();
+        let src: Vec<SourceFile> = files
+            .iter()
+            .map(|(p, s)| SourceFile {
+                path: p.to_string(),
+                source: s.to_string(),
+            })
+            .collect();
         let index = build_reference_index(&src, &resolver, &project_types);
         (index, resolver, project_types)
     }
@@ -2032,11 +2518,20 @@ mod tests {
     #[test]
     fn method_usages_counted_across_files() {
         let files = [
-            ("A.java", "package p; public class A { public int val() { return 1; } }"),
-            ("B.java", "package p; public class B { public int use(A a) { return a.val() + a.val(); } }"),
+            (
+                "A.java",
+                "package p; public class A { public int val() { return 1; } }",
+            ),
+            (
+                "B.java",
+                "package p; public class B { public int use(A a) { return a.val() + a.val(); } }",
+            ),
         ];
         let (index, _r, _pt) = index_of(&files);
-        let key = DeclKey::Method { owner: "p/A".into(), name: "val".into() };
+        let key = DeclKey::Method {
+            owner: "p/A".into(),
+            name: "val".into(),
+        };
         assert_eq!(index.usages_of(&key).len(), 2);
     }
 
@@ -2044,10 +2539,15 @@ mod tests {
     fn type_usages_exclude_declaration_name() {
         let files = [
             ("A.java", "package p; public class A { }"),
-            ("B.java", "package p; public class B { public int u(A a) { return 0; } }"),
+            (
+                "B.java",
+                "package p; public class B { public int u(A a) { return 0; } }",
+            ),
         ];
         let (index, _r, _pt) = index_of(&files);
-        let usages = index.usages_of(&DeclKey::Type { binary: "p/A".into() });
+        let usages = index.usages_of(&DeclKey::Type {
+            binary: "p/A".into(),
+        });
         assert_eq!(usages.len(), 1);
         assert_eq!(usages[0].file, "B.java");
     }
@@ -2059,7 +2559,8 @@ mod tests {
         let (index, resolver, pt) = index_of(&files);
         // caret on the local `x` in `int x = 1`
         let off = src.find("int x = 1").unwrap() + "int ".len() + 0;
-        let t = classify_target(&index, "C.java", src, off, &resolver, &pt, LangLevel(0)).expect("classified");
+        let t = classify_target(&index, "C.java", src, off, &resolver, &pt, LangLevel(0))
+            .expect("classified");
         assert!(matches!(t, RenameTarget::Local { ref name, .. } if name == "x"));
     }
 
@@ -2072,7 +2573,8 @@ mod tests {
         let files = [("C.java", src)];
         let (index, resolver, pt) = index_of(&files);
         let usage = src.rfind("id").unwrap(); // the `id` in `return id`
-        let t = classify_target(&index, "C.java", src, usage, &resolver, &pt, LangLevel(0)).expect("classified");
+        let t = classify_target(&index, "C.java", src, usage, &resolver, &pt, LangLevel(0))
+            .expect("classified");
         assert!(matches!(t, RenameTarget::Local { ref name, .. } if name == "id"));
     }
 
@@ -2086,7 +2588,9 @@ mod tests {
         let (index, resolver, pt) = index_of(&files);
         let off = src.find("return count").unwrap() + "return ".len();
         let key = classify_caret(&index, "C.java", src, off, &resolver, &pt).expect("classified");
-        assert!(matches!(key, DeclKey::Field { ref owner, ref name } if owner == "p/C" && name == "count"));
+        assert!(
+            matches!(key, DeclKey::Field { ref owner, ref name } if owner == "p/C" && name == "count")
+        );
     }
 
     #[test]
@@ -2098,7 +2602,8 @@ mod tests {
         let files = [("C.java", src)];
         let (index, resolver, pt) = index_of(&files);
         let usage = src.rfind("ctx)").unwrap(); // the `ctx` in `foo(ctx)`
-        let t = classify_target(&index, "C.java", src, usage, &resolver, &pt, LangLevel(0)).expect("classified");
+        let t = classify_target(&index, "C.java", src, usage, &resolver, &pt, LangLevel(0))
+            .expect("classified");
         assert!(matches!(t, RenameTarget::Local { ref name, .. } if name == "ctx"));
     }
 
@@ -2177,21 +2682,38 @@ mod tests {
 
     #[test]
     fn unresolved_receiver_never_panics() {
-        let files = [("X.java", "package p; public class X { void m(Unknown u) { u.frob(); } }")];
+        let files = [(
+            "X.java",
+            "package p; public class X { void m(Unknown u) { u.frob(); } }",
+        )];
         let (index, _r, _pt) = index_of(&files);
         let _ = index.declared_with_usages();
     }
 
     #[test]
     fn incremental_cache_reuses_unchanged_and_rewalks_changed() {
-        let key = DeclKey::Method { owner: "p/A".into(), name: "val".into() };
+        let key = DeclKey::Method {
+            owner: "p/A".into(),
+            name: "val".into(),
+        };
         let v1 = [
-            ("A.java", "package p; public class A { public int val() { return 1; } }"),
-            ("B.java", "package p; public class B { public int use(A a) { return a.val(); } }"),
+            (
+                "A.java",
+                "package p; public class A { public int val() { return 1; } }",
+            ),
+            (
+                "B.java",
+                "package p; public class B { public int use(A a) { return a.val(); } }",
+            ),
         ];
         let (resolver, pt) = SrcResolver::build(&v1);
-        let src1: Vec<SourceFile> =
-            v1.iter().map(|(p, s)| SourceFile { path: p.to_string(), source: s.to_string() }).collect();
+        let src1: Vec<SourceFile> = v1
+            .iter()
+            .map(|(p, s)| SourceFile {
+                path: p.to_string(),
+                source: s.to_string(),
+            })
+            .collect();
 
         // First build: no cache → full walk, one usage of A.val (in B), cache produced.
         let b1 = build_reference_index_incremental(&src1, &resolver, &pt, None, &|_, _| {});
@@ -2199,20 +2721,43 @@ mod tests {
         let cache = b1.cache_to_save.expect("first build yields a cache");
 
         // Rebuild, nothing changed → nothing re-walked, and no rewrite of the on-disk cache.
-        let b2 = build_reference_index_incremental(&src1, &resolver, &pt, Some(cache.clone()), &|_, _| {});
-        assert!(b2.cache_to_save.is_none(), "unchanged project must not rewrite the cache");
+        let b2 = build_reference_index_incremental(
+            &src1,
+            &resolver,
+            &pt,
+            Some(cache.clone()),
+            &|_, _| {},
+        );
+        assert!(
+            b2.cache_to_save.is_none(),
+            "unchanged project must not rewrite the cache"
+        );
         assert_eq!(b2.index.usages_of(&key).len(), 1);
 
         // Change B (now calls val() twice); A untouched. Same type set → incremental path:
         // B is re-walked, A reused, and the merged index reflects B's two usages.
         let v2 = [
-            ("A.java", "package p; public class A { public int val() { return 1; } }"),
-            ("B.java", "package p; public class B { public int use(A a) { return a.val() + a.val(); } }"),
+            (
+                "A.java",
+                "package p; public class A { public int val() { return 1; } }",
+            ),
+            (
+                "B.java",
+                "package p; public class B { public int use(A a) { return a.val() + a.val(); } }",
+            ),
         ];
-        let src2: Vec<SourceFile> =
-            v2.iter().map(|(p, s)| SourceFile { path: p.to_string(), source: s.to_string() }).collect();
+        let src2: Vec<SourceFile> = v2
+            .iter()
+            .map(|(p, s)| SourceFile {
+                path: p.to_string(),
+                source: s.to_string(),
+            })
+            .collect();
         let b3 = build_reference_index_incremental(&src2, &resolver, &pt, Some(cache), &|_, _| {});
-        assert!(b3.cache_to_save.is_some(), "a changed file must refresh the cache");
+        assert!(
+            b3.cache_to_save.is_some(),
+            "a changed file must refresh the cache"
+        );
         assert_eq!(b3.index.usages_of(&key).len(), 2);
     }
 
@@ -2238,10 +2783,68 @@ mod tests {
         )];
         let (index, _r, _pt) = index_of(&files);
 
-        assert_eq!(index.file_declaring("p/Outer/Failure"), Some("Outer.java"), "the source form");
-        assert_eq!(index.file_declaring("p/Outer$Failure"), Some("Outer.java"), "the JVM form");
+        assert_eq!(
+            index.file_declaring("p/Outer/Failure"),
+            Some("Outer.java"),
+            "the source form"
+        );
+        assert_eq!(
+            index.file_declaring("p/Outer$Failure"),
+            Some("Outer.java"),
+            "the JVM form"
+        );
         // A type nobody declares is still unknown, whichever way it is spelled.
         assert_eq!(index.file_declaring("p/Outer$Missing"), None);
         assert_eq!(index.file_declaring("java/util/Map$Entry"), None);
+    }
+}
+
+/// What binds a **simple type name** inside the file the reference walk is reading.
+///
+/// The order is Java's, and it is the same order every other consumer of
+/// [`bennu_java::prelude::resolve_written_type`] uses. This used to try the project-wide
+/// simple→binary map FIRST — a map that keeps exactly one binary per simple name — so in a package
+/// with a top-level `Builder` and a nested `EqualsBuilder.Builder`, `implements Builder` bound to
+/// the nested one and every judgement about the type was made against the wrong contract.
+impl bennu_java::prelude::NameScope for FileWalker<'_> {
+    fn simple(&self, simple: &str) -> Option<String> {
+        // A type declared in THIS file is authoritative — its binary comes off the file itself.
+        if let Some(b) = self.file_types.get(simple) {
+            return Some(b.clone());
+        }
+        // A member type inherited from a supertype is in scope with no import (JLS §8.1.5).
+        for owner in self.file_types.values() {
+            if let Some(b) =
+                bennu_java::prelude::inherited_member_type_of(self.resolver, owner, simple)
+            {
+                return Some(b);
+            }
+        }
+        for imp in &self.imports {
+            if imp.simple_name() == Some(simple) {
+                return Some(imp.path.replace('.', "/"));
+            }
+        }
+        // A type in the file's own package needs no import, and its exact binary is derivable.
+        if let Some(pkg) = self.package.as_deref() {
+            if !pkg.is_empty() {
+                let candidate = format!("{}/{simple}", pkg.replace('.', "/"));
+                if self.resolver.members_of(&candidate).is_some() {
+                    return Some(candidate);
+                }
+            }
+        }
+        if let Some(b) = self.project_types.get(simple) {
+            return Some(b.clone());
+        }
+        // WITH the file's imports: a DEPENDENCY type is reachable by its simple name only through
+        // the `import` that named it.
+        self.resolver
+            .resolve_simple_name(simple, &self.imports)
+            .or_else(|| bennu_java::prelude::java_lang_implicit(simple))
+    }
+
+    fn is_type(&self, binary: &str) -> bool {
+        self.resolver.members_of(binary).is_some()
     }
 }

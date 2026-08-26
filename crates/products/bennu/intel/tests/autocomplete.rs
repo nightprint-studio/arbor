@@ -71,7 +71,10 @@ fn member_access_lists_own_members() {
     let s = p.source("Owner.java").to_string();
     let labels = p.complete_labels("Owner.java", at_pooch_dot(&s));
     for own in ["bark", "fetch", "speak"] {
-        assert!(labels.contains(&own.to_string()), "expected own member {own:?} in {labels:?}");
+        assert!(
+            labels.contains(&own.to_string()),
+            "expected own member {own:?} in {labels:?}"
+        );
     }
 }
 
@@ -82,7 +85,10 @@ fn member_access_includes_inherited_members() {
     let labels = p.complete_labels("Owner.java", at_pooch_dot(&s));
     // Inherited from Animal: legs(), add(), and the protected field `name`.
     for inh in ["legs", "add", "name"] {
-        assert!(labels.contains(&inh.to_string()), "expected inherited {inh:?} in {labels:?}");
+        assert!(
+            labels.contains(&inh.to_string()),
+            "expected inherited {inh:?} in {labels:?}"
+        );
     }
 }
 
@@ -93,7 +99,10 @@ fn overridden_method_appears_once() {
     let s = p.source("Owner.java").to_string();
     let labels = p.complete_labels("Owner.java", at_pooch_dot(&s));
     let speaks = labels.iter().filter(|l| *l == "speak").count();
-    assert_eq!(speaks, 1, "overridden speak() must appear exactly once, got {labels:?}");
+    assert_eq!(
+        speaks, 1,
+        "overridden speak() must appear exactly once, got {labels:?}"
+    );
 }
 
 // ── Prefix filtering ─────────────────────────────────────────────────────────────────────────
@@ -105,9 +114,18 @@ fn typed_prefix_filters_candidates() {
     let s = p.source("Owner.java").to_string();
     let off = at(&s, "pup.fe") + "pup.fe".len();
     let labels = p.complete_labels("Owner.java", off);
-    assert!(labels.contains(&"fetch".to_string()), "fetch matches prefix fe, got {labels:?}");
-    assert!(!labels.contains(&"bark".to_string()), "bark does not match prefix fe, got {labels:?}");
-    assert!(!labels.contains(&"speak".to_string()), "speak does not match prefix fe, got {labels:?}");
+    assert!(
+        labels.contains(&"fetch".to_string()),
+        "fetch matches prefix fe, got {labels:?}"
+    );
+    assert!(
+        !labels.contains(&"bark".to_string()),
+        "bark does not match prefix fe, got {labels:?}"
+    );
+    assert!(
+        !labels.contains(&"speak".to_string()),
+        "speak does not match prefix fe, got {labels:?}"
+    );
 }
 
 #[test]
@@ -123,7 +141,10 @@ fn prefix_with_no_match_is_empty() {
     )]);
     let qs = q.source("Q.java").to_string();
     let off = at(&qs, "this.zzz") + "this.zzz".len();
-    assert!(q.complete_labels("Q.java", off).is_empty(), "no member starts with zzz");
+    assert!(
+        q.complete_labels("Q.java", off).is_empty(),
+        "no member starts with zzz"
+    );
 }
 
 // ── this. and local receivers ────────────────────────────────────────────────────────────────
@@ -138,9 +159,18 @@ fn this_dot_lists_enclosing_members() {
     // `pet` + the methods play/chase. (Members after an unfinished `receiver.` in this same
     // synthetic buffer may not extract — that is an artifact of embedding the trigger in the
     // source, not a completion defect.)
-    assert!(labels.contains(&"pet".to_string()), "this. offers field pet, got {labels:?}");
-    assert!(labels.contains(&"play".to_string()), "this. offers method play, got {labels:?}");
-    assert!(labels.contains(&"chase".to_string()), "this. offers method chase, got {labels:?}");
+    assert!(
+        labels.contains(&"pet".to_string()),
+        "this. offers field pet, got {labels:?}"
+    );
+    assert!(
+        labels.contains(&"play".to_string()),
+        "this. offers method play, got {labels:?}"
+    );
+    assert!(
+        labels.contains(&"chase".to_string()),
+        "this. offers method chase, got {labels:?}"
+    );
 }
 
 #[test]
@@ -150,8 +180,14 @@ fn local_variable_receiver_resolves() {
     let off = at(&s, "local.") + "local.".len();
     let labels = p.complete_labels("Owner.java", off);
     // `local` is a Dog → own + inherited members.
-    assert!(labels.contains(&"fetch".to_string()), "local Dog offers fetch, got {labels:?}");
-    assert!(labels.contains(&"legs".to_string()), "local Dog offers inherited legs, got {labels:?}");
+    assert!(
+        labels.contains(&"fetch".to_string()),
+        "local Dog offers fetch, got {labels:?}"
+    );
+    assert!(
+        labels.contains(&"legs".to_string()),
+        "local Dog offers inherited legs, got {labels:?}"
+    );
 }
 
 // ── Visibility ───────────────────────────────────────────────────────────────────────────────
@@ -204,12 +240,24 @@ fn method_detail_has_signature_shape() {
     let p = zoo();
     let s = p.source("Owner.java").to_string();
     let items = p.complete("Owner.java", at_pooch_dot(&s));
-    let add = items.iter().find(|c| c.label == "add").expect("add present");
+    let add = items
+        .iter()
+        .find(|c| c.label == "add")
+        .expect("add present");
     let detail = add.detail.clone().unwrap_or_default();
     // `add(int a, int b) : int` — the renderer strips packages and joins params.
-    assert!(detail.starts_with("add("), "detail begins with the method name, got {detail:?}");
-    assert!(detail.contains(':'), "method detail has a return-type separator, got {detail:?}");
-    assert!(detail.contains("int"), "add's types are int, got {detail:?}");
+    assert!(
+        detail.starts_with("add("),
+        "detail begins with the method name, got {detail:?}"
+    );
+    assert!(
+        detail.contains(':'),
+        "method detail has a return-type separator, got {detail:?}"
+    );
+    assert!(
+        detail.contains("int"),
+        "add's types are int, got {detail:?}"
+    );
     assert_eq!(add.kind, "method");
 }
 
@@ -218,10 +266,16 @@ fn field_detail_is_the_type() {
     let p = zoo();
     let s = p.source("Owner.java").to_string();
     let items = p.complete("Owner.java", at_pooch_dot(&s));
-    let name = items.iter().find(|c| c.label == "name").expect("inherited field name present");
+    let name = items
+        .iter()
+        .find(|c| c.label == "name")
+        .expect("inherited field name present");
     assert_eq!(name.kind, "field");
     let detail = name.detail.clone().unwrap_or_default();
-    assert!(detail.contains("String"), "field name is a String, got {detail:?}");
+    assert!(
+        detail.contains("String"),
+        "field name is a String, got {detail:?}"
+    );
 }
 
 #[test]
@@ -233,7 +287,11 @@ fn fields_are_offered_before_methods() {
     let first_method = items.iter().position(|c| c.kind == "method");
     let last_field = items.iter().rposition(|c| c.kind == "field");
     if let (Some(fm), Some(lf)) = (first_method, last_field) {
-        assert!(lf < fm, "all fields must precede all methods, got {:?}", items);
+        assert!(
+            lf < fm,
+            "all fields must precede all methods, got {:?}",
+            items
+        );
     }
 }
 
@@ -245,7 +303,10 @@ fn bare_identifier_without_receiver_is_empty() {
     let p = zoo();
     let s = p.source("Dog.java").to_string();
     let off = at(&s, "barks;") + 2; // inside `barks`
-    assert!(p.complete_labels("Dog.java", off).is_empty(), "no member access → no completions");
+    assert!(
+        p.complete_labels("Dog.java", off).is_empty(),
+        "no member access → no completions"
+    );
 }
 
 #[test]
@@ -259,7 +320,10 @@ fn unresolvable_receiver_is_empty() {
     )]);
     let s = p.source("U.java").to_string();
     let off = at(&s, "m.\n") + 2;
-    assert!(p.complete_labels("U.java", off).is_empty(), "unknown receiver type → []");
+    assert!(
+        p.complete_labels("U.java", off).is_empty(),
+        "unknown receiver type → []"
+    );
 }
 
 #[test]
@@ -331,8 +395,14 @@ fn enum_constants_complete_after_the_enum_name() {
     let off = at(&s, "Color.") + "Color.".len();
     let labels = p.complete_labels("Use.java", off);
     for c in ["RED", "GREEN", "BLUE"] {
-        assert!(labels.contains(&c.to_string()), "expected constant {c:?} in {labels:?}");
+        assert!(
+            labels.contains(&c.to_string()),
+            "expected constant {c:?} in {labels:?}"
+        );
     }
     // The enum's own members are still there — the constants are additions, not a replacement.
-    assert!(labels.contains(&"tag".to_string()), "enum method still offered: {labels:?}");
+    assert!(
+        labels.contains(&"tag".to_string()),
+        "enum method still offered: {labels:?}"
+    );
 }

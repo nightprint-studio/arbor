@@ -81,12 +81,24 @@ pub fn completion<M: CpMemberIndex>(
     // A SEPARATE repair from `repaired`, deliberately: `infer_receiver_type` splices its own stub
     // only when the byte after the dot is whitespace or a closer, and handing it this buffer
     // suppresses that — the receiver then mis-parses and every completion goes empty.
-    let sited = format!("{}{SITE_PLACEHOLDER}{}", &source[..byte_offset], &source[byte_offset..]);
+    let sited = format!(
+        "{}{SITE_PLACEHOLDER}{}",
+        &source[..byte_offset],
+        &source[byte_offset..]
+    );
     let site = enclosing_type_binary(&sited, byte_offset);
 
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    collect_members(resolver, &recv, &prefix, site.as_deref(), &mut out, &mut seen, &mut HashSet::new());
+    collect_members(
+        resolver,
+        &recv,
+        &prefix,
+        site.as_deref(),
+        &mut out,
+        &mut seen,
+        &mut HashSet::new(),
+    );
     // Deterministic order: fields then methods (kind tag), alphabetical within.
     out.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.label.cmp(&b.label)));
     out
@@ -138,10 +150,15 @@ fn type_receiver<M: CpMemberIndex>(
     if name.contains('.') {
         // Already qualified: it names a type exactly when the classpath holds one.
         let binary = name.replace('.', "/");
-        return resolver.members_of(&binary).is_some().then(|| TypeRef::simple(binary));
+        return resolver
+            .members_of(&binary)
+            .is_some()
+            .then(|| TypeRef::simple(binary));
     }
     let imports = extract_symbols(source).imports;
-    resolver.resolve_simple_name(name, &imports).map(TypeRef::simple)
+    resolver
+        .resolve_simple_name(name, &imports)
+        .map(TypeRef::simple)
 }
 
 /// Split the caret into `(dot_offset, typed_prefix)`: scan back over identifier chars;
@@ -185,10 +202,26 @@ fn collect_members<M: CpMemberIndex>(
     add_matching(&cm, prefix, allow_private, out, seen);
 
     if let Some(sc) = &cm.superclass {
-        collect_members(resolver, &TypeRef::simple(sc.clone()), prefix, site, out, seen, visited);
+        collect_members(
+            resolver,
+            &TypeRef::simple(sc.clone()),
+            prefix,
+            site,
+            out,
+            seen,
+            visited,
+        );
     }
     for iface in &cm.interfaces {
-        collect_members(resolver, &TypeRef::simple(iface.clone()), prefix, site, out, seen, visited);
+        collect_members(
+            resolver,
+            &TypeRef::simple(iface.clone()),
+            prefix,
+            site,
+            out,
+            seen,
+            visited,
+        );
     }
 }
 
@@ -257,7 +290,12 @@ fn render_detail(m: &Member) -> String {
         MemberKind::Field => render_type(&m.return_type),
         MemberKind::Method => {
             let params: Vec<String> = m.params.iter().map(render_type).collect();
-            format!("{}({}) : {}", m.name, params.join(", "), render_type(&m.return_type))
+            format!(
+                "{}({}) : {}",
+                m.name,
+                params.join(", "),
+                render_type(&m.return_type)
+            )
         }
     }
 }

@@ -9,15 +9,11 @@
 //! and infinite-loop reachability are intentionally left out (harder to prove without false flags).
 
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 /// Parse `source` and flag the first unreachable statement after each unconditional terminator.
 pub fn unreachable_code(source: &str) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    match parser.parse(source, None) {
+    match bennu_java::prelude::parse_java(source) {
         Some(tree) => unreachable_code_in(tree.root_node(), source),
         None => Vec::new(),
     }

@@ -7,7 +7,7 @@
 //! a filesystem action handled in the be layer.
 
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 const TYPE_DECLS: [&str; 5] = [
     "class_declaration",
@@ -70,9 +70,7 @@ pub fn change_package_edit(root: Node, source: &str, expected: &str) -> Option<(
 /// intentions handler) that only has the text. `None` when the package already matches or the parse
 /// fails.
 pub fn change_package(source: &str, expected: &str) -> Option<(usize, usize, String)> {
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-    let tree = parser.parse(source, None)?;
+    let tree = bennu_java::prelude::parse_java(source)?;
     change_package_edit(tree.root_node(), source, expected)
 }
 

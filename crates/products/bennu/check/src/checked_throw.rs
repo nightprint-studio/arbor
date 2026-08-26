@@ -25,7 +25,7 @@
 
 use bennu_java::prelude::{FileSymbols, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::members::simple_name;
 use crate::resolve::type_binary;
@@ -40,11 +40,7 @@ const ERROR: &str = "java/lang/Error";
 
 /// Parse `source` and flag directly-thrown checked exceptions that are neither caught nor declared.
 pub fn checked_throw_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let symbols = bennu_java::prelude::extract_symbols(source);

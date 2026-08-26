@@ -16,7 +16,7 @@
 
 use bennu_java::prelude::{extract_symbols, infer_node_type_cached, FileSymbols, InferCache, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::members::simple_name;
 use crate::resolve::type_binary;
@@ -24,11 +24,7 @@ use crate::walk::{hierarchy_fully_known, reaches};
 
 /// Parse `source` and flag cast / assignment / return type mismatches.
 pub fn type_compat_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
-    let mut parser = Parser::new();
-    if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-        return Vec::new();
-    }
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return Vec::new();
     };
     let symbols = extract_symbols(source);
