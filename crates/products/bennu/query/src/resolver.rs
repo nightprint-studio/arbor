@@ -164,8 +164,24 @@ impl<M: CpMemberIndex> IndexResolver<M> {
     /// Whether `key` names a PROJECT type — as a binary name OR a simple name. The diagnostic
     /// cache's negative-dependency check: a recorded miss on `key` stays valid only while this is
     /// `false` (a project type appearing under that name invalidates the cached file).
+    ///
+    /// **Both spellings of a nested type are accepted.** The index stores what the source says —
+    /// `p/Outer/Inner` — while the JVM writes `p/Outer$Inner`, and a binary that came back from
+    /// bytecode carries the `$`. Once a project has been compiled, its own classes are on its own
+    /// classpath, so a nested type of the project resolves under the JVM spelling; answering
+    /// "not mine" there is how go-to came to open a decompiled stub of the user's own record.
+    ///
+    /// The exact spelling is tried first, so a top-level class genuinely named `A$B` still wins
+    /// over a nested reading of it, and the `$` retry only ever turns a miss into a hit.
     pub fn project_contains(&self, key: &str) -> bool {
-        self.dep_signature(key).is_some() || self.project_simple(key).is_some()
+        if self.dep_signature(key).is_some() || self.project_simple(key).is_some() {
+            return true;
+        }
+        if !key.contains('$') {
+            return false;
+        }
+        let nested = key.replace('$', "/");
+        self.dep_signature(&nested).is_some() || self.project_simple(&nested).is_some()
     }
 
     /// Apply one edited `file`'s freshly-extracted [`Symbol`] records to the in-memory

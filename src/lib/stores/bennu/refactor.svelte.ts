@@ -23,6 +23,13 @@ export interface RenameRequest {
   offset: number;
   /** The identifier under the caret (pre-fills the new-name field). */
   initialName: string;
+  /**
+   * A name to pre-fill instead of `initialName`, when the caller already knows what the rename
+   * should produce — the naming-convention fix computes it, so the field opens on the answer and
+   * the user only has to confirm. `initialName` stays what the symbol is *called*, which is what
+   * the header shows and what "unchanged" is measured against.
+   */
+  suggestedName?: string;
 }
 
 /** Caret-anchored popover position, viewport coords. */

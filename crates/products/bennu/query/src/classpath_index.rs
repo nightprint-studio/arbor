@@ -16,6 +16,7 @@
 //! exactly JDK + project, as before dependency indexing existed.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use bennu_classpath::prelude::{ClassMembers, ClassSource, MemberIndex};
 
@@ -26,7 +27,12 @@ use crate::jdk::JdkMemberIndex;
 /// resolves JDK **and** library types through a single `members_of`.
 pub struct ClasspathIndex {
     /// The shared, cross-session JDK tier (persistent memo keyed by the resolved JDK).
-    jdk: JdkMemberIndex,
+    ///
+    /// Behind an `Arc` so two classpath views can share ONE decoded JDK: the full one completion
+    /// and validation resolve against, and a JDK-only one for the reference walk. Sharing is the
+    /// point — a second `JdkMemberIndex` would re-open the jimage and re-decode every class the
+    /// first had already decoded, and would race the first for the same persistent memo file.
+    jdk: Arc<JdkMemberIndex>,
     /// The optional per-project dependency tier (persistent memo keyed by the project + jar set).
     /// `None` for a project with no resolvable dependencies.
     deps: Option<JdkMemberIndex>,
@@ -36,7 +42,7 @@ impl ClasspathIndex {
     /// A JDK-only classpath index (no dependency tier). Resolution degrades to JDK + project — the
     /// behavior before dependency indexing, and the fallback when a project has no resolvable
     /// dependencies or dependency resolution failed.
-    pub fn jdk_only(jdk: JdkMemberIndex) -> Self {
+    pub fn jdk_only(jdk: Arc<JdkMemberIndex>) -> Self {
         Self { jdk, deps: None }
     }
 
@@ -51,7 +57,7 @@ impl ClasspathIndex {
     /// persistent. `_dep_memo_path` is accepted (the be layer computes it) but intentionally unused
     /// now — kept so re-enabling a *deferred* (flush-once) persistence later is a one-line change.
     pub fn with_deps(
-        jdk: JdkMemberIndex,
+        jdk: Arc<JdkMemberIndex>,
         dep_source: Box<dyn ClassSource>,
         _dep_memo_path: PathBuf,
     ) -> Self {
@@ -107,7 +113,7 @@ mod tests {
     fn absent_name_resolves_to_none_across_both_tiers() {
         let jdk = JdkMemberIndex::new(Box::new(OneClass { binary: "java/lang/X", bytes: vec![] }));
         let deps = JdkMemberIndex::new(Box::new(OneClass { binary: "dep/Y", bytes: vec![] }));
-        let idx = ClasspathIndex { jdk, deps: Some(deps) };
+        let idx = ClasspathIndex { jdk: Arc::new(jdk), deps: Some(deps) };
         // Neither tier has `p/Z`, and the one-class sources return empty (undecodable) bytes for their
         // own name → every lookup is a definitive miss. The point: composition never panics and a
         // miss stays a miss.
@@ -118,7 +124,7 @@ mod tests {
     #[test]
     fn jdk_only_has_no_dep_tier() {
         let jdk = JdkMemberIndex::new(Box::new(OneClass { binary: "java/lang/X", bytes: vec![] }));
-        let idx = ClasspathIndex::jdk_only(jdk);
+        let idx = ClasspathIndex::jdk_only(Arc::new(jdk));
         assert!(!idx.has_deps());
         assert!(idx.members_of("dep/Y").is_none());
     }

@@ -19,8 +19,16 @@ export interface IntentionOffer {
   /** End byte offset (exclusive). */
   end: number;
   replacement: string;
-  /** A non-edit action the editor dispatches instead of applying the range edit
-   *  (`"move-to-package"`). Absent for a plain edit. */
+  /**
+   * A non-edit action the editor dispatches instead of applying the range edit. Absent for a
+   * plain edit.
+   *
+   * - `"move-to-package"` — move the file to the folder its `package` declares.
+   * - `"rename-symbol"` — rename the symbol at `start` to `replacement`, straight away. Only ever
+   *   sent for a declaration whose references cannot leave the file (a local, a parameter).
+   * - `"rename-symbol-preview"` — the same rename, but through the preview modal, because it can
+   *   reach other files.
+   */
   action?: string;
 }
 

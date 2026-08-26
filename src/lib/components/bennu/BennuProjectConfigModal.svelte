@@ -15,6 +15,7 @@
    * Keyboard-first: first field auto-focused by <Modal>, Tab cycles fields in
    * logical order, Esc cancels (handled by <Modal>), Ctrl/Cmd+Enter applies.
    */
+  import { untrack } from 'svelte';
   import { Settings2, Coffee, FileType, Boxes, FolderTree, SpellCheck } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -27,6 +28,9 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
+  import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
+  import BennuNamingSettings from './BennuNamingSettings.svelte';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import {
     bennuProjectConfigStore,
     defaultConfig,
@@ -75,15 +79,40 @@
   ]);
 
   // ── Actions ────────────────────────────────────────────────────────────────
+  // The naming section edits its own store's draft (it is a real per-repo section on disk, not
+  // part of the in-memory `draft` above), so it is loaded when the modal opens on a project and
+  // written by the same Apply.
+  $effect(() => {
+    const r = root;
+    // Untracked: both calls READ the store state they then write (the cached catalog, the loaded
+    // section), and reading it here would make this effect depend on its own result — one extra
+    // round-trip per open, for nothing. The project root is the only real dependency.
+    untrack(() => {
+      void bennuNamingStore.loadCatalog(r);
+      if (r) void bennuNamingStore.load(r);
+    });
+  });
+
   function apply() {
     // MOCK — persists only to the in-memory store; wire to per-project
     // `<repo>/.arbor/bennu/config.toml` when the BE lands.
     if (root) bennuProjectConfigStore.apply(root, draft);
+    // Naming IS on disk already; only written when it actually changed, so opening and closing the
+    // modal never rewrites the file (and never invalidates the BE's cached copy for nothing).
+    if (root && bennuNamingStore.dirty) {
+      void bennuNamingStore.apply().then((ok) => {
+        if (!ok) toastStore.show("Couldn't save the naming conventions", 'error');
+      });
+    }
     onClose();
   }
 
   function resetToDefaults() {
     draft = defaultConfig();
+    // "Reset" must mean the whole modal, not the half of it that happens to live in a local. The
+    // naming draft goes back to what is on disk — resetting it to *empty* would silently offer to
+    // delete a convention the project deliberately adopted.
+    bennuNamingStore.revert();
   }
 
   // Ctrl/Cmd+Enter submits from anywhere in the modal body.
@@ -182,6 +211,9 @@
           <div class="spell-prog">{bennuSpellStore.progress}</div>
         {/if}
       </section>
+
+      <!-- Naming conventions ─────────────────────────────────────────────── -->
+      <BennuNamingSettings />
 
       <!-- Source / output roots ──────────────────────────────────────────── -->
       <section class="cfg-section">

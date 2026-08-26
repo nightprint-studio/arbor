@@ -120,6 +120,85 @@
   It's a best-effort check, so it complements <strong>Build</strong> (which runs the real compiler)
   rather than replacing it — more type checks arrive as the semantic engine grows.
 </p>
+
+<h2>Naming conventions</h2>
+<p>
+  A project can declare how its declarations are spelled, and have every name that breaks it
+  flagged. It's <strong>off until you turn it on</strong>, per kind of declaration, under
+  <strong>Project Configuration → Naming conventions</strong> — nothing is assumed about a project
+  that never asked.
+</p>
+<p>
+  It works for <strong>Java, TypeScript, JavaScript and Rust</strong>, with one difference worth
+  knowing. Java is read by Bennu's own parser, so it sees every declaration — locals and parameters
+  included. The others are read from the <strong>language server's outline</strong>, which lists
+  types and their members and nothing else: locals and parameters are simply not in it, and those
+  rows are greyed out for those languages rather than offered as rules that would never fire. Those
+  languages also need their server installed for the check to have anything to work from.
+</p>
+<p>
+  Pick a convention for each kind — types, methods, fields, constants, parameters, locals, type
+  parameters, enum constants, package segments — or leave it at <code>any</code>, which checks
+  nothing. <em>Use the standard convention</em> fills the column with what the language's community
+  uses (for Java: <code>PascalCase</code> types, <code>camelCase</code> members,
+  <code>UPPER_SNAKE_CASE</code> constants). The conventions are a fixed list rather than patterns
+  you write, and that's what makes the fix possible: a pattern can refuse a name, a convention can
+  <em>build</em> the right one.
+</p>
+<p>
+  A violation is a <strong>weak warning</strong> — its own level, below errors and warnings, drawn
+  faintly and grouped on its own in the Problems panel. A name that breaks a house style is true,
+  but it isn't a defect, and a project adopting a convention gets one finding per offending
+  declaration.
+</p>
+<p>
+  <kbd>Alt</kbd> + <kbd>Enter</kbd> on the name offers <em>Rename to
+  <code>theRightName</code></em>. For a Java local variable or parameter it renames straight away —
+  those can't be referred to from outside their file, so the rename is exact. For anything a caller
+  could also be using — a method, a field, a type, and <em>everything</em> in a language read
+  through its server — it opens the rename preview with the name filled in, so you see every file it
+  touches before it happens. A rename doesn't rewrite names inside JSP, OGNL or reflection strings,
+  which is exactly why those fixes ask first.
+</p>
+<p>
+  For more than one or two, don't visit them: the Command Palette has <em>Fix naming in file</em>
+  and <em>Fix naming in project</em>. The review opens straight away and fills in as the plan is
+  built — with progress, and a <strong>Stop</strong> that still hands you what it had — then shows
+  what it would do, and lets you disagree with part of it. Nothing is written until you apply, and
+  the whole fix is a single Undo afterwards. A name is refused when two names in a file would
+  become the same name, or when the spelling it wants is already used there — renaming onto an
+  existing name is how a bulk fix turns compiling code into two members with one signature — when
+  the method overrides something declared in a dependency, whose name a jar fixes and we can't
+  change with it, or when the file's bytes aren't valid in the project's declared encoding, which
+  makes the editor and the index read it differently and every offset in it unreliable. Every
+  refusal is listed with its reason.
+</p>
+<p>
+  The review is meant to be argued with. <strong>Group</strong> the names by file — which for Java
+  is by class — or by kind of declaration, or not at all. Switch off a <strong>kind</strong>
+  wholesale to leave every local alone and rename only methods, untick a whole
+  <strong>group</strong>, or untick a single name. <strong>Filter</strong> by name to find the ones
+  you care about. The footer always counts what Apply will actually do, so anything you hide is
+  something that will not be renamed — there is no state where a name is out of sight and still
+  applied. The list is windowed, so a project-wide fix running to thousands of names opens and
+  scrolls at the same speed as a small one.
+</p>
+<p>
+  Some things are never reported: <strong>generated code</strong> (build output directories, and any
+  file carrying a <code>@Generated</code> annotation or a “do not edit” banner), constructors (the
+  name is the class's — the type is reported instead), <code>@Override</code> methods (the name
+  belongs to the supertype), and platform-mandated names like <code>serialVersionUID</code>. Add
+  your own exclusions as path globs under <em>Never check</em>.
+</p>
+<p>
+  A project rarely has one convention, so a subtree can have its own. Under <em>Exceptions</em>, name
+  one, give it path globs, and set the conventions that apply inside it — <strong>only</strong> the
+  ones you name are replaced, so the rest of the rules still hold there. Test sources are the usual
+  case: names like <code>test00_invalid_ragioneSociale</code> mix camelCase and snake_case on
+  purpose, and an exception that sets <em>method</em> to <code>any</code> under
+  <code>**/src/test/**</code> stops reporting them without giving up the type and constant rules the
+  way <em>Never check</em> would. When two exceptions claim the same file, the later one wins.
+</p>
 <p>
   These checks normally run on the file you're editing, but you can run them over the <strong>whole
   project</strong> at once: in a Maven project the <strong>Build</strong> button is a split-button —
@@ -148,9 +227,11 @@
 </p>
 <p>
   The <strong>Problems</strong> panel is a tree grouped <strong>by severity</strong> — an
-  <strong>Errors</strong> node and a <strong>Warnings</strong> node at the top, each split by source
-  (a JDK node, an Encoding node, and one node per file), so a file with both errors and warnings
-  appears under both with just its rows of that severity. Every node is collapsible. It updates live
+  <strong>Errors</strong> node and a <strong>Warnings</strong> node at the top, then
+  <strong>Weak warnings</strong> (style findings, such as a naming-convention violation) and the
+  informational levels below them — each split by source (a JDK node, an Encoding node, and one node
+  per file), so a file with both errors and warnings appears under both with just its rows of that
+  severity. Every node is collapsible. It updates live
   for the file you're editing: as you fix a
   problem it disappears, and a newly-introduced one shows up — no need to re-run the whole-project
   validation to see the effect. That file's entry stays correct across the panel even after you

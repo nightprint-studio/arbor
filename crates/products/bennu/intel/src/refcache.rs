@@ -29,7 +29,7 @@ use crate::refs::{DeclKey, UsageLocation};
 
 /// Bumped whenever the on-disk shape (or the walk's edge semantics) changes — a mismatch
 /// drops the cache and rebuilds, since there is no migration.
-pub const CACHE_VERSION: u32 = 1;
+pub const CACHE_VERSION: u32 = 5;
 
 /// One file's cached contribution to the reference index.
 #[derive(Debug, Clone, Serialize, Deserialize)]

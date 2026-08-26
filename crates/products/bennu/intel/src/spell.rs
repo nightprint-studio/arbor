@@ -90,101 +90,16 @@ pub fn is_tech_allowed(word: &str) -> bool {
     TECH_ALLOWLIST.iter().any(|&w| w == lower)
 }
 
-// ── tokenizer (PURE) ────────────────────────────────────────────────────────────────
+// ── tokenizer (re-exported) ─────────────────────────────────────────────────────────
 
-/// A sub-word of an identifier: its text plus its byte span *relative to the identifier
-/// start*.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SubWord {
-    /// The sub-word text.
-    pub text: String,
-    /// Start byte offset within the identifier.
-    pub start: usize,
-    /// End byte offset (exclusive) within the identifier.
-    pub end: usize,
-}
-
-/// Split an identifier into sub-words on camelCase boundaries, `_`, `-`, and digit runs.
+/// Splitting an identifier into its words lives in [`bennu_naming`], which needs exactly the same
+/// split to decide whether a name is camelCase and to render the one that would be. Two copies
+/// would have drifted on the first acronym anybody disagreed about — and drift there means the
+/// spell-checker and the naming check underlining different halves of the same identifier.
 ///
-/// Rules:
-/// - Separators (`_`, `-`, and any non-alphanumeric) split and are dropped.
-/// - A lower→Upper transition starts a new word (`camelCase` → `camel`, `Case`).
-/// - An acronym run keeps the trailing capital that starts the next word
-///   (`HTTPServer` → `HTTP`, `Server`; `parseXMLFile` → `parse`, `XML`, `File`).
-/// - Digit runs are their own token (and later skipped, since they contain digits).
-///
-/// Offsets are byte offsets into `ident` (ASCII-only identifiers in Java keep them equal
-/// to char offsets; non-ASCII letters are handled by iterating `char_indices`).
-pub fn tokenize_identifier(ident: &str) -> Vec<SubWord> {
-    let mut out = Vec::new();
-    let mut word_start: Option<usize> = None;
-    let mut prev: Option<char> = None;
-    let chars: Vec<(usize, char)> = ident.char_indices().collect();
-
-    for (i, &(off, c)) in chars.iter().enumerate() {
-        let class = CharClass::of(c);
-        if class == CharClass::Sep {
-            if let Some(ws) = word_start.take() {
-                out.push(sub_word(ident, ws, off));
-            }
-            prev = None;
-            continue;
-        }
-        // Decide whether a boundary starts here (a new word begins at `off`).
-        let next_lower =
-            matches!(chars.get(i + 1), Some(&(_, n)) if CharClass::of(n) == CharClass::Lower);
-        let boundary = match (prev.map(CharClass::of), class) {
-            // Start of a word.
-            (None, _) => true,
-            // Upper → lower is a *continuation* (`Ha` in `Hash`), never a boundary.
-            (Some(CharClass::Upper), CharClass::Lower) => false,
-            // Any other class change starts a new word (camelCase `xU`, digit runs, etc.).
-            (Some(prev_class), _) if prev_class != class => true,
-            // Upper → Upper: a boundary only at the LAST capital of an acronym run whose
-            // next char is lowercase (the `S` in `HTTPServer` → `HTTP`, `Server`).
-            (Some(CharClass::Upper), CharClass::Upper) => next_lower,
-            _ => false,
-        };
-        if boundary {
-            if let Some(ws) = word_start.take() {
-                out.push(sub_word(ident, ws, off));
-            }
-            word_start = Some(off);
-        }
-        prev = Some(c);
-    }
-    if let Some(ws) = word_start.take() {
-        out.push(sub_word(ident, ws, ident.len()));
-    }
-    out
-}
-
-fn sub_word(ident: &str, start: usize, end: usize) -> SubWord {
-    SubWord { text: ident[start..end].to_string(), start, end }
-}
-
-/// Character class for the tokenizer's boundary logic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CharClass {
-    Upper,
-    Lower,
-    Digit,
-    Sep,
-}
-
-impl CharClass {
-    fn of(c: char) -> CharClass {
-        if c.is_uppercase() {
-            CharClass::Upper
-        } else if c.is_lowercase() {
-            CharClass::Lower
-        } else if c.is_numeric() {
-            CharClass::Digit
-        } else {
-            CharClass::Sep
-        }
-    }
-}
+/// Re-exported rather than reached through the other crate at every call site: these are `spell`'s
+/// vocabulary too, and `bennu_intel::prelude` has always published them.
+pub use bennu_naming::prelude::{tokenize_identifier, SubWord};
 
 /// Whether a sub-word is *skippable* without ever consulting a dictionary: too short,
 /// all-caps acronym, or contains a digit. (The allow-list / dict membership is checked
@@ -397,6 +312,13 @@ impl SpellEngine {
             });
         }
     }
+}
+
+/// One span of `text` as a [`SubWord`]. Prose, not identifiers: the identifier split lives in
+/// `bennu-naming` (see the re-export above) and comments do not want it — `getUserName` written in
+/// a sentence is one word to a dictionary.
+fn sub_word(text: &str, start: usize, end: usize) -> SubWord {
+    SubWord { text: text[start..end].to_string(), start, end }
 }
 
 /// Split a comment into letter-run words with byte spans (relative to the comment start).

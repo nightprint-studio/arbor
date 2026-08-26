@@ -31,7 +31,7 @@ import {
 } from '$lib/ipc/bennu';
 // Splicing byte-offset edits into a source string — shared with the rename-preview apply, which is
 // where it started.
-import { applyByteEdits } from '$lib/components/bennu/rename-apply';
+import { applyByteEditsChecked } from '$lib/components/bennu/rename-apply';
 // Which files open as a preview instead of as text — one predicate, so the store (which
 // decides whether to read the file at all), `saveText` (which refuses to write one) and the
 // editor (which decides what to mount) cannot disagree about what has a buffer behind it.
@@ -325,8 +325,18 @@ function createProjectStore() {
   // makes it near-instant) whose grouped diagnostics refresh the Problems panel, so cross-file
   // effects show without the user re-running "Validate". The debounce also lets the save's live
   // index patch land first, so dependents resolve against the new members.
+  /**
+   * Depth of the open bulk edits (see [`applyEditsAcrossFiles`]). While non-zero, a save does not
+   * schedule its own cross-file re-validation: the bulk does one at the end for all of them.
+   * A counter rather than a flag so nested bulk edits can't end each other's suppression.
+   */
+  let bulkEditDepth = 0;
   let problemsRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   let problemsRefreshToken = 0;
+  /** A whole-project validation is already running — see [`runProblemsRefresh`]. */
+  let problemsRefreshInFlight = false;
+  /** Something asked for a refresh while one was running / a bulk edit was open. */
+  let problemsRefreshPending = false;
   const PROBLEMS_REFRESH_DEBOUNCE_MS = 600;
   function scheduleProblemsRefresh() {
     const root = project?.root;
@@ -334,19 +344,66 @@ function createProjectStore() {
     // Only once the user has opted into the project-wide view (ran "Validate" at least once) — a
     // save shouldn't flood the panel unasked on a project with thousands of dependency problems.
     if (!bennuDiagnosticsStore.armed) return;
+    // Inside a bulk edit, every one of hundreds of saves would schedule its own whole-project
+    // validation. Remember that one is wanted and run it ONCE when the bulk finishes.
+    if (bulkEditDepth > 0) {
+      problemsRefreshPending = true;
+      return;
+    }
     if (problemsRefreshTimer !== undefined) clearTimeout(problemsRefreshTimer);
-    problemsRefreshTimer = setTimeout(() => {
-      if (project?.root !== root) return; // switched project during the debounce
-      const mine = ++problemsRefreshToken;
-      void ipcProjectDiagnostics(root)
-        .then((list) => {
-          // Ignore a superseded response or one for a project no longer active. `null` = index not
-          // ready → leave the panel untouched.
-          if (mine !== problemsRefreshToken || project?.root !== root) return;
-          if (list) bennuDiagnosticsStore.refreshProjectDiagnostics(list);
-        })
-        .catch(() => { /* BE absent — leave the panel as-is */ });
-    }, PROBLEMS_REFRESH_DEBOUNCE_MS);
+    problemsRefreshTimer = setTimeout(() => runProblemsRefresh(root), PROBLEMS_REFRESH_DEBOUNCE_MS);
+  }
+
+  /**
+   * Run the silent whole-project validation — at most one at a time.
+   *
+   * The debounce above coalesces *scheduling*; it says nothing about a run already under way. A
+   * save landing after a validation started used to begin a second one, and since each re-validates
+   * the whole project and the backend serves them one after another, they stacked up: a large
+   * rename put dozens in the queue, each waiting behind the last, which is what turned it into
+   * minutes of an unresponsive editor with everything else stuck behind them.
+   *
+   * So: one runs, anything asked for meanwhile collapses into a single trailing run. The result is
+   * the same panel content — only the redundant work is gone.
+   */
+  function runProblemsRefresh(root: string) {
+    if (project?.root !== root) return; // switched project during the debounce
+    if (problemsRefreshInFlight) {
+      problemsRefreshPending = true;
+      return;
+    }
+    problemsRefreshInFlight = true;
+    const mine = ++problemsRefreshToken;
+    void ipcProjectDiagnostics(root)
+      .then((list) => {
+        // Ignore a superseded response or one for a project no longer active. `null` = index not
+        // ready → leave the panel untouched.
+        if (mine !== problemsRefreshToken || project?.root !== root) return;
+        if (list) bennuDiagnosticsStore.refreshProjectDiagnostics(list);
+      })
+      .catch(() => { /* BE absent — leave the panel as-is */ })
+      .finally(() => {
+        problemsRefreshInFlight = false;
+        if (problemsRefreshPending) {
+          problemsRefreshPending = false;
+          scheduleProblemsRefresh();
+        }
+      });
+  }
+
+  /** Run `body` as one bulk edit: per-save whole-project re-validation is suppressed throughout,
+   *  and runs once at the end if any save asked for it. */
+  async function inBulkEdit<T>(body: () => Promise<T>): Promise<T> {
+    bulkEditDepth += 1;
+    try {
+      return await body();
+    } finally {
+      bulkEditDepth -= 1;
+      if (bulkEditDepth === 0 && problemsRefreshPending) {
+        problemsRefreshPending = false;
+        scheduleProblemsRefresh();
+      }
+    }
   }
 
   /** Build the active workspace's session snapshot from the live flat state (active project) +
@@ -603,11 +660,35 @@ function createProjectStore() {
       if (list) list.push(e);
       else byFile.set(e.file, [e]);
     }
+    // One bulk edit, not N independent saves: a project-wide rename touches hundreds of files, and
+    // letting each schedule its own whole-project re-validation queues hundreds of them on the
+    // backend — every one redundant with the last. One runs when the whole set is written.
+    return inBulkEdit(() => writeEditedFiles(byFile));
+  }
+
+  /** Write one file per entry, applying its edits. Returns how many files could not be written
+   *  (or held an edit that no longer matched). Always run inside [`inBulkEdit`]. */
+  async function writeEditedFiles(byFile: Map<string, SourceEdit[]>): Promise<number> {
     let failed = 0;
     for (const [file, fileEdits] of byFile) {
       try {
         const current = await loadText(file);
-        if (!(await saveText(file, applyByteEdits(current, fileEdits)))) failed += 1;
+        // Checked, not blind: an edit whose `old` no longer matches the bytes at its range is
+        // dropped. That is the difference between a rename that quietly does nothing to one name
+        // and one that splices it into the middle of an unrelated line — which is what a plan
+        // computed in the wrong coordinate space does, and what the buffer cannot tell apart
+        // without this. A file with ANY rejected edit counts as failed, so the caller reports it
+        // rather than announcing a clean run.
+        const { text, rejected } = applyByteEditsChecked(current, fileEdits);
+        if (rejected.length) {
+          console.warn(
+            `bennu: ${rejected.length} edit(s) in ${file} did not match the file and were skipped`,
+            rejected,
+          );
+          failed += 1;
+          continue;
+        }
+        if (!(await saveText(file, text))) failed += 1;
       } catch {
         failed += 1;
       }

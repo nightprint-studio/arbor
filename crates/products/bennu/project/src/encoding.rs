@@ -16,9 +16,60 @@
 //! `encoding_rs`' encoder (which emits numeric character references), so we don't route
 //! writes through it.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::pom::Pom;
+
+/// Which label each of a project's files is decoded with — the project's declared encoding, plus
+/// the per-file overrides the user set.
+///
+/// ## Why this is a value and not a function call
+///
+/// Deriving the project label reads the bennu config and parses `pom.xml`. Asking for it once per
+/// file, over a few hundred files, is a thousand file opens to arrive at the same answer — so it is
+/// resolved ONCE, into this.
+///
+/// But it cannot collapse to a single label either. The interactive read honours a **per-file**
+/// override ("reload in X" in the footer), and for a long time the index did not: the same file was
+/// decoded one way for the editor and another for validation, so their byte offsets disagreed and
+/// every diagnostic, go-to and rename edit in it pointed somewhere slightly wrong. One value that
+/// answers per file is what makes the two agree without paying for the lookup each time.
+#[derive(Debug, Clone, Default)]
+pub struct EncodingPlan {
+    default_label: String,
+    /// Keyed by absolute path with FORWARD slashes, which is how the config stores them and how
+    /// the frontend spells them. Lookups normalize, so an OS-spelled path still matches.
+    per_file: BTreeMap<String, String>,
+}
+
+impl EncodingPlan {
+    /// The project's label plus its per-file overrides.
+    pub fn new(default_label: impl Into<String>, per_file: BTreeMap<String, String>) -> Self {
+        Self { default_label: default_label.into(), per_file }
+    }
+
+    /// One label for everything — for a caller with no config to consult, and for tests.
+    pub fn uniform(label: impl Into<String>) -> Self {
+        Self { default_label: label.into(), per_file: BTreeMap::new() }
+    }
+
+    /// The project's declared label, for a caller that needs to name the project's encoding rather
+    /// than decode a particular file (a report, a UI field).
+    pub fn default_label(&self) -> &str {
+        &self.default_label
+    }
+
+    /// The label `file` is decoded with: its own override when the user set one, else the
+    /// project's.
+    pub fn label_for(&self, file: &Path) -> &str {
+        if self.per_file.is_empty() {
+            return &self.default_label;
+        }
+        let key = file.to_string_lossy().replace('\\', "/");
+        self.per_file.get(&key).map(String::as_str).unwrap_or(&self.default_label)
+    }
+}
 
 /// The canonical UTF-8 label, as this module spells it everywhere it reports one.
 /// Named because it is also an *answer*: a Cargo project is UTF-8 by language
@@ -298,5 +349,42 @@ mod tests {
         // Full round-trip: a CRLF file normalized to LF and restored is byte-identical.
         let crlf = "line1\r\nline2\r\nline3";
         assert_eq!(restore_crlf(&normalize_newlines(crlf)), crlf);
+    }
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+
+    fn plan() -> EncodingPlan {
+        let mut per_file = BTreeMap::new();
+        per_file.insert("C:/p/src/Odd.java".to_string(), "UTF-8".to_string());
+        EncodingPlan::new("Cp1252", per_file)
+    }
+
+    #[test]
+    fn a_file_without_an_override_takes_the_projects_label() {
+        assert_eq!(plan().label_for(Path::new("C:/p/src/Normal.java")), "Cp1252");
+    }
+
+    #[test]
+    fn a_files_own_override_wins() {
+        assert_eq!(plan().label_for(Path::new("C:/p/src/Odd.java")), "UTF-8");
+    }
+
+    /// The map is keyed the way the config and the frontend spell paths — forward slashes — but a
+    /// path walked off the filesystem on Windows arrives with backslashes. Matching only the first
+    /// spelling is how the index would keep ignoring an override the editor honours, which is the
+    /// disagreement this type exists to end.
+    #[test]
+    fn an_os_spelled_path_still_matches_the_override() {
+        assert_eq!(plan().label_for(Path::new(r"C:\p\src\Odd.java")), "UTF-8");
+    }
+
+    #[test]
+    fn a_uniform_plan_answers_the_same_for_everything() {
+        let p = EncodingPlan::uniform("UTF-8");
+        assert_eq!(p.label_for(Path::new("/a/B.java")), "UTF-8");
+        assert_eq!(p.default_label(), "UTF-8");
     }
 }

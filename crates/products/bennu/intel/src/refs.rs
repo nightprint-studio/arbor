@@ -59,10 +59,9 @@ impl LangLevel {
         self.at_least(8)
     }
 
-    /// `record` components (readable in the compact constructor) — Java 16.
-    fn records(self) -> bool {
-        self.at_least(16)
-    }
+    // No `records()` gate any more. It existed to decide whether a record component counted as a
+    // *local* binding, and a component is never a local at any language level — it is a member.
+    // Renaming one has to reach its accessor, which a local rename cannot do.
 
     /// `instanceof` / `switch` pattern variables (`o instanceof String s`) — Java 16.
     fn patterns(self) -> bool {
@@ -154,11 +153,32 @@ impl ReferenceIndex {
     /// (`it/acme/Foo`, or `it/acme/Outer.Inner` for a nested type). `None` when no indexed
     /// project source declares it. Go-to keys the member/type declaration lookup off this so a
     /// same-named member in a *different* class can't hijack the jump.
+    /// The project file declaring `type_binary`, if a project source declares it.
+    ///
+    /// Accepts **both spellings of a nested type**. The project model names one from source —
+    /// `p.Outer.Inner`, all dots — while the JVM names it `p/Outer$Inner`, and a binary that came
+    /// back from bytecode (a generic signature, a classpath member lookup) carries the `$` form.
+    /// Comparing only the dotted form meant a nested type of the project's own, once compiled into
+    /// `target/classes`, was not recognised as a project type at all: go-to opened a decompiled
+    /// stub of the user's own record, and a rename could find no source to edit.
+    ///
+    /// The exact spelling is tried first, so a top-level class genuinely named `A$B` still wins
+    /// over a nested reading of it.
     pub fn file_declaring(&self, type_binary: &str) -> Option<&str> {
         let dotted = type_binary.replace('/', ".");
+        if let Some(hit) = self.declaring_fqn(&dotted) {
+            return Some(hit);
+        }
+        if !dotted.contains('$') {
+            return None;
+        }
+        self.declaring_fqn(&dotted.replace('$', "."))
+    }
+
+    fn declaring_fqn(&self, fqn: &str) -> Option<&str> {
         self.file_symbols
             .iter()
-            .find(|(_, fs)| fs.types.iter().any(|t| t.fqn == dotted))
+            .find(|(_, fs)| fs.types.iter().any(|t| t.fqn == fqn))
             .map(|(path, _)| path.as_str())
     }
 
@@ -440,6 +460,10 @@ struct FileWalker<'a> {
     project_types: &'a HashMap<String, String>,
     line_starts: Vec<usize>,
     edges: Vec<(DeclKey, UsageLocation)>,
+    /// Memo for [`records_owner`](FileWalker::records_owner). A file names only a handful of
+    /// distinct owners but calls into them thousands of times, and the project-membership probe
+    /// goes to the persisted index — unmemoized it doubled the walk on a call-heavy file.
+    owner_is_project: HashMap<String, bool>,
     attempted: usize,
     resolved: usize,
     /// The file's `import`s, set by [`walk`](Self::walk) before it starts. A dependency type
@@ -480,6 +504,7 @@ impl<'a> FileWalker<'a> {
             project_types,
             line_starts,
             edges: Vec::new(),
+            owner_is_project: HashMap::new(),
             attempted: 0,
             resolved: 0,
             imports: Vec::new(),
@@ -487,6 +512,26 @@ impl<'a> FileWalker<'a> {
             field_owners: HashMap::new(),
             file_fields: HashMap::new(),
         }
+    }
+
+    /// Whether a member edge whose owner is `binary` is worth recording — i.e. the project
+    /// declares that type.
+    ///
+    /// The walk *resolves* library types, because a library type is a **conduit**: in
+    /// `list.stream().map(x -> x.foo())` the project type only reaches `x` by being substituted
+    /// through `List` → `Stream` → `Function`, and without resolving those the `x.foo()` edge is
+    /// never found at all. But an edge INTO a library member is never queried — find-usages and
+    /// rename only ever target project symbols — so recording one would grow the in-memory index
+    /// and the on-disk reference cache by every `list.add(…)` in the project, for nothing.
+    ///
+    /// Resolve widely, record narrowly.
+    fn records_owner(&mut self, binary: &str) -> bool {
+        if let Some(known) = self.owner_is_project.get(binary) {
+            return *known;
+        }
+        let is_project = self.resolver.is_project_type(binary);
+        self.owner_is_project.insert(binary.to_string(), is_project);
+        is_project
     }
 
     /// Walk the file's CST emitting reference edges. `root`/`symbols` are the ALREADY-parsed
@@ -505,6 +550,7 @@ impl<'a> FileWalker<'a> {
             .iter()
             .map(|t| (t.name.clone(), t.fields.iter().map(|f| f.name.clone()).collect()))
             .collect();
+        self.walk_static_imports(symbols);
         let mut stack = vec![*root];
         while let Some(n) = stack.pop() {
             let mut cur = n.walk();
@@ -513,12 +559,81 @@ impl<'a> FileWalker<'a> {
             }
             match n.kind() {
                 "method_invocation" => self.on_method_invocation(&n, root, symbols),
+                "method_reference" => self.on_method_reference(&n, root, symbols),
+                "element_value_pair" => self.on_annotation_element(&n),
                 "field_access" => self.on_field_access(&n, root, symbols),
                 "identifier" => self.on_bare_identifier(&n),
                 "type_identifier" => self.on_type_identifier(&n),
                 _ => {}
             }
         }
+    }
+
+    /// `Type::method` / `expr::method` — a method reference names a method as surely as a call
+    /// does, and a rename that moves the calls but not these leaves the reference pointing at a
+    /// name that no longer exists.
+    ///
+    /// The qualifier resolves exactly like a call's receiver: a type for `Failure::source_path` or
+    /// `Reports::helper`, an expression for `obj::run`. `Foo::new` is skipped — a constructor
+    /// reference names no method of its own, and the type it names is already recorded as a type
+    /// use by the walk.
+    fn on_method_reference(&mut self, node: &Node, root: &Node, symbols: &FileSymbols) {
+        let Some((qualifier, name_node)) = method_reference_parts(node) else { return };
+        let Some(name) = self.node_text(&name_node) else { return };
+        self.attempted += 1;
+        let Some(owner) = self.resolve_receiver_owner(
+            &qualifier,
+            name_node.start_byte(),
+            &name,
+            MemberSort::Method,
+            root,
+            symbols,
+        ) else {
+            return;
+        };
+        self.resolved += 1;
+        let usage = self.usage_at(&name_node);
+        if self.records_owner(&owner) {
+            self.edges.push((DeclKey::Method { owner, name }, usage));
+        }
+    }
+
+    /// `@Customizer(with_check_utenza = true)` — the KEY names an element of the annotation type,
+    /// and an annotation element is a method (JLS §9.6.1: `@interface` members compile to public
+    /// abstract no-arg methods, which is exactly how `bennu-java` indexes them).
+    ///
+    /// It is recorded because of what happens otherwise. `is_bound_name` correctly refuses to treat
+    /// the key as a use of a *field* — it isn't one — but nothing else claimed it either, so the
+    /// element had uses that the index could not see. Every rename of an `@interface` member was
+    /// then refused for having no declaration to edit, which on a real project was 239 of 629
+    /// refusals, the single largest reason. Recording the use and finding the declaration have to
+    /// land together: either alone renames one half of a pair and stops the code compiling.
+    fn on_annotation_element(&mut self, node: &Node) {
+        let Some(key) = node.child_by_field_name("key") else { return };
+        let Some(name) = self.node_text(&key) else { return };
+        let Some(owner) = self.enclosing_annotation_binary(node) else { return };
+        self.attempted += 1;
+        self.resolved += 1;
+        let usage = self.usage_at(&key);
+        if self.records_owner(&owner) {
+            self.edges.push((DeclKey::Method { owner, name }, usage));
+        }
+    }
+
+    /// The binary name of the annotation type whose argument list `node` sits in.
+    fn enclosing_annotation_binary(&self, node: &Node) -> Option<String> {
+        let mut cur = node.parent();
+        while let Some(n) = cur {
+            if n.kind() == "annotation" {
+                let name = n.child_by_field_name("name")?;
+                let text = self.node_text(&name)?;
+                // `@a.b.Ann(…)` is written as a scoped identifier: the last segment is the type.
+                let simple = text.rsplit('.').next().unwrap_or(&text).to_string();
+                return self.resolve_type_simple(&simple);
+            }
+            cur = n.parent();
+        }
+        None
     }
 
     fn on_method_invocation(&mut self, node: &Node, root: &Node, symbols: &FileSymbols) {
@@ -549,7 +664,9 @@ impl<'a> FileWalker<'a> {
             }
         };
         let usage = self.usage_at(&name_node);
-        self.edges.push((DeclKey::Method { owner, name }, usage));
+        if self.records_owner(&owner) {
+            self.edges.push((DeclKey::Method { owner, name }, usage));
+        }
     }
 
     fn on_field_access(&mut self, node: &Node, root: &Node, symbols: &FileSymbols) {
@@ -564,7 +681,9 @@ impl<'a> FileWalker<'a> {
         };
         self.resolved += 1;
         let usage = self.usage_at(&field_node);
-        self.edges.push((DeclKey::Field { owner, name }, usage));
+        if self.records_owner(&owner) {
+            self.edges.push((DeclKey::Field { owner, name }, usage));
+        }
     }
 
     /// A bare `identifier` standing for `this.<field>` — `count` where the source could equally
@@ -599,7 +718,9 @@ impl<'a> FileWalker<'a> {
         }
         self.resolved += 1;
         let usage = self.usage_at(node);
-        self.edges.push((DeclKey::Field { owner, name }, usage));
+        if self.records_owner(&owner) {
+            self.edges.push((DeclKey::Field { owner, name }, usage));
+        }
     }
 
     /// The type that declares field `name`, for a bare read sitting inside `binary`.
@@ -702,12 +823,122 @@ impl<'a> FileWalker<'a> {
         self.declaring_owner(&binary, member, sort)
     }
 
+    /// Record the member each `import static a.b.C.member;` names, at the span of the member
+    /// segment itself.
+    ///
+    /// The import is a use site like any other, and the only one a rename cannot afford to miss:
+    /// leaving `import static p.Util.join_all;` behind after renaming `join_all` is not a cosmetic
+    /// miss, it is a file that no longer compiles. Wildcard imports name no member and so have
+    /// nothing to rewrite.
+    ///
+    /// Whether the name is a method or a field is not in the import — `import static p.Util.FOO;`
+    /// reads the same either way — so the owner is asked, and a name that is both (legal in Java)
+    /// is recorded under both keys. Only one of them is ever the target of a given rename.
+    fn walk_static_imports(&mut self, symbols: &FileSymbols) {
+        for target in bennu_java::prelude::static_import_targets(&symbols.imports) {
+            let Some(member) = target.member.clone() else { continue };
+            if !self.records_owner(&target.owner_binary) {
+                continue;
+            }
+            let Some(cm) = self.resolver.members_of(&target.owner_binary) else { continue };
+            let is_method = cm.methods.iter().any(|m| m.name == member);
+            let is_field = cm.fields.iter().any(|f| f.name == member);
+            if !is_method && !is_field {
+                continue;
+            }
+            let Some(span) = self.static_import_member_span(&symbols.imports, &member) else {
+                continue;
+            };
+            let usage = self.usage_span(span.0, span.1);
+            if is_method {
+                self.edges.push((
+                    DeclKey::Method { owner: target.owner_binary.clone(), name: member.clone() },
+                    usage.clone(),
+                ));
+            }
+            if is_field {
+                self.edges.push((
+                    DeclKey::Field { owner: target.owner_binary.clone(), name: member.clone() },
+                    usage,
+                ));
+            }
+        }
+    }
+
+    /// The byte span of `member` inside the `import static …` declaration that names it. The member
+    /// is the path's last segment, so the LAST occurrence within the declaration is it.
+    fn static_import_member_span(
+        &self,
+        imports: &[bennu_java::prelude::Import],
+        member: &str,
+    ) -> Option<(usize, usize)> {
+        for imp in imports.iter().filter(|i| i.static_ && !i.star) {
+            let span = imp.span.as_ref()?;
+            let text = self.source.get(span.start..span.end)?;
+            if !imp.path.ends_with(member) {
+                continue;
+            }
+            let at = text.rfind(member)?;
+            return Some((span.start + at, span.start + at + member.len()));
+        }
+        None
+    }
+
     fn enclosing_owner(&self, node: &Node, member: &str, sort: MemberSort) -> Option<String> {
         let fqn = self.enclosing_type_binary(node)?;
-        self.declaring_owner(&fqn, member, sort)
+        if let Some(found) = self.declaring_owner_strict(&fqn, member, sort) {
+            return Some(found);
+        }
+        // Not on the enclosing type or anything it inherits from. A bare name can also be bound by
+        // an `import static`, which is precisely how a statically-imported helper is called — and
+        // without this the call was filed under the CALLER's own type, a key no rename looks up, so
+        // renaming the helper left every such call spelling the old name.
+        if let Some(owner) = self.static_import_owner(member, sort) {
+            return Some(owner);
+        }
+        Some(fqn)
+    }
+
+    /// The static-import owner that binds a bare `member` into this file, if one does.
+    fn static_import_owner(&self, member: &str, sort: MemberSort) -> Option<String> {
+        for target in bennu_java::prelude::static_import_targets(&self.imports) {
+            match &target.member {
+                // `import static a.b.C.member;` — named outright.
+                Some(named) if named == member => return Some(target.owner_binary),
+                Some(_) => continue,
+                // `import static a.b.C.*;` — binds it only if the owner declares it.
+                None => {
+                    let Some(cm) = self.resolver.members_of(&target.owner_binary) else { continue };
+                    let declares = match sort {
+                        MemberSort::Method => cm.methods.iter().any(|m| m.name == member),
+                        MemberSort::Field => cm.fields.iter().any(|f| f.name == member),
+                    };
+                    if declares {
+                        return Some(target.owner_binary);
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn declaring_owner(&self, start_binary: &str, member: &str, sort: MemberSort) -> Option<String> {
+        self.declaring_owner_strict(start_binary, member, sort)
+            .or_else(|| Some(start_binary.to_string()))
+    }
+
+    /// The type in `start_binary`'s hierarchy that declares `member`, or `None` when none does.
+    ///
+    /// Separate from [`declaring_owner`], which falls back to the starting type: that fallback is
+    /// right for a member whose supertypes we simply cannot resolve, and wrong for a name that is
+    /// not a member of this hierarchy at all — a statically-imported one, say, which belongs to
+    /// somebody else entirely. Telling the two apart is what lets the caller look elsewhere.
+    fn declaring_owner_strict(
+        &self,
+        start_binary: &str,
+        member: &str,
+        sort: MemberSort,
+    ) -> Option<String> {
         let mut visited = std::collections::HashSet::new();
         let mut stack = vec![start_binary.to_string()];
         while let Some(bn) = stack.pop() {
@@ -729,7 +960,7 @@ impl<'a> FileWalker<'a> {
                 stack.extend(cm.interfaces.iter().cloned());
             }
         }
-        Some(start_binary.to_string())
+        None
     }
 
     /// The binary name of the type `node` sits in.
@@ -762,9 +993,16 @@ impl<'a> FileWalker<'a> {
 
     fn is_declaration_name(&self, node: &Node) -> bool {
         let Some(parent) = node.parent() else { return false };
+        // Must list EVERY kind that declares a type. A kind missing here is indexed as a *use* of
+        // itself, and the rename planner adds the declaration edit separately — so the same byte
+        // range would be rewritten twice, once from the index and once from the walk.
         if !matches!(
             parent.kind(),
-            "class_declaration" | "interface_declaration" | "enum_declaration"
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "record_declaration"
+                | "annotation_type_declaration"
         ) {
             return false;
         }
@@ -772,8 +1010,12 @@ impl<'a> FileWalker<'a> {
     }
 
     fn usage_at(&self, node: &Node) -> UsageLocation {
-        let start = node.start_byte();
-        let end = node.end_byte();
+        self.usage_span(node.start_byte(), node.end_byte())
+    }
+
+    /// A use site given as a raw byte range — for the places a use is NOT a node of its own, such
+    /// as the member segment inside an `import static` declaration.
+    fn usage_span(&self, start: usize, end: usize) -> UsageLocation {
         let (line, col) = self.line_col(start);
         UsageLocation {
             file: self.path.to_string(),
@@ -822,9 +1064,7 @@ pub fn classify_caret(
     resolver: &dyn TypeResolver,
     project_types: &HashMap<String, String>,
 ) -> Option<DeclKey> {
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-    let tree = parser.parse(source, None)?;
+    let tree = bennu_java::prelude::parse_java(source)?;
     classify_caret_at(index, file, source, &tree.root_node(), offset, resolver, project_types)
 }
 
@@ -1003,6 +1243,18 @@ fn decl_name_key(
             let owner = enclosing_type_binary(&parent, bytes, project_types)?;
             Some(DeclKey::Method { owner, name })
         }
+        // An `@interface` element is a METHOD — `bennu-java` indexes it as one (a public abstract
+        // no-arg method, which is what it compiles to), and the walk records its use sites under a
+        // method key. Without this arm the caret fell through to the bare-identifier path and came
+        // back as a FIELD of the annotation type: a key with no declaration to edit and no use
+        // sites recorded against it, so both find-usages and rename answered empty.
+        "annotation_type_element_declaration" => {
+            if parent.child_by_field_name("name")?.id() != node.id() {
+                return None;
+            }
+            let owner = enclosing_type_binary(&parent, bytes, project_types)?;
+            Some(DeclKey::Method { owner, name })
+        }
         "variable_declarator" => {
             let gp = parent.parent()?;
             if gp.kind() != "field_declaration" {
@@ -1142,30 +1394,73 @@ fn enclosing_type_binary(
     bytes: &[u8],
     project_types: &HashMap<String, String>,
 ) -> Option<String> {
+    // The whole chain of enclosing type declarations, innermost first — not just the nearest one.
+    //
+    // `project_types` is keyed by SIMPLE name, which is unique for top-level types and emphatically
+    // not for nested ones: eleven test classes in one real project each declared a nested
+    // `JakartaValidationTest`, so every caret in any of them resolved to whichever binary happened
+    // to win the map. The key named a type in another file, so nothing was declared there and
+    // nothing used it — 237 refusals reading "nothing here can be renamed". The file is the
+    // authority on what it declares, so when it says which package it is in, the binary is built
+    // from the chain and the map is only a fallback.
+    let mut chain: Vec<String> = Vec::new();
     let mut cur = Some(*node);
     while let Some(n) = cur {
+        // An anonymous class body is a type too, and the FIRST one going up: everything written
+        // inside `new Runnable() { … }` belongs to it, not to the class the `new` appears in.
+        // Climbing past it filed an anonymous `run()` under the enclosing class — so find-usages on
+        // that class's own `run()` reported a method nobody had called.
+        if bennu_java::prelude::is_anonymous_body(&n) {
+            if let Some(name) = bennu_java::prelude::anonymous_type_name(&n, bytes) {
+                let outer = n.parent().and_then(|p| enclosing_type_binary(&p, bytes, project_types));
+                if let Some(outer) = outer {
+                    return Some(join_binary(&outer, &name, &chain));
+                }
+            }
+        }
         if matches!(
             n.kind(),
-            "class_declaration" | "interface_declaration" | "enum_declaration"
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                // A record and an `@interface` declare types like any other. Missing them here sent
+                // every member declared in one to the type ABOVE it — or to nothing at all for a
+                // top-level record.
+                | "record_declaration"
+                | "annotation_type_declaration"
         ) {
             let name = n.child_by_field_name("name")?.utf8_text(bytes).ok()?.to_string();
-            if let Some(b) = project_types.get(&name) {
-                return Some(b.clone());
-            }
-            // Not a project type — which is the normal state inside a LIBRARY source view,
-            // where the file being read belongs to a dependency. The buffer says which
-            // package it is in, so use it: the bare simple name this used to fall back to
-            // could never match `com/acme/SharedService`, the key every use site was indexed
-            // under, so a caret anywhere inside such a file classified to a key that existed
-            // nowhere and find-usages reported nothing.
-            return Some(match buffer_package(bytes) {
-                Some(pkg) => format!("{}/{name}", pkg.replace('.', "/")),
-                None => name,
-            });
+            chain.push(name);
         }
         cur = n.parent();
     }
-    None
+    let innermost = chain.first()?.clone();
+    // The buffer's own package + the chain it declares. Also the only thing that can work inside a
+    // LIBRARY source view, which is under no project and so in no map at all.
+    if let Some(pkg) = buffer_package(bytes) {
+        let outermost = chain.last().cloned().unwrap_or_else(|| innermost.clone());
+        let rest = &chain[..chain.len().saturating_sub(1)];
+        return Some(join_binary(&format!("{}/{outermost}", pkg.replace('.', "/")), "", rest));
+    }
+    if let Some(b) = project_types.get(&innermost) {
+        return Some(b.clone());
+    }
+    Some(innermost)
+}
+
+/// `outer` + an optional next segment + the remaining chain (which is stored innermost-first, so it
+/// is appended in reverse). The index spells a nested type `p/Outer/Inner`, so the separator is `/`.
+fn join_binary(outer: &str, next: &str, rest_innermost_first: &[String]) -> String {
+    let mut out = outer.to_string();
+    if !next.is_empty() {
+        out.push('/');
+        out.push_str(next);
+    }
+    for seg in rest_innermost_first.iter().rev() {
+        out.push('/');
+        out.push_str(seg);
+    }
+    out
 }
 
 /// The `package` a buffer declares, read off its own text.
@@ -1179,7 +1474,10 @@ fn buffer_package(bytes: &[u8]) -> Option<String> {
     for line in head.lines() {
         let line = line.trim();
         let Some(rest) = line.strip_prefix("package ") else { continue };
-        let pkg = rest.trim_end_matches(';').trim();
+        // Cut at the `;`, not at the end of the line: the declaration ends at the semicolon, and
+        // `package p; class C {}` on one line is legal Java (and is how fixtures are written).
+        // Trimming only a trailing `;` swallowed the rest of the line into the package name.
+        let pkg = rest.split(';').next().unwrap_or("").trim();
         if !pkg.is_empty() {
             return Some(pkg.to_string());
         }
@@ -1214,17 +1512,23 @@ pub fn classify_target(
     project_types: &HashMap<String, String>,
     level: LangLevel,
 ) -> Option<RenameTarget> {
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-    let tree = parser.parse(source, None)?;
+    let tree = bennu_java::prelude::parse_java(source)?;
     let root = tree.root_node();
     let bytes = source.as_bytes();
 
     let ident = smallest_named_at(&root, offset)?;
     if ident.kind() == "identifier" && !is_member_selector_node(&ident) {
         let name = ident.utf8_text(bytes).ok()?.to_string();
+        // A real local wins first: Java lets a local inside a record's method shadow a component,
+        // and that one genuinely is scope-exact.
         if let Some((ds, de)) = find_local_binding(&ident, bytes, &name, level) {
             return Some(RenameTarget::Local { name, def_start: ds, def_end: de });
+        }
+        // Then a record component — its declaration in the header, or a bare reference to it from
+        // the record's body. Neither reaches the member classifier below on its own: that one
+        // reads *uses on a receiver*, and both of these are unqualified.
+        if let Some(owner) = record_component_owner(&ident, source, &name) {
+            return Some(RenameTarget::Member { key: DeclKey::Field { owner, name } });
         }
     }
 
@@ -1348,8 +1652,81 @@ pub(crate) fn is_member_selector_node(node: &Node) -> bool {
         "method_invocation" => {
             parent.child_by_field_name("name").map(|n| n.id() == node.id()).unwrap_or(false)
         }
+        // `Failure::source_path` — the name after `::` selects a member of the qualifier, exactly
+        // like the name after a `.`. The grammar gives it no field name, so it is the LAST named
+        // child; the first is the qualifier. Without this it read as a bare identifier and was
+        // filed as a field of whatever class the expression appeared in — a use of something
+        // nobody wrote, and one a rename of that field would have rewritten.
+        "method_reference" => {
+            let mut cur = parent.walk();
+            let children: Vec<Node> = parent.named_children(&mut cur).collect();
+            children.len() >= 2
+                && children.last().map(|n| n.id() == node.id()).unwrap_or(false)
+                && children.first().map(|n| n.id() != node.id()).unwrap_or(false)
+        }
         _ => false,
     }
+}
+
+/// The `(qualifier, member name)` of a method reference — `Failure::source_path`.
+///
+/// `None` for `Foo::new`: a constructor reference names no method, and `new` is not even a named
+/// node, so the "last named child" would be the qualifier itself.
+pub(crate) fn method_reference_parts<'a>(node: &Node<'a>) -> Option<(Node<'a>, Node<'a>)> {
+    let mut cur = node.walk();
+    let children: Vec<Node<'a>> = node.named_children(&mut cur).collect();
+    if children.len() < 2 {
+        return None;
+    }
+    let name = *children.last()?;
+    let qualifier = *children.first()?;
+    if name.kind() != "identifier" || name.id() == qualifier.id() {
+        return None;
+    }
+    Some((qualifier, name))
+}
+
+/// The binary name of the record `ident` is a **component** of, when it is one.
+///
+/// A component looks exactly like a method parameter to the grammar — `formal_parameter` under
+/// `formal_parameters` — and only the grandparent tells them apart. `None` for anything else,
+/// including a real parameter, so the caller falls through unchanged.
+fn record_component_owner(ident: &Node, source: &str, name: &str) -> Option<String> {
+    // Walk out to the nearest type. A `record` on the way means `ident` is either the component's
+    // own declaration or an unqualified reference to it from the record's body — the two places a
+    // component's name appears without a receiver.
+    let mut cur = ident.parent();
+    while let Some(n) = cur {
+        if n.kind() == "record_declaration" {
+            return has_component(&n, source.as_bytes(), name)
+                .then(|| bennu_java::prelude::enclosing_type_binary(source, ident.start_byte()))
+                .flatten();
+        }
+        // Any other type boundary: whatever this is, it is not a component of a record.
+        if matches!(
+            n.kind(),
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "annotation_type_declaration"
+        ) {
+            return None;
+        }
+        cur = n.parent();
+    }
+    None
+}
+
+/// Whether `record_declaration` declares a component called `name`.
+fn has_component(record: &Node, bytes: &[u8], name: &str) -> bool {
+    let Some(params) = record.child_by_field_name("parameters") else { return false };
+    let mut cursor = params.walk();
+    // Bound rather than returned directly: the iterator borrows `cursor`, and as a tail expression
+    // its temporary would outlive it.
+    let found = params.named_children(&mut cursor).any(|p| {
+        p.child_by_field_name("name").and_then(|nm| nm.utf8_text(bytes).ok()) == Some(name)
+    });
+    found
 }
 
 /// Find the declarator NAME span of the local variable / parameter `name` in scope at
@@ -1391,15 +1768,13 @@ fn find_local_binding(
                 return Some(d);
             }
         }
-        // A `record`'s components (its header `formal_parameters`) are in scope in the record's
-        // members and its compact constructor. Java 16+ — gated so a same-named field can't be
-        // mistaken for a "component" in an older project. Then STOP (a type boundary).
+        // A `record`'s components are NOT locals, however much the grammar makes them look like
+        // parameters. Per JLS §8.10 each one declares a `private final` field *and* a public
+        // accessor of the same name, and callers reach it through the accessor — `f.source_path()`.
+        // Classified as a local, a rename walked only the record's own scope: the component was
+        // renamed and every caller was left reading a method that no longer exists. So this is a
+        // type boundary like any other, and the member classifier takes it from here.
         if n.kind() == "record_declaration" {
-            if level.records() {
-                if let Some(p) = find_param_decl(&n, bytes, name, level) {
-                    return Some(p);
-                }
-            }
             break;
         }
         // Stop at the enclosing TYPE boundary — a field of the type is NOT a local.
@@ -1788,9 +2163,12 @@ mod tests {
         assert_eq!(local_at(pat, "s)", LangLevel(17)).as_deref(), Some("s"));
         assert_eq!(local_at(pat, "s)", LangLevel(11)), None);
 
-        // Record component used in the compact constructor — Java 16+.
+        // A record component is NOT a local, at any level. It used to classify as one, and that is
+        // what made renaming it produce broken code: a local rename is bounded by the record's own
+        // scope, while a component also declares an accessor that callers use as `r.x()`. It is a
+        // member, so the member classifier answers for it and the rename reaches the accessor.
         let rec = "package p; public record R(int x) { R { echo(x); } static void echo(int a){} }";
-        assert_eq!(local_at(rec, "x)", LangLevel(17)).as_deref(), Some("x"));
+        assert_eq!(local_at(rec, "x)", LangLevel(17)), None);
         assert_eq!(local_at(rec, "x)", LangLevel(11)), None);
 
         // Unknown level (0) enables everything — never break go-to when the JDK wasn't detected.
@@ -1841,6 +2219,29 @@ mod tests {
     #[test]
     fn project_type_map_seeds_classification() {
         // sanity: the java_index helper produces the same simple→binary shape the walk uses
-        let _ = project_type_map(std::path::Path::new("."), "UTF-8");
+        let _ = project_type_map(
+            std::path::Path::new("."),
+            &bennu_project::prelude::EncodingPlan::uniform("UTF-8"),
+        );
+    }
+
+    #[test]
+    fn file_declaring_accepts_the_jvm_spelling_of_a_nested_type() {
+        // The project model spells a nested type `p.Outer.Inner`; the JVM spells it
+        // `p/Outer$Failure`, and any binary that came back from bytecode carries the `$`.
+        // Rejecting that form meant a compiled project's OWN nested type was not recognised as
+        // project code: go-to opened a decompiled stub of the user's record instead of the record,
+        // and a rename found no source to edit.
+        let files = [(
+            "Outer.java",
+            "package p; public class Outer { private record Failure(String source_path) {} }",
+        )];
+        let (index, _r, _pt) = index_of(&files);
+
+        assert_eq!(index.file_declaring("p/Outer/Failure"), Some("Outer.java"), "the source form");
+        assert_eq!(index.file_declaring("p/Outer$Failure"), Some("Outer.java"), "the JVM form");
+        // A type nobody declares is still unknown, whichever way it is spelled.
+        assert_eq!(index.file_declaring("p/Outer$Missing"), None);
+        assert_eq!(index.file_declaring("java/util/Map$Entry"), None);
     }
 }

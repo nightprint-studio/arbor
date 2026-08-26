@@ -20,7 +20,7 @@ use bennu_java::prelude::{
     extract_symbols, ClassFlags, ClassMembers, FileSymbols, Import, Member, MemberKind, MethodDecl,
     TypeDecl, TypeKind,
 };
-use bennu_project::prelude::{decode_for_index, source_encoding_label, IndexDecode};
+use bennu_project::prelude::{decode_for_index, source_encoding_label, EncodingPlan, IndexDecode};
 
 use crate::typemap::type_text_to_ref;
 
@@ -37,8 +37,8 @@ pub fn build_project_index(
     root: &Path,
     index_dir: &Path,
 ) -> (IndexBuilder, usize, usize) {
-    let label = source_encoding_label(root, "UTF-8");
-    let ProjectSources { sources, .. } = read_java_sources(root, &label);
+    let plan = EncodingPlan::uniform(source_encoding_label(root, "UTF-8"));
+    let ProjectSources { sources, .. } = read_java_sources(root, &plan);
     let built = build_project_index_from_sources(&sources, index_dir);
     (built.builder, built.type_count, built.member_count)
 }
@@ -119,6 +119,12 @@ pub fn build_project_index_from_sources(
         // recovered from the source token, mirroring the fresh-scan navigator).
         let file_key = path.to_string_lossy().replace('\\', "/");
         for td in &fs.types {
+            // An anonymous class is indexed (its members have to resolve) but never NAVIGATED to
+            // by name: its name is a position, so offering "1" in Go-to-Class is offering
+            // something nobody can look for.
+            if td.is_anonymous {
+                continue;
+            }
             classes.push(ClassDecl {
                 fqcn: td.fqn.clone(),
                 simple: td.name.clone(),
@@ -160,26 +166,25 @@ pub struct ProjectSources {
 /// project's declared `encoding_label` (the Maven `sourceEncoding`); a file whose bytes don't
 /// fit is recovered and reported (never silently dropped), and only a genuinely unreadable
 /// file (IO error) is skipped (and logged).
-pub fn read_java_sources(root: &Path, encoding_label: &str) -> ProjectSources {
+pub fn read_java_sources(root: &Path, encoding: &EncodingPlan) -> ProjectSources {
     let mut paths = Vec::new();
     collect_java(root, &mut paths);
-    read_sources_parallel(&paths, encoding_label)
+    read_sources_parallel(&paths, encoding)
 }
 
 /// Read `paths` off disk in parallel across a bounded std-thread pool, preserving order.
-/// Each is decoded via [`read_source_for_index`] in `encoding_label`; non-compliant files are
+/// Each is decoded via [`read_source_for_index`] under `encoding`; non-compliant files are
 /// collected, IO-unreadable files dropped (and logged). (No rayon: not a workspace dep.)
-fn read_sources_parallel(paths: &[PathBuf], encoding_label: &str) -> ProjectSources {
-    let decoded = parallel_map(paths, |p| {
-        read_source_for_index(p, encoding_label).map(|d| (p.clone(), d))
-    });
+fn read_sources_parallel(paths: &[PathBuf], encoding: &EncodingPlan) -> ProjectSources {
+    let decoded =
+        parallel_map(paths, |p| read_source_for_index(p, encoding).map(|d| (p.clone(), d)));
     let mut sources = Vec::with_capacity(decoded.len());
     let mut non_compliant = Vec::new();
     for (p, d) in decoded.into_iter().flatten() {
         if d.non_compliant {
             non_compliant.push(NonCompliantSource {
                 file: p.clone(),
-                declared_encoding: encoding_label.to_string(),
+                declared_encoding: encoding.label_for(&p).to_string(),
                 decoded_as: d.encoding.clone(),
             });
         }
@@ -198,14 +203,14 @@ fn read_sources_parallel(paths: &[PathBuf], encoding_label: &str) -> ProjectSour
 /// `encoding_rs` (UTF-8, else Windows-1252) when the bytes don't fit — flagging the file
 /// non-compliant rather than dropping it. Returns `None` only on a genuine IO error, which is
 /// logged, so the sole remaining skip is visible rather than silent.
-pub fn read_source_for_index(path: &Path, encoding_label: &str) -> Option<IndexDecode> {
+pub fn read_source_for_index(path: &Path, encoding: &EncodingPlan) -> Option<IndexDecode> {
     match std::fs::read(path) {
         Ok(bytes) => {
             // Normalize to LF so every index / validation byte offset agrees with the editor's LF
             // document (the interactive read `bennu_read_file` normalizes identically). Without this,
             // go-to targets and whole-project diagnostics on a CRLF file drift down by one position
             // per preceding line.
-            let mut d = decode_for_index(&bytes, encoding_label);
+            let mut d = decode_for_index(&bytes, encoding.label_for(path));
             d.text = bennu_project::prelude::normalize_newlines(&d.text);
             Some(d)
         }
@@ -735,13 +740,13 @@ fn member_symbol(
 
 /// The project-wide simple→binary type map for a set of `.java` files (used to seed a
 /// patch so cross-file references still resolve). Cheap re-scan of just the type decls,
-/// decoded in the project's declared `encoding_label` so a non-UTF-8 file's types still seed.
-pub fn project_type_map(root: &Path, encoding_label: &str) -> BTreeMap<String, String> {
+/// decoded under `encoding` so a non-UTF-8 file's types still seed.
+pub fn project_type_map(root: &Path, encoding: &EncodingPlan) -> BTreeMap<String, String> {
     let mut paths = Vec::new();
     collect_java(root, &mut paths);
     let mut map = BTreeMap::new();
     for p in paths {
-        if let Some(decoded) = read_source_for_index(&p, encoding_label) {
+        if let Some(decoded) = read_source_for_index(&p, encoding) {
             for td in extract_symbols(&decoded.text).types {
                 map.insert(td.name, td.fqn.replace('.', "/"));
             }
@@ -870,7 +875,7 @@ mod tests {
         // decode recovers it and flags it non-compliant — the class stays discoverable.
         let bad = dir.join("Foo.java");
         std::fs::write(&bad, b"// caff\xE0\nclass Foo {}\n").expect("write");
-        let decoded = read_source_for_index(&bad, "UTF-8").expect("readable");
+        let decoded = read_source_for_index(&bad, &EncodingPlan::uniform("UTF-8")).expect("readable");
         assert!(decoded.non_compliant);
         assert_eq!(decl_line(&decoded.text, "Foo"), Some(2));
 

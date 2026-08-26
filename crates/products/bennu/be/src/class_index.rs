@@ -58,12 +58,12 @@ fn bennu_class_index(_ctx: &BennuState, args: ClassIndexArgs) -> Result<Vec<Clas
 
     // Decode in the project's declared encoding (Maven `sourceEncoding`), recovering a
     // mislabelled file rather than dropping it — same policy as the open-project build.
-    let encoding_label = crate::index_service::resolve_index_encoding(&args.root);
+    let encoding = crate::index_service::encoding_plan(&args.root);
     let mut out = Vec::new();
     for path in paths {
         // Only a true IO error skips (logged inside the helper); a non-UTF-8 source is
         // decoded + recovered so its classes still surface.
-        let Some(decoded) = read_source_for_index(&path, &encoding_label) else {
+        let Some(decoded) = read_source_for_index(&path, &encoding) else {
             continue;
         };
         let source = decoded.text;

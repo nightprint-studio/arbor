@@ -965,6 +965,7 @@ dependencies = [
  "bennu-jsp",
  "bennu-jsp-grammar",
  "bennu-lsp",
+ "bennu-naming",
  "bennu-npm",
  "bennu-plugin",
  "bennu-project",
@@ -1128,6 +1129,7 @@ dependencies = [
  "bennu-classpath",
  "bennu-index",
  "bennu-java",
+ "bennu-naming",
  "bennu-project",
  "bennu-proto",
  "bennu-query",
@@ -1199,6 +1201,17 @@ dependencies = [
  "bennu-framed",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bennu-naming"
+version = "0.3.0"
+dependencies = [
+ "bennu-proto",
+ "serde",
+ "serde_json",
+ "tree-sitter",
+ "tree-sitter-java",
 ]
 
 [[package]]

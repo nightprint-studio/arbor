@@ -35,6 +35,15 @@ a rebuild; turning it into a location a VM understands is `bennu-be`'s job, redo
 The `CapabilitySet` bitset is *produced* by `bennu-project` (the Spike D
 capability-detection ruleset); this crate only carries its serialized view.
 
+## Diagnostic severities
+
+`Diagnostic::severity` is one of the `severity` constants: `error`, `warning`, `weak`, `info`,
+`hint`. **`weak`** sits between "this is wrong" and "this is a note" — a *style* finding, true but
+not a defect, which is what a naming-convention violation is. It is its own level because a project
+that adopts a convention gets one finding per offending declaration, and mixing thousands of those
+in with genuine compile errors would devalue both. CodeMirror has no such level, so the editor maps
+it onto the softest one it has; the Problems panel groups it on its own.
+
 ## Usage
 
 Reach the surface through the prelude:

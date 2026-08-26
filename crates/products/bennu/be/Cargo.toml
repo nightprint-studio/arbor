@@ -53,6 +53,10 @@ bennu-query = { path = "../query" }
 bennu-lsp = { path = "../lsp" }
 # AST-level Java validation (syntax errors + unused imports) over the live buffer — no compile.
 bennu-check = { path = "../check" }
+# Naming conventions as an opt-in feature pack. A leaf: the `[naming]` section decoded, a buffer
+# scanned, and one violation per declaration whose name breaks it — each carrying the name that
+# would. `crate::naming` is the glue that gives it a project.
+bennu-naming = { path = "../naming" }
 # The mmap'd symbol index: the `IndexBuilder` the index service holds on each project slot
 # so a single-file edit patches just the changed file's records in — no whole-project walk.
 bennu-index = { path = "../index" }

@@ -38,27 +38,71 @@ pub struct OfferWire {
 /// Every intention applicable at the caret (empty when none fits).
 #[arbor_rpc::handler]
 fn bennu_intentions_at(_ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<OfferWire>, String> {
-    // The pure source transforms (caret-anchored).
-    let mut offers: Vec<OfferWire> = bennu_intentions::prelude::intentions_at(&args.source, args.offset)
-        .into_iter()
-        .map(|o| OfferWire {
-            id: o.id,
-            label: o.label,
-            start: o.start,
-            end: o.end,
-            replacement: o.replacement,
-            action: None,
-        })
-        .collect();
+    let mut offers: Vec<OfferWire> = Vec::new();
+
+    // Everything below this point up to the naming offer is **Java**, and is now guarded as such:
+    // the naming pack covers server-backed languages too, so the editor asks this handler for a
+    // `.ts` and a `.rs` as well. Running Java source transforms over TypeScript would offer edits
+    // computed from a grammar that never read it.
+    if crate::intel::is_java_file(&args.file) {
+        // The pure source transforms (caret-anchored).
+        offers.extend(
+            bennu_intentions::prelude::intentions_at(&args.source, args.offset).into_iter().map(
+                |o| OfferWire {
+                    id: o.id,
+                    label: o.label,
+                    start: o.start,
+                    end: o.end,
+                    replacement: o.replacement,
+                    action: None,
+                },
+            ),
+        );
+        offers.extend(java_file_offers(&args.file, &args.source, args.offset));
+    }
+
+    // The caret is on a declaration whose name breaks the project's naming convention. The fix is
+    // the name the convention itself produced, so the offer never has to compute one.
+    //
+    // Dispatched as a **rename action**, not as an edit — even for a local, where replacing the
+    // identifier in place would rewrite the declaration and leave every use of it behind. The
+    // project's rename engine is what knows the others.
+    //
+    // Which of the two rename actions depends on how far the rename can reach, which the pack
+    // decides: only a declaration a *grammar* found, whose kind cannot be referred to from outside
+    // its file, is applied on the spot — asking a user to confirm a preview that can only ever list
+    // one file is a dialog that teaches them to click through dialogs. Everything else — every
+    // method, field and type, and *everything* a language server's outline reported — opens the
+    // preview with the suggestion filled in, and the user decides.
+    if let Some(violation) = crate::naming::violation_at(&args.file, &args.source, args.offset) {
+        let action = if violation.file_local { "rename-symbol" } else { "rename-symbol-preview" };
+        offers.push(OfferWire {
+            id: format!("naming-fix:{}", violation.target),
+            label: format!("Rename to `{}`", violation.suggested),
+            start: violation.start,
+            end: violation.end,
+            // The action's payload: what to rename to. The editor plans the rename at `start`.
+            replacement: violation.suggested,
+            action: Some(action.to_string()),
+        });
+    }
+
+    Ok(offers)
+}
+
+/// The Java intentions that need the file's location rather than only its text: fixing a package
+/// mismatch, and importing a type the caret is on.
+fn java_file_offers(file: &str, source: &str, offset: usize) -> Vec<OfferWire> {
+    let mut offers: Vec<OfferWire> = Vec::new();
 
     // File-context intentions on a package mismatch: (a) rewrite the declaration to match the folder,
     // or (b) move the file to the folder matching the declaration. Both anchored on the same mismatch.
-    if let Some(expected) = std::path::Path::new(&args.file)
+    if let Some(expected) = std::path::Path::new(file)
         .parent()
         .and_then(bennu_java::prelude::infer_package)
     {
         if let Some((start, end, replacement)) =
-            bennu_check::prelude::change_package(&args.source, &expected)
+            bennu_check::prelude::change_package(source, &expected)
         {
             offers.push(OfferWire {
                 id: "change-package".to_string(),
@@ -69,7 +113,7 @@ fn bennu_intentions_at(_ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<Of
                 action: None,
             });
             // The move alternative — a filesystem action, not an edit (dispatched by the editor).
-            if let Some(declared) = bennu_java::prelude::extract_symbols(&args.source).package {
+            if let Some(declared) = bennu_java::prelude::extract_symbols(source).package {
                 offers.push(OfferWire {
                     id: "move-to-package".to_string(),
                     label: format!("Move file to package `{declared}`"),
@@ -84,11 +128,10 @@ fn bennu_intentions_at(_ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<Of
 
     // "Import class": the caret is on a bare, unimported type name → offer to add its import, one
     // offer per candidate FQN (the Alt+Enter menu is the "which import?" picker the user asked for).
-    if let Some(simple) = bennu_java::prelude::simple_type_needing_import(&args.source, args.offset) {
-        offers.extend(import_class_offers(&args.file, &args.source, &simple));
+    if let Some(simple) = bennu_java::prelude::simple_type_needing_import(source, offset) {
+        offers.extend(import_class_offers(file, source, &simple));
     }
-
-    Ok(offers)
+    offers
 }
 
 /// Build the "Import `<fqn>`" offers for the unimported simple type `simple` used in `source`: one per

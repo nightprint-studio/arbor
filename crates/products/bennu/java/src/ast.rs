@@ -337,6 +337,21 @@ impl<'a> Lowering<'a> {
     }
 
     /// A type declaration: its own name (fully qualified, which only the declaration model knows),
+    /// The names of a `record`'s components, or empty for any other kind of type.
+    fn record_component_names(&self, node: Node<'a>) -> Vec<String> {
+        if node.kind() != "record_declaration" {
+            return Vec::new();
+        }
+        let Some(params) = node.child_by_field_name("parameters") else { return Vec::new() };
+        let mut cursor = params.walk();
+        let names = params
+            .named_children(&mut cursor)
+            .filter_map(|p| p.child_by_field_name("name"))
+            .map(|n| self.text(n))
+            .collect();
+        names
+    }
+
     /// its supertypes as rows, then its members — plus the members the *language* writes.
     fn type_decl(&self, node: Node<'a>, kind: &str) -> AstNode {
         let mut out = AstNode::new(kind, span(node));
@@ -373,14 +388,23 @@ impl<'a> Lowering<'a> {
         // The members nobody wrote. They are genuinely part of what Bennu understands — a record
         // `Point` really does have `x()` — so leaving them out would make the tree disagree with
         // completion. Marked, and pointed at the declaration that owes them.
+        //
+        // "Synthesized" is not the same as "has no span", even though a missing span implies it. A
+        // record's accessor and backing field are synthesized AND carry the span of the component
+        // in the header — because that is where a rename must edit and where go-to must land. This
+        // panel wants the first fact; rename and navigation want the second. Asking the record for
+        // its component names keeps the two apart without a flag on every symbol in the product.
+        let components = self.record_component_names(node);
+        let is_synthesized =
+            |name: &str, span: &Option<Span>| span.is_none() || components.iter().any(|c| c == name);
         if let Some(declared) = declared {
-            for method in declared.methods.iter().filter(|m| m.span.is_none()) {
+            for method in declared.methods.iter().filter(|m| is_synthesized(&m.name, &m.span)) {
                 let mut row = AstNode::new("method", span(node));
                 row.label = Some(format!("{}({})", method.name, method.params.len()));
                 row.synthesized = true;
                 out.children.push(row);
             }
-            for field in declared.fields.iter().filter(|f| f.span.is_none()) {
+            for field in declared.fields.iter().filter(|f| is_synthesized(&f.name, &f.span)) {
                 let mut row = AstNode::new("field", span(node));
                 row.label = Some(format!("{}: {}", field.name, field.type_text));
                 row.synthesized = true;

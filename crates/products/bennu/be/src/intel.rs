@@ -123,7 +123,30 @@ pub struct DiagnosticsArgs {
 /// wildcard/computed candidate → nothing, never a false positive). For a plain Java
 /// file, the empty stub (syntactic diagnostics land with tree-sitter in a later wave).
 #[arbor_rpc::handler]
-pub(crate) fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
+pub(crate) fn bennu_diagnostics(
+    _ctx: &BennuState,
+    args: DiagnosticsArgs,
+) -> Result<Vec<Diagnostic>, String> {
+    // Naming rides ALONGSIDE whatever the file's own route produces, rather than inside any one of
+    // them: a convention is a property of the project, not of the language, and the routes below
+    // each return early. Computed here and appended once, so a pack added for a language that a
+    // server already answers for still reaches the editor.
+    //
+    // Skipped on the FAST tier for the same reason framework checks are: that pass exists to paint
+    // syntax squiggles within ~120ms of a keystroke, and a style finding can wait for the idle
+    // debounce. When the project has not opted in — the default — this costs one map lookup.
+    let naming = match (args.resolved.unwrap_or(true), args.source.as_deref()) {
+        (true, Some(source)) => crate::naming::diagnostics_for(&args.file, source),
+        _ => Vec::new(),
+    };
+    let mut diags = route_diagnostics(args)?;
+    diags.extend(naming);
+    Ok(diags)
+}
+
+/// The file's own diagnostics: whichever single route claims it (language server, manifest, shader,
+/// JSP actions, or the Java validator) answers, and the others are not consulted.
+fn route_diagnostics(args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
     // A language-server-backed file first. Its diagnostics are **pushed** by the server (for
     // Rust they arrive when `cargo check` finishes, seconds after a save), so this call reads the
     // last publish rather than computing anything — which is why it is cheap enough to sit on the
@@ -242,7 +265,7 @@ fn is_jsp_file(file: &str) -> bool {
 }
 
 /// True when `file` is a Java source (case-insensitive `.java`).
-fn is_java_file(file: &str) -> bool {
+pub(crate) fn is_java_file(file: &str) -> bool {
     file.to_ascii_lowercase().ends_with(".java")
 }
 

@@ -6,7 +6,7 @@
 //! type-walk sits on.
 
 use serde::{Deserialize, Serialize};
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::seam::Visibility;
 
@@ -113,9 +113,13 @@ pub struct Annotation {
 /// A field of a type: its name and its declared type (as written in source).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldDecl {
-    /// Where it is written. **`None` when nobody wrote it** — a record's backing field, a Lombok
-    /// getter: there is no source to point at, and a `0..0` would point at the package
-    /// declaration. Anything that navigates to a member has to be able to tell the two apart.
+    /// Where it is written. **`None` when nobody wrote it** — a Lombok getter: there is no source
+    /// to point at, and a `0..0` would point at the package declaration. Anything that navigates to
+    /// a member has to be able to tell the two apart.
+    ///
+    /// A record's field and accessor are *synthesized* but not unwritten: both carry the span of
+    /// the component's name in the record header, which is the one place the language lets you
+    /// name them — and so the only place a rename can edit or a go-to can land.
     ///
     /// `#[serde(default)]` so a symbol persisted before spans existed still deserializes.
     #[serde(default)]
@@ -200,6 +204,14 @@ pub struct TypeDecl {
     /// = `Class` for a pre-existing persisted symbol. Feeds the project-source class-level flags.
     #[serde(default)]
     pub kind: TypeKind,
+    /// The body of a `new X() { … }` (or of an enum constant), which nobody named.
+    ///
+    /// It is a real type with real members, so it belongs in the index — but its `name` is a
+    /// position (`"1"`, `"2"`), not something anyone wrote or could type. Anything that shows type
+    /// names to a person — Go-to-Class, a navigator, a picker — should skip these rather than
+    /// offer a number. `#[serde(default)]` so a symbol persisted before this field still loads.
+    #[serde(default)]
+    pub is_anonymous: bool,
     /// An `abstract` class (has the `abstract` modifier). Interfaces are abstract by definition —
     /// that's derived from `kind`, not stored here.
     #[serde(default)]
@@ -250,11 +262,7 @@ pub struct FileSymbols {
 /// tree-sitter always produces a tree (with ERROR nodes) and we skip what we can't
 /// read (a partial/broken buffer is a normal editor state).
 pub fn extract_symbols(source: &str) -> FileSymbols {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_java::LANGUAGE.into())
-        .expect("load tree-sitter-java grammar");
-    let Some(tree) = parser.parse(source, None) else {
+    let Some(tree) = crate::grammar::parse_java(source) else {
         return FileSymbols::default();
     };
     extract_symbols_from_root(&tree.root_node(), source)
@@ -416,6 +424,7 @@ fn collect_type(
         name,
         fqn,
         kind,
+        is_anonymous: false,
         is_abstract,
         is_final,
         is_sealed,
@@ -431,6 +440,174 @@ fn collect_type(
 /// Collect one member node of a type body into `methods` / `fields` (or recurse for a nested type).
 /// Shared by the class/interface body loop and the enum's `enum_body_declarations` loop.
 #[allow(clippy::too_many_arguments)]
+/// Collect the types declared inside a method's or constructor's body, if it has one.
+fn collect_inner_types_in_body(
+    m: &Node,
+    bytes: &[u8],
+    package: Option<&str>,
+    fqn: &str,
+    out: &mut Vec<TypeDecl>,
+) {
+    if let Some(body) = m.child_by_field_name("body") {
+        collect_inner_types(&body, bytes, package, fqn, out);
+    }
+}
+
+/// Collect the types declared INSIDE a member's body — the two kinds a walk that reads
+/// *declarations* rather than *statements* will otherwise miss entirely.
+///
+/// **Local types**: a `class Helper { … }` written in a method. Legal since Java 1.1 (a local
+/// interface, enum or record needs Java 16 — JEP 395). Attributed to its ENCLOSING TYPE
+/// (`p.Outer.Helper`), the spelling a member type gets. Java's bytecode name disambiguates by
+/// position (`Outer$1Helper`), so two local types of the same name in different methods of one
+/// class collapse to one entry here — the one thing this cannot express, in exchange for a name
+/// that reads like the source.
+///
+/// **Anonymous classes**: the body of a `new Runnable() { … }`. Named the way javac names them,
+/// by position — `p.Outer.1` — because there is no other name to use. Without an identity of their
+/// own, everything they declared was attributed to the enclosing named class: an anonymous `run()`
+/// counted as a use of `Outer.run()`, and a `this.field` inside the body resolved against `Outer`
+/// rather than against the type actually being subclassed.
+///
+/// Neither kind is descended into here. [`collect_type`] walks the type's own members and reaches
+/// anything declared inside THEM through this same function; recursing here as well would collect
+/// every nested declaration twice.
+fn collect_inner_types(
+    node: &Node,
+    bytes: &[u8],
+    package: Option<&str>,
+    fqn: &str,
+    out: &mut Vec<TypeDecl>,
+) {
+    let mut cw = node.walk();
+    for c in node.named_children(&mut cw) {
+        match c.kind() {
+            "class_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "record_declaration"
+            | "annotation_type_declaration" => {
+                collect_type(&c, bytes, package, Some(fqn), out);
+            }
+            "class_body" if is_anonymous_body(&c) => {
+                collect_anonymous_type(&c, bytes, package, fqn, out);
+            }
+            _ => collect_inner_types(&c, bytes, package, fqn, out),
+        }
+    }
+}
+
+/// Whether this `class_body` is the body of an anonymous class — i.e. it hangs off a
+/// `new X() { … }` or an enum constant with a body, rather than off a type declaration.
+pub fn is_anonymous_body(body: &Node) -> bool {
+    body.kind() == "class_body"
+        && body
+            .parent()
+            .map(|p| matches!(p.kind(), "object_creation_expression" | "enum_constant"))
+            .unwrap_or(false)
+}
+
+/// The name javac would give the anonymous class whose body this is — `"1"`, `"2"`, … in source
+/// order **within the nearest enclosing named type**.
+///
+/// Positional rather than counted during a walk, so that the two sides that need this name — the
+/// extractor that files the type under it, and the caret query that asks "what type am I inside?"
+/// — derive it independently and cannot drift. `None` when `body` is not an anonymous body.
+pub fn anonymous_type_name(body: &Node, bytes: &[u8]) -> Option<String> {
+    if !is_anonymous_body(body) {
+        return None;
+    }
+    let scope = enclosing_named_type(body)?;
+    let mut found: Vec<usize> = Vec::new();
+    collect_anonymous_body_starts(&scope, bytes, &scope, &mut found);
+    found.sort_unstable();
+    let position = found.iter().position(|s| *s == body.start_byte())?;
+    Some((position + 1).to_string())
+}
+
+/// The nearest type DECLARATION above `node` — the scope anonymous classes are numbered within.
+fn enclosing_named_type<'a>(node: &Node<'a>) -> Option<Node<'a>> {
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        if matches!(
+            n.kind(),
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "record_declaration"
+                | "annotation_type_declaration"
+        ) {
+            return Some(n);
+        }
+        cur = n.parent();
+    }
+    None
+}
+
+/// Start offsets of every anonymous body whose numbering scope is `scope`, in tree order.
+fn collect_anonymous_body_starts(node: &Node, bytes: &[u8], scope: &Node, out: &mut Vec<usize>) {
+    let mut cw = node.walk();
+    for c in node.named_children(&mut cw) {
+        if is_anonymous_body(&c) {
+            // Only the ones this scope numbers: an anonymous class nested inside a local class is
+            // numbered within THAT class, and would otherwise be counted twice.
+            if enclosing_named_type(&c).map(|n| n.id()) == Some(scope.id()) {
+                out.push(c.start_byte());
+            }
+        }
+        collect_anonymous_body_starts(&c, bytes, scope, out);
+    }
+}
+
+/// Build the [`TypeDecl`] for an anonymous class body: its members, plus the type being
+/// instantiated as its supertype so a member inherited from it still resolves.
+fn collect_anonymous_type(
+    body: &Node,
+    bytes: &[u8],
+    package: Option<&str>,
+    outer_fqn: &str,
+    out: &mut Vec<TypeDecl>,
+) {
+    let Some(name) = anonymous_type_name(body, bytes) else { return };
+    let fqn = format!("{outer_fqn}.{name}");
+
+    // Whether the instantiated type is a class or an interface is a question only the compiler can
+    // answer, and the member walk follows both links — so it goes in `implements`, where being
+    // wrong costs nothing. Putting it in `extends` would instead feed the "extends a final class"
+    // and "must implement abstract" checks a supertype relationship they'd judge on its own terms.
+    let implements = body
+        .parent()
+        .filter(|p| p.kind() == "object_creation_expression")
+        .and_then(|p| p.child_by_field_name("type"))
+        .and_then(|t| node_text(&t, bytes))
+        .map(|t| vec![t])
+        .unwrap_or_default();
+
+    let mut methods = Vec::new();
+    let mut fields = Vec::new();
+    let mut bw = body.walk();
+    for m in body.named_children(&mut bw) {
+        collect_body_member(&m, bytes, false, package, &fqn, &mut methods, &mut fields, out);
+    }
+
+    out.push(TypeDecl {
+        span: Some(Span::of(body)),
+        name,
+        fqn,
+        kind: TypeKind::Class,
+        is_anonymous: true,
+        is_abstract: false,
+        is_final: true, // an anonymous class can never be subclassed
+        is_sealed: false,
+        type_params: Vec::new(),
+        methods,
+        fields,
+        extends: None,
+        implements,
+        annotations: Vec::new(),
+    });
+}
+
 fn collect_body_member(
     m: &Node,
     bytes: &[u8],
@@ -446,6 +623,7 @@ fn collect_body_member(
             if let Some(md) = parse_method(m, bytes, is_interface) {
                 methods.push(md);
             }
+            collect_inner_types_in_body(m, bytes, package, fqn, out);
         }
         // Constructors are indexed as `<init>` members (like bytecode) so the super-constructor,
         // unhandled-exception-from-`new`, and constructor-arity checks work on project types.
@@ -453,7 +631,13 @@ fn collect_body_member(
             if let Some(md) = parse_constructor(m, bytes) {
                 methods.push(md);
             }
+            collect_inner_types_in_body(m, bytes, package, fqn, out);
         }
+        // A `static { … }` or instance `{ … }` initializer is a body like any other, and a local
+        // type can be declared in one.
+        // A `static { … }` / instance `{ … }` initializer, and a field initializer, are all places an
+        // anonymous class is commonly written (`private Runnable r = new Runnable() { … };`).
+        "static_initializer" | "block" => collect_inner_types(m, bytes, package, fqn, out),
         // An `@interface` element (`String value();`, `int count() default 3;`) IS a public abstract
         // no-arg method of the annotation type at the bytecode level. Index it as such so a
         // `myAnno.value()` access resolves its method (otherwise it false-flags "cannot resolve").
@@ -467,6 +651,9 @@ fn collect_body_member(
         // constant reference resolves like any other field.
         "field_declaration" | "constant_declaration" => {
             parse_field(m, bytes, is_interface, fields);
+            // `private Runnable r = new Runnable() { … };` — an initializer is one of the commonest
+            // places to write an anonymous class, and it is not inside any method body.
+            collect_inner_types(m, bytes, package, fqn, out);
         }
         "class_declaration"
         | "interface_declaration"
@@ -766,6 +953,22 @@ fn parse_throws(node: &Node, bytes: &[u8]) -> Vec<String> {
 /// resolution would see an ambiguity that doesn't exist. Matching is by name **and arity**, which
 /// is what keeps a record that declares an extra `x(int)` overload from suppressing its own
 /// zero-arg accessor.
+/// Each record component's name, mapped to the span of that name in the header.
+fn component_name_spans(
+    record: &Node,
+    bytes: &[u8],
+) -> std::collections::HashMap<String, Span> {
+    let mut out = std::collections::HashMap::new();
+    let Some(params) = record.child_by_field_name("parameters") else { return out };
+    let mut cursor = params.walk();
+    for param in params.named_children(&mut cursor) {
+        let Some(name_node) = param.child_by_field_name("name") else { continue };
+        let Some(name) = node_text(&name_node, bytes) else { continue };
+        out.insert(name, Span::of(&name_node));
+    }
+    out
+}
+
 fn synthesize_record_members(
     node: &Node,
     bytes: &[u8],
@@ -776,14 +979,20 @@ fn synthesize_record_members(
     // so the existing parser handles them, varargs component included. A `record Empty()` yields
     // none, and still gets its constructor and the `Object` overrides below.
     let components = parse_params(node, bytes);
+    // Where each component's NAME is written. A record's field and accessor are synthesized, but
+    // they are not *unwritten*: the header is the one place the language lets you name them, and it
+    // is where renaming one has to edit and where go-to has to land. Left as `None`, both fell back
+    // to the generated-source view — "go to the accessor" opened a stub of the record instead of
+    // the record — and a rename could find no declaration to edit.
+    let component_spans = component_name_spans(node, bytes);
 
     for c in &components {
+        let span = component_spans.get(&c.name).copied();
         // The backing field. `private final`, and it carries the component's own name — which is
         // also why a record can't declare instance fields of its own (checked in `bennu-check`).
         if !fields.iter().any(|f| f.name == c.name) {
             fields.push(FieldDecl {
-                // Nobody wrote it — the language did. See `FieldDecl::span`.
-                span: None,
+                span,
                 name: c.name.clone(),
                 type_text: c.type_text.clone(),
                 is_static: false,
@@ -797,7 +1006,7 @@ fn synthesize_record_members(
         // people reach for `p.x()`, and Java is on their side.
         if !is_declared(methods, &c.name, 0) {
             methods.push(MethodDecl {
-                span: None,
+                span,
                 name: c.name.clone(),
                 return_type_text: c.type_text.clone(),
                 params: Vec::new(),
@@ -1124,11 +1333,26 @@ mod tests {
     /// **Nobody wrote these.** A record's accessor has no source, and a `0..0` would point at the
     /// package declaration — so it says "nowhere" instead.
     #[test]
-    fn a_synthesized_member_has_no_span() {
-        let t = one_type("record P(int x) {}");
+    fn a_record_component_points_at_where_it_is_written() {
+        // Synthesized is not the same as unwritten. A record's accessor and backing field are both
+        // generated, but the component's NAME is in the header — and that is where a rename has to
+        // edit and where go-to has to land. Left spanless, go-to on `p.x()` opened a generated stub
+        // of the record instead of the record, and a rename could find no declaration to change.
+        let src = "record P(int x) {}";
+        let t = one_type(src);
+        let component = src.find("int x").unwrap() + "int ".len();
+
         let accessor = t.methods.iter().find(|m| m.name == "x").expect("the accessor");
-        assert!(accessor.span.is_none());
-        assert!(t.fields.iter().find(|f| f.name == "x").expect("the backing field").span.is_none());
+        assert_eq!(accessor.span.map(|s| s.start), Some(component));
+        let field = t.fields.iter().find(|f| f.name == "x").expect("the backing field");
+        assert_eq!(field.span.map(|s| s.start), Some(component));
+        assert_eq!(field.span.map(|s| &src[s.start..s.end]), Some("x"));
+
+        // A member with genuinely nothing written for it still has none — the canonical
+        // constructor is not spelled anywhere in `record P(int x) {}`.
+        let ctor = t.methods.iter().find(|m| m.name == "<init>").expect("the canonical ctor");
+        assert!(ctor.span.is_none());
+
         // ...while the record itself is very much written down.
         assert!(t.span.is_some());
     }
@@ -1405,4 +1629,51 @@ mod tests {
         // A concrete class method (with a body) is never marked abstract.
         assert!(!t.methods.iter().find(|m| m.name == "done").unwrap().is_abstract);
     }
+
+    /// A class declared inside a method body — a **local class**, legal since Java 1.1. The walk
+    /// never descended into method bodies, so it was invisible: absent from the index, its members
+    /// unresolvable, and every use of it reported as an unknown type.
+    #[test]
+    fn a_class_declared_inside_a_method_is_extracted() {
+        let src = "package p;\npublic class Outer {\n    void run() {\n        class Helper {\n            int count;\n            int twice() { return count * 2; }\n        }\n        new Helper().twice();\n    }\n}\n";
+        let fs = extract_symbols(src);
+        let helper = fs
+            .types
+            .iter()
+            .find(|t| t.name == "Helper")
+            .expect("the local class was not extracted");
+        assert_eq!(helper.fqn, "p.Outer.Helper");
+        assert!(helper.methods.iter().any(|m| m.name == "twice"));
+        assert!(helper.fields.iter().any(|f| f.name == "count"));
+    }
+
+    /// Local interfaces, enums and records arrived in Java 16 (JEP 395); before that only a local
+    /// *class* was legal. The extractor reads what is written rather than gating on a version.
+    #[test]
+    fn a_record_declared_inside_a_method_is_extracted() {
+        let src = "package p;\npublic class Outer {\n    void run() {\n        record Point(int x, int y) {}\n        new Point(1, 2);\n    }\n}\n";
+        let fs = extract_symbols(src);
+        let point = fs.types.iter().find(|t| t.name == "Point").expect("the local record");
+        assert_eq!(point.kind, TypeKind::Record);
+        assert!(point.fields.iter().any(|f| f.name == "x"));
+    }
+
+    /// A local class inside a CONSTRUCTOR body, and one nested inside a local class's own method —
+    /// the walk has to recurse, not just look one level down.
+    #[test]
+    fn local_types_nest_and_appear_in_constructors_too() {
+        let src = "package p;\npublic class Outer {\n    Outer() {\n        class A {\n            void go() {\n                class B { }\n            }\n        }\n    }\n}\n";
+        let fs = extract_symbols(src);
+        assert!(fs.types.iter().any(|t| t.fqn == "p.Outer.A"), "local class in a constructor");
+        assert!(fs.types.iter().any(|t| t.fqn == "p.Outer.A.B"), "local class inside a local class");
+    }
+
+    /// A static initializer block is a body too.
+    #[test]
+    fn a_local_class_in_a_static_initializer_is_extracted() {
+        let src = "package p;\npublic class Outer {\n    static {\n        class Boot { }\n    }\n}\n";
+        let fs = extract_symbols(src);
+        assert!(fs.types.iter().any(|t| t.name == "Boot"));
+    }
+
 }

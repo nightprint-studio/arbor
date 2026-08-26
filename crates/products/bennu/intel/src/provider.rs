@@ -6,6 +6,7 @@
 //! (and, post-MVP, the LSP client).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use bennu_index::prelude::SymbolKind;
 use bennu_proto::prelude::{CompletionItem, Diagnostic};
@@ -583,7 +584,10 @@ pub struct NativeJavaProvider {
     /// The completion resolver: `Some` once a project index is built + the classpath (JDK, plus the
     /// project's dependency jars when resolvable) is available; `None` for the empty (pre-index)
     /// provider.
-    resolver: Option<IndexResolver<ClasspathIndex>>,
+    resolver: Option<Arc<IndexResolver<ClasspathIndex>>>,
+    /// The same project index over a JDK-ONLY classpath — what the reference walk resolves against.
+    /// `None` for the pre-index provider. See [`Self::walk_resolver`].
+    walk_resolver: Option<Arc<IndexResolver<ClasspathIndex>>>,
     /// Simple type name → importable FQNs (JDK + dependency + project), for the "Import class"
     /// intention. Empty for the pre-index provider.
     class_names: ClassNameIndex,
@@ -612,7 +616,7 @@ impl NativeJavaProvider {
     /// (JDK + optional dependency) member index — the Phase-1 completion path. The class-name index
     /// (for "Import class") is empty here; [`for_project`](Self::for_project) populates it.
     pub fn with_resolver(resolver: IndexResolver<ClasspathIndex>) -> Self {
-        Self { resolver: Some(resolver), ..Default::default() }
+        Self { resolver: Some(Arc::new(resolver)), ..Default::default() }
     }
 
     /// Candidate importable FQNs (dotted, sorted) for a simple type name — the "Import class"
@@ -703,16 +707,16 @@ impl NativeJavaProvider {
             class_names.add_fqn(simple, &binary.replace('/', "."));
         }
 
-        let jdk = match jdk_index_path {
+        let jdk = Arc::new(match jdk_index_path {
             Some(path) => JdkMemberIndex::persistent(source, path),
             None => JdkMemberIndex::new(source),
-        };
+        });
         let classpath = match deps {
             Some((dep_source, dep_memo_path)) => {
                 class_names.add_binaries(dep_source.class_names());
-                ClasspathIndex::with_deps(jdk, dep_source, dep_memo_path)
+                ClasspathIndex::with_deps(Arc::clone(&jdk), dep_source, dep_memo_path)
             }
-            None => ClasspathIndex::jdk_only(jdk),
+            None => ClasspathIndex::jdk_only(Arc::clone(&jdk)),
         };
         // Snapshot the prefix-search axis now that every JDK / dependency / project class is in.
         class_names.finalize();
@@ -721,14 +725,34 @@ impl NativeJavaProvider {
         for (simple, binary) in project_simple_names {
             resolver.add_simple_hint(simple, binary);
         }
-        Ok(Self { resolver: Some(resolver), class_names, jdk_sources })
+
+        // A second view for the reference walk: project + JDK, and NOT the dependency tier.
+        //
+        // The walk needs library types as *conduits* — `list.stream().map(x -> x.foo())` types `x`
+        // only by substituting through `List`/`Stream`/`Function` — but the tier that makes that
+        // expensive is the dependency one. Its classes are decoded lazily and kept in memory only,
+        // so a walk that touches thousands of them pays for thousands of jar reads every session;
+        // the JDK tier is memoized and persisted, so it is expensive once, ever, and is shared with
+        // the resolver above rather than decoded twice.
+        //
+        // The cost of leaving deps out is a conduit that runs through a LIBRARY generic (Guava's
+        // `FluentIterable`, say) — still missed. The JDK ones are the ones real code is full of.
+        let walk = PersistedIndex::open(&blob, &fst).ok().map(|index| {
+            let mut r = IndexResolver::new(index, ClasspathIndex::jdk_only(jdk));
+            for (simple, binary) in project_simple_names {
+                r.add_simple_hint(simple, binary);
+            }
+            Arc::new(r)
+        });
+
+        Ok(Self { resolver: Some(Arc::new(resolver)), walk_resolver: walk, class_names, jdk_sources })
     }
 
     /// Persist the classpath member index's memos now (best-effort; no-op for the empty provider or
     /// an in-memory index). Flushes BOTH tiers — the shared JDK memo and, when present, the
     /// per-project dependency memo — so a session's warmed JDK **and** library classes survive.
     pub fn flush_jdk_index(&self) {
-        if let Some(resolver) = &self.resolver {
+        if let Some(resolver) = self.resolver.as_deref() {
             resolver.jdk_index().flush();
         }
     }
@@ -740,7 +764,7 @@ impl NativeJavaProvider {
     /// or a decompiled stub.
     pub fn library_binary(&self, source: &str, name: &str) -> Option<String> {
         use bennu_java::prelude::TypeResolver; // brings `resolve_simple_name`/`is_project_type` into scope
-        let resolver = self.resolver.as_ref()?;
+        let resolver = self.resolver.as_deref()?;
         let binary = if name.contains('.') {
             name.replace('.', "/")
         } else {
@@ -765,7 +789,7 @@ impl NativeJavaProvider {
     /// `None` on the pre-index provider or when the bytecode isn't decodable.
     pub fn stub_for(&self, binary: &str) -> Option<String> {
         use bennu_java::prelude::TypeResolver; // brings `members_of` into scope
-        let resolver = self.resolver.as_ref()?;
+        let resolver = self.resolver.as_deref()?;
         let cm = resolver.members_of(binary)?;
         Some(render_stub(binary, &cm))
     }
@@ -778,7 +802,7 @@ impl NativeJavaProvider {
     /// DTO" — need the structure rather than a page of Java to parse back apart.
     pub fn members_of(&self, binary: &str) -> Option<std::sync::Arc<bennu_java::prelude::ClassMembers>> {
         use bennu_java::prelude::TypeResolver;
-        self.resolver.as_ref()?.members_of(binary)
+        self.resolver.as_deref()?.members_of(binary)
     }
 
     /// The binary name of the static type of the expression spanning `[start, end)` in `source`,
@@ -786,7 +810,7 @@ impl NativeJavaProvider {
     /// INSIDE a library source view — e.g. inferring `list` in `list.add(x)` to know which type
     /// declares `add`. `None` when the expression can't be typed. Works on any `.java` text.
     pub fn infer_type_binary(&self, source: &str, start: usize, end: usize) -> Option<String> {
-        let resolver = self.resolver.as_ref()?;
+        let resolver = self.resolver.as_deref()?;
         let tr = bennu_java::prelude::infer_expression_type(source, start, end, resolver)?;
         Some(tr.binary_name)
     }
@@ -799,7 +823,7 @@ impl NativeJavaProvider {
     pub fn ast_of(&self, source: &str) -> bennu_java::prelude::AstNode {
         bennu_java::prelude::lower_ast(
             source,
-            self.resolver.as_ref().map(|r| r as &dyn bennu_java::prelude::TypeResolver),
+            self.resolver.as_ref().map(|r| r.as_ref() as &dyn bennu_java::prelude::TypeResolver),
         )
     }
 
@@ -819,7 +843,7 @@ impl NativeJavaProvider {
     /// question it has no way to refuse.
     pub fn type_named(&self, source: &str, name: &str) -> Option<String> {
         use bennu_java::prelude::TypeResolver; // brings `resolve_simple_name`/`members_of` into scope
-        let resolver = self.resolver.as_ref()?;
+        let resolver = self.resolver.as_deref()?;
         if !reads_as_type_name(name) {
             return None;
         }
@@ -852,7 +876,7 @@ impl NativeJavaProvider {
 
         let normalise = |n: &str| n.replace('.', "/");
         let wanted = normalise(wanted);
-        let Some(resolver) = self.resolver.as_ref() else { return false };
+        let Some(resolver) = self.resolver.as_deref() else { return false };
 
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut queue = vec![(normalise(candidate), 0usize)];
@@ -872,6 +896,43 @@ impl NativeJavaProvider {
             }
         }
         false
+    }
+
+    /// Whether the project declares `binary` — the guard that keeps a *library* navigation from
+    /// serving code the user wrote.
+    pub fn owns_type(&self, binary: &str) -> bool {
+        use bennu_java::prelude::TypeResolver;
+        self.resolver.as_ref().is_some_and(|r| r.is_project_type(binary))
+    }
+
+    /// This provider's fully-resolving (project + JDK + dependency) resolver, type-erased and
+    /// shareable — `None` before a project index exists.
+    ///
+    /// Handed to the [`RenameEngine`](crate::rename::RenameEngine) so its reference walk can type
+    /// receivers that only a LIBRARY generic can carry: in `list.stream().map(x -> x.foo())` the
+    /// lambda parameter `x` is typed by substituting through `List`/`Stream`/`Function`, so with no
+    /// JDK those `x.foo()` edges are never recorded and a rename silently misses them. Shared
+    /// rather than rebuilt: one classpath index, one warmed memo, one set of decoded classes for
+    /// both completion and find-usages/rename.
+    pub fn shared_resolver(&self) -> Option<Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>> {
+        self.resolver
+            .as_ref()
+            .map(|r| Arc::clone(r) as Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>)
+    }
+
+    /// The resolver the REFERENCE WALK should use: project + JDK, without the dependency tier.
+    ///
+    /// The walk is parallel and runs over every file, so what it resolves has to be bounded. The
+    /// JDK tier is decoded at most once ever (memoized in process, persisted across sessions) and
+    /// is shared with the full resolver; the dependency tier is decoded lazily and kept only in
+    /// memory, so a walk through it re-reads hundreds of jars every session — which is what made a
+    /// large project's index crawl with every core busy.
+    ///
+    /// `None` before a project index exists, and then the caller falls back to project-only.
+    pub fn walk_resolver(&self) -> Option<Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>> {
+        self.walk_resolver
+            .as_ref()
+            .map(|r| Arc::clone(r) as Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>)
     }
 
     /// Classify the caret at `offset` in a library source view `source` into a go-to [`LibraryTarget`]
@@ -938,7 +999,7 @@ impl NativeJavaProvider {
         ctx: &bennu_check::prelude::FileContext,
         jdk_available: bool,
     ) -> Vec<Diagnostic> {
-        match &self.resolver {
+        match self.resolver.as_deref() {
             Some(resolver) => bennu_check::prelude::check_file_resolved(source, ctx, resolver, jdk_available),
             None => bennu_check::prelude::check_file(source, ctx),
         }
@@ -958,7 +1019,7 @@ impl NativeJavaProvider {
         resolver_rev: u64,
         cache: &mut bennu_check::prelude::IncrementalCache,
     ) -> Vec<Diagnostic> {
-        match &self.resolver {
+        match self.resolver.as_deref() {
             Some(resolver) => bennu_check::prelude::check_file_resolved_incremental(
                 source,
                 ctx,
@@ -986,7 +1047,7 @@ impl NativeJavaProvider {
     /// identifier.
     pub fn var_hover(&self, source: &str, offset: usize) -> Option<crate::rename::HoverInfo> {
         use bennu_java::prelude::infer_expression_type;
-        let resolver = self.resolver.as_ref()?;
+        let resolver = self.resolver.as_deref()?;
 
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
@@ -1040,7 +1101,7 @@ impl NativeJavaProvider {
         node: tree_sitter::Node,
     ) -> Option<bennu_java::prelude::TypeRef> {
         use bennu_java::prelude::infer_expression_type;
-        let resolver = self.resolver.as_ref()?;
+        let resolver = self.resolver.as_deref()?;
         let parent = node.parent()?;
         if parent.child_by_field_name("name").map(|n| n.id()) != Some(node.id()) {
             return None;
@@ -1072,7 +1133,7 @@ impl NativeJavaProvider {
     /// wants them; this exists to answer "which type is this, exactly".
     fn type_of_written(&self, source: &str, written: &str) -> Option<bennu_java::prelude::TypeRef> {
         use bennu_java::prelude::{TypeRef, TypeResolver};
-        let resolver = self.resolver.as_ref()?;
+        let resolver = self.resolver.as_deref()?;
         let base = written.split('<').next()?.trim().trim_end_matches("[]");
         if base.is_empty() {
             return None;
@@ -1126,7 +1187,7 @@ impl NativeJavaProvider {
         ctx: &bennu_check::prelude::FileContext,
         jdk_available: bool,
     ) -> (Vec<Diagnostic>, bennu_query::prelude::RecordedDeps) {
-        match &self.resolver {
+        match self.resolver.as_deref() {
             Some(resolver) => bennu_query::prelude::record(|| {
                 bennu_check::prelude::check_file_resolved(source, ctx, resolver, jdk_available)
             }),
@@ -1142,7 +1203,7 @@ impl NativeJavaProvider {
     pub fn project_view(&self) -> Option<&(dyn bennu_query::prelude::ProjectView + '_)> {
         self.resolver
             .as_ref()
-            .map(|r| r as &dyn bennu_query::prelude::ProjectView)
+            .map(|r| r.as_ref() as &dyn bennu_query::prelude::ProjectView)
     }
 
     /// Apply one edited `file`'s freshly-extracted [`Symbol`](bennu_index::prelude::Symbol)
@@ -1154,7 +1215,7 @@ impl NativeJavaProvider {
     /// `file`), so a rename/remove drops the stale entries; an empty `records` (a deleted
     /// file) just clears the file's overlay.
     pub fn apply_file_patch(&self, file: &str, records: &[bennu_index::prelude::Symbol]) {
-        if let Some(resolver) = &self.resolver {
+        if let Some(resolver) = self.resolver.as_deref() {
             resolver.apply_file_patch(file, records);
         }
     }
@@ -1164,7 +1225,7 @@ impl NativeJavaProvider {
     /// analyzer owns how a member symbol maps to a [`ProjectMember`]). An empty vec on the
     /// pre-index (empty) provider — the FE shows the "building" state.
     pub fn project_members(&self) -> Vec<ProjectMember> {
-        let Some(resolver) = &self.resolver else {
+        let Some(resolver) = self.resolver.as_deref() else {
             return Vec::new();
         };
         resolver
@@ -1244,7 +1305,7 @@ impl IntelProvider for NativeJavaProvider {
         source: Option<&str>,
     ) -> Result<Vec<CompletionItem>, IntelError> {
         // No index yet (pre-open / still building) → benign empty, not an error.
-        let Some(resolver) = &self.resolver else {
+        let Some(resolver) = self.resolver.as_deref() else {
             return Ok(Vec::new());
         };
         // Prefer the live buffer the caller hands in: the caret `offset` is in the editor's
@@ -1259,7 +1320,7 @@ impl IntelProvider for NativeJavaProvider {
             None => {
                 let Some(decoded) = crate::java_index::read_source_for_index(
                     std::path::Path::new(&at.file),
-                    "UTF-8",
+                    &bennu_project::prelude::EncodingPlan::uniform("UTF-8"),
                 ) else {
                     return Ok(Vec::new());
                 };

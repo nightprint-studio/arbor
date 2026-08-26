@@ -60,7 +60,7 @@ const SCAN_EXTS: [&str; 19] = [
 ];
 
 /// Directory names never descended into during the scan (mirrors [`crate::todos`]).
-const SKIP_DIRS: [&str; 4] = ["target", ".git", "node_modules", ".idea"];
+pub(crate) const SKIP_DIRS: [&str; 4] = ["target", ".git", "node_modules", ".idea"];
 
 /// Upper bound on returned hits — a project-wide search on a huge legacy tree can match a
 /// lot; capping keeps the payload bounded. Reported in the terminal event's `capped` flag

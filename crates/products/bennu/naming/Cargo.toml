@@ -1,0 +1,25 @@
+[package]
+name         = "bennu-naming"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu naming conventions — a language-parametric feature pack that flags a declaration whose name breaks the convention the project declared, and CONSTRUCTS the name that would satisfy it (so the diagnostic carries its own fix). Conventions are enumerated, never regexes: a regex can refuse a name, it cannot build one. Declarations come from a tree-sitter grammar (Java) or from a language server outline (TypeScript, JavaScript, Rust). Leaf crate: declarations in, diagnostics out."
+
+[dependencies]
+# The wire diagnostic shape (byte offsets) the be layer forwards unchanged.
+bennu-proto = { path = "../proto" }
+# The per-repo config is serde-decoded straight out of `[naming]`.
+serde = { workspace = true }
+# Grammar runtime for the declaration scan. Pinned to the workspace-shared tree-sitter 0.25
+# (native `links` lib — one version workspace-wide).
+tree-sitter      = "0.25"
+# The Java pack's grammar. Each further language pack adds its own grammar here, and nothing
+# else in the crate has to change — see `pack::Pack`. Server-backed languages (TypeScript,
+# JavaScript, Rust) need no grammar at all: their declarations come from the LSP outline.
+tree-sitter-java = "0.23"
+
+[dev-dependencies]
+# The config's serde shape is asserted against JSON, which is the form it crosses the RPC seam in.
+serde_json = { workspace = true }

@@ -16,6 +16,7 @@ use std::time::Instant;
 use bennu_check::prelude::FileContext;
 use bennu_intel::prelude::{
     build_project_index_from_sources, parallel_map, read_java_sources, source_hash, DiagCache,
+    EncodingPlan,
     FileDeps, NativeJavaProvider,
 };
 
@@ -36,7 +37,7 @@ fn profile_real_project() {
 
     // ── build the real index (parse all sources, persist fst) ─────────────────────────────────
     let t = Instant::now();
-    let sources = read_java_sources(&root, "UTF-8").sources;
+    let sources = read_java_sources(&root, &EncodingPlan::uniform("UTF-8")).sources;
     eprintln!("read+decoded {} sources in {:?}", sources.len(), t.elapsed());
 
     let index_dir = std::env::temp_dir().join(format!("bennu-real-profile-{}", std::process::id()));
@@ -100,7 +101,7 @@ fn profile_diag_cache() {
     assert!(root.exists(), "BENNU_TEST_PROJECT does not exist ({})", root.display());
     let jdk_version = std::env::var("BENNU_TEST_JDK").unwrap_or_else(|_| "21".to_string());
 
-    let mut sources = read_java_sources(&root, "UTF-8").sources;
+    let mut sources = read_java_sources(&root, &EncodingPlan::uniform("UTF-8")).sources;
     eprintln!("read {} sources", sources.len());
     let index_dir = std::env::temp_dir().join(format!("bennu-real-diagcache-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&index_dir);

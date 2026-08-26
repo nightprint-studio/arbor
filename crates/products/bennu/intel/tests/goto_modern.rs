@@ -106,18 +106,19 @@ fn record_component_in_compact_ctor_resolves_at_17() {
 }
 
 #[test]
-fn record_component_in_compact_ctor_not_at_11() {
+fn record_component_resolves_even_when_the_declared_jdk_says_otherwise() {
+    // A component used to be resolved as a *local binding*, and that heuristic was version-gated
+    // so a plain field in an old project could not be mistaken for one. It is a member now,
+    // resolved from an actual `record_declaration` node — and a file that literally says
+    // `public record Point(int x, int y)` is a record whatever the pom claims, because it would
+    // not compile otherwise. Refusing to navigate there would report a mismatch in the project's
+    // configuration as "this name resolves to nothing".
     let p = Project::with_jdk(&[("Point.java", RECORD_SRC)], "11");
     let s = p.source("Point.java").to_string();
-    // At JDK 11 records are not enabled → the compact-ctor component binding is not resolved.
     let off = at(&s, "int sum = x + y") + "int sum = ".len();
-    // Must not panic; whatever it returns must not be the record-component local binding.
-    let got = p.goto("Point.java", off);
-    assert!(
-        got.is_none(),
-        "record component must NOT resolve as a local at JDK 11, got {:?}",
-        got.map(|d| d.label)
-    );
+    let d = p.goto("Point.java", off).expect("the component still resolves");
+    assert_eq!(d.file, "Point.java");
+    assert!(d.label.contains('x'), "expected the component `x`, got {:?}", d.label);
 }
 
 #[test]

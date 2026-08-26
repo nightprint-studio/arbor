@@ -10,7 +10,7 @@ pub use crate::cargo::{
 };
 pub use crate::encoding::{
     decode as decode_bytes, decode_for_index, encode as encode_text, has_crlf, normalize_newlines,
-    project_encoding_label, restore_crlf, source_encoding_label, IndexDecode, UTF8,
+    project_encoding_label, restore_crlf, source_encoding_label, EncodingPlan, IndexDecode, UTF8,
 };
 pub use crate::error::ProjectError;
 pub use crate::ignored::IgnoreStack;

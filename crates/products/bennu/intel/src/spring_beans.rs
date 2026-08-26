@@ -105,6 +105,7 @@ mod tests {
             name: name.to_string(),
             fqn: fqn.to_string(),
             kind: bennu_java::prelude::TypeKind::Class,
+            is_anonymous: false,
             is_abstract: false,
             is_final: false,
             is_sealed: false,

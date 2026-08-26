@@ -16,7 +16,7 @@
     History,
     Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
     DownloadCloud, FileDown, Variable, Database, Clock, Columns3, ListPlus, SquarePen,
-    Languages,
+    Languages, CaseSensitive,
   } from 'lucide-svelte';
   import { tick, untrack } from 'svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
@@ -43,7 +43,7 @@
     lspFormat, lspFolding, lspHighlights, lspLensLocations, lspSelectionRanges,
     type LspAction, type LspLens, type LspMacroExpansion,
   } from '$lib/ipc/bennu/lsp';
-  import type { SourceEdit } from '$lib/types/bennu';
+  import type { DiagnosticSeverity, SourceEdit } from '$lib/types/bennu';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
@@ -108,7 +108,7 @@
   import { buildDiagnosticsFor } from './build-diags';
   import { spellcheck as ipcSpellcheck, type SpellHit } from '$lib/ipc/bennu/spell';
   import { mojibakeCheck as ipcMojibakeCheck } from '$lib/ipc/bennu/mojibake';
-  import { intentionsAt as ipcIntentionsAt } from '$lib/ipc/bennu/intentions';
+  import { intentionsAt as ipcIntentionsAt, type IntentionOffer } from '$lib/ipc/bennu/intentions';
   import { validationTarget as ipcValidationTarget } from '$lib/ipc/bennu/validation';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
   import type {
@@ -117,6 +117,7 @@
   import type { EditorView } from '@codemirror/view';
   import { bennuIntentionsStore } from '$lib/stores/bennu/intentions.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
+  import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
   import { bennuHierarchyStore } from '$lib/stores/bennu/hierarchy.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuNavStore } from '$lib/stores/bennu/nav-history.svelte';
@@ -492,9 +493,26 @@
   // squiggle). Re-fetched when the index rebuilds too (`buildRevision`), so squiggles
   // appear once the config graph finishes building after a fresh open.
   let diags = $state<EditorDiagnostic[]>([]);
+
+  /**
+   * The backend's severity as CodeMirror understands it.
+   *
+   * `weak` — a style finding, which is what a naming-convention violation is — has no CodeMirror
+   * equivalent, so it is drawn with the softest level the lint gutter has. The distinction is not
+   * lost: the wire value reaches the Problems panel unchanged, which groups it on its own. Mapping
+   * here rather than widening `shared/ui/code-editor` keeps that widget's severities 1:1 with
+   * CodeMirror's, which is the promise it makes to every other product.
+   */
+  function cmSeverity(s: DiagnosticSeverity): EditorDiagnostic['severity'] {
+    return s === 'weak' ? 'hint' : s;
+  }
+
   $effect(() => {
     const path = activePath;
     void bennuIndexStore.buildRevision; // re-run when the index (config graph) rebuilds
+    // …and when the project's naming conventions are saved, so a rule change repaints on the next
+    // debounce rather than on the next time the file is reopened.
+    void bennuNamingStore.revision;
     if (!path) { diags = []; return; }
     // Only the files an analyzer understands are validated. Asking about a `.rs` / `.dig` /
     // `.toml` buffer would hand it to the Java validator once per keystroke, for an answer
@@ -519,7 +537,7 @@
         .then((ds) => {
           if (cancelled) return;
           fullDone = true;
-          diags = ds.map((d) => ({ from: d.start, to: d.end, severity: d.severity, message: d.message }));
+          diags = ds.map((d) => ({ from: d.start, to: d.end, severity: cmSeverity(d.severity), message: d.message }));
           bennuDiagnosticsStore.setActiveFileDiagnostics(path, ds);
         })
         // A full-pass FAILURE (backend error/panic) must NOT blank the editor: keep whatever the
@@ -537,7 +555,7 @@
         void ipcDiagnostics(path, src, true)
           .then((ds) => {
             if (cancelled) return;
-            diags = ds.map((d) => ({ from: d.start, to: d.end, severity: d.severity, message: d.message }));
+            diags = ds.map((d) => ({ from: d.start, to: d.end, severity: cmSeverity(d.severity), message: d.message }));
             bennuDiagnosticsStore.setActiveFileDiagnostics(path, ds);
           })
           .catch(() => {});
@@ -560,7 +578,7 @@
         void ipcDiagnostics(path, src, false)
           .then((ds) => {
             if (cancelled || fullDone) return;
-            diags = ds.map((d) => ({ from: d.start, to: d.end, severity: d.severity, message: d.message }));
+            diags = ds.map((d) => ({ from: d.start, to: d.end, severity: cmSeverity(d.severity), message: d.message }));
           })
           .catch(() => {});
       }, 120);
@@ -1534,7 +1552,7 @@
           strutsDiags = hits.map((d) => ({
             from: d.start,
             to: d.end,
-            severity: d.severity as EditorDiagnostic['severity'],
+            severity: cmSeverity(d.severity as DiagnosticSeverity),
             message: d.message,
           }));
         })
@@ -1656,7 +1674,47 @@
     if (id === 'np-equals') return ArrowLeftRight;
     if (id === 'change-package') return Package;
     if (id === 'move-to-package') return FolderInput;
+    if (id.startsWith('naming-fix:')) return CaseSensitive;
     return Wand2; // the simplification family (isEmpty / boolean / negated comparison)
+  }
+
+  /**
+   * Run an intention that is an action rather than an edit.
+   *
+   * The two rename actions differ only in whether the user is shown the plan first, and the BE
+   * decides which: a local or a parameter cannot be referred to from outside its file, so its
+   * rename is exact and applying it on the spot is the whole gesture. Anything that can reach
+   * another file opens the preview with the suggestion filled in — the name is pre-computed either
+   * way, so the modal opens on the answer rather than on an empty field.
+   */
+  async function runIntentionAction(o: IntentionOffer, path: string) {
+    if (o.action === 'move-to-package') { await moveFileToPackage(path); return; }
+    if (o.action !== 'rename-symbol' && o.action !== 'rename-symbol-preview') return;
+    if (!editorComp) return;
+
+    const source = editorComp.getValue();
+    // The offer's offsets are bytes (the BE coordinate); the buffer is UTF-16.
+    const b2u = makeByteToU16(source);
+    const current = source.slice(b2u(o.start), b2u(o.end));
+    if (o.action === 'rename-symbol-preview') {
+      bennuRefactorStore.openRename({
+        file: path,
+        source,
+        offset: o.start,
+        initialName: current,
+        suggestedName: o.replacement,
+      });
+      return;
+    }
+    try {
+      const edits = await ipcRenameApply(path, source, o.start, o.replacement);
+      if (!edits.length) { toastStore.show('Nothing to rename here', 'info'); return; }
+      const failed = await projectStore.applyEdits(edits);
+      if (failed) toastStore.show(`Renamed, but ${failed} file(s) could not be written`, 'error');
+      else toastStore.show(`Renamed to “${o.replacement}”`, 'success');
+    } catch {
+      toastStore.show('Rename failed', 'error');
+    }
   }
 
   /** Move the file into the folder matching its declared package (the `move-to-package` intention).
@@ -1698,8 +1756,13 @@
     // Context-aware, Rust-backed intentions resolved by bennu-be in one round-trip: the pure
     // `bennu-intentions` catalog returns every quick-fix applicable at the caret (parameterize
     // logging, NP-safe equals, isEmpty()/boolean/negated-comparison simplifications).
+    //
+    // Asked for EVERY file, not only a Java one: the naming-convention fix rides in the same
+    // answer and covers the languages a server serves too. The handler itself is what knows which
+    // of its offers are Java-only — a guard here would have to know that as well, and the two
+    // would drift the first time a language-agnostic offer was added.
     const dynamic: IntentionItem[] = [];
-    if (isJavaFileOf(path)) {
+    {
       const src = editorComp.getValue();
       const offset = editorComp.caretByteOffset();
       const offers = await ipcIntentionsAt(path, src, offset).catch(() => []);
@@ -1709,11 +1772,12 @@
             id: o.id,
             label: o.label,
             icon: intentionIcon(o.id),
-            // A non-edit action (a filesystem move) is dispatched by the store; a plain edit
-            // applies the byte-range replacement in place.
-            run: o.action === 'move-to-package'
-              ? () => void moveFileToPackage(path)
-              : () => editorComp?.replaceByteRange(o.start, o.end, o.replacement),
+            // A non-edit action is dispatched by whoever owns it — a filesystem move by the
+            // store, a rename by the rename engine (never by splicing the identifier in place,
+            // which would leave every use of it behind). A plain edit applies the byte-range
+            // replacement.
+            run: o.action ? () => void runIntentionAction(o, path) : () =>
+              editorComp?.replaceByteRange(o.start, o.end, o.replacement),
           });
         }
       }

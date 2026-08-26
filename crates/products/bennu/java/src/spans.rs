@@ -7,7 +7,7 @@
 //!   * inherited-members (`bennu-query`) resolves a type's JVM binary name by `(simple, line)` via
 //!     [`binary_of_type_at`], and locates a supertype's project source via [`find_type_name_span`].
 
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 /// Find the byte span of a type declaration's NAME token in `source` (class / interface / enum /
 /// record / annotation matching `simple`). `None` when `source` declares no type with that simple
@@ -21,9 +21,7 @@ pub fn find_type_name_span(source: &str, simple: &str) -> Option<(usize, usize)>
     if !source.contains(simple) {
         return None;
     }
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-    let tree = parser.parse(source, None)?;
+    let tree = crate::grammar::parse_java(source)?;
     let bytes = source.as_bytes();
     let root = tree.root_node();
 
@@ -59,9 +57,7 @@ pub fn find_type_name_span(source: &str, simple: &str) -> Option<(usize, usize)>
 /// Nested types are keyed with a `/` separator (`Outer/Inner`), matching the source extractor's
 /// FQN persisted in the index — NOT the JVM `Outer$Inner` form — so a project record lookup hits.
 pub fn binary_of_type_at(source: &str, simple: &str, line: i64) -> Option<String> {
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-    let tree = parser.parse(source, None)?;
+    let tree = crate::grammar::parse_java(source)?;
     let bytes = source.as_bytes();
     let root = tree.root_node();
 
@@ -86,9 +82,17 @@ fn walk_types(
 ) {
     let mut cur = node.walk();
     for child in node.named_children(&mut cur) {
+        // The same five kinds the other two walks in this file already list. Missing `record` and
+        // `@interface` here meant their binary names were never built, so go-to could not locate
+        // the declaration and fell back to opening it as an external library view — a nested
+        // record in the file you are already looking at, reported as "not in this project".
         if matches!(
             child.kind(),
-            "class_declaration" | "interface_declaration" | "enum_declaration"
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "record_declaration"
+                | "annotation_type_declaration"
         ) {
             let Some(name_node) = child.child_by_field_name("name") else { continue };
             let Ok(name) = name_node.utf8_text(bytes) else { continue };
@@ -129,9 +133,7 @@ fn walk_types(
 /// against each candidate member's declaring type. Same `/`-nesting convention as
 /// [`binary_of_type_at`] (`Outer/Inner`), so it lines up with indexed project binaries.
 pub fn enclosing_type_binary(source: &str, byte_offset: usize) -> Option<String> {
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-    let tree = parser.parse(source, None)?;
+    let tree = crate::grammar::parse_java(source)?;
     let bytes = source.as_bytes();
     let root = tree.root_node();
     let package = package_name(&root, bytes);
@@ -216,6 +218,29 @@ mod tests {
         assert!(find_type_name_span("record Point(int x, int y) {}", "Point").is_some());
         assert!(find_type_name_span("@interface Ann {}", "Ann").is_some());
         assert!(find_type_name_span("enum E { A, B }", "E").is_some());
+    }
+
+    #[test]
+    fn binary_of_type_at_finds_a_nested_record() {
+        // `find_type_name_span` above already knew records; THIS walk did not, so a nested record
+        // had no binary name — and go-to, which resolves through it, reported a type declared in
+        // the open file as belonging to an external library.
+        let src = "package com.acme;\npublic class Compiler {\n    private record failure(String why) {}\n}\n";
+        let line = src[..src.find("record failure").unwrap()].lines().count() as i64;
+        assert_eq!(
+            binary_of_type_at(src, "failure", line),
+            Some("com/acme/Compiler/failure".to_string())
+        );
+    }
+
+    #[test]
+    fn binary_of_type_at_finds_a_nested_annotation_type() {
+        let src = "package com.acme;\npublic class Holder {\n    public @interface Marker {}\n}\n";
+        let line = src[..src.find("@interface Marker").unwrap()].lines().count() as i64;
+        assert_eq!(
+            binary_of_type_at(src, "Marker", line),
+            Some("com/acme/Holder/Marker".to_string())
+        );
     }
 
     #[test]

@@ -12,7 +12,7 @@ inference.
 // Structural model of one file.
 fn extract_symbols(source: &str) -> FileSymbols
 //   FileSymbols { package, package_span, imports, types }
-//   TypeDecl    { span, name, fqn, kind, is_abstract, is_final, is_sealed, methods, fields, extends, implements }
+//   TypeDecl    { span, name, fqn, kind, is_anonymous, is_abstract, is_final, is_sealed, methods, fields, extends, implements }
 //   TypeKind    = Class | Interface | Enum | Record | Annotation
 //   MethodDecl  { span, name, return_type_text, params, is_static, is_abstract, is_default, is_final }
 //   FieldDecl   { span, name, type_text, is_static, is_final }

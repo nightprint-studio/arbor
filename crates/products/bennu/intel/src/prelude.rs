@@ -56,13 +56,18 @@ pub use bennu_query::prelude::{ProjectView, RecordedDeps};
 // Plus go-to-declaration (`resolve_declaration` + `DeclarationLocation`), which reuses the
 // same caret classifier + decl-site name-span finders.
 pub use crate::rename::{
-    find_member_name_span, rename_apply, rename_plan, resolve_declaration, DeclarationLocation,
-    Edit, EditReason, FileEdits, HoverInfo, RenameEngine, RenamePlan,
+    find_member_name_span, find_member_name_spans, rename_apply, rename_plan, resolve_declaration,
+    DeclarationLocation, file_rename_for, plan_types, Edit, EditReason, FileEdits, FileRename,
+    HoverInfo,
+    RenameEngine, RenamePlan, TypeRename,
 };
 // The rename planner's project-source input unit + the type-declaration name-span finder now live
 // in the base crates (`bennu-query` / `bennu-java`); re-surfaced here as part of the rename API.
 pub use bennu_java::prelude::find_type_name_span;
 pub use bennu_query::prelude::PlanFile;
+// The per-file encoding map the index readers decode through — re-surfaced so a caller that reads
+// sources needs one import, not two.
+pub use bennu_project::prelude::EncodingPlan;
 
 // Spell-check engine (declaration names + comments): the pure tokenizer / allow-list +
 // the process-wide dictionary cache + the Java-source walk.

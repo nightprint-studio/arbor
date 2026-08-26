@@ -7,7 +7,87 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Bennu checks names against the convention a project declares.** Off until you turn it on, per kind of declaration, under Project Configuration → Naming conventions; a name that breaks the rule is a weak warning carrying the name that would satisfy it, and Alt+Enter renames to it — straight away for a Java local or parameter, through the rename preview for anything a caller could also be using. Generated code, constructors, `@Override` methods and platform-mandated names are never reported.
+
+- **Fix every naming violation at once.** *Fix naming in file* and *Fix naming in project* in the Command Palette open a review that fills in as the plan is built, with progress and a Stop button — how many names, across how many files, and every name left alone with the reason — then apply it as a single Undo.
+
+- **Naming conventions cover TypeScript, JavaScript and Rust too, through their language servers.** Those languages are read from the server's outline, so types and their members are checked while locals and parameters — which an outline doesn't contain — are greyed out rather than offered.
+
+- **A third diagnostic level, weak warnings.** Style findings — true, but not defects — are drawn faintly and grouped on their own in the Problems panel, below errors and warnings.
+
+- **A subtree can have its own naming conventions.** Under Project Configuration → Naming conventions → Exceptions, give a set of path globs the conventions that apply inside them; only the rules you name are replaced, so the rest still hold there. Test sources are the case it exists for — names that mix camelCase and snake_case on purpose stop being reported without switching the check off for the whole tree.
+
+- **The bulk naming fix is now a review you can argue with.** Group the names by file or by kind of declaration, switch a whole kind off, untick a group or a single name, and filter by name — the footer counts what Apply will actually do. The list is windowed, so a project-wide fix running to thousands of names opens and scrolls like a small one.
+
+- **Renaming a top-level type renames its file too.** Java ties a public type to its filename, so the two had to move together by hand. A nested type, whose file is named after its outer type, still leaves the file alone.
+
 ### Fixed
+
+- **Classes declared inside a method, and anonymous classes, are understood.** Local classes — and, since Java 16, local interfaces, enums and records — were invisible to the engine: not in the index, so every use of one read as an unknown type, with no go-to, no find-usages and no rename. They now work like any nested type, including ones declared in a constructor, in an initializer block, or inside another local class.
+
+- **What an anonymous class declares belongs to it.** The body of a `new Runnable() { … }` had no identity, so everything in it was attributed to the class the `new` appeared in: a field read inside the body resolved against the wrong type, and an anonymous `run()` counted as a use of the outer class's own `run()` — find-usages reporting calls that were never made. Anonymous classes are indexed under the position-based name javac gives them, and are left out of Go-to-Class, which has no name to offer.
+
+- **An encoding you set on a single file is now honoured everywhere, not just in the editor.** Reloading one file in a different encoding changed what the editor showed but not what the index read, so that file's diagnostics, go-to targets and rename edits were all computed against different text — every offset in it slightly wrong.
+
+- **A bulk naming fix no longer plans renames it cannot apply in a mis-encoded file.** A file whose bytes don't fit the project's declared encoding is read one way by the index and another by the editor, so edits planned in it landed on the wrong bytes and were silently dropped at apply time. Its names are still listed, now with the reason and a pointer to fix the encoding first.
+
+- **Renaming a statically-imported member rewrites the import and the calls.** Only the declaration was renamed — the `import static` and every bare call kept the old name, so the file stopped compiling. Both now move with it, wildcard static imports included.
+
+- **A rename that would break an override of library code is refused.** A method implementing an interface from a jar cannot be renamed on its own: the jar does not follow, and the class stops implementing what it declares. The preview shows what it would have done and names the library type, with Apply disabled; a bulk fix lists it among the refusals.
+
+- **A rename that would break an override of a dependency's interface is refused again.** Making the reference walk cheaper had also stopped it reading dependency jars, so the check that guards this could no longer see the interface it was guarding — every method implementing one renamed clean and stopped compiling. The refusal now asks the full classpath, which it can afford: it is asked once per rename, not once per reference.
+
+- **Renaming a member the project does not declare says so.** `codice.name()` on a project enum is `java.lang.Enum.name()`, and the rename answered "the symbol under the caret isn't renameable, or the index is still building" — which named neither the symbol nor the reason. It now names the type that declares it, and the preview shows a refusal instead of an empty panel.
+
+- **The bulk naming fix renames files again.** A rename of a public top-level type carried its file move all the way to the frontend, where a mismatch in how the field was spelled on the wire meant it was never read: the class was renamed and its file left behind, which does not compile.
+
+- **`@interface` elements can be renamed.** An annotation's elements are methods, but the engine classified them as fields — a kind with no declaration to edit and no uses recorded — so every one of them was refused.
+
+- **Members of same-named nested classes no longer resolve to the wrong file.** Nested types were looked up by simple name alone, so eleven test classes each declaring a nested `JakartaValidationTest` all collapsed onto whichever one won: go-to, find-usages and rename all answered about a different file's members. The file's own package and declaration chain now decide.
+
+- **Overloaded methods rename together instead of refusing each other.** Two declarations sharing a name are one method to every caller and the engine already renamed them as one, but the bulk fix counted them as two names wanting the same spelling and refused both.
+
+- **A name already in the file no longer blocks a rename when it isn't a name.** The check matched raw text, so an occurrence inside a string literal or a comment — or a method belonging to some other object — counted as a collision.
+
+- **Go to declaration works again on a member inherited from outside the project.** A project enum's `name()`, or any method a project class inherits from a library type, resolved to nothing at all — owning the type was mistaken for owning every member reachable through it. The jump now lands on the supertype that actually declares the member.
+
+- **Planning a bulk naming fix is much faster.** Every violation re-parsed its whole file three or four times over, and each file re-read the project config and `pom.xml` to work out the same encoding again — so a project-wide fix spent most of its time re-doing work it had already done.
+
+- **Renaming a method now covers the whole hierarchy it belongs to.** An abstract or interface method and the implementations that override it are one method to every caller, but only the one under the caret was renamed — leaving overrides declaring the old name, `@Override` no longer overriding anything, and calls made through a subclass-typed variable untouched while identical-looking calls elsewhere were rewritten.
+
+- **Both halves of an overloaded method are renamed.** Overloads share a name and count as one symbol, but only the first declaration found was rewritten — quietly splitting one method into two, one under each name.
+
+- **A rename no longer edits a same-named member of a different type in the same file.** The declaration search matched by name alone, so a nested class holding a member of the same name could be edited instead of the intended one.
+
+- **Validating picks up files that changed outside the editor.** Validation read the sources fresh but still resolved them against the index, so a `git checkout` or an edit made in another tool updated that file's own problems while every file *using* it kept the old view — errors that should have appeared or cleared didn't, until a manual Rebuild index. The changed files are now folded back into the index first.
+
+- **A rename across hundreds of files no longer takes minutes with the editor unresponsive.** Each file saved scheduled its own whole-project re-validation, and nothing stopped a second from starting while the first was still running — so a large rename left dozens queued behind each other, blocking everything else asking the backend a question. One runs at a time now, and a bulk edit does a single one at the end instead of one per file.
+
+- **Method references are renamed with the method.** `Failure::sourcePath` was recorded nowhere, so a rename moved the declaration and every ordinary call and left the reference spelling the old name. The name after `::` is also no longer mistaken for a field of the surrounding class.
+
+- **A bulk naming fix renames the files of the types it renames.** Only the single-symbol rename did; the whole-project fix left every renamed public type in a file still named after the old one. Unticking a name in the review skips its file too.
+
+- **Renames follow library generics again, without the indexing cost.** The reference walk resolves through the JDK — which is decoded once and remembered across sessions — but no longer through the project's dependency jars, which are re-read every session and were what made indexing a large project crawl. `BENNU_RENAME_FULL_RESOLVER=1` adds the dependency tier back for a project that needs it.
+
+- **Renaming a field renames the callers of the accessors Lombok generates for it.** `getCustomerName()` is never written down anywhere, so nothing in the rename touched it and every caller was left reading a method that no longer existed. Getters, setters and `@With` copy-methods all follow, including Lombok's `is`-prefix rule for `boolean` fields; an accessor you wrote by hand is left alone.
+
+- **Go to declaration never opens a decompiled stub of your own code.** The library jump types the receiver with the full classpath-aware resolver, which succeeds on things the project-only engine cannot — a lambda parameter whose type arrives through `List.stream().map(…)` — so go-to failed first and fell through to it. It now recognises a type the project declares and opens the real source at the member instead.
+
+- **A compiled project's own nested types are recognised as project code again.** Java names a nested type `Outer.Inner` in source and `Outer$Inner` in bytecode, and only the first spelling was accepted — so once a project had been compiled, anything resolved through its own `target/classes` looked like a library class. Go to declaration on a nested record fell through to the last-resort library jump and opened a decompiled stub of your own code (`throw new RuntimeException("compiled code")`), and a rename found no source to edit.
+
+- **Go to declaration on a record's accessor lands in the record.** A record's accessor and backing field are generated, and carried no position at all — so navigating to `failure.sourcePath()` opened a generated stub of the record rather than the record itself, and a rename could find no declaration to edit. Both now point at the component in the record header, which is the one place the language lets you name them.
+
+- **Renaming a `record` component renames its accessor's callers too.** A component declares a field *and* a public accessor of the same name, and callers read it as `failure.sourcePath()`. It was treated as a local variable, so the rename stopped at the record's own braces and left every caller calling a method that no longer existed. Renaming one from its declaration — which previously reported "nothing here can be renamed" — now works as well.
+
+- **Renaming a method parameter no longer leaves its declaration behind.** The scope walk started at the method body, so every use inside the method was rewritten while the parameter in the signature kept its old name.
+
+- **Go to declaration on a nested `record` or `@interface` lands on it instead of opening it as an external file.** Their binary names were never built, so a type declared in the file you were looking at was reported as belonging to a library.
+
+- **Renaming a `record` or an `@interface` no longer leaves its declaration behind.** The engine recognised only classes, interfaces and enums as type declarations, so every *use* was rewritten and the declaration was not — code that no longer compiles, from a refactor that reported success.
+
+- **An edit whose text no longer matches the file is skipped instead of applied.** Every rename edit carries the exact text the backend saw at its position; that was never checked, so a plan computed against a stale or differently-encoded buffer would splice a name into whatever happened to sit at those offsets.
 
 - **A query tab bound to a connection has that connection's intelligence.** The catalogue was held for one connection at a time — the selected one — so a tab bound to any other lost completion, abbreviation expansion and live validation with nothing on screen to say why, and switching back and forth re-read hundreds of relations each way. A few catalogues are now held at once, and every reader asks for the connection it means.
 

@@ -6,9 +6,11 @@
    * file · buffer · byte offset · initial name). Typing a new name re-plans the
    * rename via `bennu_rename_plan` (debounced), showing every edit grouped by file
    * with its reason and an "inferred" flag for heuristic sites (an overloaded
-   * method's calls). On confirm it applies the edits to each file's text (byte-offset
-   * splice) and saves them to disk (`projectStore.saveText`) — the backend never
-   * writes buffers, so CodeMirror stays the source of truth and undo works per file.
+   * method's calls). On confirm it hands the whole set to `projectStore.applyEdits` — the
+   * one write path that checks each edit against the text it was computed against and
+   * treats the set as a single bulk edit — then carries out the file move the rename
+   * implies, if any. The backend never writes buffers, so CodeMirror stays the source of
+   * truth and undo works per file.
    *
    * Keyboard-first: the field auto-focuses (via <Modal>), Ctrl/Cmd+Enter renames,
    * Esc cancels.
@@ -22,17 +24,23 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import Alert from '$lib/components/shared/ui/Alert.svelte';
+  import ValueChange from '$lib/components/shared/ui/ValueChange.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { renamePlan, type RenamePreview } from '$lib/ipc/bennu/nav';
-  import { applyByteEdits } from './rename-apply';
 
   let { onClose }: { onClose: () => void } = $props();
 
   const req = $derived(bennuRefactorStore.renameReq);
 
-  let newName = $state(bennuRefactorStore.renameReq?.initialName ?? '');
+  // Opens on the suggestion when the caller computed one (the naming-convention fix), otherwise on
+  // the current name — which the user then edits. Either way the field starts selected, so typing
+  // over it costs nothing.
+  let newName = $state(
+    bennuRefactorStore.renameReq?.suggestedName ?? bennuRefactorStore.renameReq?.initialName ?? '',
+  );
   let preview = $state<RenamePreview | null>(null);
   let planning = $state(false);
   let applying = $state(false);
@@ -41,7 +49,11 @@
   const valid = $derived(
     !!req && JAVA_IDENT.test(newName.trim()) && newName.trim() !== req.initialName,
   );
-  const canRename = $derived(valid && !!preview && preview.total_edits > 0 && !applying);
+  // `blocked` is a refusal from the engine, not advice: applying anyway produces code that does not
+  // compile, so it disables the button rather than adding a banner to click past.
+  const canRename = $derived(
+    valid && !!preview && preview.total_edits > 0 && !preview.blocked && !applying,
+  );
 
   function baseName(path: string): string {
     return path.split(/[\\/]/).pop() ?? path;
@@ -74,15 +86,32 @@
     if (!r || !p || !canRename) return;
     applying = true;
     try {
-      for (const f of p.files) {
-        const current = await projectStore.loadText(f.file);
-        const next = applyByteEdits(current, f.edits);
-        await projectStore.saveText(f.file, next);
+      // Through the store, not a loop of our own: that is the one write path that verifies each
+      // edit still matches the text it was computed against, and that treats the whole set as ONE
+      // bulk edit — a rename touching hundreds of files must not schedule hundreds of whole-project
+      // re-validations behind itself.
+      const failed = await projectStore.applyEdits(p.files.flatMap((f) => f.edits));
+
+      // The file move comes AFTER the edits: they are addressed to the old path.
+      let moved = '';
+      if (p.file_rename) {
+        const base = p.file_rename.to.split('/').pop() ?? p.file_rename.to;
+        try {
+          await projectStore.renameFile(p.file_rename.from, base);
+          moved = ` · renamed the file to ${base}`;
+        } catch (e) {
+          toastStore.show(`Renamed, but the file could not be moved: ${e}`, 'error');
+          bennuRefactorStore.closeRename();
+          return;
+        }
       }
-      toastStore.show(
-        `Renamed to “${newName.trim()}” · ${p.total_edits} edit(s) in ${p.files.length} file(s)`,
-        'success',
-      );
+
+      const summary = `${p.total_edits} edit(s) in ${p.files.length} file(s)${moved}`;
+      if (failed) {
+        toastStore.show(`Renamed, but ${failed} file(s) could not be written · ${summary}`, 'error');
+      } else {
+        toastStore.show(`Renamed to “${newName.trim()}” · ${summary}`, 'success');
+      }
       bennuRefactorStore.closeRename();
     } catch {
       toastStore.show('Rename failed', 'error');
@@ -124,14 +153,23 @@
           <div class="pv-state"><Spinner size={13} /> Computing preview…</div>
         {:else if !valid}
           <div class="pv-state muted">Enter a different, valid Java identifier.</div>
-        {:else if !preview || preview.total_edits === 0}
+        {:else if (!preview || preview.total_edits === 0) && !preview?.blocked}
+          <!-- A refusal is NOT this case, even with nothing to show: `blocked` names the symbol and
+               the reason, and collapsing it into "isn't renameable, or the index is still building"
+               told the user neither — it reads as a bug in Bennu rather than as an answer. -->
           <div class="pv-state muted">No edits — the symbol under the caret isn't renameable, or the index is still building.</div>
-        {:else}
+        {:else if preview}
           <div class="pv-head">
             <span class="pv-target">{preview.target_label}</span>
-            <span class="pv-count">{preview.total_edits} edit{preview.total_edits === 1 ? '' : 's'} · {preview.files.length} file{preview.files.length === 1 ? '' : 's'}</span>
+            {#if preview.total_edits > 0}
+              <span class="pv-count">{preview.total_edits} edit{preview.total_edits === 1 ? '' : 's'} · {preview.files.length} file{preview.files.length === 1 ? '' : 's'}</span>
+            {/if}
           </div>
-          {#if preview.has_inferred}
+          {#if preview.blocked}
+            <!-- Shown WITH the edit list, not instead of it: the list is what makes the reason
+                 legible. Apply is disabled. -->
+            <Alert variant="error">{preview.blocked}</Alert>
+          {:else if preview.has_inferred}
             <div class="pv-warn"><AlertTriangle size={12} /> Some edits are inferred (e.g. overloaded calls) — review before applying.</div>
           {/if}
           <div class="pv-files">
@@ -141,7 +179,7 @@
                 {#each f.edits as e, i (i)}
                   <div class="pv-edit" class:inferred={e.inferred}>
                     <span class="pv-reason r-{e.reason}">{e.reason}</span>
-                    <span class="pv-diff"><s>{e.old}</s> → <b>{e.new_text}</b></span>
+                    <ValueChange from={e.old} to={e.new_text} />
                     {#if e.inferred}<span class="pv-inf">inferred</span>{/if}
                   </div>
                 {/each}
@@ -208,8 +246,7 @@
   }
   .r-declaration { color: var(--accent); background: var(--accent-subtle); }
   .r-spring-bean { color: var(--info); background: color-mix(in srgb, var(--info) 14%, transparent); }
-  .pv-diff { flex: 1; min-width: 0; font-family: var(--font-code); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pv-diff s { color: var(--text-disabled); }
-  .pv-diff b { color: var(--success); font-weight: 600; }
-  .pv-inf { font-size: var(--font-size-3xs); color: var(--warning); flex-shrink: 0; }
+  /* The change itself is `ValueChange`; the flag is pushed to the far edge, which is what the
+     old-name/new-name span used to do by taking the slack. */
+  .pv-inf { margin-left: auto; font-size: var(--font-size-3xs); color: var(--warning); flex-shrink: 0; }
 </style>

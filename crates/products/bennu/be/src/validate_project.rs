@@ -16,10 +16,7 @@
 //! thousands of files never stalls the IPC loop; the validation itself runs across CPU cores
 //! (leaving ~2 free for the interactive path).
 
-use std::path::Path;
-
 use bennu_core::prelude::BennuState;
-use bennu_project::prelude::source_encoding_label;
 use bennu_proto::prelude::{FileDiagnostics, ProjectValidationResult};
 use serde::Deserialize;
 use serde_json::json;
@@ -66,14 +63,14 @@ fn bennu_validate_project(
 ) -> Result<ProjectValidationResult, String> {
     let _guard = BuildGuard::acquire().ok_or_else(|| BUSY_MSG.to_string())?;
     let sink = ctx.event_sink();
-    let label = source_encoding_label(Path::new(&args.root), "UTF-8");
+    let encoding = crate::index_service::encoding_plan(&args.root);
     let svc = IndexService::global();
 
     // Validate the whole project (parallel, cache-backed), streaming progress to the Build window.
     let on_progress = |done: usize, total: usize| {
         sink.emit(EVT_VALIDATE_PROGRESS, json!({ "root": &args.root, "done": done, "total": total }));
     };
-    let mut out = svc.validate_project_collect(&args.root, &label, &on_progress);
+    let mut out = svc.validate_project_collect(&args.root, &encoding, &on_progress);
     eprintln!(
         "bennu-be: validated {} file(s) in {}ms, {} served from the diagnostic cache",
         out.validated, out.wall_ms, out.cached_hits
@@ -124,8 +121,8 @@ fn bennu_project_diagnostics(
     if !svc.has_resolver(&args.root) {
         return Ok(None);
     }
-    let label = source_encoding_label(Path::new(&args.root), "UTF-8");
-    let mut out = svc.validate_project_collect(&args.root, &label, &|_done, _total| {});
+    let encoding = crate::index_service::encoding_plan(&args.root);
+    let mut out = svc.validate_project_collect(&args.root, &encoding, &|_done, _total| {});
     out.diagnostics.truncate(MAX_DIAG_FILES);
     Ok(Some(out.diagnostics))
 }

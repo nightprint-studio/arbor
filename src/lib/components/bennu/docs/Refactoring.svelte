@@ -46,13 +46,22 @@
 </p>
 <ul>
   <li>a <strong>local variable</strong> or <strong>parameter</strong> — scope-exact, in that method only, never a same-named variable elsewhere or a field of the same name;</li>
-  <li>a <strong>method</strong> or <strong>field</strong> — its declaration and every use across the project;</li>
-  <li>a <strong>class</strong> or <strong>interface</strong> — its declaration, references, <code>import</code> statements, and the matching Spring <code>&lt;bean class="…"&gt;</code> entries. A Struts <code>&lt;action class="…"&gt;</code> names a bean id, not the class, so it is left untouched.</li>
+  <li>a <strong>method</strong> or <strong>field</strong> — its declaration and every use across the project, including uses whose receiver is only typed through a library generic (a lambda parameter off <code>list.stream().map(…)</code>). A method carries its whole <strong>override family</strong> with it: the abstract or interface declaration it comes from, and every implementation that overrides it, since to a caller those are one method. All <strong>overloads</strong> of the name move together for the same reason;</li>
+  <li>a <strong>record component</strong>, or a field whose accessors <strong>Lombok</strong> generates — the field itself, plus the call sites of accessors nobody wrote down. <code>failure.sourcePath()</code> and <code>order.getCustomerName()</code> appear at every caller even though the methods appear nowhere, so they move with the field; getters, setters and <code>@With</code> copy-methods all follow. An accessor you wrote by hand is a declaration in its own right and is left alone;</li>
+  <li>a <strong>class</strong> or <strong>interface</strong> — its declaration, references, <code>import</code> statements, and the matching Spring <code>&lt;bean class="…"&gt;</code> entries. A Struts <code>&lt;action class="…"&gt;</code> names a bean id, not the class, so it is left untouched. When the file is named after the type — a public top-level one — <strong>the file is renamed with it</strong>, since Java requires the two to match; a nested type's file is named after its outer type and stays where it is.</li>
 </ul>
 <p>
   Edits that can't be pinned down exactly — an overloaded method's call sites, for instance — are
   marked for review in the preview rather than applied silently. It answers once the index is warm.
   OGNL and JSP references are not rewritten yet.
+</p>
+<p>
+  A member reached through an <code>import static</code> carries both the import and the bare calls
+  with it, and so does a <strong>method reference</strong> — <code>Failure::sourcePath</code> moves
+  with the method it names. And a rename is <strong>refused</strong> when it would break an override of code that
+  can't follow: a method implementing an interface from a dependency has its name fixed by that
+  dependency, so renaming only your side leaves a class that no longer implements what it declares.
+  The preview still shows what it would have done, and names the library type, but won't apply it.
 </p>
 <h2>Generate</h2>
 <p>

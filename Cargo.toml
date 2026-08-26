@@ -125,6 +125,9 @@ members = [
     # shape as `lsp`: hand-rolled protocol, serde, and the shared frame reader.
     "crates/products/bennu/dap",
     "crates/products/bennu/check",
+    # Naming conventions as an opt-in feature pack: a leaf that turns a grammar into "this
+    # declaration breaks the convention the project declared, and here is the name that would not".
+    "crates/products/bennu/naming",
     "crates/products/bennu/test",
     "crates/products/bennu/jdwp",
     "crates/products/bennu/ssr",

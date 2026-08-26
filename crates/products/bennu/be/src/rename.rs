@@ -19,7 +19,7 @@
 
 use bennu_core::prelude::BennuState;
 use bennu_intel::prelude::{Edit as IntelEdit, RenamePlan};
-use bennu_proto::prelude::{RenameEdit, RenameFileEdits, RenamePreview};
+use bennu_proto::prelude::{RenameEdit, RenameFileEdits, RenameFileMove, RenamePreview};
 use serde::Deserialize;
 
 use crate::index_service::IndexService;
@@ -90,11 +90,15 @@ pub(crate) fn preview_of(plan: RenamePlan) -> RenamePreview {
             .collect(),
         total_edits,
         has_inferred: plan.has_inferred,
+        blocked: plan.blocked,
+        file_rename: plan
+            .file_rename
+            .map(|r| RenameFileMove { from: r.from, to: r.to }),
     }
 }
 
 /// Map an intel [`IntelEdit`] onto the wire [`RenameEdit`] (stringify the reason enum).
-fn wire_edit(e: IntelEdit) -> RenameEdit {
+pub(crate) fn wire_edit(e: IntelEdit) -> RenameEdit {
     RenameEdit {
         file: e.file,
         start: e.start,

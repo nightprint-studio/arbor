@@ -388,6 +388,20 @@ struct ProjectSlot {
     /// live), so `index_stats.ready` — which the FE's "Indexing" card finishes on — stays
     /// false through the O(N) reference walk and the References-index step remains visible.
     ready: AtomicBool,
+    /// Content hash of every `.java` file **as the index currently understands it**, keyed by the
+    /// normalized (forward-slash) path — the same key [`IndexService::patch_file`] uses.
+    ///
+    /// The index learns a file's text in exactly two places: the full build, and a patch. Both
+    /// record here. That makes it possible to answer "has this file changed behind our back?"
+    /// without a rebuild — which is what a validation needs, because it reads the sources fresh off
+    /// disk but resolves them against the index, and an edit made OUTSIDE the editor (a
+    /// `git checkout`, another IDE, a code generator) leaves the two disagreeing: the file's own
+    /// diagnostics update while every type it declares still resolves to its old members, so the
+    /// errors don't move until a manual "Rebuild index".
+    ///
+    /// A content hash rather than an mtime/size stamp: the text is already in hand at all three
+    /// sites, so hashing is free, and it can't be fooled by a copy that preserves timestamps.
+    indexed_hashes: Mutex<HashMap<String, u64>>,
     /// Coalescing coordinator for the config-graph rebuild triggered by a `.xml` edit. A config
     /// rebuild is O(whole project) — it walks the tree, parses every config XML, and (the first
     /// time after a Java change) re-decodes every source to re-collect annotation beans — so it
@@ -471,12 +485,37 @@ struct PatchCounts {
 /// project-open and the fresh-scan handlers (`bennu_class_index` / `bennu_main_classes`) so a
 /// legacy tree is decoded identically everywhere.
 pub fn resolve_index_encoding(root: &str) -> String {
+    encoding_plan(root).default_label().to_string()
+}
+
+/// How every file under `root` is decoded for indexing — the project's declared label plus the
+/// per-file overrides.
+///
+/// Resolved once and carried, for two reasons that pull in opposite directions unless you do it
+/// this way. Deriving the project label loads the bennu config and parses `pom.xml`, so asking per
+/// file is a thousand file opens for one constant answer. But the answer is NOT constant: the
+/// interactive read (`bennu_read_file`) honours a per-file override, and for a long time the index
+/// did not — so a file the user had reloaded in another encoding was decoded one way for the editor
+/// and another for validation. Two texts of different lengths mean every byte offset in that file
+/// disagreed, which is a diagnostic on the wrong range, a go-to that lands beside the name, and a
+/// rename edit that moves the wrong bytes.
+pub fn encoding_plan(root: &str) -> bennu_project::prelude::EncodingPlan {
     let cfg = bennu_core::config::load();
-    cfg.encoding_overrides
+    let project = cfg
+        .encoding_overrides
         .get(root)
         .filter(|s| !s.is_empty())
         .cloned()
-        .unwrap_or_else(|| source_encoding_label(Path::new(root), &cfg.default_encoding))
+        .unwrap_or_else(|| source_encoding_label(Path::new(root), &cfg.default_encoding));
+    // Everything else in the map is keyed by FILE — the root's own entry is the project override
+    // already folded in above.
+    let per_file = cfg
+        .encoding_overrides
+        .iter()
+        .filter(|(k, v)| k.as_str() != root && !v.is_empty())
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    bennu_project::prelude::EncodingPlan::new(project, per_file)
 }
 
 static SERVICE: OnceLock<IndexService> = OnceLock::new();
@@ -645,6 +684,7 @@ impl IndexService {
             types: AtomicUsize::new(0),
             members: AtomicUsize::new(0),
             ready: AtomicBool::new(false),
+            indexed_hashes: Mutex::new(HashMap::new()),
             config_rebuild: ConfigRebuild::default(),
         });
         self.slots.lock().unwrap_or_else(|p| p.into_inner()).insert(root_path.clone(), slot.clone());
@@ -684,7 +724,7 @@ impl IndexService {
             // the same parse (no separate whole-project scan).
             emit_progress(&sink, &root_str, "project", "start");
             let ProjectSources { sources, non_compliant } =
-                read_java_sources(&root_path, &encoding_label);
+                read_java_sources(&root_path, &encoding_plan(&root_str));
             // Record the files that weren't valid in the declared encoding (recovered, not
             // dropped) for the encoding report — visible, never a silent skip.
             if !non_compliant.is_empty() {
@@ -697,6 +737,9 @@ impl IndexService {
             }
             *slot.non_compliant.write().unwrap_or_else(|p| p.into_inner()) =
                 non_compliant.iter().map(encoding_issue_of).collect();
+            // What the index is about to be built from — the baseline every later "has this file
+            // changed behind our back?" check compares against. See `ProjectSlot::indexed_hashes`.
+            record_indexed_hashes(&slot, &sources);
             let built = build_project_index_from_sources(&sources, &index_dir);
             if let Err(e) = built.builder.persist() {
                 // A persist failure is logged ONCE and the build thread exits cleanly,
@@ -1160,6 +1203,21 @@ impl IndexService {
     /// Whether the project at `root` has a built resolver (so the diagnostic cache can check
     /// freshness). The background warm-up skips validation until this is true — validating pure-AST
     /// with nothing to cache would be wasted work on every open.
+    /// Whether `root`'s RENAME engine is built and answering.
+    ///
+    /// Separate from [`has_resolver`](Self::has_resolver): completion goes live as soon as the
+    /// provider is swapped in, while the rename engine waits for the O(N) reference walk behind it.
+    /// In that window every rename plan comes back empty — which a caller must be able to tell
+    /// apart from "this particular thing cannot be renamed", or it reports one refusal per name
+    /// and blames the code instead of the clock.
+    pub fn has_rename_engine(&self, root: &str) -> bool {
+        let slot = {
+            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            slots.get(&PathBuf::from(root)).map(Arc::clone)
+        };
+        slot.is_some_and(|s| s.rename.read().unwrap_or_else(|p| p.into_inner()).is_some())
+    }
+
     pub fn has_resolver(&self, root: &str) -> bool {
         let slot = {
             let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
@@ -1182,10 +1240,14 @@ impl IndexService {
     pub fn validate_project_collect(
         &self,
         root: &str,
-        label: &str,
+        encoding: &bennu_project::prelude::EncodingPlan,
         on_progress: &(dyn Fn(usize, usize) + Sync),
     ) -> RunOutcome {
-        let sources = read_java_sources(Path::new(root), label).sources;
+        let sources = read_java_sources(Path::new(root), encoding).sources;
+        // Sources come off disk; the types they mention resolve through the index. Reconcile the
+        // two before validating, or a file edited outside the editor produces diagnostics computed
+        // against its own new text but everyone else's OLD view of the types it declares.
+        self.sync_external_changes(&sources);
         let mut cache = self.diag_cache_load(root);
         let run = std::time::Instant::now();
         let results = self.validate_project_batch(root, &sources, &cache, on_progress);
@@ -1546,7 +1608,99 @@ impl IndexService {
             let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
             g.as_ref().map(Arc::clone)
         }?;
-        engine.plan(file, source, offset, new_name)
+        if let Some(plan) = engine.plan(file, source, offset, new_name) {
+            return Some(plan);
+        }
+        // The engine plans over PROJECT declarations, so a caret on a member the project does not
+        // declare falls out of it as `None` — and `None` reaches the user as "the symbol under the
+        // caret isn't renameable, or the index is still building", which names neither the symbol
+        // nor the reason and reads like a bug in Bennu.
+        //
+        // It usually isn't. `codevento.name()` on a project enum is `java.lang.Enum.name()`: real,
+        // resolvable, and simply not ours to rename. Say that instead of shrugging.
+        self.foreign_member_refusal(&slot, source, offset, new_name)
+    }
+
+    /// A refusal naming the LIBRARY type that declares the member at the caret, for a member the
+    /// project itself does not declare. `None` when the caret isn't on a resolvable member, or when
+    /// the declaring type turns out to be project code after all (then the engine's silence is
+    /// about something else and inventing a reason would be worse than saying nothing).
+    fn foreign_member_refusal(
+        &self,
+        slot: &Arc<ProjectSlot>,
+        source: &str,
+        offset: usize,
+        new_name: &str,
+    ) -> Option<RenamePlan> {
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        let target = provider.library_target_at(source, offset)?;
+        let member = target.member.clone()?;
+        // Owning the TYPE is not owning every member reachable through it: an inherited one is
+        // declared above, and that is the type the refusal has to name.
+        let owner = if provider.owns_type(&target.binary) {
+            declaring_supertype(&provider, &target)?
+        } else {
+            target.binary.clone()
+        };
+        if provider.owns_type(&owner) {
+            return None;
+        }
+        let owner_label = owner.replace('/', ".");
+        let kind = if member.is_field { "field" } else { "method" };
+        Some(RenamePlan {
+            old_name: member.name.clone(),
+            new_name: new_name.to_string(),
+            target_label: format!("{kind} {owner_label}.{}", member.name),
+            files: Vec::new(),
+            has_inferred: false,
+            file_rename: None,
+            blocked: Some(format!(
+                "`{}` is declared by {owner_label}, which the project does not own — renaming it \
+                 here would rewrite the call sites to a member that nothing declares.",
+                member.name
+            )),
+        })
+    }
+
+    /// The binary name of the type declared at `file`:`offset`, if the caret is on one.
+    ///
+    /// A lookup, not a scan — the batch half of the bulk fix resolves every type it means to
+    /// rename with this, then plans them together in one pass.
+    pub fn classify_type(&self, file: &str, source: &str, offset: usize) -> Option<String> {
+        let slot = self.slot_for_file(file)?;
+        let engine = {
+            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
+            g.as_ref().map(Arc::clone)
+        }?;
+        engine.classify_type(file, source, offset)
+    }
+
+    /// Plan several **type** renames for the project at `root` in ONE pass over its sources.
+    ///
+    /// The batch twin of [`plan_rename`](Self::plan_rename), for the bulk naming fix. Planning a
+    /// type rename costs a pass over every project file, so doing it one at a time costs that pass
+    /// once per type — which on a legacy tree is minutes. Returns one bucket of edits per input
+    /// rename, in order; an empty vec when no project is open at `root` or its engine is still
+    /// building.
+    pub fn plan_type_renames(
+        &self,
+        root: &str,
+        renames: &[bennu_intel::prelude::TypeRename],
+        on_file: &dyn Fn(usize, usize) -> bool,
+    ) -> (Vec<Vec<bennu_intel::prelude::Edit>>, bool) {
+        let engine = {
+            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            let Some(slot) = slots.get(&PathBuf::from(root)) else { return (Vec::new(), true) };
+            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
+            g.as_ref().map(Arc::clone)
+        };
+        match engine {
+            Some(engine) => engine.plan_types(renames, on_file),
+            None => (Vec::new(), true),
+        }
     }
 
     /// Find all usages of the symbol at `file`:`offset`, over the owning project's rename
@@ -1624,7 +1778,16 @@ impl IndexService {
             let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
             g.as_ref().map(Arc::clone)
         }?;
-        engine.declaration(file, source, offset).map(declaration_target_of)
+        // A `None` here is what sends the editor down its fallback chain, at the end of which sits
+        // the decompiled view. Saying so — with the classification that produced it — is the
+        // difference between diagnosing "go-to opened a stub" in one step and guessing at it.
+        let found = engine.declaration(file, source, offset);
+        if found.is_none() {
+            nav_log(format_args!(
+                "declaration: nothing resolved at {file}:{offset} — the editor will fall back"
+            ));
+        }
+        found.map(declaration_target_of)
     }
 
     /// The inherited ("super") members of the type declared at `file`:(`type_name`,`line`),
@@ -1694,7 +1857,16 @@ impl IndexService {
             let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
             Arc::clone(&g)
         };
-        let binary = provider.library_binary(source, name)?;
+        // The last-resort library jump is the one place that can open a decompiled view of code the
+        // user wrote, so it says out loud what it decided and why. Set `BENNU_GOTO_LOG=1` and grep
+        // the backend console for `[bennu-goto]`: the name asked for, the binary it resolved to, and
+        // whether the project was judged to own it — which is the verdict that keeps this from
+        // opening a stub of somebody's own class.
+        let binary = provider.library_binary(source, name);
+        nav_log(format_args!(
+            "decompiled_stub: name={name:?} -> binary={binary:?} (None means the project owns it)"
+        ));
+        let binary = binary?;
         let (text, file_binary, is_stub) = self.serve_source_view(&provider, &root, &binary)?;
         let path = write_view(&file_binary, &text)?;
         Some(DecompiledView {
@@ -1907,6 +2079,70 @@ impl IndexService {
 
     /// Whether to offer the "Download sources" banner: only for a STUB of a third-party dependency (a
     /// JDK stub has no Maven artifact; a project with no resolved deps can't fetch anything).
+    /// The **project source** a library-shaped navigation actually resolved to.
+    ///
+    /// Reached when the "library" jump lands on a type the project declares — see the caller. The
+    /// answer is shaped like a source view because that is what the editor is expecting, but the
+    /// path is a real file in the project, so the tab that opens is the user's own code.
+    ///
+    /// `None` when no project source declares the owner (it was a library after all) or the member
+    /// cannot be located in it — either way the caller falls through to the real library view.
+    fn project_member_view(
+        &self,
+        slot: &ProjectSlot,
+        target: &bennu_intel::prelude::LibraryTarget,
+    ) -> Option<DecompiledView> {
+        let engine = {
+            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
+            g.as_ref().map(Arc::clone)
+        }?;
+        let file = engine.index().file_declaring(&target.binary)?.to_string();
+
+        // Read it the way every offset in the product is measured: the project's declared encoding,
+        // newlines normalised. A raw UTF-8 read would fail on a Cp1252 legacy source and would put
+        // the caret one byte further along for every CRLF line before it.
+        let bytes = std::fs::read(&file).ok()?;
+        let encoding = resolve_index_encoding(&norm_path(&slot.root));
+        let text = bennu_project::prelude::normalize_newlines(
+            &bennu_project::prelude::decode_for_index(&bytes, &encoding).text,
+        );
+
+        let offset = match &target.member {
+            Some(member) => {
+                let key = if member.is_field {
+                    bennu_intel::prelude::DeclKey::Field {
+                        owner: target.binary.clone(),
+                        name: member.name.clone(),
+                    }
+                } else {
+                    bennu_intel::prelude::DeclKey::Method {
+                        owner: target.binary.clone(),
+                        name: member.name.clone(),
+                    }
+                };
+                // A record's accessor has no `method_declaration`: it is written once, as the
+                // component in the header, which the field key finds.
+                bennu_intel::prelude::find_member_name_span(&text, &key)
+                    .or_else(|| {
+                        bennu_intel::prelude::find_member_name_span(
+                            &text,
+                            &bennu_intel::prelude::DeclKey::Field {
+                                owner: target.binary.clone(),
+                                name: member.name.clone(),
+                            },
+                        )
+                    })
+                    .map(|(start, _)| start)
+            }
+            None => {
+                let simple = target.binary.rsplit(['/', '$']).next().unwrap_or(&target.binary);
+                bennu_java::prelude::find_type_name_span(&text, simple).map(|(start, _)| start)
+            }
+        }?;
+
+        Some(DecompiledView { file, offset, can_download: false })
+    }
+
     fn can_download_sources(&self, slot: &ProjectSlot, binary: &str, is_stub: bool) -> bool {
         let has_deps = !slot.dep_jars.read().unwrap_or_else(|p| p.into_inner()).is_empty();
         is_stub && has_deps && !crate::sources_download::is_jdk_package(binary)
@@ -1932,6 +2168,39 @@ impl IndexService {
             Arc::clone(&g)
         };
         let target = provider.library_target_at(view_source, offset)?;
+
+        // This is the LIBRARY jump, and it must never serve code the project wrote. It can reach
+        // one: the receiver's type is inferred with the full, JDK-aware resolver, which succeeds on
+        // things the project-only rename engine cannot type — a lambda parameter whose type comes
+        // through `List.stream().map(…)`, say. Go-to therefore fails first and falls through to
+        // here, and without this check the answer was a decompiled stub of the user's own record.
+        //
+        // Owning the type is not a reason to give up, though: the owner is known, the member is
+        // known, and the project has real source for both. So the answer is the real file — which
+        // the editor opens exactly as it would open any other target, with no change on that side.
+        let mut target = target;
+        if provider.owns_type(&target.binary) {
+            nav_log(format_args!(
+                "library_declaration: {} is project code — resolving it in source",
+                target.binary
+            ));
+            if let Some(view) = self.project_member_view(&slot, &target) {
+                return Some(view);
+            }
+            // The project owns the TYPE but not this MEMBER — it is INHERITED. `EEventoCode.name()`
+            // is `java.lang.Enum.name()`: there is nothing in the enum's own source to land on, and
+            // stopping here left go-to with no answer at all. Re-aim at the supertype that actually
+            // declares it, which is where the member is written.
+            let owner = declaring_supertype(&provider, &target)?;
+            nav_log(format_args!(
+                "library_declaration: the member is inherited — re-aiming at {owner}"
+            ));
+            target = bennu_intel::prelude::LibraryTarget { binary: owner, member: target.member };
+            if provider.owns_type(&target.binary) {
+                return self.project_member_view(&slot, &target);
+            }
+        }
+
         let (text, file_binary, is_stub) = self.serve_source_view(&provider, &root, &target.binary)?;
         let jump = member_jump_offset(&text, &file_binary, target.member.as_ref());
         let path = write_view(&file_binary, &text)?;
@@ -2284,34 +2553,51 @@ impl IndexService {
         if !is_java(file) {
             return; // nothing to re-index for this file kind
         }
+        self.patch_java_files(&slot, &[(PathBuf::from(file), source)]);
+    }
 
-        let file_path = PathBuf::from(file);
-
-        // Buffer-edit bookkeeping for the out-of-code-block cache: bump the global count + this file's
-        // own count. A file A's resolver revision is `total − per_file[A]`, so editing A leaves A's own
-        // cache valid (both counts rise together) while it invalidates every OTHER file's cache that
-        // might depend on A's now-changed types.
-        {
-            let mut g = self.patch_counts.lock().unwrap_or_else(|p| p.into_inner());
-            g.total = g.total.wrapping_add(1);
-            *g.per_file.entry(file_path.clone()).or_insert(0) += 1;
+    /// Apply a batch of `.java` patches to the live index in ONE pass — the shared body of both a
+    /// single edited buffer ([`Self::patch_file`]) and a whole set of files that changed behind the
+    /// editor's back ([`Self::sync_external_changes`]).
+    ///
+    /// Batched because the per-file work is not all per-file: snapshotting the project-wide
+    /// simple→binary map and sweeping the class-navigator cache are each O(project), so doing them
+    /// once per file turns a few hundred files into a quadratic stall. Here they happen once for
+    /// the whole batch, which is what makes it safe to hand this everything a `git checkout` moved.
+    fn patch_java_files(&self, slot: &Arc<ProjectSlot>, files: &[(PathBuf, Option<&str>)]) {
+        if files.is_empty() {
+            return;
         }
 
-        // Update the project-wide simple→binary map from the edited file's OWN type decls
-        // (a renamed/added/removed type in THIS file), without re-scanning the project.
+        // Buffer-edit bookkeeping for the out-of-code-block cache: bump the global count + each
+        // file's own count. A file A's resolver revision is `total − per_file[A]`, so editing A
+        // leaves A's own cache valid (both counts rise together) while it invalidates every OTHER
+        // file's cache that might depend on A's now-changed types.
+        {
+            let mut g = self.patch_counts.lock().unwrap_or_else(|p| p.into_inner());
+            for (path, _) in files {
+                g.total = g.total.wrapping_add(1);
+                *g.per_file.entry(path.clone()).or_insert(0) += 1;
+            }
+        }
+
+        // Update the project-wide simple→binary map from the patched files' OWN type decls
+        // (a renamed/added/removed type in one of them), without re-scanning the project.
         // Cross-file type references still resolve — every other file's types are already
-        // in the map from the last full build.
+        // in the map from the last full build. Merge the whole batch, then snapshot ONCE.
         let simple = {
             let mut guard = slot.simple_names.lock().unwrap_or_else(|p| p.into_inner());
-            merge_file_types(&mut guard, &file_path, source);
+            for (path, source) in files {
+                merge_file_types(&mut guard, path, *source);
+            }
             guard.clone()
         };
 
-        // Re-extract only this file's records (its `Symbol`s carry the resolved members)
-        // and apply them to the live provider's in-memory overlay — no disk, no rebuild.
-        // A delete (`source == None`) applies an empty record set, which drops the file's
-        // prior overlay entries. Keyed by the FE `file` string so the overlay's per-file
-        // rename/remove bookkeeping matches on the next edit.
+        // Re-extract each file's records (its `Symbol`s carry the resolved members) and apply them
+        // to the live provider's in-memory overlay — no disk, no rebuild. A delete
+        // (`source == None`) applies an empty record set, which drops the file's prior overlay
+        // entries. Keyed by the normalized path, which is also the FE `file` string, so the
+        // overlay's per-file rename/remove bookkeeping matches on the next edit.
         let provider = {
             let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
             Arc::clone(&g)
@@ -2319,19 +2605,80 @@ impl IndexService {
         // Resolve a wildcard-imported supertype/return/param to the exact package via the live
         // resolver's project view (the merged `simple` map is lossy on same-name collisions).
         let is_project = |b: &str| provider.is_project_type(b);
-        let symbols: Vec<Symbol> = source
-            .map(|src| {
-                file_records_from_source(&file_path, src, &simple, u32::MAX / 2, &is_project)
-                    .into_iter()
-                    .map(|r| r.symbol)
-                    .collect()
-            })
-            .unwrap_or_default();
-        provider.apply_file_patch(file, &symbols);
+        for (path, source) in files {
+            let symbols: Vec<Symbol> = source
+                .map(|src| {
+                    file_records_from_source(path, src, &simple, u32::MAX / 2, &is_project)
+                        .into_iter()
+                        .map(|r| r.symbol)
+                        .collect()
+                })
+                .unwrap_or_default();
+            provider.apply_file_patch(&norm_path(path), &symbols);
+        }
 
-        // Refresh the class navigator cache for THIS file (best-effort): drop its old
-        // entries and re-add from the fresh parse, so Go-to-Class reflects a rename.
-        refresh_class_cache_for_file(&slot, &file_path, source);
+        // Go-to-Class reflects a rename without a full rebuild.
+        refresh_class_cache_for_files(slot, files);
+
+        // The index now understands these files as given — record it, so a later validation can
+        // tell an edit it already absorbed from one made behind its back.
+        {
+            let mut g = slot.indexed_hashes.lock().unwrap_or_else(|p| p.into_inner());
+            for (path, source) in files {
+                let key = norm_path(path);
+                match source {
+                    Some(src) => {
+                        g.insert(key, bennu_intel::prelude::source_hash(src));
+                    }
+                    None => {
+                        g.remove(&key);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Bring the index back in line with the disk for every file that changed outside the editor,
+    /// and return how many needed it.
+    ///
+    /// Validation reads its sources fresh off disk but *resolves* them against the index. When a
+    /// file is edited elsewhere — a `git checkout`, another IDE, a code generator — the two
+    /// disagree: the changed file's own diagnostics update, but every type it declares still
+    /// resolves to the members it had at the last build, so errors in the files that USE it neither
+    /// appear nor clear. The only way out was a manual "Rebuild index".
+    ///
+    /// The fix is the cheap path, not a rebuild: re-extract those files' symbols into the
+    /// resolver's overlay. Nothing is re-read (the caller already holds the text) and nothing is
+    /// re-persisted. It also makes the diagnostic cache do the right thing on its own — the patched
+    /// types' member signatures change, so every file whose recorded dependencies name them
+    /// re-validates instead of being served from cache.
+    ///
+    /// NOTE: this refreshes what VALIDATION and completion resolve against. The rename engine's
+    /// reference index is a full-build cost and is not rebuilt here, so find-usages over externally
+    /// changed files still wants a rebuild.
+    fn sync_external_changes(&self, sources: &[(PathBuf, String)]) -> usize {
+        let Some((first, _)) = sources.first() else { return 0 };
+        let Some(slot) = self.slot_for_file(&norm_path(first)) else { return 0 };
+
+        let stale: Vec<(PathBuf, Option<&str>)> = {
+            let known = slot.indexed_hashes.lock().unwrap_or_else(|p| p.into_inner());
+            sources
+                .iter()
+                .filter(|(path, text)| known.get(&norm_path(path)) != Some(&bennu_intel::prelude::source_hash(text)))
+                // Normalized here so the overlay key matches the one a buffer edit would use for
+                // the same file — the paths from the disk walk are the OS spelling.
+                .map(|(path, text)| (PathBuf::from(norm_path(path)), Some(text.as_str())))
+                .collect()
+        };
+        if stale.is_empty() {
+            return 0;
+        }
+        eprintln!(
+            "bennu-be: {} file(s) changed outside the editor — re-indexed before validating",
+            stale.len()
+        );
+        self.patch_java_files(&slot, &stale);
+        stale.len()
     }
 
     /// Schedule a coalesced, off-request-thread rebuild of the config graph after a `.xml` edit.
@@ -2413,7 +2760,8 @@ impl IndexService {
                 }
             }
         }
-        let ProjectSources { sources, .. } = read_java_sources(&slot.root, &slot.encoding_label);
+        let ProjectSources { sources, .. } =
+            read_java_sources(&slot.root, &encoding_plan(&norm_path(&slot.root)));
         let beans = Arc::new(collect_annotation_beans(&sources));
         *slot.config_rebuild.beans.lock().unwrap_or_else(|p| p.into_inner()) =
             Some((java_gen, Arc::clone(&beans)));
@@ -2793,8 +3141,35 @@ fn build_rename_engine(
             json!({ "root": root_str, "phase": "references", "state": "progress", "done": done, "total": total }),
         );
     };
-    match RenameEngine::for_project(index_dir, jdk_version, simple_names, java, xml, &on_progress) {
+    // Lend the engine the provider's JDK-ONLY view (see `NativeJavaProvider::walk_resolver`).
+    //
+    // The walk needs library types as conduits — a lambda parameter off `list.stream().map(…)` is
+    // typed by substituting through `List`/`Stream`/`Function`, and without them a rename silently
+    // misses every such call site. What it must NOT do is drag in the dependency tier: those
+    // classes are decoded lazily into memory only, so a parallel walk through hundreds of jars
+    // re-reads them every session — which made a large project's index crawl with every core busy,
+    // and, since there is no rename engine until the walk lands, made every name report "cannot be
+    // renamed" in the meantime.
+    //
+    // `BENNU_RENAME_FULL_RESOLVER=1` opts back into the dependency tier, for a project whose
+    // conduits run through a library generic and that can afford the walk.
+    let provider = { Arc::clone(&slot.provider.read().unwrap_or_else(|p| p.into_inner())) };
+    let shared = match std::env::var_os("BENNU_RENAME_FULL_RESOLVER") {
+        Some(_) => provider.shared_resolver(),
+        None => provider.walk_resolver(),
+    };
+    // The full view, lent for POLICY only. Cheap for the walk and complete for the refusal is not a
+    // contradiction: the walk asks per reference per file, the refusal asks once per rename. The
+    // interface a rename would break lives precisely in the tier the walk drops — measured on a real
+    // project, THIRTEEN of thirteen methods implementing a dependency interface (jakarta
+    // `ConstraintValidator`, Spring `Condition`, …) planned clean and would have stopped compiling.
+    let policy = provider.shared_resolver();
+    match RenameEngine::for_project(index_dir, jdk_version, simple_names, java, xml, shared, &on_progress) {
         Ok(engine) => {
+            let engine = match policy {
+                Some(full) => engine.with_policy_resolver(full),
+                None => engine,
+            };
             *slot.rename.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(engine));
             eprintln!("bennu-be: rename engine live for {}", root.display());
         }
@@ -2875,15 +3250,76 @@ fn merge_file_types(map: &mut BTreeMap<String, String>, _file: &Path, source: Op
     }
 }
 
-/// Refresh the class-navigator cache for a single edited `file`: drop its prior entries and
-/// re-add from the fresh parse (a rename/add/remove of a top-level type shows up in
-/// Go-to-Class without a full rebuild). Best-effort; a parse miss just leaves the cache as-is
-/// for that file until the next full index.
-fn refresh_class_cache_for_file(slot: &Arc<ProjectSlot>, file: &Path, source: Option<&str>) {
-    let file_key = file.to_string_lossy().replace('\\', "/");
+/// The nearest supertype of `target.binary` that actually DECLARES `target.member`, or `None` when
+/// nothing above it does (or the target names no member).
+///
+/// Owning a type is not the same as owning every member reachable through it. A project enum's
+/// `name()` is `java.lang.Enum.name()`; a project class implementing a library interface answers
+/// for methods declared in the jar. Go-to has to land where the member is *written*, so when the
+/// type's own source doesn't declare it, the answer is above.
+///
+/// Breadth-first, so the closest declaration wins over a more distant one that overrides it.
+fn declaring_supertype(
+    provider: &NativeJavaProvider,
+    target: &bennu_intel::prelude::LibraryTarget,
+) -> Option<String> {
+    /// A hierarchy this deep is a cycle in a malformed index, not a real one.
+    const MAX_STEPS: usize = 64;
+    let member = target.member.as_ref()?;
+    let mut queue: Vec<String> = vec![target.binary.clone()];
+    let mut seen: HashSet<String> = HashSet::new();
+    seen.insert(target.binary.clone());
+    let mut steps = 0usize;
+
+    while !queue.is_empty() && steps < MAX_STEPS {
+        let mut next: Vec<String> = Vec::new();
+        for binary in queue.drain(..) {
+            steps += 1;
+            let Some(cm) = provider.members_of(&binary) else { continue };
+            let declares = if member.is_field {
+                cm.fields.iter().any(|f| f.name == member.name)
+            } else {
+                cm.methods.iter().any(|m| m.name == member.name)
+            };
+            // Not the starting type: the caller already established its source has no such member.
+            if declares && binary != target.binary {
+                return Some(binary);
+            }
+            for s in cm.superclass.iter().chain(cm.interfaces.iter()) {
+                if seen.insert(s.clone()) {
+                    next.push(s.clone());
+                }
+            }
+        }
+        queue = next;
+    }
+    None
+}
+
+/// Record the content the index is being built from, replacing whatever was there — the baseline
+/// [`IndexService::sync_external_changes`] compares against. See [`ProjectSlot::indexed_hashes`].
+fn record_indexed_hashes(slot: &Arc<ProjectSlot>, sources: &[(PathBuf, String)]) {
+    let mut g = slot.indexed_hashes.lock().unwrap_or_else(|p| p.into_inner());
+    g.clear();
+    for (path, text) in sources {
+        g.insert(norm_path(path), bennu_intel::prelude::source_hash(text));
+    }
+}
+
+/// Refresh the class-navigator cache for a batch of patched files: drop their prior entries and
+/// re-add from the fresh parse (a rename/add/remove of a top-level type shows up in Go-to-Class
+/// without a full rebuild). Best-effort; a parse miss just leaves the cache as-is for that file
+/// until the next full index.
+///
+/// One sweep for the whole batch, not one per file: `retain` walks every entry in the project, so
+/// doing it per file is quadratic once a batch is more than a handful.
+fn refresh_class_cache_for_files(slot: &Arc<ProjectSlot>, files: &[(PathBuf, Option<&str>)]) {
+    let keys: HashSet<String> = files.iter().map(|(p, _)| norm_path(p)).collect();
     let mut cache = slot.classes.write().unwrap_or_else(|p| p.into_inner());
-    cache.retain(|c| c.file != file_key);
-    if let Some(src) = source {
+    cache.retain(|c| !keys.contains(&c.file));
+    for (path, source) in files {
+        let Some(src) = source else { continue };
+        let file_key = norm_path(path);
         let fs = bennu_java::prelude::extract_symbols(src);
         for td in &fs.types {
             cache.push(ClassEntry {
@@ -3768,5 +4204,19 @@ mod tests {
         assert_eq!(e.simple, "Order");
         assert_eq!(e.file, "/proj/Order.java");
         assert_eq!(e.line, 7);
+    }
+}
+
+/// Whether the navigation diagnostic log is on (`BENNU_GOTO_LOG`).
+fn nav_log_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("BENNU_GOTO_LOG").is_some())
+}
+
+/// One go-to diagnostic line on **stderr** (stdout is the RPC protocol channel). Shares the
+/// `[bennu-goto]` prefix with the JSP→action log so one grep covers navigation.
+fn nav_log(args: std::fmt::Arguments) {
+    if nav_log_enabled() {
+        eprintln!("[bennu-goto] {args}");
     }
 }

@@ -15,10 +15,13 @@ pub use crate::contract::{
     JdkStatus, JspActionBinding, JspActionOption, JspNav, PropertyLintHit,
     InheritedMember, InheritedSource, JdkInfo, MainClassEntry, ProjectInfo, ProjectKind,
     ProjectValidationResult,
-    RenameEdit, RenameFileEdits, RenamePreview, RunConfig, RunConfigSet, RunHandle, SnippetStop, SpellHit,
+    RenameEdit, RenameFileEdits, RenameFileMove, RenamePreview, RunConfig, RunConfigSet, RunHandle, SnippetStop, SpellHit,
     SpellStatus,
     TodoItem, TreeNode, UsageHit, UsagesResult, ValidationContext, WriteResult,
 };
+// The severity strings a `Diagnostic` carries, as a module so a call site reads
+// `severity::WEAK` rather than importing five look-alike constants.
+pub use crate::contract::severity;
 pub use crate::lsp::{
     LspAction, LspCallSite, LspDiagnostic, LspFold, LspHierarchyNode, LspHighlight, LspLens,
     LspMacroExpansion, LspRelated, LspServerInfo, LspSignature, LspStatus, LspSymbol, LspToken,

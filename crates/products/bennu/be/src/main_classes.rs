@@ -77,10 +77,10 @@ fn bennu_main_classes(
     collect_java(&root, &mut paths);
 
     // Decode in the project's declared encoding (Maven `sourceEncoding`), same as the build.
-    let encoding_label = crate::index_service::resolve_index_encoding(&args.root);
+    let encoding = crate::index_service::encoding_plan(&args.root);
     let mut out = Vec::new();
     for path in paths {
-        let Some(decoded) = read_source_for_index(&path, &encoding_label) else {
+        let Some(decoded) = read_source_for_index(&path, &encoding) else {
             continue; // true IO error only — non-UTF-8 is decoded + recovered, not dropped
         };
         let source = decoded.text;

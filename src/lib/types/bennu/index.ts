@@ -208,8 +208,17 @@ export interface SourceEdit {
   new_text: string;
 }
 
-/** Severity of a {@link Diagnostic}. */
-export type DiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint';
+/**
+ * Severity of a {@link Diagnostic}.
+ *
+ * `weak` sits between "this is wrong" and "this is a note": a **style** finding — true, but not a
+ * defect — which is what a naming-convention violation is. It is its own level because a project
+ * that adopts a convention gets one finding per offending declaration, and mixing thousands of
+ * those in with genuine compile errors would devalue both. CodeMirror has no such level, so the
+ * editor maps it onto the softest one it has (see `cmSeverity` in `BennuEditor`); the Problems
+ * panel groups it on its own.
+ */
+export type DiagnosticSeverity = 'error' | 'warning' | 'weak' | 'info' | 'hint';
 
 /** One diagnostic (`bennu_diagnostics`). `start`/`end` are **UTF-8 byte offsets**
  *  into the file source (the editor maps them to CM lint spans). Phase 0 returns []. */

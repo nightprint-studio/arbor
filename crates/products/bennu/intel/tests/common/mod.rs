@@ -14,8 +14,13 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
-use bennu_classpath::prelude::{ClassMembers as CpClassMembers, MemberIndex as CpMemberIndex};
+use bennu_classpath::prelude::{
+    ClassFlags as CpClassFlags, ClassMembers as CpClassMembers, Member as CpMember,
+    MemberIndex as CpMemberIndex, MemberKind as CpMemberKind, TypeRef as CpTypeRef,
+    Visibility as CpVisibility,
+};
 use bennu_index::prelude::PersistedIndex;
 use bennu_intel::prelude::{
     build_project_index_from_sources, rename_apply, CompletionItem, DeclarationLocation,
@@ -87,6 +92,18 @@ impl Project {
     /// Build a project pinned to a specific Java language level (`"8"`, `"17"`, …) — for the
     /// version-gated constructs (records / pattern variables / inferred lambda params).
     pub fn with_jdk(files: &[(&str, &str)], jdk: &str) -> Self {
+        Self::build(files, jdk, false)
+    }
+
+    /// Like [`Project::new`], but the rename engine also resolves the faked JDK stream types
+    /// ([`StreamJdk`]) — i.e. it gets the kind of fully-resolving resolver the provider lends it
+    /// in production, instead of a project-only one. Use for anything that types a receiver
+    /// THROUGH a library generic.
+    pub fn with_stream_jdk(files: &[(&str, &str)]) -> Self {
+        Self::build(files, "21", true)
+    }
+
+    fn build(files: &[(&str, &str)], jdk: &str, stream_jdk: bool) -> Self {
         let temp = TempDir::new();
         // A `gN` gen subdir so the engine's reference cache lands at `temp/…` (unique per
         // project), never a shared path across tests.
@@ -103,12 +120,26 @@ impl Project {
         let java_sources: Vec<(String, String)> =
             files.iter().map(|(p, s)| (p.to_string(), s.to_string())).collect();
 
-        let engine = RenameEngine::for_project(&index_dir, jdk, &pairs, java_sources, vec![], &|_, _| {})
-            .expect("build rename engine");
-
-        // A completion resolver over the same on-disk index (JDK-free — project types only).
         let blob = index_dir.join("symbols.blob");
         let fst = index_dir.join("names.fst");
+
+        // The resolver the engine borrows. `None` = the production fallback (project-only, built
+        // inside `for_project`); `Some` mirrors production, where the provider lends its own.
+        let shared: Option<Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>> = stream_jdk
+            .then(|| {
+                let persisted = PersistedIndex::open(&blob, &fst).expect("open index for engine");
+                let mut r = IndexResolver::new(persisted, StreamJdk);
+                for (simple, binary) in &pairs {
+                    r.add_simple_hint(simple, binary);
+                }
+                Arc::new(r) as Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>
+            });
+
+        let engine =
+            RenameEngine::for_project(&index_dir, jdk, &pairs, java_sources, vec![], shared, &|_, _| {})
+                .expect("build rename engine");
+
+        // A completion resolver over the same on-disk index (JDK-free — project types only).
         let persisted = PersistedIndex::open(&blob, &fst).expect("open index for completion");
         let mut completion_resolver = IndexResolver::new(persisted, NoJdk);
         for (simple, binary) in &pairs {
@@ -117,6 +148,16 @@ impl Project {
 
         let sources = files.iter().map(|(p, s)| (p.to_string(), s.to_string())).collect();
         Self { engine, completion_resolver, sources, _temp: temp }
+    }
+
+    /// Whether the project index recognises `binary` as a type this project declares.
+    ///
+    /// This is the guard that keeps go-to from opening a decompiled stub of the user's own code:
+    /// `library_binary` refuses a binary the project declares. A nested type is where it is most
+    /// likely to fail, because source and bytecode spell one differently.
+    pub fn is_project_type(&self, binary: &str) -> bool {
+        use bennu_java::prelude::TypeResolver;
+        self.completion_resolver.is_project_type(binary)
     }
 
     /// The source text of `file` (for computing expected offsets / lines).
@@ -205,4 +246,104 @@ pub fn line_of(src: &str, needle: &str) -> u32 {
 pub fn line_of_last(src: &str, needle: &str) -> u32 {
     let off = at_last(src, needle);
     1 + src[..off].bytes().filter(|&b| b == b'\n').count() as u32
+}
+
+// ── a hand-built stand-in for the JDK classes a stream chain runs through ─────────
+
+/// The three JDK types a `list.stream().map(x -> …)` chain needs in order to type `x`, built by
+/// hand so the test is deterministic and needs no JDK install.
+///
+/// They matter as **conduits**, not destinations: `x` is a PROJECT type that only reaches the
+/// lambda by being substituted through `List<E>` → `Stream<T>` → `Function<T, R>`. Drop any link
+/// and `x` is untyped, no edge is recorded for `x.foo()`, and a rename of `foo` misses that call.
+pub struct StreamJdk;
+
+fn iface(type_params: &[&str], methods: Vec<CpMember>) -> CpClassMembers {
+    CpClassMembers {
+        superclass: None,
+        interfaces: Vec::new(),
+        methods,
+        fields: Vec::new(),
+        flags: CpClassFlags { is_interface: true, is_abstract: true, ..Default::default() },
+        type_params: type_params.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+fn method(name: &str, params: Vec<CpTypeRef>, ret: CpTypeRef) -> CpMember {
+    CpMember {
+        name: name.to_string(),
+        kind: CpMemberKind::Method,
+        return_type: ret,
+        params,
+        is_static: false,
+        is_abstract: true,
+        is_default: false,
+        is_final: false,
+        visibility: CpVisibility::Public,
+        raw_signature: name.to_string(),
+        throws: Vec::new(),
+    }
+}
+
+/// A generic reference: `applied("java/util/List", ["E"])` is `List<E>`.
+fn applied(binary: &str, args: &[&str]) -> CpTypeRef {
+    CpTypeRef {
+        binary_name: binary.to_string(),
+        type_args: args.iter().map(|a| CpTypeRef::plain(*a)).collect(),
+    }
+}
+
+impl CpMemberIndex for StreamJdk {
+    fn members_of(&self, binary_name: &str) -> Option<CpClassMembers> {
+        Some(match binary_name {
+            // `interface List<E> { Stream<E> stream(); }`
+            "java/util/List" => {
+                iface(&["E"], vec![method("stream", vec![], applied("java/util/stream/Stream", &["E"]))])
+            }
+            // `interface Stream<T> { <R> Stream<R> map(Function<? super T, ? extends R> f); }`
+            "java/util/stream/Stream" => iface(
+                &["T"],
+                vec![method(
+                    "map",
+                    vec![applied("java/util/function/Function", &["T", "R"])],
+                    applied("java/util/stream/Stream", &["R"]),
+                )],
+            ),
+            // `interface Function<T, R> { R apply(T t); }` — the functional interface whose single
+            // abstract method's parameter type IS the lambda parameter's type.
+            "java/util/function/Function" => {
+                iface(&["T", "R"], vec![method("apply", vec![CpTypeRef::plain("T")], CpTypeRef::plain("R"))])
+            }
+            // Every enum implicitly extends this, and `name()` / `ordinal()` are declared nowhere in
+            // the project — so a project enum's `e.name()` resolves only if the walk can see it.
+            "java/lang/Enum" => CpClassMembers {
+                superclass: Some("java/lang/Object".to_string()),
+                interfaces: Vec::new(),
+                methods: vec![
+                    method("name", vec![], CpTypeRef::plain("java/lang/String")),
+                    method("ordinal", vec![], CpTypeRef::plain("int")),
+                ],
+                fields: Vec::new(),
+                flags: CpClassFlags::default(),
+                type_params: Vec::new(),
+            },
+            "java/lang/Object" => CpClassMembers {
+                superclass: None,
+                interfaces: Vec::new(),
+                methods: vec![method("toString", vec![], CpTypeRef::plain("java/lang/String"))],
+                fields: Vec::new(),
+                flags: CpClassFlags::default(),
+                type_params: Vec::new(),
+            },
+            "java/lang/String" | "java/lang/Record" => CpClassMembers {
+                superclass: Some("java/lang/Object".to_string()),
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: Vec::new(),
+                flags: CpClassFlags::default(),
+                type_params: Vec::new(),
+            },
+            _ => return None,
+        })
+    }
 }

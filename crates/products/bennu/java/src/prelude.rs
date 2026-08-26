@@ -21,7 +21,11 @@ pub use crate::ast::{lower as lower_ast, AstNode};
 // "Import class" detection: the simple type name under the caret that needs an import.
 // The grammar itself, for callers that walk a parse rather than ask a question of it —
 // the syntax-tree panel. One pin for the whole workspace (see `grammar.rs`).
-pub use crate::grammar::language as java_language;
+pub use crate::grammar::{language as java_language, parse_java};
+// Anonymous-class identity: the synthetic name an unnamed `new X() { … }` body is filed under,
+// and the test that recognises one. Shared so the extractor and the caret query derive it the
+// same way rather than each having its own idea.
+pub use crate::symbols::{anonymous_type_name, is_anonymous_body};
 
 pub use crate::import_hint::simple_type_needing_import;
 

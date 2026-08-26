@@ -215,3 +215,113 @@ fn rename_from_use_site_matches_from_decl() {
     assert_eq!(u.total_edits(), d.total_edits(), "same symbol → same edit count");
     assert_eq!(u.target_label, d.target_label);
 }
+
+// ── record components reached through a lambda ──────────────────────────────────
+
+/// The shape real code has: a nested `record`, and its accessor called on a **lambda parameter**
+/// whose type is only known by following a generic chain — `Box<Failure>` → `stream()` →
+/// `Seq<Failure>` → `map(Fn<T,R>)` → `T`.
+///
+/// Modelled with project types on purpose. The harness has no JDK, so `List.stream()` cannot be
+/// resolved here — but the *inference* being tested is generic substitution through method return
+/// types and functional-interface parameters, which project types exercise identically. Testing it
+/// against an explicitly typed variable instead (`Failure f`) is what made an earlier fix look
+/// correct while the real code stayed broken.
+fn record_lambda_project() -> Project {
+    Project::new(&[
+        ("Fn.java", "package app;\npublic interface Fn<T, R> {\n    R apply(T t);\n}\n"),
+        (
+            "Seq.java",
+            "package app;\n\
+             public class Seq<T> {\n\
+             \x20   public <R> Seq<R> map(Fn<T, R> f) { return null; }\n\
+             }\n",
+        ),
+        (
+            "Box.java",
+            "package app;\n\
+             public class Box<T> {\n\
+             \x20   public Seq<T> stream() { return null; }\n\
+             }\n",
+        ),
+        (
+            "Outer.java",
+            "package app;\n\
+             public class Outer {\n\
+             \x20   private record Failure(String source_path) {}\n\
+             \x20   Seq<String> show(Box<Failure> failures) {\n\
+             \x20       return failures.stream().map(failure -> failure.source_path());\n\
+             \x20   }\n\
+             }\n",
+        ),
+    ])
+}
+
+#[test]
+fn the_index_records_an_accessor_called_on_a_lambda_parameter() {
+    // Asserted separately from the rename so a failure says WHICH half is broken: if the index
+    // never keyed this call, no rename could ever have found it and the problem is type inference,
+    // not the rename plan.
+    let p = record_lambda_project();
+    let s = p.source("Outer.java").to_string();
+    let off = at(&s, "failure.source_path()") + "failure.".len();
+    let usages = p.find_usages("Outer.java", off);
+    assert!(
+        usages.is_some_and(|u| !u.usages.is_empty()),
+        "the accessor call on a lambda parameter must be indexed as a use"
+    );
+}
+
+#[test]
+fn renaming_a_record_component_reaches_an_accessor_on_a_lambda_parameter() {
+    let p = record_lambda_project();
+    let s = p.source("Outer.java").to_string();
+    let off = at(&s, "String source_path)") + "String ".len();
+    let edits = p.rename_edits("Outer.java", off, "sourcePath");
+    assert!(!edits.is_empty(), "the component must be renameable at all");
+
+    let accessor = at(&s, "failure.source_path()") + "failure.".len();
+    assert!(
+        edits.iter().any(|e| e.file == "Outer.java" && e.start == accessor),
+        "the accessor call must be renamed, got {edits:?}"
+    );
+}
+
+#[test]
+fn go_to_a_record_accessor_lands_in_the_record_not_in_a_generated_stub() {
+    // A record's accessor is synthesized, and its symbol used to carry no span — so anything
+    // navigating to it had nowhere in the project to go and fell back to the generated-source
+    // view: "go to source_path()" opened a stub of the record instead of the record itself.
+    // The component's name in the header IS where it is written.
+    let p = record_lambda_project();
+    let s = p.source("Outer.java").to_string();
+    let off = at(&s, "failure.source_path()") + "failure.".len();
+    let d = p.goto("Outer.java", off).expect("the accessor resolves");
+    assert_eq!(d.file, "Outer.java", "it must land in the file that declares the record");
+    let component = at(&s, "String source_path)") + "String ".len();
+    assert_eq!(
+        d.start, component,
+        "it must land on the component in the header, got {:?}",
+        &s[d.start..d.end.min(s.len())]
+    );
+}
+
+#[test]
+fn a_nested_project_type_is_recognised_as_project_code() {
+    // The guard behind "go to declaration opened a decompiled stub of my own record":
+    // `library_binary` refuses to open a library view for a binary the project declares. If that
+    // check says "not mine" for a nested type, the last-resort library jump happily renders the
+    // class from `target/classes` — the user's own code, shown as `throw new
+    // RuntimeException("compiled code")`.
+    let p = record_lambda_project();
+    assert!(p.is_project_type("app/Outer"), "the outer class is obviously project code");
+    assert!(
+        p.is_project_type("app/Outer/Failure"),
+        "a nested type is project code too — source spelling"
+    );
+    assert!(
+        p.is_project_type("app/Outer$Failure"),
+        "…and under the JVM spelling, which is what comes back from its own compiled classes"
+    );
+    assert!(!p.is_project_type("java/util/Map"), "a real library type is not project code");
+}

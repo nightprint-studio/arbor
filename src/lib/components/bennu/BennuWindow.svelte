@@ -109,6 +109,8 @@
   import BennuRunConfigModal from './BennuRunConfigModal.svelte';
   import BennuBreakpointsModal from './BennuBreakpointsModal.svelte';
   import BennuSsrModal from './BennuSsrModal.svelte';
+  import BennuNamingFixModal from './BennuNamingFixModal.svelte';
+  import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
   import BennuRenameModal from './BennuRenameModal.svelte';
   import BennuUsagesPopover from './BennuUsagesPopover.svelte';
   import BennuGotoModal from './BennuGotoModal.svelte';
@@ -1066,6 +1068,39 @@
 
   function run(fn: () => void) { bennuUiStore.closePalette(); queueMicrotask(fn); }
 
+  /** Whether the project has switched the naming check on — what gates the two bulk-fix entries.
+   *  Offering "Fix naming" to a project with no convention is offering to do nothing. */
+  const namingOn = $derived(bennuNamingStore.config.enabled);
+
+  // Read the project's naming section when a project opens, so `namingOn` is right before anyone
+  // has been near Project Configuration. Untracked because `load` writes the state it reads.
+  $effect(() => {
+    const root = projectStore.project?.root;
+    if (root) untrack(() => void bennuNamingStore.load(root));
+  });
+
+  /**
+   * Start a bulk naming fix. The review opens immediately and fills in as the plan is built.
+   *
+   * The "nothing to do" case closes it again with a toast: a dialog whose only content is "no
+   * results" is a dialog you have to dismiss to learn nothing.
+   */
+  async function planNamingFix(scope: 'file' | 'project') {
+    const root = projectStore.project?.root;
+    if (!root) return;
+    const file = scope === 'file' ? projectStore.activeFilePath ?? undefined : undefined;
+    if (scope === 'file' && !file) return;
+    const source = file ? projectStore.sourceOf(file) : undefined;
+    const plan = await bennuNamingStore.planFix(root, file, source);
+    if (plan && plan.renamed.length === 0 && plan.refused.length === 0) {
+      bennuNamingStore.dismissFix();
+      toastStore.show(
+        scope === 'file' ? 'No naming issues in this file' : 'No naming issues in this project',
+        'success',
+      );
+    }
+  }
+
   /** Re-scan the plugin directories and reload what is there, reporting either way.
    *
    *  Silence would be the wrong answer for both outcomes: a reload that worked looks identical
@@ -1139,6 +1174,17 @@
         action: () => run(() => editor?.showTypeHierarchy()), when: isLspFile(path) },
       { id: 'rename', title: 'Rename…', icon: 'target', shortcut: 'Shift+F6',
         action: () => run(() => editor?.openRename()), when: canNav },
+      // The bulk half of the naming check. Two entries and not one: "this file" is the answer to a
+      // screen full of squiggles, "the project" is a deliberate sweep, and they cost very
+      // different amounts. Both open the same review before anything is written.
+      // No keybinding on purpose: a bulk fix is something you run once after adopting a
+      // convention, not something you reach for while typing, and every free Ctrl+Shift+<letter>
+      // is worth more to an action that is.
+      { id: 'namingfixfile', title: 'Fix naming in file', icon: 'wand',
+        action: () => run(() => void planNamingFix('file')),
+        when: !!projectStore.activeFilePath && namingOn },
+      { id: 'namingfixproject', title: 'Fix naming in project', icon: 'wand',
+        action: () => run(() => void planNamingFix('project')), when: namingOn },
       { id: 'save', title: 'Save file', icon: 'file', shortcut: 'Ctrl+S',
         action: () => run(saveActive), when: !!projectStore.activeFilePath },
       { id: 'find', title: 'Find in file', icon: 'search', shortcut: 'Ctrl+F',
@@ -1904,6 +1950,13 @@
 
 {#if bennuUiStore.ssrOpen}
   <BennuSsrModal onClose={() => bennuUiStore.closeSsr()} />
+{/if}
+
+<!-- Open from the moment the fix is asked for, not from the moment it finishes: on a real project
+     the planning phase runs for a while, and that is exactly when the user needs to see something
+     — including a way to stop it. -->
+{#if bennuNamingStore.fixOpen}
+  <BennuNamingFixModal onClose={() => bennuNamingStore.dismissFix()} />
 {/if}
 
 {#if bennuUiStore.navOpen}

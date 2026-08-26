@@ -930,8 +930,8 @@ fn collect(dir: &Path, dialect: Dialect, out: &mut Vec<String>) {
 /// Read a source in the project's declared encoding — a legacy tree is frequently Cp1252, and a
 /// file this could not decode is a file whose matches would be missing from the count.
 fn read_source(root: &str, path: &str) -> Option<String> {
-    let label = crate::index_service::resolve_index_encoding(root);
-    bennu_intel::prelude::read_source_for_index(Path::new(path), &label).map(|d| d.text)
+    let encoding = crate::index_service::encoding_plan(root);
+    bennu_intel::prelude::read_source_for_index(Path::new(path), &encoding).map(|d| d.text)
 }
 
 fn write_source(root: &str, path: &str, text: &str) -> Result<(), String> {

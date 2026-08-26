@@ -345,6 +345,29 @@ pub struct CompletionItem {
     pub resolve_id: Option<usize>,
 }
 
+/// The severities a [`Diagnostic`] may carry, as the strings that ride on the wire.
+///
+/// [`WEAK`] is the level between "this is wrong" and "this is a note": a **style** finding, true
+/// but not a defect. It exists because a project that adopts a naming convention gets one finding
+/// per offending declaration — thousands, on a legacy tree — and mixing those in with genuine
+/// compile errors would devalue both. The editor draws it faintly and the Problems panel groups it
+/// on its own; CodeMirror has no such level, so the editor maps it onto the softest one it has.
+///
+/// [`HINT`] stays what it has always been: spell-check and other suggestions that are not about
+/// the code being right or wrong at all.
+pub mod severity {
+    /// A defect — it will not compile, or it will not work.
+    pub const ERROR: &str = "error";
+    /// A defect in waiting: legal, and very probably not what was meant.
+    pub const WARNING: &str = "warning";
+    /// A style finding — true, but not a defect. See the module doc.
+    pub const WEAK: &str = "weak";
+    /// Informational.
+    pub const INFO: &str = "info";
+    /// A suggestion about the prose, not the code (spell-check).
+    pub const HINT: &str = "hint";
+}
+
 /// A single diagnostic returned by `bennu_diagnostics`. Phase 0 returns an empty
 /// list; the shape is frozen now so the FE binds against it. Byte offsets, not
 /// line/col — the FE maps them against the buffer it already has.
@@ -352,7 +375,7 @@ pub struct CompletionItem {
 pub struct Diagnostic {
     /// The message shown to the user.
     pub message: String,
-    /// Severity: `"error"` | `"warning"` | `"info"` | `"hint"`.
+    /// Severity — one of the [`severity`] constants.
     pub severity: String,
     /// Stable machine identifier for the KIND of diagnostic (a kebab-case slug like
     /// `"unknown-member"` / `"wrong-type-argument-count"`), from the emitting check's `CheckId`. Lets
@@ -419,6 +442,28 @@ pub struct RenamePreview {
     pub total_edits: usize,
     /// Whether any edit is `inferred` (the FE nudges review before applying).
     pub has_inferred: bool,
+    /// Why this rename must NOT be applied, when it must not be. The edits are still listed —
+    /// seeing what it would do is how the reason makes sense — but the FE has to refuse to apply
+    /// them, not merely warn. Today: a method overriding a member of a library type.
+    #[serde(default)]
+    pub blocked: Option<String>,
+    /// The file this rename also has to move, if any — see [`RenameFileMove`]. Applied by the FE
+    /// AFTER the edits, since the edits are addressed to the old path.
+    #[serde(default)]
+    pub file_rename: Option<RenameFileMove>,
+}
+
+/// A source file that has to be renamed along with the type it declares.
+///
+/// Java ties a public top-level type to its filename, so renaming the type without the file leaves
+/// code that does not compile. Only ever set when the file is named after the type being renamed —
+/// which excludes a nested type, whose file is named after its outer type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenameFileMove {
+    /// The file's current path.
+    pub from: String,
+    /// The path it must take — same directory, new basename.
+    pub to: String,
 }
 
 // ── write_file ───────────────────────────────────────────────────────────────

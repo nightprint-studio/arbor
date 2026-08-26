@@ -26,6 +26,10 @@ bennu-query = { path = "../query" }
 # AST + resolver-backed validation (syntax/statements/declarations/unknown-members): the provider's
 # `validate` runs it against its own resolver.
 bennu-check = { path = "../check" }
+# Naming conventions (opt-in feature pack). Used here only for the identifier tokenizer, which
+# `spell` re-exports rather than keeping a second copy of the same word split — the pack's own
+# scan is merged into the diagnostics funnel one layer up, in `bennu-be`.
+bennu-naming = { path = "../naming" }
 # The web-config graph (Struts/Spring/Tiles): the native provider ingests its
 # string-keyed records into the index (as `Source::StrutsAction`/`SpringBean` symbols +
 # edges) and resolves the C1 chain (action → bean-id → FQCN) + the view chain off it.

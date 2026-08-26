@@ -189,6 +189,15 @@ mod todos;
 // case, checked against en_US/it_IT Hunspell + tech allow-list + custom dicts) /
 // `bennu_dict_add` / `bennu_spell_status` / `bennu_download_dictionaries` (LibreOffice dicts).
 mod spell;
+// Naming conventions (opt-in, per-repo): `bennu_get_naming_config` / `bennu_set_naming_config` /
+// `bennu_naming_catalog`, plus the scan that merges a declaration whose name breaks the project's
+// convention into the diagnostics funnel — each one carrying the name that would satisfy it, which
+// is what the Alt+Enter fix renames to.
+mod naming;
+// The bulk half of the naming pack: `bennu_naming_fix_plan` plans every fix in a file or a whole
+// project at once, as edits the editor applies (so one Undo takes it all back), with every name it
+// refuses to touch reported by name.
+mod naming_fix;
 // Find in files (project-wide text search): `bennu_find_in_files` — a fresh, line-oriented
 // scan of the project's text files for a query (plain / whole-word; regex is a
 // case-insensitive substring fallback, as the `regex` crate isn't a dependency).

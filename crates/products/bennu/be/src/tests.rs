@@ -116,7 +116,7 @@ pub(crate) fn bennu_discover_tests(
     args: DiscoverTestsArgs,
 ) -> Result<Vec<DiscoveredTest>, String> {
     let root = PathBuf::from(&args.root);
-    let encoding = crate::index_service::resolve_index_encoding(&args.root);
+    let encoding = crate::index_service::encoding_plan(&args.root);
 
     // Single file: never cached — this is the caret path, and it must be current.
     if let Some(file) = &args.file {
@@ -142,7 +142,11 @@ pub(crate) fn bennu_discover_tests(
 
 /// One file's test classes, decoded in the project's encoding (a legacy Cp1252 source still
 /// yields its tests) and tagged with its module.
-fn discover_file(root: &Path, file: &Path, encoding: &str) -> Vec<DiscoveredTest> {
+fn discover_file(
+    root: &Path,
+    file: &Path,
+    encoding: &bennu_project::prelude::EncodingPlan,
+) -> Vec<DiscoveredTest> {
     let Some(decoded) = read_source_for_index(file, encoding) else {
         return Vec::new();
     };

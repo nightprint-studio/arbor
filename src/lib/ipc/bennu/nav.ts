@@ -355,6 +355,23 @@ export interface RenamePreview {
   total_edits: number;
   /** Whether any edit is `inferred` (the FE nudges review before applying). */
   has_inferred: boolean;
+  /** Why this rename must NOT be applied, or `null`. The edits are still listed — seeing what it
+   *  would do is how the reason makes sense — but this is a refusal, not a warning to click past.
+   *  Today: a method that overrides a member of a library type, which cannot be renamed with it. */
+  blocked: string | null;
+  /** The file this rename also has to move, or `null`. Applied AFTER the edits — they are
+   *  addressed to the old path. */
+  file_rename: RenameFileMove | null;
+}
+
+/** A source file that has to be renamed along with the type it declares. Java ties a public
+ *  top-level type to its filename, so renaming the type without the file leaves code that does
+ *  not compile. Only ever set for a type whose file is named after it — never a nested one. */
+export interface RenameFileMove {
+  /** The file's current path. */
+  from: string;
+  /** The path it must take — same directory, new basename. */
+  to: string;
 }
 
 /** Plan a rename for the symbol at `file`:`offset` → `newName`, returning the PREVIEW

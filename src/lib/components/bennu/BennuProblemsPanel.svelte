@@ -76,9 +76,11 @@
     files: FileGroup[];
   }
 
-  const SEV_ORDER: Severity[] = ['error', 'warning', 'info', 'hint'];
+  // Severity order is severity order: a style finding sits below every defect and above the
+  // suggestions that are not about the code at all.
+  const SEV_ORDER: Severity[] = ['error', 'warning', 'weak', 'info', 'hint'];
   const SEV_LABEL: Record<string, string> = {
-    error: 'Errors', warning: 'Warnings', info: 'Info', hint: 'Hints',
+    error: 'Errors', warning: 'Warnings', weak: 'Weak warnings', info: 'Info', hint: 'Hints',
   };
 
   function baseName(path: string): string {
@@ -374,6 +376,9 @@
   .pb-icon { display: flex; flex-shrink: 0; }
   .sev-error { color: var(--error); }
   .sev-warning { color: var(--warning); }
+  /* A style finding is drawn in the muted foreground, not in an alert colour: it is true, but it
+     is not a defect, and giving it the warning amber would put it on a level with one. */
+  .sev-weak { color: var(--text-muted); }
   .sev-info, .sev-hint { color: var(--info); }
   .pb-msg { flex-shrink: 0; max-width: 55%; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pb-detail { flex: 1; min-width: 0; font-size: var(--font-size-2xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

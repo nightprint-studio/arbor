@@ -215,7 +215,7 @@ impl FrameworkService {
         let wants_java =
             registry.ids().iter().any(|id| !matches!(*id, "xml" | "jsp" | "fulcrum.i18n" | "bevy"));
         let java: Vec<ScannedFile> = if wants_java {
-            let encoding = resolve_index_encoding(root);
+            let encoding = crate::index_service::encoding_plan(root);
             bennu_intel::prelude::read_java_sources(path, &encoding)
                 .sources
                 .into_iter()

@@ -129,10 +129,24 @@ Two impl slots:
   walk). `RenameEngine::inherited_members(file, type_name, line)` is the thin engine-scoped
   entry that forwards the engine's resolver + java sources to it.
 - **`rename`** — best-effort, preview-first rename planning (docs §5 #10-12):
-  - `RenameEngine::for_project(index_dir, jdk, simple_names, java_sources, xml_sources)`
-    opens the persisted index, builds the resolver + the reference index (via the
-    incremental `refcache` — only changed files + their dependents are re-walked on reopen),
-    and caches the source sets — one `Send + Sync` engine per project (built off-thread).
+  - `RenameEngine::for_project(index_dir, jdk, simple_names, java_sources, xml_sources,
+    shared_resolver)` builds the reference index (via the incremental `refcache` — only
+    changed files + their dependents are re-walked on reopen) and caches the source sets —
+    one `Send + Sync` engine per project (built off-thread). `shared_resolver` is the
+    **provider's own** resolver, lent rather than rebuilt; `None` falls back to a project-only
+    one over the persisted index alone.
+  - **Resolve widely, record narrowly.** The walk resolves library types because a library
+    type is a *conduit* — in `list.stream().map(x -> x.foo())` the project type only reaches
+    `x` by substitution through `List`/`Stream`/`Function`, so without the JDK the `x.foo()`
+    edge is never found. But an edge INTO a library member is never queried, so `records_owner`
+    (memoized per file) drops it: recording them would grow the index and the on-disk refcache
+    by every `list.add(…)` for nothing. `BENNU_RENAME_PROJECT_ONLY=1` forces the old
+    project-only resolver. Changing what the walk records means bumping `refcache::CACHE_VERSION`.
+  - **Generated members travel with their field.** `generated_accessors` adds the call sites of
+    accessors nobody wrote down — a record component's (JLS §8.10) and Lombok's getter / setter /
+    `@With`. Lombok's new name comes from re-running its own naming rule
+    (`lombok::accessors_of_field` → `PlannedAccessor::name_for`), the same rule that synthesizes
+    the members, so the two can't drift.
   - `engine.plan(file, source, offset, new_name)` → a `RenamePlan` PREVIEW: per-file
     `Edit`s tagged by `EditReason` (`Declaration` / `Reference` / `Import` / `SpringBean` /
     `Local`) with an `inferred` flag. A **local** is scope-exact single-file; a

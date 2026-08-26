@@ -20,7 +20,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use bennu_java::prelude::{Annotation, Import, Member, MemberKind, TypeDecl, TypeRef, Visibility};
+use bennu_java::prelude::{
+    Annotation, FieldDecl, Import, Member, MemberKind, TypeDecl, TypeRef, Visibility,
+};
 
 use crate::typemap::type_text_to_ref;
 
@@ -62,18 +64,8 @@ pub fn synthesize(
         return LombokMembers { methods, fields };
     }
 
-    // Class-level flags. `@Data` = getters + setters; `@Value` = getters only (immutable). Each is
-    // honoured only when the annotation resolves to Lombok (correctly imported), never by bare name.
-    let cls_getter = has_lombok(&td.annotations, imports, &["Getter", "Data", "Value"]);
-    let is_value = has_lombok(&td.annotations, imports, &["Value"]);
-    let cls_setter = has_lombok(&td.annotations, imports, &["Setter", "Data"]) && !is_value;
-    // `@With`/`@Wither` generates a `withX(v)` copy-method per field, returning the OWNER type.
-    let cls_with = has_lombok(&td.annotations, imports, &["With", "Wither"]);
     let owner = td.fqn.replace('.', "/");
-    // `@Accessors(fluent = true)` renames accessors to the FIELD name (`name()` / `name(v)`) with no
-    // get/set/is prefix, and (with `chain`, which defaults on when fluent) makes the setter return
-    // `this`. Configurable at class level or per field (the field's own `@Accessors` overrides).
-    let cls_accessors = accessors_config(&td.annotations, imports);
+    let cls = class_accessors(td, imports);
 
     // `@UtilityClass` generates a `private` constructor (one that throws) so the class can't be
     // instantiated. The rest of what it does — making every member `static` and the class `final` —
@@ -97,97 +89,31 @@ pub fn synthesize(
     synthesize_constructors(td, imports, project_types, existing_methods, is_project, &mut methods);
 
     for f in &td.fields {
-        // Lombok does not generate accessors for static fields.
-        if f.is_static {
-            continue;
-        }
-        let want_getter = cls_getter || has_lombok(&f.annotations, imports, &["Getter"]);
-        let want_setter =
-            (cls_setter || has_lombok(&f.annotations, imports, &["Setter"])) && !is_value && !f.is_final;
-        let acc = accessors_config(&f.annotations, imports).or(cls_accessors).unwrap_or_default();
-
-        // `@Getter(AccessLevel.X)` / `@Setter(AccessLevel.X)` — the level the author asked for,
-        // field-level first, then the class annotation, then Lombok's `public` default. `NONE`
-        // means the accessor is not generated at all, so it must not be indexed as existing.
-        let getter_vis = accessor_visibility(&f.annotations, &td.annotations, imports, &["Getter", "Data"]);
-        let setter_vis = accessor_visibility(&f.annotations, &td.annotations, imports, &["Setter", "Data"]);
-        let want_getter = want_getter && getter_vis.is_some();
-        let want_setter = want_setter && setter_vis.is_some();
-
-        if want_getter {
-            let name = if acc.fluent {
-                f.name.clone()
-            } else {
-                getter_name(&f.name, is_primitive_boolean(&f.type_text))
+        for acc in planned_accessors(td, imports, f, &cls, existing_methods) {
+            let ftype = type_text_to_ref(&f.type_text, imports, project_types, is_project);
+            // `chain` (implied by `fluent`) → the setter returns the owner for call-chaining;
+            // `@With` always does (it is a copy-with-one-field-changed).
+            let (params, ret, ret_text) = match acc.kind {
+                AccessorKind::Getter => (Vec::new(), ftype, f.type_text.as_str()),
+                AccessorKind::Setter if !acc.chain => (vec![ftype], TypeRef::simple("void"), "void"),
+                _ => (vec![ftype], TypeRef::simple(owner.clone()), td.name.as_str()),
             };
-            if !existing_methods.contains(&(name.clone(), 0)) {
-                let ret = type_text_to_ref(&f.type_text, imports, project_types, is_project);
-                methods.push(Member {
-                    name: name.clone(),
-                    kind: MemberKind::Method,
-                    return_type: ret,
-                    params: Vec::new(),
-                    is_static: false,
-                    is_abstract: false,
-                    is_default: false,
-                    is_final: false,
-                    visibility: getter_vis.unwrap_or(Visibility::Public),
-                    raw_signature: format!("{} {}()", f.type_text, name),
-                    throws: Vec::new(),
-                });
-            }
-        }
-        if want_setter {
-            let name = if acc.fluent {
-                f.name.clone()
-            } else {
-                // Same rule as the getter, so a `boolean isRunning` gets `setRunning` (Lombok runs
-                // both through one `toAccessorName`).
-                accessor_name("set", &f.name, is_primitive_boolean(&f.type_text))
-            };
-            if !existing_methods.contains(&(name.clone(), 1)) {
-                let param = type_text_to_ref(&f.type_text, imports, project_types, is_project);
-                // `chain` (implied by `fluent`) → the setter returns the owner for call-chaining.
-                let (ret, ret_text) = if acc.chain {
-                    (TypeRef::simple(owner.clone()), td.name.as_str())
-                } else {
-                    (TypeRef::simple("void"), "void")
-                };
-                methods.push(Member {
-                    name: name.clone(),
-                    kind: MemberKind::Method,
-                    return_type: ret,
-                    params: vec![param],
-                    is_static: false,
-                    is_abstract: false,
-                    is_default: false,
-                    is_final: false,
-                    visibility: setter_vis.unwrap_or(Visibility::Public),
-                    raw_signature: format!("{} {}({})", ret_text, name, f.type_text),
-                    throws: Vec::new(),
-                });
-            }
-        }
-        // `@With foo` → `Foo withFoo(T value)` (an immutable "copy with one field changed").
-        let want_with = cls_with || has_lombok(&f.annotations, imports, &["With", "Wither"]);
-        if want_with {
-            let name = accessor_name("with", &f.name, is_primitive_boolean(&f.type_text));
-            if !existing_methods.contains(&(name.clone(), 1)) {
-                let param = type_text_to_ref(&f.type_text, imports, project_types, is_project);
-                methods.push(Member {
-                    name: name.clone(),
-                    kind: MemberKind::Method,
-                    return_type: TypeRef::simple(owner.clone()),
-                    params: vec![param],
-                    is_static: false,
-                    is_abstract: false,
-                    is_default: false,
-                    is_final: false,
-                    visibility: Visibility::Public,
-                    raw_signature: format!("{} {}({})", td.name, name, f.type_text),
-                    throws: Vec::new(),
-                });
-            }
+            methods.push(Member {
+                name: acc.name.clone(),
+                kind: MemberKind::Method,
+                return_type: ret,
+                params,
+                is_static: false,
+                is_abstract: false,
+                is_default: false,
+                is_final: false,
+                visibility: acc.visibility,
+                raw_signature: match acc.kind {
+                    AccessorKind::Getter => format!("{} {}()", f.type_text, acc.name),
+                    _ => format!("{} {}({})", ret_text, acc.name, f.type_text),
+                },
+                throws: Vec::new(),
+            });
         }
     }
 
@@ -472,6 +398,169 @@ pub fn is_utility_class(td: &TypeDecl, imports: &[Import]) -> bool {
     file_imports_lombok(imports) && has_lombok(&td.annotations, imports, &["UtilityClass"])
 }
 
+/// Which accessor Lombok is generating — fixes the arity, the parameters and the return type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessorKind {
+    Getter,
+    Setter,
+    /// `@With foo` → `Foo withFoo(T value)`, an immutable "copy with one field changed".
+    With,
+}
+
+impl AccessorKind {
+    /// The parameter count — with the name, this is Lombok's own suppression key (a hand-written
+    /// method of the same name AND arity cancels the synthetic one).
+    pub fn arity(self) -> usize {
+        match self {
+            AccessorKind::Getter => 0,
+            AccessorKind::Setter | AccessorKind::With => 1,
+        }
+    }
+}
+
+/// One accessor Lombok generates for a field, carrying the naming RULE that produced it and not
+/// just the resulting name.
+///
+/// The rule is what rename needs. Moving a field `source_path` → `sourcePath` must also move
+/// `getSource_path` → `getSourcePath`, and the only way to be sure the new name is the one Lombok
+/// will actually generate is to re-run the very rule that produced the old one. A second,
+/// parallel implementation of "how Lombok names an accessor" would drift from this one and rewrite
+/// call sites to a method that never appears — worse than not renaming them at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedAccessor {
+    /// The name Lombok generates for the field this was derived from.
+    pub name: String,
+    pub kind: AccessorKind,
+    pub visibility: Visibility,
+    /// `None` for an `@Accessors(fluent)` accessor, whose name simply IS the field name.
+    prefix: Option<&'static str>,
+    is_bool: bool,
+    /// Whether the setter returns the owner rather than `void` (`@Accessors(chain)`).
+    chain: bool,
+}
+
+impl PlannedAccessor {
+    fn new(
+        kind: AccessorKind,
+        prefix: Option<&'static str>,
+        is_bool: bool,
+        field: &str,
+        visibility: Visibility,
+        chain: bool,
+    ) -> Self {
+        let mut a = Self { name: String::new(), kind, visibility, prefix, is_bool, chain };
+        a.name = a.name_for(field);
+        a
+    }
+
+    pub fn arity(&self) -> usize {
+        self.kind.arity()
+    }
+
+    /// The name this same rule yields for `field` — i.e. what the accessor will be called once the
+    /// field is renamed to `field`.
+    pub fn name_for(&self, field: &str) -> String {
+        match self.prefix {
+            None => field.to_string(),
+            Some(p) => accessor_name(p, field, self.is_bool),
+        }
+    }
+}
+
+/// The class-level Lombok state that shapes every field's accessors, read once per type.
+///
+/// `@Data` = getters + setters; `@Value` = getters only (immutable). Each is honoured only when the
+/// annotation resolves to Lombok (correctly imported), never by bare name.
+struct ClassAccessors {
+    getter: bool,
+    setter: bool,
+    /// `@With`/`@Wither` at class level — a `withX(v)` per field.
+    with: bool,
+    is_value: bool,
+    /// `@Accessors(fluent = true)` renames accessors to the FIELD name (`name()` / `name(v)`) with
+    /// no get/set/is prefix. A field's own `@Accessors` overrides this.
+    accessors: Option<Accessors>,
+}
+
+fn class_accessors(td: &TypeDecl, imports: &[Import]) -> ClassAccessors {
+    let is_value = has_lombok(&td.annotations, imports, &["Value"]);
+    ClassAccessors {
+        getter: has_lombok(&td.annotations, imports, &["Getter", "Data", "Value"]),
+        setter: has_lombok(&td.annotations, imports, &["Setter", "Data"]) && !is_value,
+        with: has_lombok(&td.annotations, imports, &["With", "Wither"]),
+        is_value,
+        accessors: accessors_config(&td.annotations, imports),
+    }
+}
+
+/// Every accessor Lombok generates for one field — THE decision, used both to synthesize the
+/// members and to plan a rename over them.
+fn planned_accessors(
+    td: &TypeDecl,
+    imports: &[Import],
+    f: &FieldDecl,
+    cls: &ClassAccessors,
+    existing_methods: &HashSet<(String, usize)>,
+) -> Vec<PlannedAccessor> {
+    // Lombok does not generate accessors for static fields.
+    if f.is_static {
+        return Vec::new();
+    }
+    let acc = accessors_config(&f.annotations, imports).or(cls.accessors).unwrap_or_default();
+    let is_bool = is_primitive_boolean(&f.type_text);
+    // `@Getter(AccessLevel.X)` / `@Setter(AccessLevel.X)` — the level the author asked for,
+    // field-level first, then the class annotation, then Lombok's `public` default. `NONE` means
+    // the accessor is not generated at all, so it must not be indexed as existing.
+    let getter_vis = accessor_visibility(&f.annotations, &td.annotations, imports, &["Getter", "Data"]);
+    let setter_vis = accessor_visibility(&f.annotations, &td.annotations, imports, &["Setter", "Data"]);
+
+    let mut out = Vec::new();
+    if (cls.getter || has_lombok(&f.annotations, imports, &["Getter"])) && getter_vis.is_some() {
+        // Only the primitive `boolean` gets an `isX` getter; the `Boolean` wrapper uses `getX`.
+        let prefix = (!acc.fluent).then_some(if is_bool { "is" } else { "get" });
+        let vis = getter_vis.unwrap_or(Visibility::Public);
+        out.push(PlannedAccessor::new(AccessorKind::Getter, prefix, is_bool, &f.name, vis, acc.chain));
+    }
+    let want_setter = (cls.setter || has_lombok(&f.annotations, imports, &["Setter"]))
+        && !cls.is_value
+        && !f.is_final
+        && setter_vis.is_some();
+    if want_setter {
+        // Same rule as the getter, so a `boolean isRunning` gets `setRunning` (Lombok runs both
+        // through one `toAccessorName`).
+        let prefix = (!acc.fluent).then_some("set");
+        let vis = setter_vis.unwrap_or(Visibility::Public);
+        out.push(PlannedAccessor::new(AccessorKind::Setter, prefix, is_bool, &f.name, vis, acc.chain));
+    }
+    if cls.with || has_lombok(&f.annotations, imports, &["With", "Wither"]) {
+        // `@With` is not affected by `fluent` — it always carries its prefix.
+        let vis = Visibility::Public;
+        out.push(PlannedAccessor::new(AccessorKind::With, Some("with"), is_bool, &f.name, vis, acc.chain));
+    }
+    // A hand-written method of the same name and arity cancels the synthetic one — and then it is a
+    // real declaration, independent of the field, which a rename must NOT touch.
+    out.retain(|a| !existing_methods.contains(&(a.name.clone(), a.arity())));
+    out
+}
+
+/// The accessors Lombok generates for the field named `field` of `td` — the rename path's entry
+/// point. Empty when the file doesn't use Lombok, the field doesn't exist, or nothing is generated.
+///
+/// Renaming a `@Data` / `@Getter` field has to carry its generated accessors' CALL SITES with it:
+/// the methods themselves are never written down, so nothing else in the rename plan would move
+/// them, and leaving them behind breaks every caller.
+pub fn accessors_of_field(td: &TypeDecl, imports: &[Import], field: &str) -> Vec<PlannedAccessor> {
+    if !file_imports_lombok(imports) {
+        return Vec::new();
+    }
+    let Some(f) = td.fields.iter().find(|f| f.name == field) else {
+        return Vec::new();
+    };
+    let existing: HashSet<(String, usize)> =
+        td.methods.iter().map(|m| (m.name.clone(), m.params.len())).collect();
+    planned_accessors(td, imports, f, &class_accessors(td, imports), &existing)
+}
+
 /// Lombok `@Accessors` naming config that shapes the synthetic getters/setters.
 #[derive(Clone, Copy, Default)]
 struct Accessors {
@@ -516,11 +605,6 @@ fn accessor_name(prefix: &str, field: &str, is_bool: bool) -> String {
 /// followed by any character that is not a lowercase letter.
 fn already_is_prefixed(field: &str) -> bool {
     field.starts_with("is") && field.chars().nth(2).is_some_and(|c| !c.is_lowercase())
-}
-
-/// The Lombok getter name for `field`: `getFoo`, or `isFoo` for a primitive `boolean`.
-fn getter_name(field: &str, is_bool: bool) -> String {
-    accessor_name(if is_bool { "is" } else { "get" }, field, is_bool)
 }
 
 /// Uppercase the first character (ASCII), leaving the rest unchanged.
@@ -618,6 +702,7 @@ mod tests {
             name: "Order".to_string(),
             fqn: "shop.Order".to_string(),
             kind: bennu_java::prelude::TypeKind::Class,
+            is_anonymous: false,
             is_abstract: false,
             is_final: false,
             is_sealed: false,

@@ -783,6 +783,13 @@ fn rename_preview(
         // The FE nudges review when set. A pending file operation is exactly the case that
         // deserves a look before applying.
         has_inferred: !outcome.file_ops.is_empty(),
+        // A language server reports no such refusal; its file-op caveat rides the label above.
+        blocked: None,
+        // The Java engine fills this in and the FE carries it out; a language server's file ops
+        // stay a caveat in the label above, as they were. The two want converging — `FileOp::Rename`
+        // is the same shape — but that would start performing operations this path has always
+        // refused, which is a change to make deliberately and with its own tests.
+        file_rename: None,
     }
 }
 
