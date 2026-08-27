@@ -134,7 +134,7 @@ fn types_under_list<'t>(wrapper: Node<'t>, bytes: &[u8]) -> Vec<(String, Node<'t
         if node.kind() == "type_list" || node.kind() == "interface_type_list" {
             let mut c = node.walk();
             for ch in node.named_children(&mut c) {
-                if is_type_node(ch.kind()) {
+                if is_class_type_node(ch.kind()) {
                     if let Ok(t) = ch.utf8_text(bytes) {
                         out.push((t.to_string(), ch));
                     }
@@ -150,7 +150,10 @@ fn types_under_list<'t>(wrapper: Node<'t>, bytes: &[u8]) -> Vec<(String, Node<'t
     out
 }
 
-fn is_type_node(kind: &str) -> bool {
+/// Whether a kind is a REFERENCE type as written — the only thing an `extends`, `implements` or
+/// `throws` list can hold. Primitives and arrays are excluded on purpose; see
+/// `erasure_clash::is_written_type_node` for the predicate that includes them.
+fn is_class_type_node(kind: &str) -> bool {
     matches!(kind, "type_identifier" | "scoped_type_identifier" | "generic_type")
 }
 

@@ -46,6 +46,8 @@ use bennu_java::prelude::{
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::scopes::{is_value_position, resolves_as_local, single_top_level_type};
+
 use crate::resolve::type_binary;
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
 
@@ -166,7 +168,7 @@ pub fn undefined_var_errors_in(
         }
         // Is this identifier a genuine bare *value* reference we're allowed to judge? (position +
         // scope guards). Every rejection here is a deliberate SKIP for soundness.
-        if !is_judgeable_value_ident(n, top.node) {
+        if !(is_value_position(n) && scope_is_directly_top(n, top.node)) {
             continue;
         }
         let Ok(name) = n.utf8_text(bytes) else { continue };
@@ -225,40 +227,6 @@ pub fn undefined_var_errors_in(
     out
 }
 
-/// A located top-level type: its CST node plus its declared simple name.
-struct TopType<'t> {
-    node: Node<'t>,
-    decl_name: String,
-}
-
-/// The file's single top-level `class`/`enum`, or `None` when there are zero, several, or the shape
-/// is anything else. We restrict to ONE top-level class/enum so "the enclosing type" is unambiguous —
-/// with two top-level classes an identifier's owning type would need per-node attribution we skip.
-/// A top-level interface/record/annotation present alongside also bails: an interface body has no
-/// instance fields to reference bare, and a record's compact/canonical members are subtle enough to
-/// not risk mis-owning an identifier.
-fn single_top_level_type<'t>(root: Node<'t>, bytes: &[u8]) -> Option<TopType<'t>> {
-    let mut found: Option<TopType> = None;
-    let mut c = root.walk();
-    for ch in root.named_children(&mut c) {
-        if matches!(ch.kind(), "class_declaration" | "enum_declaration") {
-            if found.is_some() {
-                return None; // more than one top-level class/enum → ambiguous ownership → SKIP
-            }
-            let name = ch.child_by_field_name("name")?;
-            let decl_name = name.utf8_text(bytes).ok()?.to_string();
-            found = Some(TopType { node: ch, decl_name });
-        } else if matches!(
-            ch.kind(),
-            "interface_declaration" | "record_declaration" | "annotation_type_declaration"
-        ) {
-            // A top-level interface/record/annotation present alongside makes ownership murky; bail.
-            return None;
-        }
-    }
-    found
-}
-
 /// Collect the enum-constant names declared directly in `top` when it's an enum body. A no-op for a
 /// class. Read from the CST (`enum_constant` nodes) so we don't depend on whether the resolver's
 /// field list includes synthetic enum constants.
@@ -287,105 +255,6 @@ fn collect_enum_constants(top: Node, bytes: &[u8], out: &mut HashSet<String>) {
             }
         }
     }
-}
-
-/// Whether `ident` is a bare *value* reference we're entitled to judge, given the file's top-level
-/// type `top`. Combines the POSITION guards (it's a primary-expression identifier, not a declaration
-/// / suffix / method-name / type / label position) with the SCOPE guards (enclosing type is exactly
-/// `top`, no intervening nested class body or lambda). Any doubt → `false` (SKIP).
-fn is_judgeable_value_ident(ident: Node, top: Node) -> bool {
-    // POSITION: the parent node kind + the field this identifier occupies determine whether it's a
-    // value. Reject every non-value slot explicitly.
-    let Some(parent) = ident.parent() else { return false };
-    let pkind = parent.kind();
-
-    // The field this identifier fills in its parent, if any — the reliable slot discriminator.
-    let field_of_parent = child_field_name(parent, ident);
-
-    // A `variable_declarator` (`int y = count;`) has BOTH a `name` slot (the binding, skip) and a
-    // `value` slot (the initializer — a genuine value reference we DO judge). `count` above is the
-    // `value`; `y` is the `name`. Skip only the `name` slot.
-    if pkind == "variable_declarator" {
-        if field_of_parent.as_deref() == Some("name") {
-            return false;
-        }
-        // else: the `value` (RHS) bare identifier → judge it (fall through to scope checks below).
-    } else {
-        match pkind {
-        // A `foo.bar` member access. The `field` (suffix) is a member handled by the fields check.
-        // The `object` HEAD (`foo`) is a qualifier that could be a **variable**, but equally a **type**
-        // (`Integer.MAX_VALUE`) or a **package segment** (`java.util.List`) — ambiguities we don't
-        // model. The PARAMOUNT rule (never a false positive) forces us to SKIP the head too: only a
-        // TRULY STANDALONE bare identifier (an argument / operand / RHS, with no `.` before or after)
-        // is safe to judge. So we skip BOTH slots of a `field_access`.
-        "field_access" => return false,
-        // `a.b.C` scoped forms are package/type qualifiers we never judge (head or suffix).
-        "scoped_identifier" | "scoped_type_identifier" | "scoped_type_arguments" => return false,
-        // A method call. The `name` slot is the method (members check owns it). The `object` HEAD is a
-        // qualifier with the same type/package/variable ambiguity as `field_access` → SKIP both. Only a
-        // BARE call `foo()` (no `object`) would leave an identifier here, and that's the `name` slot,
-        // already skipped. So any identifier directly under a `method_invocation` is skipped.
-        "method_invocation" => return false,
-        // A method reference `Type::method` / `expr::method` / `Type::new`. The RHS is the referenced
-        // method NAME (owned by method-ref resolution, never a bare variable); the LHS is a
-        // type-or-value qualifier with the same ambiguity as `field_access`. Skip both slots — else
-        // `Long::sum` / `Objects::nonNull` wrongly flag `sum` / `nonNull` as an undefined symbol.
-        "method_reference" => return false,
-        // Declaration NAME slots — the identifier introduces a binding, not references one.
-        "formal_parameter"
-        | "spread_parameter"
-        | "catch_formal_parameter"
-        | "type_parameter"
-        | "class_declaration"
-        | "interface_declaration"
-        | "enum_declaration"
-        | "record_declaration"
-        | "annotation_type_declaration"
-        | "method_declaration"
-        | "constructor_declaration"
-        | "enum_constant"
-        | "labeled_statement" => return false,
-        // Type positions — never a value.
-        "type_identifier"
-        | "generic_type"
-        | "array_type"
-        | "cast_expression"
-        | "object_creation_expression"
-        | "type_arguments"
-        | "annotation"
-        | "marker_annotation"
-        | "annotation_argument_list"
-        | "element_value_pair" => return false,
-        // Import / package qualifiers.
-        "import_declaration" | "package_declaration" => return false,
-        // A `switch`/`case` label constant: `case FOO:` — an enum-constant / constant-name context we
-        // don't judge (it resolves against the selector's enum type, not the local scope).
-        "switch_label" | "constant" => return false,
-        _ => {}
-        }
-    }
-
-    // SCOPE: the nearest enclosing type must be exactly `top`, with no nested/anonymous/local class
-    // body and no lambda between the identifier and `top`. Either kind of intervening scope could
-    // declare or capture a name we don't model → we must not judge identifiers inside them.
-    scope_is_directly_top(ident, top)
-}
-
-/// The field name that immediate child `child` occupies in `parent` (`name`, `value`, `object`,
-/// `field`, …), or `None` if it fills no named field. Uses a cursor to read field names.
-fn child_field_name(parent: Node, child: Node) -> Option<String> {
-    let mut c = parent.walk();
-    if c.goto_first_child() {
-        loop {
-            if c.node().id() == child.id() {
-                return c.field_name().map(str::to_string);
-            }
-            if !c.goto_next_sibling() {
-                break;
-            }
-        }
-    }
-    None
 }
 
 /// Whether `ident`'s nearest enclosing type is exactly `top`, crossing NO lambda and no
@@ -428,165 +297,6 @@ fn scope_is_directly_top(ident: Node, top: Node) -> bool {
             _ => {}
         }
         cur = p.parent();
-    }
-    false
-}
-
-/// Whether `name` (the identifier's text) is declared as a local / parameter / for-var / catch-param /
-/// try-resource / lambda-param / pattern var in ANY scope enclosing `ident`, up to `top`. We collect
-/// every such name declared anywhere in each ancestor `block` / method / for / etc. and check
-/// membership. Over-collecting (a name declared in a sibling block of an ancestor) is *conservative*
-/// here — it can only SUPPRESS a diagnostic, never create one, and this check must never false-positive.
-fn resolves_as_local(ident: Node, top: Node, bytes: &[u8]) -> bool {
-    let Ok(name) = ident.utf8_text(bytes) else { return true }; // unreadable → SKIP (treat as resolved)
-
-    // The one body node of `top` we must NOT treat as a "locals scope": scanning the whole class body
-    // for locals would suppress a genuine positive whenever ANY other method reuses the same local name
-    // (`i`, `result`, …) — gutting detection. `top`'s members contribute FIELDS, resolved separately.
-    let top_body_id = top.child_by_field_name("body").map(|b| b.id());
-
-    // Walk ancestors from the identifier upward, checking each executable scope for a binding of
-    // `name`. Stop at `top`'s body / `top` itself — beyond the enclosing method, only fields apply.
-    let mut cur = ident.parent();
-    while let Some(p) = cur {
-        if p.id() == top.id() || Some(p.id()) == top_body_id {
-            break; // reached the type / its body — not a locals scope
-        }
-        if declares_name_in_scope(p, name, bytes) {
-            return true;
-        }
-        cur = p.parent();
-    }
-    false
-}
-
-/// Whether scope node `scope` introduces `name` as a local/param/etc. anywhere within it (searched
-/// broadly — over-inclusion only suppresses diagnostics, never adds them). Handles: method / lambda /
-/// constructor parameters, `catch` params, enhanced-`for` and classic-`for` variables, `try`-with-
-/// resources resources, local variable declarations, and record/instanceof pattern variables.
-fn declares_name_in_scope(scope: Node, name: &str, bytes: &[u8]) -> bool {
-    // For the parameter-bearing scopes, check the parameter list directly.
-    match scope.kind() {
-        "method_declaration" | "constructor_declaration" | "lambda_expression" => {
-            if params_declare(scope, name, bytes) {
-                return true;
-            }
-        }
-        "catch_clause" => {
-            // `catch (E e)` — the `catch_formal_parameter` is a sibling of the catch body block, so
-            // the body-only subtree scan below would miss it; check the clause's children directly.
-            let mut c = scope.walk();
-            for ch in scope.named_children(&mut c) {
-                if ch.kind() == "catch_formal_parameter" {
-                    if let Some(nm) = ch.child_by_field_name("name") {
-                        if nm.utf8_text(bytes) == Ok(name) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        "for_statement" | "enhanced_for_statement" => {
-            // Classic `for (int i = …; …)` uses an `init` local_variable_declaration; the enhanced
-            // `for (T x : xs)` uses a `name` field. Both are captured by the subtree scan below, but
-            // the enhanced form's variable is a direct `name` field we check explicitly.
-            if let Some(nm) = scope.child_by_field_name("name") {
-                if nm.utf8_text(bytes) == Ok(name) {
-                    return true;
-                }
-            }
-        }
-        _ => {}
-    }
-
-    // For a `block` (or any scope), scan its DIRECT and nested statements for declared names WITHOUT
-    // crossing into a deeper NEW scope owned by a nested type/lambda — those own their names and we
-    // already SKIP identifiers inside them (via `scope_is_directly_top`), so here we simply gather
-    // broadly: any local/resource/pattern var textually inside `scope`. Over-collection is safe.
-    let mut stack: Vec<Node> = Vec::new();
-    let mut c = scope.walk();
-    for ch in scope.named_children(&mut c) {
-        stack.push(ch);
-    }
-    while let Some(n) = stack.pop() {
-        match n.kind() {
-            "variable_declarator" => {
-                if let Some(nm) = n.child_by_field_name("name") {
-                    if nm.utf8_text(bytes) == Ok(name) {
-                        return true;
-                    }
-                }
-            }
-            // A record-pattern / type-pattern binding: `if (o instanceof String s)` → `s`.
-            "pattern" | "type_pattern" => {
-                if let Some(nm) = n.child_by_field_name("name") {
-                    if nm.utf8_text(bytes) == Ok(name) {
-                        return true;
-                    }
-                }
-                // Some grammars expose the binding as a bare identifier child.
-                let mut cc = n.walk();
-                for ch in n.named_children(&mut cc) {
-                    if ch.kind() == "identifier" && ch.utf8_text(bytes) == Ok(name) {
-                        return true;
-                    }
-                }
-            }
-            // Params, try-with-resources resources, and an enhanced-for var all bind via a `name`
-            // field. An `instanceof_expression` carries the pattern-binding `name` in some grammars
-            // (`o instanceof String s` → `s`). All of these are collected broadly (over-collection
-            // only SUPPRESSES a diagnostic, never adds one — sound for this never-false-positive check).
-            "catch_formal_parameter"
-            | "formal_parameter"
-            | "spread_parameter"
-            | "resource"
-            | "enhanced_for_statement"
-            | "instanceof_expression" => {
-                if let Some(nm) = n.child_by_field_name("name") {
-                    if nm.utf8_text(bytes) == Ok(name) {
-                        return true;
-                    }
-                }
-            }
-            _ => {}
-        }
-        let mut cc = n.walk();
-        for ch in n.named_children(&mut cc) {
-            stack.push(ch);
-        }
-    }
-    false
-}
-
-/// Whether a parameter-bearing scope declares `name` in its `parameters` list.
-fn params_declare(member: Node, name: &str, bytes: &[u8]) -> bool {
-    let Some(params) = member.child_by_field_name("parameters") else { return false };
-    let mut c = params.walk();
-    for p in params.named_children(&mut c) {
-        match p.kind() {
-            "formal_parameter" | "spread_parameter" => {
-                if let Some(nm) = p.child_by_field_name("name") {
-                    if nm.utf8_text(bytes) == Ok(name) {
-                        return true;
-                    }
-                }
-            }
-            // A bare-identifier lambda param (`x -> …`) or an inferred_parameters list member.
-            "identifier" => {
-                if p.utf8_text(bytes) == Ok(name) {
-                    return true;
-                }
-            }
-            "inferred_parameters" => {
-                let mut ic = p.walk();
-                for id in p.named_children(&mut ic) {
-                    if id.kind() == "identifier" && id.utf8_text(bytes) == Ok(name) {
-                        return true;
-                    }
-                }
-            }
-            _ => {}
-        }
     }
     false
 }

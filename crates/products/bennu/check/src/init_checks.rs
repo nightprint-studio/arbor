@@ -20,6 +20,8 @@ use std::collections::HashSet;
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::nodes::{has_keyword};
+
 /// Public entry over a `root` node: extracts the file's Lombok-`val` import once (needed by check 2's
 /// gate), then delegates to the slice core. Mirrors the `*_in` / `*_nodes` split of the sibling checks
 /// so the `check_file` aggregator can share its single traversal.
@@ -75,7 +77,7 @@ fn check_uninitialized_final_fields(n: Node, bytes: &[u8], lombok_present: bool,
     let mut candidates: Vec<(String, Node)> = Vec::new();
     let mut bc = body.walk();
     for m in body.named_children(&mut bc) {
-        if m.kind() != "field_declaration" || !has_final(m, bytes) {
+        if m.kind() != "field_declaration" || !has_keyword(m, bytes, "final") {
             continue;
         }
         let mut dc = m.walk();
@@ -255,22 +257,6 @@ fn imports_any_lombok(nodes: &[Node], bytes: &[u8]) -> bool {
             let compact = t.replace(char::is_whitespace, "");
             if compact.contains("importlombok.") || compact.contains("importstaticlombok.") {
                 return true;
-            }
-        }
-    }
-    false
-}
-
-/// Whether a declaration node carries the `final` modifier. Same shape as `finals::has_final`.
-fn has_final(node: Node, bytes: &[u8]) -> bool {
-    let mut c = node.walk();
-    for ch in node.children(&mut c) {
-        if ch.kind() == "modifiers" {
-            let mut mc = ch.walk();
-            for m in ch.children(&mut mc) {
-                if m.utf8_text(bytes) == Ok("final") {
-                    return true;
-                }
             }
         }
     }

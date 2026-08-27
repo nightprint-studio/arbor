@@ -150,6 +150,26 @@ pub fn jar_entry_names(jar: &Path) -> (Vec<String>, Vec<String>) {
 ///
 /// Undecoded, like everything else here — what those bytes say is the caller's question (see the
 /// module doc).
+/// Read SEVERAL entries from one jar, opening it once.
+///
+/// [`read_jar_entry_bytes`] opens the archive per call, which is right for the one-off reads it was
+/// written for and wrong the moment a caller wants a few hundred: the central directory would be
+/// re-read once per entry. Returns one slot per requested entry, in order, `None` where the entry is
+/// absent — so a caller can zip the answers back onto its own list without a second lookup.
+pub fn read_jar_entries_bytes(jar: &Path, entries: &[String]) -> Vec<Option<Vec<u8>>> {
+    let mut out = vec![None; entries.len()];
+    let Ok(file) = std::fs::File::open(jar) else { return out };
+    let Ok(mut archive) = zip::ZipArchive::new(std::io::BufReader::new(file)) else { return out };
+    for (slot, entry) in out.iter_mut().zip(entries) {
+        let Ok(mut zipped) = archive.by_name(entry) else { continue };
+        let mut bytes = Vec::new();
+        if zipped.read_to_end(&mut bytes).is_ok() {
+            *slot = Some(bytes);
+        }
+    }
+    out
+}
+
 pub fn read_jar_entry_bytes(jar: &Path, entry: &str) -> Option<Vec<u8>> {
     let file = std::fs::File::open(jar).ok()?;
     let mut archive = zip::ZipArchive::new(std::io::BufReader::new(file)).ok()?;

@@ -28,6 +28,8 @@ use std::collections::{HashMap, HashSet};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::nodes::{has_keyword};
+
 /// All captured-then-reassigned errors over the shared pre-collected node list (one traversal across
 /// all pure-AST checks). Each matched scope drives a bounded sub-walk of its own body.
 pub fn capture_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
@@ -84,7 +86,7 @@ fn check_scope(scope: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
         }
         match n.kind() {
             "local_variable_declaration" => {
-                let has_init_final = has_final(n, bytes); // a `final` local is `finals`' job → skip it
+                let has_init_final = has_keyword(n, bytes, "final"); // a `final` local is `finals`' job → skip it
                 let mut dc = n.walk();
                 for d in n.named_children(&mut dc) {
                     if d.kind() != "variable_declarator" {
@@ -279,21 +281,6 @@ fn is_local_boundary(kind: &str) -> bool {
             | "method_declaration"
             | "constructor_declaration"
     )
-}
-
-fn has_final(node: Node, bytes: &[u8]) -> bool {
-    let mut c = node.walk();
-    for ch in node.children(&mut c) {
-        if ch.kind() == "modifiers" {
-            let mut mc = ch.walk();
-            for m in ch.children(&mut mc) {
-                if m.utf8_text(bytes) == Ok("final") {
-                    return true;
-                }
-            }
-        }
-    }
-    false
 }
 
 fn text(node: Node, bytes: &[u8]) -> Option<String> {

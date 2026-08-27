@@ -187,7 +187,7 @@ fn param_signatures(member: Node, bytes: &[u8]) -> (Vec<String>, Option<Vec<Stri
 fn spread_type(p: Node) -> Option<Node> {
     let mut c = p.walk();
     for ch in p.named_children(&mut c) {
-        if is_type_node(ch.kind()) {
+        if is_written_type_node(ch.kind()) {
             return Some(ch);
         }
     }
@@ -195,7 +195,14 @@ fn spread_type(p: Node) -> Option<Node> {
 }
 
 /// Whether a node kind denotes a Java type usable as a parameter type.
-fn is_type_node(kind: &str) -> bool {
+/// Whether a kind is any WRITTEN type — primitives and arrays included, because a parameter type
+/// can be either.
+///
+/// Deliberately not the same predicate as the reference-type one the `extends` / `implements` /
+/// `throws` walks use (there named `is_class_type_node`): a `throws int` does not exist, and a
+/// parameter list of only class types would miss half of them. They shared a name once, which is
+/// how a reader concludes there is one rule here when there are two.
+fn is_written_type_node(kind: &str) -> bool {
     matches!(
         kind,
         "generic_type"

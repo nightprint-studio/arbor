@@ -587,6 +587,11 @@ fn collect_inner_types_in_body(
 /// Neither kind is descended into here. [`collect_type`] walks the type's own members and reaches
 /// anything declared inside THEM through this same function; recursing here as well would collect
 /// every nested declaration twice.
+///
+/// An explicit stack rather than recursion, because this descends through expressions: a
+/// machine-generated `"a" + "a" + …` of thirty thousand terms is a thirty-thousand-deep tree, and a
+/// recursive walk of one overflowed the stack — which aborts the whole backend process, not just
+/// that file's analysis. The JDK's own `DeepStringConcat` test is exactly such a file.
 fn collect_inner_types(
     node: &Node,
     bytes: &[u8],
@@ -594,8 +599,9 @@ fn collect_inner_types(
     fqn: &str,
     out: &mut Vec<TypeDecl>,
 ) {
-    let mut cw = node.walk();
-    for c in node.named_children(&mut cw) {
+    let mut stack = Vec::new();
+    push_named_children(node, &mut stack);
+    while let Some(c) = stack.pop() {
         match c.kind() {
             "class_declaration"
             | "interface_declaration"
@@ -607,7 +613,7 @@ fn collect_inner_types(
             "class_body" if is_anonymous_body(&c) => {
                 collect_anonymous_type(&c, bytes, package, fqn, out);
             }
-            _ => collect_inner_types(&c, bytes, package, fqn, out),
+            _ => push_named_children(&c, &mut stack),
         }
     }
 }
@@ -733,9 +739,14 @@ fn enclosing_named_type<'a>(node: &Node<'a>) -> Option<Node<'a>> {
 }
 
 /// Start offsets of every anonymous body whose numbering scope is `scope`, in tree order.
-fn collect_anonymous_body_starts(node: &Node, bytes: &[u8], scope: &Node, out: &mut Vec<usize>) {
-    let mut cw = node.walk();
-    for c in node.named_children(&mut cw) {
+///
+/// Tree order is load-bearing — it IS the numbering, so `Outer$1` stays `Outer$1` — which is why
+/// the stack is fed in reverse and popped: it walks the tree in the same order the recursive
+/// version did, without its depth. See [`collect_inner_types`] for why depth matters here.
+fn collect_anonymous_body_starts(node: &Node, _bytes: &[u8], scope: &Node, out: &mut Vec<usize>) {
+    let mut stack = Vec::new();
+    push_named_children(node, &mut stack);
+    while let Some(c) = stack.pop() {
         if is_anonymous_body(&c) {
             // Only the ones this scope numbers: an anonymous class nested inside a local class is
             // numbered within THAT class, and would otherwise be counted twice.
@@ -743,8 +754,17 @@ fn collect_anonymous_body_starts(node: &Node, bytes: &[u8], scope: &Node, out: &
                 out.push(c.start_byte());
             }
         }
-        collect_anonymous_body_starts(&c, bytes, scope, out);
+        push_named_children(&c, &mut stack);
     }
+}
+
+/// Push `node`'s named children so that popping the stack yields them left to right — the order a
+/// recursive `for` over `named_children` had. Shared by the walks that had to stop recursing.
+fn push_named_children<'t>(node: &Node<'t>, stack: &mut Vec<Node<'t>>) {
+    let mut cw = node.walk();
+    let start = stack.len();
+    stack.extend(node.named_children(&mut cw));
+    stack[start..].reverse();
 }
 
 /// Build the [`TypeDecl`] for an anonymous class body: its members, plus the type being
@@ -975,15 +995,17 @@ fn collect_annotation_strings(node: &Node, bytes: &[u8], element: &str, out: &mu
     // A text block is a string literal with different delimiters, and it is how anyone writes a
     // multi-line one — a JPQL query, a SQL statement, a long cron description. Treating it as "not
     // a string" made exactly the annotations that most need reading invisible.
-    if matches!(node.kind(), "string_literal" | "text_block") {
-        if let Some((value, start, end)) = annotation_string_contents(node, bytes) {
-            out.push(AnnString { element: element.to_string(), value, start, end });
+    // A stack, for the same reason as [`collect_inner_types`]: an annotation element can hold an
+    // arbitrarily deep concatenation, and a generated one does.
+    let mut stack = vec![*node];
+    while let Some(n) = stack.pop() {
+        if matches!(n.kind(), "string_literal" | "text_block") {
+            if let Some((value, start, end)) = annotation_string_contents(&n, bytes) {
+                out.push(AnnString { element: element.to_string(), value, start, end });
+            }
+            continue;
         }
-        return;
-    }
-    let mut w = node.walk();
-    for c in node.named_children(&mut w) {
-        collect_annotation_strings(&c, bytes, element, out);
+        push_named_children(&n, &mut stack);
     }
 }
 

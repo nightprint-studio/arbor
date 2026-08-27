@@ -30,7 +30,7 @@ use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
 use crate::check_id::CheckId;
-use crate::members::simple_name;
+use crate::nodes::simple_name;
 use crate::resolve::type_binary;
 use crate::walk::hierarchy_fully_known;
 
@@ -261,7 +261,7 @@ fn direct_supertype_texts(n: Node, bytes: &[u8]) -> Vec<String> {
 fn collect_type_texts(wrapper: Node, bytes: &[u8], out: &mut Vec<String>) {
     let mut stack = vec![wrapper];
     while let Some(node) = stack.pop() {
-        if is_type_node(node.kind()) {
+        if is_class_type_node(node.kind()) {
             if let Ok(t) = node.utf8_text(bytes) {
                 out.push(t.to_string());
             }
@@ -274,7 +274,10 @@ fn collect_type_texts(wrapper: Node, bytes: &[u8], out: &mut Vec<String>) {
     }
 }
 
-fn is_type_node(kind: &str) -> bool {
+/// Whether a kind is a REFERENCE type as written — the only thing an `extends`, `implements` or
+/// `throws` list can hold. Primitives and arrays are excluded on purpose; see
+/// `erasure_clash::is_written_type_node` for the predicate that includes them.
+fn is_class_type_node(kind: &str) -> bool {
     matches!(kind, "type_identifier" | "scoped_type_identifier" | "generic_type")
 }
 

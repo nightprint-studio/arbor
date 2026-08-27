@@ -51,7 +51,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use bennu_classpath::prelude::{jar_entry_names, read_jar_entry_bytes};
+use bennu_classpath::prelude::{
+    jar_entry_names, parse_class_flags, read_jar_entries_bytes, read_jar_entry_bytes,
+};
 use bennu_core::prelude::BennuState;
 use serde::{Deserialize, Serialize};
 
@@ -75,6 +77,11 @@ pub struct LibraryClass {
     pub package: String,
     /// The artifact it came from — the jar's file name, version and all.
     pub jar: String,
+    /// The type-kind slug (`"class"` / `"interface"` / `"enum"` / `"record"` / `"annotation"`) —
+    /// the same vocabulary a project type uses, so one icon rule serves both lists. Empty when the
+    /// class file could not be read, which the navigator renders as a plain class rather than
+    /// guessing.
+    pub kind: String,
 }
 
 /// A non-class entry found in a dependency jar.
@@ -111,6 +118,13 @@ struct LibraryIndex {
     /// changed gets a fresh index rather than yesterday's answer.
     jars: Vec<String>,
     entries: Vec<JarEntries>,
+    /// Binary name → kind slug, filled lazily for the classes a search actually returns.
+    ///
+    /// Not built with the index: the kind lives in the class file, and reading a few hundred
+    /// thousand of them to answer one letter is the cost this whole module is written to avoid.
+    /// Filled for the ≤`MAX_HITS` rows a query hands back, and kept — so a class is read once per
+    /// project no matter how many keystrokes pass over it.
+    kinds: Mutex<HashMap<String, String>>,
 }
 
 fn cache() -> &'static Mutex<HashMap<String, Arc<LibraryIndex>>> {
@@ -146,7 +160,7 @@ fn index_for(root: &str) -> Arc<LibraryIndex> {
         })
         .collect();
 
-    let built = Arc::new(LibraryIndex { jars, entries });
+    let built = Arc::new(LibraryIndex { jars, entries, kinds: Mutex::new(HashMap::new()) });
     cache()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -299,8 +313,10 @@ fn bennu_library_classes(
     }
     let index = index_for(&args.root);
 
+    // The binary name and the jar ride along with each candidate: the kind lives in the class
+    // file, and reading it is worth doing only for what survives the ranking.
     let mut scored = Vec::new();
-    for jar in &index.entries {
+    for (jar_idx, jar) in index.entries.iter().enumerate() {
         for binary in &jar.classes {
             // The order of the three tests is the whole performance story. Almost every class on
             // the classpath fails the first one, so it has to be the cheapest thing that can say
@@ -322,16 +338,90 @@ fn bennu_library_classes(
             let fqcn = dot_form(binary);
             scored.push((
                 score,
-                LibraryClass {
-                    simple: simple_of(&fqcn).to_string(),
-                    package: package_of(&fqcn).to_string(),
-                    fqcn,
-                    jar: jar.name.clone(),
-                },
+                (
+                    LibraryClass {
+                        simple: simple_of(&fqcn).to_string(),
+                        package: package_of(&fqcn).to_string(),
+                        fqcn,
+                        jar: jar.name.clone(),
+                        kind: String::new(),
+                    },
+                    binary.clone(),
+                    jar_idx,
+                ),
             ));
         }
     }
-    Ok(take_best(scored))
+    Ok(with_kinds(&index, take_best(scored)))
+}
+
+/// Fill in each candidate's type kind, reading the class files the memo does not already have.
+///
+/// Grouped by jar and read in one pass per archive: the per-entry reader re-opens the jar, which
+/// over four hundred candidates would re-read four hundred central directories to answer one
+/// keystroke. What is read is kept on the index, so a class costs this once per project however
+/// many keystrokes pass over it.
+///
+/// A class that cannot be read keeps an empty kind rather than a guess — the navigator draws it as
+/// an ordinary class, which is what it would have drawn anyway.
+fn with_kinds(
+    index: &LibraryIndex,
+    ranked: Vec<(LibraryClass, String, usize)>,
+) -> Vec<LibraryClass> {
+    let mut wanted: HashMap<usize, Vec<String>> = HashMap::new();
+    {
+        let memo = index.kinds.lock().unwrap_or_else(|p| p.into_inner());
+        for (_, binary, jar_idx) in &ranked {
+            if !memo.contains_key(binary) {
+                let list = wanted.entry(*jar_idx).or_default();
+                if !list.contains(binary) {
+                    list.push(binary.clone());
+                }
+            }
+        }
+    }
+
+    for (jar_idx, binaries) in wanted {
+        let Some(jar) = index.entries.get(jar_idx) else { continue };
+        let entries: Vec<String> = binaries.iter().map(|b| format!("{b}.class")).collect();
+        let read = read_jar_entries_bytes(&jar.path, &entries);
+        let mut memo = index.kinds.lock().unwrap_or_else(|p| p.into_inner());
+        for (binary, bytes) in binaries.into_iter().zip(read) {
+            let kind = bytes
+                .and_then(|b| parse_class_flags(&b).ok())
+                .map(|f| kind_slug(&f).to_string())
+                .unwrap_or_default();
+            memo.insert(binary, kind);
+        }
+    }
+
+    let memo = index.kinds.lock().unwrap_or_else(|p| p.into_inner());
+    ranked
+        .into_iter()
+        .map(|(mut class, binary, _)| {
+            class.kind = memo.get(&binary).cloned().unwrap_or_default();
+            class
+        })
+        .collect()
+}
+
+/// The kind slug for a set of class flags, in the vocabulary a project type already uses.
+///
+/// Order matters: an annotation is also an interface and a record is also a class in the access
+/// flags, so the more specific test has to come first or every `@interface` would read as a plain
+/// interface.
+fn kind_slug(flags: &bennu_classpath::prelude::ClassFlags) -> &'static str {
+    if flags.is_annotation {
+        "annotation"
+    } else if flags.is_interface {
+        "interface"
+    } else if flags.is_enum {
+        "enum"
+    } else if flags.is_record {
+        "record"
+    } else {
+        "class"
+    }
 }
 
 /// Whether a class on the classpath is one nobody would navigate to: made at runtime (so no

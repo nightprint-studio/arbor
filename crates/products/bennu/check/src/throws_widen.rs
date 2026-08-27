@@ -30,8 +30,12 @@ use bennu_java::prelude::{FileSymbols, MemberKind, TypeResolver, Visibility};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::nodes::{child_of_kind, simple_name};
+
 use crate::checked_throw::is_checked;
 use crate::resolve::type_binary;
+use crate::method_sig::{method_param_binaries, superclass_text};
+use crate::nodes::{text};
 use crate::walk::{for_each_supertype, hierarchy_fully_known, reaches};
 
 /// The signature (mirrors [`crate::finals::final_override_errors_in`]): iterate the shared pre-collected
@@ -197,7 +201,7 @@ fn declared_throws<'t>(
     let Some(throws_node) = child_of_kind(m, "throws") else { return out };
     let mut c = throws_node.walk();
     for ty in throws_node.named_children(&mut c) {
-        if !is_type_node(ty.kind()) {
+        if !is_class_type_node(ty.kind()) {
             continue;
         }
         let Ok(text) = ty.utf8_text(bytes) else { continue };
@@ -207,45 +211,6 @@ fn declared_throws<'t>(
         }
     }
     out
-}
-
-/// The erased binary names of a method's parameter types. `None` (skip the whole method) if any
-/// parameter type can't be resolved, or the method is varargs — mirrors `finals::method_param_binaries`
-/// so the override-matching is byte-for-byte the same: a signature we can't fully resolve can't be
-/// confirmed an override, so we SKIP rather than risk matching the wrong super method.
-fn method_param_binaries(
-    md: Node,
-    bytes: &[u8],
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-) -> Option<Vec<String>> {
-    let params_node = md.child_by_field_name("parameters")?;
-    let mut out = Vec::new();
-    let mut c = params_node.walk();
-    for p in params_node.named_children(&mut c) {
-        match p.kind() {
-            "formal_parameter" => {
-                let ty = p.child_by_field_name("type")?;
-                let text = ty.utf8_text(bytes).ok()?;
-                out.push(type_binary(text, symbols, resolver)?); // unresolvable param → SKIP method.
-            }
-            "spread_parameter" => return None, // varargs — skip (erased-array matching is finicky).
-            _ => {}
-        }
-    }
-    Some(out)
-}
-
-/// The `extends` type text of a class (`superclass` wrapper), if any. Mirrors `finals::superclass_text`.
-fn superclass_text(n: Node, bytes: &[u8]) -> Option<String> {
-    let sc = n.child_by_field_name("superclass")?;
-    let mut c = sc.walk();
-    for ch in sc.named_children(&mut c) {
-        if matches!(ch.kind(), "type_identifier" | "scoped_type_identifier" | "generic_type") {
-            return text(ch, bytes);
-        }
-    }
-    None
 }
 
 // ── CST helpers ──────────────────────────────────────────────────────────────
@@ -262,29 +227,12 @@ fn has_keyword_modifier(node: Node, bytes: &[u8], keyword: &str) -> bool {
     false
 }
 
-/// The first direct named child of `n` with the given kind.
-fn child_of_kind<'t>(n: Node<'t>, kind: &str) -> Option<Node<'t>> {
-    let mut c = n.walk();
-    for ch in n.named_children(&mut c) {
-        if ch.kind() == kind {
-            return Some(ch);
-        }
-    }
-    None
-}
-
 /// A type node that names a class/interface (a throws alternative).
-fn is_type_node(kind: &str) -> bool {
+/// Whether a kind is a REFERENCE type as written — the only thing an `extends`, `implements` or
+/// `throws` list can hold. Primitives and arrays are excluded on purpose; see
+/// `erasure_clash::is_written_type_node` for the predicate that includes them.
+fn is_class_type_node(kind: &str) -> bool {
     matches!(kind, "type_identifier" | "scoped_type_identifier" | "generic_type")
-}
-
-fn text(node: Node, bytes: &[u8]) -> Option<String> {
-    node.utf8_text(bytes).ok().map(str::to_string)
-}
-
-/// The simple (last) segment of a binary name (`java/sql/SQLException` → `SQLException`).
-fn simple_name(binary: &str) -> &str {
-    binary.rsplit(['/', '$']).next().unwrap_or(binary)
 }
 
 /// Whether `binary` names a type the resolver can actually resolve (its members are known). A raw,

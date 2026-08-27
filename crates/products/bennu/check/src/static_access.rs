@@ -37,6 +37,8 @@ use bennu_java::prelude::{FileSymbols, MemberKind, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::scopes::{is_value_position, resolves_as_local, single_top_level_type};
+
 use crate::resolve::type_binary;
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
 
@@ -139,7 +141,7 @@ pub fn static_access_errors_in(
             }
             // A bare value identifier. Resolve against FIELD signatures.
             "identifier" => {
-                if !is_judgeable_value_ident(n, top.node) {
+                if !is_value_position(n) {
                     continue;
                 }
                 check_reference(n, n, top.node, bytes, &sig, MemberDomain::Field, &mut out);
@@ -238,105 +240,6 @@ struct TopType<'t> {
     decl_name: String,
 }
 
-/// The file's single top-level `class`/`enum`, or `None` when there are zero, several, or a top-level
-/// interface/record/annotation is present (ambiguous ownership → SKIP the file). Mirrors
-/// [`crate::undefined_var`]'s guard exactly.
-fn single_top_level_type<'t>(root: Node<'t>, bytes: &[u8]) -> Option<TopType<'t>> {
-    let mut found: Option<TopType> = None;
-    let mut c = root.walk();
-    for ch in root.named_children(&mut c) {
-        if matches!(ch.kind(), "class_declaration" | "enum_declaration") {
-            if found.is_some() {
-                return None;
-            }
-            let name = ch.child_by_field_name("name")?;
-            let decl_name = name.utf8_text(bytes).ok()?.to_string();
-            found = Some(TopType { node: ch, decl_name });
-        } else if matches!(
-            ch.kind(),
-            "interface_declaration" | "record_declaration" | "annotation_type_declaration"
-        ) {
-            return None;
-        }
-    }
-    found
-}
-
-/// Whether `ident` is a bare *value* reference we're entitled to judge (a primary-expression
-/// identifier, not a declaration / suffix / method-name / type / label). The SCOPE part (enclosing
-/// type + static context) is enforced separately by [`in_static_context_of_top`]; here we only reject
-/// non-value POSITIONS — mirroring [`crate::undefined_var::is_judgeable_value_ident`]'s position half.
-fn is_judgeable_value_ident(ident: Node, _top: Node) -> bool {
-    let Some(parent) = ident.parent() else { return false };
-    let pkind = parent.kind();
-    let field_of_parent = child_field_name(parent, ident);
-
-    if pkind == "variable_declarator" {
-        // Skip the binding `name` slot; judge the `value` (initializer RHS) slot.
-        if field_of_parent.as_deref() == Some("name") {
-            return false;
-        }
-    } else {
-        match pkind {
-            // A `foo.bar` member access: the `object` head is a qualifier (variable/type/package
-            // ambiguity) and the `field` suffix is a member — neither is a BARE value. SKIP both.
-            "field_access" => return false,
-            "scoped_identifier" | "scoped_type_identifier" | "scoped_type_arguments" => return false,
-            // Any identifier directly under a call is the method `name` or a qualifier head — a bare
-            // CALL is handled via the `method_invocation` branch, not here. SKIP.
-            "method_invocation" => return false,
-            // Declaration NAME slots — introduce a binding, not a reference.
-            "formal_parameter"
-            | "spread_parameter"
-            | "catch_formal_parameter"
-            | "type_parameter"
-            | "class_declaration"
-            | "interface_declaration"
-            | "enum_declaration"
-            | "record_declaration"
-            | "annotation_type_declaration"
-            | "method_declaration"
-            | "constructor_declaration"
-            | "enum_constant"
-            | "labeled_statement" => return false,
-            // Type positions.
-            "type_identifier"
-            | "generic_type"
-            | "array_type"
-            | "cast_expression"
-            | "object_creation_expression"
-            | "type_arguments"
-            | "annotation"
-            | "marker_annotation"
-            | "annotation_argument_list"
-            | "element_value_pair" => return false,
-            // Import / package qualifiers.
-            "import_declaration" | "package_declaration" => return false,
-            // A `case FOO:` constant label — resolves against the selector's enum, not local scope.
-            "switch_label" | "constant" => return false,
-            _ => {}
-        }
-    }
-    true
-}
-
-/// The field name that immediate child `child` occupies in `parent`, or `None`. (Copied from
-/// [`crate::undefined_var`] — reads field names via a cursor, never `.find(...)`.)
-fn child_field_name(parent: Node, child: Node) -> Option<String> {
-    let mut c = parent.walk();
-    if c.goto_first_child() {
-        loop {
-            if c.node().id() == child.id() {
-                return c.field_name().map(str::to_string);
-            }
-            if !c.goto_next_sibling() {
-                break;
-            }
-        }
-    }
-    None
-}
-
 /// Whether `ref_node` sits in a STATIC context whose `this`-less scope is exactly the top type's:
 /// walking upward from the reference to `top`, the NEAREST enclosing executable member must be a
 /// `static` method or a `static_initializer`, crossing NO lambda and no nested/anonymous/local type
@@ -405,156 +308,6 @@ fn is_static_method(method: Node) -> bool {
                 }
             }
             return false;
-        }
-    }
-    false
-}
-
-/// Whether `name` (the reference's text) is declared as a local / parameter / for-var / catch-param /
-/// resource / pattern var in ANY scope enclosing `ref_node`, up to `top`. Collected textually from
-/// every ancestor executable scope. Over-collection (a name declared in a sibling block of an
-/// ancestor) is SAFE here — it can only SUPPRESS a diagnostic, never create one. Mirrors
-/// [`crate::undefined_var::resolves_as_local`].
-fn resolves_as_local(ref_node: Node, top: Node, bytes: &[u8]) -> bool {
-    let Ok(name) = ref_node_name(ref_node, bytes) else { return true }; // unreadable → SKIP as resolved
-
-    let top_body_id = top.child_by_field_name("body").map(|b| b.id());
-
-    let mut cur = ref_node.parent();
-    while let Some(p) = cur {
-        if p.id() == top.id() || Some(p.id()) == top_body_id {
-            break; // reached the type / its body — beyond the enclosing member only fields apply
-        }
-        if declares_name_in_scope(p, name, bytes) {
-            return true;
-        }
-        cur = p.parent();
-    }
-    false
-}
-
-/// The referenced name: the identifier's text for a value reference, or the `name` child's text for a
-/// `method_invocation`.
-fn ref_node_name<'a>(ref_node: Node, bytes: &'a [u8]) -> Result<&'a str, std::str::Utf8Error> {
-    if ref_node.kind() == "method_invocation" {
-        if let Some(nm) = ref_node.child_by_field_name("name") {
-            return nm.utf8_text(bytes);
-        }
-    }
-    ref_node.utf8_text(bytes)
-}
-
-/// Whether scope node `scope` introduces `name` as a local/param/etc. anywhere within it (searched
-/// broadly — over-inclusion only suppresses diagnostics). Handles method / lambda / constructor
-/// parameters, `catch` params, enhanced- and classic-`for` variables, try-with-resources resources,
-/// local variable declarations, and record/instanceof pattern variables. Mirrors
-/// [`crate::undefined_var::declares_name_in_scope`].
-fn declares_name_in_scope(scope: Node, name: &str, bytes: &[u8]) -> bool {
-    match scope.kind() {
-        "method_declaration" | "constructor_declaration" | "lambda_expression" => {
-            if params_declare(scope, name, bytes) {
-                return true;
-            }
-        }
-        "catch_clause" => {
-            let mut c = scope.walk();
-            for ch in scope.named_children(&mut c) {
-                if ch.kind() == "catch_formal_parameter" {
-                    if let Some(nm) = ch.child_by_field_name("name") {
-                        if nm.utf8_text(bytes) == Ok(name) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        "for_statement" | "enhanced_for_statement" => {
-            if let Some(nm) = scope.child_by_field_name("name") {
-                if nm.utf8_text(bytes) == Ok(name) {
-                    return true;
-                }
-            }
-        }
-        _ => {}
-    }
-
-    let mut stack: Vec<Node> = Vec::new();
-    let mut c = scope.walk();
-    for ch in scope.named_children(&mut c) {
-        stack.push(ch);
-    }
-    while let Some(n) = stack.pop() {
-        match n.kind() {
-            "variable_declarator" => {
-                if let Some(nm) = n.child_by_field_name("name") {
-                    if nm.utf8_text(bytes) == Ok(name) {
-                        return true;
-                    }
-                }
-            }
-            "pattern" | "type_pattern" => {
-                if let Some(nm) = n.child_by_field_name("name") {
-                    if nm.utf8_text(bytes) == Ok(name) {
-                        return true;
-                    }
-                }
-                let mut cc = n.walk();
-                for ch in n.named_children(&mut cc) {
-                    if ch.kind() == "identifier" && ch.utf8_text(bytes) == Ok(name) {
-                        return true;
-                    }
-                }
-            }
-            "catch_formal_parameter"
-            | "formal_parameter"
-            | "spread_parameter"
-            | "resource"
-            | "enhanced_for_statement"
-            | "instanceof_expression" => {
-                if let Some(nm) = n.child_by_field_name("name") {
-                    if nm.utf8_text(bytes) == Ok(name) {
-                        return true;
-                    }
-                }
-            }
-            _ => {}
-        }
-        let mut cc = n.walk();
-        for ch in n.named_children(&mut cc) {
-            stack.push(ch);
-        }
-    }
-    false
-}
-
-/// Whether a parameter-bearing scope declares `name` in its `parameters` list. Mirrors
-/// [`crate::undefined_var::params_declare`].
-fn params_declare(member: Node, name: &str, bytes: &[u8]) -> bool {
-    let Some(params) = member.child_by_field_name("parameters") else { return false };
-    let mut c = params.walk();
-    for p in params.named_children(&mut c) {
-        match p.kind() {
-            "formal_parameter" | "spread_parameter" => {
-                if let Some(nm) = p.child_by_field_name("name") {
-                    if nm.utf8_text(bytes) == Ok(name) {
-                        return true;
-                    }
-                }
-            }
-            "identifier" => {
-                if p.utf8_text(bytes) == Ok(name) {
-                    return true;
-                }
-            }
-            "inferred_parameters" => {
-                let mut ic = p.walk();
-                for id in p.named_children(&mut ic) {
-                    if id.kind() == "identifier" && id.utf8_text(bytes) == Ok(name) {
-                        return true;
-                    }
-                }
-            }
-            _ => {}
         }
     }
     false

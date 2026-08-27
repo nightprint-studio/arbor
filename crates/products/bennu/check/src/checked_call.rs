@@ -35,18 +35,17 @@
 //! enclosing callable's `throws` → one diagnostic per unhandled checked type, anchored on the call's
 //! method name (or the `new` type node for a constructor).
 
-use bennu_java::prelude::{
-    infer_node_type_cached, FileSymbols, InferCache, MemberKind, TypeResolver,
-};
+use bennu_java::prelude::{FileSymbols, InferCache, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
+
+use crate::throws_of::{thrown_by, Thrown};
 
 use crate::checked_throw::{
     callable_in_synthetic_type, callable_sneaky_throws, caught_by_enclosing_try,
     declared_by_callable, enclosing_callable, is_checked,
 };
-use crate::members::simple_name;
-use crate::resolve::type_binary;
+use crate::nodes::simple_name;
 use crate::walk::hierarchy_fully_known;
 
 /// One call that can throw a checked exception nothing handles — the analysis's own answer, before
@@ -121,11 +120,14 @@ pub fn unhandled_calls_in(
     let mut out = Vec::new();
     for &n in nodes {
         match n.kind() {
-            "method_invocation" => {
-                check_invocation(n, &root, source, bytes, symbols, resolver, cache, &mut out)
-            }
-            "object_creation_expression" => {
-                check_creation(n, bytes, symbols, resolver, &mut out)
+            // Both kinds ask the same question of `throws_of`, which owns the reading of a
+            // `throws` clause; what differs is only what we do with the answer.
+            "method_invocation" | "object_creation_expression" => {
+                if let Thrown::Known(anchor, thrown) =
+                    thrown_by(n, &root, source, bytes, symbols, resolver, cache)
+                {
+                    flag_unhandled(n, anchor, &thrown.definitely, bytes, symbols, resolver, &mut out);
+                }
             }
             _ => {}
         }
@@ -138,142 +140,6 @@ pub fn unhandled_calls_in(
 /// type's fully-known hierarchy, intersects their `throws`, and flags each definitely-thrown checked
 /// exception that is neither caught nor declared.
 #[allow(clippy::too_many_arguments)]
-fn check_invocation(
-    n: Node,
-    root: &Node,
-    source: &str,
-    bytes: &[u8],
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-    cache: &InferCache,
-    out: &mut Vec<UnhandledCall>,
-) {
-    let Some(name) = n.child_by_field_name("name") else { return };
-    if name.has_error() {
-        return;
-    }
-    let Ok(method) = name.utf8_text(bytes) else { return };
-
-    // SKIP: only an explicit-receiver call `obj.method(...)`. A bare `foo()` / implicit-`this` call
-    // resolves against the enclosing type, whose source form we may not carry `throws` for reliably;
-    // inferring it risks a false positive, so we stay silent (aligns with members/arity, which also
-    // require an `object` field).
-    let Some(obj) = n.child_by_field_name("object") else { return };
-    // SKIP: receiver type not inferable, or inferred to the empty/unknown type → we can't gather a
-    // trustworthy candidate set (an un-indexed type might declare/overload the method differently).
-    let Some(ty) = infer_node_type_cached(root, source, symbols, &obj, resolver, cache) else {
-        return;
-    };
-    if ty.binary_name.is_empty() {
-        return;
-    }
-    // The overload set for this name across the receiver's hierarchy (memoized walk shared with the
-    // member/arity/argument checks). `complete` is the hierarchy-fully-known gate.
-    let res = cache.resolve_methods(resolver, &ty.binary_name, method);
-    // SKIP: an unknown supertype might carry an overload with a DIFFERENT (smaller) `throws` list,
-    // which would shrink the true intersection — so a hidden overload could make our intersection an
-    // over-estimate → a false positive. Only a fully-known hierarchy makes the intersection sound.
-    if !res.complete {
-        return;
-    }
-    // SKIP: no candidate of that name (a missing method is `members.rs`'s job; here nothing definite
-    // is thrown). Intersection over an empty set is meaningless → SKIP.
-    if res.candidates.is_empty() {
-        return;
-    }
-
-    let thrown = intersected_throws(&res.candidates);
-    // `x.clone()` reaching `Object.clone()` is not evidence of a checked exception.
-    //
-    // `Object.clone()` is `protected`, so a call on a plain receiver only compiles when the receiver
-    // is an ARRAY — every array type overrides it public, covariant and `throws`-free (JLS §10.7),
-    // and an array has no `ClassMembers` for the walk to find — or when some class overrode it with
-    // its own `throws`, which the intersection would then carry. A class calling its own inherited
-    // one writes `super.clone()`, a different receiver. So the shape below is the false positive and
-    // nothing else, and it fired on `array.clone()` — which every Java program writes.
-    let only_object_clone = method == "clone"
-        && n.child_by_field_name("arguments").map(|a| a.named_child_count() == 0).unwrap_or(true)
-        && thrown.len() == 1
-        && thrown.iter().any(|t| t == "java/lang/CloneNotSupportedException");
-    if only_object_clone {
-        return;
-    }
-    flag_unhandled(n, name, &thrown, bytes, symbols, resolver, out);
-}
-
-/// A `new T(args)` construction. Resolves `T`, gathers its OWN `<init>` members (constructors are not
-/// inherited — mirror `arity::check_new`), intersects their `throws`, and flags unhandled checked
-/// exceptions anchored on the `new`'s type node.
-fn check_creation(
-    n: Node,
-    bytes: &[u8],
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-    out: &mut Vec<UnhandledCall>,
-) {
-    let Some(ty_node) = n.child_by_field_name("type") else { return };
-
-    // SKIP: an anonymous class `new Runnable(){…}` — the args bind to the supertype's constructor and
-    // the anonymous body's own methods complicate the contract; stay out of it (mirror arity/members).
-    // GOTCHA: explicit `for` loop over children (never `.any()` on `named_children`).
-    let mut cw = n.walk();
-    for c in n.named_children(&mut cw) {
-        if c.kind() == "class_body" {
-            return;
-        }
-    }
-
-    let Ok(type_text) = ty_node.utf8_text(bytes) else { return };
-    // SKIP: `T` unresolvable → we don't know which constructors exist.
-    let Some(binary) = type_binary(type_text, symbols, resolver) else { return };
-
-    // Constructors are NOT inherited — look only at this class's own `<init>` methods (mirror arity).
-    let Some(cm) = resolver.members_of(&binary) else { return };
-    let ctors: Vec<&bennu_java::prelude::Member> = {
-        let mut v = Vec::new();
-        for m in &cm.methods {
-            if m.name == "<init>" && m.kind == MemberKind::Method {
-                v.push(m);
-            }
-        }
-        v
-    };
-    // SKIP: no constructors indexed (the index may omit them) → nothing definite → SKIP.
-    if ctors.is_empty() {
-        return;
-    }
-
-    let thrown = intersected_throws_refs(&ctors);
-    // Anchor the diagnostic on the `new`'s type node (there's no `name` field on a construction).
-    flag_unhandled(n, ty_node, &thrown, bytes, symbols, resolver, out);
-}
-
-/// The INTERSECTION of `throws` across every candidate (owned `Member`s). See module docs: an
-/// exception every overload declares is thrown regardless of which one binds → sound to report; one
-/// only some declare is dropped. Empty when candidates disagree (or any declares nothing).
-fn intersected_throws(candidates: &[bennu_java::prelude::Member]) -> Vec<String> {
-    let refs: Vec<&bennu_java::prelude::Member> = candidates.iter().collect();
-    intersected_throws_refs(&refs)
-}
-
-/// The intersection over borrowed candidates (constructors are gathered as refs). Start from the first
-/// candidate's `throws` and retain only entries present in EVERY other candidate's `throws`. A single
-/// candidate with an empty `throws` collapses the intersection to empty (correct: if one overload
-/// throws nothing checked, we can't assume any checked exception is definitely thrown).
-fn intersected_throws_refs(candidates: &[&bennu_java::prelude::Member]) -> Vec<String> {
-    let Some((first, rest)) = candidates.split_first() else { return Vec::new() };
-    let mut acc: Vec<String> = first.throws.clone();
-    for cand in rest {
-        // Keep only exceptions also declared by `cand` (set intersection; `throws` lists are tiny, so
-        // a linear `contains` is fine and avoids allocating a HashSet per candidate).
-        acc.retain(|x| cand.throws.iter().any(|y| y == x));
-        if acc.is_empty() {
-            break;
-        }
-    }
-    acc
-}
-
 /// For each definitely-thrown exception in `thrown`, keep only those that are provably CHECKED over a
 /// FULLY-KNOWN hierarchy, then flag the ones neither caught by an enclosing `try` nor declared by the
 /// enclosing callable's `throws`. `anchor` is where the diagnostic points (method name / `new` type).

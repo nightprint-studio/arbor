@@ -34,7 +34,7 @@
    *   name their **artifact**, because what you can edit and what you can only read are not the
    *   same kind of answer.
    */
-  import { Braces, FolderTree, Package } from 'lucide-svelte';
+  import { Braces, FolderTree } from 'lucide-svelte';
   import ToggleButton from '$lib/components/shared/ui/ToggleButton.svelte';
   import NavigateTo, {
     type NavigateCategory,
@@ -325,7 +325,13 @@
           id: `${c.fqcn}@${c.jar}`,
           name: c.simple,
           detail: c.package,
-          icon: Package,
+          // The same lettered ring a project type wears — C / I / E / R / @. A library class is
+          // still a class, an interface still an interface, and the jar it came from is already
+          // said in `origin`; drawing every one of them as an archive answered "what kind of type
+          // is this" with the name of the box it arrived in.
+          icon: SymbolKindIcon,
+          iconProps: { kind: c.kind },
+          tag: c.kind && c.kind !== 'class' ? c.kind : undefined,
           // The artifact — which of four versions of the same class you are about to open is the
           // question a classpath makes you ask, and it sits in the same slot a project class
           // puts its module in.

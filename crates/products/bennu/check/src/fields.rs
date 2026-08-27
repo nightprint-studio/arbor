@@ -13,7 +13,7 @@ use tree_sitter::Node;
 #[cfg(test)]
 use tree_sitter::Parser;
 
-use crate::members::simple_name;
+use crate::nodes::simple_name;
 use crate::walk::hierarchy_has;
 
 /// Parse `source` and flag accesses to non-existent fields on their inferred receiver types.

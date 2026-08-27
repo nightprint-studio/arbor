@@ -42,6 +42,8 @@ use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, TypeR
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::nodes::{simple_name};
+
 use crate::switch_label::{label_is_default, label_is_pattern, labels_of};
 
 /// The boxed selector types whose labels must be integral — a `String` label on one of these is an
@@ -246,11 +248,6 @@ fn label_name<'a>(node: Node, bytes: &'a [u8]) -> Option<&'a str> {
         }
         _ => None,
     }
-}
-
-/// The readable name of a binary name — `com/x/Fmt$Kind` → `Kind`.
-fn simple_name(binary: &str) -> &str {
-    binary.rsplit(['/', '$']).next().unwrap_or(binary)
 }
 
 #[cfg(test)]

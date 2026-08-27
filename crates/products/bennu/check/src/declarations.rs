@@ -12,6 +12,8 @@
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::nodes::{modifier_keywords};
+
 const TYPE_DECLS: [&str; 5] = [
     "class_declaration",
     "interface_declaration",
@@ -40,27 +42,6 @@ pub fn declaration_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
         }
     }
     out
-}
-
-/// The keyword modifiers (anonymous tokens) on a declaration — `["public", "abstract"]`. Annotations
-/// (named nodes inside `modifiers`) are excluded.
-fn modifier_keywords<'a>(node: Node, bytes: &'a [u8]) -> Vec<&'a str> {
-    let mut c = node.walk();
-    for ch in node.children(&mut c) {
-        if ch.kind() == "modifiers" {
-            let mut out = Vec::new();
-            let mut mc = ch.walk();
-            for m in ch.children(&mut mc) {
-                if !m.is_named() {
-                    if let Ok(t) = m.utf8_text(bytes) {
-                        out.push(t);
-                    }
-                }
-            }
-            return out;
-        }
-    }
-    Vec::new()
 }
 
 /// The nearest enclosing type declaration of `node`, if any.

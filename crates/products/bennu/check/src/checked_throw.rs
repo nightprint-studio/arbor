@@ -27,7 +27,8 @@ use bennu_java::prelude::{FileSymbols, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::members::simple_name;
+use crate::nodes::{child_of_kind, simple_name};
+
 use crate::resolve::type_binary;
 use crate::walk::{hierarchy_fully_known, reaches};
 
@@ -363,7 +364,7 @@ fn clause_catch_types(
     let Some(catch_type) = child_of_kind(param, "catch_type") else { return out };
     let mut c = catch_type.walk();
     for ty in catch_type.named_children(&mut c) {
-        if !is_type_node(ty.kind()) {
+        if !is_class_type_node(ty.kind()) {
             continue;
         }
         let Ok(text) = ty.utf8_text(bytes) else { continue };
@@ -387,7 +388,7 @@ pub(crate) fn declared_by_callable(
     let Some(throws_node) = child_of_kind(callable, "throws") else { return false };
     let mut c = throws_node.walk();
     for ty in throws_node.named_children(&mut c) {
-        if !is_type_node(ty.kind()) {
+        if !is_class_type_node(ty.kind()) {
             continue;
         }
         let Ok(text) = ty.utf8_text(bytes) else { continue };
@@ -403,19 +404,11 @@ pub(crate) fn declared_by_callable(
 
 // ── CST helpers (mirrors exceptions.rs) ───────────────────────────────────────────────────────────
 
-/// The first direct named child of `n` with the given kind.
-fn child_of_kind<'t>(n: Node<'t>, kind: &str) -> Option<Node<'t>> {
-    let mut c = n.walk();
-    for ch in n.named_children(&mut c) {
-        if ch.kind() == kind {
-            return Some(ch);
-        }
-    }
-    None
-}
-
 /// A type node that names a class/interface (a catch/throws alternative).
-fn is_type_node(kind: &str) -> bool {
+/// Whether a kind is a REFERENCE type as written — the only thing an `extends`, `implements` or
+/// `throws` list can hold. Primitives and arrays are excluded on purpose; see
+/// `erasure_clash::is_written_type_node` for the predicate that includes them.
+fn is_class_type_node(kind: &str) -> bool {
     matches!(kind, "type_identifier" | "scoped_type_identifier" | "generic_type")
 }
 

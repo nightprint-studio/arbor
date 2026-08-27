@@ -15,6 +15,8 @@ use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, TypeR
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::nodes::{simple_name};
+
 /// Parse `source` and flag calls to non-existent methods on their inferred receiver types.
 pub fn unknown_members(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
     let Some(tree) = bennu_java::prelude::parse_java(source) else {
@@ -152,10 +154,6 @@ fn check_call(
             format!("Cannot resolve method `{method}` in `{}`", simple_name(&ty.binary_name)),
         ));
     }
-}
-
-pub(crate) fn simple_name(binary: &str) -> &str {
-    binary.rsplit(['/', '$']).next().unwrap_or(binary)
 }
 
 #[cfg(test)]

@@ -39,7 +39,7 @@ use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
 use crate::check_id::CheckId;
-use crate::members::simple_name;
+use crate::nodes::simple_name;
 use crate::resolve::type_binary;
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
 

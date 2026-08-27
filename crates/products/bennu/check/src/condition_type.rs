@@ -18,7 +18,8 @@ use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, TypeR
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::members::simple_name;
+use crate::nodes::{is_primitive, is_type_var, simple_name};
+
 
 /// Parse `source` and flag control-flow conditions whose inferred type is definitely non-boolean.
 pub fn condition_type_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
@@ -129,18 +130,6 @@ fn definite_non_boolean(binary: &str, resolver: &dyn TypeResolver) -> Option<Str
     // non-boolean.
     resolver.members_of(binary)?;
     Some(simple_name(binary).to_string())
-}
-
-fn is_primitive(binary: &str) -> bool {
-    matches!(
-        binary,
-        "int" | "long" | "short" | "byte" | "char" | "boolean" | "float" | "double" | "void"
-    )
-}
-
-/// A single upper-case letter binary is a type variable (`T`, `E`, …), never a concrete class.
-fn is_type_var(binary: &str) -> bool {
-    binary.len() == 1 && binary.chars().all(|c| c.is_ascii_uppercase())
 }
 
 fn err(message: String, node: Node) -> Diagnostic {

@@ -24,6 +24,8 @@
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::nodes::{modifier_keywords};
+
 /// Flag `@FunctionalInterface` interfaces whose abstract-method (SAM) count is not exactly one.
 /// Pure-AST: iterates the shared `nodes` slice, no resolver.
 pub fn func_iface_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
@@ -164,27 +166,6 @@ fn param_arity(member: Node) -> usize {
         }
     }
     n
-}
-
-/// The keyword modifiers (anonymous tokens) on a declaration — annotations (named nodes) excluded.
-/// Same shape as `declarations.rs::modifier_keywords`.
-fn modifier_keywords<'a>(node: Node, bytes: &'a [u8]) -> Vec<&'a str> {
-    let mut c = node.walk();
-    for ch in node.children(&mut c) {
-        if ch.kind() == "modifiers" {
-            let mut out = Vec::new();
-            let mut mc = ch.walk();
-            for m in ch.children(&mut mc) {
-                if !m.is_named() {
-                    if let Ok(t) = m.utf8_text(bytes) {
-                        out.push(t);
-                    }
-                }
-            }
-            return out;
-        }
-    }
-    Vec::new()
 }
 
 #[cfg(test)]

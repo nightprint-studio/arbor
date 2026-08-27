@@ -9,6 +9,11 @@
 //!
 //! Any annotation not in the table is skipped (a custom `@Target` could allow anything) — the
 //! resolver-backed phase generalises this later.
+//!
+//! Plus one check that needs no table at all: **the same element given a value twice**
+//! (`@Column(name = "a", name = "b")`, javac's `compiler.err.duplicate.annotation.member.value`).
+//! Which value wins is not a question Java answers — it refuses to compile — and on a long
+//! configuration annotation the two are rarely adjacent enough to see.
 
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
@@ -170,5 +175,76 @@ mod tests {
     fn qualified_override_name_is_recognised() {
         let e = errs("class C { @java.lang.Override int x; }");
         assert_eq!(e.len(), 1, "qualified @java.lang.Override still resolves to Override: {e:?}");
+    }
+}
+
+
+// ── the same element valued twice ────────────────────────────────────────────
+
+/// Every `@Foo(a = 1, a = 2)` in the pre-collected node slice.
+///
+/// Pairs only. A single-element `@Foo("x")` has no name to repeat, and a nested annotation's own
+/// arguments are a separate list reached as its own `annotation` node — so no recursion here.
+pub fn duplicate_annotation_values_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
+    let bytes = source.as_bytes();
+    let mut out = Vec::new();
+    for &n in nodes {
+        if n.kind() != "annotation_argument_list" {
+            continue;
+        }
+        let mut seen: Vec<&str> = Vec::new();
+        let mut cw = n.walk();
+        for pair in n.named_children(&mut cw) {
+            if pair.kind() != "element_value_pair" {
+                continue;
+            }
+            let Some(key_node) = pair.child_by_field_name("key") else { continue };
+            let Ok(key) = key_node.utf8_text(bytes) else { continue };
+            if seen.contains(&key) {
+                out.push(crate::check_id::CheckId::DuplicateAnnotationValue.at(
+                    key_node,
+                    format!("`{key}` is given a value twice in this annotation"),
+                ));
+            } else {
+                seen.push(key);
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod duplicate_value_tests {
+    use crate::check::collect_nodes;
+
+    fn codes(src: &str) -> Vec<String> {
+        let tree = bennu_java::prelude::parse_java(src).expect("parse");
+        let nodes = collect_nodes(tree.root_node());
+        super::duplicate_annotation_values_nodes(&nodes, src).into_iter().map(|d| d.code).collect()
+    }
+
+    #[test]
+    fn the_same_element_valued_twice_is_flagged() {
+        let src = r#"class A { @Column(name = "a", nullable = true, name = "b") String f; }"#;
+        assert_eq!(codes(src), ["duplicate-annotation-value"]);
+    }
+
+    #[test]
+    fn distinct_elements_are_fine() {
+        let src = r#"class A { @Column(name = "a", nullable = true) String f; }"#;
+        assert!(codes(src).is_empty());
+    }
+
+    /// The same element name on two DIFFERENT annotations is two annotations, not a duplicate.
+    #[test]
+    fn the_same_name_on_two_annotations_is_fine() {
+        let src = r#"class A { @Column(name = "a") @JoinColumn(name = "b") String f; }"#;
+        assert!(codes(src).is_empty());
+    }
+
+    #[test]
+    fn a_nested_annotation_keeps_its_own_argument_list() {
+        let src = r#"class A { @Table(indexes = @Index(name = "i"), name = "t") String f; }"#;
+        assert!(codes(src).is_empty());
     }
 }

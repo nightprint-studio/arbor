@@ -12,7 +12,10 @@
 //!      grammar an empty statement is an anonymous `;` token (not a named node), so we detect it as a
 //!      `;` child *of a `block`* — which by construction excludes `for(;;)` clauses (children of the
 //!      `for_statement`) and `while(cond);` bodies (a `;` child of the loop, not a block).
-//!   4. **String `==` / `!=`** — one operand is syntactically a `string_literal`. Reference equality
+//!   4. **Empty `if` body** — `if (cond);`: the `;` IS the guarded statement, so whatever follows
+//!      runs unconditionally. Unlike a stray `;` in a block (check 3) this one changes what the
+//!      program does, which is why it is its own kind and not that one.
+//!   5. **String `==` / `!=`** — one operand is syntactically a `string_literal`. Reference equality
 //!      on a String literal is virtually always a bug; this is the subset provable without type info.
 
 use bennu_proto::prelude::Diagnostic;
@@ -39,6 +42,11 @@ pub fn expr_lint_warnings_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
                 }
             }
             "block" => empty_statements_in_block(n, &mut out),
+            "if_statement" => {
+                if let Some(d) = empty_if_body(n) {
+                    out.push(d);
+                }
+            }
             _ => {}
         }
     }
@@ -360,5 +368,53 @@ mod tests {
         // `s == null` is the canonical null check — must stay silent.
         let d = lint("String s = null; boolean r = s == null;");
         assert!(!d.iter().any(|m| m.contains("compares references")), "{d:?}");
+    }
+}
+
+// ── 4. empty `if` body ───────────────────────────────────────────────────────
+
+/// `if (cond);` — the body is a bare `;`, so the statement the author meant to guard sits after the
+/// `if` and runs either way. A typo whose damage is invisible at the site: the indentation below
+/// still reads as a body.
+///
+/// Only the `;` shape. An empty BLOCK (`if (c) {}`) is left alone — it is how a deliberate "nothing
+/// happens here" is written, often beside a commented-out line or an `else` that does the work.
+fn empty_if_body(stmt: Node) -> Option<Diagnostic> {
+    let body = stmt.child_by_field_name("consequence")?;
+    (body.kind() == ";").then(|| {
+        crate::check_id::CheckId::at(
+            crate::check_id::CheckId::EmptyIfBody,
+            body,
+            "the `if` body is empty — the statement below it runs unconditionally",
+        )
+    })
+}
+
+#[cfg(test)]
+mod empty_if_tests {
+    use crate::check::collect_nodes;
+
+    fn codes(src: &str) -> Vec<String> {
+        let tree = bennu_java::prelude::parse_java(src).expect("parse");
+        let nodes = collect_nodes(tree.root_node());
+        super::expr_lint_warnings_nodes(&nodes, src).into_iter().map(|d| d.code).collect()
+    }
+
+    #[test]
+    fn a_semicolon_if_body_is_flagged() {
+        let src = "class A { void m(boolean b) { if (b); doIt(); } void doIt() {} }";
+        assert!(codes(src).contains(&"empty-if-body".to_string()));
+    }
+
+    #[test]
+    fn an_empty_block_body_is_left_alone() {
+        let src = "class A { void m(boolean b) { if (b) {} else { doIt(); } } void doIt() {} }";
+        assert!(!codes(src).contains(&"empty-if-body".to_string()));
+    }
+
+    #[test]
+    fn an_ordinary_if_is_left_alone() {
+        let src = "class A { void m(boolean b) { if (b) doIt(); } void doIt() {} }";
+        assert!(!codes(src).contains(&"empty-if-body".to_string()));
     }
 }

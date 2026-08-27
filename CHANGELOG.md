@@ -51,9 +51,31 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **Conditional breakpoints, and stopping every Nth hit.** Right-click a breakpoint → *Add condition…*, or edit it in the Breakpoints window, which also shows how many times each one has stopped the program. A Java condition is a watch path compared with a literal — `i > 5`, `order.customer.name == "acme"`, `order != null && order.total > 100` — joined with `&&`, `||`, `!` and parentheses; a method call or arithmetic is refused by name as you type rather than approximated. On a Rust session the condition is the debug adapter's own expression, sent untouched — so its grammar is CodeLLDB's, lldb-dap's or GDB's, and Bennu cannot check it as you type.
 
+- **Reading a field in a `this(…)` or `super(…)` argument is reported where it is written.** Until the delegated constructor returns the object does not exist, so `this(count)` reads a zero and `this(computeSize())` calls a method on a half-built object — and the line reads exactly like the working version one scope out. Static members are left alone: computing a delegation argument from one is what they are for.
+
+- **A `catch` for something the `try` cannot throw is reported.** What a refactor leaves behind: the call that threw `SQLException` moved to a repository, the `catch` around what is now three lines of arithmetic stayed, and the block still reads as though something in there talks to a database. Abandoned entirely if anything in the body cannot be accounted for — a single unresolved call and the body could be throwing anything.
+
+- **An annotation written twice where Java allows it once.** Repeating annotations are opt-in — the annotation type must carry `@Repeatable` — and without it the second one is a compile error rather than a second value. On a declaration long enough for anyone to write the second by accident, the two are rarely adjacent.
+
+- **An annotation value that cannot be a constant.** `@Column(name = config.get("k"))` reads like configuration and does not compile: an annotation is recorded at compile time, so a call, a `new` or a lambda can never be one of its values.
+
+- **A capturing local class created from its own `static` member.** It holds a hidden reference to the variable it captured, and a `static` member has no enclosing instance to take it from. Java 16 and up, where a local class may have `static` members at all.
+
+- **A typo in an annotation element is caught where it is written.** `@Column(nulable = true)` compiles as far as the editor was concerned; nothing reads `nulable`, so the column stays `NOT NULL` and the failure arrives from the database, far from the line that caused it.
+
+- **An override that hides a method is refused before the build.** Writing `protected void run()` against `Runnable`, or narrowing a `public` superclass method — Java forbids it, because a subtype cannot withdraw a promise its supertype made to every caller holding a supertype reference. Package-private is left alone: whether it is even inherited depends on the packages.
+
+- **A static method called through an instance says so.** `helper.parse(s)` compiles, evaluates `helper` and throws it away — so it reads as though the answer depends on that object when it cannot, and it keeps working when the receiver is `null`. Only a receiver that is certainly a value is reported; `Files.readAllLines(p)` is a type qualifier and correct.
+
+- **Five more compile errors caught before the build.** A `break` or `continue` with no loop around it (a `switch` satisfies the first, never the second); a `break outer;` whose label nothing declares any more; a field initialized from itself (`private int total = total;`), which can only ever read the default; the same annotation element given a value twice (`@Column(name = "a", name = "b")`), which Java refuses rather than picking a winner; and an `if` whose body is a bare `;`, so the line below it runs unconditionally.
+
 - **Optimize imports** (Ctrl+Shift+O, Java). Drops what the file does not use and orders the rest — everything else, then `javax` and `java`, then the statics — as one undo step. It never folds a package into a wildcard and never adds an import, and it uses the same judgement the `unused-import` warning does, so the command and the squiggle cannot disagree.
 
 ### Fixed
+
+- **A library class in Go-to-Class wears its own kind.** Every result from a dependency jar was drawn as an archive box, so an interface, an enum and an `@interface` were indistinguishable in a list where telling them apart is most of why you are looking. They now carry the same lettered mark a project type does — and the jar they came from was already shown beside them.
+
+- **A generated Java file no longer takes the backend down.** An expression can nest as deeply as it is long, and machine-written code reaches depths hand-written code never does — a constant built from thirty thousand concatenated pieces, a query assembled fragment by fragment. Three of the walks that read a file descended one call per level and overflowed the stack, which aborts the whole process: opening one such file cost the editor its Java backend, not just that file's analysis.
 
 - **Find-usages on a Lombok field finds where its getter is used.** On a class whose accessors Lombok generates, the accessors are the *only* way the field is used from outside — and the getter itself has no declaration anywhere to put a caret on. So asking about the field reported a field nobody touches, and there was no other question to ask. Its generated getter, setter, wither, builder setter and `Fields` constant now come back with it, each hit labelled with what it is written as.
 

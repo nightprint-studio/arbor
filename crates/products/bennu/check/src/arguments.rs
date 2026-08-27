@@ -16,7 +16,8 @@ use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, TypeR
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::members::simple_name;
+use crate::nodes::{is_primitive, is_type_var, simple_name};
+
 use crate::walk::{hierarchy_fully_known, reaches};
 
 /// Parse `source` and flag arguments of the wrong type.
@@ -184,17 +185,6 @@ fn named_args(arg_list: Node) -> Vec<Node> {
         .named_children(&mut c)
         .filter(|n| !matches!(n.kind(), "line_comment" | "block_comment"))
         .collect()
-}
-
-fn is_primitive(binary: &str) -> bool {
-    matches!(
-        binary,
-        "int" | "long" | "short" | "byte" | "char" | "boolean" | "float" | "double" | "void"
-    )
-}
-
-fn is_type_var(binary: &str) -> bool {
-    binary.len() == 1 && binary.chars().all(|c| c.is_ascii_uppercase())
 }
 
 #[cfg(test)]

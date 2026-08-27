@@ -34,7 +34,7 @@ fn check_lambda(lambda: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     let Some(body) = lambda.child_by_field_name("body") else { return };
 
     // Names local to the enclosing method (params + local declarations) — the capturable set.
-    let Some(method) = enclosing_callable(lambda) else { return };
+    let Some(method) = enclosing_executable_scope(lambda) else { return };
     let mut enclosing: HashSet<String> = HashSet::new();
     if let Some(params) = method.child_by_field_name("parameters") {
         collect_param_names(params, bytes, &mut enclosing);
@@ -85,7 +85,13 @@ fn check_lambda(lambda: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
 
 /// The nearest enclosing method / constructor / lambda of `node` (the scope whose locals it can
 /// capture). Stops at a type declaration (a field initializer has no capturable method locals).
-fn enclosing_callable(node: Node) -> Option<Node> {
+/// The nearest executable scope around `node`, or `None` when a type boundary comes first.
+///
+/// NOT the same question as `checked_throw::enclosing_callable`, which returns the boundary node
+/// ITSELF so its caller can see what it was and skip. Here a boundary means "no answer". Two
+/// contracts, and they carried one name — merging them would have been a silent behaviour change in
+/// whichever check lost.
+fn enclosing_executable_scope(node: Node) -> Option<Node> {
     let mut cur = node.parent();
     while let Some(n) = cur {
         match n.kind() {

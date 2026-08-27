@@ -218,6 +218,20 @@ pub trait TypeResolver {
     /// dominant cost of the walk; an `Arc` clone is a refcount bump.
     fn members_of(&self, binary_name: &str) -> Option<Arc<ClassMembers>>;
 
+    /// The annotations written on the TYPE `binary_name` itself — `@Repeatable` / `@Target` /
+    /// `@Retention` on an annotation type, `@Entity` on a JPA class.
+    ///
+    /// Kept OUT of [`ClassMembers`] on purpose. That struct is memoized for every class the resolver
+    /// touches, and most of them are never asked this; carrying the metadata there would grow the
+    /// cache for every consumer to serve a handful of call sites.
+    ///
+    /// The default is empty, which every resolver that cannot answer inherits. So empty means
+    /// **"none, or not read"** — a caller concluding something from an absence has to treat it as
+    /// unknown and stay silent, exactly as it would for an unresolved type.
+    fn class_annotations(&self, _binary_name: &str) -> Vec<crate::symbols::Annotation> {
+        Vec::new()
+    }
+
     /// Resolve a simple type name (`ArrayList`) to a binary name, using the file's
     /// imports for disambiguation. `None` when unresolvable.
     fn resolve_simple_name(&self, name: &str, imports: &[crate::symbols::Import])

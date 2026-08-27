@@ -17,7 +17,7 @@ use bennu_java::prelude::{
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::members::simple_name;
+use crate::nodes::simple_name;
 
 /// One overload's arity shape: its parameter count and whether the last parameter is an array
 /// (hence *maybe* varargs).

@@ -117,6 +117,11 @@ pub fn check_file_in(
     out.extend(crate::annotations::annotation_errors_nodes(nodes, source));
     out.extend(crate::lambdas::lambda_capture_errors_nodes(nodes, source));
     out.extend(crate::ctor_checks::ctor_check_errors_nodes(nodes, source));
+    out.extend(crate::branches::branch_errors_nodes(nodes, source));
+    out.extend(crate::self_ref::self_ref_errors_nodes(nodes, source));
+    out.extend(crate::ctor_before::ctor_before_errors_nodes(nodes, source));
+    out.extend(crate::local_class::local_class_errors_nodes(nodes, source));
+    out.extend(crate::annotations::duplicate_annotation_values_nodes(nodes, source));
     out.extend(crate::expr_lint::expr_lint_warnings_nodes(nodes, source));
     out.extend(crate::switch_flow::switch_flow_warnings_nodes(nodes, source));
     out.extend(crate::generics_syntax::generics_syntax_errors_nodes(nodes, source));
@@ -244,6 +249,7 @@ pub fn check_file_resolved(
         timed!("functional", crate::functional::functional_errors_in(&nodes, source, &symbols, resolver));
         timed!("super_constructor", crate::constructors::super_constructor_errors_in(&nodes, source, &symbols, resolver));
         timed!("final_override", crate::finals::final_override_errors_in(&nodes, source, &symbols, resolver));
+        timed!("override_access", crate::override_access::override_access_errors_in(&nodes, source, &symbols, resolver));
         timed!("override_return", crate::override_return::override_return_errors_in(&nodes, source, &symbols, resolver));
         timed!("inherit_cycle", crate::inherit_cycle::inherit_cycle_errors_in(&nodes, source, &symbols, resolver));
         timed!("exceptions", crate::exceptions::exception_errors_in(&nodes, source, &symbols, resolver));
@@ -257,6 +263,9 @@ pub fn check_file_resolved(
         timed!("checked_call", crate::checked_call::checked_call_errors_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("throws_widen", crate::throws_widen::throws_widen_errors_in(&nodes, source, &symbols, resolver));
         timed!("static_access", crate::static_access::static_access_errors_in(root, &nodes, source, &symbols, resolver));
+        timed!("dead_catch", crate::dead_catch::dead_catch_errors_in(root, &nodes, source, &symbols, resolver, &cache));
+        timed!("annotation_elements", crate::annotation_elements::annotation_element_errors_in(&nodes, source, &symbols, resolver));
+        timed!("static_via_instance", crate::static_via_instance::static_via_instance_warnings_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("visibility", crate::visibility::visibility_errors_in(root, &nodes, source, &symbols, resolver, &cache));
     }
     if let Some(t) = t_total {

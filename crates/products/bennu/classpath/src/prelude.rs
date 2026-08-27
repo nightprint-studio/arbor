@@ -18,7 +18,7 @@ pub use crate::annotations::{
 // The shared-seam structured member index: TypeRef / Member / ClassMembers /
 // MemberIndex, plus the ClassSource→MemberIndex adapter.
 pub use crate::members::{
-    parse_class_members, ClassFlags, ClassMembers, Member, MemberIndex, MemberKind,
+    parse_class_flags, parse_class_members, ClassFlags, ClassMembers, Member, MemberIndex, MemberKind,
     SourceMemberIndex, TypeRef, Visibility,
 };
 
@@ -45,7 +45,7 @@ pub use crate::maven::{
 // `spring-configuration-metadata.json` and anything shaped like it), plus the by-name listing
 // and single-entry read behind "go to a class or file in a dependency".
 pub use crate::resources::{
-    jar_entry_names, read_jar_entries, read_jar_entries_matching, read_jar_entry_bytes,
+    jar_entry_names, read_jar_entries, read_jar_entries_matching, read_jar_entries_bytes, read_jar_entry_bytes,
     JarResource,
 };
 

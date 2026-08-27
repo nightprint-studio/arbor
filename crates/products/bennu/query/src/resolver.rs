@@ -18,8 +18,9 @@ use crate::dep_record;
 use bennu_classpath::prelude::MemberIndex as CpMemberIndex;
 use bennu_index::prelude::{PersistedIndex, Symbol, SymbolKind};
 use bennu_java::prelude::{
-    ClassFlags as JClassFlags, ClassMembers as JClassMembers, Import, Member as JMember,
-    MemberKind as JMemberKind, TypeRef as JTypeRef, TypeResolver, Visibility as JVisibility,
+    Annotation as JAnnotation, ClassFlags as JClassFlags, ClassMembers as JClassMembers, Import,
+    Member as JMember, MemberKind as JMemberKind, TypeRef as JTypeRef, TypeResolver,
+    Visibility as JVisibility,
 };
 
 /// A [`TypeResolver`] composing the persisted project index and a JDK `MemberIndex`,
@@ -388,6 +389,15 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         self.project_contains(binary_name)
     }
 
+    fn class_annotations(&self, binary_name: &str) -> Vec<JAnnotation> {
+        // Only the classpath answers this today. A PROJECT-declared annotation type would have to
+        // carry its own annotations through the persisted index, which `TypeDecl` does not yet do —
+        // so a project `@Repeatable` reads as "not known" and every caller stays silent, which is
+        // the same thing they do for a type that does not resolve at all.
+        let Some(found) = self.jdk.class_annotations(binary_name) else { return Vec::new() };
+        found.class.iter().map(convert_annotation).collect()
+    }
+
     fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String> {
         // Imports win (a `java.util.List` import binds `List`).
         for imp in imports {
@@ -547,6 +557,32 @@ fn convert_member(m: &bennu_classpath::prelude::Member) -> JMember {
         // A member decoded from BYTECODE. A `.class` does carry runtime-visible annotations, but
         // this decoder does not read them yet — so empty here means "not read", not "none".
         annotations: Vec::new(),
+    }
+}
+
+/// A bytecode annotation in the shape the checks read.
+///
+/// The class file stores the type as a descriptor and the decoder has already turned it into a
+/// dotted FQN, so `qualified` is exact and `name` is its last segment — which is what a check
+/// matching `@Repeatable` compares, because source may write either.
+///
+/// Spans are zero: there is no source to point at. A caller that needs a span must be looking at a
+/// declaration it parsed itself, never at one recovered from a jar.
+fn convert_annotation(a: &bennu_classpath::prelude::Annotation) -> JAnnotation {
+    let qualified = a.type_name.clone();
+    let name = qualified.rsplit('.').next().unwrap_or(&qualified).to_string();
+    JAnnotation {
+        name,
+        qualified,
+        start: 0,
+        end: 0,
+        strings: Vec::new(),
+        args: a
+            .elements
+            .iter()
+            .map(|(k, v)| (k.clone(), format!("{v:?}")))
+            .collect(),
+        positional: Vec::new(),
     }
 }
 

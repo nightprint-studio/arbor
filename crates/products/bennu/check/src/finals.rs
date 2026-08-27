@@ -23,6 +23,8 @@ use tree_sitter::Node;
 #[cfg(test)]
 use tree_sitter::Parser;
 
+use crate::method_sig::{method_param_binaries, superclass_text};
+use crate::nodes::{has_keyword, text};
 use crate::resolve::type_binary;
 use crate::walk::for_each_supertype;
 
@@ -353,66 +355,15 @@ fn check_type_final_overrides(
 
 /// The erased binary names of a method's parameter types. `None` (skip the method) if any parameter
 /// type can't be resolved, or the method is varargs (a conservative miss rather than a wrong match).
-fn method_param_binaries(
-    md: Node,
-    bytes: &[u8],
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-) -> Option<Vec<String>> {
-    let params_node = md.child_by_field_name("parameters")?;
-    let mut out = Vec::new();
-    let mut c = params_node.walk();
-    for p in params_node.named_children(&mut c) {
-        match p.kind() {
-            "formal_parameter" => {
-                let ty = p.child_by_field_name("type")?;
-                let text = ty.utf8_text(bytes).ok()?;
-                out.push(type_binary(text, symbols, resolver)?);
-            }
-            "spread_parameter" => return None, // varargs — skip (erased-array matching is finicky)
-            _ => {}
-        }
-    }
-    Some(out)
-}
-
-/// The `extends` type text of a class (`superclass` wrapper), if any.
-fn superclass_text(n: Node, bytes: &[u8]) -> Option<String> {
-    let sc = n.child_by_field_name("superclass")?;
-    let mut c = sc.walk();
-    for ch in sc.named_children(&mut c) {
-        if matches!(ch.kind(), "type_identifier" | "scoped_type_identifier" | "generic_type") {
-            return text(ch, bytes);
-        }
-    }
-    None
-}
-
 fn has_static(node: Node, bytes: &[u8]) -> bool {
-    has_keyword_modifier(node, bytes, "static")
+    has_keyword(node, bytes, "static")
 }
 
 fn has_visibility(node: Node, bytes: &[u8], keyword: &str) -> bool {
-    has_keyword_modifier(node, bytes, keyword)
-}
-
-fn has_keyword_modifier(node: Node, bytes: &[u8], keyword: &str) -> bool {
-    let mut c = node.walk();
-    for ch in node.children(&mut c) {
-        if ch.kind() == "modifiers" {
-            if let Ok(t) = ch.utf8_text(bytes) {
-                return t.split_whitespace().any(|w| w == keyword);
-            }
-        }
-    }
-    false
+    has_keyword(node, bytes, keyword)
 }
 
 // ── shared node helpers ──────────────────────────────────────────────────────
-
-fn text(node: Node, bytes: &[u8]) -> Option<String> {
-    node.utf8_text(bytes).ok().map(str::to_string)
-}
 
 fn decl_name(declarator: Node, bytes: &[u8]) -> Option<String> {
     declarator.child_by_field_name("name").and_then(|n| text(n, bytes))

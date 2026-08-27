@@ -154,6 +154,17 @@ pub trait MemberIndex {
     /// (absent from every source). Never errors on a missing class — that is a
     /// normal, non-fatal state (docs §8).
     fn members_of(&self, binary_name: &str) -> Option<ClassMembers>;
+
+    /// The annotations written on the TYPE itself — `@Repeatable` / `@Target` / `@Retention` on an
+    /// annotation type, `@Entity` on a JPA class.
+    ///
+    /// A SEPARATE lookup rather than a field on [`ClassMembers`], and deliberately so: that struct is
+    /// memoized for every class the resolver touches, while this is asked about the handful of types
+    /// a check actually names. Default `None` — an index with no class source cannot answer, and
+    /// `None` must be read as "not known", never as "has none".
+    fn class_annotations(&self, _binary_name: &str) -> Option<crate::annotations::ClassAnnotations> {
+        None
+    }
 }
 
 /// Adapt any [`ClassSource`](crate::source::ClassSource) into a [`MemberIndex`]: the
@@ -177,6 +188,10 @@ impl<S: crate::source::ClassSource> SourceMemberIndex<S> {
 }
 
 impl<S: crate::source::ClassSource> MemberIndex for SourceMemberIndex<S> {
+    fn class_annotations(&self, binary_name: &str) -> Option<crate::annotations::ClassAnnotations> {
+        crate::annotations::class_annotations_of(&self.source, binary_name)
+    }
+
     fn members_of(&self, binary_name: &str) -> Option<ClassMembers> {
         match self.source.class_bytes(binary_name) {
             Ok(Some(bytes)) => parse_class_members(&bytes).ok(),
@@ -225,6 +240,18 @@ pub fn parse_class_members(bytes: &[u8]) -> Result<ClassMembers, String> {
         .unwrap_or_default();
 
     Ok(ClassMembers { superclass, interfaces, methods, fields, flags, type_params })
+}
+
+/// Just the class-level flags — what kind of type this is — without decoding a single member.
+///
+/// [`parse_class_members`] allocates a `Member` per method and per field, which is the right cost
+/// when the members are the answer and pure waste when the question is only "is this an interface".
+/// The library-class navigator asks that of a few hundred classes per keystroke, so it gets its own
+/// entry point rather than paying for a member list it throws away.
+pub fn parse_class_flags(bytes: &[u8]) -> Result<ClassFlags, String> {
+    let parsed: ClassFile =
+        parse_class(bytes).map_err(|e| format!("cafebabe parse failed: {e}"))?;
+    Ok(decode_class_flags(&parsed))
 }
 
 /// Decode the class-level flags a checker needs. `record`/`sealed` come from attributes (there is no

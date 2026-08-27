@@ -19,8 +19,9 @@ use bennu_java::prelude::{FileSymbols, InferCache, TypeResolver, infer_node_type
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::nodes::{is_primitive, is_type_var, simple_name};
+
 use crate::check_id::CheckId;
-use crate::members::simple_name;
 use crate::resolve::type_binary;
 use crate::walk::{hierarchy_fully_known, reaches};
 
@@ -169,17 +170,6 @@ fn concrete_binary(binary: String, resolver: &dyn TypeResolver) -> Option<String
         return None; // an interface is never "unrelated" — a subclass could implement it
     }
     Some(binary)
-}
-
-fn is_type_var(binary: &str) -> bool {
-    binary.len() == 1 && binary.chars().all(|c| c.is_ascii_uppercase())
-}
-
-fn is_primitive(binary: &str) -> bool {
-    matches!(
-        binary,
-        "int" | "long" | "short" | "byte" | "char" | "boolean" | "float" | "double" | "void"
-    )
 }
 
 #[cfg(test)]

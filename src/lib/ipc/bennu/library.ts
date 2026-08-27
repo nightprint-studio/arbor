@@ -24,6 +24,10 @@ export interface LibraryClassDto {
   package: string;
   /** The artifact it came from: the jar's file name, version and all. */
   jar: string;
+  /** Type-kind slug — `class` | `interface` | `enum` | `record` | `annotation`. The same
+   *  vocabulary a project type carries, so one icon rule serves both lists. Empty when the class
+   *  file could not be read; render it as an ordinary class rather than guessing. */
+  kind?: string;
 }
 
 /** A non-class entry found in a dependency jar. */

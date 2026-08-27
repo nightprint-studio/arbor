@@ -78,6 +78,8 @@ pub enum CheckId {
     OverrideOverridesNothing,
     /// A method that overrides a `final` supertype method.
     FinalMethodOverride,
+    /// An override that makes the method less visible than the one it overrides.
+    WeakerAccessOverride,
     /// An override whose return type isn't covariant with the overridden method's.
     CovariantReturn,
     /// An override that declares a checked exception the overridden method doesn't.
@@ -94,6 +96,8 @@ pub enum CheckId {
     InaccessibleMember,
     /// A non-static member referenced from a `static` context.
     StaticContextAccess,
+    /// A `static` method called through an instance rather than through its type. *Warning.*
+    StaticViaInstance,
 
     // ── imports ──────────────────────────────────────────────────────────────────
     /// A single-type `import a.b.C;` the resolver can't resolve.
@@ -110,10 +114,14 @@ pub enum CheckId {
     IncompatibleInstanceof,
     /// A `new` on an abstract class or interface.
     InstantiateAbstract,
+    /// A capturing local class instantiated from a `static` member of itself.
+    LocalClassFromStatic,
 
     // ── try / catch ──────────────────────────────────────────────────────────────
     /// A `catch` whose type is already handled by an earlier clause (unreachable).
     UnreachableCatch,
+    /// A `catch` for a checked exception the `try` body cannot throw.
+    UnthrownCatch,
     /// A multi-`catch` listing a type together with its supertype.
     RedundantMultiCatch,
     /// A try-with-resources whose resource type definitely isn't `AutoCloseable`.
@@ -151,6 +159,8 @@ pub enum CheckId {
     // ── pure-AST: constructors & records ─────────────────────────────────────────
     /// A constructor that delegates to itself (directly or via a cycle).
     RecursiveConstructor,
+    /// Instance state read in the arguments of a `this(…)` / `super(…)`, before the object exists.
+    ReferenceBeforeConstructor,
     /// A record component left unassigned by its canonical constructor.
     RecordConstructor,
     /// A concrete method named exactly like its class (a likely missing-`void` typo). *Warning.*
@@ -204,6 +214,29 @@ pub enum CheckId {
     /// A local-variable `var` whose initializer gives no inferable type.
     VarTypeInferenceFailed,
 
+    // ── branches & labels ────────────────────────────────────────────────────────
+    /// A `break` outside any loop or `switch`, or a `continue` outside any loop.
+    BranchOutsideLoop,
+    /// A `break`/`continue` naming a label that no enclosing statement declares.
+    UnknownLabel,
+
+    /// An `if` whose body is a bare `;` — the guarded statement is outside the `if`, not in it.
+    EmptyIfBody,
+
+    // ── initializers ─────────────────────────────────────────────────────────────
+    /// A field initializer that reads the field it is initializing.
+    SelfReferencingInitializer,
+
+    // ── annotations ──────────────────────────────────────────────────────────────
+    /// The same annotation element given a value twice (`@Foo(a = 1, a = 2)`).
+    DuplicateAnnotationValue,
+    /// A value given for an element the annotation type does not declare (`@Column(nulable = true)`).
+    UnknownAnnotationElement,
+    /// The same annotation written twice on one declaration, without being `@Repeatable`.
+    NotRepeatableAnnotation,
+    /// An annotation element given a value that is not a constant expression.
+    NonConstantAnnotationValue,
+
     // ── pure-AST: syntax ─────────────────────────────────────────────────────────
     /// A tree-sitter `ERROR` node — a genuine syntax error.
     SyntaxError,
@@ -239,19 +272,23 @@ impl CheckId {
             CyclicInheritance => "cyclic-inheritance",
             OverrideOverridesNothing => "override-overrides-nothing",
             FinalMethodOverride => "final-method-override",
+            WeakerAccessOverride => "weaker-access-override",
             CovariantReturn => "covariant-return",
             CheckedExceptionWidening => "checked-exception-widening",
             SuperConstructorRequired => "super-constructor-required",
             LambdaArity => "lambda-arity",
             InaccessibleMember => "inaccessible-member",
             StaticContextAccess => "static-context-access",
+            StaticViaInstance => "static-via-instance",
             UnresolvedImport => "unresolved-import",
             RedundantImport => "redundant-import",
             DuplicateImport => "duplicate-import",
             UnusedImport => "unused-import",
             IncompatibleInstanceof => "incompatible-instanceof",
             InstantiateAbstract => "instantiate-abstract",
+            LocalClassFromStatic => "local-class-from-static",
             UnreachableCatch => "unreachable-catch",
+            UnthrownCatch => "unthrown-catch",
             RedundantMultiCatch => "redundant-multi-catch",
             NonAutoCloseableResource => "non-autocloseable-resource",
             IllegalDeclaration => "illegal-declaration",
@@ -267,6 +304,7 @@ impl CheckId {
             DuplicateInterface => "duplicate-interface",
             ImportCollision => "import-collision",
             RecursiveConstructor => "recursive-constructor",
+            ReferenceBeforeConstructor => "reference-before-constructor",
             RecordConstructor => "record-constructor",
             MethodNamedLikeConstructor => "method-named-like-constructor",
             FinalAssignment => "final-assignment",
@@ -288,6 +326,14 @@ impl CheckId {
             EmptyStatement => "empty-statement",
             StringReferenceEquality => "string-reference-equality",
             VarTypeInferenceFailed => "var-type-inference-failed",
+            BranchOutsideLoop => "branch-outside-loop",
+            UnknownLabel => "unknown-label",
+            EmptyIfBody => "empty-if-body",
+            SelfReferencingInitializer => "self-referencing-initializer",
+            DuplicateAnnotationValue => "duplicate-annotation-value",
+            UnknownAnnotationElement => "unknown-annotation-element",
+            NotRepeatableAnnotation => "not-repeatable-annotation",
+            NonConstantAnnotationValue => "non-constant-annotation-value",
             SyntaxError => "syntax-error",
             MissingToken => "missing-token",
         }
@@ -300,7 +346,7 @@ impl CheckId {
             // Style / hygiene lints — not compile errors.
             RedundantImport | DuplicateImport | UnusedImport | MethodNamedLikeConstructor
             | SwitchFallthrough | FinallyAbrupt | SelfAssignment | DivisionByZero | EmptyStatement
-            | StringReferenceEquality | ConstantCondition | DeadStore => "warning",
+            | StringReferenceEquality | ConstantCondition | DeadStore | EmptyIfBody | StaticViaInstance => "warning",
             // Everything else is a compile-level error.
             _ => "error",
         }
@@ -354,19 +400,23 @@ impl CheckId {
             CyclicInheritance,
             OverrideOverridesNothing,
             FinalMethodOverride,
+            WeakerAccessOverride,
             CovariantReturn,
             CheckedExceptionWidening,
             SuperConstructorRequired,
             LambdaArity,
             InaccessibleMember,
             StaticContextAccess,
+            StaticViaInstance,
             UnresolvedImport,
             RedundantImport,
             DuplicateImport,
             UnusedImport,
             IncompatibleInstanceof,
             InstantiateAbstract,
+            LocalClassFromStatic,
             UnreachableCatch,
+            UnthrownCatch,
             RedundantMultiCatch,
             NonAutoCloseableResource,
             IllegalDeclaration,
@@ -382,6 +432,7 @@ impl CheckId {
             DuplicateInterface,
             ImportCollision,
             RecursiveConstructor,
+            ReferenceBeforeConstructor,
             RecordConstructor,
             MethodNamedLikeConstructor,
             FinalAssignment,
@@ -403,6 +454,14 @@ impl CheckId {
             EmptyStatement,
             StringReferenceEquality,
             VarTypeInferenceFailed,
+            BranchOutsideLoop,
+            UnknownLabel,
+            EmptyIfBody,
+            SelfReferencingInitializer,
+            DuplicateAnnotationValue,
+            UnknownAnnotationElement,
+            NotRepeatableAnnotation,
+            NonConstantAnnotationValue,
             SyntaxError,
             MissingToken,
         ]

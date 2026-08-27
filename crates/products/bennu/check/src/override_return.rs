@@ -26,7 +26,10 @@ use bennu_java::prelude::{FileSymbols, MemberKind, TypeResolver, Visibility};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::members::simple_name;
+use crate::nodes::{is_primitive, is_type_var, simple_name};
+
+use crate::method_sig::{implements_texts, method_param_binaries, superclass_text};
+use crate::nodes::{has_keyword, text};
 use crate::resolve::type_binary_at;
 use crate::walk::{for_each_supertype, hierarchy_fully_known, reaches};
 
@@ -172,90 +175,8 @@ fn concrete_ref(binary: &str, resolver: &dyn TypeResolver) -> Option<String> {
     Some(binary.to_string())
 }
 
-fn is_primitive(binary: &str) -> bool {
-    matches!(
-        binary,
-        "int" | "long" | "short" | "byte" | "char" | "boolean" | "float" | "double" | "void"
-    )
-}
-
-fn is_type_var(binary: &str) -> bool {
-    binary.len() == 1 && binary.chars().all(|c| c.is_ascii_uppercase())
-}
-
 /// The erased binary names of a method's parameter types. `None` (skip the method) if any parameter
 /// type can't be resolved, or the method is varargs. Mirrors `finals::method_param_binaries`.
-fn method_param_binaries(
-    md: Node,
-    bytes: &[u8],
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-) -> Option<Vec<String>> {
-    let params_node = md.child_by_field_name("parameters")?;
-    let mut out = Vec::new();
-    let mut c = params_node.walk();
-    for p in params_node.named_children(&mut c) {
-        match p.kind() {
-            "formal_parameter" => {
-                let ty = p.child_by_field_name("type")?;
-                let text = ty.utf8_text(bytes).ok()?;
-                out.push(type_binary_at(text, ty, bytes, symbols, resolver)?);
-            }
-            "spread_parameter" => return None, // varargs — skip
-            _ => {}
-        }
-    }
-    Some(out)
-}
-
-/// The `extends` type text of a class (`superclass` wrapper), if any.
-fn superclass_text(n: Node, bytes: &[u8]) -> Option<String> {
-    let sc = n.child_by_field_name("superclass")?;
-    let mut c = sc.walk();
-    for ch in sc.named_children(&mut c) {
-        if matches!(ch.kind(), "type_identifier" | "scoped_type_identifier" | "generic_type") {
-            return text(ch, bytes);
-        }
-    }
-    None
-}
-
-/// The `implements` interface type texts of a class/enum (`interfaces` → `type_list`).
-fn implements_texts(n: Node, bytes: &[u8]) -> Vec<String> {
-    let Some(w) = n.child_by_field_name("interfaces") else { return Vec::new() };
-    let mut out = Vec::new();
-    let mut stack = vec![w];
-    while let Some(node) = stack.pop() {
-        if matches!(node.kind(), "type_identifier" | "scoped_type_identifier" | "generic_type") {
-            if let Some(t) = text(node, bytes) {
-                out.push(t);
-            }
-            continue;
-        }
-        let mut c = node.walk();
-        for ch in node.named_children(&mut c) {
-            stack.push(ch);
-        }
-    }
-    out
-}
-
-fn has_keyword(node: Node, bytes: &[u8], keyword: &str) -> bool {
-    let mut c = node.walk();
-    for ch in node.children(&mut c) {
-        if ch.kind() == "modifiers" {
-            if let Ok(t) = ch.utf8_text(bytes) {
-                return t.split_whitespace().any(|w| w == keyword);
-            }
-        }
-    }
-    false
-}
-
-fn text(node: Node, bytes: &[u8]) -> Option<String> {
-    node.utf8_text(bytes).ok().map(str::to_string)
-}
-
 fn err(message: String, node: Node) -> Diagnostic {
     crate::check_id::CheckId::CovariantReturn.at(node, message)
 }

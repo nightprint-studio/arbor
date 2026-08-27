@@ -16,7 +16,7 @@ use bennu_java::prelude::{extract_symbols, FileSymbols, MemberKind, TypeRef, Typ
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::members::simple_name;
+use crate::nodes::simple_name;
 use crate::resolve::type_binary;
 
 /// Flag constructors that must call `super(...)` but don't (and classes lacking a needed constructor).
