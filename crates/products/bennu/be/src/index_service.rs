@@ -707,7 +707,7 @@ impl IndexService {
             classes: RwLock::new(Vec::new()),
             provider: RwLock::new(Arc::new(NativeJavaProvider::new())),
             config: RwLock::new(None),
-            rename: RwLock::new(None),
+            semantics: RwLock::new(None),
             dep_jars: RwLock::new(Vec::new()),
             types: AtomicUsize::new(0),
             members: AtomicUsize::new(0),
@@ -1731,7 +1731,10 @@ impl IndexService {
         offset: usize,
         new_name: &str,
     ) -> Option<RenamePlan> {
-        let engine = self.semantics_for(file)?;
+        // The slot, not just the engine: the refusal below reaches for the slot's provider, and
+        // taking the lock twice could land on two different builds.
+        let slot = self.slot_for_file(file)?;
+        let engine = slot.semantics()?;
         if let Some(plan) = engine.plan(file, source, offset, new_name) {
             return Some(plan);
         }

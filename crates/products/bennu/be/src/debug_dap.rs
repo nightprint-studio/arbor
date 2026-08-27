@@ -495,6 +495,9 @@ impl SessionHandler for Events {
             // so a bad one comes back as a refusal to verify, in `message`, and there is no
             // separate answer for Bennu to report here.
             condition_error: String::new(),
+            // The adapter owns the stops, so it is the only thing that could count them, and DAP
+            // has no field that reports it. Zero rather than a guess.
+            hits: 0,
         };
         self.sink.emit(
             EVT_DEBUG_BREAKPOINTS,

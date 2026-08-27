@@ -475,7 +475,7 @@ impl Session {
             breakpoints: config
                 .breakpoints
                 .into_iter()
-                .map(|at| Bp { at, requests: Vec::new(), verified: false, message: String::new() })
+                .map(new_bp)
                 .collect(),
             exceptions: config.exceptions.into_iter().map(|e| (e, Vec::new())).collect(),
             ..Mutable::default()
