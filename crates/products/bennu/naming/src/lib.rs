@@ -42,7 +42,7 @@
 //!
 //! Everything else — a method, a field, a type — can be reached by a caller, by reflection, or by
 //! a framework binding a name out of an XML or JSP file that no grammar here reads. Those are
-//! offered one at a time, through the project's real rename engine, never rewritten in place.
+//! offered one at a time, through the project's real semantic engine, never rewritten in place.
 //!
 //! ## Public API: use the [`prelude`]
 

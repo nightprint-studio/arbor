@@ -30,7 +30,7 @@
   import { ArrowRight, Copy } from 'lucide-svelte';
   import { baseName } from '$lib/utils/paths';
   import { kindGlyph } from './symbol-kind-glyph';
-  import type { LspHierarchyDirection } from '$lib/ipc/bennu/lsp';
+  import type { HierarchyDirection } from '$lib/ipc/bennu/hierarchy';
 
   const kind = $derived(bennuHierarchyStore.kind);
   const rows = $derived(bennuHierarchyStore.roots);
@@ -42,14 +42,18 @@
     bennuHierarchyStore.directions.map((d) => ({ id: d.id, label: d.label })),
   );
 
-  /** Every row can have children until the server has said otherwise — which is what makes the tree
-   *  lazy. `exhausted` is the server's "there are none", and only then does the chevron go. */
+  /** Every row can have children until the engine has said otherwise — which is what makes the tree
+   *  lazy. `exhausted` is the engine's "there are none", and only then does the chevron go. */
   function hasChildren(row: HierarchyRow): boolean {
     return !row.exhausted;
   }
 
   function jump(row: HierarchyRow) {
     const node = row.node;
+    // A supertype that lives in a dependency jar has no source to open. It is worth showing — a
+    // class that `extends HttpServlet` is not a class built on nothing — and worth being able to
+    // expand, so it is a row like any other, minus the jump.
+    if (!node.file) return;
     // A caller row jumps to the CALL, not to the head of the function containing it — that is the
     // difference between one hop and reading a body to find the line you were told about. Falls back
     // to the declaration for a type hierarchy, which has no call sites.
@@ -126,7 +130,7 @@
         items={chips}
         selected={bennuHierarchyStore.direction}
         size="sm"
-        onSelect={(sel) => bennuHierarchyStore.setDirection(sel as LspHierarchyDirection)}
+        onSelect={(sel) => bennuHierarchyStore.setDirection(sel as HierarchyDirection)}
       />
     </div>
   {/if}
@@ -150,7 +154,7 @@
         onExpandToggle={(id, next) => bennuHierarchyStore.toggle(id, next)}
         onActivate={jump}
         onContextMenu={onRowContextMenu}
-        rowTitle={(row) => `${row.node.file}:${row.node.line}`}
+        rowTitle={(row) => (row.node.file ? `${row.node.file}:${row.node.line}` : row.node.name)}
         guides
         ariaLabel={title}
       >
@@ -171,7 +175,13 @@
           {#if sites > 1}<span class="r-sites">{sites}×</span>{/if}
           <span class="r-spacer"></span>
           {#if node.loading}<Spinner size={11} />{/if}
-          <span class="r-where">{baseName(node.node.file)}:{node.node.line}</span>
+          <!-- No file means no source to point at — a dependency's type. Saying so is better than
+               a `:0` that reads as a bug in the row. -->
+          {#if node.node.file}
+            <span class="r-where">{baseName(node.node.file)}:{node.node.line}</span>
+          {:else}
+            <span class="r-where">in a dependency</span>
+          {/if}
         {/snippet}
       </Tree>
     </div>

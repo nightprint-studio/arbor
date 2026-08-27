@@ -515,6 +515,9 @@
           <FormRow label="Sticky scroll" description="Pin the enclosing class and method signatures to the top while scrolling. Applies on the next file opened.">
             <Toggle checked={s.stickyScroll} onchange={(v) => s.setStickyScroll(v)} ariaLabel="Sticky scroll" />
           </FormRow>
+          <FormRow label="Inlay hints" description="Draw the parameter name in front of each argument that doesn't already say what it is, and the type a `var` was inferred as. Not part of the file — they can't be selected or copied.">
+            <Toggle checked={s.inlayHints} onchange={(v) => s.setInlayHints(v)} ariaLabel="Inlay hints" />
+          </FormRow>
           <FormRow label="Word wrap" description="Wrap long lines to the viewport instead of scrolling horizontally.">
             <Toggle checked={s.wordWrap} onchange={(v) => s.setWordWrap(v)} ariaLabel="Word wrap" />
           </FormRow>

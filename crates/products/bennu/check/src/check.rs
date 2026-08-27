@@ -43,7 +43,7 @@ fn clamp_message(message: &mut String) {
 /// get byte-for-byte identical behaviour. Collecting once and sharing it across the resolver-backed
 /// checks turns their ~dozen independent tree walks — the dominant per-file cost on a big file — into
 /// one walk plus cheap slice passes.
-pub(crate) fn collect_nodes(root: tree_sitter::Node) -> Vec<tree_sitter::Node> {
+pub fn collect_nodes(root: tree_sitter::Node) -> Vec<tree_sitter::Node> {
     let mut nodes = Vec::new();
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
@@ -130,6 +130,10 @@ pub fn check_file_in(
     out.extend(crate::record_ctor::record_ctor_errors_nodes(nodes, source));
     out.extend(crate::var_target::var_target_errors_nodes(nodes, source));
     out.extend(crate::capture::capture_errors_nodes(nodes, source));
+    // Data flow — the checks that follow a value through a method rather than reading a
+    // declaration. Pure AST like everything else here: the model is straight-line and forgets at
+    // the first branch, which is what keeps it sound without a solver (see `crate::dataflow`).
+    out.extend(crate::dataflow::dataflow_errors_in(root, source));
     out.extend(crate::imports::unused_imports(root, source));
     out.extend(crate::imports::duplicate_imports(root, source));
     out.extend(crate::imports::redundant_imports(root, source));
@@ -244,6 +248,7 @@ pub fn check_file_resolved(
         timed!("inherit_cycle", crate::inherit_cycle::inherit_cycle_errors_in(&nodes, source, &symbols, resolver));
         timed!("exceptions", crate::exceptions::exception_errors_in(&nodes, source, &symbols, resolver));
         timed!("enum_switch", crate::enum_switch::enum_switch_errors_in(root, &nodes, source, &symbols, resolver, &cache));
+        timed!("switch_label_type", crate::switch_label_type::switch_label_type_errors_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("super_method", crate::super_method::super_method_errors_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("condition_type", crate::condition_type::condition_type_errors_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("type_use", crate::type_use::type_use_errors_in(root, &nodes, source, &symbols, resolver, &cache));

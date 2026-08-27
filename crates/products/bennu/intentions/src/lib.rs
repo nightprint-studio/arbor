@@ -23,11 +23,14 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_intentions::prelude::...`.
 
+pub mod format;
 pub mod import_class;
 pub mod intentions;
 pub mod log_param;
 pub mod np_equals;
+pub mod override_stub;
 pub mod prelude;
+pub mod quick_fix;
 mod scan;
 pub mod simplify;
 

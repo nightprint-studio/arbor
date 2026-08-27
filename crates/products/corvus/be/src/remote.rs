@@ -32,7 +32,8 @@ use std::sync::Arc;
 use arbor_ipc::prelude::{EventSink, HostCaller};
 use corvus_core::prelude::{hooks, CorvusState};
 use corvus_git::prelude::{
-    CredentialResolver, FetchResult, GitCli, RecoveryKind, RemoteInfo, SnapshotPolicy, StashEntry,
+    http_auth_args_for_credentials, CredentialResolver, FetchResult, GitCli, RecoveryKind,
+    RemoteInfo, SnapshotPolicy, StashEntry,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -51,6 +52,25 @@ pub(crate) fn credential_resolver(
     move |url: &str| {
         let value = host.call("__git_credentials", json!(url))?;
         serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
+
+/// The same resolver one step further on: `(url) -> the host-scoped `-c …` argv` a git
+/// subcommand needs to authenticate against that URL, empty when there is no stored credential
+/// for its host (git then falls through to its own helper).
+///
+/// One place rather than the identical five-line closure at every call site — it was copied per
+/// handler, so a change to how auth args are built had five copies to find.
+pub(crate) fn auth_args_resolver(
+    host: Arc<dyn HostCaller>,
+) -> impl Fn(&str) -> Vec<String> + Send + Sync {
+    let resolve = credential_resolver(host);
+    move |url: &str| {
+        resolve(url)
+            .ok()
+            .flatten()
+            .map(|(u, p)| http_auth_args_for_credentials(url, &u, &p))
+            .unwrap_or_default()
     }
 }
 

@@ -15,11 +15,16 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_query::prelude::...`.
 
+pub mod access;
 pub mod classpath_index;
 pub mod completion;
 pub mod dep_record;
+pub mod hints;
 pub mod inherited;
 pub mod jdk;
+pub mod member_text;
+pub mod overridable;
 pub mod prelude;
+pub mod rank;
 pub mod resolver;
 pub mod source;

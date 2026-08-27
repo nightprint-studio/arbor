@@ -146,7 +146,7 @@
     ...(isCargo
       ? []
       : [{ kind: 'item', id: 'validate', label: 'Validate project', icon: ListChecks, disabled: busy, onclick: () => selectBuild('validate') } as DropdownItem]),
-    { kind: 'item', id: 'stop',    label: 'Stop',            icon: Square, disabled: !bennuRunStore.running, onclick: () => void bennuRunStore.stop() },
+    { kind: 'item', id: 'stop',    label: 'Stop',            icon: Square, disabled: !bennuRunStore.canStop, onclick: () => void bennuRunStore.stop() },
     // Tests. A Cargo project's tests are `cargo test`, which this runner does not speak, so
     // the entries are out rather than failing when pressed.
     ...(isCargo
@@ -372,7 +372,7 @@
            question this button — or the panel it opens — can ask. -->
       <button
         class="btb-run-btn"
-        class:btb-debugging={bennuDebugStore.live}
+        class:btb-debugging={bennuDebugStore.anyLive}
         onclick={debugProject}
         disabled={!hasProject || busy}
         use:tooltip={{ content: 'Debug', shortcut: 'Shift+F9' }}

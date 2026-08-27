@@ -987,7 +987,7 @@ impl NativeJavaProvider {
     /// This provider's fully-resolving (project + JDK + dependency) resolver, type-erased and
     /// shareable — `None` before a project index exists.
     ///
-    /// Handed to the [`RenameEngine`](crate::rename::RenameEngine) so its reference walk can type
+    /// Handed to the [`SemanticEngine`](crate::engine::SemanticEngine) so its reference walk can type
     /// receivers that only a LIBRARY generic can carry: in `list.stream().map(x -> x.foo())` the
     /// lambda parameter `x` is typed by substituting through `List`/`Stream`/`Function`, so with no
     /// JDK those `x.foo()` edges are never recorded and a rename silently misses them. Shared

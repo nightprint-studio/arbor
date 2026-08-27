@@ -18,6 +18,13 @@ export interface BreakpointDto {
   line: number;
   /** A disabled breakpoint is remembered but not installed. */
   enabled: boolean;
+  /** Stop here only when this holds. Empty = every time.
+   *
+   *  The language differs by engine, deliberately: a Java condition is Bennu's own (a watch path
+   *  compared with a literal), a native one is the adapter's, which already has a real evaluator. */
+  condition: string;
+  /** Stop on every Nth hit. `0` and `1` both mean every one. Counted after the condition. */
+  hit_count: number;
 }
 
 /** A breakpoint on a **throw** rather than on a line.
@@ -50,6 +57,12 @@ export interface BreakpointStatusDto {
   /** Why it isn't verified, or where it really bound. "The class isn't loaded yet" (which
    *  resolves itself) reads very differently from "that line has no code" (which never will). */
   message: string;
+  /** What went wrong with the condition: it did not parse, or it could not be answered at a hit.
+   *  Separate from `message` because the two are different problems with different fixes. */
+  condition_error: string;
+  /** How many times it has stopped the program this session — what a pass count counts, and the
+   *  answer to "is this line even running". Zero until the first stop. */
+  hits: number;
 }
 
 /** One frame of a suspended thread's stack. Deliberately the same shape a stack-trace frame in

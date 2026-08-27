@@ -1031,8 +1031,81 @@ impl Ctx<'_> {
         let res = self
             .cache
             .resolve_methods(self.resolver, &recv.binary_name, method_name);
-        let ret = self.select_overload_return(&res.candidates, args, enclosing)?;
-        Some(self.substitute_generics(&ret, recv))
+        let (ret, picked) = self.select_overload(&res.candidates, args, enclosing)?;
+        // Receiver-bound variables first (`List<Foo>.get` → `Foo`), then the ones the receiver can't
+        // answer for because the METHOD declares them.
+        let ret = self.substitute_generics(&ret, recv);
+        Some(match picked {
+            Some(m) => self.bind_method_type_vars(&ret, m, args, enclosing),
+            None => ret,
+        })
+    }
+
+    /// Resolve a **method-level** type variable from the argument that determines it.
+    ///
+    /// `static <T> Optional<T> ofNullable(T value)` is the shape: `T` is declared by the *method*, so
+    /// the receiver carries no type argument to substitute it with — [`Self::substitute_generics`]
+    /// correctly leaves it alone, and the chain that follows (`.orElse(…)` → `T`) stays unresolved.
+    /// The binding was in the call all along: whatever was passed *as* `value`.
+    ///
+    /// Deliberately limited to an **identity parameter** — one whose declared type is exactly the
+    /// variable, with no type arguments of its own. That covers the static factories real code is
+    /// full of (`Optional.of/ofNullable`, `Objects.requireNonNull`, `Collections.singletonList`) and
+    /// stops short of structural unification, which is what `Stream.map(Function<? super T, ? extends
+    /// R>)` would need: recovering `R` there means typing a lambda or method reference, which this
+    /// inference doesn't do. Those stay unresolved, exactly as before.
+    ///
+    /// Every step abstains rather than guesses: an argument we can't type, an argument that is itself
+    /// a type variable, a variadic or wrapped parameter — each simply contributes no binding.
+    fn bind_method_type_vars(
+        &self,
+        ret: &TypeRef,
+        m: &Member,
+        args: &[Node],
+        enclosing: Option<&str>,
+    ) -> TypeRef {
+        // Only worth the argument inference when something in the return type is still open.
+        if !self.mentions_type_variable(ret) {
+            return ret.clone();
+        }
+        let mut bindings: Vec<(String, TypeRef)> = Vec::new();
+        for (i, p) in m.params.iter().enumerate() {
+            if !p.type_args.is_empty() || !self.is_type_variable(&p.binary_name) {
+                continue; // not an identity parameter
+            }
+            if bindings.iter().any(|(v, _)| *v == p.binary_name) {
+                continue; // first occurrence wins; a second would need a join we don't compute
+            }
+            let Some(arg) = args.get(i) else { continue };
+            let Some(arg_ty) = self.infer_expr(arg, enclosing) else { continue };
+            if arg_ty.binary_name.is_empty() || self.is_type_variable(&arg_ty.binary_name) {
+                continue; // an untypeable argument binds nothing
+            }
+            bindings.push((p.binary_name.clone(), arg_ty));
+        }
+        if bindings.is_empty() {
+            return ret.clone();
+        }
+        apply_bindings(ret, &bindings)
+    }
+
+    /// Whether `ty` — at any depth — still names a type variable.
+    fn mentions_type_variable(&self, ty: &TypeRef) -> bool {
+        self.is_type_variable(&ty.binary_name)
+            || ty.type_args.iter().any(|a| self.mentions_type_variable(a))
+    }
+
+    /// Whether `name` is a type **variable** rather than a type.
+    ///
+    /// A binary name is package-qualified, so a slash settles it outright. What is left is a bare
+    /// identifier, which is a variable only when it names no type the resolver knows — that last
+    /// test is what keeps a class in the default package (`Foo`) from reading as a variable, and it
+    /// is why this is a method on the walk rather than the free-standing shape test [`is_type_var`].
+    fn is_type_variable(&self, name: &str) -> bool {
+        !name.is_empty()
+            && !name.contains('/')
+            && !is_primitive(name)
+            && self.resolver.members_of(name).is_none()
     }
 
     /// Pick the return type of the overload a call of `args` binds to, from all same-named `candidates`
@@ -1051,6 +1124,22 @@ impl Ctx<'_> {
         args: &[Node],
         enclosing: Option<&str>,
     ) -> Option<TypeRef> {
+        self.select_overload(candidates, args, enclosing).map(|(ret, _)| ret)
+    }
+
+    /// [`Self::select_overload_return`], plus the member the return type came from **when exactly one
+    /// candidate survived**.
+    ///
+    /// The distinction matters to [`Self::bind_method_type_vars`] and to nothing else: several
+    /// overloads can agree on a return type while differing in their parameters, and reading a type
+    /// variable's binding off the parameters of a method the call might not have chosen would be a
+    /// guess. `None` there means "the return type is trustworthy, the parameter list is not".
+    fn select_overload<'m>(
+        &self,
+        candidates: &'m [Member],
+        args: &[Node],
+        enclosing: Option<&str>,
+    ) -> Option<(TypeRef, Option<&'m Member>)> {
         // Collapse OVERRIDE chains: the same method reachable at several hierarchy levels (a plain
         // inherit, or a COVARIANT override where the derived return type is more specific) arrives as
         // several candidates with identical parameter signatures. Keep the most-derived occurrence —
@@ -1068,7 +1157,7 @@ impl Ctx<'_> {
         // second-guessing an imperfect param model; only genuine overload sets go through arity/argument
         // disambiguation below.
         if let [only] = distinct.as_slice() {
-            return Some(only.return_type.clone());
+            return Some((only.return_type.clone(), Some(only)));
         }
         let argc = args.len();
         let arity_ok: Vec<&Member> = distinct
@@ -1076,7 +1165,7 @@ impl Ctx<'_> {
             .filter(|m| arity_admits(m.params.len(), last_is_array(m), argc))
             .collect();
         if let Some(ret) = unique_return(&arity_ok) {
-            return Some(ret);
+            return Some((ret, sole(&arity_ok)));
         }
         if arity_ok.is_empty() {
             return None;
@@ -1088,7 +1177,7 @@ impl Ctx<'_> {
             .into_iter()
             .filter(|m| args_admissible(&m.params, &arg_types))
             .collect();
-        unique_return(&applicable)
+        unique_return(&applicable).map(|ret| (ret, sole(&applicable)))
     }
 
     /// Walk the class + its superclass/interfaces, returning the first `f` hit.
@@ -1974,6 +2063,27 @@ fn last_is_array(m: &Member) -> bool {
 /// The single return type shared by every member in `members`, or `None` when the set is empty or its
 /// members return more than one distinct type — the "unique return" gate that keeps an ambiguous
 /// overload UNRESOLVED (never guessed) while resolving the common single-return case.
+/// The one member in `members`, or `None` when there are several — "which method was called" is only
+/// answerable when the field narrowed to one, and a caller that reads parameters off the answer has
+/// to know the difference.
+fn sole<'m>(members: &[&'m Member]) -> Option<&'m Member> {
+    match members {
+        [only] => Some(only),
+        _ => None,
+    }
+}
+
+/// Substitute every `(variable, type)` binding into `ty`, at any depth.
+fn apply_bindings(ty: &TypeRef, bindings: &[(String, TypeRef)]) -> TypeRef {
+    if let Some((_, bound)) = bindings.iter().find(|(v, _)| *v == ty.binary_name) {
+        return bound.clone();
+    }
+    TypeRef {
+        binary_name: ty.binary_name.clone(),
+        type_args: ty.type_args.iter().map(|a| apply_bindings(a, bindings)).collect(),
+    }
+}
+
 fn unique_return(members: &[&Member]) -> Option<TypeRef> {
     let mut ret: Option<&TypeRef> = None;
     for m in members {
@@ -2691,5 +2801,95 @@ mod depth_tests {
             assert_eq!(depth.get(), 1, "held for as long as the guard lives");
         }
         assert_eq!(depth.get(), 0, "released on the way out");
+    }
+}
+
+/// A method-level type variable bound by the ARGUMENT that determines it — the static-factory shape
+/// (`Optional.ofNullable(x)`) whose result the receiver alone can never explain.
+#[cfg(test)]
+mod method_type_var_tests {
+    use super::test_support::*;
+    use super::*;
+    use crate::seam::ClassMembers;
+    use std::collections::HashMap;
+
+    /// `Opt` is `java.util.Optional` in miniature: a class variable `T`, a static factory
+    /// `<T> Opt<T> ofNullable(T)` whose `T` is the METHOD's, and `orElse(T) -> T` whose `T` is the
+    /// class's. `Repo.kind()` returns an enum-ish `acme/Kind`; `Box.of(T, String) -> Opt<T>` exists
+    /// to prove a second parameter doesn't confuse the binding.
+    fn resolver() -> MapResolver {
+        let mut members = HashMap::new();
+        members.insert("java/lang/Object".into(), cm(vec![]));
+        members.insert("java/lang/String".into(), cm(vec![]));
+        members.insert("acme/Kind".into(), cm(vec![]));
+        let opt = ClassMembers {
+            superclass: Some("java/lang/Object".into()),
+            interfaces: vec![],
+            methods: vec![
+                Member::method(
+                    "ofNullable",
+                    TypeRef { binary_name: "acme/Opt".into(), type_args: vec![TypeRef::simple("T")] },
+                    vec![TypeRef::simple("T")],
+                )
+                .stat(),
+                meth("orElse", "T", &["T"]),
+            ],
+            fields: vec![],
+            flags: Default::default(),
+            // The class declares `T` — which is exactly why a STATIC factory's `T` cannot be read
+            // off the receiver: same spelling, different variable.
+            type_params: vec!["T".into()],
+        };
+        members.insert("acme/Opt".into(), opt);
+        members.insert("acme/Repo".into(), cm(vec![meth("kind", "acme/Kind", &[])]));
+        let simple = [
+            ("Opt", "acme/Opt"),
+            ("Repo", "acme/Repo"),
+            ("Kind", "acme/Kind"),
+            ("String", "java/lang/String"),
+            ("Object", "java/lang/Object"),
+        ]
+        .into_iter()
+        .map(|(s, b)| (s.to_string(), b.to_string()))
+        .collect();
+        MapResolver { members, simple }
+    }
+
+    /// The reported miss: the chain's type is the ARGUMENT's, and without the binding it stayed the
+    /// bare variable `T` — which every consumer reads as "unknown", so the return-type check that
+    /// should have caught `Integer m() { return …; }` had nothing to compare.
+    #[test]
+    fn a_static_factorys_type_variable_comes_from_its_argument() {
+        let src = "class C { Repo r; void m() { Opt.ofNullable(r.kind()).orElse(null); } }";
+        assert_eq!(
+            infer_call(src, "Opt.ofNullable(r.kind()).orElse(null)", &resolver()),
+            Some("acme/Kind".to_string()),
+        );
+    }
+
+    /// The intermediate step, on its own: `Opt<Kind>`, not `Opt<T>`.
+    #[test]
+    fn the_factory_call_itself_carries_the_bound_argument() {
+        let src = "class C { Repo r; void m() { Opt.ofNullable(r.kind()); } }";
+        let start = src.find("Opt.ofNullable(r.kind())").unwrap();
+        let ty = infer_expression_type(src, start, start + "Opt.ofNullable(r.kind())".len(), &resolver())
+            .expect("inferred");
+        assert_eq!(ty.binary_name, "acme/Opt");
+        assert_eq!(
+            ty.type_args.first().map(|a| a.binary_name.as_str()),
+            Some("acme/Kind"),
+        );
+    }
+
+    /// An argument that types to nothing binds nothing — the variable stays open rather than being
+    /// filled with a guess.
+    #[test]
+    fn an_untypeable_argument_binds_nothing() {
+        let src = "class C { void m() { Opt.ofNullable(mystery()).orElse(null); } }";
+        let got = infer_call(src, "Opt.ofNullable(mystery()).orElse(null)", &resolver());
+        assert!(
+            got.is_none() || got.as_deref() == Some("T"),
+            "expected unresolved, got {got:?}"
+        );
     }
 }

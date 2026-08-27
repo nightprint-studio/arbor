@@ -86,14 +86,31 @@ mod lsp;
 mod lsp_registry;
 mod lsp_route;
 // Refactor rename (docs §5 #10-12): `bennu_rename_plan` (preview) / `bennu_rename_apply`
-// (edits) — best-effort, config-aware, off the per-project rename engine.
+// (edits) — best-effort, config-aware, off the per-project semantic engine.
 mod rename;
 // Find-usages (docs §5 #7): `bennu_references` — the read-only twin of rename, reporting
 // every resolved use site of the symbol under the caret off the same reference index.
 mod references;
 // Hover (editor hover card): `bennu_hover` — classifies the symbol under the caret off the
-// per-project rename engine and returns its signature / kind / owning type.
+// per-project semantic engine and returns its signature / kind / owning type.
 mod hover;
+// What the editor draws AROUND a call rather than in it: `bennu_signature_help` (the parameter
+// strip for the call the caret is inside) and `bennu_inlay_hints` (argument names, inferred `var`
+// types). The same resolution serves both.
+mod hints;
+// `bennu_format` — reformat a buffer, routing to whichever engine knows the language: a server for
+// the ones that have one, Bennu's own formatter for Java.
+mod format;
+// `bennu_optimize_imports` — drop the unused imports and reorder the rest. Java-only, and it reads
+// the checker's own unused-import judgement so the command and the squiggle cannot disagree.
+mod optimize_imports;
+// `bennu_hierarchy_prepare` / `bennu_hierarchy_step` — the call and type hierarchy, routed the same
+// way `format` is: a server for the languages that have one, the reference index for Java.
+mod hierarchy;
+// The repairs that need types — "add `throws IOException`", "fill in the missing enum cases". The
+// text-only ones live in the pure `bennu-intentions` crate; both reach the editor through
+// `intentions`, which is where Alt+Enter asks.
+mod quick_fix;
 // Go-to-declaration (Ctrl+Click / Ctrl+B): `bennu_declaration` — resolves the symbol under
 // the caret to its declaration site (method / field / local / class) off the same engine.
 mod declaration;
@@ -146,6 +163,7 @@ mod jdk_status;
 mod inspect;
 // The per-project index lifecycle: build the symbol index off-thread on open, cache
 // the native provider, serve completion from it, and patch a single file on edit.
+mod generate_override;
 mod index_service;
 // Config-graph input discovery: walk the project tree to find struts/spring/tiles files
 // (`WebInputs`) for the config-graph build.
@@ -193,6 +211,9 @@ mod spell;
 // `bennu_naming_catalog`, plus the scan that merges a declaration whose name breaks the project's
 // convention into the diagnostics funnel — each one carrying the name that would satisfy it, which
 // is what the Alt+Enter fix renames to.
+// Which checks a project reports and how loudly: `bennu_get/set_inspection_config` +
+// `bennu_inspection_catalog`, and the policy the diagnostics funnel applies over everything.
+mod inspections;
 mod naming;
 // The bulk half of the naming pack: `bennu_naming_fix_plan` plans every fix in a file or a whole
 // project at once, as edits the editor applies (so one Undo takes it all back), with every name it
@@ -234,6 +255,10 @@ mod debug_value;
 // `*head` — and a refusal by name for anything else. The walk differs per protocol, the shape of
 // what the user typed does not.
 mod debug_path;
+// What a Java breakpoint CONDITION is: paths (the watch grammar) compared with literals, and a
+// refusal by name for everything else. Java-only — a native condition is the adapter's own
+// expression and is forwarded untouched.
+mod debug_cond;
 // The Rust side of a watch: route a path to our own walk over the DAP variables tree, hand anything
 // else to the adapter's evaluator in the right dialect, and say what Rust cannot evaluate at all
 // rather than forwarding LLDB's C++ prose about a Rust type.

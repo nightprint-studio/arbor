@@ -12,7 +12,7 @@
 //! the cached provider is swapped in and completion goes live.
 //!
 //! The background build reads each `.java` **once** and shares the text between the symbol
-//! index and the rename engine (no second disk pass), parses in parallel, and overlaps the
+//! index and the semantic engine (no second disk pass), parses in parallel, and overlaps the
 //! config-graph build with the rename-engine walk. It emits `arbor://bennu/index-progress`
 //! events per phase so the FE can show a live "Indexing…" status. The class-navigator
 //! entries fall out of the same parse and are cached on the slot (Go-to-Class is instant).
@@ -48,7 +48,7 @@ use bennu_intel::prelude::{
     ingest_config_graph, read_java_sources, ActionVerdict, AnnotationBean, CompletionItem,
     ConfigResolver,
     DeclarationLocation, HoverInfo as IntelHoverInfo, IntelProvider, NativeJavaProvider,
-    NonCompliantSource, Position, ProjectSources, ReferencesResult, RenameEngine, RenamePlan,
+    NonCompliantSource, Position, ProjectSources, ReferencesResult, RenamePlan, SemanticEngine,
 };
 use bennu_query::prelude::InheritedMember as IntelInheritedMember;
 use bennu_project::prelude::source_encoding_label;
@@ -340,7 +340,7 @@ struct ProjectSlot {
     /// The stable per-root base dir; each full build persists into a fresh `g<NNN>` subdir
     /// of this (never overwriting a mapped file — Windows os error 1224).
     index_base: PathBuf,
-    /// The **current** generation dir the live provider/rename engine mmap from
+    /// The **current** generation dir the live provider/semantic engine mmap from
     /// (`<index_base>/g<NNN>`). Updated on each full build; a per-keystroke patch does NOT
     /// touch disk (it updates the in-memory overlay), so this only moves on a full build.
     index_dir: RwLock<PathBuf>,
@@ -369,10 +369,11 @@ struct ProjectSlot {
     /// Drives `bennu_definition` (JSP action → class/view) + the JSP action-existence
     /// diagnostic.
     config: RwLock<Option<Arc<ConfigResolver>>>,
-    /// The rename engine (whole-project reference index + resolver + source sets), built
-    /// off-thread on open alongside the provider. `None` until built. Drives
-    /// `bennu_rename_plan` / `bennu_rename_apply` (docs §5 #10-12) + `bennu_hover`.
-    rename: RwLock<Option<Arc<RenameEngine>>>,
+    /// The project's semantic model (whole-project reference index + resolver + source sets),
+    /// built off-thread on open alongside the provider. `None` until built. Every whole-project
+    /// question answers from it: rename, find-usages, go-to, hover, inherited members, the
+    /// hierarchies. Reach it through [`ProjectSlot::semantics`], never by taking the lock by hand.
+    semantics: RwLock<Option<Arc<SemanticEngine>>>,
     /// The dependency jars the resolver actually loaded for this project (absolute paths,
     /// forward slashes) — the index's own dependency tier, NOT the Build's `target/` artifact.
     /// Set on each build when Maven dep resolution succeeds (empty for a dep-less project or a
@@ -421,6 +422,20 @@ struct ProjectSlot {
     /// than being refused, because a refused Validate is a click the user has to repeat, and the
     /// wait is bounded by work that was going to happen anyway.
     sweep: Mutex<()>,
+}
+
+impl ProjectSlot {
+    /// This project's semantic engine, or `None` while the index is still building.
+    ///
+    /// The one place the lock is taken. Every query used to open-code the same three lines, and
+    /// three lines repeated eleven times is eleven chances for one of them to hold the guard a
+    /// little longer than the others — which on a `RwLock` a whole-project rebuild is waiting to
+    /// write to is not a style question. Cloning the `Arc` out and dropping the guard immediately
+    /// is the invariant; here it is one function, not a habit.
+    fn semantics(&self) -> Option<Arc<SemanticEngine>> {
+        let guard = self.semantics.read().unwrap_or_else(|p| p.into_inner());
+        guard.as_ref().map(Arc::clone)
+    }
 }
 
 /// Coalescing state for a slot's config-graph rebuild — see [`ProjectSlot::config_rebuild`].
@@ -733,7 +748,7 @@ impl IndexService {
             }
 
             // ── phase "project": read every `.java` ONCE, then build + persist the symbol
-            // index (parsing in parallel). The sources are shared with the rename engine
+            // index (parsing in parallel). The sources are shared with the semantic engine
             // below — no second disk pass, and the class navigator + type map fall out of
             // the same parse (no separate whole-project scan).
             emit_progress(&sink, &root_str, "project", "start");
@@ -851,8 +866,8 @@ impl IndexService {
                 Err(e) => eprintln!("bennu-be: provider build failed ({}): {e}", root_path.display()),
             }
 
-            // The config-graph phase is independent of the rename engine, so overlap them:
-            // config on its own thread while the rename engine's O(N) reference walk runs
+            // The config-graph phase is independent of the semantic engine, so overlap them:
+            // config on its own thread while the semantic engine's O(N) reference walk runs
             // here. Both are non-fatal.
             let config_handle = {
                 let root_path = root_path.clone();
@@ -1063,6 +1078,78 @@ impl IndexService {
         provider.completion(&at, source).unwrap_or_default()
     }
 
+    /// Every method the class enclosing `offset` in `source` could override — the
+    /// "Implement / override methods" list.
+    ///
+    /// Runs on the project's FULL resolver (the one completion uses), because most of what a class
+    /// overrides comes from outside the project: a servlet's `doGet`, an `AbstractList`, an
+    /// interface from a jar. The project-only resolver the semantic engine carries would answer for
+    /// a project supertype and go silent on every library one.
+    ///
+    /// `[]` when no project owns the file, the index is still building, or the caret is not inside
+    /// a class — all benign.
+    pub fn overridable_at(
+        &self,
+        file: &str,
+        source: &str,
+        offset: usize,
+    ) -> Vec<bennu_query::prelude::Overridable> {
+        if !understands(file) {
+            return Vec::new();
+        }
+        let Some(slot) = self.slot_for_file(file) else {
+            return Vec::new();
+        };
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        let Some(resolver) = provider.shared_resolver() else {
+            return Vec::new();
+        };
+        bennu_query::prelude::overridable_at(source, offset, &*resolver)
+    }
+
+    /// The resolver the caret-driven queries run on — the project's FULL one, the same completion
+    /// uses. Factored out because three of them want exactly this and each was opening the slot,
+    /// cloning the provider and unwrapping the resolver by hand.
+    ///
+    /// `None` when no project owns the file, the file is not one Bennu understands, or the index is
+    /// still building — each of which means the caller answers "nothing", not "error".
+    pub fn caret_resolver_for(&self, file: &str) -> Option<Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>> {
+        if !understands(file) {
+            return None;
+        }
+        let slot = self.slot_for_file(file)?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.shared_resolver()
+    }
+
+    /// The signature of the call the caret is inside — the parameter-hint strip.
+    ///
+    /// `None` for every uncertainty (see [`bennu_query::prelude::signature_at`]): the strip not
+    /// appearing is the right answer to "I cannot tell which method this is".
+    pub fn signature_at(
+        &self,
+        file: &str,
+        source: &str,
+        offset: usize,
+    ) -> Option<bennu_query::prelude::SignatureHelp> {
+        let resolver = self.caret_resolver_for(file)?;
+        bennu_query::prelude::signature_at(source, offset, &*resolver)
+    }
+
+    /// Every inlay hint for `source` — parameter names at call sites, inferred `var` types.
+    pub fn inlay_hints(&self, file: &str, source: &str) -> Vec<bennu_query::prelude::InlayHint> {
+        let Some(resolver) = self.caret_resolver_for(file) else {
+            return Vec::new();
+        };
+        bennu_query::prelude::inlay_hints(source, &*resolver)
+    }
+
     /// Validate a Java `file` over its owning project's provider (AST checks + the resolver-backed
     /// unknown-member check when the index is built). `source` is the live buffer. Falls back to the
     /// pure AST checks when no project owns the file / its index isn't built yet.
@@ -1224,19 +1311,15 @@ impl IndexService {
     /// Whether the project at `root` has a built resolver (so the diagnostic cache can check
     /// freshness). The background warm-up skips validation until this is true — validating pure-AST
     /// with nothing to cache would be wasted work on every open.
-    /// Whether `root`'s RENAME engine is built and answering.
+    /// Whether `root`'s SEMANTIC engine is built and answering.
     ///
     /// Separate from [`has_resolver`](Self::has_resolver): completion goes live as soon as the
-    /// provider is swapped in, while the rename engine waits for the O(N) reference walk behind it.
-    /// In that window every rename plan comes back empty — which a caller must be able to tell
+    /// provider is swapped in, while the semantic engine waits for the O(N) reference walk behind
+    /// it. In that window every rename plan comes back empty — which a caller must be able to tell
     /// apart from "this particular thing cannot be renamed", or it reports one refusal per name
     /// and blames the code instead of the clock.
-    pub fn has_rename_engine(&self, root: &str) -> bool {
-        let slot = {
-            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
-            slots.get(&PathBuf::from(root)).map(Arc::clone)
-        };
-        slot.is_some_and(|s| s.rename.read().unwrap_or_else(|p| p.into_inner()).is_some())
+    pub fn has_semantic_engine(&self, root: &str) -> bool {
+        self.slot_for_root(root).and_then(|s| s.semantics()).is_some()
     }
 
     /// Whether a whole-project validation sweep is running for `root`.
@@ -1638,7 +1721,7 @@ impl IndexService {
     }
 
     /// Plan a rename for the symbol at `file`:`offset` → `new_name`, over the owning
-    /// project's rename engine (built off-thread on open). `source` is the current
+    /// project's semantic engine (built off-thread on open). `source` is the current
     /// (possibly-unsaved) buffer. Returns `None` when no project owns the file, the engine
     /// is still building, or the caret isn't on a renameable identifier.
     pub fn plan_rename(
@@ -1648,11 +1731,7 @@ impl IndexService {
         offset: usize,
         new_name: &str,
     ) -> Option<RenamePlan> {
-        let slot = self.slot_for_file(file)?;
-        let engine = {
-            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
-            g.as_ref().map(Arc::clone)
-        }?;
+        let engine = self.semantics_for(file)?;
         if let Some(plan) = engine.plan(file, source, offset, new_name) {
             return Some(plan);
         }
@@ -1715,11 +1794,7 @@ impl IndexService {
     /// A lookup, not a scan — the batch half of the bulk fix resolves every type it means to
     /// rename with this, then plans them together in one pass.
     pub fn classify_type(&self, file: &str, source: &str, offset: usize) -> Option<String> {
-        let slot = self.slot_for_file(file)?;
-        let engine = {
-            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
-            g.as_ref().map(Arc::clone)
-        }?;
+        let engine = self.semantics_for(file)?;
         engine.classify_type(file, source, offset)
     }
 
@@ -1736,12 +1811,7 @@ impl IndexService {
         renames: &[bennu_intel::prelude::TypeRename],
         on_file: &dyn Fn(usize, usize) -> bool,
     ) -> (Vec<Vec<bennu_intel::prelude::Edit>>, bool) {
-        let engine = {
-            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
-            let Some(slot) = slots.get(&PathBuf::from(root)) else { return (Vec::new(), true) };
-            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
-            g.as_ref().map(Arc::clone)
-        };
+        let engine = self.slot_for_root(root).and_then(|s| s.semantics());
         match engine {
             Some(engine) => engine.plan_types(renames, on_file),
             None => (Vec::new(), true),
@@ -1781,11 +1851,7 @@ impl IndexService {
             eprintln!("bennu-be: find-usages in a library view — no project for origin {origin_file}");
             return None;
         };
-        let engine = {
-            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
-            g.as_ref().map(Arc::clone)
-        };
-        let Some(engine) = engine else {
+        let Some(engine) = slot.semantics() else {
             eprintln!("bennu-be: find-usages in a library view — the reference index is still building");
             return None;
         };
@@ -1800,16 +1866,50 @@ impl IndexService {
         if !understands(file) {
             return None;
         }
-        let slot = self.slot_for_file(file)?;
-        let engine = {
-            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
-            g.as_ref().map(Arc::clone)
-        }?;
+        let engine = self.semantics_for(file)?;
         engine.find_usages(file, source, offset)
     }
 
+    /// The root of a call (`calls`) or type hierarchy for the symbol at `file`:`offset`, over the
+    /// owning project's engine. `[]` when no project owns the file, its index is still building, or
+    /// the caret isn't on something a hierarchy can be built from. Mirrors
+    /// [`find_usages`](Self::find_usages).
+    pub fn prepare_hierarchy(
+        &self,
+        file: &str,
+        source: &str,
+        offset: usize,
+        calls: bool,
+    ) -> Vec<bennu_intel::prelude::HierarchyItem> {
+        let Some(engine) = self.semantics_for(file) else {
+            return Vec::new();
+        };
+        engine.prepare_hierarchy(file, source, offset, calls)
+    }
+
+    /// One level of a hierarchy, expanded from a node's handle. `scope` is any project path — the
+    /// file the hierarchy was opened from — because a node can perfectly well live in a different
+    /// file from the one the question was asked in.
+    pub fn hierarchy_step(
+        &self,
+        scope: &str,
+        handle: &bennu_intel::prelude::HierarchyHandle,
+        direction: bennu_intel::prelude::HierarchyDirection,
+    ) -> Vec<bennu_intel::prelude::HierarchyItem> {
+        let Some(engine) = self.semantics_for(scope) else {
+            return Vec::new();
+        };
+        engine.hierarchy_step(handle, direction)
+    }
+
+    /// The semantic engine of the project owning `file`, or `None` when no project owns it or its
+    /// index is still building. The two-line form every whole-project query starts with.
+    fn semantics_for(&self, file: &str) -> Option<Arc<SemanticEngine>> {
+        self.slot_for_file(file)?.semantics()
+    }
+
     /// Resolve the symbol at `file`:`offset` to its DECLARATION site (go-to-declaration),
-    /// over the owning project's rename engine (which shares the whole-project reference
+    /// over the owning project's semantic engine (which shares the whole-project reference
     /// index + resolver + source sets, built off-thread on open). `source` is the current
     /// (possibly-unsaved) buffer. Returns `None` when no project owns the file, the engine
     /// is still building, the caret isn't on a resolvable symbol, or the declaration lives
@@ -1818,11 +1918,7 @@ impl IndexService {
         if !understands(file) {
             return None;
         }
-        let slot = self.slot_for_file(file)?;
-        let engine = {
-            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
-            g.as_ref().map(Arc::clone)
-        }?;
+        let engine = self.semantics_for(file)?;
         // A `None` here is what sends the editor down its fallback chain, at the end of which sits
         // the decompiled view. Saying so — with the classification that produced it — is the
         // difference between diagnosing "go-to opened a stub" in one step and guessing at it.
@@ -1836,27 +1932,20 @@ impl IndexService {
     }
 
     /// The inherited ("super") members of the type declared at `file`:(`type_name`,`line`),
-    /// over the owning project's rename engine (which shares the whole-project resolver +
+    /// over the owning project's semantic engine (which shares the whole-project resolver +
     /// source sets, built off-thread on open). `line` is the 1-based declaration line, to
     /// disambiguate a nested / same-simple-named type. Returns `[]` when no project owns the
     /// file, the engine is still building, or the type can't be resolved. Mirrors
     /// [`declaration`](Self::declaration).
     pub fn inherited_members(&self, file: &str, type_name: &str, line: i64) -> Vec<InheritedMember> {
-        let Some(slot) = self.slot_for_file(file) else {
-            return Vec::new();
-        };
-        let engine = {
-            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
-            g.as_ref().map(Arc::clone)
-        };
-        let Some(engine) = engine else {
+        let Some(engine) = self.semantics_for(file) else {
             return Vec::new();
         };
         engine.inherited_members(file, type_name, line).into_iter().map(inherited_member_of).collect()
     }
 
     /// Resolve the symbol at `file`:`offset` to a hover card, over the owning project's
-    /// rename engine (which shares the whole-project reference index + resolver, built
+    /// semantic engine (which shares the whole-project reference index + resolver, built
     /// off-thread on open). `source` is the current (possibly-unsaved) buffer. Returns
     /// `None` when no project owns the file, the engine is still building, or the caret
     /// isn't on a symbol we can classify. Mirrors [`find_usages`](Self::find_usages).
@@ -1866,18 +1955,14 @@ impl IndexService {
         }
         let slot = self.slot_for_file(file)?;
         // 1. The reference-index classifier: fields / methods / types (with Javadoc).
-        let engine = {
-            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
-            g.as_ref().map(Arc::clone)
-        };
-        if let Some(engine) = engine {
+        if let Some(engine) = slot.semantics() {
             if let Some(info) = engine.hover(file, source, offset) {
                 return Some(hover_info_of(info));
             }
         }
         // 2. Fallback: a local variable / parameter isn't keyed in the reference index — resolve its
         //    TYPE via the provider's full (JDK-aware) resolver, so hovering a `var`/`val` (or any
-        //    local) shows what it is. Runs on the provider, not the rename engine (which is
+        //    local) shows what it is. Runs on the provider, not the semantic engine (which is
         //    project-only and can't type a JDK `var`).
         let provider = {
             let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
@@ -2137,11 +2222,8 @@ impl IndexService {
         slot: &ProjectSlot,
         target: &bennu_intel::prelude::LibraryTarget,
     ) -> Option<DecompiledView> {
-        let engine = {
-            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
-            g.as_ref().map(Arc::clone)
-        }?;
-        let file = engine.index().file_declaring(&target.binary)?.to_string();
+        let engine = slot.semantics()?;
+        let file = engine.file_declaring(&target.binary)?;
 
         // Read it the way every offset in the product is measured: the project's declared encoding,
         // newlines normalised. A raw UTF-8 read would fail on a Cp1252 legacy source and would put
@@ -2216,7 +2298,7 @@ impl IndexService {
 
         // This is the LIBRARY jump, and it must never serve code the project wrote. It can reach
         // one: the receiver's type is inferred with the full, JDK-aware resolver, which succeeds on
-        // things the project-only rename engine cannot type — a lambda parameter whose type comes
+        // things the project-only semantic engine cannot type — a lambda parameter whose type comes
         // through `List.stream().map(…)`, say. Go-to therefore fails first and falls through to
         // here, and without this check the answer was a decompiled stub of the user's own record.
         //
@@ -2580,7 +2662,7 @@ impl IndexService {
     /// updates the edited file's types in that overlay so completion reflects the edit
     /// immediately, while the mmap'd files stay untouched until the next full build /
     /// reindex (which persists into a fresh generation dir and swaps in a new provider,
-    /// clearing the overlay). The rename engine is NOT rebuilt here (its O(N) reference
+    /// clearing the overlay). The semantic engine is NOT rebuilt here (its O(N) reference
     /// walk stays a full-build cost) — an unsaved edit's find-usages/rename runs against
     /// the current buffer over the last engine, the documented preview-first behavior.
     pub fn patch_file(&self, file: &str, source: Option<&str>) {
@@ -2665,6 +2747,19 @@ impl IndexService {
         // Go-to-Class reflects a rename without a full rebuild.
         refresh_class_cache_for_files(slot, files);
 
+        // Find-usages and rename reflect the edit too. Their reference index used to be a pure
+        // build artefact — walked when the project opened and left alone until something rebuilt
+        // it — so a method you had just written had no usages, and one you had just stopped calling
+        // still had its old ones. Go-to kept working throughout, because it reads the live buffer
+        // through the resolver, which is what made the disagreement so hard to place.
+        //
+        // Cheap by construction: withdrawing a file's edges visits only the buckets it is in, and
+        // the files that resolve against it are re-walked only when its *declaration surface*
+        // moved — a fingerprint over what it declares, blind to method bodies. Typing inside a
+        // method is one file's parse, so this can sit on the same debounced edit as everything
+        // else here. Runs AFTER the provider patch above, since the walk resolves through it.
+        refresh_reference_index(slot, files);
+
         // The index now understands these files as given — record it, so a later validation can
         // tell an edit it already absorbed from one made behind its back.
         {
@@ -2698,7 +2793,7 @@ impl IndexService {
     /// types' member signatures change, so every file whose recorded dependencies name them
     /// re-validates instead of being served from cache.
     ///
-    /// NOTE: this refreshes what VALIDATION and completion resolve against. The rename engine's
+    /// NOTE: this refreshes what VALIDATION and completion resolve against. The semantic engine's
     /// reference index is a full-build cost and is not rebuilt here, so find-usages over externally
     /// changed files still wants a rebuild.
     fn sync_external_changes(&self, sources: &[(PathBuf, String)]) -> usize {
@@ -3145,7 +3240,7 @@ fn warm_up_validation_cache(
     );
 }
 
-/// Build + swap in the rename engine for `slot`: reuse the already-read `.java` `sources`
+/// Build + swap in the semantic engine for `slot`: reuse the already-read `.java` `sources`
 /// (shared with the symbol-index build — no second disk pass) and read the Spring `.xml`
 /// fragments (the only XML that can carry `<bean class=>`), then build the whole-project
 /// reference index + resolver. Non-fatal on failure (rename then just returns "still
@@ -3168,7 +3263,7 @@ fn build_rename_engine(
 
     // Spring bean XML fragments (any `.xml` with a `<beans` root) — the class-rename
     // config-aware edit target set.
-    eprintln!("bennu-be: rename engine — gathering Spring XML for {}", root.display());
+    eprintln!("bennu-be: semantic engine — gathering Spring XML for {}", root.display());
     let xml: Vec<(String, String)> = discover_web_inputs(root)
         .spring_files
         .iter()
@@ -3176,7 +3271,7 @@ fn build_rename_engine(
         .collect();
 
     eprintln!(
-        "bennu-be: rename engine — building ({} java files, {} spring xml)",
+        "bennu-be: semantic engine — building ({} java files, {} spring xml)",
         java.len(),
         xml.len()
     );
@@ -3195,7 +3290,7 @@ fn build_rename_engine(
     // misses every such call site. What it must NOT do is drag in the dependency tier: those
     // classes are decoded lazily into memory only, so a parallel walk through hundreds of jars
     // re-reads them every session — which made a large project's index crawl with every core busy,
-    // and, since there is no rename engine until the walk lands, made every name report "cannot be
+    // and, since there is no semantic engine until the walk lands, made every name report "cannot be
     // renamed" in the meantime.
     //
     // `BENNU_RENAME_FULL_RESOLVER=1` opts back into the dependency tier, for a project whose
@@ -3211,16 +3306,16 @@ fn build_rename_engine(
     // project, THIRTEEN of thirteen methods implementing a dependency interface (jakarta
     // `ConstraintValidator`, Spring `Condition`, …) planned clean and would have stopped compiling.
     let policy = provider.shared_resolver();
-    match RenameEngine::for_project(index_dir, jdk_version, simple_names, java, xml, shared, &on_progress) {
+    match SemanticEngine::for_project(index_dir, jdk_version, simple_names, java, xml, shared, &on_progress) {
         Ok(engine) => {
             let engine = match policy {
                 Some(full) => engine.with_policy_resolver(full),
                 None => engine,
             };
-            *slot.rename.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(engine));
-            eprintln!("bennu-be: rename engine live for {}", root.display());
+            *slot.semantics.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(engine));
+            eprintln!("bennu-be: semantic engine live for {}", root.display());
         }
-        Err(e) => eprintln!("bennu-be: rename engine build failed ({}): {e}", root.display()),
+        Err(e) => eprintln!("bennu-be: semantic engine build failed ({}): {e}", root.display()),
     }
 }
 
@@ -3377,6 +3472,21 @@ fn refresh_class_cache_for_files(slot: &Arc<ProjectSlot>, files: &[(PathBuf, Opt
                 kind: td.kind.slug().to_string(),
             });
         }
+    }
+}
+
+/// Bring the slot's reference index up to date with a batch of edited (or deleted) files, so
+/// find-usages, rename and hover answer about the project as it is rather than as it was when it
+/// opened.
+///
+/// A no-op while the engine is still building: the build walks every file from source anyway, so
+/// there is nothing an edit could tell it that it is not about to find out. Nothing here can fail
+/// in a way worth reporting — a file the engine doesn't hold is simply skipped — so it returns
+/// nothing and the caller doesn't branch on it.
+fn refresh_reference_index(slot: &Arc<ProjectSlot>, files: &[(PathBuf, Option<&str>)]) {
+    let Some(engine) = slot.semantics() else { return };
+    for (path, source) in files {
+        engine.refresh_file(&norm_path(path), *source);
     }
 }
 
@@ -3724,7 +3834,7 @@ fn action_usage_hits(sources: &[(String, String)], needle: &str) -> Vec<UsageHit
                 continue;
             }
             let (line, col, preview) = line_col_preview(src, r.start);
-            out.push(UsageHit { file: path.clone(), start: r.start, end: r.end, line, col, preview });
+            out.push(UsageHit { file: path.clone(), start: r.start, end: r.end, line, col, preview, via: None });
         }
     }
     out

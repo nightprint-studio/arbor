@@ -23,8 +23,19 @@
  *
  * Tabs rather than one buffer because a run is something that HAPPENED: comparing this
  * run against the previous one is most of what a console is for, and a single buffer
- * threw the previous one away the moment you pressed ▷ again. Only one runs at a time
- * (a launch is refused while one is live); the rest are readable history.
+ * threw the previous one away the moment you pressed ▷ again.
+ *
+ * ## Several at once
+ *
+ * Any number of programs can be running, each in its own tab: a server and the client that
+ * talks to it, or the same project's two entry points side by side. The backend was always
+ * built for it — every launch gets its own process and its own run id, and the output and exit
+ * events carry that id — so what the tabs show is the shape the backend already had.
+ *
+ * Two things follow. Stop and stdin act on the tab **in front**, not on "the live one", since
+ * there may be several (see `targetTab`); and a compile is still exclusive, because
+ * `bennu_build` takes the backend's build guard, so a launch is refused only while one is
+ * compiling.
  *
  * Rune store — private `$state`, returned getters + methods (CLAUDE.md).
  */
@@ -42,6 +53,9 @@ import type {
 import type { LogLevel, LogPiece } from '$lib/types/log';
 import { bennuUiStore } from './ui.svelte';
 import { bennuDiagnosticsStore } from './diagnostics.svelte';
+// One-way edge (the debugger knows nothing about console tabs): a run and its debug session share
+// an id, so the console is what says which session the Debug panel is looking at.
+import { bennuDebugStore } from './debug.svelte';
 import {
   bennuRunConfigStore, splitArgs, envRecord, isRunKind, cargoInvocationOf, type RunConfig,
 } from './run-config.svelte';
@@ -211,15 +225,14 @@ function createBennuRunStore() {
   // ── the Run console: one tab per run ────────────────────────────────────────
   let tabs = $state<RunTab[]>([]);
   let activeTabId = $state<string | null>(null);
-  /** The tab a launch has just created, before the backend has answered with its run id —
-   *  output can arrive in that window, and it belongs to that tab. */
-  let pendingTabId: string | null = null;
+  /** Events that named a run id no tab carried yet, by run id. See {@link stash}. */
+  const orphans = new Map<string, ((tabId: string) => void)[]>();
 
   const activeTab = $derived(tabs.find((t) => t.id === activeTabId) ?? null);
-  /** The live run, if any. One at a time: a launch is refused while one is running, so this
-   *  is a `find` and not a list. */
-  const liveTab = $derived(tabs.find((t) => t.live) ?? null);
-  const running = $derived(liveTab !== null);
+  /** Every run in flight. A list, not a find: several programs can be running at once, each
+   *  with its own tab, its own stdin and its own Stop. */
+  const liveTabs = $derived(tabs.filter((t) => t.live));
+  const running = $derived(liveTabs.length > 0);
 
   // Whole-project validation (the split-button's `validate` build type).
   let validating = $state(false);
@@ -276,12 +289,74 @@ function createBennuRunStore() {
     if (activeTabId) pushTo(activeTabId, text, stream);
   }
 
-  /** The tab an event belongs to: the one holding that backend run id, else the tab a launch
-   *  has just created and is still waiting on. */
+  /** The tab holding that backend run id, or null while the launch that will claim it is still
+   *  in flight — see {@link stash}. */
   function tabForRun(backendId: string): RunTab | null {
-    return (
-      tabs.find((t) => t.runId === backendId) ??
-      (pendingTabId ? (tabs.find((t) => t.id === pendingTabId) ?? null) : null)
+    return tabs.find((t) => t.runId === backendId) ?? null;
+  }
+
+  /**
+   * Hold an event that arrived before its tab knew its run id, to be replayed by {@link claimRun}.
+   *
+   * A program can print (or exit) between the backend spawning it and `bennu_run` returning the id
+   * to us. With one run at a time that window could be papered over by sending the stray output to
+   * "the tab we just opened"; with several launches in flight that guess picks the wrong console,
+   * so the id is waited for instead. Keyed by run id, so nothing has to be guessed at all.
+   */
+  function stash(runId: string, replay: (tabId: string) => void) {
+    const queue = orphans.get(runId) ?? [];
+    queue.push(replay);
+    orphans.set(runId, queue);
+  }
+
+  /**
+   * Bring a tab to the front, and with it its debug session.
+   *
+   * The console tab and the debug session are the same id, so "which run am I reading" and "which
+   * session does the Debug panel show" are one question — asked here, in the one place that knows
+   * the answer changed. The edge is one-way: the debugger knows nothing about tabs.
+   */
+  function focusTab(id: string | null) {
+    activeTabId = id;
+    bennuDebugStore.view(tabs.find((t) => t.id === id)?.runId ?? null);
+  }
+
+  /** Bind a tab to its backend run id and replay whatever arrived before it was known. */
+  function claimRun(tabId: string, runId: string, patch: Partial<RunTab> = {}) {
+    patchTab(tabId, { ...patch, runId });
+    // The tab was opened before the id existed, so its session could not be pointed at then.
+    if (tabId === activeTabId) bennuDebugStore.view(runId);
+    const queue = orphans.get(runId);
+    if (!queue) return;
+    orphans.delete(runId);
+    for (const replay of queue) replay(tabId);
+  }
+
+  /** The program in `tabId` ended — close the tab's record of it and say how it went. */
+  function exited(tabId: string, code: number | null) {
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    const durationMs = tab.startedAt ? Date.now() - tab.startedAt : null;
+    patchTab(tabId, {
+      live: false,
+      runId: null,
+      finished: true,
+      durationMs,
+      // A process we killed reports whatever the kill produced (`taskkill /F` gives 1),
+      // which is not the program's verdict on itself — so a stopped run has no code, and
+      // the console says "Stopped" instead of inventing a failure.
+      exitCode: tab.stopping ? null : code,
+      stopping: false,
+    });
+    // A killed process has no exit code of its own to report; saying "terminated" is
+    // both true and the answer to "did my Stop work".
+    pushTo(
+      tabId,
+      tab.stopping
+        ? `Process terminated${durationMs === null ? '' : ` after ${formatMs(durationMs)}`}.`
+        : `Process finished with exit code ${code ?? '?'}` +
+          `${durationMs === null ? '' : ` in ${formatMs(durationMs)}`}`,
+      tab.stopping || code !== 0 ? 'err' : 'meta',
     );
   }
 
@@ -313,43 +388,32 @@ function createBennuRunStore() {
       await listen<{ run_id: string; stream: string; text: string } & LogAnnotation>(
         'arbor://bennu/run-output',
         (e) => {
+          const write = (tabId: string) =>
+            pushTo(tabId, e.payload.text, e.payload.stream === 'stderr' ? 'err' : 'out', {
+              level: e.payload.level,
+              pieces: e.payload.pieces,
+            });
           const tab = tabForRun(e.payload.run_id);
-          if (!tab) return;
-          pushTo(tab.id, e.payload.text, e.payload.stream === 'stderr' ? 'err' : 'out', {
-            level: e.payload.level,
-            pieces: e.payload.pieces,
-          });
+          if (tab) write(tab.id);
+          else stash(e.payload.run_id, write);
         },
       ),
     );
     add(
       await listen<{ run_id: string; code: number | null }>('arbor://bennu/run-exit', (e) => {
         const tab = tabForRun(e.payload.run_id);
-        if (!tab) return;
-        const code = e.payload.code;
-        const durationMs = tab.startedAt ? Date.now() - tab.startedAt : null;
-        patchTab(tab.id, {
-          live: false,
-          runId: null,
-          finished: true,
-          durationMs,
-          // A process we killed reports whatever the kill produced (`taskkill /F` gives 1),
-          // which is not the program's verdict on itself — so a stopped run has no code, and
-          // the console says "Stopped" instead of inventing a failure.
-          exitCode: tab.stopping ? null : code,
-          stopping: false,
-        });
-        if (pendingTabId === tab.id) pendingTabId = null;
-        // A killed process has no exit code of its own to report; saying "terminated" is
-        // both true and the answer to "did my Stop work".
-        pushTo(
-          tab.id,
-          tab.stopping
-            ? `Process terminated${durationMs === null ? '' : ` after ${formatMs(durationMs)}`}.`
-            : `Process finished with exit code ${code ?? '?'}` +
-              `${durationMs === null ? '' : ` in ${formatMs(durationMs)}`}`,
-          tab.stopping || code !== 0 ? 'err' : 'meta',
-        );
+        if (tab) exited(tab.id, e.payload.code);
+        else stash(e.payload.run_id, (tabId) => exited(tabId, e.payload.code));
+      }),
+    );
+    add(
+      // A breakpoint firing in a program you were not reading pulls the console to it, the way it
+      // pulls the whole window forward (`surface`). The session id IS the run id, so the tab is a
+      // lookup — and the Debug panel follows the tab, which keeps the two agreeing about which
+      // program is being looked at.
+      await listen<{ session_id: string }>('arbor://bennu/debug-paused', (e) => {
+        const tab = tabForRun(e.payload.session_id);
+        if (tab && tab.id !== activeTabId) focusTab(tab.id);
       }),
     );
     return detach;
@@ -513,14 +577,16 @@ function createBennuRunStore() {
       kept.splice(victim, 1);
     }
     tabs = [...kept, tab];
-    activeTabId = id;
-    pendingTabId = id;
+    focusTab(id);
     bennuUiStore.showBottom('run');
     return id;
   }
 
   async function launch(spec: JvmRunSpec): Promise<void> {
-    if (building || running) return;
+    // Only a compile in flight refuses a launch, and not as a policy: `bennu_build` takes the
+    // backend's build guard, so a second compile would be refused there anyway. A program already
+    // RUNNING is no reason at all — a server and the client that talks to it are two runs.
+    if (building) return;
     const cls = spec.mainClass.trim();
     if (!cls) return;
 
@@ -545,7 +611,6 @@ function createBennuRunStore() {
         'err',
       );
       patchTab(id, { finished: true });
-      pendingTabId = null;
       return;
     }
 
@@ -561,15 +626,12 @@ function createBennuRunStore() {
         debugSuspend: spec.debugSuspend,
         classpathScope: spec.classpathScope,
       });
-      patchTab(id, {
-        runId: handle.run_id,
+      claimRun(id, handle.run_id, {
         command: handle.command,
         workingDir: handle.working_dir,
       });
-      pendingTabId = null;
     } catch (e) {
       patchTab(id, { live: false, finished: true });
-      pendingTabId = null;
       pushTo(id, `Could not start: ${e instanceof Error ? e.message : String(e)}`, 'err');
     }
   }
@@ -582,7 +644,8 @@ function createBennuRunStore() {
    * command instead, since `cargo check` on a cold workspace is a minute of silence otherwise.
    */
   async function launchCargo(spec: CargoRunSpec): Promise<void> {
-    if (building || running) return;
+    // See `launch`: the compile is what serializes, not the running.
+    if (building) return;
     const id = openTab(spec, spec.label, spec.invocation.command);
     patchTab(id, { live: true, startedAt: Date.now() });
     try {
@@ -597,15 +660,12 @@ function createBennuRunStore() {
             workingDir: spec.workingDir,
             env: spec.env,
           });
-      patchTab(id, {
-        runId: handle.run_id,
+      claimRun(id, handle.run_id, {
         command: handle.command,
         workingDir: handle.working_dir,
       });
-      pendingTabId = null;
     } catch (e) {
       patchTab(id, { live: false, finished: true });
-      pendingTabId = null;
       // The backend's message carries the install hint when a rustup component is what is missing —
       // which is the difference between "clippy is broken" and "clippy is not installed".
       pushTo(id, `Could not start: ${e instanceof Error ? e.message : String(e)}`, 'err');
@@ -815,11 +875,24 @@ function createBennuRunStore() {
     await launch(from.spec);
   }
 
+  /**
+   * The run a console verb acts on: the tab in front when it is live, else the only live one.
+   *
+   * The tab in front first, because the console shows one transcript and Stop under it means that
+   * program. `null` rather than a guess when several are running and none of them is the one being
+   * looked at — killing whichever happened to be first in the list is not a thing to do to a
+   * program by accident.
+   */
+  function targetTab(): RunTab | null {
+    if (activeTab?.live) return activeTab;
+    return liveTabs.length === 1 ? liveTabs[0] : null;
+  }
+
   /** Feed one line to the running program's stdin, echoing it into its tab — a terminal
    *  echoes what you type, and without it the transcript reads as the program answering
    *  questions nobody asked. */
   async function sendInput(text: string): Promise<void> {
-    const tab = liveTab;
+    const tab = targetTab();
     if (!tab?.runId) return;
     pushTo(tab.id, text, 'in');
     try {
@@ -833,11 +906,11 @@ function createBennuRunStore() {
     }
   }
 
-  /** Stop the live run — the backend kills the whole process tree. The tab stays `live`
+  /** Stop the run in front — the backend kills the whole process tree. The tab stays `live`
    *  until the exit event lands, so the console shows "stopping…" instead of claiming the
-   *  program is gone while it is still winding down. */
+   *  program is gone while it is still winding down. See {@link targetTab} for which run. */
   async function stop(): Promise<void> {
-    const tab = liveTab;
+    const tab = targetTab();
     if (!tab?.runId) return;
     patchTab(tab.id, { stopping: true });
     try {
@@ -865,17 +938,26 @@ function createBennuRunStore() {
     tabs = next;
     if (activeTabId === id) {
       // The neighbour, the way every tab strip does it.
-      activeTabId = (next[i] ?? next[i - 1] ?? next[next.length - 1] ?? null)?.id ?? null;
+      focusTab((next[i] ?? next[i - 1] ?? next[next.length - 1] ?? null)?.id ?? null);
     }
-    if (pendingTabId === id) pendingTabId = null;
   }
 
   return {
     get building() { return building; },
     get running() { return running; },
     get validating() { return validating; },
-    /** Busy = a build, validation or run is in flight (drives disabling the build/▶ buttons). */
-    get active() { return building || running || validating; },
+    /**
+     * Busy = a compile or a validation is in flight — what disables the build / ▷ buttons.
+     *
+     * A live RUN is deliberately not part of it. Those two share the backend's build guard and
+     * genuinely cannot overlap; a running program cannot stop you starting another one, which is
+     * the whole point of a console with several tabs. Ask {@link running} for that.
+     */
+    get active() { return building || validating; },
+    /** Every run in flight — what the console's tab strip marks live. */
+    get liveTabs() { return liveTabs; },
+    /** Whether Stop / stdin have an unambiguous target: see `targetTab`. */
+    get canStop() { return targetTab() !== null; },
     get stopping() { return activeTab?.stopping ?? false; },
     get tool() { return tool; },
     get ok() { return ok; },
@@ -946,7 +1028,7 @@ function createBennuRunStore() {
     closeTab,
     /** Show a tab. */
     showTab(id: string) {
-      if (tabs.some((t) => t.id === id)) activeTabId = id;
+      if (tabs.some((t) => t.id === id)) focusTab(id);
     },
     /** Clear the BUILD log + last result (the Build panel's "clear" action). */
     clear() {
@@ -961,7 +1043,7 @@ function createBennuRunStore() {
     clearRun() {
       const live = tabs.filter((t) => t.live);
       tabs = live;
-      activeTabId = live[0]?.id ?? null;
+      focusTab(live[0]?.id ?? null);
     },
   };
 }

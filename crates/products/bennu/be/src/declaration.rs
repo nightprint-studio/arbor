@@ -1,7 +1,7 @@
 //! `declaration` domain — `bennu_declaration` (go-to-declaration, Ctrl+Click / Ctrl+B).
 //!
 //! The navigation twin of `bennu_references`: it classifies the symbol under the caret
-//! against the owning project's rename engine (the whole-project reference index +
+//! against the owning project's semantic engine (the whole-project reference index +
 //! resolver + source sets built off-thread on `bennu_open_project`) and returns the single
 //! DECLARATION site the symbol resolves to — the name token of the method / field / local /
 //! class it names, plus the owning project file (with 1-based line/col for the FE to jump

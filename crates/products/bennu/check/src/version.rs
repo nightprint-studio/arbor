@@ -60,6 +60,13 @@ fn feature_at(n: Node, bytes: &[u8]) -> Option<(&'static str, u32)> {
         "method_reference" => Some(("Method references", 8)),
         // Arrow-labelled / expression `switch` (`case X ->`).
         "switch_rule" => Some(("Switch expressions", 14)),
+        // A colon-form `switch` *expression* has no `switch_rule` — what dates it is the `yield`.
+        // Only one *inside a switch* counts: `yield` is a contextual keyword, so a pre-14 project
+        // calling its own `yield(x)` method parses as a `yield_statement` too, and flagging that
+        // would be a false positive on code that compiles.
+        "yield_statement" => inside_switch(n).then_some(("`yield`", 14)),
+        // What a `switch` accepts widened across releases; a case label is where each widening shows.
+        "switch_label" => switch_label_feature(n),
         "try_with_resources_statement" => Some(("Try-with-resources", 7)),
         // `var x = …` local type inference.
         "local_variable_declaration" => is_var(n, bytes).then_some(("`var` local variables", 10)),
@@ -76,6 +83,52 @@ fn feature_at(n: Node, bytes: &[u8]) -> Option<(&'static str, u32)> {
         "method_declaration" => interface_method_feature(n, bytes),
         _ => None,
     }
+}
+
+/// The dated feature a `case` label uses, if any.
+///
+/// `switch` started out accepting only the int family; each release since widened either the
+/// **selector** or the **label**, and both widenings are visible in the label itself — which is what
+/// makes this decidable without a resolver:
+///
+///   * a **string literal** label can only sit on a `String` selector → Java 7;
+///   * a **type or record pattern** label → Java 21 (preview from 17, final in 21);
+///   * a **`when` guard** → Java 21, and it is a *sibling* of its pattern in the grammar, so it is
+///     matched in its own right rather than assumed to travel with one;
+///   * **`case null`** → Java 21. Before it, `null` was the one selector value a `switch` could not
+///     be given a label for, and reaching one threw instead.
+///
+/// The *selector* widenings that leave no mark on any label (an `enum` or a boxed `Integer`, both
+/// Java 5) are not gated here: no project Bennu opens targets Java 1.4.
+fn switch_label_feature(label: Node) -> Option<(&'static str, u32)> {
+    let mut c = label.walk();
+    for ch in label.named_children(&mut c) {
+        match ch.kind() {
+            "pattern" | "type_pattern" | "record_pattern" => {
+                return Some(("`switch` type patterns", 21))
+            }
+            "guard" => return Some(("Pattern guards", 21)),
+            "null_literal" => return Some(("`case null`", 21)),
+            // A text block is its own node in some grammar builds and a triple-quoted
+            // `string_literal` in others; either spelling means a `String` selector.
+            "string_literal" | "text_block" => return Some(("`switch` on `String`", 7)),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Whether `n` sits anywhere inside a `switch` — the guard that tells a `switch` `yield` from a call
+/// to a method a pre-14 project happened to name `yield`.
+fn inside_switch(n: Node) -> bool {
+    let mut cur = n.parent();
+    while let Some(p) = cur {
+        if p.kind() == "switch_expression" {
+            return true;
+        }
+        cur = p.parent();
+    }
+    false
 }
 
 /// A tight span for the diagnostic — the node clamped to its first line (a whole record/lambda body
@@ -298,5 +351,62 @@ mod tests {
     fn plain_java_8_code_is_clean() {
         let src = "class C { int add(int a, int b) { return a + b; } }";
         assert!(at(src, 8).is_empty());
+    }
+
+    // ── what `switch` accepts, by release ────────────────────────────────────
+
+    #[test]
+    fn a_string_switch_needs_7() {
+        let src = "class C { void m(String s) { switch (s) { case \"a\": break; } } }";
+        let d = at(src, 6);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`switch` on `String` requires Java 7"), "{d:?}");
+        assert!(at(src, 8).is_empty());
+    }
+
+    #[test]
+    fn an_int_switch_is_clean_on_every_release() {
+        let src = "class C { void m(int i) { switch (i) { case 1: break; default: break; } } }";
+        assert!(at(src, 5).is_empty());
+    }
+
+    #[test]
+    fn case_null_needs_21() {
+        let src = "class C { void m(String s) { switch (s) { case null: break; default: break; } } }";
+        let d = at(src, 17);
+        assert!(d.iter().any(|m| m.contains("`case null` requires Java 21")), "{d:?}");
+        assert!(at(src, 21).is_empty(), "{:?}", at(src, 21));
+    }
+
+    #[test]
+    fn a_type_pattern_label_needs_21() {
+        let src = "class C { void m(Object o) { switch (o) { case String s -> {} default -> {} } } }";
+        let d = at(src, 17);
+        assert!(d.iter().any(|m| m.contains("type patterns require Java 21")), "{d:?}");
+        assert!(at(src, 21).is_empty(), "{:?}", at(src, 21));
+    }
+
+    #[test]
+    fn a_when_guard_needs_21() {
+        let src = "class C { void m(Object o, boolean f) { switch (o) { case String s when f -> {} default -> {} } } }";
+        let d = at(src, 17);
+        assert!(d.iter().any(|m| m.contains("Java 21")), "{d:?}");
+        assert!(at(src, 21).is_empty(), "{:?}", at(src, 21));
+    }
+
+    #[test]
+    fn a_switch_yield_needs_14() {
+        let src = "class C { int m(int i) { return switch (i) { default: yield 1; }; } }";
+        let d = at(src, 11);
+        assert!(d.iter().any(|m| m.contains("`yield` requires Java 14")), "{d:?}");
+        assert!(at(src, 17).is_empty(), "{:?}", at(src, 17));
+    }
+
+    /// `yield` is a contextual keyword: a pre-14 project may have its own `yield(…)` method, which
+    /// parses as a `yield_statement` too. Only one inside a `switch` dates the file.
+    #[test]
+    fn a_call_to_a_method_named_yield_is_not_a_switch_yield() {
+        let src = "class C { void yield(int x) {} void m() { yield(1); } }";
+        assert!(at(src, 8).is_empty(), "{:?}", at(src, 8));
     }
 }

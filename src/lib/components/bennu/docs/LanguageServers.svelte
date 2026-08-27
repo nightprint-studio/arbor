@@ -50,7 +50,8 @@
     below.</li>
   <li><strong>Code lenses</strong> — counts above an item, clickable; see below.</li>
   <li><strong>Call and type hierarchy</strong> — <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> and
-    <kbd>Ctrl</kbd> + <kbd>H</kbd>; see below.</li>
+    <kbd>Ctrl</kbd> + <kbd>H</kbd>. Not server-only: Java answers from its own index (see
+    <em>Navigation</em>), and the panel is the same one. See below for what a server adds.</li>
 </ul>
 <h2>Go to type, go to symbol</h2>
 <p>
@@ -98,7 +99,8 @@
   <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> on a function opens its <strong>callers</strong>;
   <kbd>Ctrl</kbd> + <kbd>H</kbd> on a type opens its <strong>implementors</strong>. Both land in the
   Hierarchy panel at the bottom, which has a direction chip to walk the other way — callees, or what a
-  type is built on.
+  type is built on. On a file the server owns the server answers; on a <code>.java</code> Bennu's own
+  index does, into the same panel.
 </p>
 <p>
   The tree is expanded <strong>one level at a time</strong>, and that is not laziness for its own sake:

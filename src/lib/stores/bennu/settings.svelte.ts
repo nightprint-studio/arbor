@@ -53,6 +53,8 @@ export interface BennuSettingsSnapshot {
   indentGuides: boolean;
   /** Pin the enclosing declaration lines (class › method) to the top while scrolling. */
   stickyScroll: boolean;
+  /** Draw inlay hints — argument names at call sites, and the type a `var` was inferred as. */
+  inlayHints: boolean;
   /** Vertical margin guide column (IntelliJ's hard-wrap ruler). 0 = hidden. */
   rightMargin: number;
   /** Which SQL dialect `.sql` buffers are highlighted as. Config-backed. */
@@ -110,6 +112,7 @@ const DEFAULTS: BennuSettingsSnapshot = {
   minimap: true,
   indentGuides: true,
   stickyScroll: true,
+  inlayHints: true,
   rightMargin: 120,
   sqlDialect: 'portable',
   autosave: true,
@@ -147,6 +150,7 @@ function createSettingsStore() {
   let minimap = $state(DEFAULTS.minimap);
   let indentGuides = $state(DEFAULTS.indentGuides);
   let stickyScroll = $state(DEFAULTS.stickyScroll);
+  let inlayHints = $state(DEFAULTS.inlayHints);
   let rightMargin = $state(DEFAULTS.rightMargin);
   let sqlDialect = $state<SqlDialectSetting>(DEFAULTS.sqlDialect);
   let autosave = $state(DEFAULTS.autosave);
@@ -179,7 +183,7 @@ function createSettingsStore() {
   function snapshot(): BennuSettingsSnapshot {
     return {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
-      highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, rightMargin,
+      highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, inlayHints, rightMargin,
       sqlDialect, autosave, collapseLibraryFrames, searchDependencies,
       localHistory, localHistoryDays, localHistoryMaxMb, localHistoryMaxFileMb,
       autoPopup, popupDelayMs, caseSensitive, autoImport,
@@ -251,6 +255,8 @@ function createSettingsStore() {
     setIndentGuides(v: boolean) { indentGuides = v; persist(); },
     get stickyScroll() { return stickyScroll; },
     setStickyScroll(v: boolean) { stickyScroll = v; persist(); },
+    get inlayHints() { return inlayHints; },
+    setInlayHints(v: boolean) { inlayHints = v; persist(); },
     get rightMargin() { return rightMargin; },
     setRightMargin(v: number) { rightMargin = v; persist(); },
     get sqlDialect() { return sqlDialect; },
@@ -355,6 +361,7 @@ function createSettingsStore() {
       minimap = DEFAULTS.minimap;
       indentGuides = DEFAULTS.indentGuides;
       stickyScroll = DEFAULTS.stickyScroll;
+      inlayHints = DEFAULTS.inlayHints;
       rightMargin = DEFAULTS.rightMargin;
       sqlDialect = DEFAULTS.sqlDialect;
       autosave = DEFAULTS.autosave;

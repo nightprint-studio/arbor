@@ -49,6 +49,26 @@ use crate::members::simple_name;
 use crate::resolve::type_binary;
 use crate::walk::hierarchy_fully_known;
 
+/// One call that can throw a checked exception nothing handles — the analysis's own answer, before
+/// it is turned into a message.
+///
+/// The diagnostic is a sentence; a **quick-fix** needs the parts of it. Which exception, so the fix
+/// can name the type it adds; where the `throws` clause goes; and what a `try` would have to wrap.
+/// Recomputing those from the diagnostic would mean parsing our own message back — and computing
+/// them a second time somewhere else would mean two implementations of "is this handled?", which is
+/// exactly the question that must have one answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnhandledCall {
+    /// JVM binary name of the exception (`java/io/IOException`).
+    pub exception: String,
+    /// Byte span the diagnostic underlines — the call's name, or a constructor's type.
+    pub anchor: (usize, usize),
+    /// Byte offset where a `throws` clause would be inserted on the enclosing callable.
+    pub throws_insert: usize,
+    /// Byte span of the statement containing the call — what a `try { … }` would wrap.
+    pub statement: (usize, usize),
+}
+
 /// Parse `source` and flag calls that can throw an unhandled checked exception.
 pub fn checked_call_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
     let Some(tree) = bennu_java::prelude::parse_java(source) else {
@@ -70,6 +90,33 @@ pub fn checked_call_errors_in(
     resolver: &dyn TypeResolver,
     cache: &InferCache,
 ) -> Vec<Diagnostic> {
+    unhandled_calls_in(root, nodes, source, symbols, resolver, cache)
+        .into_iter()
+        .map(|u| {
+            crate::check_id::CheckId::UnhandledCheckedException.span(
+                u.anchor.0,
+                u.anchor.1,
+                format!(
+                    "Unhandled exception: `{}` must be caught or declared to be thrown",
+                    simple_name(&u.exception)
+                ),
+            )
+        })
+        .collect()
+}
+
+/// The analysis itself: every call that can throw a checked exception nothing handles.
+///
+/// [`checked_call_errors_in`] is this plus a sentence. A quick-fix wants the [`UnhandledCall`]s —
+/// see that type for why they are not recovered from the diagnostic.
+pub fn unhandled_calls_in(
+    root: Node,
+    nodes: &[Node],
+    source: &str,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> Vec<UnhandledCall> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
     for &n in nodes {
@@ -99,7 +146,7 @@ fn check_invocation(
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
     cache: &InferCache,
-    out: &mut Vec<Diagnostic>,
+    out: &mut Vec<UnhandledCall>,
 ) {
     let Some(name) = n.child_by_field_name("name") else { return };
     if name.has_error() {
@@ -162,7 +209,7 @@ fn check_creation(
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
-    out: &mut Vec<Diagnostic>,
+    out: &mut Vec<UnhandledCall>,
 ) {
     let Some(ty_node) = n.child_by_field_name("type") else { return };
 
@@ -238,7 +285,7 @@ fn flag_unhandled(
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
-    out: &mut Vec<Diagnostic>,
+    out: &mut Vec<UnhandledCall>,
 ) {
     if thrown.is_empty() {
         return;
@@ -290,15 +337,49 @@ fn flag_unhandled(
             continue;
         }
 
-        // Survived every SKIP: a checked exception the call can throw, not caught, not declared → error.
-        out.push(crate::check_id::CheckId::UnhandledCheckedException.at(
-            anchor,
-            format!(
-                "Unhandled exception: `{}` must be caught or declared to be thrown",
-                simple_name(binary)
-            ),
-        ));
+        // Survived every SKIP: a checked exception the call can throw, not caught, not declared.
+        out.push(UnhandledCall {
+            exception: binary.clone(),
+            anchor: (anchor.start_byte(), anchor.end_byte()),
+            throws_insert: throws_insertion_point(callable),
+            statement: enclosing_statement(call)
+                .map(|s| (s.start_byte(), s.end_byte()))
+                .unwrap_or((call.start_byte(), call.end_byte())),
+        });
     }
+}
+
+/// Where a `throws` clause would go on `callable`: just after its parameter list's `)`.
+///
+/// Not "before the body", because a constructor or an abstract method may have annotations, type
+/// parameters or a `default` value between the two, and a clause spliced in there is a syntax error.
+/// The `)` is the one landmark every callable has in the same place.
+fn throws_insertion_point(callable: Node) -> usize {
+    callable
+        .child_by_field_name("parameters")
+        .map(|p| p.end_byte())
+        // A callable with no parameter list is not a shape we can edit; anchoring on its start makes
+        // the caller's `throws` offer land somewhere visible rather than silently nowhere.
+        .unwrap_or_else(|| callable.start_byte())
+}
+
+/// The statement containing `call` — what a `try { … }` would have to wrap.
+///
+/// The whole statement, not the call: wrapping `Files.readAllBytes(p)` alone inside
+/// `byte[] b = try { … }` is not Java. Stops at the callable boundary, so a call in a field
+/// initialiser (which is inside no statement) yields nothing rather than the whole class body.
+fn enclosing_statement(call: Node) -> Option<Node> {
+    let mut cur = Some(call);
+    while let Some(n) = cur {
+        if n.kind().ends_with("_statement") || n.kind() == "local_variable_declaration" {
+            return Some(n);
+        }
+        if matches!(n.kind(), "method_declaration" | "constructor_declaration" | "class_body") {
+            return None;
+        }
+        cur = n.parent();
+    }
+    None
 }
 
 #[cfg(test)]

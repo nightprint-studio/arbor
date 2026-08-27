@@ -37,6 +37,31 @@
   <code>list.size() == 0</code> → <code>list.isEmpty()</code>, <code>flag == true</code> →
   <code>flag</code>, <code>!(a == b)</code> → <code>a != b</code>.
 </p>
+<h2>Quick-fixes</h2>
+<p>
+  With the caret on a <strong>diagnostic</strong>, <kbd>Alt</kbd> + <kbd>Enter</kbd> offers its
+  repair — not just the sentence saying what is wrong:
+</p>
+<ul>
+  <li><strong>Unused, duplicate or redundant import</strong> → remove it, with its line.</li>
+  <li><strong>Unhandled checked exception</strong> → two ways out: add <code>throws</code> to the
+    enclosing method (extending the clause it already has, if any), or surround the statement with a
+    <code>try</code>/<code>catch</code>.</li>
+  <li><strong>Non-exhaustive enum switch</strong> → write the missing cases, in the form the switch
+    already uses (arrows or colons, never a mix — that doesn't compile).</li>
+  <li><strong>Comparing strings with <code>==</code></strong> → <code>equals</code>, with the literal
+    moved to the receiver side so it cannot throw. <code>!=</code> keeps its negation.</li>
+  <li><strong>Switch fall-through</strong> → add the missing <code>break;</code>, indented with the
+    group it ends.</li>
+  <li><strong>A stray <code>;</code></strong> → remove it.</li>
+  <li><strong>A missing import</strong> → add it, one entry per candidate package (see above).</li>
+</ul>
+<p>
+  A fix is keyed to the <em>kind</em> of diagnostic and reads the source itself, so it is never
+  guessing from the wording. The two that need to know types — which exception, which constants —
+  are recomputed from the same analysis that raised the diagnostic, so a fix that appears is one
+  that will actually clear the squiggle.
+</p>
 <h2>Rename</h2>
 <p>
   Put the caret on a symbol and press <kbd>Shift</kbd> + <kbd>F6</kbd> to rename it across the
@@ -70,6 +95,32 @@
   choose fluent or plain setters and camelCase or snake_case accessors; a live preview shows the code
   and <kbd>Ctrl</kbd> + <kbd>Enter</kbd> inserts it at the caret.
 </p>
+<h2>Implement / override methods</h2>
+<p>
+  With the caret inside a class, <kbd>Alt</kbd> + <kbd>Enter</kbd> →
+  <strong>Implement / override methods…</strong> (also in the Command Palette) lists everything the
+  class inherits and is allowed to override, <strong>grouped by the type that declares it</strong>.
+  Tick the ones you want — a group's own box takes all of them at once — and
+  <kbd>Ctrl</kbd> + <kbd>Enter</kbd> writes them just inside the class's closing brace, as a single
+  undo step.
+</p>
+<p>
+  <strong>Abstract methods are ticked when the dialog opens</strong>, and nothing else is: those are
+  the ones the compiler will demand, so implementing an interface is one gesture, while overriding
+  something that already works stays a decision. An abstract method's body throws
+  <code>UnsupportedOperationException</code> — a stub that returned <code>null</code> would compile,
+  run, and lie. A concrete one's body starts with <code>super.…</code>, because overriding one
+  usually means adding to it.
+</p>
+<p>
+  Only what Java would actually let you override is offered: never a <code>static</code>,
+  <code>final</code> or <code>private</code> method, never a constructor, never a package-private
+  method from another package, and never one this class already declares — matched on the parameter
+  types, so the overloads you have not written yet are still there. The types the new methods
+  mention are <strong>imported in the same step</strong>; generated code that does not compile is
+  not generated code.
+</p>
+
 <h2>Spelling</h2>
 <p>
   Opt-in per project (Project Configuration → <strong>Spelling</strong>): after downloading the

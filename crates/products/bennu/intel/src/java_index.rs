@@ -31,7 +31,7 @@ use crate::typemap::type_text_to_ref;
 ///
 /// Reads each `.java` off disk once, in the project's declared encoding (resolved from the
 /// pom's `sourceEncoding`, else UTF-8). When the caller has already read the sources (the be
-/// layer reads them once and shares the text with the rename engine — no second disk pass),
+/// layer reads them once and shares the text with the semantic engine — no second disk pass),
 /// prefer [`build_project_index_from_sources`].
 pub fn build_project_index(root: &Path, index_dir: &Path) -> (IndexBuilder, usize, usize) {
     let plan = EncodingPlan::uniform(source_encoding_label(root, "UTF-8"));

@@ -25,7 +25,63 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **Renaming a top-level type renames its file too.** Java ties a public type to its filename, so the two had to move together by hand. A nested type, whose file is named after its outer type, still leaves the file alone.
 
+- **Completion no longer offers what you cannot write.** Constructors were members of the class file rather than of the class, so `s.` opened on eight `<init>` entries before reaching a method; and package-private members were offered across packages, so `String.` opened on the JDK's own internals — `COMPACT_STRINGS`, `LATIN1`, `UTF16`, `checkBoundsBeginEnd`.
+
+- **Completion is ordered by what it means, not by the alphabet.** `list.` opened on `clone`, `equals`, `forEach` and `getClass` before it got to `add`, and `Color.` offered `wait(long, int)` beside the enum's own constants. Suggestions are now ranked by what the receiver is, how far up the hierarchy the member was found, whether it is deprecated and whether this file already uses it — with `java.lang.Object`'s members, which match everything and are wanted almost never, last.
+
+- **Implement / override methods** — Ctrl+I, Alt+Enter, or the Command Palette. With the caret in a class, everything it inherits and may override, grouped by the type that declares it; abstract ones ticked on open, because those are the ones the compiler will demand. Ctrl+Enter writes them inside the class brace as one undo step, with the imports they need. Only what Java would let you override is offered — no statics, finals, privates, constructors, package-private from elsewhere, or anything the class already declares.
+
+- **Bennu runs and debugs several programs at once.** A server and the client that talks to it, or two entry points of the same project, each in its own console tab with its own stdin and its own Stop — and each under its own debugger, the panel following whichever tab is in front. A breakpoint firing in a program you were not reading brings its tab forward. Only compiling is still exclusive.
+
+- **Postfix templates.** Write the expression, then say what to do with it: `order.getTotal().nn` becomes `if (order.getTotal() != null) { … }` with the caret in the body. Null checks, control flow, statements and expression wrappers, offered in the completion list under IntelliJ's own names — and gated on the project's Java level, so `.var` doesn't write `var` into a Java 8 file.
+
+- **Alt+Enter fixes the diagnostic, not just describes it.** Remove an unused import, add the missing `throws` or surround the statement with a try/catch, write the enum cases a switch is missing, turn a string `==` into `equals`, add a fall-through's `break`. Bennu found seventy-one kinds of problem and could repair one of them; now the common ones carry their repair.
+
+- **Parameter hints.** Inside a call's argument list, a strip above the line shows the method's signature with the argument you are on picked out, following the commas as you type. Java answers from Bennu's own resolver, every other language from its server, into the same widget.
+
+- **Inlay hints** (Settings → Editor). The parameter name in front of each argument that does not already carry it — `transfer(source: from, target: to, amount: 500)` — and the type a `var` was inferred as. Drawn between the code rather than in it: the caret cannot land in one and nothing shifts.
+
+- **Java has a formatter.** Alt+Shift+F re-indents the file to its nesting, strips trailing whitespace and collapses blank runs, using the indentation the footer shows. It stops there deliberately — no rewrapping, no reordering, no spacing changes inside expressions — so it is safe to run on inherited code, and it works on a file that does not parse.
+
+- **Every check can be turned down, and any line can say it knows.** A severity per kind under Project Configuration — `error`, `warning`, `weak` or off — and, at a site, `@SuppressWarnings("unused-import")` on the declaration or a `// bennu:ignore unused-import` comment on the line. Javac's own vocabulary (`unused`, `fallthrough`, `all`) is honoured where it overlaps, because a legacy file already carries it. Seventy-odd checks with no volume control is a Problems panel nobody opens.
+
+- **The first checks that follow a value, not a declaration.** A member reached on a local that is definitely `null`; a null check whose answer is already known; a value assigned and overwritten before anything reads it. The model is straight-line and forgets at the first branch — narrow on purpose, because a flow analysis that is wrong accuses working code and leaves no way to see why.
+
+- **Java has a call and a type hierarchy.** Ctrl+Shift+H opens a method's callers, Ctrl+H the hierarchy of the class you are in — the same panel Rust already had, now answered from the reference index find-usages reads. Callers of a method declared on an interface include the ones written against an implementation, and the other way round. Calls into a dependency are not listed, and overloads are one row.
+
+- **Conditional breakpoints, and stopping every Nth hit.** Right-click a breakpoint → *Add condition…*, or edit it in the Breakpoints window, which also shows how many times each one has stopped the program. A Java condition is a watch path compared with a literal — `i > 5`, `order.customer.name == "acme"`, `order != null && order.total > 100` — joined with `&&`, `||`, `!` and parentheses; a method call or arithmetic is refused by name as you type rather than approximated. On a Rust session the condition is the debug adapter's own expression, sent untouched — so its grammar is CodeLLDB's, lldb-dap's or GDB's, and Bennu cannot check it as you type.
+
+- **Optimize imports** (Ctrl+Shift+O, Java). Drops what the file does not use and orders the rest — everything else, then `javax` and `java`, then the statics — as one undo step. It never folds a package into a wildcard and never adds an import, and it uses the same judgement the `unused-import` warning does, so the command and the squiggle cannot disagree.
+
 ### Fixed
+
+- **Find-usages on a Lombok field finds where its getter is used.** On a class whose accessors Lombok generates, the accessors are the *only* way the field is used from outside — and the getter itself has no declaration anywhere to put a caret on. So asking about the field reported a field nobody touches, and there was no other question to ask. Its generated getter, setter, wither, builder setter and `Fields` constant now come back with it, each hit labelled with what it is written as.
+
+- **An inlay hint no longer invents a parameter name.** A class file carries no parameter names unless it was compiled with `-parameters`, and the placeholder a generated override uses — `arg0` — was reaching the hints, so `get_genere(arg0: gara.getNgara())` claimed a name the method does not have. Where the name is unknown there is now no hint, and a signature strip shows the type alone.
+
+- **Format file is offered on Java again.** Alt+Shift+F formatted a `.java` buffer, but the Command Palette entry was still gated to the languages with a server, so the one place the verb is discoverable hid it on the language it had just learned.
+
+- **Ctrl+Shift+O no longer opens the project picker.** Ctrl+O did not check Shift, so it answered both.
+
+- **Postfix templates no longer push members out of the completion list.** They were ranked in the same band as resolved members, so `nn`, `null`, `if` and `else` alternated with them down the popup. They now sit below every member and above the guesses — reachable the moment you type enough of the name to mean one.
+
+- **A method's overloads are one row, not one row each.** Accepting a completion writes the method's name and not its arguments, so three `fallback` rows were three chances to choose and one outcome — while pushing the members you were looking for off the list. The row now says `+2 overloads`, and the parameter strip shows them all the moment you type `(`.
+
+- **Find-usages and rename keep up with your edits.** The reference index was built when the project opened and left alone until something rebuilt it, so a method you had just written had no usages while one you had just stopped calling still had its old ones — and go-to-definition, which reads the live buffer, disagreed with both. The edited file is now re-read into the index as you type, along with the files that resolve against it when what it declares has changed.
+
+- **A rename reaches an implementation you added this session.** Which types extend or implement which was also fixed at project-open, so a class that had just started implementing an interface was invisible to the method's override family: renaming the interface's method moved every other implementation and left that one declaring the old name, no longer overriding anything. Changing an `extends` or `implements` clause now re-files the type straight away.
+
+- **A `case` label that cannot match its `switch` is now an error.** A `switch` over an enum with numbered labels — `case 1:`, `case 2:` — is what a refactor leaves behind when an `int` constant becomes an enum, and it compiled nowhere while being reported nowhere. Labels are now checked against the selector's type: a literal on an enum, a name that is no constant of it, and a wrong-family literal on a `String` or boxed-integer selector.
+
+- **Bennu dates what `switch` accepts, not just how it is written.** A project below the Java level a feature needs was told about records, `var` and switch arrows but not about the `switch` widenings themselves — a `String` selector (Java 7), `yield` (14), and type patterns, `when` guards and `case null` (21).
+
+- **A type mismatch at the end of a fluent chain is caught.** `Optional.ofNullable(repo.kind()).orElse(null)` returned from a method declared `Integer` is an error the compiler makes and Bennu stayed silent about: a static factory's type variable is bound by its *argument*, which the inference did not read, and every chained call was skipped rather than risk a wrong answer off the missing binding. The binding is now read from the argument, and only chains handed a lambda or method reference — whose type genuinely comes from the function — are still left to the compiler.
+
+- **A terminal is no longer killed by looking at something else.** Switching the bottom panel — to Stage, to Jobs, or just by clicking a commit — destroyed the terminal and terminated the process running in it, leaving the tab behind as an empty box. A long build started in a terminal now keeps running and keeps its output through every panel switch, repository change and closing of the panel; only closing the tab ends it.
+
+- **Pulling a submodule finds its credentials.** A submodule URL may be recorded relative to the superproject (`../shared-lib.git`, what GitLab and GitHub both suggest for a sibling repository), and a relative URL names no host to look a token up by — so nothing was sent and git asked for a username it had no way to be given: *could not read Username for 'https://gitlab.com'*, on a submodule whose parent pulls fine.
+
+- **An enum's `values()` and `valueOf(String)` exist again.** Java gives both to every enum without writing them anywhere, so an enum read from source looked as though it had neither: `Colour.valueOf(s)` was reported as a one-argument call to the two-argument `valueOf` that `java.lang.Enum` really does declare, and Ctrl+click on it opened a decompiled stub of that class rather than the enum. Both now belong to the enum, and go-to lands on its declaration.
 
 - **An override family is now a closure, so both sides of an inherited implementation move together.** A superclass method can satisfy an interface on behalf of a subclass — the connection runs down and then back up — and a family gathered by walking up and then down never crossed it. Each side was renamed on its own, and a class stopped implementing the interface it declares. It also means a rename refused from one member is refused from every member, instead of going through from a different starting point.
 

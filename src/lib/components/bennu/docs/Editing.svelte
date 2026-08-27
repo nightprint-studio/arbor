@@ -91,6 +91,54 @@
   focus it and press <kbd>↑</kbd>/<kbd>↓</kbd>) to switch between <strong>spaces and tabs</strong> and
   pick the <strong>tab width</strong> (2 / 4 / 8). The change applies to the open editor immediately.
 </p>
+<h2>Reformat</h2>
+<p>
+  <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> reformats the open file. A language with a
+  <strong>language server</strong> is formatted by it (Rust by <code>rustfmt</code>); <strong>Java</strong>
+  is formatted by Bennu, which re-indents every line to its nesting, strips trailing whitespace and
+  collapses runs of blank lines — using the indentation the footer shows.
+</p>
+<p>
+  It deliberately stops there: it never rewraps a long line, reorders anything, adds or removes
+  braces, or changes the spacing inside an expression. Those are the rules that can be wrong —
+  <code>a &lt; b</code> and <code>Map&lt;K, V&gt;</code> differ by context, <code>-1</code> and
+  <code>a - 1</code> by parse — and a formatter that occasionally rewrites an expression is one
+  nobody dares run on inherited code. Comments and text blocks are left exactly as written, inside
+  and out, and a file that doesn't parse still formats.
+</p>
+<h2>Optimize imports</h2>
+<p>
+  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> on a Java file drops the imports the file does
+  not use and puts what is left in order: everything else first, then <code>javax</code> and
+  <code>java</code>, then the static imports, alphabetical inside each group and a blank line
+  between them. Duplicates collapse. It lands as one undo step.
+</p>
+<p>
+  What counts as unused is the same judgement the <code>unused-import</code> warning makes, so the
+  command and the squiggle can never disagree — which also means it inherits that judgement's
+  caution: an import named only in a Javadoc counts as used, and a <code>static</code> or wildcard
+  import is never removed, only moved. It will not fold several imports of one package into a
+  wildcard (that can change what a simple name resolves to), and it will not add a missing import —
+  that one is <kbd>Alt</kbd> + <kbd>Enter</kbd>'s.
+</p>
+<p>
+  A file with a comment written among its imports is left alone. A comment sits above the import it
+  was written for, and reordering would strand it above a different one.
+</p>
+<h2>Parameter and inlay hints</h2>
+<p>
+  Inside a call's argument list, a strip above the line shows the <strong>signature</strong> of the
+  method with the argument you're on picked out — and it follows the commas as you type. Both engines
+  answer it: Bennu's own for Java, the language server for everything else.
+</p>
+<p>
+  <strong>Inlay hints</strong> (Settings → Editor) draw what the code doesn't say:
+  the parameter name in front of each argument that doesn't already carry it —
+  <code>transfer(source: from, target: to, amount: 500)</code> — and the type a <code>var</code> was
+  inferred as. They are not part of the file: the caret can't land in one, they aren't copied with a
+  selection, and no offset shifts. An argument that already says the name, a lambda, or a long
+  expression is left alone.
+</p>
 <h2>Emmet</h2>
 <p>
   In JSP and HTML files, type an <strong>Emmet abbreviation</strong> and press <kbd>Tab</kbd> to

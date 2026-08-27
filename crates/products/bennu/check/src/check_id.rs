@@ -51,6 +51,20 @@ pub enum CheckId {
     // ── enum ────────────────────────────────────────────────────────────────────
     /// A `switch` EXPRESSION over an enum that leaves some constant uncovered and has no `default`.
     NonExhaustiveEnumSwitch,
+    /// A `case` label whose literal type can never match the selector's (`case 1` on an enum).
+    IncompatibleCaseLabel,
+    /// A `case` label naming something that isn't a constant of the selector's enum.
+    UnknownEnumCaseLabel,
+
+    // ── data flow ───────────────────────────────────────────────────────────────
+    // The first checks that follow a VALUE rather than reading a declaration. See `crate::dataflow`
+    // for the model and for why it is deliberately a small one.
+    /// A member reached on a local that is definitely `null` at that point.
+    NullDereference,
+    /// A condition whose answer is already known — a null check on something definitely non-null.
+    ConstantCondition,
+    /// A value assigned to a local and overwritten before anything reads it.
+    DeadStore,
 
     // ── inheritance & overrides ──────────────────────────────────────────────────
     /// An illegal `extends`/`implements` — extending a `final`/record/enum/interface, or
@@ -215,6 +229,11 @@ impl CheckId {
             NonBooleanCondition => "non-boolean-condition",
             UnhandledCheckedException => "unhandled-checked-exception",
             NonExhaustiveEnumSwitch => "non-exhaustive-enum-switch",
+            IncompatibleCaseLabel => "incompatible-case-label",
+            UnknownEnumCaseLabel => "unknown-enum-case-label",
+            NullDereference => "null-dereference",
+            ConstantCondition => "constant-condition",
+            DeadStore => "dead-store",
             IllegalInheritance => "illegal-inheritance",
             MissingAbstractMethod => "missing-abstract-method",
             CyclicInheritance => "cyclic-inheritance",
@@ -281,7 +300,7 @@ impl CheckId {
             // Style / hygiene lints — not compile errors.
             RedundantImport | DuplicateImport | UnusedImport | MethodNamedLikeConstructor
             | SwitchFallthrough | FinallyAbrupt | SelfAssignment | DivisionByZero | EmptyStatement
-            | StringReferenceEquality => "warning",
+            | StringReferenceEquality | ConstantCondition | DeadStore => "warning",
             // Everything else is a compile-level error.
             _ => "error",
         }
@@ -302,4 +321,90 @@ impl CheckId {
     pub fn at(self, node: Node, message: impl Into<String>) -> Diagnostic {
         self.span(node.start_byte(), node.end_byte(), message)
     }
+
+    /// Every check kind, for a settings screen that lists them.
+    ///
+    /// Hand-maintained beside the `code()` match rather than derived: there is no reflection over a
+    /// Rust enum, and a catalog that silently missed a kind would be a check nobody could ever
+    /// configure. A new variant that is added to `code()` and not to this is the one mistake to
+    /// watch for — which is what `every_kind_is_in_the_catalog` is for.
+    pub const ALL: &'static [CheckId] = {
+        use CheckId::*;
+        &[
+            UnknownMember,
+            UnknownField,
+            WrongArgumentCount,
+            ArgumentType,
+            UnresolvedSuperMethod,
+            UnresolvedType,
+            UnresolvedSymbol,
+            WrongTypeArgumentCount,
+            IncompatibleType,
+            LossyConversion,
+            NonBooleanCondition,
+            UnhandledCheckedException,
+            NonExhaustiveEnumSwitch,
+            IncompatibleCaseLabel,
+            UnknownEnumCaseLabel,
+            NullDereference,
+            ConstantCondition,
+            DeadStore,
+            IllegalInheritance,
+            MissingAbstractMethod,
+            CyclicInheritance,
+            OverrideOverridesNothing,
+            FinalMethodOverride,
+            CovariantReturn,
+            CheckedExceptionWidening,
+            SuperConstructorRequired,
+            LambdaArity,
+            InaccessibleMember,
+            StaticContextAccess,
+            UnresolvedImport,
+            RedundantImport,
+            DuplicateImport,
+            UnusedImport,
+            IncompatibleInstanceof,
+            InstantiateAbstract,
+            UnreachableCatch,
+            RedundantMultiCatch,
+            NonAutoCloseableResource,
+            IllegalDeclaration,
+            AnnotationNotApplicable,
+            MissingMethodBody,
+            TypeNameMismatchFile,
+            PackageMismatch,
+            SpecialFileContent,
+            FeatureRequiresNewerJava,
+            DuplicateMethod,
+            ErasureClash,
+            DuplicateDeclaration,
+            DuplicateInterface,
+            ImportCollision,
+            RecursiveConstructor,
+            RecordConstructor,
+            MethodNamedLikeConstructor,
+            FinalAssignment,
+            DefiniteAssignment,
+            CapturedVariableNotFinal,
+            NotAFunctionalInterface,
+            IllegalGenericUsage,
+            UnreachableStatement,
+            NotAStatement,
+            MissingReturn,
+            ReturnValueFromVoid,
+            SwitchFallthrough,
+            FinallyAbrupt,
+            IllegalSwitchSelector,
+            SwitchExpressionIncomplete,
+            DuplicateCaseLabel,
+            SelfAssignment,
+            DivisionByZero,
+            EmptyStatement,
+            StringReferenceEquality,
+            VarTypeInferenceFailed,
+            SyntaxError,
+            MissingToken,
+        ]
+    };
 }

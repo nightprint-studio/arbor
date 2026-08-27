@@ -32,7 +32,7 @@ pub use bennu_web::prelude::{StatementKind, StatementRecord, StatementTarget};
 // Cross-file references / find-usages + the caret classifier (docs §5 #7).
 pub use crate::refs::{
     build_reference_index, build_reference_index_incremental, classify_caret, classify_target,
-    references, DeclKey, IncrementalBuild, LangLevel, ReferenceIndex, ReferencesResult,
+    references, AliasUsages, DeclKey, IncrementalBuild, LangLevel, ReferenceIndex, ReferencesResult,
     RenameTarget, SourceFile, UsageLocation,
 };
 
@@ -58,8 +58,11 @@ pub use bennu_query::prelude::{ProjectView, RecordedDeps};
 pub use crate::rename::{
     file_rename_for, find_member_name_span, find_member_name_spans, plan_types, rename_apply,
     rename_plan, resolve_declaration, DeclarationLocation, Edit, EditReason, FileEdits, FileRename,
-    HoverInfo, RenameEngine, RenamePlan, TypeRename,
+    HoverInfo, RenamePlan, SubtypeMap, TypeRename,
 };
+// The project's semantic model — what every whole-project question is answered from. Consumers hold
+// one of these per open project; the free functions above are how it answers.
+pub use crate::engine::SemanticEngine;
 // The rename planner's project-source input unit + the type-declaration name-span finder now live
 // in the base crates (`bennu-query` / `bennu-java`); re-surfaced here as part of the rename API.
 pub use bennu_java::prelude::find_type_name_span;
@@ -83,4 +86,15 @@ pub use crate::java_index::{
     file_records_from_source, parallel_map, parallel_map_capped, project_type_map,
     read_java_sources, read_source_for_index, set_background_workers, ClassDecl,
     NonCompliantSource, ProjectBuild, ProjectSources,
+};
+
+// A field is also known by the accessors nobody wrote — what a rename must carry, and what
+// find-usages must find. One answer for both.
+pub use crate::rename::{generated_aliases, FieldAlias};
+
+// Call / type hierarchy over the Java engine — the same reference index find-usages reads, walked
+// as a tree. Entered through `SemanticEngine::prepare_hierarchy` / `hierarchy_step`; the types are
+// here because the be layer maps them onto the wire.
+pub use crate::hierarchy::{
+    HierarchyCallSite, HierarchyDirection, HierarchyHandle, HierarchyItem,
 };

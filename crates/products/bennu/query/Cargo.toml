@@ -18,3 +18,9 @@ bennu-java = { path = "../java" }
 bennu-proto = { path = "../proto" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
+# The parse tree, for the queries that are about a POSITION in the file rather than about a type:
+# which call the caret is inside (`hints::signature_at`) and which argument each hint belongs to
+# (`hints::inlay_hints`). Everything else here asks `bennu-java` for an answer and never sees a
+# node, which is why this arrived late. Pinned to the workspace's single `links = "tree-sitter"`
+# version — it is a native library, so two versions in one binary do not link.
+tree-sitter = "0.25"

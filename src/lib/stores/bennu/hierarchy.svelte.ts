@@ -1,10 +1,14 @@
 /**
  * The call / type hierarchy — one tree, fetched a level at a time.
  *
- * Both hierarchies live in one store for the same reason they share a wire type: the protocol gives
- * them the same shape, and the question they answer differs only in direction. A call hierarchy walks
- * *who calls this* or *what this calls*; a type hierarchy walks *what this is built on* or *what is
- * built on this*. Four directions, one tree, one panel.
+ * Both hierarchies live in one store for the same reason they share a wire type: the question they
+ * answer differs only in direction. A call hierarchy walks *who calls this* or *what this calls*; a
+ * type hierarchy walks *what this is built on* or *what is built on this*. Four directions, one
+ * tree, one panel.
+ *
+ * Which ENGINE answers is not this store's business either. A `.java` buffer is answered by Bennu's
+ * own engine over the whole-project reference index and a `.rs` one by rust-analyzer; the backend
+ * routes on the file, and both produce the same node.
  *
  * ## Why it is lazy, and not a depth limit
  *
@@ -16,17 +20,17 @@
  *
  * ## The handle is the identity
  *
- * A node's `handle` is the server's own opaque item, sent back verbatim to ask for its children.
- * Re-deriving one from a node's name and position would be asking about something the server never
+ * A node's `handle` is the engine's own opaque item, sent back verbatim to ask for its children.
+ * Re-deriving one from a node's name and position would be asking about something the engine never
  * offered — see the wire type. This store therefore never constructs a node; it only ever passes
  * back what it was given.
  */
 
 import { SvelteSet } from 'svelte/reactivity';
 import {
-  lspPrepareHierarchy, lspHierarchyStep,
-  type LspHierarchyDirection, type LspHierarchyNode,
-} from '$lib/ipc/bennu/lsp';
+  prepareHierarchy, hierarchyStep,
+  type HierarchyDirection, type HierarchyNode,
+} from '$lib/ipc/bennu/hierarchy';
 
 /** Which hierarchy is on screen. */
 export type HierarchyKind = 'calls' | 'types';
@@ -35,17 +39,17 @@ export type HierarchyKind = 'calls' | 'types';
 export interface HierarchyRow {
   /** Position in the tree (`0/2/1`), stable while the tree stands — the Tree widget's node id. */
   id: string;
-  node: LspHierarchyNode;
+  node: HierarchyNode;
   /** `null` until this level has been fetched. */
   children: HierarchyRow[] | null;
   loading: boolean;
-  /** The server answered, and there was nothing — a leaf we *know* is a leaf, drawn without a
+  /** The engine answered, and there was nothing — a leaf we *know* is a leaf, drawn without a
    *  chevron. Distinct from `children === null`, which is "not asked yet". */
   exhausted: boolean;
 }
 
 /** The directions each hierarchy offers, in the order the panel shows them. */
-export const DIRECTIONS: Record<HierarchyKind, { id: LspHierarchyDirection; label: string }[]> = {
+export const DIRECTIONS: Record<HierarchyKind, { id: HierarchyDirection; label: string }[]> = {
   calls: [
     { id: 'incoming', label: 'Callers' },
     { id: 'outgoing', label: 'Callees' },
@@ -60,13 +64,13 @@ function createBennuHierarchyStore() {
   let kind = $state<HierarchyKind>('calls');
   // The default per kind is the question you actually have when you ask. For calls that is "who
   // calls this" — you are reading a function and want to know what depends on it. For types it is
-  // "what implements this", which on a Rust trait is the list a reader is looking for; supertypes of
+  // "what implements this", which on an interface or a trait is the list a reader wants; supertypes of
   // a concrete type is a shorter and rarer answer.
-  let direction = $state<LspHierarchyDirection>('incoming');
+  let direction = $state<HierarchyDirection>('incoming');
   let roots = $state<HierarchyRow[]>([]);
   /** What the tree is about — the item the caret was on. Shown in the header. */
   let subject = $state<string | null>(null);
-  /** Any path inside the workspace: which server answers a step. The file the hierarchy was opened
+  /** Any path inside the workspace: which engine answers a step. The file the hierarchy was opened
    *  from, which is also correct when that file is a dependency's source (see `session_covering`). */
   let scope = $state<string | null>(null);
   let loading = $state(false);
@@ -77,8 +81,8 @@ function createBennuHierarchyStore() {
   let openNonce = $state(0);
   const expanded = new SvelteSet<string>();
 
-  /** Wrap the server's nodes as unfetched rows under `parentId`. */
-  function rowsOf(nodes: LspHierarchyNode[], parentId: string): HierarchyRow[] {
+  /** Wrap the engine's nodes as unfetched rows under `parentId`. */
+  function rowsOf(nodes: HierarchyNode[], parentId: string): HierarchyRow[] {
     return nodes.map((node, i) => ({
       id: parentId ? `${parentId}/${i}` : String(i),
       node,
@@ -116,12 +120,12 @@ function createBennuHierarchyStore() {
     if (row.children !== null || row.loading) return;
     row.loading = true;
     try {
-      const found = await lspHierarchyStep(scope, row.node.handle, direction);
+      const found = await hierarchyStep(scope, row.node.handle, direction);
       row.children = rowsOf(found, id);
       row.exhausted = found.length === 0;
     } catch {
       // A step that failed is not a leaf: leaving `children` null lets it be tried again, which is
-      // the right outcome for a server that was busy or restarting.
+      // the right outcome for a server that was busy or an index still building.
       row.children = null;
       row.exhausted = false;
     } finally {
@@ -163,7 +167,7 @@ function createBennuHierarchyStore() {
       message = null;
       loading = true;
       try {
-        const found = await lspPrepareHierarchy(file, source, offset, k === 'calls');
+        const found = await prepareHierarchy(file, source, offset, k === 'calls');
         if (found.length === 0) {
           message = k === 'calls'
             ? 'No function or method at the caret.'
@@ -177,7 +181,7 @@ function createBennuHierarchyStore() {
         // a panel that opens showing one row and a chevron has answered nothing yet.
         await expand(roots[0].id);
       } catch {
-        message = 'The language server could not build this hierarchy.';
+        message = 'This hierarchy could not be built.';
       } finally {
         loading = false;
       }
@@ -191,7 +195,7 @@ function createBennuHierarchyStore() {
 
     /** Walk the other way. The roots stay — it is the same subject, asked the opposite question —
      *  and every fetched level is discarded, because those answers were about the old direction. */
-    setDirection(d: LspHierarchyDirection) {
+    setDirection(d: HierarchyDirection) {
       if (d === direction) return;
       direction = d;
       collapseAll();

@@ -98,6 +98,33 @@
   <code>setValue(int value)</code> does not report its own parameter as a use of
   <code>this.value</code>. A declaration is never a use of itself.
 </p>
+<h2>Call and type hierarchy</h2>
+<p>
+  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> on a method opens its <strong>callers</strong>;
+  <kbd>Ctrl</kbd> + <kbd>H</kbd> opens the <strong>type hierarchy</strong> of the class you are in —
+  the caret may be anywhere inside it. Both land in the Hierarchy panel at the bottom, which has a
+  direction chip to walk the other way: callees, or what a type is built on. The tree expands one
+  level at a time, so a recursive chain is something you walk into as far as you care to.
+</p>
+<p>
+  It is the same index find-usages reads, which is why the two agree — and why the callers of a
+  method declared on an <strong>interface</strong> include the ones written against an
+  implementation, and the other way round. That is the same family a rename carries.
+</p>
+<p>
+  A caller row jumps to the <em>call</em> rather than to the head of the method containing it, and
+  says <code>2×</code> when there is more than one call to the same thing inside it. A call inside a
+  field initialiser or a static block has no method to name, so it is filed under its class, and
+  that row is a leaf.
+</p>
+<p>
+  Two honest limits. Calls into a <strong>dependency</strong> are not there: the index records an
+  edge only when the callee is the project's own code, which is what keeps the list about your code.
+  And <strong>overloads collapse</strong> — <code>process(String)</code> and
+  <code>process(int)</code> are one row, because the index keys a method by its name. A supertype
+  that lives in a jar does appear in a type hierarchy (a class that <code>extends HttpServlet</code>
+  is not built on nothing) and can be expanded upward, but has no source to jump to.
+</p>
 <h2>Hover</h2>
 <p>
   Rest the pointer on a class, method or field to see a card with what it is (a tag: class,

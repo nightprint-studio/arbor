@@ -5,6 +5,7 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import TerminalInstance from './TerminalInstance.svelte';
+  import { endSession } from './session';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -41,8 +42,11 @@
     uiStore.setPanel('settings');
   }
 
+  /** Close a terminal for good: the tab, the PTY, and the xterm session behind it. Ending the
+   *  session is what an unmount must NOT do — see `session.ts`. */
   async function closeTab(id: string) {
     terminalStore.removeTab(id);
+    endSession(id);
     try { await terminalClose(id); } catch { /* already gone */ }
   }
 

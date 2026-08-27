@@ -24,3 +24,21 @@ pub use crate::source::PlanFile;
 // Inherited ("super") members of a type — the Structure panel's lazy "Inherited" bucket. Reuses the
 // resolver's supertype walk (superclass + interfaces), one level up from the type's own members.
 pub use crate::inherited::{inherited_members, InheritedMember, InheritedSource};
+
+// Which methods the class under the caret can override — the "Implement / override methods"
+// dialog's list, grouped by the supertype that declares them.
+pub use crate::overridable::{by_declaring_type, overridable_at, Overridable};
+
+// The accessibility rules the queries share (who can see what).
+pub use crate::access::{package_of, same_package, same_top_level};
+
+// What the editor draws around a call: the signature of the one the caret is inside, and the
+// parameter names / inferred `var` types drawn between the code.
+pub use crate::hints::{inlay_hints, signature_at, InlayHint, SignatureHelp};
+
+// Turning a resolved member back into the text a person reads — shared so two features cannot
+// disagree about what a method's parameters are called.
+pub use crate::member_text::{
+    named_parameters, parameters, render_param, render_signature, render_type,
+    signature_param_names, simple_of, split_top_level,
+};

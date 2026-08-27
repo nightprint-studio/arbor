@@ -367,10 +367,23 @@ fn by_file(config: &DebugConfig) -> Vec<(String, Vec<SourceBreakpoint>)> {
         if !bp.enabled {
             continue;
         }
-        grouped
-            .entry(bp.file.replace('\\', "/"))
-            .or_default()
-            .push(SourceBreakpoint { line: bp.line, ..SourceBreakpoint::default() });
+        grouped.entry(bp.file.replace('\\', "/")).or_default().push(SourceBreakpoint {
+            line: bp.line,
+            // Sent as the adapter's OWN expression, not translated. Bennu's condition grammar
+            // exists because JDWP has no evaluator and one had to be written; an adapter already
+            // has a real one, its docs describe it, and reimplementing a subset here would be a
+            // strictly worse language that also disagreed with everything the user has read.
+            condition: (!bp.condition.trim().is_empty()).then(|| bp.condition.clone()),
+            // `%N` is CodeLLDB's "every Nth hit". DAP does not define the syntax — the spec says
+            // the adapter interprets `hitCondition` as it sees fit — so this is a best effort that
+            // an adapter reading it differently will get differently, and the docs say so rather
+            // than promising the two engines behave alike.
+            //
+            // `0` and `1` are every hit and are sent as nothing rather than as `%1`: expressing "no
+            // restriction" must never be the thing that makes a breakpoint fail to install.
+            hit_condition: (bp.hit_count > 1).then(|| format!("%{}", bp.hit_count)),
+            ..SourceBreakpoint::default()
+        });
     }
     grouped.into_iter().collect()
 }
@@ -478,6 +491,10 @@ impl SessionHandler for Events {
             line,
             verified: breakpoint.verified,
             message: breakpoint.message.unwrap_or_default(),
+            // A native condition is the adapter's own expression, evaluated inside the adapter —
+            // so a bad one comes back as a refusal to verify, in `message`, and there is no
+            // separate answer for Bennu to report here.
+            condition_error: String::new(),
         };
         self.sink.emit(
             EVT_DEBUG_BREAKPOINTS,
@@ -608,7 +625,7 @@ mod tests {
     }
 
     fn bp(file: &str, line: u32, enabled: bool) -> BpConfig {
-        BpConfig { file: file.to_string(), line, enabled }
+        BpConfig { file: file.to_string(), line, enabled, ..BpConfig::default() }
     }
 
     /// DAP replaces a file's WHOLE set per request, so they have to be grouped: one request per
@@ -636,6 +653,19 @@ mod tests {
     fn windows_separators_are_normalised_before_they_reach_the_adapter() {
         let grouped = by_file(&config(vec![bp(r"C:\p\src\main.rs", 3, true)]));
         assert_eq!(grouped[0].0, "C:/p/src/main.rs");
+    }
+
+    /// A condition goes to the adapter verbatim — it is the adapter's language, not Bennu's — and
+    /// an empty one is **omitted** rather than sent as `""`, which some adapters read as an
+    /// expression that never holds.
+    #[test]
+    fn a_condition_reaches_the_adapter_unchanged_and_an_empty_one_is_not_sent() {
+        let mut with = bp("/p/src/main.rs", 10, true);
+        with.condition = "i > 5".to_string();
+        let grouped = by_file(&config(vec![with, bp("/p/src/main.rs", 20, true)]));
+        let lines = &grouped[0].1;
+        assert_eq!(lines[0].condition.as_deref(), Some("i > 5"));
+        assert_eq!(lines[1].condition, None);
     }
 
     /// Rust has no caught/uncaught throwable. "Any throw" becomes the adapter's panic filter; a named

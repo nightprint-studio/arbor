@@ -1,7 +1,7 @@
 //! Shared end-to-end harness for the `bennu-intel` integration tests.
 //!
 //! Each [`Project`] builds the **real** pipeline over a set of in-memory Java files: it
-//! persists a symbol index to a throwaway temp dir, opens a live `RenameEngine` (the real
+//! persists a symbol index to a throwaway temp dir, opens a live `SemanticEngine` (the real
 //! `IndexResolver` + reference walk), and exposes go-to-declaration / find-usages exactly as
 //! the backend serves them. No fakes — a test that passes here reflects production behaviour.
 //!
@@ -24,7 +24,7 @@ use bennu_classpath::prelude::{
 use bennu_index::prelude::PersistedIndex;
 use bennu_intel::prelude::{
     build_project_index_from_sources, rename_apply, CompletionItem, DeclarationLocation, Edit,
-    HoverInfo, ReferencesResult, RenameEngine, RenamePlan,
+    HierarchyDirection, HierarchyItem, HoverInfo, ReferencesResult, RenamePlan, SemanticEngine,
 };
 use bennu_query::prelude::{completion, IndexResolver, InheritedMember};
 
@@ -67,13 +67,13 @@ impl Drop for TempDir {
     }
 }
 
-/// A live project over the real index + rename engine.
+/// A live project over the real index + semantic engine.
 ///
 /// Field order matters: `engine` (which mmaps the persisted index) is declared before `_temp`
 /// so it drops FIRST, releasing the mapping before the temp dir is removed (Windows os error
 /// 1224 otherwise).
 pub struct Project {
-    engine: RenameEngine,
+    engine: SemanticEngine,
     /// A second resolver over the SAME persisted index, kept for member-access completion.
     /// The engine's own resolver is `project_only` + private; completion wants an
     /// `IndexResolver` it can pass to `completion(...)`, so we open one here. It mmaps the
@@ -95,7 +95,7 @@ impl Project {
         Self::build(files, jdk, false)
     }
 
-    /// Like [`Project::new`], but the rename engine also resolves the faked JDK stream types
+    /// Like [`Project::new`], but the semantic engine also resolves the faked JDK stream types
     /// ([`StreamJdk`]) — i.e. it gets the kind of fully-resolving resolver the provider lends it
     /// in production, instead of a project-only one. Use for anything that types a receiver
     /// THROUGH a library generic.
@@ -142,7 +142,7 @@ impl Project {
                 Arc::new(r) as Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>
             });
 
-        let engine = RenameEngine::for_project(
+        let engine = SemanticEngine::for_project(
             &index_dir,
             jdk,
             &pairs,
@@ -151,7 +151,7 @@ impl Project {
             shared,
             &|_, _| {},
         )
-        .expect("build rename engine");
+        .expect("build semantic engine");
 
         // A completion resolver over the same on-disk index (JDK-free — project types only).
         let persisted = PersistedIndex::open(&blob, &fst).expect("open index for completion");
@@ -246,6 +246,29 @@ impl Project {
         self.rename(file, offset, new_name)
             .map(|p| rename_apply(&p))
             .unwrap_or_default()
+    }
+
+    /// The root of the CALL hierarchy for the symbol at `file`:`offset` (empty on a caret that is
+    /// not on a project method).
+    pub fn call_hierarchy(&self, file: &str, offset: usize) -> Vec<HierarchyItem> {
+        self.engine
+            .prepare_hierarchy(file, self.source(file), offset, true)
+    }
+
+    /// The root of the TYPE hierarchy for the symbol at `file`:`offset` — a caret on a member
+    /// climbs to its owner.
+    pub fn type_hierarchy(&self, file: &str, offset: usize) -> Vec<HierarchyItem> {
+        self.engine
+            .prepare_hierarchy(file, self.source(file), offset, false)
+    }
+
+    /// One level below `item`, in `direction`.
+    pub fn hierarchy_step(
+        &self,
+        item: &HierarchyItem,
+        direction: HierarchyDirection,
+    ) -> Vec<HierarchyItem> {
+        self.engine.hierarchy_step(&item.handle, direction)
     }
 
     /// The inherited ("super") members of the type named `type_name` declared at `file`:`line`

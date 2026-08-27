@@ -168,15 +168,21 @@ fn assign_check(
     verb: &str,
     out: &mut Vec<Diagnostic>,
 ) {
-    // A CHAINED method call (`a.b().c()`) is where our shallow generic substitution
-    // (`infer.rs::substitute_generics`) is known-unreliable: it maps a callee's return type variable
-    // to the RECEIVER's element type even when that variable is actually bound by an ARGUMENT. E.g.
-    // `list.stream().map(X::getId).max(..).orElse(null)` — `map`'s result type comes from `X::getId`,
-    // not the stream element, so the chain mis-infers as the element type (`X`) instead of `Long`.
-    // Hard-flagging a type mismatch off that guess would be a false positive (the crate's cardinal
-    // rule forbids it), so we SKIP the compat check for chained calls — a genuine mismatch inside a
-    // chain is left to the real compiler. Single calls (`p.dog()`) and plain names stay checked.
-    if is_chained_call(&val) {
+    // A chain that passes a **function** — a lambda or a method reference — is the one shape whose
+    // result type this inference cannot reach: `list.stream().map(X::getId).max(…).orElse(null)` is
+    // a `Long` only because `X::getId` says so, and typing a method reference is not something the
+    // walk does. It leaves the variable unresolved, which is the honest answer, and a mismatch
+    // computed against an unresolved variable would be noise — so a chain like that is skipped
+    // outright and left to the real compiler.
+    //
+    // Every OTHER chain is checked. It used to be that all of them were skipped, because generic
+    // substitution once mapped a method-level type variable onto the receiver's element type and
+    // produced a confidently wrong concrete answer. It no longer does — an unresolvable variable
+    // comes back as itself, and `definite_assign_mismatch` cannot make a diagnostic out of one
+    // (`concrete_binary` rejects it). Skipping the rest was therefore costing real errors:
+    // `Optional.ofNullable(repo.findKind(id)).orElse(null)` returned as an `Integer` is a mismatch
+    // in the code someone actually wrote, and it lived in a chain.
+    if passes_a_function(&val) {
         return;
     }
     let Some(value_ty) = infer_node_type_cached(root, source, symbols, &val, resolver, cache)
@@ -317,9 +323,28 @@ fn first_value_child(ret: Node) -> Option<Node> {
 /// invocation. Our shallow generic substitution can yield a confident-but-wrong type through a chain
 /// (an argument-bound type variable mis-bound to the receiver's element type — the `Stream.map`/
 /// `Optional.orElse` case), so we never hard-flag a compat error off a chained value.
-fn is_chained_call(val: &Node) -> bool {
-    val.kind() == "method_invocation"
-        && val.child_by_field_name("object").is_some_and(|o| o.kind() == "method_invocation")
+/// Whether `val` — or anything it is chained off — hands a **lambda or method reference** to a call.
+///
+/// That is the marker of a result type this inference can't compute: the type variable is bound by
+/// the *function*, and typing a function is not something the walk does. Anything the chain does
+/// after that point is computed from an unresolved variable.
+fn passes_a_function(val: &Node) -> bool {
+    let mut cur = Some(*val);
+    while let Some(n) = cur {
+        if n.kind() != "method_invocation" {
+            return false;
+        }
+        if let Some(list) = n.child_by_field_name("arguments") {
+            let mut c = list.walk();
+            for arg in list.named_children(&mut c) {
+                if matches!(arg.kind(), "lambda_expression" | "method_reference") {
+                    return true;
+                }
+            }
+        }
+        cur = n.child_by_field_name("object");
+    }
+    false
 }
 
 /// The nearest enclosing `method_declaration`, stopping at a `lambda_expression` (a `return` inside a
@@ -382,11 +407,22 @@ mod tests {
         let mut members = HashMap::new();
         members.insert("java/lang/Object".to_string(), cls(None, vec![]));
         members.insert("com/acme/Animal".to_string(), cls(Some("java/lang/Object"), vec![]));
-        // Dog carries a `cat() -> Cat` method so a CHAINED call (`p.dog().cat()`) can be inferred to a
-        // concrete type in the chained-call-skip test (proving the skip, not an inference miss).
+        // Dog carries `cat() -> Cat` so a CHAINED call (`p.dog().cat()`) infers to a concrete type,
+        // and `pick(Object) -> Cat` so a chain that passes a LAMBDA can be written — the one chain
+        // shape that is still skipped.
         members.insert(
             "com/acme/Dog".to_string(),
-            cls(Some("com/acme/Animal"), vec![getter("cat", "com/acme/Cat")]),
+            cls(
+                Some("com/acme/Animal"),
+                vec![
+                    getter("cat", "com/acme/Cat"),
+                    Member::method(
+                        "pick",
+                        TypeRef::simple("com/acme/Cat".to_string()),
+                        vec![TypeRef::simple("java/lang/Object".to_string())],
+                    ),
+                ],
+            ),
         );
         members.insert("com/acme/Cat".to_string(), cls(Some("com/acme/Animal"), vec![]));
         members.insert("com/acme/Widget".to_string(), cls(Some("java/lang/Object"), vec![]));
@@ -535,21 +571,33 @@ mod tests {
     }
 
     #[test]
-    fn chained_call_return_is_not_flagged() {
-        // `p.dog().cat()` is a CHAINED call: even though Cat isn't a Widget, our shallow generic
-        // substitution can't be trusted through a chain (the Stream.map/Optional.orElse mis-typing
-        // class), so we never hard-flag it — left to the compiler. The single-call form IS still
-        // flagged (see `return_wrong_type_is_flagged`), so this proves the chain-only skip.
+    fn a_mismatch_at_the_end_of_a_chain_is_flagged() {
+        // `p.dog().cat()` is a `Cat`, which is not a `Widget`. A chain used to be skipped wholesale;
+        // what is skipped now is only a chain whose type depends on a function it was passed.
         let src = "class C { Provider p; Widget m() { return p.dog().cat(); } }";
         let d: Vec<String> =
             type_compat_errors(src, &resolver()).into_iter().map(|x| x.message).collect();
-        assert!(d.is_empty(), "{d:?}");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`Cat` cannot be returned as `Widget`"), "{d:?}");
     }
 
     #[test]
-    fn chained_call_assignment_is_not_flagged() {
-        // Same guard on an assignment: `Widget w = p.dog().cat();` must not be hard-flagged.
-        assert!(diags("Widget w = p.dog().cat();").is_empty());
+    fn a_mismatch_assigned_from_a_chain_is_flagged() {
+        let d = diags("Widget w = p.dog().cat();");
+        assert_eq!(d.len(), 1, "{d:?}");
+    }
+
+    /// A lambda anywhere in the chain binds a type variable this inference can't read, so the whole
+    /// chain is left to the compiler — even though the fixture's `pick` really does return a `Cat`.
+    #[test]
+    fn a_chain_that_passes_a_lambda_is_skipped() {
+        assert!(diags("Widget w = p.dog().pick(x -> x);").is_empty());
+    }
+
+    /// Same for a method reference — the shape (`stream().map(X::getId)`) the skip exists for.
+    #[test]
+    fn a_chain_that_passes_a_method_reference_is_skipped() {
+        assert!(diags("Widget w = p.dog().pick(String::valueOf);").is_empty());
     }
 
     #[test]

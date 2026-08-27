@@ -7,7 +7,7 @@
 //!
 //! Returns the wire [`CompletionItem`] the provider forwards unchanged.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use bennu_classpath::prelude::MemberIndex as CpMemberIndex;
 use bennu_java::prelude::{
@@ -16,6 +16,8 @@ use bennu_java::prelude::{
 };
 use bennu_proto::prelude::CompletionItem;
 
+use crate::access::{same_package, same_top_level};
+use crate::rank;
 use crate::resolver::IndexResolver;
 
 /// The identifier spliced in at the caret to make a `receiver.` buffer parse while the enclosing
@@ -56,6 +58,9 @@ pub fn completion<M: CpMemberIndex>(
         s
     };
 
+    // Whether the receiver names a TYPE rather than a value — the ranking's strongest term, since
+    // after `Color.` an instance member is not merely unlikely, it does not compile.
+    let mut receiver_is_type = false;
     let recv = match infer_receiver_type(&repaired, dot_offset, resolver) {
         Some(r) => r,
         // A **type** receiver — `Color.RED`, `Files.copy(…)`, `Config.MAX`. Inference types
@@ -63,7 +68,10 @@ pub fn completion<M: CpMemberIndex>(
         // completed to an empty list. Resolving the written name AS a type is the other half of
         // the same question, and the one `refs` already asks on the go-to path.
         None => match type_receiver(&repaired, dot_offset, resolver) {
-            Some(r) => r,
+            Some(r) => {
+                receiver_is_type = true;
+                r
+            }
             None => return Vec::new(),
         },
     };
@@ -90,30 +98,88 @@ pub fn completion<M: CpMemberIndex>(
 
     let mut out = Vec::new();
     let mut seen = HashSet::new();
+    let ctx = rank::Context::new(source, receiver_is_type);
     collect_members(
         resolver,
         &recv,
         &prefix,
         site.as_deref(),
+        0,
+        &ctx,
         &mut out,
         &mut seen,
         &mut HashSet::new(),
     );
-    // Deterministic order: fields then methods (kind tag), alphabetical within.
-    out.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.label.cmp(&b.label)));
-    out
+    collapse_overloads(&mut out);
+    // Most relevant first (see `rank`), and — because relevance ties are common and a popup that
+    // reshuffles between keystrokes is unusable — the old deterministic order underneath it:
+    // fields then methods, alphabetical within.
+    out.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then(a.item.kind.cmp(&b.item.kind))
+            .then(a.item.label.cmp(&b.item.label))
+    });
+    out.into_iter().map(|r| r.item).collect()
 }
 
-/// Whether a `private` member declared in `declaring` is accessible from within `site`: true iff
-/// they belong to the same top-level class — equal, or one nested in the other (its binary is the
-/// other's with a `/`-boundary suffix). Package vs nesting is `/`-ambiguous in a binary, but two
-/// *top-level* classes never prefix each other at a `/` boundary, so this only ever matches a real
-/// same-class / nesting relationship.
-fn same_top_level(declaring: &str, site: Option<&str>) -> bool {
-    let Some(site) = site else { return false };
-    declaring == site
-        || site.starts_with(&format!("{declaring}/"))
-        || declaring.starts_with(&format!("{site}/"))
+/// Fold a method's overloads into ONE row, counted in its detail.
+///
+/// They are collected separately — an override has to be told from an overload, and the parameters
+/// are what tells them apart — but a *list* of them is a list of rows that all insert the same
+/// text. Accepting a completion here writes the method's name; it does not write arguments, so
+/// there is no sense in which you can pick "the `Integer` one". Three `fallback` rows are three
+/// chances to choose and one outcome, and they push the members you were looking for off the popup.
+///
+/// Nothing is hidden by the fold: the detail says `+2 overloads`, and the **parameter hints** strip
+/// shows the whole set the moment you type `(` — which is when knowing them starts to matter and
+/// when the editor can show them properly, one at a time, with the argument you are on marked.
+///
+/// (This is why the fluent-accessor case the per-parameter dedup exists for is safe: a Lombok
+/// `name()` and its `name(String)` still both reach here, and the row says there are two.)
+fn collapse_overloads(out: &mut Vec<Ranked>) {
+    let mut kept: Vec<Ranked> = Vec::with_capacity(out.len());
+    // `(kind, label)` → where its row is in `kept`, and how many have folded into it so far.
+    let mut at: HashMap<(String, String), (usize, usize)> = HashMap::new();
+    for r in out.drain(..) {
+        if r.item.kind != "method" {
+            kept.push(r);
+            continue;
+        }
+        let key = (r.item.kind.clone(), r.item.label.clone());
+        match at.get_mut(&key) {
+            Some((idx, extra)) => {
+                *extra += 1;
+                // The most relevant of the set is the one whose signature is shown — a deprecated
+                // overload should not become the face of a method that also has a current one.
+                if r.score > kept[*idx].score {
+                    kept[*idx].score = r.score;
+                    kept[*idx].item.detail = r.item.detail.clone();
+                }
+                let n = *extra;
+                let base = kept[*idx]
+                    .item
+                    .detail
+                    .as_deref()
+                    .map(|d| d.split("  +").next().unwrap_or(d).to_string());
+                kept[*idx].item.detail = Some(match base {
+                    Some(d) => format!("{d}  +{n} overload{}", if n == 1 { "" } else { "s" }),
+                    None => format!("+{n} overload{}", if n == 1 { "" } else { "s" }),
+                });
+            }
+            None => {
+                at.insert(key, (kept.len(), 0));
+                kept.push(r);
+            }
+        }
+    }
+    *out = kept;
+}
+
+/// A candidate and how relevant it is here, before the sort turns the pair back into a list.
+struct Ranked {
+    score: i32,
+    item: CompletionItem,
 }
 
 /// The receiver read as a TYPE name — the other half of "what is before this dot".
@@ -180,12 +246,19 @@ fn split_prefix(source: &str, caret: usize) -> (usize, String) {
 /// Walk `recv`'s class + its superclass/interfaces, collecting members whose name
 /// starts with `prefix`. Picks up inherited members; dedups overrides by [`dedup_key`] — which keeps
 /// overloads distinct, so an overload set is offered one entry per signature.
+///
+/// `depth` is how far up the hierarchy this level is (`0` = the receiver's own type). It is carried
+/// rather than recomputed because the walk is the only thing that knows it, and it is the term that
+/// puts a class's own methods above the ones it inherited.
+#[allow(clippy::too_many_arguments)]
 fn collect_members<M: CpMemberIndex>(
     resolver: &IndexResolver<M>,
     recv: &TypeRef,
     prefix: &str,
     site: Option<&str>,
-    out: &mut Vec<CompletionItem>,
+    depth: usize,
+    ctx: &rank::Context,
+    out: &mut Vec<Ranked>,
     seen: &mut HashSet<String>,
     visited: &mut HashSet<String>,
 ) {
@@ -199,7 +272,7 @@ fn collect_members<M: CpMemberIndex>(
     // `private` members of this level are offered only when the caret's class is the same top-level
     // class (a private is never inherited, so a supertype level's privates are simply never shown).
     let allow_private = same_top_level(bn, site);
-    add_matching(&cm, prefix, allow_private, out, seen);
+    add_matching(&cm, bn, prefix, allow_private, site, depth, ctx, out, seen);
 
     if let Some(sc) = &cm.superclass {
         collect_members(
@@ -207,6 +280,8 @@ fn collect_members<M: CpMemberIndex>(
             &TypeRef::simple(sc.clone()),
             prefix,
             site,
+            depth + 1,
+            ctx,
             out,
             seen,
             visited,
@@ -218,6 +293,8 @@ fn collect_members<M: CpMemberIndex>(
             &TypeRef::simple(iface.clone()),
             prefix,
             site,
+            depth + 1,
+            ctx,
             out,
             seen,
             visited,
@@ -225,32 +302,57 @@ fn collect_members<M: CpMemberIndex>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_matching(
     cm: &ClassMembers,
+    declaring: &str,
     prefix: &str,
     allow_private: bool,
-    out: &mut Vec<CompletionItem>,
+    site: Option<&str>,
+    depth: usize,
+    ctx: &rank::Context,
+    out: &mut Vec<Ranked>,
     seen: &mut HashSet<String>,
 ) {
     for m in cm.methods.iter().chain(cm.fields.iter()) {
         if !m.name.starts_with(prefix) {
             continue;
         }
+        // A constructor and a static initialiser are members of the class file, not things you can
+        // reach through a dot. `s.` used to open on eight `<init>` entries — they sort before every
+        // letter, so they were the first thing the popup showed on any String.
+        if m.name == "<init>" || m.name == "<clinit>" {
+            continue;
+        }
         // Hide a private member from an external / cross-class receiver (the common case: a field
-        // of another object). Protected/package stay visible — hiding them would need package +
-        // subclass context and risks dropping genuinely-accessible members.
+        // of another object). Protected stays visible — hiding it would need subclass context and
+        // risks dropping a genuinely-accessible member.
         if m.visibility == Visibility::Private && !allow_private {
+            continue;
+        }
+        // Package-private is visible only from the same package, and the JDK's own internals are
+        // full of it: `String.` opened on `COMPACT_STRINGS`, `LATIN1`, `UTF16` and
+        // `checkBoundsBeginEnd` before it reached anything you could write. See `same_package` for
+        // why this hides only when it is sure.
+        if m.visibility == Visibility::Package && !same_package(declaring, site) {
             continue;
         }
         if !seen.insert(dedup_key(m)) {
             continue;
         }
-        out.push(CompletionItem {
-            label: m.name.clone(),
-            kind: kind_tag(m.kind).to_string(),
-            detail: Some(render_detail(m)),
-            auto_import: None, // a member has no import to add
-            ..Default::default()
+        out.push(Ranked {
+            score: rank::score(m, declaring, depth, ctx),
+            item: CompletionItem {
+                label: m.name.clone(),
+                kind: kind_tag(m.kind).to_string(),
+                detail: Some(render_detail(m)),
+                auto_import: None, // a member has no import to add
+                // Carried on the wire for whoever draws it (the Java popup does not yet); the
+                // ranking is what puts it last today. One answer, asked once, so the two can
+                // never disagree about which member is meant.
+                deprecated: rank::is_deprecated(m),
+                ..Default::default()
+            },
         });
     }
 }
@@ -308,5 +410,96 @@ fn render_type(t: &TypeRef) -> String {
     } else {
         let args: Vec<String> = t.type_args.iter().map(render_type).collect();
         format!("{}<{}>", simple, args.join(", "))
+    }
+}
+
+
+#[cfg(test)]
+mod overload_collapse_tests {
+    use super::*;
+
+    fn item(kind: &str, label: &str, detail: &str, score: i32) -> Ranked {
+        Ranked {
+            score,
+            item: CompletionItem {
+                label: label.to_string(),
+                kind: kind.to_string(),
+                detail: Some(detail.to_string()),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn labels(v: &[Ranked]) -> Vec<String> {
+        v.iter().map(|r| r.item.label.clone()).collect()
+    }
+
+    /// The reported shape: three rows that all insert `fallback`, becoming one that says so.
+    #[test]
+    fn overloads_of_one_method_become_one_row() {
+        let mut v = vec![
+            item("method", "fallback", "fallback() : Integer", 10),
+            item("method", "fallback", "fallback(Integer) : void", 10),
+            item("method", "fallback", "fallback(Object) : void", 10),
+        ];
+        collapse_overloads(&mut v);
+        assert_eq!(labels(&v), vec!["fallback".to_string()]);
+        assert_eq!(
+            v[0].item.detail.as_deref(),
+            Some("fallback() : Integer  +2 overloads")
+        );
+    }
+
+    /// A single method keeps its detail untouched — no counter on something with nothing to count.
+    #[test]
+    fn a_lone_method_is_left_exactly_as_it_was() {
+        let mut v = vec![item("method", "solo", "solo() : void", 5)];
+        collapse_overloads(&mut v);
+        assert_eq!(v[0].item.detail.as_deref(), Some("solo() : void"));
+    }
+
+    #[test]
+    fn one_extra_overload_reads_singular() {
+        let mut v = vec![
+            item("method", "of", "of() : X", 1),
+            item("method", "of", "of(int) : X", 1),
+        ];
+        collapse_overloads(&mut v);
+        assert_eq!(v[0].item.detail.as_deref(), Some("of() : X  +1 overload"));
+    }
+
+    /// A field and a method of the same name are two different things you can write, so they stay
+    /// two rows — the fold is keyed on kind as well as name.
+    #[test]
+    fn a_field_and_a_method_of_the_same_name_stay_apart() {
+        let mut v = vec![
+            item("field", "name", "String name", 3),
+            item("method", "name", "name() : String", 3),
+        ];
+        collapse_overloads(&mut v);
+        assert_eq!(v.len(), 2, "{:?}", labels(&v));
+    }
+
+    /// The row shows the signature of the most relevant overload, not of whichever came first.
+    #[test]
+    fn the_most_relevant_overload_supplies_the_signature() {
+        let mut v = vec![
+            item("method", "run", "run(Object) : void", 1),
+            item("method", "run", "run() : void", 9),
+        ];
+        collapse_overloads(&mut v);
+        assert_eq!(v[0].item.detail.as_deref(), Some("run() : void  +1 overload"));
+        assert_eq!(v[0].score, 9, "and its score, so it ranks as the best of the set");
+    }
+
+    /// Different methods are not overloads of each other.
+    #[test]
+    fn different_names_are_not_folded() {
+        let mut v = vec![
+            item("method", "a", "a() : void", 1),
+            item("method", "b", "b() : void", 1),
+        ];
+        collapse_overloads(&mut v);
+        assert_eq!(labels(&v), vec!["a".to_string(), "b".to_string()]);
     }
 }

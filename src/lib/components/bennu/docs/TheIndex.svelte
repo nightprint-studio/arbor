@@ -20,6 +20,29 @@
   <kbd>Ctrl</kbd> + <kbd>F9</kbd>).
 </p>
 
+<h2>It keeps up with your edits</h2>
+<p>
+  The index is not a snapshot of the project as you opened it. As you type, the file you are editing
+  is re-read into it — so a method you have just written has its usages, and one you have just
+  stopped calling loses them. Nothing has to be saved, rebuilt or reopened for
+  <strong>find-usages</strong>, <strong>rename</strong> and <strong>hover</strong> to agree with
+  go-to-definition about what the code says.
+</p>
+<p>
+  When an edit changes what a file <em>declares</em> — a method added, renamed, removed, a signature
+  or a supertype changed — the files that resolve against it are re-read too, since their view of it
+  is what just moved. Typing inside a method body changes nothing anyone else resolves, so it costs
+  one file. <strong>Rebuild index</strong> is still there for the rare case where something looks
+  stale, but it is no longer what you reach for after adding a method.
+</p>
+<p>
+  <strong>Who extends whom</strong> keeps up in the same way. It matters more than it sounds: a
+  method rename carries its whole <em>override family</em> with it, so a class that has just started
+  implementing an interface has to be known to be one — otherwise the rename would move the
+  interface's method and leave that class declaring the old name, no longer overriding anything.
+  Changing an <code>extends</code> or <code>implements</code> clause re-files the type immediately.
+</p>
+
 <div class="callout">
   Everything is reachable from the keyboard. The <strong>Command Palette</strong>
   (<kbd>Ctrl</kbd> + <kbd>K</kbd>) lists the editor and tool-window actions; the tool windows toggle

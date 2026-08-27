@@ -8,7 +8,7 @@
 //! `source` file+line WHEN the declaring type resolves to project source (else `null`, like
 //! go-to-declaration for a JDK / jar member).
 //!
-//! Read-only, off the owning project's rename engine (the whole-project resolver + source
+//! Read-only, off the owning project's semantic engine (the whole-project resolver + source
 //! sets built off-thread on `bennu_open_project`). Returns `[]` (never an error) when no
 //! project owns the file, the engine is still building, or the type can't be resolved — the
 //! FE shows an empty bucket gracefully.

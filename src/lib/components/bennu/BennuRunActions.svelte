@@ -15,7 +15,9 @@
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
 </script>
 
-{#if bennuRunStore.running}
+<!-- The tab in front, not "a run": several programs can be going at once, and Stop in this
+     header is about the transcript underneath it. -->
+{#if bennuRunStore.activeIsLive}
   <!-- Red: it is the one action here that ends something, and the only one you cannot take back. -->
   <button
     class="ps-btn ps-btn-danger"

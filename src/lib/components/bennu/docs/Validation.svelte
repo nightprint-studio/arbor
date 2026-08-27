@@ -40,7 +40,11 @@
     and an assignment or <code>return</code> whose value isn't of the declared type — including
     <code>String</code>/number mixups like <code>int x = "1";</code> or <code>int y = "1" + 1;</code>.
     Reference types are compared only between concrete classes, so it never second-guesses interface
-    or generic code (boxing and widening are allowed).</li>
+    or generic code (boxing and widening are allowed). A <strong>fluent chain</strong> is checked
+    like anything else — <code>Optional.ofNullable(repo.kind()).orElse(null)</code> returned as an
+    <code>Integer</code> is caught — with one exception: a chain that is handed a <strong>lambda or
+    method reference</strong> takes its type from that function, which Bennu doesn't type, so it is
+    left to the compiler rather than guessed at.</li>
   <li><strong>Missing / wrong return</strong> — a non-<code>void</code> method that can finish without
     returning, a value returned from a <code>void</code> method or constructor, or a bare
     <code>return;</code> where a value is required.</li>
@@ -62,6 +66,10 @@
   <li><strong>Switch</strong> — a <code>switch</code> on a type it doesn't accept
     (<code>long</code>/<code>float</code>/<code>double</code>/<code>boolean</code>), and a
     <code>switch</code> <em>expression</em> arm that doesn't <code>yield</code> a value.</li>
+  <li><strong>Case labels</strong> — a label that can't match the selector: a number or a string
+    where the selector is an <strong>enum</strong> (an enum label has to be the unqualified name of a
+    constant), a name that is no constant of that enum, and a literal of the wrong family on a
+    <code>String</code> or boxed-integer selector.</li>
   <li><strong>Lambdas</strong> — a lambda whose parameter count doesn't match its target functional
     interface (or a target that isn't a functional interface).</li>
   <li><strong>Declaration &amp; modifier errors</strong> — an <code>abstract</code> method in a
@@ -77,7 +85,10 @@
     <code>package-info.java</code> and <code>module-info.java</code> files are held to their
     restricted shape.</li>
   <li><strong>Java version</strong> — a feature newer than the project's target level (records,
-    sealed types, <code>var</code>, text blocks, switch arrows, lambdas, …). A <code>var</code>
+    sealed types, <code>var</code>, text blocks, switch arrows, lambdas, …). What
+    <code>switch</code> accepts widened across releases, and each widening is caught where it is
+    written: a <code>String</code> selector needs Java 7, <code>yield</code> needs 14, and type
+    patterns, <code>when</code> guards and <code>case null</code> need 21. A <code>var</code>
     back-ported by Lombok (imported from <code>lombok</code>) is allowed below Java 10.</li>
   <li><strong>Imports</strong> — unused or duplicate imports, and a redundant wildcard import
     (<code>import java.lang.*;</code> or a wildcard on the file's own package, both already in scope).</li>
@@ -119,6 +130,37 @@
 <p>
   It's a best-effort check, so it complements <strong>Build</strong> (which runs the real compiler)
   rather than replacing it — more type checks arrive as the semantic engine grows.
+</p>
+
+<h2>Data flow</h2>
+<p>
+  Three checks follow a <em>value</em> through a method rather than reading a declaration: a member
+  reached on a local that is definitely <code>null</code>, a null check whose answer is already
+  known, and a value assigned to a local and overwritten before anything reads it.
+</p>
+<p>
+  The model is deliberately narrow. It reads a method's statements in order and <strong>forgets
+  everything at the first branch</strong> — an <code>if</code>, a loop, a <code>try</code>, a
+  <code>switch</code> — and it tracks <strong>locals only</strong>, never fields, since another
+  method could change a field between two lines. So it misses more than it finds, and that is the
+  trade: a flow analysis that is wrong accuses working code of throwing, and leaves the reader no
+  way to see why except to reconstruct it in their head.
+</p>
+
+<h2>Turning a check down</h2>
+<p>
+  Under Project Configuration → <strong>Inspections</strong>, every check has a severity you can set
+  to <strong>error</strong>, <strong>warning</strong>, <strong>weak</strong> or <strong>off</strong>.
+  That is a policy over <em>kinds</em> — the right shape for "this project does not care about unused
+  imports".
+</p>
+<p>
+  For one place rather than one kind, the source says so:
+  <code>&#64;SuppressWarnings("unused-import")</code> on the enclosing declaration, or a
+  <code>// bennu:ignore unused-import</code> comment on the offending line or the one above it. A
+  marker naming no code silences the line it governs. Javac's own vocabulary —
+  <code>unused</code>, <code>fallthrough</code>, <code>all</code> — is honoured where it overlaps, so
+  a legacy file that already carries it does not have to say the same thing twice.
 </p>
 
 <h2>Naming conventions</h2>

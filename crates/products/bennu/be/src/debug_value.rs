@@ -30,7 +30,7 @@
 // shadow `std`'s in a module whose functions all return `Result<T, String>`.
 use bennu_jdwp::prelude::{
     array_length, array_values, class_name, frame_this, frame_values, object_type, object_values,
-    string_value, superclass, Field, Id, Local, Tag, Value,
+    string_value, superclass, Field, Frame, Id, Local, Tag, Value,
 };
 use bennu_proto::prelude::DebugValue;
 
@@ -191,26 +191,40 @@ pub(crate) fn watch(
     frame: usize,
     expression: &str,
 ) -> Result<DebugValue, String> {
-    let steps = debug_path::parse(expression, debug_path::JAVA)?;
-    let mut walk = steps.into_iter();
-    let Some(Step::Field(first)) = walk.next() else {
-        return Err("a watch starts with a variable name".to_string());
+    let Some((thread, at)) = session.frame_at(frame) else {
+        return Err("the program is not stopped there".to_string());
     };
-
-    let mut value = root_value(session, frame, &first)?;
-    for step in walk {
-        value = follow(session, value, &step)?;
-    }
-
+    let steps = debug_path::parse(expression, debug_path::JAVA)?;
+    let value = walk_path(session, thread, &at, &steps)?;
     Ok(describe(session, expression, "watch", None, value))
+}
+
+/// Resolve an already-parsed path against a **named** frame of a thread.
+///
+/// Separate from [`watch`] because a breakpoint condition is evaluated in a frame the session has
+/// not announced a pause for — the VM stopped, the condition is being tested, and if it does not
+/// hold the program is let go without anyone ever being told it stopped. Going through
+/// `frame_at` would mean publishing a pause first and taking it back, which is a lie the panel
+/// would briefly render.
+pub(crate) fn walk_path(
+    session: &Session,
+    thread: Id,
+    at: &Frame,
+    steps: &[Step],
+) -> Result<Value, String> {
+    let Some(Step::Field(first)) = steps.first() else {
+        return Err("a path starts with a variable name".to_string());
+    };
+    let mut value = root_value(session, thread, at, first)?;
+    for step in &steps[1..] {
+        value = follow(session, value, step)?;
+    }
+    Ok(value)
 }
 
 /// The first segment: a local of the frame, else a field of its receiver — which is how
 /// watching a bare field name works inside an instance method.
-fn root_value(session: &Session, frame: usize, name: &str) -> Result<Value, String> {
-    let Some((thread, at)) = session.frame_at(frame) else {
-        return Err("the program is not stopped there".to_string());
-    };
+fn root_value(session: &Session, thread: Id, at: &Frame, name: &str) -> Result<Value, String> {
     let table = session.variables_of(at.location.class, at.location.method);
     if let Some(local) =
         table.iter().find(|l| l.name == name && l.in_scope(at.location.index))

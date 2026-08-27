@@ -357,6 +357,16 @@ fn session_of(id: &str) -> Option<Arc<Session>> {
 /// A breakpoint the way the session holds it: what the user set, plus what the VM made of it.
 struct Bp {
     at: Breakpoint,
+    /// The parsed condition, when there is one. Parsed **once**, when the set is installed, rather
+    /// than at each hit: a condition on a hot line is asked thousands of times a second, and a
+    /// parse error has to be reported when the breakpoint is set rather than the first time the
+    /// line happens to run.
+    condition: Option<crate::debug_cond::Cond>,
+    /// Why the condition could not be used — a parse error, or the last evaluation failure. Shown
+    /// on the breakpoint itself, because that is the thing that is broken.
+    condition_error: String,
+    /// How many times it has stopped the program this session — what a pass count counts.
+    hits: u32,
     /// Event requests to clear when it is removed or the set is replaced, each with the kind it
     /// was set with. The kind is carried rather than assumed because a single breakpoint holds
     /// both `BREAKPOINT` requests (where it is installed) and `CLASS_PREPARE` ones (what it is
@@ -365,6 +375,27 @@ struct Bp {
     requests: Vec<(u8, i32)>,
     verified: bool,
     message: String,
+}
+
+/// A configured breakpoint as the session holds it, with its condition parsed.
+///
+/// A condition that does not parse leaves the breakpoint **unconditional** and says so, rather than
+/// disabling it: a typo must not silently remove a breakpoint you are standing at, and a stop you
+/// did not want is recoverable in one keystroke while a stop that never happens is not.
+fn new_bp(at: Breakpoint) -> Bp {
+    let (condition, condition_error) = match crate::debug_cond::parse(&at.condition) {
+        Ok(parsed) => (parsed, String::new()),
+        Err(why) => (None, format!("condition ignored — {why}")),
+    };
+    Bp {
+        at,
+        condition,
+        condition_error,
+        hits: 0,
+        requests: Vec::new(),
+        verified: false,
+        message: String::new(),
+    }
 }
 
 /// Where a suspended thread is. Frame ids are valid **only** while it stays suspended —
@@ -490,7 +521,17 @@ impl Session {
                 // to hang the moment a watched class loads.
                 let _ = resume_thread(&self.client, thread);
             }
-            Event::Breakpoint { thread, .. } => self.on_stop(thread, "breakpoint", None),
+            Event::Breakpoint { request, thread, .. } => {
+                // A condition and a pass count are both checked HERE, after the VM has already
+                // stopped, because that is the only place the frame they talk about exists. When
+                // they do not hold the program is let go without anyone ever being told it
+                // stopped — which is also why a condition on a hot line costs what it costs.
+                if !self.should_stop(request, thread) {
+                    let _ = resume_vm(&self.client);
+                    return;
+                }
+                self.on_stop(thread, "breakpoint", None);
+            }
             Event::Step { thread, location, .. } => {
                 self.clear_step();
                 // A step that landed in generated code has arrived nowhere: keep going rather
@@ -506,6 +547,96 @@ impl Session {
             }
             Event::ThreadStart { .. } | Event::ThreadDeath { .. } | Event::Other { .. } => {}
         }
+    }
+
+    /// Whether the breakpoint behind `request` says to stop this time — condition first, then the
+    /// pass count.
+    ///
+    /// **In that order**, because the other one does not compose: "the third time `i > 5`" is a
+    /// question anybody might ask, while "`i > 5` on the third hit, whatever `i` was on the first
+    /// two" is not one anyone means. So a hit the condition rejected is not counted at all.
+    ///
+    /// A plain breakpoint still passes through here rather than short-circuiting, because the hit
+    /// count is worth having on every one of them — and this only runs when the VM has already
+    /// stopped, which costs milliseconds of round trips either way. A lock is not what to save here.
+    ///
+    /// `true` as well when the condition **could not be answered** — a null halfway down the path,
+    /// a field that is not there on this subclass. That is deliberate and is the whole safety
+    /// property of the feature: a condition that errors is a bug in the condition, the only way to
+    /// see it is to be standing there, and silently continuing would turn a typo into a breakpoint
+    /// that never fires and never explains itself. The reason is recorded on the breakpoint, so the
+    /// gutter and the Breakpoints window say why the stop happened.
+    fn should_stop(&self, request: i32, thread: Id) -> bool {
+        let Some((index, cond, every)) = ({
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            state
+                .breakpoints
+                .iter()
+                .position(|b| {
+                    b.requests.iter().any(|(k, r)| *k == kind::BREAKPOINT && *r == request)
+                })
+                .map(|i| {
+                    let bp = &state.breakpoints[i];
+                    (i, bp.condition.clone(), bp.at.hit_count)
+                })
+        }) else {
+            // A request nothing claims — the set was edited between the hit and this lock. Stop:
+            // the alternative silently swallows a breakpoint over a race.
+            return true;
+        };
+        if let Some(cond) = cond {
+            if !self.condition_holds(index, thread, &cond) {
+                return false;
+            }
+        }
+        self.count_hit(index, every)
+    }
+
+    /// Evaluate one breakpoint's condition in frame 0 of the stopped thread — the frame its line is
+    /// in. Read directly rather than through `Paused`, which is only set once a stop has been
+    /// announced: publishing a pause and taking it back is a state the panel would briefly render.
+    fn condition_holds(&self, index: usize, thread: Id, cond: &crate::debug_cond::Cond) -> bool {
+        let Some(frame) = frames(&self.client, thread).ok().and_then(|f| f.into_iter().next())
+        else {
+            self.note_condition(index, "condition skipped — the stopped thread has no frame");
+            return true;
+        };
+        match crate::debug_cond::holds(self, thread, &frame, cond) {
+            Ok(hit) => {
+                self.note_condition(index, "");
+                hit
+            }
+            Err(why) => {
+                self.note_condition(index, &format!("stopped anyway — {why}"));
+                true
+            }
+        }
+    }
+
+    /// Count a hit the condition accepted, and say whether the pass count lets it through.
+    ///
+    /// `every <= 1` is "every hit", so the counter still advances — the number is worth having on
+    /// its own ("is this line even running" is otherwise only answerable by adding a log line and
+    /// rebuilding), and it is what the Breakpoints window shows.
+    fn count_hit(&self, index: usize, every: u32) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(bp) = state.breakpoints.get_mut(index) else { return true };
+        bp.hits = bp.hits.saturating_add(1);
+        every <= 1 || bp.hits % every == 0
+    }
+
+    /// Record (and publish) what happened to a breakpoint's condition. Publishes only on a change,
+    /// so a condition that is fine does not emit an event on every hit of a hot line.
+    fn note_condition(&self, index: usize, why: &str) {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            let Some(bp) = state.breakpoints.get_mut(index) else { return };
+            if bp.condition_error == why {
+                return;
+            }
+            bp.condition_error = why.to_string();
+        }
+        self.emit_breakpoints();
     }
 
     /// Whether there is nothing to show at `at` — so a step that landed there has not arrived.
@@ -576,6 +707,10 @@ impl Session {
         };
         self.sink.emit(EVT_DEBUG_PAUSED, serde_json::to_value(payload).unwrap_or(json!({})));
         emit_status(&self.sink, &self.id, "paused", "", "");
+        // The hit counts moved, and a stop is the one moment they are worth publishing: they are
+        // read while the program is standing still, and emitting on every rejected hit of a hot
+        // line would be the slowest thing in the debugger.
+        self.emit_breakpoints();
     }
 
     /// A class this project declares just loaded — install whatever was waiting for it.
@@ -726,15 +861,7 @@ impl Session {
             let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             std::mem::replace(
                 &mut state.breakpoints,
-                wanted
-                    .into_iter()
-                    .map(|at| Bp {
-                        at,
-                        requests: Vec::new(),
-                        verified: false,
-                        message: String::new(),
-                    })
-                    .collect(),
+                wanted.into_iter().map(new_bp).collect(),
             )
         };
         for bp in &old {
@@ -936,6 +1063,8 @@ impl Session {
                     line: b.at.line,
                     verified: b.verified,
                     message: b.message.clone(),
+                    condition_error: b.condition_error.clone(),
+                    hits: b.hits,
                 })
                 .collect()
         };
@@ -1027,6 +1156,38 @@ pub struct NoArgs {}
 #[arbor_rpc::handler]
 fn bennu_step_excludes(_ctx: &BennuState, _args: NoArgs) -> Result<Vec<String>, String> {
     Ok(step_excludes())
+}
+
+/// Args for [`bennu_debug_check_condition`].
+#[derive(Deserialize)]
+pub struct CheckConditionArgs {
+    /// The file the breakpoint is in — which engine will have to answer it.
+    pub file: String,
+    pub condition: String,
+}
+
+/// What is wrong with a breakpoint condition, or `""` when there is nothing wrong with it.
+///
+/// Asked while the user types, because a condition is the one setting in the debugger whose
+/// mistakes are **invisible at the time you make them**: a bad watch shows an error next to the
+/// watch, a bad condition just means the program never stops, ten minutes from now, in a place you
+/// are not looking. The parser is the same one the session uses, so what the box accepts and what
+/// the debugger accepts cannot drift.
+///
+/// A native condition is the adapter's own expression language — Bennu has no parser for it and
+/// says nothing rather than guessing.
+#[arbor_rpc::handler]
+fn bennu_debug_check_condition(
+    _ctx: &BennuState,
+    args: CheckConditionArgs,
+) -> Result<String, String> {
+    if !crate::intel::is_java_file(&args.file) {
+        return Ok(String::new());
+    }
+    Ok(match crate::debug_cond::parse(&args.condition) {
+        Ok(_) => String::new(),
+        Err(why) => why,
+    })
 }
 
 /// Args naming a project root.

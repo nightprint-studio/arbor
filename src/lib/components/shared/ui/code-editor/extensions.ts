@@ -38,6 +38,8 @@ import {
 } from '@codemirror/autocomplete';
 
 import { documentHighlights, serverFolding } from './server-layers';
+import { inlayHints } from './inlay-hints';
+import { signatureHints } from './signature-hint';
 import { codeLensLayer } from './code-lens';
 import { snippetStops } from './snippet-stops';
 import type { LanguageDescriptor, Tree, Node } from './types';
@@ -277,6 +279,13 @@ export function createCodeEditorExtensions(
   // descriptor is provider-backed, because that is exactly when there is something to push: it costs
   // one state field holding an empty decoration set until the host pushes anything.
   if (lang.intel) exts.push(documentHighlights());
+
+  // Inlay hints and the parameter strip, on the same terms and for the same reason: both are
+  // things only a provider can know, both cost one idle state field until something is pushed, and
+  // both are wanted by every provider-backed language rather than by any particular one. Where the
+  // content comes from — Bennu's own resolver for Java, a language server for the rest — is the
+  // host's business and invisible from here.
+  if (lang.intel) exts.push(inlayHints(), signatureHints());
 
   // Code lenses — the counts a provider draws above an item. Gated on the HOST's press handler
   // rather than on the descriptor: a lens is a control, and only the host knows what pressing one

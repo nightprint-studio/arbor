@@ -29,6 +29,8 @@ use bennu_java::prelude::{
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::switch_label::label_is_default;
+
 /// Flag enum switch **expressions** that neither cover every constant nor carry a `default`.
 ///
 /// Resolver-backed signature (mirrors [`crate::casts::type_compat_errors_in`]): the caller's already
@@ -143,7 +145,7 @@ fn check_switch(
 /// an enum constant is represented in the member model (`enum E { A, B }` → static `E A`, static
 /// `E B`), so this both *finds* the constants and *excludes* ordinary static fields of a different
 /// type. Order follows declaration order in `fields`, which is the order we want in the message.
-fn enum_constants(members: &ClassMembers, enum_binary: &str) -> Vec<String> {
+pub fn enum_constants(members: &ClassMembers, enum_binary: &str) -> Vec<String> {
     members
         .fields
         .iter()
@@ -205,18 +207,6 @@ fn label_constant<'a>(label: Node, bytes: &'a [u8]) -> Option<&'a str> {
         }
         _ => None,
     }
-}
-
-/// Whether a `switch_label` is the `default` clause. The `default` keyword is an anonymous (unnamed)
-/// child of the label, so we scan the label's children (including anonymous ones) for its text.
-fn label_is_default(label: Node, bytes: &[u8]) -> bool {
-    let mut c = label.walk();
-    for ch in label.children(&mut c) {
-        if !ch.is_named() && ch.utf8_text(bytes) == Ok("default") {
-            return true;
-        }
-    }
-    false
 }
 
 #[cfg(test)]

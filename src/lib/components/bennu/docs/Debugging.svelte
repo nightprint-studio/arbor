@@ -13,6 +13,20 @@
   <em>project</em>, not to a session: they are kept in <code>.arbor/bennu/config.toml</code> beside the
   run configurations, so they are still there tomorrow, and a launch installs whatever is set.
 </p>
+<h3>More than one at once</h3>
+<p>
+  Several programs can be under the debugger at the same time, each in its own console tab. A
+  session and its tab are the same thing, so the panel shows the one whose tab is in front, and
+  moving along the strip moves the frames, the variables and the watches with it. What the running
+  VM made of each breakpoint is per session too — two VMs on the same project can disagree, because
+  one has loaded the class and the other has not yet.
+</p>
+<p>
+  <strong>A stop pulls you to it.</strong> When a breakpoint fires in a program you were not
+  reading, its tab comes forward with the window — a breakpoint is the answer to something that
+  just happened, and having to go looking for which of three consoles it happened in would be the
+  one case where the debugger makes you work for it.
+</p>
 
 <h3>Rust, and the debug adapter</h3>
 <p>
@@ -145,4 +159,71 @@
   Breakpoints follow the lines they are on as you edit above them. If one still ends up on a line
   the compiler produced no code for, it binds to the statement underneath and the tooltip says
   which line it really stopped on.
+</p>
+
+<h3>Conditions, and stopping every Nth time</h3>
+<p>
+  Right-click a breakpoint and choose <em>Add condition…</em>, or open the Breakpoints window
+  (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F8</kbd>) where every breakpoint has a condition field
+  and a pass count. A breakpoint that carries either is drawn with a ring around its dot, because a
+  breakpoint that does not stop is the most expensive thing to misread in a debugger and "it has a
+  condition on it" is the answer most of the time.
+</p>
+<p>
+  <strong>Stop on every Nth hit</strong> is the field beside it. It counts <em>after</em> the
+  condition — “the third time <code>i&nbsp;&gt;&nbsp;5</code>” — which is the only reading that
+  composes. The count starts again on each launch, and the Breakpoints window shows how many times
+  each one has actually stopped the program, which is also the quickest answer to “is this line even
+  running”.
+</p>
+<p>
+  A condition costs what it costs: the VM stops every time the line is reached, the condition is
+  evaluated in that frame, and the program is let go again when it does not hold. That is how every
+  debugger does it. On a line that runs a million times, it will be slow.
+</p>
+<h4>What a Java condition may say</h4>
+<p>
+  A <strong>path compared with a literal</strong> — the same paths a watch takes, joined with
+  <code>&amp;&amp;</code>, <code>||</code>, <code>!</code> and parentheses:
+</p>
+<ul>
+  <li><code>i &gt; 5</code>, <code>count == 0</code>, <code>ratio &lt; 0.5</code></li>
+  <li><code>order.customer.name == "acme"</code>, <code>items[2].price &gt; 0</code></li>
+  <li><code>order != null &amp;&amp; order.total &gt; 100</code> — <code>&amp;&amp;</code>
+    short-circuits, so the left side guards the right</li>
+  <li><code>done</code>, <code>!order.paid</code> — a path on its own has to be a boolean</li>
+  <li><code>status.name == "ACTIVE"</code> for an enum: every constant carries its own
+    <code>name</code>, and reading it is an ordinary field walk</li>
+</ul>
+<p>
+  It is deliberately not Java. A watch is a path for the reasons that page gives, and the argument
+  is stronger for a condition: a watch that quietly answers something adjacent to what you typed
+  shows you a wrong number, which you might notice — a condition that does it swallows the stop, and
+  there is nothing on screen at all. So <strong>method calls</strong> (<code>list.size() &gt; 3</code>
+  — calling into a paused program runs application code inside it) and <strong>arithmetic</strong>
+  (<code>i + 1 == n</code>) are refused by name, as you type, rather than approximated.
+</p>
+<p>
+  When a condition cannot be answered at a hit — a null halfway down the path, a field that is not
+  there on this subclass — the program <strong>stops anyway</strong> and the breakpoint says why. A
+  bug in a condition is only visible from where it happened, and silently running on would turn a
+  typo into a breakpoint that never fires and never explains itself.
+</p>
+<h4>On a Rust session</h4>
+<p>
+  The condition is the <strong>debug adapter's</strong> own expression language, sent to it
+  untouched — it already has a real evaluator, its documentation describes it, and a reimplemented
+  subset here would be a worse language that also disagreed with everything you have read about
+  LLDB or GDB. So the answer to “what may it say” is CodeLLDB's, lldb-dap's or GDB's documentation,
+  depending on which one is driving; the status bar names it.
+</p>
+<p>
+  Two consequences worth knowing. Bennu <strong>cannot check it as you type</strong> — it has no
+  parser for a language it does not own — so a mistake shows up after the launch, as a breakpoint
+  that did not verify with the adapter's complaint in its tooltip. And the <strong>pass count</strong>
+  is sent as that adapter's own hit-condition expression (<code>%3</code> for every third), which not
+  all of them read the same way; a breakpoint that stops every time when you asked for every third is
+  the adapter saying it does not do this rather than the setting being lost. An adapter that says
+  outright it supports neither has the field dropped instead: the breakpoint itself must survive,
+  because a request that sets a file's breakpoints sets <em>all</em> of them.
 </p>

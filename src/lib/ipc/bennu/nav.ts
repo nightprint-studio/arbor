@@ -297,7 +297,7 @@ export function didChange(file: string, text: string | null): Promise<boolean> {
 }
 
 /** Invalidate + rebuild the whole semantic index for the project at `root` (BE
- *  `bennu_reindex`): drops the class cache / symbol index / config resolver / rename engine
+ *  `bennu_reindex`): drops the class cache / symbol index / config resolver / semantic engine
  *  / completion provider and rebuilds them from a fresh source scan off-thread, emitting
  *  `arbor://bennu/index-progress` like an open. No compilation happens (that's
  *  `bennu_build`). A no-op on the BE when no open project owns `root`.
@@ -377,7 +377,7 @@ export interface RenameFileMove {
 /** Plan a rename for the symbol at `file`:`offset` → `newName`, returning the PREVIEW
  *  the user confirms before anything is written. `source` is the current (possibly
  *  unsaved) buffer — the caret is classified against it. Resolves to `null` gracefully
- *  when no project owns the file, its rename engine is still building, or the caret
+ *  when no project owns the file, its semantic engine is still building, or the caret
  *  isn't on a renameable identifier.
  *  Wire: `bennu_rename_plan` — `RenameArgs { file, source, offset, new_name }`. */
 export function renamePlan(
@@ -420,6 +420,13 @@ export interface UsageHit {
   col: number;
   /** The trimmed source line, for the results list. */
   preview: string;
+  /**
+   * The member this use was found **through**, when it is not the one asked about — `getName()`.
+   *
+   * A field whose accessors Lombok generates is used as `order.getName()` and never as `name`, so
+   * its uses are real uses spelled as something else. Absent for an ordinary hit.
+   */
+  via?: string;
 }
 
 /** The find-usages result — mirrors the BE `UsagesResult`. `bennu_references` returns

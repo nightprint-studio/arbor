@@ -23,7 +23,8 @@ pub use crate::contract::{
 // `severity::WEAK` rather than importing five look-alike constants.
 pub use crate::contract::severity;
 pub use crate::lsp::{
-    LspAction, LspCallSite, LspDiagnostic, LspFold, LspHierarchyNode, LspHighlight, LspLens,
-    LspMacroExpansion, LspRelated, LspServerInfo, LspSignature, LspStatus, LspSymbol, LspToken,
-    SourceEdit,
+    LspAction, LspDiagnostic, LspFold, LspHighlight, LspLens, LspMacroExpansion, LspRelated,
+    LspServerInfo, LspSignature, LspStatus, LspSymbol, LspToken, SourceEdit,
 };
+// The call / type hierarchy, which both engines produce — see `crate::hierarchy`.
+pub use crate::hierarchy::{HierarchyCallSite, HierarchyNode};

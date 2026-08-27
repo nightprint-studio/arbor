@@ -5,6 +5,36 @@
   being written anywhere.
 </p>
 
+<h2>The order things are offered in</h2>
+<p>
+  What the popup shows first is worked out from what the engine already knows, and it decides most
+  of what completion feels like. Five things count, strongest first:
+</p>
+<ul>
+  <li><strong>What the receiver is.</strong> After a <em>type</em> name — <code>Color.</code> — the
+    static members are the answer and the instance ones are not a program at all, so they go to the
+    bottom; a constant, which is what a type is most often reached for, goes to the very top.
+    Through a <em>value</em> — <code>color.</code> — it is the other way round and more gently: a
+    static reached through an instance compiles, it is just rarely what was meant.</li>
+  <li><strong>How far up the hierarchy it was found.</strong> A method the receiver's own class
+    declares beats one it inherited, and the further up, the weaker.</li>
+  <li><strong><code>java.lang.Object</code>.</strong> Its members match every prefix on every
+    receiver and are hardly ever what you are reaching for, so they sink furthest —
+    <code>list.</code> opens on <code>add</code>, not on <code>clone</code> and
+    <code>equals</code>.</li>
+  <li><strong>Deprecated.</strong> Still offered, since it exists and you may be reading old code,
+    but last. Visible on your own source rather than on library members, which carry no annotations
+    in compiled form.</li>
+  <li><strong>What this file already uses.</strong> A name already written in the buffer is likely
+    the one you want again. It decides between otherwise-equal candidates and cannot do more than
+    that.</li>
+</ul>
+<p>
+  Keywords and words scraped out of the buffer are offered when nothing better matches, always
+  below anything the index resolved. Beyond that, how well what you typed matches still decides
+  between neighbours — the ordering is a starting point, not an override.
+</p>
+
 <h2>Completions</h2>
 <p>
   Typing <code>.</code> after an expression offers member completions; press
@@ -97,4 +127,35 @@
   One limitation, and it is deliberate: <strong>go-to on a generated member</strong> has nothing to
   open, since there is no name in the source to jump to. Go-to on the backing <em>field</em> (or a
   record's component) works.
+</p>
+
+<h2>Postfix templates</h2>
+<p>
+  Write the expression first, then say what to do with it. Type a dot after any expression and a
+  short word — <code>order.getTotal().nn</code> becomes
+  <code>if (order.getTotal() != null) &lbrace; … &rbrace;</code>, with the caret in the body. The
+  point isn't the keystrokes saved: it lets you think in the order you actually think, the value and
+  then the control flow around it, instead of committing to an <code>if (</code> before you know what
+  goes in it.
+</p>
+<p>
+  They appear in the completion list under the name you type, so they're discovered the way
+  everything else is. The names are IntelliJ's on purpose — muscle memory is the whole value of a
+  postfix template.
+</p>
+<ul>
+  <li><strong>Null checks</strong> — <code>.nn</code>, <code>.null</code></li>
+  <li><strong>Control flow</strong> — <code>.if</code>, <code>.else</code>, <code>.while</code>,
+    <code>.for</code>, <code>.fori</code>, <code>.forr</code>, <code>.switch</code>,
+    <code>.try</code>, <code>.synchronized</code></li>
+  <li><strong>Statements</strong> — <code>.var</code>, <code>.return</code>, <code>.throw</code>,
+    <code>.assert</code>, <code>.sout</code>, <code>.serr</code></li>
+  <li><strong>Expressions</strong> — <code>.not</code>, <code>.par</code>, <code>.cast</code>,
+    <code>.instanceof</code>, <code>.opt</code>, <code>.stream</code>, <code>.forEach</code></li>
+</ul>
+<p>
+  What is offered follows the project's <strong>Java level</strong>: on a project below Java 10,
+  <code>.var</code> and <code>.for</code> leave you a stop where the type goes instead of writing
+  <code>var</code>, which wouldn't compile there. Rust gets its own postfix set from rust-analyzer,
+  in the same list.
 </p>

@@ -43,7 +43,7 @@ pub struct IndexResolver<M: CpMemberIndex> {
     /// change a type's members.
     members_cache: RwLock<HashMap<String, Option<Arc<JClassMembers>>>>,
     /// When set, `members_of` resolves ONLY project types — it never decodes JDK / library
-    /// bytecode. Used by the reference / rename engine: a use site on a JDK member is never
+    /// bytecode. Used by the reference / semantic engine: a use site on a JDK member is never
     /// queried by find-usages / rename (you can't rename it), so decoding the JDK for it is
     /// pure waste that made the whole reference walk crawl. The provider (completion) keeps
     /// full JDK resolution (a separate resolver instance).
@@ -83,7 +83,7 @@ impl<M: CpMemberIndex> IndexResolver<M> {
     }
 
     /// Restrict this resolver to PROJECT types only — `members_of` returns `None` for a JDK /
-    /// library type instead of decoding its bytecode. For the reference / rename engine, where
+    /// library type instead of decoding its bytecode. For the reference / semantic engine, where
     /// resolving JDK receivers is wasted work (their edges are never queried). The provider
     /// (completion) does NOT call this, so it keeps full JDK resolution.
     pub fn project_only(mut self) -> Self {
@@ -286,7 +286,7 @@ impl<M: CpMemberIndex> IndexResolver<M> {
                     // superclass the source omitted (interfaces have none; an enum/record carries its
                     // own root). Only when unset, and never for Object itself.
                     // Only for the full resolver (validation/completion): the project-only reference/
-                    // rename engine never resolves JDK types, so a synthesized Object ancestor would
+                    // semantic engine never resolves JDK types, so a synthesized Object ancestor would
                     // just be an unresolvable link on every walk — leave its hierarchy as declared.
                     if !self.project_only
                         && cm.superclass.is_none()
@@ -312,7 +312,7 @@ impl<M: CpMemberIndex> IndexResolver<M> {
             }
         }
         // 2) JDK bytecode type (converted from the classpath seam) — skipped entirely for a
-        //    project-only resolver (the reference/rename engine), which never needs it.
+        //    project-only resolver (the reference/semantic engine), which never needs it.
         if self.project_only {
             return None;
         }
@@ -453,7 +453,7 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         // fast now (the resolver's per-name memo + the persistent JDK memo). A hit means the type
         // genuinely EXISTS, so `None` here is a real "cannot resolve" — the definitive answer the
         // validator's unresolved-type check needs. Skipped in `project_only` mode (the reference /
-        // rename engine never resolves JDK receivers, so decoding bytecode for them is waste).
+        // semantic engine never resolves JDK receivers, so decoding bytecode for them is waste).
         if self.project_only {
             return None;
         }
@@ -695,7 +695,7 @@ mod tests {
     #[test]
     fn project_only_skips_the_jdk_probe() {
         let r = empty_resolver_with_jdk(FakeJdk).project_only();
-        // The reference/rename engine never resolves JDK receivers — even a real java.lang type
+        // The reference/semantic engine never resolves JDK receivers — even a real java.lang type
         // must not resolve here (it's wasted bytecode decoding for a use-site we can't rename).
         assert!(r.resolve_simple_name("Runnable", &[]).is_none());
     }

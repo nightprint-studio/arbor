@@ -139,9 +139,21 @@ pub(crate) fn bennu_diagnostics(
         (true, Some(source)) => crate::naming::diagnostics_for(&args.file, source),
         _ => Vec::new(),
     };
+    let file = args.file.clone();
+    let source = args.source.clone();
     let mut diags = route_diagnostics(args)?;
     diags.extend(naming);
-    Ok(diags)
+
+    // The project's inspection policy, applied ONCE over everything above — whichever route
+    // produced it, and including the framework and naming contributions. Applying it inside the
+    // checks would be seventy places that each have to remember to ask; here a check cannot forget,
+    // and one added tomorrow is configurable the day it lands.
+    //
+    // Suppression needs the source, so a request that did not send one (the editor asking about a
+    // file it has not opened) gets severities re-levelled and nothing suppressed — which is the
+    // right half to keep, since `@SuppressWarnings` is about a place in a buffer.
+    let policy = crate::inspections::policy_for_file(&file);
+    Ok(policy.apply(source.as_deref().unwrap_or(""), diags))
 }
 
 /// The file's own diagnostics: whichever single route claims it (language server, manifest, shader,

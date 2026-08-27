@@ -17,7 +17,8 @@ pub use crate::duplicates::duplicate_signatures;
 pub use crate::fields::unknown_fields;
 pub use crate::functional::functional_errors;
 pub use crate::imports::{
-    duplicate_imports, unresolved_imports, unresolved_static_imports, unused_imports,
+    duplicate_imports, import_inventory, unresolved_imports, unresolved_static_imports,
+    unused_imports, ImportEntry,
 };
 pub use crate::incremental::{check_file_resolved_incremental, IncrementalCache};
 pub use crate::inheritance::{inheritance_errors, missing_abstract_impls};
@@ -41,3 +42,25 @@ pub use crate::version::version_errors;
 
 // The wire diagnostic the checks emit, re-exported so a consumer reaches it through this prelude.
 pub use bennu_proto::prelude::Diagnostic;
+
+// The unhandled-checked-exception analysis's structured answer, for the quick-fix that repairs it:
+// which exception, where a `throws` clause goes, and what a `try` would wrap. The diagnostic form
+// is the same analysis with a sentence on it — see `checked_call::UnhandledCall`.
+pub use crate::checked_call::{unhandled_calls_in, UnhandledCall};
+
+// The constants of an enum, as the switch checks identify them — the input to the quick-fix that
+// fills in a non-exhaustive switch.
+pub use crate::enum_switch::enum_constants;
+
+// Every named node of a parsed tree — the one traversal the resolver-backed checks share. Exposed
+// because a consumer that wants to run one of them (a quick-fix recomputing its own diagnostic)
+// needs the same slice they take.
+pub use crate::check::collect_nodes;
+
+// The project's inspection policy — which checks report, and how loudly. Severity per kind from the
+// config, suppression from the source itself.
+pub use crate::inspections::{Inspections, Level as InspectionLevel};
+
+
+// Data flow — null dereference, constant condition, dead store.
+pub use crate::dataflow::dataflow_errors_in;

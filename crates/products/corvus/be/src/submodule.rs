@@ -17,17 +17,16 @@
 //!      `submodule_checkout`) need no auth; the network ops build an
 //!      `AuthArgsResolver` (`url -> Vec<String>`) from the SAME reverse-channel
 //!      credential seam the `remote` domain uses
-//!      ([`crate::remote::credential_resolver`] → `__git_credentials`),
-//!      wrapping the resolved `(user, pass)` into the host-scoped `-c …` argv
-//!      via [`corvus_git::prelude::http_auth_args_for_credentials`]. These run
-//!      on the dispatch worker thread; the resolver blocks there and the serve
-//!      loop's reader thread delivers the reply (the reverse-channel
+//!      ([`crate::remote::auth_args_resolver`] → `__git_credentials`), which
+//!      wraps the resolved `(user, pass)` into the host-scoped `-c …` argv.
+//!      These run on the dispatch worker thread; the resolver blocks there and
+//!      the serve loop's reader thread delivers the reply (the reverse-channel
 //!      reentrancy) — no `spawn_blocking` (the in-process source spawned none).
 
-use corvus_git::prelude::{http_auth_args_for_credentials, SubmoduleInfo};
+use corvus_git::prelude::SubmoduleInfo;
 use corvus_core::prelude::CorvusState;
 
-use crate::remote::credential_resolver;
+use crate::remote::auth_args_resolver;
 use crate::repo::{git, open, repo_path};
 
 // ---------------------------------------------------------------------------
@@ -50,14 +49,7 @@ fn submodule_fetch(state: &CorvusState, tab_id: String, sub_path: String) -> Res
     let host = state
         .host_caller()
         .ok_or_else(|| "submodule_fetch: no reverse channel for credentials".to_string())?;
-    let resolve = credential_resolver(host);
-    let auth = |url: &str| {
-        resolve(url)
-            .ok()
-            .flatten()
-            .map(|(u, p)| http_auth_args_for_credentials(url, &u, &p))
-            .unwrap_or_default()
-    };
+    let auth = auth_args_resolver(host);
     corvus_git::submodule::submodule_fetch(&git(state), &repo, &sub_path, &auth)
         .map_err(|e| e.to_string())
 }
@@ -68,14 +60,7 @@ fn submodule_pull(state: &CorvusState, tab_id: String, sub_path: String) -> Resu
     let host = state
         .host_caller()
         .ok_or_else(|| "submodule_pull: no reverse channel for credentials".to_string())?;
-    let resolve = credential_resolver(host);
-    let auth = |url: &str| {
-        resolve(url)
-            .ok()
-            .flatten()
-            .map(|(u, p)| http_auth_args_for_credentials(url, &u, &p))
-            .unwrap_or_default()
-    };
+    let auth = auth_args_resolver(host);
     corvus_git::submodule::submodule_pull(&git(state), &repo, &sub_path, &auth)
         .map_err(|e| e.to_string())
 }
@@ -86,14 +71,7 @@ fn submodule_push(state: &CorvusState, tab_id: String, sub_path: String) -> Resu
     let host = state
         .host_caller()
         .ok_or_else(|| "submodule_push: no reverse channel for credentials".to_string())?;
-    let resolve = credential_resolver(host);
-    let auth = |url: &str| {
-        resolve(url)
-            .ok()
-            .flatten()
-            .map(|(u, p)| http_auth_args_for_credentials(url, &u, &p))
-            .unwrap_or_default()
-    };
+    let auth = auth_args_resolver(host);
     corvus_git::submodule::submodule_push(&git(state), &repo, &sub_path, &auth)
         .map_err(|e| e.to_string())
 }
@@ -135,14 +113,7 @@ fn update_submodule(
     let host = state
         .host_caller()
         .ok_or_else(|| "update_submodule: no reverse channel for credentials".to_string())?;
-    let resolve = credential_resolver(host);
-    let auth = |url: &str| {
-        resolve(url)
-            .ok()
-            .flatten()
-            .map(|(u, p)| http_auth_args_for_credentials(url, &u, &p))
-            .unwrap_or_default()
-    };
+    let auth = auth_args_resolver(host);
     corvus_git::submodule::update_submodule(&git(state), &path, &name, recursive, &auth)
         .map_err(|e| e.to_string())
 }
@@ -157,14 +128,7 @@ fn update_all_submodules(
     let host = state
         .host_caller()
         .ok_or_else(|| "update_all_submodules: no reverse channel for credentials".to_string())?;
-    let resolve = credential_resolver(host);
-    let auth = |url: &str| {
-        resolve(url)
-            .ok()
-            .flatten()
-            .map(|(u, p)| http_auth_args_for_credentials(url, &u, &p))
-            .unwrap_or_default()
-    };
+    let auth = auth_args_resolver(host);
     corvus_git::submodule::update_submodules(&git(state), &path, recursive, &auth)
         .map_err(|e| e.to_string())
 }

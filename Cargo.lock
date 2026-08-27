@@ -1259,6 +1259,7 @@ dependencies = [
  "bennu-proto",
  "serde",
  "serde_json",
+ "tree-sitter",
 ]
 
 [[package]]

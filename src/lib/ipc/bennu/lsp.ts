@@ -51,41 +51,6 @@ export interface LspLens {
   arguments: unknown[];
 }
 
-/** One call site inside a hierarchy node. */
-export interface LspCallSite {
-  file: string;
-  start: number;
-  end: number;
-  line: number;
-  preview: string;
-}
-
-/** One node of a call or type hierarchy.
- *
- *  The two hierarchies share a shape because the protocol gives them one, and because the panel
- *  that draws them is one panel: a tree whose children are fetched a level at a time. */
-export interface LspHierarchyNode {
-  name: string;
-  /** A lowercase kind name (`function`, `struct`, `trait`). */
-  kind: string;
-  detail?: string | null;
-  /** Where the declaration is — the name token, so go-to lands on it. */
-  file: string;
-  start: number;
-  end: number;
-  line: number;
-  col: number;
-  /** The trimmed source line, for a preview. */
-  preview: string;
-  /** The call sites inside this node that reach the item asked about; empty for a type hierarchy. */
-  call_sites: LspCallSite[];
-  /** The server's own handle on this item, opaque. Sent back **verbatim** to fetch its children. */
-  handle: unknown;
-}
-
-/** Which way a hierarchy is walked. `incoming`/`outgoing` are calls, `supertypes`/`subtypes` types. */
-export type LspHierarchyDirection = 'incoming' | 'outgoing' | 'supertypes' | 'subtypes';
-
 /** The expansion of a macro.
  *
  *  `expansion` is Rust source as **text** — not a file the server knows about. That is why it cannot
@@ -337,34 +302,6 @@ export function lspLensLocations(
   return bennu('bennu_lsp_lens_locations', { args: { file, source, title, arguments: args } });
 }
 
-/** The item at `offset` a hierarchy can be built from — the root of the tree the panel draws.
- *
- *  `calls` picks which hierarchy: `true` for the call hierarchy, `false` for the type hierarchy. An
- *  empty list means the caret is not on something either can be built from.
- *  Wire: `bennu_lsp_prepare_hierarchy` — `{ file, source, offset, calls }`. */
-export function lspPrepareHierarchy(
-  file: string,
-  source: string,
-  offset: number,
-  calls: boolean,
-): Promise<LspHierarchyNode[]> {
-  return bennu('bennu_lsp_prepare_hierarchy', { args: { file, source, offset, calls } });
-}
-
-/** One level of a hierarchy, expanded from a node's handle.
- *
- *  `scope` is any path inside the workspace — which server answers. Not the node's own file: a
- *  caller can live in a dependency's source, which is deliberately not a workspace of its own.
- *  `item` is the node's `handle`, passed back verbatim.
- *  Wire: `bennu_lsp_hierarchy_step` — `{ scope, item, direction }`. */
-export function lspHierarchyStep(
-  scope: string,
-  item: unknown,
-  direction: LspHierarchyDirection,
-): Promise<LspHierarchyNode[]> {
-  return bennu('bennu_lsp_hierarchy_step', { args: { scope, item, direction } });
-}
-
 /** The edits a file rename implies — for Rust, the `mod` declaration that names it and every `use`
  *  path through the module it declares.
  *
@@ -445,24 +382,6 @@ export function lspSignatureHelp(
  *  Wire: `bennu_lsp_resolve_completion` — `{ file, id }`. */
 export function lspResolveCompletion(file: string, id: number): Promise<CompletionItem | null> {
   return bennu('bennu_lsp_resolve_completion', { args: { file, id } });
-}
-
-// ── Editing ──────────────────────────────────────────────────────────────────
-
-/** Format the whole buffer (`rustfmt`, for Rust).
- *
- *  Returns **edits**, not the formatted text: applying them through CodeMirror keeps the format
- *  in the undo history and the caret in place.
- *  Wire: `bennu_lsp_format` — `{ file, source, tab_size?, insert_spaces? }`. */
-export function lspFormat(
-  file: string,
-  source: string,
-  tabSize?: number,
-  insertSpaces?: boolean,
-): Promise<SourceEdit[]> {
-  return bennu('bennu_lsp_format', {
-    args: { file, source, tab_size: tabSize, insert_spaces: insertSpaces },
-  });
 }
 
 /** Quick fixes and refactorings for the caret / selection — the Alt+Enter list.

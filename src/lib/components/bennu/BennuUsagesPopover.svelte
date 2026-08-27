@@ -163,6 +163,10 @@
             <span class="u-icon"><CornerDownRight size={12} /></span>
             <span class="u-file"><FileCode2 size={11} /> {baseName(h.file)}</span>
             <span class="u-pos">{h.line}:{h.col}</span>
+            <!-- A use found through a generated accessor is spelled as that accessor, not as what
+                 was asked about — saying so is what keeps `order.getName()` from reading as a bug
+                 in the search when you asked about the field `name`. -->
+            {#if h.via}<span class="u-via">{h.via}</span>{/if}
             <span class="u-preview" class:on={i === active}>{h.preview}</span>
           </button>
         {/each}
@@ -209,4 +213,13 @@
   .u-pos { font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted); flex-shrink: 0; min-width: 34px; font-variant-numeric: tabular-nums; }
   .u-preview { flex: 1; min-width: 0; font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .u-preview.on { color: var(--text-primary); }
+  .u-via {
+    flex: none;
+    font-family: var(--font-code);
+    font-size: var(--font-size-xs);
+    color: var(--accent-info, var(--text-muted));
+    background: var(--bg-hover);
+    border-radius: var(--radius-sm);
+    padding: 0 4px;
+  }
 </style>

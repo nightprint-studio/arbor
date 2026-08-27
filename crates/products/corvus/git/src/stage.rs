@@ -186,6 +186,13 @@ mod tests {
             ));
             let _ = std::fs::remove_dir_all(&dir);
             let repo = Repository::init(&dir).expect("init repo");
+            // These tests assert file CONTENT after a checkout, so line endings have to be the
+            // ones they wrote. A developer with `core.autocrlf=true` globally — the Windows
+            // default — otherwise gets CRLF back from every checkout and a failure that is about
+            // their git configuration rather than about the code under test.
+            repo.config()
+                .and_then(|mut c| c.set_bool("core.autocrlf", false))
+                .expect("pin the repo's line endings");
             TempRepo { dir, repo }
         }
 

@@ -99,6 +99,11 @@
   import PluginTools from '$lib/components/plugins/PluginTools.svelte';
   import { notifyActiveFile, resetActiveFileNotifier } from '$lib/contributions/bennu-file-hook';
   import BennuGenerateModal from './BennuGenerateModal.svelte';
+  import BennuOverrideModal from './BennuOverrideModal.svelte';
+  import {
+    overridableMembers as ipcOverridable, generateOverrides as ipcGenerateOverrides,
+    type OverridableMember,
+  } from '$lib/ipc/bennu/overrides';
   import BennuJpaGenerateModal from './BennuJpaGenerateModal.svelte';
   import { JPA_PALETTE_ACTIONS } from './jpa-actions';
   import BennuValidationModal from './BennuValidationModal.svelte';
@@ -137,6 +142,7 @@
   import { isI18nBundle } from './i18n/bundle-path';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuCargoStore } from '$lib/stores/bennu/cargo.svelte';
+  import { javaLevelStore } from '$lib/stores/bennu/java-level.svelte';
   import { emptyInvocation as emptyCargoInvocation } from '$lib/ipc/bennu/cargo';
   import { bennuRunConfigStore } from '$lib/stores/bennu/run-config.svelte';
   import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
@@ -440,6 +446,18 @@
     }
   });
 
+  // The project's Java language level, for the editor decisions that are only correct with it —
+  // today, which postfix templates may emit `var`. Cheap (it reads the build file, which the JDK
+  // status resolution has already parsed) and Java-only, like everything that consults it.
+  $effect(() => {
+    const root = projectStore.project?.root ?? null;
+    if (root && !projectStore.isDemo && !projectStore.isCargo) {
+      void javaLevelStore.load(root);
+    } else {
+      javaLevelStore.reset();
+    }
+  });
+
   // The Cargo workspace, on opening a Rust project. Read here rather than only by the Cargo panel
   // because three other surfaces want it before that panel is ever opened: the run-configuration
   // editor's crate and target pickers, ▶ looking for the sole binary, and the palette. Cheap — it
@@ -619,6 +637,7 @@
     createValidationFile: () => void;
     toggleBreakpointAtCaret: () => void;
     formatDocument: () => Promise<void>;
+    optimizeImportsInBuffer: () => Promise<void>;
     navBack: () => void;
     navForward: () => void;
   } | null>(null);
@@ -659,6 +678,49 @@
   }
 
   // Alt+Enter "Generate…" intention → open the Generate modal in that mode.
+  // ── Implement / override methods ───────────────────────────────────────────────
+  // The picker is hosted here because it is a window-level dialog, and the caret it was opened
+  // AT is remembered: the user may click around the list for a while, and the methods have to be
+  // written where the class was, not where the caret ended up.
+  let overrideOpen = $state(false);
+  let overrideLoading = $state(false);
+  let overrideMembers = $state<OverridableMember[]>([]);
+  let overrideAt: { file: string; source: string; offset: number } | null = null;
+
+  async function openOverrides() {
+    const path = projectStore.activeFilePath;
+    const ctx = editor?.caretContext();
+    if (!path || !ctx) { toastStore.show('Open a Java file first', 'info'); return; }
+    overrideAt = { file: path, ...ctx };
+    overrideMembers = [];
+    overrideLoading = true;
+    overrideOpen = true;
+    try {
+      overrideMembers = await ipcOverridable(path, ctx.source, ctx.offset);
+    } catch (e) {
+      toastStore.show(`Couldn't read the hierarchy: ${e}`, 'error');
+      overrideOpen = false;
+    } finally {
+      overrideLoading = false;
+    }
+  }
+
+  async function writeOverrides(selected: OverridableMember[]) {
+    const at = overrideAt;
+    overrideOpen = false;
+    if (!at || selected.length === 0) return;
+    try {
+      const edits = await ipcGenerateOverrides(at.source, at.offset, selected);
+      if (!edits.length) { toastStore.show('Nothing to write here', 'info'); return; }
+      editor?.applyGeneratedEdits(edits);
+      editor?.focusEditor();
+      const n = selected.length;
+      toastStore.show(`Generated ${n} method${n === 1 ? '' : 's'}`, 'success');
+    } catch (e) {
+      toastStore.show(`Generate failed: ${e}`, 'error');
+    }
+  }
+
   function openGenerateFromIntention(mode: GenerateMode) {
     bennuUiStore.openGenerate(mode);
   }
@@ -844,10 +906,10 @@
     // registry, so Stop, ⟳ and the tab strip all mean the same thing on a Rust project.
     {
       id: 'run',
-      tooltip: bennuDebugStore.live ? 'Run / Debug' : 'Run',
+      tooltip: bennuDebugStore.anyLive ? 'Run / Debug' : 'Run',
       shortcut: 'Alt+R',
-      icon: bennuDebugStore.live ? Bug : Play,
-      dot: bennuDebugStore.paused
+      icon: bennuDebugStore.anyLive ? Bug : Play,
+      dot: bennuDebugStore.anyPaused
         ? ('warning' as const)
         : bennuRunStore.running
           ? ('accent' as const)
@@ -1166,12 +1228,12 @@
         shortcut: 'Alt+Shift+F7',
         action: () => run(() => void editor?.findComponentUsages()),
         when: (path ?? '').toLowerCase().endsWith('.svelte') },
-      // Only for a server-backed buffer: the Java engine has find-usages and no hierarchy, so on a
-      // `.java` these verbs would open a panel that can only ever say "nothing here".
+      // Both engines answer these now — a `.java` buffer over the whole-project reference index,
+      // everything else over its language server. The backend routes on the file.
       { id: 'callhierarchy', title: 'Call hierarchy', icon: 'network', shortcut: 'Ctrl+Shift+H',
-        action: () => run(() => editor?.showCallHierarchy()), when: isLspFile(path) },
+        action: () => run(() => editor?.showCallHierarchy()), when: isJava || isLspFile(path) },
       { id: 'typehierarchy', title: 'Type hierarchy', icon: 'network', shortcut: 'Ctrl+H',
-        action: () => run(() => editor?.showTypeHierarchy()), when: isLspFile(path) },
+        action: () => run(() => editor?.showTypeHierarchy()), when: isJava || isLspFile(path) },
       { id: 'rename', title: 'Rename…', icon: 'target', shortcut: 'Shift+F6',
         action: () => run(() => editor?.openRename()), when: canNav },
       // The bulk half of the naming check. Two entries and not one: "this file" is the answer to a
@@ -1195,6 +1257,8 @@
         action: () => run(() => bennuUiStore.revealActiveInTree()), when: !!projectStore.activeFilePath },
       { id: 'generate', title: 'Generate…', icon: 'wand', shortcut: 'Alt+Insert',
         action: () => run(() => bennuUiStore.openGenerate()), when: isJava },
+      { id: 'override', title: 'Implement / override methods…', icon: 'wand', shortcut: 'Ctrl+I',
+        action: () => run(() => void openOverrides()), when: isJava },
       { id: 'intentions', title: 'Show intentions', icon: 'bulb', shortcut: 'Alt+Enter',
         // Also the language-server quick-fix list for a server-backed buffer — the user's gesture
         // is "what can you do here", and which engine answers is not their problem.
@@ -1203,7 +1267,12 @@
       // preserve AltGr, so the binding would simply never fire. Alt+Shift+F is VS Code's and is
       // in the safe family.
       { id: 'format', title: 'Format file', icon: 'wand', shortcut: 'Alt+Shift+F',
-        action: () => run(() => void editor?.formatDocument()), when: isLspFile(path) },
+        action: () => run(() => void editor?.formatDocument()), when: isJava || isLspFile(path) },
+      // Eclipse's own binding for this, and it is the one people reach for: IntelliJ's Ctrl+Alt+O
+      // is unusable here (Chromium drops Ctrl+Alt+<letter> on IT/DE/FR/ES layouts to preserve
+      // AltGr).
+      { id: 'optimizeimports', title: 'Optimize imports', icon: 'wand', shortcut: 'Ctrl+Shift+O',
+        action: () => run(() => void editor?.optimizeImportsInBuffer()), when: isJava },
       // What a macro expands to. Recursive — the server has no single-step form — and read-only,
       // because what comes back is text rather than a file it knows.
       { id: 'expandmacro', title: 'Expand macro', icon: 'wand', shortcut: 'Alt+Shift+M',
@@ -1355,7 +1424,7 @@
       { id: 'rerun', title: 'Rerun', icon: 'rerun',
         action: () => run(() => void bennuRunStore.rerunApp()), when: idle && bennuRunStore.canRerun },
       { id: 'stoprun', title: 'Stop the program', icon: 'hammer',
-        action: () => run(() => void bennuRunStore.stop()), when: bennuRunStore.running },
+        action: () => run(() => void bennuRunStore.stop()), when: bennuRunStore.canStop },
       { id: 'runcfg', title: 'Edit run configuration…', icon: 'sliders',
         action: () => run(() => bennuUiStore.openRunConfig()), when: !!projectStore.project },
       // One entry per cargo command, so every one is reachable by name from the keyboard rather
@@ -1607,11 +1676,12 @@
      * hierarchy rather than its Ctrl+Alt+H — Ctrl+Alt+<letter> is dropped by Chromium on IT/DE/FR/ES
      * layouts to preserve AltGr, so that binding would never fire here.
      *
-     * Server-backed buffers only: Bennu's Java engine answers find-usages and has no hierarchy, so
-     * on a `.java` the key would open a panel that could only say "nothing here".
+     * Both engines answer: a `.java` buffer over the whole-project reference index (the same one
+     * find-usages reads), everything else over its language server.
      */
     if (mod && !e.altKey && isKey(e, 'h')) {
-      if (!isLspFile(projectStore.activeFilePath)) return;
+      const path = projectStore.activeFilePath;
+      if (!isLspFile(path) && !isJavaFile(path)) return;
       e.preventDefault();
       if (e.shiftKey) editor?.showCallHierarchy();
       else editor?.showTypeHierarchy();
@@ -1788,7 +1858,23 @@
       e.preventDefault(); editor?.goToDefinition(); return;
     }
     if (mod && isKey(e, 'f')) { e.preventDefault(); editor?.openSearch(); return; }
-    if (mod && isKey(e, 'o')) {
+    // Implement / override methods (IntelliJ's Ctrl+I). Java-only: the picker reads a supertype
+    // hierarchy, which is a question only the Java index can answer. `!e.shiftKey` because
+    // Ctrl+Shift+I is Corvus's "Initialize repository" and the two windows share a vocabulary.
+    if (mod && !e.shiftKey && isKey(e, 'i')) {
+      if (!isJavaFile(projectStore.activeFilePath)) return;
+      e.preventDefault(); void openOverrides(); return;
+    }
+    // Optimize imports — Eclipse's Ctrl+Shift+O, not IntelliJ's Ctrl+Alt+O: Ctrl+Alt+<letter> is
+    // dropped by Chromium on IT/DE/FR/ES layouts to preserve AltGr, so that binding would never
+    // fire. Java-only, because the unused-import judgement behind it is.
+    if (mod && e.shiftKey && !e.altKey && isKey(e, 'o')) {
+      if (!isJavaFile(projectStore.activeFilePath)) return;
+      e.preventDefault(); void editor?.optimizeImportsInBuffer(); return;
+    }
+    // `!e.shiftKey` because of the binding above: without it, Ctrl+Shift+O opened the project
+    // picker as well.
+    if (mod && !e.shiftKey && isKey(e, 'o')) {
       e.preventDefault();
       window.dispatchEvent(new CustomEvent('bennu:open-project'));
       return;
@@ -1827,7 +1913,7 @@
 
         <div class="main-col">
           <div class="card grow">
-            <BennuEditor bind:this={editor} onGenerate={openGenerateFromIntention} />
+            <BennuEditor bind:this={editor} onGenerate={openGenerateFromIntention} onOverride={() => void openOverrides()} />
           </div>
           {#if showJobOutput}
             <PanelCard
@@ -2010,6 +2096,15 @@
     mode={bennuUiStore.generateMode}
     onClose={() => bennuUiStore.closeGenerate()}
     onInsert={(text) => { editor?.insertAtCursor(text); editor?.focusEditor(); }}
+  />
+{/if}
+
+{#if overrideOpen}
+  <BennuOverrideModal
+    members={overrideMembers}
+    loading={overrideLoading}
+    onClose={() => { overrideOpen = false; editor?.focusEditor(); }}
+    onGenerate={(sel) => void writeOverrides(sel)}
   />
 {/if}
 

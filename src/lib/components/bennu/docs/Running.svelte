@@ -195,8 +195,11 @@
     still running. Closing a tab whose program is still running stops it.</li>
 </ul>
 <p>
-  One program runs at a time: launching while one is going is refused, so the other tabs are
-  history rather than a set of live consoles.
+  Several programs can run at once — a server and the client that talks to it, or two entry points
+  of the same project side by side. Each has its own tab, its own stdin and its own Stop, and a live
+  tab carries a ▷ in the strip so a run still going is visible from whichever transcript you are
+  reading. <strong>Stop and the input line act on the tab in front</strong>; when several are
+  running and you are looking at a finished one, Stop waits until you pick which.
 </p>
 <h2>Which Java runs it</h2>
 <p>
@@ -228,8 +231,7 @@
     not through <code>spring-boot:run</code>. Devtools and the plugin's own resource handling are
     therefore not in play.</li>
   <li>Only <strong>one</strong> build, validation or test run at a time: they all touch
-    <code>target/</code>, and two Maven processes on one tree fight over it. A launched program is
-    not part of that lock — it is already running.</li>
-  <li>A launched program is not part of the build lock — it is already running — but only one
-    of them at a time: launching while one is going is refused.</li>
+    <code>target/</code>, and two Maven processes on one tree fight over it. Launched programs are
+    not part of that lock — they are already running — so the only moment a launch is refused is
+    while something is compiling.</li>
 </ul>

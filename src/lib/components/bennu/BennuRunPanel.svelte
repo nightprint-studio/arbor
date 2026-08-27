@@ -165,18 +165,21 @@
   }
 
   /**
-   * A launch pulls the strip onto its own tab.
+   * The strip follows whichever run the store says is in front.
    *
-   * Without it, starting a program while you were reading the test tree would run it into a tab
-   * you cannot see — the console would be silently filling somewhere else. Keyed on the run id
-   * so it fires once per launch rather than on every line that arrives.
+   * That is a launch (it opens a tab and makes it active), and it is also a breakpoint firing in a
+   * program you were not reading, which brings its tab forward the way the window comes forward.
+   *
+   * It used to watch for "the first live tab" instead, which was the same thing back when only one
+   * program could be running: with a server already going, the tab it found never changed, and
+   * launching anything else filled a tab you could not see.
    */
-  let shownRun = '';
+  let followed = '';
   $effect(() => {
-    const live = bennuRunStore.tabs.find((t) => t.live);
-    if (!live || live.id === shownRun) return;
-    shownRun = live.id;
-    bennuUiStore.showRunTab(live.id);
+    const id = bennuRunStore.activeTabId;
+    if (!id || id === followed) return;
+    followed = id;
+    bennuUiStore.showRunTab(id);
   });
 
   /** The same, for a test run: starting one brings its tab forward. Edge-detected rather than

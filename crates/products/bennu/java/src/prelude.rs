@@ -42,7 +42,7 @@ pub use crate::static_import::{static_import_targets, StaticImportTarget};
 // The structural model produced by `extract_symbols`.
 pub use crate::symbols::{
     collect_annotations, AnnString, Annotation, FieldDecl, FileSymbols, Import, MethodDecl,
-    ParamDecl, Span, TypeDecl, TypeKind,
+    ParamDecl, Span, TypeDecl, TypeKind, ENUM_IMPLICIT_METHODS,
 };
 
 // The resolver seam the type-walk consumes + the member shapes it resolves against.

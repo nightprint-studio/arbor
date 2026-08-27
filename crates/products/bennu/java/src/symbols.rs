@@ -15,7 +15,7 @@ use crate::seam::Visibility;
 /// (`interface`/`enum`/`record` legality) — the bytecode side gets the same from
 /// [`ClassFlags`](crate::seam::ClassFlags). `#[default]` = `Class` so a pre-existing
 /// persisted symbol (before this field) still deserializes as a plain class.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum TypeKind {
     #[default]
     Class,
@@ -525,6 +525,11 @@ fn collect_type(
     // belong here beside the parsed ones, and not in `bennu-intel`'s Lombok synthesis.
     if matches!(kind, TypeKind::Record) {
         synthesize_record_members(node, bytes, &mut methods, &mut fields);
+    }
+    // Same rule for an enum's implicit `values()` / `valueOf(String)` — see
+    // [`synthesize_enum_members`] for why omitting them turned working code red.
+    if matches!(kind, TypeKind::Enum) {
+        synthesize_enum_members(&name, &mut methods);
     }
 
     let annotations = collect_annotations(node, bytes);
@@ -1309,6 +1314,61 @@ fn synthesize_record_members(
     }
 }
 
+/// The methods every `enum` declares without anyone writing them (JLS §8.9.3), in the order
+/// [`synthesize_enum_members`] adds them. Shared with go-to, which needs to recognise a member that
+/// exists but has no name token in the source to open.
+pub const ENUM_IMPLICIT_METHODS: [&str; 2] = ["values", "valueOf"];
+
+/// The two methods an `enum E` implicitly declares (JLS §8.9.3): `public static E[] values()` and
+/// `public static E valueOf(String name)`. javac writes both into the class file, so an enum read
+/// from a jar already has them — only one read from SOURCE was missing them, which made the same
+/// type answer differently depending on where it came from.
+///
+/// What that cost: `Color.valueOf("RED")` found nothing on the enum, walked up to the implicit
+/// `java.lang.Enum` superclass, matched its `valueOf(Class<T>, String)` — and the arity check
+/// reported a one-argument call to a two-argument method. `Color.values()` fared worse: nothing in
+/// the hierarchy declares it, so it read as a call to a method that does not exist.
+///
+/// Deliberately NOT synthesizing `name()` / `ordinal()` / `compareTo(..)`: those are *inherited*
+/// from `java.lang.Enum`, not declared here. Declaring them on the enum would tell the semantic engine
+/// the project owns a declaration it has no source span to edit — the refusal it currently gives
+/// ("`name()` is declared by java.lang.Enum") is the right answer and depends on them staying up
+/// there.
+fn synthesize_enum_members(name: &str, methods: &mut Vec<MethodDecl>) {
+    let implicit = [
+        (ENUM_IMPLICIT_METHODS[0], format!("{name}[]"), Vec::new()),
+        (
+            ENUM_IMPLICIT_METHODS[1],
+            name.to_string(),
+            vec![ParamDecl {
+                name: "name".into(),
+                type_text: "String".into(),
+                annotations: Vec::new(),
+            }],
+        ),
+    ];
+    for (member, return_type_text, params) in implicit {
+        // The language forbids declaring either of these in an enum body, but a file mid-edit can
+        // still hold one — and a declared member winning is the rule everywhere else here.
+        if is_declared(methods, member, params.len()) {
+            continue;
+        }
+        methods.push(MethodDecl {
+            span: None,
+            name: member.to_string(),
+            return_type_text,
+            params,
+            is_static: true,
+            visibility: Visibility::Public,
+            is_abstract: false,
+            is_default: false,
+            is_final: false,
+            throws: Vec::new(),
+            annotations: Vec::new(),
+        });
+    }
+}
+
 /// Whether `methods` already holds one of that name and arity — the "a declared member wins" test.
 /// Arity as well as name, so a record declaring an extra `x(int)` overload doesn't suppress the
 /// zero-arg accessor the language owes it.
@@ -1592,6 +1652,54 @@ mod tests {
             .map(|f| &src[f.span.expect("a span").start..f.span.unwrap().end])
             .collect();
         assert_eq!(spans, ["a", "b"]);
+    }
+
+    // ── enum implicits ───────────────────────────────────────────────────────────
+
+    /// The bug this pair exists for: a generated `enum CollectionFormat` declaring only its
+    /// constants, called as `CollectionFormat.valueOf(s)`. Without the implicit one-argument
+    /// `valueOf`, the walk climbed to `java.lang.Enum`, matched its `valueOf(Class, String)`, and
+    /// reported a compile error on code javac accepts.
+    #[test]
+    fn an_enum_declares_values_and_a_one_argument_value_of() {
+        let t = one_type("enum Color { RED, GREEN; }");
+
+        let values = t.methods.iter().find(|m| m.name == "values").expect("values()");
+        assert!(values.params.is_empty(), "values() takes nothing");
+        assert!(values.is_static, "values() is static");
+        assert_eq!(values.return_type_text, "Color[]", "it returns an array of the enum");
+
+        let value_of = t.methods.iter().find(|m| m.name == "valueOf").expect("valueOf()");
+        assert_eq!(value_of.params.len(), 1, "ONE argument — the two-argument one is Enum's");
+        assert_eq!(value_of.params[0].type_text, "String");
+        assert!(value_of.is_static);
+        assert_eq!(value_of.return_type_text, "Color");
+
+        // Nobody wrote either of them, and there is no header to point at the way a record
+        // component has one.
+        assert!(values.span.is_none() && value_of.span.is_none());
+    }
+
+    /// `name()` and `ordinal()` are INHERITED from `java.lang.Enum`, not declared by the enum.
+    /// Declaring them here would hand the semantic engine a project declaration with no source span
+    /// to edit — the refusal it gives today depends on them staying on the supertype.
+    #[test]
+    fn an_enum_does_not_claim_the_methods_it_inherits() {
+        let t = one_type("enum Color { RED; }");
+        for inherited in ["name", "ordinal", "compareTo", "getDeclaringClass"] {
+            assert!(
+                !t.methods.iter().any(|m| m.name == inherited),
+                "`{inherited}` belongs to java.lang.Enum, not to the enum"
+            );
+        }
+    }
+
+    /// A plain class named like an enum gets nothing — the synthesis is keyed on the declaration
+    /// kind, not on a name or a shape.
+    #[test]
+    fn only_an_enum_gets_the_enum_implicits() {
+        let t = one_type("class Color { }");
+        assert!(t.methods.is_empty(), "a class declares what it declares");
     }
 
     /// **Nobody wrote these.** A record's accessor has no source, and a `0..0` would point at the

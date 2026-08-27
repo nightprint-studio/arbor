@@ -44,6 +44,8 @@
     type SemanticToken,
   } from './semantic-tokens';
   import { setCodeLenses as cmSetCodeLenses } from './code-lens';
+  import { setInlayHints as cmSetInlayHints } from './inlay-hints';
+  import { setSignature as cmSetSignature, clearSignature as cmClearSignature } from './signature-hint';
 
   let {
     value,
@@ -914,6 +916,65 @@
           key: l.key,
         })),
       ),
+    });
+  }
+
+  /**
+   * Replace the **inlay hints** — the text a provider draws between the code.
+   *
+   * Byte offsets in, like everything else a provider reports. An empty array clears them, which is
+   * the whole of "turn them off": there is no separate teardown, so a host can push and clear on a
+   * setting without reconfiguring the view.
+   */
+  export function setInlayHints(
+    hints: readonly { offset: number; label: string; before?: boolean }[],
+  ) {
+    if (!view) return;
+    const b2u = makeByteToU16(view.state.doc.toString());
+    view.dispatch({
+      effects: cmSetInlayHints.of(
+        hints.map((h) => ({
+          pos: b2u(h.offset),
+          label: h.label,
+          side: h.before === false ? ('after' as const) : ('before' as const),
+        })),
+      ),
+    });
+  }
+
+  /**
+   * Show the **parameter hint** — the signature of the call the caret is inside — or clear it
+   * with `null`.
+   *
+   * The `params` spans are offsets into `label`, in the units the provider counted them in: Bennu's
+   * own resolver counts bytes and a language server counts UTF-16, so the caller converts. They are
+   * not document offsets and are not mapped here.
+   */
+  export function setSignatureHint(
+    info: {
+      label: string;
+      params: readonly { start: number; end: number }[];
+      active: number;
+      anchor: number;
+      doc?: string | null;
+      overload?: { index: number; count: number } | null;
+    } | null,
+  ) {
+    if (!view) return;
+    if (!info) {
+      view.dispatch({ effects: cmClearSignature.of(null) });
+      return;
+    }
+    const b2u = makeByteToU16(view.state.doc.toString());
+    view.dispatch({
+      effects: cmSetSignature.of({
+        label: info.label,
+        params: info.params,
+        active: info.active,
+        doc: info.doc ?? null,
+        overload: info.overload ?? null,
+        pos: b2u(info.anchor),
+      }),
     });
   }
 

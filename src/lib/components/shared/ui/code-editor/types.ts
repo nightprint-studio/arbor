@@ -79,6 +79,15 @@ export interface EditorDiagnostic {
   to: number;
   severity: DiagnosticSeverity;
   message: string;
+  /**
+   * The provider's stable kind slug (`unused-import`, `unhandled-checked-exception`), when it has
+   * one.
+   *
+   * Carried because a **fix** is keyed by kind, never by message: it is what lets the host ask for
+   * the repair of the squiggle under the caret without the message becoming a wire format that
+   * cannot be reworded. Absent for a diagnostic whose provider has no catalogue.
+   */
+  code?: string;
   /** Optional quick-fixes (e.g. spell-check "Add to dictionary" / "Replace with …"). */
   actions?: EditorDiagnosticAction[];
 }

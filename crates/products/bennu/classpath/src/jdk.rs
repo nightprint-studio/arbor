@@ -83,7 +83,7 @@ impl ClassSource for MultiSource {
 /// failing. `Err` only when NO JDK is installed at all (or its container is missing).
 ///
 /// Why the fallback: completion, go-to-declaration and find-usages all build off this
-/// classpath (the provider + the rename engine). A legacy project targeting Java 8 on a
+/// classpath (the provider + the semantic engine). A legacy project targeting Java 8 on a
 /// machine that only has a modern JDK (17/21) would otherwise silently lose all three —
 /// while the pure-source class index still works — a confusing half-broken state. The core
 /// `java.*` API is largely forward-compatible, so a newer JDK answers member resolution fine.

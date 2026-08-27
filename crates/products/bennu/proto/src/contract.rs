@@ -502,6 +502,14 @@ pub struct UsageHit {
     pub col: usize,
     /// The trimmed source line text, for the results-list preview.
     pub preview: String,
+    /// The member this use was found **through**, when it is not the one asked about.
+    ///
+    /// A field whose accessors Lombok generates is used as `order.getName()`, never as `name` — so
+    /// its uses are real uses of the field, spelled as something else. Saying which member they
+    /// came through is the difference between a result list that looks right and one that looks
+    /// like a bug. `None` for an ordinary hit.
+    #[serde(default)]
+    pub via: Option<String>,
 }
 
 /// Result of `bennu_references` — the declaration the caret resolved to (as a human
@@ -1284,11 +1292,35 @@ pub struct Breakpoint {
     /// A disabled breakpoint is remembered but not installed — the alternative to deleting one
     /// you will want back in ten minutes.
     pub enabled: bool,
+    /// Stop here only when this holds. Empty = stop every time.
+    ///
+    /// The VM stops either way — a condition is checked *after* the hit, in the frame it
+    /// produced, and the program is let go again when it does not hold. That is how every
+    /// debugger does it, and it is why a condition on a hot line is slow rather than free.
+    ///
+    /// The language differs by engine, deliberately: a Java condition is Bennu's own (a watch
+    /// path compared with a literal — see `debug_cond`), a native one is the adapter's, because
+    /// the adapter can already evaluate it and reimplementing that would be strictly worse.
+    #[serde(default)]
+    pub condition: String,
+    /// Stop on every **N**th hit. `0` and `1` both mean every one.
+    ///
+    /// Counted **after** the condition, so `3` with a condition of `i > 5` means the third time
+    /// `i > 5` — which is the only reading that composes. The count is per session: it starts at
+    /// zero on each launch, and editing the breakpoint set restarts it.
+    #[serde(default)]
+    pub hit_count: u32,
 }
 
 impl Default for Breakpoint {
     fn default() -> Self {
-        Breakpoint { file: String::new(), line: 0, enabled: true }
+        Breakpoint {
+            file: String::new(),
+            line: 0,
+            enabled: true,
+            condition: String::new(),
+            hit_count: 0,
+        }
     }
 }
 
@@ -1346,6 +1378,21 @@ pub struct BreakpointStatus {
     /// Why not, when it isn't — "the class isn't loaded yet" (which resolves itself) reads very
     /// differently from "that line has no code" (which never will).
     pub message: String,
+    /// What went wrong with the condition, if anything: it did not parse, or it could not be
+    /// answered at a hit. Separate from [`Self::message`] because the two are different problems
+    /// with different fixes — one is about where the breakpoint bound, the other about what you
+    /// typed — and a panel that ran them together would read as one confused sentence.
+    #[serde(default)]
+    pub condition_error: String,
+    /// How many times it has stopped the program **this session** — the number a pass count is
+    /// counting, and the answer to "is this line even running", which is otherwise only knowable
+    /// by adding a log line and rebuilding.
+    ///
+    /// Counted where the stop is decided, so a hit the condition rejected is not one. Updated when
+    /// the program actually stops, not on every rejected hit: a condition on a hot line is asked
+    /// thousands of times a second and an event apiece would be the slowest thing in the debugger.
+    #[serde(default)]
+    pub hits: u32,
 }
 
 /// One frame of a suspended thread's stack.

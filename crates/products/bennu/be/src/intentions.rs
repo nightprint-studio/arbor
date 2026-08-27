@@ -19,6 +19,25 @@ pub struct IntentionsArgs {
     pub source: String,
     /// Caret position as a **UTF-8 byte offset** into `source`.
     pub offset: usize,
+    /// The diagnostics the editor is currently showing, so the ones under the caret can be offered
+    /// their **fix**.
+    ///
+    /// Passed in rather than recomputed. The editor has them — it drew them — and revalidating the
+    /// file to answer an Alt+Enter would run every check in it for the sake of the one squiggle the
+    /// caret is on. What arrives is only `code` and a span; the fixes read the source themselves and
+    /// never the message (see `bennu_intentions::prelude::fixes_for`).
+    #[serde(default)]
+    pub diagnostics: Vec<DiagRef>,
+}
+
+/// A diagnostic as a quick-fix needs it: what kind, and where.
+#[derive(Deserialize, Clone)]
+pub struct DiagRef {
+    /// The stable kind slug — `unused-import`, `unhandled-checked-exception`.
+    pub code: String,
+    /// Byte span in `source`.
+    pub start: usize,
+    pub end: usize,
 }
 
 /// One applicable intention — a stable id, a label, and either a byte-range edit to apply or an
@@ -59,6 +78,7 @@ fn bennu_intentions_at(_ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<Of
             ),
         );
         offers.extend(java_file_offers(&args.file, &args.source, args.offset));
+        offers.extend(quick_fix_offers(&args));
     }
 
     // The caret is on a declaration whose name breaks the project's naming convention. The fix is
@@ -66,7 +86,7 @@ fn bennu_intentions_at(_ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<Of
     //
     // Dispatched as a **rename action**, not as an edit — even for a local, where replacing the
     // identifier in place would rewrite the declaration and leave every use of it behind. The
-    // project's rename engine is what knows the others.
+    // project's semantic engine is what knows the others.
     //
     // Which of the two rename actions depends on how far the rename can reach, which the pack
     // decides: only a declaration a *grammar* found, whose kind cannot be referred to from outside
@@ -88,6 +108,49 @@ fn bennu_intentions_at(_ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<Of
     }
 
     Ok(offers)
+}
+
+/// The **fixes** for the diagnostics under the caret.
+///
+/// A diagnostic is under the caret when its span contains it, or when the caret is at either end of
+/// it — a squiggle you have just walked the caret onto is the one you want to fix, and "inside" is
+/// a distinction nobody makes while pressing Alt+Enter.
+///
+/// Text-only fixes come from the pure crate; the ones that need types come from the resolver, and
+/// only if the project has one built. A cold index simply offers fewer fixes.
+fn quick_fix_offers(args: &IntentionsArgs) -> Vec<OfferWire> {
+    let under: Vec<&DiagRef> =
+        args.diagnostics.iter().filter(|d| args.offset >= d.start && args.offset <= d.end).collect();
+    if under.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for d in &under {
+        out.extend(
+            bennu_intentions::prelude::fixes_for(&d.code, &args.source, d.start, d.end)
+                .into_iter()
+                .map(|f| OfferWire {
+                    id: f.id,
+                    label: f.label,
+                    start: f.start,
+                    end: f.end,
+                    replacement: f.replacement,
+                    action: None,
+                }),
+        );
+    }
+    if let Some(resolver) = IndexService::global().caret_resolver_for(&args.file) {
+        for d in &under {
+            out.extend(crate::quick_fix::resolver_fixes(
+                &d.code,
+                &args.source,
+                d.start,
+                d.end,
+                &*resolver,
+            ));
+        }
+    }
+    out
 }
 
 /// The Java intentions that need the file's location rather than only its text: fixing a package
@@ -131,6 +194,24 @@ fn java_file_offers(file: &str, source: &str, offset: usize) -> Vec<OfferWire> {
     if let Some(simple) = bennu_java::prelude::simple_type_needing_import(source, offset) {
         offers.extend(import_class_offers(file, source, &simple));
     }
+
+    // "Implement / override methods": offered only when there IS something to override, which is
+    // why it asks rather than offering unconditionally. An Alt+Enter item that opens a dialog
+    // saying "nothing here" is an item that teaches you to stop reading the menu.
+    //
+    // A dialog, not an edit — the user picks which methods — so it travels as an action and the
+    // editor opens the picker. The hierarchy walk it costs runs on a memoized resolver and only on
+    // an Alt+Enter, which is a keystroke the user asked for.
+    if !IndexService::global().overridable_at(file, source, offset).is_empty() {
+        offers.push(OfferWire {
+            id: "override-methods".to_string(),
+            label: "Implement / override methods…".to_string(),
+            start: offset,
+            end: offset,
+            replacement: String::new(),
+            action: Some("override-methods".to_string()),
+        });
+    }
     offers
 }
 
@@ -165,7 +246,7 @@ fn import_class_offers(file: &str, source: &str, simple: &str) -> Vec<OfferWire>
 /// is needed: the fqn is a `java.lang` type, in the file's OWN package, already imported, or covered
 /// by an `import pkg.*;`. The single place the "does this need importing?" policy lives — shared by
 /// the "Import class" intention (per candidate) and the auto-import-on-completion handler.
-fn import_edit_for(source: &str, fqn: &str) -> Option<(usize, usize, String)> {
+pub(crate) fn import_edit_for(source: &str, fqn: &str) -> Option<(usize, usize, String)> {
     let pkg = fqn.rsplit_once('.').map(|(p, _)| p).unwrap_or("");
     if pkg == "java.lang" {
         return None;

@@ -237,13 +237,74 @@ pub fn update_submodule(git: &GitCli, repo_path: &str, name: &str, recursive: bo
 /// the auth args Arbor should prepend to its CLI invocation.  Empty when
 /// the URL is SSH/file or the caller has no stored token for that host.
 fn submodule_auth_args(repo: &Repository, sub_path: &str, resolve_auth: AuthArgsResolver) -> Vec<String> {
-    let url = repo
-        .find_submodule(sub_path)
-        .ok()
-        .and_then(|s| s.url().map(|u| u.to_string()))
-        .unwrap_or_default();
-    if url.is_empty() { return Vec::new(); }
+    let Some(url) = repo.find_submodule(sub_path).ok().as_ref().and_then(|s| submodule_url(repo, s))
+    else {
+        return Vec::new();
+    };
     resolve_auth(&url)
+}
+
+/// The absolute URL a submodule's own `fetch` / `pull` / `push` will contact.
+///
+/// Not simply what `.gitmodules` records, which is the trap this exists for: a submodule URL is
+/// allowed to be **relative** to the superproject's remote (`../shared-lib.git`, the form GitLab
+/// and GitHub both suggest for repositories in the same group). A relative URL has no host, and a
+/// credential lookup is by host — so asking for one returned nothing, no `Authorization` header
+/// was injected, and git fell through to its own helper with prompts disabled:
+/// *could not read Username for 'https://gitlab.com'* on a submodule whose parent pulls fine.
+///
+/// Best first:
+///   1. the submodule's OWN `origin` — once it is cloned this is what git actually uses, and it is
+///      already absolute, because git resolved any relative form when it cloned it;
+///   2. what `.gitmodules` records, made absolute against the superproject's `origin`.
+fn submodule_url(parent: &Repository, sub: &git2::Submodule<'_>) -> Option<String> {
+    if let Ok(sub_repo) = sub.open() {
+        if let Some(url) = sub_repo
+            .find_remote("origin")
+            .ok()
+            .and_then(|r| r.url().map(str::to_string))
+            .filter(|u| !u.is_empty())
+        {
+            return Some(url);
+        }
+    }
+    let recorded = sub.url().filter(|u| !u.is_empty())?;
+    let base = parent.find_remote("origin").ok().and_then(|r| r.url().map(str::to_string));
+    Some(match base {
+        Some(base) => absolutize(recorded, &base),
+        None => recorded.to_string(),
+    })
+}
+
+/// Resolve a relative submodule URL against the superproject's remote, the way git's own
+/// `relative_url()` does: each `../` removes one path component from the superproject's URL and
+/// `./` removes none — so `../lib.git` under `…/acme/portal.git` is `…/acme/lib.git`. Anything
+/// already absolute is returned untouched.
+fn absolutize(url: &str, base: &str) -> String {
+    if !(url.starts_with("./") || url.starts_with("../")) {
+        return url.to_string();
+    }
+    let mut segments: Vec<&str> = base.trim_end_matches('/').split('/').collect();
+    let mut rest = url;
+    loop {
+        if let Some(r) = rest.strip_prefix("../") {
+            // Never climb past the host. `https://h/a` is `["https:", "", "h", "a"]`, so three
+            // segments left IS the host — a `.gitmodules` that asks for more is broken, and
+            // answering with a URL on some other host would be worse than answering with the one
+            // we were handed.
+            if segments.len() <= 3 {
+                return url.to_string();
+            }
+            segments.pop();
+            rest = r;
+        } else if let Some(r) = rest.strip_prefix("./") {
+            rest = r;
+        } else {
+            break;
+        }
+    }
+    segments.push(rest);
+    segments.join("/")
 }
 
 /// Collect every submodule URL declared by the parent repo and return one
@@ -258,10 +319,12 @@ fn submodule_auth_args(repo: &Repository, sub_path: &str, resolve_auth: AuthArgs
 /// `http_auth_args_for_urls` host-dedup behaviour.
 fn repo_submodule_auth_args(repo_path: &str, resolve_auth: AuthArgsResolver) -> Vec<String> {
     let Ok(repo) = Repository::open(repo_path) else { return Vec::new(); };
+    // Through `submodule_url`, not `s.url()`: a relative `.gitmodules` entry carries no host to
+    // scope a credential to — see there.
     let urls: Vec<String> = repo
         .submodules()
         .ok()
-        .map(|subs| subs.iter().filter_map(|s| s.url().map(|u| u.to_string())).collect())
+        .map(|subs| subs.iter().filter_map(|s| submodule_url(&repo, s)).collect())
         .unwrap_or_default();
     if urls.is_empty() { return Vec::new(); }
 
@@ -352,4 +415,66 @@ fn git_run_str_with_prefix(git: &GitCli, dir: &str, prefix: &[String], args: &[&
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::absolutize;
+
+    /// The shape that broke: GitLab's own suggestion for a sibling repository in the same group.
+    /// A relative URL carries no host, and a credential lookup is by host.
+    #[test]
+    fn a_sibling_resolves_against_the_superproject() {
+        assert_eq!(
+            absolutize("../shared-lib.git", "https://gitlab.com/acme/portal.git"),
+            "https://gitlab.com/acme/shared-lib.git",
+        );
+    }
+
+    /// `./` removes nothing, so it hangs the submodule UNDER the superproject's URL. That reads
+    /// oddly and is rarely what anyone writes, but it is git's rule and the host — the only part a
+    /// credential is scoped to — comes out right either way.
+    #[test]
+    fn a_dot_slash_removes_nothing() {
+        assert_eq!(
+            absolutize("./sub.git", "https://gitlab.com/acme/portal.git"),
+            "https://gitlab.com/acme/portal.git/sub.git",
+        );
+    }
+
+    #[test]
+    fn several_levels_climb_several_groups() {
+        assert_eq!(
+            absolutize("../../other/lib.git", "https://gitlab.com/acme/team/portal.git"),
+            "https://gitlab.com/acme/other/lib.git",
+        );
+    }
+
+    /// An absolute URL is what git will contact whatever the superproject's remote is.
+    #[test]
+    fn an_absolute_url_is_left_alone() {
+        for url in ["https://github.com/o/r.git", "git@gitlab.com:o/r.git", "/srv/git/r.git"] {
+            assert_eq!(absolutize(url, "https://gitlab.com/acme/portal.git"), url);
+        }
+    }
+
+    /// Climbing past the host would point the credential at somebody else's server. Handing back
+    /// what we were given fails the same way it does today; inventing a host could fail worse.
+    #[test]
+    fn climbing_past_the_host_refuses_rather_than_inventing_one() {
+        assert_eq!(
+            absolutize("../../../elsewhere.git", "https://gitlab.com/acme/portal.git"),
+            "../../../elsewhere.git",
+        );
+    }
+
+    /// An scp-style SSH base has no scheme to protect and no host segment to count — it must not
+    /// produce something that looks absolute.
+    #[test]
+    fn an_ssh_base_does_not_get_climbed() {
+        assert_eq!(
+            absolutize("../lib.git", "git@gitlab.com:acme/portal.git"),
+            "../lib.git",
+        );
+    }
 }

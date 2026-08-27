@@ -35,6 +35,23 @@ export function setDebugConfig(root: string, config: DebugConfigDto): Promise<vo
   return bennu('bennu_set_debug_config', { args: { root, config } });
 }
 
+/**
+ * What is wrong with a breakpoint condition, or `''` when nothing is.
+ *
+ * Asked while the user types, because a condition is the one debugger setting whose mistakes are
+ * invisible at the time you make them: a bad watch shows an error beside the watch, a bad condition
+ * just means the program never stops — ten minutes later, somewhere you are not looking.
+ *
+ * The backend runs the same parser the session runs, so what the box accepts and what the debugger
+ * accepts cannot drift. A native condition is the adapter's own language and comes back `''`:
+ * Bennu has no parser for it and says nothing rather than guessing.
+ *
+ * Wire: `bennu_debug_check_condition` — `{ file, condition }`.
+ */
+export function checkBreakpointCondition(file: string, condition: string): Promise<string> {
+  return bennu('bennu_debug_check_condition', { args: { file, condition } });
+}
+
 /** Let the program run on. Wire: `bennu_debug_resume` — `SessionArgs { session_id }`. */
 export function debugResume(sessionId: string): Promise<void> {
   return bennu('bennu_debug_resume', { args: { session_id: sessionId } });

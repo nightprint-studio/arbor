@@ -278,21 +278,40 @@ fn field_detail_is_the_type() {
     );
 }
 
+/// What the order means now: relevance, and kind only where relevance ties.
+///
+/// This used to assert "every field precedes every method", which was true because the query
+/// sorted by `(kind, label)` and knew nothing else. It now ranks — a class's own members above
+/// the ones it inherits, and `java.lang.Object`'s last — so fields and methods interleave by
+/// design, and the kind ordering survives underneath as the tie-break it always really was.
 #[test]
-fn fields_are_offered_before_methods() {
+fn a_types_own_members_are_offered_before_the_ones_it_inherits() {
     let p = zoo();
     let s = p.source("Owner.java").to_string();
     let items = p.complete("Owner.java", at_pooch_dot(&s));
-    // The query sorts by kind ("field" < "method") then label; every field precedes every method.
-    let first_method = items.iter().position(|c| c.kind == "method");
-    let last_field = items.iter().rposition(|c| c.kind == "field");
-    if let (Some(fm), Some(lf)) = (first_method, last_field) {
-        assert!(
-            lf < fm,
-            "all fields must precede all methods, got {:?}",
-            items
-        );
+    let at = |label: &str| {
+        items
+            .iter()
+            .position(|c| c.label == label)
+            .unwrap_or_else(|| panic!("`{label}` should be offered, got {items:?}"))
+    };
+
+    // `Dog` declares these; `Animal` declares those. Every one of the first beats every one of
+    // the second.
+    for own in ["bark", "fetch"] {
+        for inherited in ["legs", "add", "name"] {
+            assert!(at(own) < at(inherited), "`{own}` should precede `{inherited}`");
+        }
     }
+
+    // (Where `java.lang.Object`'s members land is not asked here: this fixture has no JDK, so
+    // `Object` does not resolve and none are offered. That term is covered by `bennu_query`'s own
+    // `rank` tests, which score a member without needing a project to exist.)
+
+    // The old rule, in the place it belongs: between members that are equally relevant — same
+    // class, same distance — a field still comes before a method.
+    assert!(at("name") < at("add"), "at equal relevance a field precedes a method");
+    assert!(at("name") < at("legs"));
 }
 
 // ── Negative / robustness ────────────────────────────────────────────────────────────────────

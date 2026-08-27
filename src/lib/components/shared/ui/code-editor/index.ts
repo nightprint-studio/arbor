@@ -76,3 +76,23 @@ export {
   type LiteralPasteRenderer,
   type LiteralPasteRefusal,
 } from './paste-literal';
+// Postfix templates — `expr.if` → `if (expr) { … }`. The engine is language-agnostic; each language
+// supplies its own table.
+export {
+  postfixCompletion,
+  expressionStart,
+  extractStops,
+  CARET,
+  type PostfixTemplate,
+  type PostfixOptions,
+} from './postfix';
+// Parameter hints — the signature of the call the caret is inside, with the active argument marked.
+export {
+  signatureHints,
+  setSignature,
+  clearSignature,
+  showSignatureHint,
+  type SignatureInfo,
+} from './signature-hint';
+// Inlay hints — text the provider draws between the code, not in it.
+export { inlayHints, setInlayHints, type InlayHint } from './inlay-hints';

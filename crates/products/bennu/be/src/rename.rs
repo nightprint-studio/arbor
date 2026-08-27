@@ -1,6 +1,6 @@
 //! `rename` domain — `bennu_rename_plan` / `bennu_rename_apply` (docs §5 #10-12).
 //!
-//! Both handlers plan the rename off the owning project's rename engine (the whole-project
+//! Both handlers plan the rename off the owning project's semantic engine (the whole-project
 //! reference index + resolver + source sets the [`crate::index_service`] builds off-thread
 //! on `bennu_open_project`). They differ only in what they return:
 //!   * `bennu_rename_plan` → the **preview** (`old→new` per file, with a `reason` and an
@@ -38,7 +38,7 @@ pub struct RenameArgs {
 }
 
 /// Plan a rename for the symbol at `file`:`offset` → `new_name`, returning the PREVIEW.
-/// `None` when no project owns the file, its rename engine is still building, or the caret
+/// `None` when no project owns the file, its semantic engine is still building, or the caret
 /// isn't on a renameable identifier.
 #[arbor_rpc::handler]
 fn bennu_rename_plan(_ctx: &BennuState, args: RenameArgs) -> Result<Option<RenamePreview>, String> {

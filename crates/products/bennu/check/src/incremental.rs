@@ -186,6 +186,7 @@ fn run_body_checks<'a>(
     out.extend(crate::arguments::argument_type_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::casts::type_compat_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::enum_switch::enum_switch_errors_in(root, nodes, source, symbols, resolver, infer));
+    out.extend(crate::switch_label_type::switch_label_type_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::super_method::super_method_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::condition_type::condition_type_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::type_use::type_use_errors_in(root, nodes, source, symbols, resolver, infer));

@@ -25,7 +25,7 @@ use bennu_proto::prelude::{
     LspToken, RenameEdit, RenameFileEdits, RenamePreview, SourceEdit, UsageHit, UsagesResult,
 };
 use bennu_proto::prelude::{
-    LspCallSite, LspFold, LspHierarchyNode, LspHighlight, LspLens, LspMacroExpansion, SnippetStop,
+    HierarchyCallSite, HierarchyNode, LspFold, LspHighlight, LspLens, LspMacroExpansion, SnippetStop,
 };
 
 use crate::lsp_registry::LspRegistry;
@@ -344,7 +344,7 @@ pub fn prepare_hierarchy(
     source: &str,
     offset: usize,
     calls: bool,
-) -> Vec<LspHierarchyNode> {
+) -> Vec<HierarchyNode> {
     route(file, Vec::new(), |session| {
         let result = if calls {
             session.prepare_call_hierarchy(file, source, offset)
@@ -366,7 +366,7 @@ pub fn hierarchy_step(
     scope: &str,
     item: serde_json::Value,
     direction: &str,
-) -> Vec<LspHierarchyNode> {
+) -> Vec<HierarchyNode> {
     let Some(session) = LspRegistry::global().session_covering(scope) else { return Vec::new() };
     let result = match direction {
         "incoming" => session.incoming_calls(item),
@@ -434,8 +434,8 @@ pub fn expand_macro(file: &str, source: &str, offset: usize) -> Option<LspMacroE
 }
 
 /// A hierarchy node on the wire.
-fn hierarchy_wire(n: bennu_lsp::prelude::HierarchyNode) -> LspHierarchyNode {
-    LspHierarchyNode {
+fn hierarchy_wire(n: bennu_lsp::prelude::HierarchyNode) -> HierarchyNode {
+    HierarchyNode {
         name: n.name,
         kind: n.kind,
         detail: n.detail,
@@ -448,7 +448,7 @@ fn hierarchy_wire(n: bennu_lsp::prelude::HierarchyNode) -> LspHierarchyNode {
         call_sites: n
             .call_sites
             .into_iter()
-            .map(|s| LspCallSite {
+            .map(|s| HierarchyCallSite {
                 file: s.file,
                 start: s.start,
                 end: s.end,
@@ -687,6 +687,7 @@ fn usage_wire(t: SpanTarget) -> UsageHit {
         line: t.line,
         col: t.col,
         preview: t.preview,
+        via: None,
     }
 }
 

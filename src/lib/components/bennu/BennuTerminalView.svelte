@@ -21,6 +21,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import TerminalInstance from '$lib/components/shared/terminal/TerminalInstance.svelte';
+  import { endSession } from '$lib/components/shared/terminal/session';
   import { terminalCreate, terminalClose } from '$lib/ipc/terminal';
   import { terminalStore } from '$lib/stores/terminal.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
@@ -45,8 +46,11 @@
     }
   }
 
+  /** Close a terminal for good: the tab, the PTY, and the xterm session behind it. Ending the
+   *  session is what an unmount must NOT do — see `session.ts`. */
   async function closeTab(id: string) {
     terminalStore.removeTab(id);
+    endSession(id);
     try { await terminalClose(id); } catch { /* already gone */ }
   }
 

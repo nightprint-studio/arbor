@@ -23,6 +23,10 @@ pub mod class_names;
 pub mod config;
 pub mod conflict;
 pub mod diag_cache;
+// The project's semantic model — the one view of the index + sources + type maps that rename,
+// find-usages, go-to, hover, inherited members and the hierarchies all answer from.
+pub mod engine;
+pub mod hierarchy;
 pub mod java_index;
 // Internal: Lombok generated-member synthesis, an implementation detail of index-building
 // (java_index). Not part of the public surface, so it stays a private module (no prelude entry).

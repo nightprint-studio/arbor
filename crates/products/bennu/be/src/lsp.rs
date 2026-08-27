@@ -19,9 +19,9 @@
 
 use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::{
-    CompletionItem, DeclarationTarget, FileDiagnostics, LspAction, LspFold, LspHierarchyNode,
-    LspHighlight, LspLens, LspMacroExpansion, LspServerInfo, LspSignature, LspStatus, LspSymbol,
-    LspToken, SourceEdit, UsagesResult,
+    CompletionItem, DeclarationTarget, FileDiagnostics, LspAction, LspFold, LspHighlight, LspLens,
+    LspMacroExpansion, LspServerInfo, LspSignature, LspStatus, LspSymbol, LspToken, SourceEdit,
+    UsagesResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -208,49 +208,6 @@ fn bennu_lsp_lens_locations(
     args: LspLensPressArgs,
 ) -> Result<Option<UsagesResult>, String> {
     Ok(lsp_route::lens_locations(&args.file, &args.source, &args.title, &args.arguments))
-}
-
-/// Args for [`bennu_lsp_prepare_hierarchy`].
-#[derive(Deserialize)]
-pub struct LspHierarchyArgs {
-    pub file: String,
-    pub source: String,
-    pub offset: usize,
-    /// `true` for the **call** hierarchy, `false` for the **type** hierarchy.
-    ///
-    /// One handler for both because the protocol gives them the same shape and the panel that draws
-    /// them is one panel — two handlers would be two copies of the same marshalling.
-    pub calls: bool,
-}
-
-/// The item at the caret a hierarchy can be built from, or an empty list when there is none.
-#[arbor_rpc::handler]
-fn bennu_lsp_prepare_hierarchy(
-    _ctx: &BennuState,
-    args: LspHierarchyArgs,
-) -> Result<Vec<LspHierarchyNode>, String> {
-    Ok(lsp_route::prepare_hierarchy(&args.file, &args.source, args.offset, args.calls))
-}
-
-/// Args for [`bennu_lsp_hierarchy_step`].
-#[derive(Deserialize)]
-pub struct LspHierarchyStepArgs {
-    /// Any path inside the workspace — which server answers. Not the item's own file: a caller can
-    /// live in a dependency's source, which is deliberately not a workspace of its own.
-    pub scope: String,
-    /// The node's `handle`, verbatim.
-    pub item: serde_json::Value,
-    /// `incoming` · `outgoing` · `supertypes` · `subtypes`.
-    pub direction: String,
-}
-
-/// One level of a hierarchy, expanded from a node's handle.
-#[arbor_rpc::handler]
-fn bennu_lsp_hierarchy_step(
-    _ctx: &BennuState,
-    args: LspHierarchyStepArgs,
-) -> Result<Vec<LspHierarchyNode>, String> {
-    Ok(lsp_route::hierarchy_step(&args.scope, args.item, &args.direction))
 }
 
 /// Args for [`bennu_lsp_will_rename`].

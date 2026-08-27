@@ -337,7 +337,7 @@ impl Session {
         for (file, breakpoints) in breakpoints {
             let args = SetBreakpointsArguments {
                 source: Source { path: Some(file.clone()), ..Source::default() },
-                breakpoints: breakpoints.clone(),
+                breakpoints: allowed(breakpoints.clone(), &capabilities),
                 source_modified: false,
             };
             // A file the adapter refuses is one file's breakpoints lost, not a failed session: a
@@ -507,7 +507,7 @@ impl Session {
     ) -> Result<Vec<Breakpoint>, String> {
         let args = SetBreakpointsArguments {
             source: Source { path: Some(file.to_string()), ..Source::default() },
-            breakpoints: breakpoints.to_vec(),
+            breakpoints: allowed(breakpoints.to_vec(), &self.capabilities),
             source_modified: false,
         };
         let body: SetBreakpointsBody = self.ask("setBreakpoints", Some(args))?;
@@ -618,9 +618,79 @@ fn with_stderr(message: &str, tail: &[String]) -> String {
     format!("{message}\n{}", log.join("\n"))
 }
 
+/// Strip the breakpoint fields this adapter did not claim to support.
+///
+/// The spec says a client sends `condition` only when `supportsConditionalBreakpoints` is set, and
+/// the reason is not pedantry: `setBreakpoints` replaces a **whole file's** set in one request, so an
+/// adapter that errors on a field it does not know does not lose one breakpoint — it loses every
+/// breakpoint in that file, and the program then runs straight past all of them.
+///
+/// Dropping the field rather than the breakpoint is the right half to give up. A breakpoint that
+/// stops too often is one keystroke from being fixed; one that never binds is invisible.
+fn allowed(mut breakpoints: Vec<SourceBreakpoint>, capabilities: &Capabilities) -> Vec<SourceBreakpoint> {
+    if capabilities.supports_conditional_breakpoints
+        && capabilities.supports_hit_conditional_breakpoints
+    {
+        return breakpoints;
+    }
+    for bp in &mut breakpoints {
+        if !capabilities.supports_conditional_breakpoints {
+            bp.condition = None;
+        }
+        if !capabilities.supports_hit_conditional_breakpoints {
+            bp.hit_condition = None;
+        }
+    }
+    breakpoints
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A breakpoint carrying both extras, for the capability filter below.
+    fn restricted() -> SourceBreakpoint {
+        SourceBreakpoint {
+            line: 10,
+            condition: Some("i > 5".into()),
+            hit_condition: Some("%3".into()),
+            ..SourceBreakpoint::default()
+        }
+    }
+
+    #[test]
+    fn an_adapter_that_supports_both_gets_both_unchanged() {
+        let caps = Capabilities {
+            supports_conditional_breakpoints: true,
+            supports_hit_conditional_breakpoints: true,
+            ..Capabilities::default()
+        };
+        let out = allowed(vec![restricted()], &caps);
+        assert_eq!(out[0].condition.as_deref(), Some("i > 5"));
+        assert_eq!(out[0].hit_condition.as_deref(), Some("%3"));
+    }
+
+    /// The failure this guards is not "the condition is ignored" — `setBreakpoints` replaces a whole
+    /// file's set, so an adapter that errors on an unknown field loses EVERY breakpoint in that file.
+    #[test]
+    fn a_field_the_adapter_never_claimed_is_dropped_and_the_breakpoint_survives() {
+        let out = allowed(vec![restricted()], &Capabilities::default());
+        assert_eq!(out.len(), 1, "the breakpoint stays — only the field goes");
+        assert_eq!(out[0].line, 10);
+        assert_eq!(out[0].condition, None);
+        assert_eq!(out[0].hit_condition, None);
+    }
+
+    #[test]
+    fn the_two_capabilities_are_answered_separately() {
+        let caps = Capabilities {
+            supports_conditional_breakpoints: true,
+            ..Capabilities::default()
+        };
+        let out = allowed(vec![restricted()], &caps);
+        assert_eq!(out[0].condition.as_deref(), Some("i > 5"));
+        assert_eq!(out[0].hit_condition, None, "a hit condition is a separate claim");
+    }
 
     /// The bug this seam exists for, pinned.
     ///

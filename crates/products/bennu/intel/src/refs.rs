@@ -18,7 +18,7 @@
 //! reference query keys off; [`classify_target`] is its rename superset that also
 //! recognises a **local variable / parameter** (which find-usages doesn't bucket).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bennu_java::prelude::{
     extract_symbols_from_root, infer_receiver_type_at, FileSymbols, TypeResolver,
@@ -136,12 +136,175 @@ pub struct ReferenceIndex {
     /// at the site. Keyed by name because that is the question a rename asks: "is there anywhere
     /// spelling this name that I cannot see?" — see [`ReferenceIndex::unresolved_named`].
     unresolved_by_name: HashMap<String, Vec<UsageLocation>>,
+    /// Which buckets each file put something in — see [`FileFootprint`].
+    footprints: HashMap<String, FileFootprint>,
+}
+
+/// Where one file's contribution landed, so it can be taken back out again.
+///
+/// The index is a merge: every file's edges are poured into shared buckets keyed by declaration,
+/// and once poured there is nothing in a bucket that says which file an entry came from except the
+/// entry's own path. Withdrawing a file without this means visiting every bucket in the project to
+/// ask — which is the whole index, on every keystroke. The footprint turns that into a visit to the
+/// handful of buckets the file actually touched.
+///
+/// It also carries the file's share of the resolve counters, which are sums: subtracting on
+/// withdrawal is what keeps them a count of what is currently in the index rather than of
+/// everything ever walked into it.
+#[derive(Default, Clone)]
+struct FileFootprint {
+    /// The declaration buckets this file has entries in (deduplicated).
+    keys: Vec<DeclKey>,
+    /// The unresolved-name buckets this file has entries in (deduplicated).
+    names: Vec<String>,
+    attempted: usize,
+    resolved: usize,
 }
 
 impl ReferenceIndex {
     /// Every usage of a declaration key (empty when none / unknown key).
     pub fn usages_of(&self, key: &DeclKey) -> &[UsageLocation] {
         self.by_decl.get(key).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Re-walk one file and swap its contribution into the index, in place.
+    ///
+    /// The index is otherwise a build artefact: it is walked once when the project opens and stays
+    /// as it was until something rebuilds it. That is why a method you had just written had no
+    /// usages and the one you had just stopped calling still had its old one — find-usages was
+    /// answering from the project as it looked when you opened it, while go-to (which classifies
+    /// against the live buffer through the resolver) answered from the project as it is.
+    ///
+    /// Cost is one file's parse and walk, and the withdrawal visits only the buckets that file is
+    /// actually in (see [`FileFootprint`]) — so this is proportional to the file, not the project,
+    /// and can run on every debounced edit.
+    ///
+    /// `source == None` removes the file (a delete).
+    pub fn refresh_file(
+        &mut self,
+        path: &str,
+        source: Option<&str>,
+        resolver: &dyn TypeResolver,
+        project_types: &HashMap<String, String>,
+    ) {
+        self.withdraw_file(path);
+        let Some(src) = source else { return };
+        self.absorb(path, walk_file(path, src, resolver, project_types));
+    }
+
+    /// Take a file's entries back out of every bucket it is in, and un-count its stats.
+    fn withdraw_file(&mut self, path: &str) {
+        self.file_symbols.remove(path);
+        let Some(fp) = self.footprints.remove(path) else { return };
+        self.attempted = self.attempted.saturating_sub(fp.attempted);
+        self.resolved = self.resolved.saturating_sub(fp.resolved);
+        for key in &fp.keys {
+            if let Some(bucket) = self.by_decl.get_mut(key) {
+                bucket.retain(|u| u.file != path);
+                if bucket.is_empty() {
+                    self.by_decl.remove(key);
+                }
+            }
+        }
+        for name in &fp.names {
+            if let Some(bucket) = self.unresolved_by_name.get_mut(name) {
+                bucket.retain(|u| u.file != path);
+                if bucket.is_empty() {
+                    self.unresolved_by_name.remove(name);
+                }
+            }
+        }
+    }
+
+    /// Pour a freshly-walked file's contribution in, recording where it landed.
+    fn absorb(&mut self, path: &str, c: FileContribution) {
+        self.attempted += c.attempted;
+        self.resolved += c.resolved;
+        let mut fp =
+            FileFootprint { attempted: c.attempted, resolved: c.resolved, ..FileFootprint::default() };
+        for (key, usage) in c.edges {
+            if !fp.keys.contains(&key) {
+                fp.keys.push(key.clone());
+            }
+            self.by_decl.entry(key).or_default().push(usage);
+        }
+        for (name, usage) in c.unresolved {
+            if !fp.names.iter().any(|n| *n == name) {
+                fp.names.push(name.clone());
+            }
+            self.unresolved_by_name.entry(name).or_default().push(usage);
+        }
+        self.file_symbols.insert(path.to_string(), c.symbols);
+        self.footprints.insert(path.to_string(), fp);
+    }
+
+    /// The binary names of the types `path` declares, as the index currently understands it.
+    ///
+    /// Read *before* a refresh and compared with the same read *after*, this is how a change to a
+    /// file's declaration surface is noticed: what other files resolve against is the set of types
+    /// a file declares, so a change to it is exactly the change their edges depend on.
+    pub fn types_declared_in(&self, path: &str) -> Vec<String> {
+        self.file_symbols
+            .get(path)
+            .map(|s| s.types.iter().map(|t| t.fqn.replace('.', "/")).collect())
+            .unwrap_or_default()
+    }
+
+    /// A fingerprint of everything about `path` that another file could resolve against: the types
+    /// it declares, their supertypes, and the names and shapes of their members.
+    ///
+    /// It exists to answer one question cheaply — *did this edit change anything outside this
+    /// file?* Typing inside a method body doesn't, and that is the overwhelming majority of edits;
+    /// only when the fingerprint moves is it worth re-walking the files that resolve against these
+    /// types. Deliberately blind to bodies, spans and modifiers-that-aren't-visibility: those change
+    /// on every keystroke and change nothing anybody else resolves.
+    pub fn declaration_fingerprint(&self, path: &str) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let Some(syms) = self.file_symbols.get(path) else { return 0 };
+        syms.package.hash(&mut h);
+        for t in &syms.types {
+            t.fqn.hash(&mut h);
+            t.kind.hash(&mut h);
+            t.type_params.hash(&mut h);
+            t.extends.hash(&mut h);
+            t.implements.hash(&mut h);
+            for m in &t.methods {
+                m.name.hash(&mut h);
+                m.return_type_text.hash(&mut h);
+                m.is_static.hash(&mut h);
+                m.visibility.hash(&mut h);
+                m.params.len().hash(&mut h);
+                for p in &m.params {
+                    p.type_text.hash(&mut h);
+                }
+            }
+            for f in &t.fields {
+                f.name.hash(&mut h);
+                f.type_text.hash(&mut h);
+                f.is_static.hash(&mut h);
+                f.visibility.hash(&mut h);
+            }
+        }
+        h.finish()
+    }
+
+    /// Every file with an edge resolving to one of `owners` — the files whose view of those types
+    /// is now out of date, and so the files that have to be re-walked after they change.
+    ///
+    /// `exclude` is the file that changed: it has already been refreshed and re-walking it a second
+    /// time would be pure cost.
+    pub fn dependents_of(&self, owners: &HashSet<String>, exclude: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for (path, fp) in &self.footprints {
+            if path == exclude {
+                continue;
+            }
+            if fp.keys.iter().any(|k| owners.contains(k.owner_binary())) {
+                out.push(path.clone());
+            }
+        }
+        out
     }
 
     /// Every place this project writes `.<name>` on a receiver the walk could not type.
@@ -322,19 +485,32 @@ fn assemble(
     let mut attempted = 0usize;
     let mut resolved = 0usize;
     let mut unresolved_by_name: HashMap<String, Vec<UsageLocation>> = HashMap::new();
+    let mut footprints: HashMap<String, FileFootprint> = HashMap::new();
     for (path, cf) in &files_map {
         attempted += cf.attempted;
         resolved += cf.resolved;
         file_symbols.insert(path.clone(), cf.symbols.clone());
+        let mut fp = FileFootprint {
+            attempted: cf.attempted,
+            resolved: cf.resolved,
+            ..FileFootprint::default()
+        };
         for (key, usage) in &cf.edges {
             by_decl.entry(key.clone()).or_default().push(usage.clone());
+            if !fp.keys.contains(key) {
+                fp.keys.push(key.clone());
+            }
         }
         for (name, usage) in &cf.unresolved {
             unresolved_by_name
                 .entry(name.clone())
                 .or_default()
                 .push(usage.clone());
+            if !fp.names.iter().any(|n| n == name) {
+                fp.names.push(name.clone());
+            }
         }
+        footprints.insert(path.clone(), fp);
     }
     let index = ReferenceIndex {
         by_decl,
@@ -342,6 +518,7 @@ fn assemble(
         attempted,
         resolved,
         unresolved_by_name,
+        footprints,
     };
     let cache = crate::refcache::RefCache {
         version: crate::refcache::CACHE_VERSION,
@@ -363,7 +540,6 @@ pub fn build_reference_index_incremental(
     prior: Option<crate::refcache::RefCache>,
     on_progress: &(dyn Fn(usize, usize) + Sync),
 ) -> IncrementalBuild {
-    use std::collections::HashSet;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     let tm_hash = crate::refcache::type_map_hash(project_types);
@@ -495,6 +671,22 @@ pub struct ReferencesResult {
     pub target: DeclKey,
     /// Its use sites across the project.
     pub usages: Vec<UsageLocation>,
+    /// Uses reached through a member the declaration is **also known by** — a generated accessor.
+    ///
+    /// Separate from `usages` because they are not spelled like the target: `order.getName()` is a
+    /// use of the field `name`, and a results list that showed it without saying so would look
+    /// wrong. Each group carries the name it was found under.
+    ///
+    /// Empty for everything that has no such members, which is nearly everything.
+    pub aliases: Vec<AliasUsages>,
+}
+
+/// One generated member's use sites, and what it is called.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AliasUsages {
+    /// How the member is written at the call sites — `getName()`, `withName()`.
+    pub label: String,
+    pub usages: Vec<UsageLocation>,
 }
 
 /// Resolve the declaration at `offset` in `file` and return its usages. `None` when the
@@ -515,6 +707,10 @@ pub fn references(
     Some(ReferencesResult {
         target: key,
         usages,
+        // Filled in by the caller that can: finding a field's generated accessors needs the text of
+        // the file that declares it, which this index does not hold. See
+        // `SemanticEngine::find_usages`.
+        aliases: Vec::new(),
     })
 }
 
@@ -1078,7 +1274,7 @@ impl<'a> FileWalker<'a> {
         // a dotted chain of them, never as a call or an index — and the fallback below happily
         // slashes whatever text it is given, so `m.thing()` became the "type" `m/thing()` and the
         // member was filed under it. That is not a resolution, it is a name nothing will ever look
-        // up: the use was lost, and — worse — the walk counted it as resolved, so the rename engine
+        // up: the use was lost, and — worse — the walk counted it as resolved, so the semantic engine
         // had no way to know it was blind there.
         if !matches!(
             obj.kind(),
@@ -2392,7 +2588,7 @@ mod tests {
 
     // A tiny in-memory TypeResolver over project sources only (no JDK) — enough for the
     // pure-project reference/rename cases the unit tests cover.
-    struct SrcResolver {
+    pub(super) struct SrcResolver {
         project: HashMap<String, bennu_java::prelude::ClassMembers>,
         simple: HashMap<String, String>,
     }
@@ -2502,7 +2698,7 @@ mod tests {
         }
     }
 
-    fn index_of(files: &[(&str, &str)]) -> (ReferenceIndex, SrcResolver, HashMap<String, String>) {
+    pub(super) fn index_of(files: &[(&str, &str)]) -> (ReferenceIndex, SrcResolver, HashMap<String, String>) {
         let (resolver, project_types) = SrcResolver::build(files);
         let src: Vec<SourceFile> = files
             .iter()
@@ -2846,5 +3042,128 @@ impl bennu_java::prelude::NameScope for FileWalker<'_> {
 
     fn is_type(&self, binary: &str) -> bool {
         self.resolver.members_of(binary).is_some()
+    }
+}
+
+/// The in-session refresh: an edit reaches find-usages without rebuilding the project.
+#[cfg(test)]
+mod incremental_tests {
+    use super::tests::*;
+    use super::*;
+
+    fn method_key(owner: &str, name: &str) -> DeclKey {
+        DeclKey::Method { owner: owner.into(), name: name.into() }
+    }
+
+    /// The reported symptom, end to end: a caller switched from an old method to a new one, and
+    /// find-usages kept answering about the project as it was when it opened — nothing for the new
+    /// method, the stale call site still there for the old one.
+    #[test]
+    fn a_caller_that_switched_methods_is_reflected_both_ways() {
+        let a = "package p; public class A { public int old() { return 1; } public int fresh() { return 2; } }";
+        let before = "package p; public class B { public int u(A a) { return a.old(); } }";
+        let after = "package p; public class B { public int u(A a) { return a.fresh(); } }";
+        let (mut index, resolver, project_types) =
+            index_of(&[("A.java", a), ("B.java", before)]);
+
+        assert_eq!(index.usages_of(&method_key("p/A", "old")).len(), 1);
+        assert_eq!(index.usages_of(&method_key("p/A", "fresh")).len(), 0);
+
+        index.refresh_file("B.java", Some(after), &resolver, &project_types);
+
+        assert_eq!(
+            index.usages_of(&method_key("p/A", "old")).len(),
+            0,
+            "the call that went away must go away with it"
+        );
+        assert_eq!(index.usages_of(&method_key("p/A", "fresh")).len(), 1);
+    }
+
+    /// A refresh withdraws only the refreshed file — another file's use of the same method stays.
+    #[test]
+    fn refreshing_one_file_leaves_the_others_alone() {
+        let a = "package p; public class A { public int val() { return 1; } }";
+        let b = "package p; public class B { public int u(A a) { return a.val(); } }";
+        let c = "package p; public class C { public int u(A a) { return a.val(); } }";
+        let (mut index, resolver, project_types) =
+            index_of(&[("A.java", a), ("B.java", b), ("C.java", c)]);
+        assert_eq!(index.usages_of(&method_key("p/A", "val")).len(), 2);
+
+        let b2 = "package p; public class B { public int u(A a) { return 0; } }";
+        index.refresh_file("B.java", Some(b2), &resolver, &project_types);
+
+        let hits = index.usages_of(&method_key("p/A", "val"));
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert_eq!(hits[0].file, "C.java");
+    }
+
+    /// A deleted file takes its edges with it.
+    #[test]
+    fn deleting_a_file_withdraws_its_usages() {
+        let a = "package p; public class A { public int val() { return 1; } }";
+        let b = "package p; public class B { public int u(A a) { return a.val(); } }";
+        let (mut index, resolver, project_types) = index_of(&[("A.java", a), ("B.java", b)]);
+        index.refresh_file("B.java", None, &resolver, &project_types);
+        assert!(index.usages_of(&method_key("p/A", "val")).is_empty());
+    }
+
+    /// Refreshing the same file twice must not double-count it — the whole point of withdrawing
+    /// first is that absorbing is not additive.
+    #[test]
+    fn refreshing_twice_does_not_double_count() {
+        let a = "package p; public class A { public int val() { return 1; } }";
+        let b = "package p; public class B { public int u(A a) { return a.val(); } }";
+        let (mut index, resolver, project_types) = index_of(&[("A.java", a), ("B.java", b)]);
+        index.refresh_file("B.java", Some(b), &resolver, &project_types);
+        index.refresh_file("B.java", Some(b), &resolver, &project_types);
+        assert_eq!(index.usages_of(&method_key("p/A", "val")).len(), 1);
+    }
+
+    /// The fingerprint is what decides whether the *other* files need re-walking, so it has to be
+    /// blind to bodies and awake to signatures.
+    #[test]
+    fn the_fingerprint_ignores_bodies_and_notices_signatures() {
+        let a = "package p; public class A { public int val() { return 1; } }";
+        let (index, _r, _pt) = index_of(&[("A.java", a)]);
+        let base = index.declaration_fingerprint("A.java");
+
+        let body_changed = "package p; public class A { public int val() { return 99 + 1; } }";
+        let (i2, _r, _pt) = index_of(&[("A.java", body_changed)]);
+        assert_eq!(i2.declaration_fingerprint("A.java"), base, "a body is nobody else's business");
+
+        let member_added =
+            "package p; public class A { public int val() { return 1; } public int extra() { return 2; } }";
+        let (i3, _r, _pt) = index_of(&[("A.java", member_added)]);
+        assert_ne!(i3.declaration_fingerprint("A.java"), base);
+
+        let renamed = "package p; public class A { public int val2() { return 1; } }";
+        let (i4, _r, _pt) = index_of(&[("A.java", renamed)]);
+        assert_ne!(i4.declaration_fingerprint("A.java"), base);
+    }
+
+    /// `dependents_of` is how the sweep finds the files holding edges into a changed type.
+    #[test]
+    fn dependents_are_the_files_that_reference_the_type() {
+        let a = "package p; public class A { public int val() { return 1; } }";
+        let b = "package p; public class B { public int u(A a) { return a.val(); } }";
+        let c = "package p; public class C { public int u() { return 0; } }";
+        let (index, _r, _pt) = index_of(&[("A.java", a), ("B.java", b), ("C.java", c)]);
+
+        let owners: HashSet<String> = ["p/A".to_string()].into_iter().collect();
+        let deps = index.dependents_of(&owners, "A.java");
+        assert!(deps.contains(&"B.java".to_string()), "{deps:?}");
+        assert!(!deps.contains(&"C.java".to_string()), "C references nothing of A's — {deps:?}");
+        assert!(!deps.contains(&"A.java".to_string()), "the changed file is excluded — {deps:?}");
+    }
+
+    /// A refreshed file's symbols are refreshed too, since the caret classifier reads them.
+    #[test]
+    fn a_refresh_replaces_the_files_symbols() {
+        let a = "package p; public class A { public int val() { return 1; } }";
+        let (mut index, resolver, project_types) = index_of(&[("A.java", a)]);
+        let a2 = "package p; public class A { public int val() { return 1; } } class Extra { }";
+        index.refresh_file("A.java", Some(a2), &resolver, &project_types);
+        let types = index.types_declared_in("A.java");
+        assert!(types.contains(&"p/Extra".to_string()), "{types:?}");
     }
 }

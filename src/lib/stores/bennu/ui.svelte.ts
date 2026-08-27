@@ -147,6 +147,10 @@ function createBennuUiStore() {
   // The breakpoint list — every breakpoint of the project in one place: disable one, drop one,
   // or add an exception breakpoint, which the gutter has nowhere to express.
   let breakpointsOpen = $state(false);
+  // Which breakpoint the list should open ON — set when it is reached from the gutter, so
+  // "Condition…" on line 118 lands with line 118 focused instead of at the top of a list of
+  // forty. `null` when it was opened as a list (Ctrl+Shift+F8).
+  let breakpointsFocus = $state<{ file: string; line: number } | null>(null);
   // Structural search & replace (Ctrl+Shift+M) — find code by its SHAPE, count it, rewrite it.
   // A modal rather than a panel: it is a thing you go and do, with a wide answer, and it does not
   // belong open beside the editor the way a tool window does.
@@ -252,6 +256,8 @@ function createBennuUiStore() {
     get projectConfigOpen() { return projectConfigOpen; },
     get runConfigOpen() { return runConfigOpen; },
     get breakpointsOpen() { return breakpointsOpen; },
+    /** The breakpoint the list should focus, when it was opened from one. */
+    get breakpointsFocus() { return breakpointsFocus; },
     get ssrOpen() { return ssrOpen; },
     get navOpen()      { return navOpen; },
     get navMode()      { return navMode; },
@@ -358,8 +364,12 @@ function createBennuUiStore() {
     closeProjectConfig() { projectConfigOpen = false; },
     openRunConfig()      { runConfigOpen = true; },
     closeRunConfig()     { runConfigOpen = false; },
-    openBreakpoints()    { breakpointsOpen = true; },
-    closeBreakpoints()   { breakpointsOpen = false; },
+    /** `focus` opens the list ON a breakpoint — what the gutter's "Condition…" does. */
+    openBreakpoints(focus?: { file: string; line: number }) {
+      breakpointsFocus = focus ?? null;
+      breakpointsOpen = true;
+    },
+    closeBreakpoints()   { breakpointsOpen = false; breakpointsFocus = null; },
     openSsr()            { ssrOpen = true; },
     closeSsr()           { ssrOpen = false; },
     /** Open the Go-to navigator on `mode`'s tab, optionally pre-filling the query (e.g. the

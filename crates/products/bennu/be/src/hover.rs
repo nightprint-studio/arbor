@@ -1,7 +1,7 @@
 //! `hover` domain — `bennu_hover` (editor hover card).
 //!
 //! The read-only cousin of `bennu_references`: it classifies the symbol under the caret
-//! against the owning project's rename engine (the whole-project reference index +
+//! against the owning project's semantic engine (the whole-project reference index +
 //! resolver built off-thread on `bennu_open_project`) and returns a hover card — the
 //! symbol's signature, its kind, and (for a member) its owning type's dotted FQCN.
 //!

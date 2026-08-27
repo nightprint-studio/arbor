@@ -21,6 +21,10 @@
 //! but the prelude is the canonical call-site path.
 
 pub mod contract;
+/// The call / type hierarchy — its own module because both engines produce it (Bennu's Java one
+/// over the reference index, a language server over the protocol) and the panel that draws it is
+/// one panel.
+pub mod hierarchy;
 /// The language-server side of the contract — its own module because `contract.rs` is
 /// already long and everything in there answers an LSP-backed handler.
 pub mod lsp;

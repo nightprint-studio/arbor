@@ -4,7 +4,7 @@
 //! index" palette verb): drop the whole semantic index for the open project and rebuild
 //! it from scratch. It re-runs [`IndexService::open`] for `root`, which allocates a FRESH
 //! generation dir, re-reads every `.java` source, and rebuilds the symbol index, the Go-to
-//! Class cache, the config-graph resolver, the rename engine, and the completion provider
+//! Class cache, the config-graph resolver, the semantic engine, and the completion provider
 //! off-thread — emitting `arbor://bennu/index-progress` exactly like an open (so the FE
 //! index store re-arms its "Indexing…" job and invalidates its class cache on `ready`).
 //!

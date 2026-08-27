@@ -86,6 +86,10 @@
     <div class="fc-desc">Per-tab scrollback buffer — enough for most build outputs and test runs.</div>
   </div>
   <div class="feature-card">
+    <div class="fc-title">Keeps running</div>
+    <div class="fc-desc">A terminal survives everything except being closed. Switch to Stage, click a commit, change repository or workspace, close the panel entirely — the process keeps going and its output is all there when you come back. Only closing the tab ends it.</div>
+  </div>
+  <div class="feature-card">
     <div class="fc-title">Dynamic resize</div>
     <div class="fc-desc">The terminal reflows automatically when you drag the panel divider. The panel height persists across sessions.</div>
   </div>

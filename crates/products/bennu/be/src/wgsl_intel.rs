@@ -195,6 +195,7 @@ pub(crate) fn references(
                     .unwrap_or("")
                     .trim()
                     .to_string(),
+                via: None,
             }
         })
         .collect();

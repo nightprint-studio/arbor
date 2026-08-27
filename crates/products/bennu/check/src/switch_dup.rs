@@ -45,6 +45,8 @@
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::switch_label::{label_is_default, label_is_pattern};
+
 /// Flag duplicate `case` labels within a single `switch` over a shared pre-collected node slice (one
 /// traversal across all pure-AST checks). Each `switch_expression` is checked independently against
 /// its own DIRECT labels, so nested switches never cross-contaminate.
@@ -122,36 +124,6 @@ fn check_switch<'t>(switch: Node<'t>, bytes: &[u8], out: &mut Vec<Diagnostic>) {
             }
         }
     }
-}
-
-/// Whether a `switch_label` is a **pattern** label rather than a constant one.
-///
-/// Per tree-sitter-java, a `switch_label`'s named children are one of: an `expression` (the constant
-/// forms), a `pattern` (a `type_pattern` or a `record_pattern`), or a `guard` (the `when` clause,
-/// which is a sibling of the pattern, not nested inside it). Either of the latter two makes this a
-/// pattern label — the guard is checked too so a grammar that ever emitted one without a sibling
-/// pattern still can't leak a guard expression into the constant set.
-fn label_is_pattern(label: Node) -> bool {
-    let mut c = label.walk();
-    for ch in label.named_children(&mut c) {
-        if matches!(ch.kind(), "pattern" | "type_pattern" | "record_pattern" | "guard") {
-            return true;
-        }
-    }
-    false
-}
-
-/// Whether a `switch_label` is the `default` clause. The `default` keyword is an anonymous (unnamed)
-/// child of the label (no named constant child), so we scan the label's children including anonymous
-/// ones for its text — the same shape [`crate::enum_switch`] relies on.
-fn label_is_default(label: Node, bytes: &[u8]) -> bool {
-    let mut c = label.walk();
-    for ch in label.children(&mut c) {
-        if !ch.is_named() && ch.utf8_text(bytes) == Ok("default") {
-            return true;
-        }
-    }
-    false
 }
 
 #[cfg(test)]

@@ -61,7 +61,7 @@ fn bennu_jsp_nav(_ctx: &BennuState, args: JspNavArgs) -> Result<JspNav, String> 
         .into_iter()
         .map(|r| {
             let (line, col, preview) = crate::index_service::line_col_preview(&args.source, r.start);
-            UsageHit { file: args.file.clone(), start: r.start, end: r.end, line, col, preview }
+            UsageHit { file: args.file.clone(), start: r.start, end: r.end, line, col, preview, via: None }
         })
         .collect();
 

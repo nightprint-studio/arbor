@@ -163,12 +163,12 @@ fn bennu_cancel_naming_fix(_ctx: &BennuState, _args: NamingFixArgs) -> Result<()
 /// Plan the fix for one file or for the whole project.
 #[arbor_rpc::handler]
 fn bennu_naming_fix_plan(ctx: &BennuState, args: NamingFixArgs) -> Result<NamingFixPlan, String> {
-    // Refuse the whole run rather than every name in it. Without the rename engine EVERY plan comes
+    // Refuse the whole run rather than every name in it. Without the semantic engine EVERY plan comes
     // back empty, and the scan would answer with one identical "nothing here can be renamed" per
     // violation — thousands of rows blaming the code for what is really "ask again in a moment".
     // One honest sentence is the whole difference.
-    if !IndexService::global().has_rename_engine(&args.root) {
-        return Err("The rename engine is still building — the whole-project reference index has \
+    if !IndexService::global().has_semantic_engine(&args.root) {
+        return Err("The semantic engine is still building — the whole-project reference index has \
                     to finish before names can be moved. Try again when indexing completes."
             .to_string());
     }
@@ -462,7 +462,7 @@ impl Run {
 /// failing loudly:
 ///
 /// * It is **UTF-8 only**. Legacy trees are frequently Cp1252, where it either fails or mangles.
-/// * It keeps **CRLF**. The index, the rename engine and the editor's buffer all work on
+/// * It keeps **CRLF**. The index, the semantic engine and the editor's buffer all work on
 ///   LF-normalized text (see `bennu_project::normalize_newlines`), so an offset computed against
 ///   the CRLF bytes lands one byte further along for every line before it. Applied, that is a
 ///   rename spliced into the middle of whatever happens to sit twenty-odd bytes later — a comment,

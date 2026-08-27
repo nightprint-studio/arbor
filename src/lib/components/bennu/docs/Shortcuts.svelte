@@ -29,8 +29,8 @@
   <li><kbd>Tab</kbd> — inside the navigator, move between <strong>All · Classes · Files · Symbols</strong></li>
   <li><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>→</kbd> — navigate <strong>back</strong> / <strong>forward</strong> through your recent jumps (across files)</li>
   <li><kbd>Ctrl</kbd> + <kbd>F12</kbd> — <strong>file structure</strong>: a searchable outline of the file in front of you. On a language-server file the server supplies it, so a Rust file lists its structs, traits, impls and functions</li>
-  <li><kbd>Ctrl</kbd> + <kbd>H</kbd> — <strong>type hierarchy</strong> of the type at the caret: its implementors, or by direction what it is built on</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> — <strong>call hierarchy</strong> of the function at the caret: its callers, or by direction what it calls. Both open the Hierarchy panel, which expands one level at a time and takes the keyboard as it opens — a recursive chain is walked as far as you care to and no further</li>
+  <li><kbd>Ctrl</kbd> + <kbd>H</kbd> — <strong>type hierarchy</strong> of the type at the caret: its implementors, or by direction what it is built on. The caret may be anywhere inside the type — on a member it climbs to the owner</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> — <strong>call hierarchy</strong> of the method at the caret: its callers, or by direction what it calls. Both open the Hierarchy panel, which expands one level at a time and takes the keyboard as it opens — a recursive chain is walked as far as you care to and no further</li>
 </ul>
 
 <h2>Editor</h2>
@@ -59,7 +59,9 @@
     and on a Mac the two are one modifier apart</li>
   <li><kbd>Shift</kbd> + <kbd>F6</kbd> — <strong>rename</strong> the symbol under the caret (with a per-file preview)</li>
   <li><kbd>Alt</kbd> + <kbd>Insert</kbd> — <strong>generate</strong> constructor, getters or setters</li>
-  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> — <strong>format</strong> the file with the language's own formatter (<code>rustfmt</code> for Rust, honouring the project's configuration). Only for a language with a <strong>language server</strong> behind it</li>
+  <li><kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>I</kbd> — <strong>implement / override methods</strong>: everything the class inherits and may override, grouped by the type that declares it, with the abstract ones already ticked</li>
+  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> — <strong>format</strong> the file. A language with a <strong>language server</strong> is formatted by it (<code>rustfmt</code> for Rust, honouring the project's configuration); <strong>Java</strong> is re-indented and tidied by Bennu's own formatter</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> — <strong>optimize imports</strong> in a Java file: drop what it does not use, order the rest. Eclipse's own key, because IntelliJ's <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>O</kbd> is dropped by Chromium on Italian, German, French and Spanish layouts to keep AltGr working</li>
   <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>→</kbd> / <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>←</kbd> — <strong>expand</strong> / <strong>shrink</strong> the selection by one syntactic step — the token, the expression, the argument list, the call, the block, on the server's own idea of structure. VS Code's keys rather than IntelliJ's <kbd>Ctrl</kbd> + <kbd>W</kbd>, which a WebView may read as "close the window"</li>
   <li><kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd> — after accepting a completion that inserted <strong>placeholders</strong>, move between them; <kbd>Esc</kbd> leaves the run. Accepting <code>println!</code> puts the caret between the parentheses, and a function completion walks you through its arguments</li>
   <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> — <strong>expand the macro</strong> at the caret and read what it generates (also under <kbd>Alt</kbd> + <kbd>Enter</kbd>). The expansion is recursive (all the way down — the server has no single-step form) and is text rather than a file, so it cannot be navigated: to go deeper, point at the nested macro in the source and expand again</li>

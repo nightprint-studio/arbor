@@ -32,8 +32,30 @@ export interface IntentionOffer {
   action?: string;
 }
 
-/** Every intention applicable at byte `offset` in `source` (empty when none fit).
- *  Wire: `bennu_intentions_at` — `{ file, source, offset }`. */
-export function intentionsAt(file: string, source: string, offset: number): Promise<IntentionOffer[]> {
-  return bennu('bennu_intentions_at', { args: { file, source, offset } });
+/** A diagnostic as a quick-fix needs it: what kind, and where. */
+export interface DiagRef {
+  /** The stable kind slug — `unused-import`, `unhandled-checked-exception`. */
+  code: string;
+  /** Byte span in `source`. */
+  start: number;
+  end: number;
+}
+
+/**
+ * Every intention applicable at byte `offset` in `source` (empty when none fit).
+ *
+ * `diagnostics` are the ones the editor is already showing: the offers include a **fix** for each
+ * one under the caret, and passing them is what saves the backend revalidating the whole file to
+ * answer a single keystroke. Only the `code` and the span travel — the fixes read the source, never
+ * the message.
+ *
+ * Wire: `bennu_intentions_at` — `{ file, source, offset, diagnostics }`.
+ */
+export function intentionsAt(
+  file: string,
+  source: string,
+  offset: number,
+  diagnostics: readonly DiagRef[] = [],
+): Promise<IntentionOffer[]> {
+  return bennu('bennu_intentions_at', { args: { file, source, offset, diagnostics } });
 }

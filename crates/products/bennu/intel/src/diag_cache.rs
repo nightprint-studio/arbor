@@ -43,7 +43,12 @@ use serde::{Deserialize, Serialize};
 /// 2: name resolution inside a check now follows Java's order (what a type inherits, then the
 /// file's imports) instead of asking every type the file declares, and the covariant-return check
 /// resolves the names it reads in the scope of the class that wrote them.
-pub const CACHE_VERSION: u32 = 2;
+///
+/// 3: an enum read from source now carries the implicit `values()` / `valueOf(String)` the compiler
+/// declares for it. The recorded members-hash of the enum would invalidate the files that read it
+/// anyway; the bump is here because a stale "no overload takes 1 argument" on working code is worth
+/// one cold re-validation to be certain of.
+pub const CACHE_VERSION: u32 = 3;
 
 /// A deterministic content hash of a source buffer — the file's `own_hash`. Shares the
 /// reference cache's FNV-1a so the whole product hashes source the same way.

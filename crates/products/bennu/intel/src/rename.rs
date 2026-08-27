@@ -18,24 +18,21 @@
 //! Conservative: an edit is emitted only where we can justify it. Method use-sites are
 //! flagged `inferred` (overloads collapse to one key) so the FE surfaces them for review,
 //! never silently applies them as if exact.
+//!
+//! Everything here is a **free function over a borrowed project view** — the index, the sources,
+//! the type map, the subtype map. What holds those four together and hands them out consistently is
+//! [`crate::engine::SemanticEngine`], which is also where go-to, hover and the hierarchies enter.
+//! The split is the point: this module is testable against an in-memory resolver with no live JDK,
+//! and the engine is where a lock is taken.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
-use std::sync::Arc;
 
 use bennu_java::prelude::{find_type_name_span, TypeResolver};
+use bennu_query::prelude::PlanFile;
 use bennu_web::prelude::bean_class_value_spans;
 use tree_sitter::Node;
 
-use bennu_query::prelude::{
-    inherited_members, IndexResolver, InheritedMember, JdkMemberIndex, PlanFile,
-};
-
-use crate::refs::{
-    build_reference_index_incremental, build_reference_index_with_progress, classify_caret,
-    classify_target, references, DeclKey, LangLevel, ReferenceIndex, ReferencesResult,
-    RenameTarget, SourceFile,
-};
+use crate::refs::{classify_target, DeclKey, LangLevel, ReferenceIndex, RenameTarget};
 
 /// Why an edit was planned (drives the preview grouping + the honest-limits surfacing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -426,7 +423,7 @@ pub fn rename_apply(plan: &RenamePlan) -> Vec<Edit> {
 /// Resolve the caret at `file`:`offset` to its DECLARATION site (go-to-declaration). Runs
 /// the same caret classification find-usages / rename share, then returns the declaration
 /// NAME span + owning project file (+ 1-based line/col from the declaring file's source).
-/// The free-function core [`RenameEngine::declaration`] wraps — kept separate so it's
+/// The free-function core [`crate::engine::SemanticEngine::declaration`] wraps — kept separate so it's
 /// testable with an in-memory resolver (no live JDK), like [`rename_plan`] / [`references`].
 ///
 /// `None` when the caret isn't on a resolvable symbol, or the declaration lives in a JDK /
@@ -502,6 +499,25 @@ pub fn resolve_declaration(
                     }
                 }
             }
+            // An enum's `values()` / `valueOf(String)`: the type declares them (the compiler writes
+            // them into the class file) but nothing in the source names them, so there is no member
+            // token to open. The enum's own declaration is the honest destination — the same answer
+            // an IDE gives, and better than the fall-through, which sent go-to into a decompiled
+            // `java.lang.Enum` stub that does not declare a one-argument `valueOf` at all.
+            if is_enum_implicit(&key, resolver) {
+                let simple = simple_of(key.owner_binary());
+                if let Some((s, e)) = find_type_name_span(decl_src, &simple) {
+                    let (line, col) = line_col_1based(decl_src, s);
+                    return Some(DeclarationLocation {
+                        file: decl_file,
+                        start: s,
+                        end: e,
+                        line,
+                        col,
+                        label: format!("enum {}", key.owner_binary().replace('/', ".")),
+                    });
+                }
+            }
             None
         }
         RenameTarget::Type { binary, .. } => {
@@ -524,402 +540,32 @@ pub fn resolve_declaration(
     }
 }
 
+/// Whether `key` names one of the methods the compiler declares for every enum — `values()` /
+/// `valueOf(String)` on a type whose own flags say `enum`. The owner check is what keeps a
+/// hand-written `values()` on an ordinary class out of it.
+fn is_enum_implicit(key: &DeclKey, resolver: &dyn TypeResolver) -> bool {
+    let DeclKey::Method { owner, name } = key else {
+        return false;
+    };
+    bennu_java::prelude::ENUM_IMPLICIT_METHODS.contains(&name.as_str())
+        && resolver
+            .members_of(owner)
+            .is_some_and(|cm| cm.flags.is_enum)
+}
+
 /// The cached source text of a project java file by its (forward-slash) path.
-fn project_source<'a>(java_files: &'a [PlanFile], file: &str) -> Option<&'a str> {
+pub(crate) fn project_source<'a>(java_files: &'a [PlanFile], file: &str) -> Option<&'a str> {
     java_files
         .iter()
         .find(|f| f.path == file)
         .map(|f| f.source.as_str())
 }
 
-// ── the cached rename engine (built once per project, on the index thread) ────────
-
-/// A ready-to-query rename engine for one project: the whole-project reference index +
-/// the resolver + the project-wide simple→binary map + the java/xml source sets. Built
-/// once (on the index background thread, alongside the completion provider) and cached
-/// behind an `Arc` in the be layer — `plan` then answers a rename request off it.
-///
-/// `Send + Sync` so it lives in the shared project slot across the dispatcher. The resolver is
-/// type-erased behind an `Arc` because in production it is the **provider's own** fully-resolving
-/// one, shared rather than duplicated (see [`for_project`](Self::for_project)).
-pub struct RenameEngine {
-    index: ReferenceIndex,
-    resolver: Arc<dyn TypeResolver + Send + Sync>,
-    /// The resolver POLICY questions are asked of — see [`RenameEngine::with_policy_resolver`].
-    /// Defaults to `resolver`, so an engine built without one behaves exactly as before.
-    policy: Arc<dyn TypeResolver + Send + Sync>,
-    project_types: HashMap<String, String>,
-    /// Who extends/implements whom — built once, so an override family descends instead of
-    /// scanning the project once per rename. See [`SubtypeMap`].
-    subtypes: SubtypeMap,
-    java_files: Vec<PlanFile>,
-    xml_files: Vec<PlanFile>,
-    /// The project's Java language level — gates recognition of version-specific binding forms
-    /// (records, pattern variables, lambda inferred params) during caret classification.
-    lang_level: LangLevel,
-}
-
-/// A resolver over the persisted project index ALONE — no JDK, no dependencies. The fallback for
-/// [`RenameEngine::for_project`] when the caller has no shared resolver to lend it (the provider
-/// failed to build, or no JDK is installed): rename over project symbols keeps working, it just
-/// cannot follow a library generic back to a project type. An empty member source stands in for
-/// the unused classpath slot.
-fn project_only_resolver(
-    index_dir: &Path,
-    project_simple_names: &[(String, String)],
-) -> Result<IndexResolver<JdkMemberIndex>, String> {
-    use bennu_classpath::prelude::MultiSource;
-    use bennu_index::prelude::PersistedIndex;
-
-    let blob = index_dir.join("symbols.blob");
-    let fst = index_dir.join("names.fst");
-    let project = PersistedIndex::open(&blob, &fst).map_err(|e| e.to_string())?;
-    let jdk = JdkMemberIndex::new(Box::new(MultiSource::new(Vec::new())));
-    let mut resolver = IndexResolver::new(project, jdk).project_only();
-    for (simple, binary) in project_simple_names {
-        resolver.add_simple_hint(simple, binary);
-    }
-    Ok(resolver)
-}
-
-impl RenameEngine {
-    /// Build the engine from the project's `.java` sources (path, text) + `.xml` config
-    /// fragments (path, text), a type resolver, and the project-wide simple→binary type map.
-    /// The reference index is walked here (the O(N) step) so `plan` is cheap.
-    pub fn new(
-        java_sources: Vec<(String, String)>,
-        xml_sources: Vec<(String, String)>,
-        resolver: Arc<dyn TypeResolver + Send + Sync>,
-        project_types: HashMap<String, String>,
-        on_progress: &(dyn Fn(usize, usize) + Sync),
-    ) -> Self {
-        let ref_input: Vec<SourceFile> = java_sources
-            .iter()
-            .map(|(p, s)| SourceFile {
-                path: p.clone(),
-                source: s.clone(),
-            })
-            .collect();
-        let index = build_reference_index_with_progress(
-            &ref_input,
-            &*resolver,
-            &project_types,
-            on_progress,
-        );
-        let java_files = java_sources
-            .into_iter()
-            .map(|(path, source)| PlanFile { path, source })
-            .collect();
-        let xml_files = xml_sources
-            .into_iter()
-            .map(|(path, source)| PlanFile { path, source })
-            .collect();
-        // No project version here (the test/plain constructor) → unknown level enables all
-        // binding forms.
-        let policy = Arc::clone(&resolver);
-        let subtypes = SubtypeMap::build(&index, &*resolver);
-        Self {
-            index,
-            resolver,
-            policy,
-            project_types,
-            subtypes,
-            java_files,
-            xml_files,
-            lang_level: LangLevel(0),
-        }
-    }
-
-    /// Lend the engine a SECOND resolver, used only to answer policy questions — today, "does this
-    /// method override something declared in a dependency jar?".
-    ///
-    /// The two differ in cost, not in kind. The walk resolver is deliberately cheap (JDK-only by
-    /// default, see [`RenameEngine::for_project`]) because it is consulted once per reference in
-    /// every file; a policy question is asked **once per rename**, so it can afford the full
-    /// classpath — and it has to, because the interface whose contract a rename would break lives
-    /// exactly in the tier the cheap resolver drops. Without this, a method implementing
-    /// `jakarta.validation.ConstraintValidator` renamed clean and stopped compiling: the ancestor
-    /// was named in the project's own record, but nothing could read its members to see the
-    /// method declared there.
-    pub fn with_policy_resolver(mut self, policy: Arc<dyn TypeResolver + Send + Sync>) -> Self {
-        self.policy = policy;
-        self
-    }
-
-    /// Build the engine over the given source sets, resolving types with `shared_resolver` when
-    /// the caller has one. `Err` only when no resolver is supplied AND the index can't be opened.
-    ///
-    /// ## Why the resolver is shared, not built here
-    /// This engine used to build its own **project-only** resolver: find-usages / rename target
-    /// project symbols, so resolving JDK types looked like pure waste — and back when every
-    /// `members_of` re-parsed the bytecode, it really did make the walk crawl for minutes.
-    ///
-    /// That reasoning has one hole. A library type is not only a destination, it is a **conduit**:
-    /// in `failures.stream().map(f -> f.getPath())` the lambda parameter `f` is typed by
-    /// substituting the project type through `List` → `Stream` → `Function`. With no JDK the
-    /// substitution dead-ends, the walk records no edge for `f.getPath()`, and a rename of that
-    /// member silently misses every such call — the symptom being an edit list that covers the
-    /// declaration and the plain call sites but skips the ones inside stream/optional chains.
-    ///
-    /// ## Why it is still project-only by DEFAULT
-    ///
-    /// Lending the engine the provider's full resolver fixes that, and costs too much to be the
-    /// default. The walk is parallel, and every JDK / dependency lookup funnels through
-    /// `JdkMemberIndex`'s single mutex — the JDK-8 `JarSource` is `!Sync`, so serializing is not
-    /// an implementation detail to tune away. Turning it on made a 700-file project's index take
-    /// far longer with every core busy, and until that walk finishes there is no rename engine at
-    /// all: every name comes back "cannot be renamed".
-    ///
-    /// So the trade is explicit. Off: indexing is fast, and a rename misses call sites whose
-    /// receiver is typed only through a library generic. On (`BENNU_RENAME_FULL_RESOLVER=1`): those
-    /// call sites are found, and the first walk pays for decoding the classpath.
-    ///
-    /// `jdk_version` is read as the project's Java **language level**, to gate version-specific
-    /// binding forms (records, pattern variables, lambda inferred params) during classification.
-    pub fn for_project(
-        index_dir: &Path,
-        jdk_version: &str,
-        project_simple_names: &[(String, String)],
-        java_sources: Vec<(String, String)>,
-        xml_sources: Vec<(String, String)>,
-        shared_resolver: Option<Arc<dyn TypeResolver + Send + Sync>>,
-        on_progress: &(dyn Fn(usize, usize) + Sync),
-    ) -> Result<Self, String> {
-        let mut project_types = HashMap::new();
-        for (simple, binary) in project_simple_names {
-            project_types.insert(simple.clone(), binary.clone());
-        }
-        // Whether to accept the loan is the CALLER's decision — it knows what the walk will cost on
-        // this machine and this project. Here we only honour it.
-        let resolver: Arc<dyn TypeResolver + Send + Sync> = match shared_resolver {
-            Some(shared) => shared,
-            None => Arc::new(project_only_resolver(index_dir, project_simple_names)?),
-        };
-
-        // Incremental, persisted reference walk: reuse the on-disk cache (keyed by per-file
-        // content hash) where valid, re-walking only changed files + their dependents. The
-        // cache lives at a STABLE path under the index base (the parent of the per-build gen
-        // dir), so it survives across opens — a full walk only happens on the first open or a
-        // structural type change.
-        let cache_path = index_dir.parent().map(crate::refcache::cache_path);
-        let prior = cache_path.as_deref().and_then(crate::refcache::load);
-
-        let ref_input: Vec<SourceFile> = java_sources
-            .iter()
-            .map(|(p, s)| SourceFile {
-                path: p.clone(),
-                source: s.clone(),
-            })
-            .collect();
-        let built = build_reference_index_incremental(
-            &ref_input,
-            &*resolver,
-            &project_types,
-            prior,
-            on_progress,
-        );
-        let index = built.index;
-        if let (Some(path), Some(cache)) = (&cache_path, &built.cache_to_save) {
-            crate::refcache::save(path, cache);
-        }
-
-        let java_files = java_sources
-            .into_iter()
-            .map(|(path, source)| PlanFile { path, source })
-            .collect();
-        let xml_files = xml_sources
-            .into_iter()
-            .map(|(path, source)| PlanFile { path, source })
-            .collect();
-        // Same view for both until the caller lends a fuller one (`with_policy_resolver`).
-        let policy = Arc::clone(&resolver);
-        let subtypes = SubtypeMap::build(&index, &*resolver);
-        Ok(Self {
-            index,
-            resolver,
-            policy,
-            project_types,
-            subtypes,
-            java_files,
-            xml_files,
-            lang_level: LangLevel::from_version(jdk_version),
-        })
-    }
-
-    /// Plan a rename at `file`:`offset` → the new name. `None` when the caret isn't on a
-    /// renameable identifier. `source` is the (possibly-unsaved) current buffer text.
-    pub fn plan(
-        &self,
-        file: &str,
-        source: &str,
-        offset: usize,
-        new_name: &str,
-    ) -> Option<RenamePlan> {
-        rename_plan(
-            &self.index,
-            file,
-            source,
-            offset,
-            new_name,
-            &*self.resolver,
-            &*self.policy,
-            &self.project_types,
-            &self.subtypes,
-            &self.java_files,
-            &self.xml_files,
-            self.lang_level,
-        )
-    }
-
-    /// The binary name of the **type** declared at `file`:`offset`, if the caret is on one.
-    ///
-    /// The classification half of a rename, on its own. It costs an index + resolver lookup and
-    /// touches no project sources, which is what lets a batch caller resolve a hundred carets and
-    /// then plan them all in one pass — see [`plan_types`].
-    pub fn classify_type(&self, file: &str, source: &str, offset: usize) -> Option<String> {
-        let target = classify_target(
-            &self.index,
-            file,
-            source,
-            offset,
-            &*self.resolver,
-            &self.project_types,
-            self.lang_level,
-        )?;
-        match target {
-            RenameTarget::Type { binary, .. } => Some(binary),
-            _ => None,
-        }
-    }
-
-    /// Plan several **type** renames in one pass over the project's sources — see [`plan_types`].
-    ///
-    /// The batch entry point exists because the per-type cost is a pass over every project file,
-    /// so a bulk fix that calls [`plan`](Self::plan) once per type pays that pass once per type.
-    /// Returns one bucket of edits per input rename, in order, plus whether the pass **completed**
-    /// — see [`plan_types`], whose `on_file` this forwards.
-    pub fn plan_types(
-        &self,
-        renames: &[TypeRename],
-        on_file: &dyn Fn(usize, usize) -> bool,
-    ) -> (Vec<Vec<Edit>>, bool) {
-        plan_types(
-            &self.index,
-            renames,
-            &self.java_files,
-            &self.xml_files,
-            &self.project_types,
-            on_file,
-        )
-    }
-
-    /// The reference index (for a find-usages query sharing the same build).
-    pub fn index(&self) -> &ReferenceIndex {
-        &self.index
-    }
-
-    /// Resolve the symbol at `file`:`offset` to its DECLARATION site (go-to-declaration).
-    /// Runs the same caret classification find-usages / rename share, then returns the
-    /// declaration NAME span + the owning **project** file (with 1-based line/col computed
-    /// from the declaring file's source). `source` is the current (possibly-unsaved) buffer.
-    ///
-    /// `None` (never an error) when the caret isn't on a resolvable symbol, or when the
-    /// declaration lives in a JDK / dep-jar (no project source declares it → nothing to
-    /// open). A **local variable / parameter** resolves to its declarator in the CURRENT
-    /// file (scope-exact); a **method / field** to its name token on the owner type's
-    /// declaration; a **class / interface / enum** to its type-declaration name token.
-    pub fn declaration(
-        &self,
-        file: &str,
-        source: &str,
-        offset: usize,
-    ) -> Option<DeclarationLocation> {
-        resolve_declaration(
-            &self.index,
-            file,
-            source,
-            offset,
-            &*self.resolver,
-            &self.project_types,
-            &self.java_files,
-            self.lang_level,
-        )
-    }
-
-    /// Find all usages of the symbol at `file`:`offset` (byte offset), for find-usages.
-    /// Shares the engine's reference index + resolver with rename (same off-thread build).
-    /// `source` is the current (possibly-unsaved) buffer. `None` when the caret isn't on a
-    /// referenceable symbol (a local/param is scope-exact and not bucketed here).
-    pub fn find_usages(&self, file: &str, source: &str, offset: usize) -> Option<ReferencesResult> {
-        references(
-            &self.index,
-            file,
-            source,
-            offset,
-            &*self.resolver,
-            &self.project_types,
-        )
-    }
-
-    /// The inherited ("super") members of the type declared at `file`:(`type_name`,`line`) —
-    /// the Structure panel's lazy "Inherited" bucket. Resolves the type's binary name off its
-    /// declaring source, then collects the members of its SUPERCLASS + INTERFACES recursively
-    /// (NOT the type's own members), deduping overrides, tagging each with its declaring FQCN
-    /// + visibility + (for a project supertype) a source file+line. `[]` when the type can't
-    /// be resolved in `file`. Shares the engine's resolver + java sources (same off-thread
-    /// build) with completion / rename.
-    pub fn inherited_members(
-        &self,
-        file: &str,
-        type_name: &str,
-        line: i64,
-    ) -> Vec<InheritedMember> {
-        inherited_members(&*self.resolver, &self.java_files, file, type_name, line)
-    }
-
-    /// Resolve the symbol at `file`:`offset` to a hover card (signature + kind + owner).
-    /// Shares the engine's classifier + resolver with rename/find-usages (same off-thread
-    /// build). `source` is the current (possibly-unsaved) buffer. `None` when the caret
-    /// isn't on a symbol we can classify (a local variable / parameter isn't keyed here).
-    pub fn hover(&self, file: &str, source: &str, offset: usize) -> Option<HoverInfo> {
-        let key = classify_caret(
-            &self.index,
-            file,
-            source,
-            offset,
-            &*self.resolver,
-            &self.project_types,
-        )?;
-        let mut info = hover_for_key(&key, &*self.resolver);
-        // Best-effort: attach the leading Javadoc of the PROJECT declaration this key
-        // resolves to (None for a classpath-only / JDK symbol we can't read the source of).
-        info.doc = self.project_doc_for_key(&key);
-        Some(info)
-    }
-
-    /// Extract the leading Javadoc (`/** … */`) of the project declaration `key` names. `None` when
-    /// the declaration isn't in a project source (a JDK / dep-jar symbol) or carries no Javadoc.
-    /// Best-effort — a parse/lookup miss just yields `None`.
-    ///
-    /// It asks the reference index which file declares the owning type and parses **that one**.
-    /// The previous version walked every `.java` in the project, running a full tree-sitter parse
-    /// per file — and, when the declaration it found carried no Javadoc (the common case in a
-    /// legacy codebase), kept going through the rest anyway. On a 1300-file project that is 1300
-    /// parses for one tooltip, which is why hovering a method took an age while hovering a local
-    /// variable (one parse, on the fallback path) was instant.
-    fn project_doc_for_key(&self, key: &DeclKey) -> Option<String> {
-        let file = self.index.file_declaring(key.owner_binary())?;
-        let source = project_source(&self.java_files, file)?;
-        let decl_start = decl_site_for_key(source, key)?;
-        leading_javadoc(source, decl_start)
-    }
-}
-
 /// The byte offset where the *declaration* of `key` begins in `source` (the start of the
 /// `class`/`interface`/`enum`/method/field declaration node, NOT just its name token — so
 /// a preceding Javadoc comment can be found immediately above it). `None` when `source`
 /// doesn't declare `key`.
-fn decl_site_for_key(source: &str, key: &DeclKey) -> Option<usize> {
+pub(crate) fn decl_site_for_key(source: &str, key: &DeclKey) -> Option<usize> {
     let tree = bennu_java::prelude::parse_java(source)?;
     let bytes = source.as_bytes();
     let root = tree.root_node();
@@ -996,7 +642,7 @@ fn find_decl_node_start(
 /// declaration starting at `decl_start` in `source`. Returns the joined, trimmed doc text
 /// (leading `*` and the `/**` / `*/` markers stripped, capped ~600 chars), or `None` when
 /// the lines directly above the declaration aren't a Javadoc block.
-fn leading_javadoc(source: &str, decl_start: usize) -> Option<String> {
+pub(crate) fn leading_javadoc(source: &str, decl_start: usize) -> Option<String> {
     // Everything above the declaration. We look only at the whitespace/comment tail here —
     // a modifier keyword (`public`) between the comment and the node can't occur, since the
     // declaration node start already precedes modifiers.
@@ -1058,7 +704,7 @@ pub struct HoverInfo {
 /// Build a [`HoverInfo`] for a classified [`DeclKey`], resolving a member's signature from
 /// the resolver's [`bennu_java::prelude::ClassMembers`] (falling back to a synthesized
 /// `name(...)` when the class isn't on the resolvable classpath or carries no signature).
-fn hover_for_key(key: &DeclKey, resolver: &dyn TypeResolver) -> HoverInfo {
+pub(crate) fn hover_for_key(key: &DeclKey, resolver: &dyn TypeResolver) -> HoverInfo {
     match key {
         DeclKey::Type { binary } => {
             // What the type IS, not "class" for everything — an interface reported as a class
@@ -1370,14 +1016,59 @@ fn generated_accessors(
     field: &str,
     new_name: &str,
 ) -> Vec<GeneratedAccessor> {
+    generated_aliases(decl_source, owner, field)
+        .into_iter()
+        .map(|alias| GeneratedAccessor {
+            new_name: alias.rename_to(new_name),
+            key: alias.key,
+        })
+        .collect()
+}
+
+/// A member the field is ALSO known by, without anyone having written it down.
+#[derive(Debug, Clone)]
+pub struct FieldAlias {
+    /// The declaration key its call sites are bucketed under.
+    pub key: DeclKey,
+    /// How it is written at a call site — `getName()`, `withName()`, `name`.
+    pub label: String,
+    /// Lombok's own rule for deriving the accessor's name from the field's, when the two differ.
+    /// `None` where the member simply IS the field's name (a record component, a `Fields` constant,
+    /// a builder setter).
+    naming: Option<crate::lombok::PlannedAccessor>,
+}
+
+impl FieldAlias {
+    /// What this member is called after the field is renamed to `new_field`.
+    ///
+    /// Re-runs Lombok's naming rule rather than reimplementing it, which is what keeps
+    /// `getSource_path` → `getSourcePath` right in a place that is not Lombok's own module.
+    fn rename_to(&self, new_field: &str) -> String {
+        match &self.naming {
+            Some(acc) => acc.name_for(new_field),
+            None => new_field.to_string(),
+        }
+    }
+}
+
+/// Every member `field` on `owner` is also known by — the shared answer behind two questions.
+///
+/// **Rename** asks it because those call sites read a method that will no longer exist.
+/// **Find-usages** asks it because they are uses of the field: `order.getName()` is how the field
+/// `name` is read from outside, and a class whose accessors Lombok generates has *no other kind of
+/// use site* — so a usages list without them reports a field nobody touches, and the getter itself
+/// has no declaration anywhere to put a caret on and ask about.
+///
+/// One function so the two can never disagree: whatever a rename would move, a search finds.
+pub fn generated_aliases(decl_source: &str, owner: &str, field: &str) -> Vec<FieldAlias> {
     let mut out = Vec::new();
+    // A record component declares a private final field AND a public accessor of the same name
+    // (JLS §8.10) — one written declaration, two members.
     if declares_record_component(decl_source, owner, field) {
-        out.push(GeneratedAccessor {
-            key: DeclKey::Method {
-                owner: owner.to_string(),
-                name: field.to_string(),
-            },
-            new_name: new_name.to_string(),
+        out.push(FieldAlias {
+            key: DeclKey::Method { owner: owner.to_string(), name: field.to_string() },
+            label: format!("{field}()"),
+            naming: None,
         });
     }
     let symbols = bennu_java::prelude::extract_symbols(decl_source);
@@ -1387,12 +1078,13 @@ fn generated_accessors(
         .find(|t| t.fqn.replace('.', "/") == owner)
     {
         for acc in crate::lombok::accessors_of_field(td, &symbols.imports, field) {
-            out.push(GeneratedAccessor {
+            out.push(FieldAlias {
                 key: DeclKey::Method {
                     owner: owner.to_string(),
                     name: acc.name.clone(),
                 },
-                new_name: acc.name_for(new_name),
+                label: format!("{}()", acc.name),
+                naming: Some(acc),
             });
         }
         // The two nested TYPES Lombok generates each hold one member per field, named exactly like
@@ -1401,21 +1093,23 @@ fn generated_accessors(
         // one without the others leaves code that does not compile.
         let generated = crate::lombok::generated_type_names(td, &symbols.imports);
         if let Some(fields_type) = generated.field_constants {
-            out.push(GeneratedAccessor {
+            out.push(FieldAlias {
                 key: DeclKey::Field {
                     owner: format!("{owner}/{fields_type}"),
                     name: field.to_string(),
                 },
-                new_name: new_name.to_string(),
+                label: format!("{fields_type}.{field}"),
+                naming: None,
             });
         }
         if let Some(builder_type) = generated.builder {
-            out.push(GeneratedAccessor {
+            out.push(FieldAlias {
                 key: DeclKey::Method {
                     owner: format!("{owner}/{builder_type}"),
                     name: field.to_string(),
                 },
-                new_name: new_name.to_string(),
+                label: format!("{builder_type}.{field}()"),
+                naming: None,
             });
         }
     }
@@ -1823,7 +1517,7 @@ pub fn plan_types(
 ///
 /// Only project types: library source can't be edited, and a family rooted at a JDK type
 /// (everything "declares" `toString`) would drag in every unrelated class in the project.
-fn override_family(
+pub(crate) fn override_family(
     resolver: &dyn TypeResolver,
     subtypes: &SubtypeMap,
     owner: &str,
@@ -1872,39 +1566,85 @@ fn override_family(
 
 /// Who directly extends or implements whom, across the whole project.
 ///
-/// Built once per engine, from the index's own list of declared types — the one place that knows
-/// them all, ANONYMOUS classes included. That last part is not a detail: an anonymous class is
-/// where most overrides of a callback interface actually live, and it has no name to look up, so
-/// every search that goes by name is blind to it. Here it is an ordinary subtype of the interface
-/// it was written against, and an override family finds it the same way it finds any other.
+/// Built from the index's own list of declared types — the one place that knows them all, ANONYMOUS
+/// classes included. That last part is not a detail: an anonymous class is where most overrides of a
+/// callback interface actually live, and it has no name to look up, so every search that goes by
+/// name is blind to it. Here it is an ordinary subtype of the interface it was written against, and
+/// an override family finds it the same way it finds any other.
+///
+/// ## It has to keep up with an edit
+///
+/// It used to be built once and left, which is a worse kind of stale than a missing search result.
+/// A method rename carries its whole override family, and the family is read from here — so a class
+/// that started implementing an interface *this session* was not in it. The rename moved the
+/// interface's method and every implementation the map knew about, and left that one declaring the
+/// old name: a class that no longer overrides what it says it does, produced by a refactor whose
+/// whole promise is that it does not do that.
+///
+/// So a type is re-filed by [`Self::refresh_type`] when its file is re-read, which is why `parents`
+/// exists — see the field.
 #[derive(Default)]
 pub struct SubtypeMap {
     children: HashMap<String, Vec<String>>,
+    /// The parents each type is currently filed under — the inverse of `children`.
+    ///
+    /// Kept so a type whose supertypes changed can be taken out of exactly the lists it is in.
+    /// Without it, re-filing one type means scanning every list in the project, which is the whole
+    /// map — and the map would then only be affordable to rebuild wholesale, which is what left it
+    /// stale for the rest of the session in the first place.
+    parents: HashMap<String, Vec<String>>,
 }
 
 impl SubtypeMap {
     /// Invert the supertype links of every project type.
-    fn build(index: &ReferenceIndex, resolver: &dyn TypeResolver) -> Self {
-        let mut children: HashMap<String, Vec<String>> = HashMap::new();
+    pub(crate) fn build(index: &ReferenceIndex, resolver: &dyn TypeResolver) -> Self {
+        let mut map = Self::default();
         for binary in index.project_type_binaries() {
-            let Some(cm) = resolver.members_of(&binary) else {
-                continue;
-            };
-            for parent in cm.superclass.iter().chain(cm.interfaces.iter()) {
-                children
-                    .entry(parent.clone())
-                    .or_default()
-                    .push(binary.clone());
-            }
+            map.refresh_type(&binary, resolver);
         }
-        for v in children.values_mut() {
-            v.sort_unstable();
-            v.dedup();
-        }
-        Self { children }
+        map
     }
 
-    fn children(&self, binary: &str) -> &[String] {
+    /// Re-file `binary` under whatever the resolver now says its supertypes are.
+    ///
+    /// Withdraw-then-file, so changing `extends A` to `extends B` moves it rather than filing it
+    /// under both. A type the resolver cannot see is simply withdrawn: it is either gone, or not
+    /// resolvable, and in both cases claiming it is a subtype of anything would be an invention.
+    pub(crate) fn refresh_type(&mut self, binary: &str, resolver: &dyn TypeResolver) {
+        self.withdraw_type(binary);
+        let Some(cm) = resolver.members_of(binary) else { return };
+        let mut filed: Vec<String> = Vec::new();
+        for parent in cm.superclass.iter().chain(cm.interfaces.iter()) {
+            let list = self.children.entry(parent.clone()).or_default();
+            // Inserted in place rather than pushed-and-sorted: the list stays ordered (so an
+            // override family descends deterministically) and stays deduplicated, without a sort
+            // per insertion — which on a widely-implemented interface would be one sort of a
+            // growing list per implementor, all through the initial build.
+            if let Err(at) = list.binary_search_by(|c| c.as_str().cmp(binary)) {
+                list.insert(at, binary.to_string());
+            }
+            if !filed.iter().any(|p| p == parent) {
+                filed.push(parent.clone());
+            }
+        }
+        if !filed.is_empty() {
+            self.parents.insert(binary.to_string(), filed);
+        }
+    }
+
+    /// Take `binary` out of every list it is in.
+    pub(crate) fn withdraw_type(&mut self, binary: &str) {
+        let Some(was) = self.parents.remove(binary) else { return };
+        for parent in was {
+            let Some(list) = self.children.get_mut(&parent) else { continue };
+            list.retain(|c| c != binary);
+            if list.is_empty() {
+                self.children.remove(&parent);
+            }
+        }
+    }
+
+    pub(crate) fn children(&self, binary: &str) -> &[String] {
         self.children
             .get(binary)
             .map(|v| v.as_slice())
@@ -2726,5 +2466,169 @@ mod tests {
         )
         .unwrap();
         assert!(leading_javadoc(src, start).is_none());
+    }
+}
+
+/// The subtype map, and its one hard requirement: that it keeps up with an `extends` clause.
+#[cfg(test)]
+mod subtype_map_tests {
+    use super::*;
+    use bennu_java::prelude::{ClassMembers, Import};
+    use std::cell::RefCell;
+    use std::sync::Arc;
+
+    /// A resolver whose supertype links can be rewritten between calls — which is the whole point:
+    /// an edit changes what `members_of` answers, and the map has to be asked again.
+    #[derive(Default)]
+    struct MutableResolver {
+        types: RefCell<HashMap<String, (Option<String>, Vec<String>)>>,
+    }
+
+    impl MutableResolver {
+        fn set(&self, binary: &str, superclass: Option<&str>, interfaces: &[&str]) {
+            self.types.borrow_mut().insert(
+                binary.to_string(),
+                (
+                    superclass.map(str::to_string),
+                    interfaces.iter().map(|s| s.to_string()).collect(),
+                ),
+            );
+        }
+        fn remove(&self, binary: &str) {
+            self.types.borrow_mut().remove(binary);
+        }
+    }
+
+    impl TypeResolver for MutableResolver {
+        fn members_of(&self, binary: &str) -> Option<Arc<ClassMembers>> {
+            let (superclass, interfaces) = self.types.borrow().get(binary).cloned()?;
+            Some(Arc::new(ClassMembers {
+                superclass,
+                interfaces,
+                methods: Vec::new(),
+                fields: Vec::new(),
+                flags: Default::default(),
+                type_params: Vec::new(),
+            }))
+        }
+
+        /// Never consulted here — the map reads supertypes off resolved members, never off a name.
+        fn resolve_simple_name(&self, _name: &str, _imports: &[Import]) -> Option<String> {
+            None
+        }
+    }
+
+    fn kids(map: &SubtypeMap, parent: &str) -> Vec<String> {
+        map.children(parent).to_vec()
+    }
+
+    #[test]
+    fn a_type_is_filed_under_each_of_its_supertypes() {
+        let r = MutableResolver::default();
+        r.set("p/Sub", Some("p/Base"), &["p/Marker"]);
+        let mut map = SubtypeMap::default();
+        map.refresh_type("p/Sub", &r);
+        assert_eq!(kids(&map, "p/Base"), vec!["p/Sub".to_string()]);
+        assert_eq!(kids(&map, "p/Marker"), vec!["p/Sub".to_string()]);
+    }
+
+    /// The case the whole change exists for: changing `extends` MOVES the type, rather than filing
+    /// it under both — a rename descending the old parent would edit a class that no longer
+    /// overrides anything.
+    #[test]
+    fn changing_a_supertype_moves_the_type_rather_than_duplicating_it() {
+        let r = MutableResolver::default();
+        r.set("p/Sub", Some("p/Old"), &[]);
+        let mut map = SubtypeMap::default();
+        map.refresh_type("p/Sub", &r);
+        assert_eq!(kids(&map, "p/Old"), vec!["p/Sub".to_string()]);
+
+        r.set("p/Sub", Some("p/New"), &[]);
+        map.refresh_type("p/Sub", &r);
+        assert!(kids(&map, "p/Old").is_empty(), "{:?}", kids(&map, "p/Old"));
+        assert_eq!(kids(&map, "p/New"), vec!["p/Sub".to_string()]);
+    }
+
+    /// Adding an interface keeps the ones already there.
+    #[test]
+    fn adding_an_interface_keeps_the_existing_links() {
+        let r = MutableResolver::default();
+        r.set("p/Sub", Some("p/Base"), &[]);
+        let mut map = SubtypeMap::default();
+        map.refresh_type("p/Sub", &r);
+
+        r.set("p/Sub", Some("p/Base"), &["p/Marker"]);
+        map.refresh_type("p/Sub", &r);
+        assert_eq!(kids(&map, "p/Base"), vec!["p/Sub".to_string()]);
+        assert_eq!(kids(&map, "p/Marker"), vec!["p/Sub".to_string()]);
+    }
+
+    /// Withdrawing takes the type out of every list it was in, and only those.
+    #[test]
+    fn withdrawing_a_type_leaves_its_siblings_alone() {
+        let r = MutableResolver::default();
+        r.set("p/A", Some("p/Base"), &[]);
+        r.set("p/B", Some("p/Base"), &[]);
+        let mut map = SubtypeMap::default();
+        map.refresh_type("p/A", &r);
+        map.refresh_type("p/B", &r);
+        assert_eq!(kids(&map, "p/Base"), vec!["p/A".to_string(), "p/B".to_string()]);
+
+        map.withdraw_type("p/A");
+        assert_eq!(kids(&map, "p/Base"), vec!["p/B".to_string()]);
+    }
+
+    /// A type the resolver can no longer see is withdrawn rather than left filed — claiming it is
+    /// a subtype of anything would be an invention.
+    #[test]
+    fn a_type_the_resolver_lost_is_withdrawn() {
+        let r = MutableResolver::default();
+        r.set("p/Sub", Some("p/Base"), &[]);
+        let mut map = SubtypeMap::default();
+        map.refresh_type("p/Sub", &r);
+        r.remove("p/Sub");
+        map.refresh_type("p/Sub", &r);
+        assert!(kids(&map, "p/Base").is_empty());
+    }
+
+    /// Refreshing the same unchanged type twice must not file it twice — absorbing is not additive.
+    #[test]
+    fn refreshing_an_unchanged_type_is_idempotent() {
+        let r = MutableResolver::default();
+        r.set("p/Sub", Some("p/Base"), &[]);
+        let mut map = SubtypeMap::default();
+        map.refresh_type("p/Sub", &r);
+        map.refresh_type("p/Sub", &r);
+        assert_eq!(kids(&map, "p/Base"), vec!["p/Sub".to_string()]);
+    }
+
+    /// The children of a parent stay sorted whatever order they arrive in — an override family
+    /// descends them, and a rename that visited them in a different order each run would produce a
+    /// different edit list each run.
+    #[test]
+    fn children_stay_sorted_whatever_order_they_arrive_in() {
+        let r = MutableResolver::default();
+        for name in ["p/C", "p/A", "p/B"] {
+            r.set(name, Some("p/Base"), &[]);
+        }
+        let mut map = SubtypeMap::default();
+        for name in ["p/C", "p/A", "p/B"] {
+            map.refresh_type(name, &r);
+        }
+        assert_eq!(
+            kids(&map, "p/Base"),
+            vec!["p/A".to_string(), "p/B".to_string(), "p/C".to_string()]
+        );
+    }
+
+    /// A type with no supertype the resolver knows records nothing — and so has nothing to withdraw
+    /// later, which is what keeps `parents` from growing an entry per type in the project.
+    #[test]
+    fn a_type_with_no_known_supertypes_records_nothing() {
+        let r = MutableResolver::default();
+        r.set("p/Root", None, &[]);
+        let mut map = SubtypeMap::default();
+        map.refresh_type("p/Root", &r);
+        assert!(map.parents.is_empty());
     }
 }

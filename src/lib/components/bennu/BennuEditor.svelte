@@ -40,9 +40,14 @@
   import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
   import {
     lspSemanticTokens, lspCodeActions, lspCodeLenses, lspExecuteCommand, lspExpandMacro,
-    lspFormat, lspFolding, lspHighlights, lspLensLocations, lspSelectionRanges,
-    type LspAction, type LspLens, type LspMacroExpansion,
+    lspFolding, lspHighlights, lspLensLocations, lspSelectionRanges,
+    lspSignatureHelp,
+    type LspAction, type LspLens, type LspMacroExpansion, type LspSignature,
   } from '$lib/ipc/bennu/lsp';
+  import { formatBuffer, optimizeImports } from '$lib/ipc/bennu/format';
+  import {
+    signatureHelp as ipcSignatureHelp, inlayHints as ipcInlayHints, type SignatureHelp,
+  } from '$lib/ipc/bennu/hints';
   import type { DiagnosticSeverity, SourceEdit } from '$lib/types/bennu';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
@@ -108,7 +113,9 @@
   import { buildDiagnosticsFor } from './build-diags';
   import { spellcheck as ipcSpellcheck, type SpellHit } from '$lib/ipc/bennu/spell';
   import { mojibakeCheck as ipcMojibakeCheck } from '$lib/ipc/bennu/mojibake';
-  import { intentionsAt as ipcIntentionsAt, type IntentionOffer } from '$lib/ipc/bennu/intentions';
+  import {
+    intentionsAt as ipcIntentionsAt, type IntentionOffer, type DiagRef,
+  } from '$lib/ipc/bennu/intentions';
   import { validationTarget as ipcValidationTarget } from '$lib/ipc/bennu/validation';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
   import type {
@@ -136,8 +143,12 @@
     /** Open the Generate modal in `mode` (routed to the window's BennuGenerateModal).
      *  Passed down so the Alt+Enter "Generate…" intentions can trigger it. */
     onGenerate,
+    onOverride,
   }: {
     onGenerate?: (mode: GenerateMode) => void;
+    /** Alt+Enter → "Implement / override methods": the window hosts the picker, so the offer is
+     *  relayed rather than handled here. */
+    onOverride?: () => void;
   } = $props();
 
   type EditorController = {
@@ -173,6 +184,21 @@
     /** Replace the fold ranges a provider supplied. */
     setFoldRanges: (
       ranges: readonly { start: number; end: number; placeholder?: string }[],
+    ) => void;
+    /** Replace the inlay hints — the text drawn between the code, never in it. */
+    setInlayHints: (
+      hints: readonly { offset: number; label: string; before?: boolean }[],
+    ) => void;
+    /** Show the parameter-hint strip for the call the caret is inside, or clear it with `null`. */
+    setSignatureHint: (
+      info: {
+        label: string;
+        params: readonly { start: number; end: number }[];
+        active: number;
+        anchor: number;
+        doc?: string | null;
+        overload?: { index: number; count: number } | null;
+      } | null,
     ) => void;
     /** Replace the code lenses drawn above the items of the buffer. */
     setCodeLenses: (
@@ -455,8 +481,14 @@
   });
 
   // ── Edits → store ────────────────────────────────────────────────────────────
+  /** Bumped on every edit — what the document-keyed effects (inlay hints) depend on.
+   *  A counter rather than the text: they re-read the buffer themselves, and depending on a
+   *  megabyte string would re-run them on a change that produced the same text. */
+  let docRevision = $state(0);
+
   function onInput(text: string) {
     if (activePath) projectStore.setSource(activePath, text);
+    docRevision += 1;
   }
 
   // ── The syntax-tree panel, both directions ───────────────────────────────────
@@ -537,7 +569,7 @@
         .then((ds) => {
           if (cancelled) return;
           fullDone = true;
-          diags = ds.map((d) => ({ from: d.start, to: d.end, severity: cmSeverity(d.severity), message: d.message }));
+          diags = ds.map((d) => ({ from: d.start, to: d.end, severity: cmSeverity(d.severity), message: d.message, code: d.code }));
           bennuDiagnosticsStore.setActiveFileDiagnostics(path, ds);
         })
         // A full-pass FAILURE (backend error/panic) must NOT blank the editor: keep whatever the
@@ -555,7 +587,7 @@
         void ipcDiagnostics(path, src, true)
           .then((ds) => {
             if (cancelled) return;
-            diags = ds.map((d) => ({ from: d.start, to: d.end, severity: cmSeverity(d.severity), message: d.message }));
+            diags = ds.map((d) => ({ from: d.start, to: d.end, severity: cmSeverity(d.severity), message: d.message, code: d.code }));
             bennuDiagnosticsStore.setActiveFileDiagnostics(path, ds);
           })
           .catch(() => {});
@@ -578,7 +610,7 @@
         void ipcDiagnostics(path, src, false)
           .then((ds) => {
             if (cancelled || fullDone) return;
-            diags = ds.map((d) => ({ from: d.start, to: d.end, severity: cmSeverity(d.severity), message: d.message }));
+            diags = ds.map((d) => ({ from: d.start, to: d.end, severity: cmSeverity(d.severity), message: d.message, code: d.code }));
           })
           .catch(() => {});
       }, 120);
@@ -621,6 +653,21 @@
   const allDiags = $derived([
     ...diags, ...buildDiags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags,
   ]);
+
+  /**
+   * The diagnostics a quick-fix could act on, in the shape the backend wants.
+   *
+   * Only the ones with a `code`: a fix is keyed by kind, so a diagnostic without one has no fix to
+   * look up. That drops the build output and the spell hits, which is right — the first is a
+   * compiler's word about a file on disk, and the second already carries its own actions.
+   */
+  function diagRefsForFixes(): DiagRef[] {
+    const out: DiagRef[] = [];
+    for (const d of allDiags) {
+      if (d.code) out.push({ code: d.code, start: d.from, end: d.to });
+    }
+    return out;
+  }
 
   // ── Semantic highlight (language-server backed languages) ───────────────────────
   //
@@ -986,6 +1033,106 @@
     return () => { cancelled = true; clearTimeout(t); };
   });
 
+  // ── Parameter hints ─────────────────────────────────────────────────────────────
+  //
+  // The signature of the call the caret is inside, in the strip above the line. Keyed on the caret
+  // like occurrence highlighting, and for the same reason: what you want to know changes with every
+  // comma. Both engines answer it — Bennu's resolver for Java, the language server for everything
+  // else — into the same shared widget, so the two look and behave identically.
+  //
+  // Cleared eagerly on a caret that is not in a call, rather than waiting for the answer: leaving
+  // the last signature up while you type the next statement is worse than a flicker, because it
+  // reads as a claim about the line you are on now.
+  $effect(() => {
+    const path = activePath;
+    const caret = highlightCaret;
+    if (!path || (!isJavaFileOf(path) && !isLspFileOf(path))) {
+      editorComp?.setSignatureHint(null);
+      return;
+    }
+    const src = editorComp?.getValue() ?? '';
+    let cancelled = false;
+    const t = setTimeout(() => {
+      const fetch = isJavaFileOf(path)
+        ? ipcSignatureHelp(path, src, caret).then(javaSignatureToHint)
+        : lspSignatureHelp(path, src, caret).then(lspSignatureToHint);
+      void fetch
+        .then((hint) => {
+          if (cancelled || projectStore.activeFilePath !== path) return;
+          editorComp?.setSignatureHint(hint);
+        })
+        .catch(() => {});
+    }, 160);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  /** Bennu's own answer, which already carries a span per parameter. */
+  function javaSignatureToHint(s: SignatureHelp | null) {
+    if (!s) return null;
+    return {
+      label: s.label,
+      params: s.params.map(([start, end]) => ({ start, end })),
+      active: s.active,
+      anchor: s.anchor,
+      overload: s.overload ? { index: s.overload[0], count: s.overload[1] } : null,
+    };
+  }
+
+  /**
+   * A language server's answer, which marks only the ACTIVE parameter's span.
+   *
+   * The widget takes a span per parameter and an index, so the server's single span becomes a
+   * one-element list with index 0 — the same thing said in the shape the widget speaks. Rebuilding
+   * the other spans by searching the label for each parameter's text is what the previous,
+   * never-wired version did, and it goes wrong the moment two parameters share a type.
+   */
+  function lspSignatureToHint(s: LspSignature | null) {
+    if (!s) return null;
+    const start = s.active_start ?? null;
+    const end = s.active_end ?? null;
+    const params = start !== null && end !== null ? [{ start, end }] : [];
+    return {
+      label: s.label,
+      params,
+      active: 0,
+      // The server reports no anchor; the caret is inside the call, which is close enough to put
+      // the strip over the right line.
+      anchor: editorComp?.caretByteOffset() ?? 0,
+      doc: s.doc ?? null,
+      overload: null,
+    };
+  }
+
+  // ── Inlay hints ─────────────────────────────────────────────────────────────────
+  //
+  // Argument names and inferred types, drawn between the code. Keyed on the DOCUMENT rather than
+  // the caret — they annotate the file, not the position — with a longer debounce, because a hint
+  // that is one keystroke stale is invisible while a request per keystroke is not.
+  //
+  // Off unless the setting is on, and cleared when it is turned off, so the toggle is immediate
+  // rather than effective from the next edit.
+  $effect(() => {
+    const path = activePath;
+    const revision = docRevision;
+    const on = bennuSettingsStore.inlayHints;
+    if (!path || !on || !isJavaFileOf(path)) {
+      editorComp?.setInlayHints([]);
+      return;
+    }
+    void revision;
+    const src = editorComp?.getValue() ?? '';
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void ipcInlayHints(path, src)
+        .then((hints) => {
+          if (cancelled || projectStore.activeFilePath !== path) return;
+          editorComp?.setInlayHints(hints);
+        })
+        .catch(() => {});
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
   // ── Expand / shrink selection ───────────────────────────────────────────────────
   //
   // The server answers with the WHOLE chain from the token under the caret out to the file, so
@@ -1303,15 +1450,26 @@
     if (!root || !activePath || !canBreak) return [];
     return bennuDebugStore.breakpointsIn(root, activePath).map((b) => {
       const status = bennuDebugStore.statusOf(b.file, b.line);
+      const restricted = !!b.condition.trim() || b.hit_count > 1;
       const classes = ['cm-bp'];
       if (!b.enabled) classes.push('cm-bp-off');
       else if (status && !status.verified) classes.push('cm-bp-pending');
+      // Marked distinctly whatever else it is: a breakpoint that does not stop is the single most
+      // expensive thing to misread in a debugger, and "it has a condition on it" is the answer
+      // ninety per cent of the time. The dot has to say so without being clicked.
+      if (restricted) classes.push('cm-bp-cond');
       return {
         line: b.line,
         className: classes.join(' '),
-        tooltip: !b.enabled
-          ? 'Breakpoint (disabled) — right-click for more'
-          : (status?.message || 'Breakpoint — click to remove, right-click for more'),
+        tooltip: [
+          b.enabled ? 'Breakpoint' : 'Breakpoint (disabled)',
+          b.condition.trim() ? `stops when ${b.condition.trim()}` : '',
+          b.hit_count > 1 ? `every ${b.hit_count} hits` : '',
+          status?.hits ? `hit ${status.hits}×` : '',
+          status?.condition_error || status?.message || '',
+        ]
+          .filter(Boolean)
+          .join(' — '),
       };
     });
   });
@@ -1376,8 +1534,12 @@
     if (!root || !activePath || !canBreak) return;
     const path = activePath;
     const existing = bennuDebugStore.breakpointsIn(root, path).find((b) => b.line === line);
+    const conditional = !!existing?.condition.trim() || (existing?.hit_count ?? 0) > 1;
     const items: MenuItem[] = existing
       ? [
+          // First, because it is the reason to open this menu on a breakpoint that already exists
+          // — enabling and removing are both one click away in the gutter itself.
+          { id: 'condition', label: conditional ? 'Edit condition…' : 'Add condition…' },
           { id: 'toggle', label: existing.enabled ? 'Disable breakpoint' : 'Enable breakpoint' },
           { id: 'remove', label: 'Remove breakpoint' },
           { id: 'sep', separator: true },
@@ -1388,6 +1550,9 @@
       if (id === 'add') bennuDebugStore.toggleBreakpoint(root, path, line);
       else if (id === 'remove') bennuDebugStore.removeBreakpoint(root, path, line);
       else if (id === 'clear') bennuDebugStore.clearBreakpoints(root);
+      // The list, focused on this one. A popup hanging off the gutter would be a second place to
+      // edit the same thing, and one the keyboard could not reach.
+      else if (id === 'condition') bennuUiStore.openBreakpoints({ file: path, line });
       else if (id === 'toggle' && existing) {
         bennuDebugStore.setBreakpointEnabled(root, path, line, !existing.enabled);
       }
@@ -1674,6 +1839,7 @@
     if (id === 'np-equals') return ArrowLeftRight;
     if (id === 'change-package') return Package;
     if (id === 'move-to-package') return FolderInput;
+    if (id === 'override-methods') return Wand2;
     if (id.startsWith('naming-fix:')) return CaseSensitive;
     return Wand2; // the simplification family (isEmpty / boolean / negated comparison)
   }
@@ -1689,6 +1855,7 @@
    */
   async function runIntentionAction(o: IntentionOffer, path: string) {
     if (o.action === 'move-to-package') { await moveFileToPackage(path); return; }
+    if (o.action === 'override-methods') { onOverride?.(); return; }
     if (o.action !== 'rename-symbol' && o.action !== 'rename-symbol-preview') return;
     if (!editorComp) return;
 
@@ -1765,7 +1932,10 @@
     {
       const src = editorComp.getValue();
       const offset = editorComp.caretByteOffset();
-      const offers = await ipcIntentionsAt(path, src, offset).catch(() => []);
+      // The diagnostics travel with the request so the offers can include a FIX for the ones under
+      // the caret. They are the editor's own, already computed and already drawn — revalidating the
+      // file to rediscover them would run every check in it for the sake of one squiggle.
+      const offers = await ipcIntentionsAt(path, src, offset, diagRefsForFixes()).catch(() => []);
       if (projectStore.activeFilePath === path) {
         for (const o of offers) {
           dynamic.push({
@@ -1773,7 +1943,7 @@
             label: o.label,
             icon: intentionIcon(o.id),
             // A non-edit action is dispatched by whoever owns it — a filesystem move by the
-            // store, a rename by the rename engine (never by splicing the identifier in place,
+            // store, a rename by the semantic engine (never by splicing the identifier in place,
             // which would leave every use of it behind). A plain edit applies the byte-range
             // replacement.
             run: o.action ? () => void runIntentionAction(o, path) : () =>
@@ -1885,12 +2055,14 @@
   export async function formatDocument() {
     const path = activePath;
     if (!path || !editorComp) return;
-    if (!isLspFileOf(path)) {
+    // Java is formatted by Bennu's own formatter and everything else by its server, and the backend
+    // routes between them — so the only files with no formatter are the ones that are neither.
+    if (!isLspFileOf(path) && !isJavaFileOf(path)) {
       toastStore.show('No formatter for this file type', 'info');
       return;
     }
     const src = editorComp.getValue();
-    const edits = await lspFormat(
+    const edits = await formatBuffer(
       path,
       src,
       bennuSettingsStore.tabSize,
@@ -1907,8 +2079,58 @@
     );
   }
 
+  /**
+   * Drop the imports the file does not use and put the rest in order.
+   *
+   * Java only — the answer comes from the same `unused-import` judgement the squiggles do, and no
+   * other language here has one. One edit over the whole import block, so it is one undo step.
+   */
+  export async function optimizeImportsInBuffer() {
+    const path = activePath;
+    if (!path || !editorComp) return;
+    if (!isJavaFileOf(path)) {
+      toastStore.show('Imports can only be optimized in a Java file', 'info');
+      return;
+    }
+    const edits = await optimizeImports(path, editorComp.getValue()).catch(() => []);
+    if (!edits.length) {
+      // Deliberately not "already in order": a file with a comment written among its imports is
+      // also left alone (reordering would strand the comment above a different import), and
+      // claiming it was already tidy would be a lie in that case.
+      toastStore.show('No import changes', 'info');
+      return;
+    }
+    editorComp.replaceByteRanges(
+      edits.map((e) => ({ startByte: e.start, endByte: e.end, text: e.new_text })),
+    );
+  }
+
   /** Insert text at the caret (Generate modal → editor). Mirrors merula's insert. */
   export function insertAtCursor(text: string) { editorComp?.insertAtCursor(text); }
+
+  /** The buffer and the caret in it, in the byte coordinates every backend span uses. `null` when
+   *  no editor is mounted — a generator has nothing to work from. */
+  export function caretContext(): { source: string; offset: number } | null {
+    if (!editorComp) return null;
+    return { source: editorComp.getValue(), offset: editorComp.caretByteOffset() };
+  }
+
+  /**
+   * Apply a generator's byte-range edits as ONE undo step.
+   *
+   * One step because they are one action: the methods and the imports they need are not two things
+   * the user did, and undoing half of it leaves code that does not compile. The backend already
+   * ordered them highest-offset-first for callers that apply them one at a time; the editor's own
+   * batch API remaps for us, so the order here does not matter.
+   */
+  export function applyGeneratedEdits(
+    edits: readonly { start: number; end: number; replacement: string }[],
+  ) {
+    if (!editorComp || edits.length === 0) return;
+    editorComp.replaceByteRanges(
+      edits.map((e) => ({ startByte: e.start, endByte: e.end, text: e.replacement })),
+    );
+  }
 
   // ── Rename (Shift+F6) — inline ────────────────────────────────────────────────
   // An IntelliJ-style in-place rename: a small field anchored at the caret, pre-filled
@@ -2148,7 +2370,11 @@
    * hierarchy can be built from.
    */
   async function showHierarchy(kind: 'calls' | 'types') {
-    if (!activePath || !editorComp || !isLspFileOf(activePath)) return;
+    // Java is answered by Bennu's own engine over the reference index and everything else by its
+    // server; the backend routes between them, so the only files with no hierarchy are the ones
+    // that are neither. Same shape as `formatDocument`.
+    if (!activePath || !editorComp) return;
+    if (!isLspFileOf(activePath) && !isJavaFileOf(activePath)) return;
     bennuUiStore.showBottom('hierarchy');
     await bennuHierarchyStore.open(
       kind,
@@ -2160,7 +2386,7 @@
 
   /** Who calls the function at the caret (and, by direction, what it calls). */
   export function showCallHierarchy() { void showHierarchy('calls'); }
-  /** What implements the trait at the caret (and, by direction, what it is built on). */
+  /** What implements the type at the caret (and, by direction, what it is built on). */
   export function showTypeHierarchy() { void showHierarchy('types'); }
 
   // ── Go to definition (Ctrl+B / Ctrl+Click) ────────────────────────────────────
@@ -3519,6 +3745,15 @@
   :global(.cm-flag-icon.cm-bp-off) {
     background: transparent;
     box-shadow: inset 0 0 0 1.5px var(--text-muted);
+  }
+  /* A condition (or a pass count) on it. A ring around the dot rather than another colour:
+     colour is already saying whether the VM accepted it, and those two are different questions —
+     a conditional breakpoint can be verified, pending or disabled like any other. A breakpoint
+     that does not stop is the most expensive thing to misread in a debugger, and this is what
+     answers it before you think to right-click. */
+  :global(.cm-flag-icon.cm-bp-cond) {
+    outline: 1.5px solid var(--warning);
+    outline-offset: 1.5px;
   }
 
   /* Where the program is stopped, on the frame you are looking at. A full-width band with a

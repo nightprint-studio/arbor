@@ -14,3 +14,12 @@ pub use crate::simplify::{
     simplify_boolean_compare, simplify_negated_comparison, simplify_size_check,
 };
 pub use crate::Edit;
+
+// Generating an override: the rendered method and where in the class body it goes.
+pub use crate::override_stub::{class_body_insertion, render_override, OverrideSpec};
+
+// Quick-fixes — the repair attached to a diagnostic, keyed by its `code` and span.
+pub use crate::quick_fix::{fixes_for, Fix};
+
+// The Java formatter — re-indentation and whitespace tidying, as line-range edits.
+pub use crate::format::{format_edits, format_source, FormatStyle};

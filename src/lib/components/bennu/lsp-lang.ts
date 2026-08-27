@@ -27,6 +27,7 @@ import type { LanguageDescriptor, CompletionSource } from '$lib/components/share
 import {
   hoverCardDom, insertWithStops, makeByteToU16, makeU16ToByte,
 } from '$lib/components/shared/ui/code-editor';
+import { boostForRank, RESOLVED } from '$lib/components/shared/ui/code-editor/completion-rank';
 import { StreamLanguage, type StreamParser } from '@codemirror/language';
 import type { Extension } from '@codemirror/state';
 import { insertCompletionText, type Completion, type CompletionContext, type CompletionResult }
@@ -36,7 +37,7 @@ import { projectStore } from '$lib/stores/bennu/project.svelte';
 import { completion as ipcCompletion } from '$lib/ipc/bennu';
 import { hover as ipcHover } from '$lib/ipc/bennu/nav';
 import {
-  lspResolveCompletion, lspSignatureHelp, type LspSignature,
+  lspResolveCompletion,
 } from '$lib/ipc/bennu/lsp';
 import type { CompletionItem, SourceEdit } from '$lib/types/bennu';
 
@@ -95,21 +96,16 @@ function applyAdditionalEdits(view: EditorView, edits: SourceEdit[], preInsertSo
 /**
  * Turn one provider item into a CodeMirror completion.
  *
- * `rank` is the item's position in the provider's own ordering, and it becomes a `boost` because
- * that is the only lever CodeMirror offers: it scores options by fuzzy-matching the label and
- * adds `boost`, so a string sort key has nowhere to go. Without the nudge, typing `it` in Rust
- * puts `zip` above `iter` — while rust-analyzer's own ordering already knew which one you meant.
- *
- * The mapping is a nudge, not an override: the top of the server's list gets a strong boost, the
- * tail a small penalty, and CodeMirror's match quality still decides between neighbours. A hard
- * override would break the thing CodeMirror is genuinely better at — ranking by what was typed.
+ * `rank` is the item's position in the provider's own ordering, and it becomes a `boost` through
+ * the shared curve — see `completion-rank`. Without the nudge, typing `it` in Rust puts `zip`
+ * above `iter`, while rust-analyzer's own ordering already knew which one you meant.
  */
 function toCompletion(item: CompletionItem, rank: number, file: string): Completion {
   const completion: Completion = {
     label: item.label,
     detail: item.detail ?? undefined,
     type: kindToType(item.kind),
-    boost: item.preselect ? 99 : Math.max(-50, 60 - rank),
+    boost: boostForRank(rank, RESOLVED, item.preselect),
   };
 
   // `label` is a display string — a server may send `push(…)`. What goes in the buffer is
@@ -275,56 +271,6 @@ export function backendHoverSource(
     .catch(() => null);
 }
 
-/**
- * Signature help, rendered as a hover-style tooltip at the caret.
- *
- * Not wired as `intel.hover` (that is pointer-driven); the host calls
- * {@link fetchSignatureHelp} on a caret move inside an argument list. Kept here so the
- * formatting of the active parameter lives beside the rest of the language's presentation.
- */
-export async function fetchSignatureHelp(
-  file: string,
-  source: string,
-  byteOffset: number,
-): Promise<LspSignature | null> {
-  return lspSignatureHelp(file, source, byteOffset).catch(() => null);
-}
-
-/** Render a signature into a hover card, with the active parameter emphasised. */
-export function signatureCardDom(sig: LspSignature): HTMLElement {
-  const dom = document.createElement('div');
-  dom.className = 'cm-hover-card';
-
-  const head = document.createElement('div');
-  head.className = 'cm-hc-head';
-  const title = document.createElement('span');
-  title.className = 'cm-hc-title';
-
-  // The server gave the active parameter's span inside the label, so it can be bolded exactly
-  // rather than by searching the label for the parameter's text — which goes wrong the moment
-  // two parameters share a name or a type.
-  const start = sig.active_start;
-  const end = sig.active_end;
-  if (start != null && end != null && end > start && end <= sig.label.length) {
-    title.appendChild(document.createTextNode(sig.label.slice(0, start)));
-    const active = document.createElement('strong');
-    active.textContent = sig.label.slice(start, end);
-    title.appendChild(active);
-    title.appendChild(document.createTextNode(sig.label.slice(end)));
-  } else {
-    title.textContent = sig.label;
-  }
-  head.appendChild(title);
-  dom.appendChild(head);
-
-  if (sig.doc) {
-    const doc = document.createElement('div');
-    doc.className = 'cm-hc-doc';
-    doc.textContent = sig.doc;
-    dom.appendChild(doc);
-  }
-  return dom;
-}
 
 /** How a server-backed descriptor folds and comments. Both default to the stream-mode case,
  *  which is what {@link lspLanguage} passes and what Rust and every legacy mode want. */

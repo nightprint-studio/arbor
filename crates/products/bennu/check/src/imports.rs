@@ -249,34 +249,50 @@ pub fn duplicate_imports(root: Node, source: &str) -> Vec<Diagnostic> {
 /// Every unused single-type import in `root`, as `warning` diagnostics spanning the whole
 /// `import …;` statement.
 pub fn unused_imports(root: Node, source: &str) -> Vec<Diagnostic> {
+    import_inventory(root, source)
+        .into_iter()
+        .filter(|i| !i.used)
+        .map(|i| {
+            let simple = i.simple_name().to_string();
+            CheckId::UnusedImport.span(i.start, i.end, format!("Unused import `{simple}`"))
+        })
+        .collect()
+}
+
+/// One `import …;` statement, and whether anything in the file appears to use it.
+///
+/// The shape "optimize imports" reads. It exists so that the question *is this import unused* has
+/// exactly ONE answer in the product: a command that removed an import the checker does not flag
+/// (or left one it does) would be two engines disagreeing about the same file, and each would look
+/// right on its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportEntry {
+    /// Byte span of the whole `import …;` statement.
+    pub start: usize,
+    pub end: usize,
+    /// The dotted path as written — no `import`, no `static`, no `;`. A wildcard keeps its `.*`.
+    pub path: String,
+    pub static_: bool,
+    pub star: bool,
+    /// Whether the simple name this binds appears anywhere outside the import block.
+    ///
+    /// Always `true` for a `static` or wildcard import: what those bind is a member name or an open
+    /// set, not this one simple name, so there is no evidence here either way — and inventing one
+    /// would mean deleting an import that is load-bearing.
+    pub used: bool,
+}
+
+impl ImportEntry {
+    /// The last dotted segment — the simple name a single-type import binds (`*` for a wildcard).
+    pub fn simple_name(&self) -> &str {
+        self.path.rsplit('.').next().unwrap_or(&self.path)
+    }
+}
+
+/// Every top-level `import …;` in the file, in source order, each tagged with whether it is used.
+pub fn import_inventory(root: Node, source: &str) -> Vec<ImportEntry> {
     let bytes = source.as_bytes();
-    let imports = collect_imports(root, bytes);
-    if imports.is_empty() {
-        return Vec::new();
-    }
-    let used = collect_used_idents(root, bytes);
-    let comments = collect_comment_text(root, bytes);
-
-    let mut out = Vec::new();
-    for imp in imports {
-        if used.contains(&imp.simple) || word_in(&comments, &imp.simple) {
-            continue;
-        }
-        out.push(CheckId::UnusedImport.span(imp.start, imp.end, format!("Unused import `{}`", imp.simple)));
-    }
-    out
-}
-
-/// A single-type import: the imported simple name + the `import …;` statement span.
-struct ImportDecl {
-    simple: String,
-    start: usize,
-    end: usize,
-}
-
-/// Collect the plain single-type imports (skipping `static` + wildcard).
-fn collect_imports(root: Node, bytes: &[u8]) -> Vec<ImportDecl> {
-    let mut out = Vec::new();
+    let mut raw: Vec<(Node, bool, bool, Option<String>)> = Vec::new();
     let mut c = root.walk();
     for child in root.children(&mut c) {
         if child.kind() != "import_declaration" {
@@ -287,31 +303,51 @@ fn collect_imports(root: Node, bytes: &[u8]) -> Vec<ImportDecl> {
 
         let mut is_static = false;
         let mut is_wildcard = is_wildcard_text;
-        let mut simple: Option<String> = None;
+        let mut path: Option<String> = None;
         let mut cc = child.walk();
         for part in child.children(&mut cc) {
             match part.kind() {
                 "static" => is_static = true,
                 "asterisk" => is_wildcard = true,
-                "scoped_identifier" => {
-                    if let Some(name) = part.child_by_field_name("name") {
-                        simple = name.utf8_text(bytes).ok().map(str::to_string);
-                    }
-                }
-                "identifier" => {
-                    simple = part.utf8_text(bytes).ok().map(str::to_string);
+                "scoped_identifier" | "identifier" => {
+                    path = part.utf8_text(bytes).ok().map(str::to_string);
                 }
                 _ => {}
             }
         }
-        if is_static || is_wildcard {
-            continue;
-        }
-        if let Some(simple) = simple {
-            out.push(ImportDecl { simple, start: child.start_byte(), end: child.end_byte() });
-        }
+        raw.push((child, is_static, is_wildcard, path));
     }
-    out
+    if raw.is_empty() {
+        return Vec::new();
+    }
+
+    // The two scans are the expensive part and neither depends on the import — done once, not once
+    // per import.
+    let used = collect_used_idents(root, bytes);
+    let comments = collect_comment_text(root, bytes);
+
+    raw.into_iter()
+        .filter_map(|(node, static_, star, path)| {
+            let mut path = path?;
+            if star && !path.ends_with(".*") {
+                path.push_str(".*");
+            }
+            let entry = ImportEntry {
+                start: node.start_byte(),
+                end: node.end_byte(),
+                used: true,
+                path,
+                static_,
+                star,
+            };
+            if static_ || star {
+                return Some(entry);
+            }
+            let simple = entry.simple_name().to_string();
+            let seen = used.contains(&simple) || word_in(&comments, &simple);
+            Some(ImportEntry { used: seen, ..entry })
+        })
+        .collect()
 }
 
 /// Every identifier / type-identifier used OUTSIDE the import (and package) declarations.

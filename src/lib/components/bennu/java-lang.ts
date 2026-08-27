@@ -31,6 +31,12 @@ import {
   type LanguageDescriptor, type TokenClass, type CompletionSource,
 } from '$lib/components/shared/ui/code-editor';
 import {
+  boostForRank, FALLBACK, RESOLVED,
+} from '$lib/components/shared/ui/code-editor/completion-rank';
+import { postfixCompletion } from '$lib/components/shared/ui/code-editor/postfix';
+import { javaPostfixTemplates } from './java-postfix';
+import { javaLevelStore } from '$lib/stores/bennu/java-level.svelte';
+import {
   insertCompletionText,
   type Completion, type CompletionContext, type CompletionResult,
 } from '@codemirror/autocomplete';
@@ -289,11 +295,15 @@ const MAX_FALLBACK = 400;
 function appendFallbackCompletions(
   ctx: CompletionContext, prefix: string, seen: Set<string>, out: Completion[],
 ): void {
+  // Everything added here is a guess — a language keyword, or a word that happens to be somewhere
+  // in this buffer. It belongs entirely below anything the backend resolved, however well it
+  // matches what was typed, so it is boosted within its own band (see `completion-rank`).
   const pl = prefix.toLowerCase();
+  let rank = 0;
   for (const k of KEYWORD_COMPLETION_LABELS) {
     if (seen.has(k) || (pl && !k.startsWith(pl))) continue;
     seen.add(k);
-    out.push({ label: k, type: 'keyword' });
+    out.push({ label: k, type: 'keyword', boost: boostForRank(rank++, FALLBACK) });
   }
   const src = ctx.state.doc.toString();
   BUFFER_WORD_RE.lastIndex = 0;
@@ -305,7 +315,7 @@ function appendFallbackCompletions(
     if (seen.has(w) || w.toLowerCase() === pl) continue;
     if (pl && !w.toLowerCase().startsWith(pl)) continue;
     seen.add(w);
-    out.push({ label: w, type: 'variable' });
+    out.push({ label: w, type: 'variable', boost: boostForRank(rank++, FALLBACK) });
   }
 }
 
@@ -377,18 +387,30 @@ const javaCompletionSource: CompletionSource = async (
       const token = ctx.matchBefore(/[\w$.\-/]*$/);
       return {
         from: token ? token.from : ctx.pos,
-        options: extItems.map((it) => ({
+        // An extension's own ordering is honoured the same way the backend's is — it put the
+        // vocabulary it allows HERE ahead of the one it merely allows somewhere.
+        options: extItems.map((it, rank) => ({
           label: it.label,
           detail: it.detail ?? undefined,
           type: it.kind === 'bean' ? 'class' : 'property',
+          boost: boostForRank(rank),
         })),
         validFor: /^[\w$.\-/]*$/,
       };
     }
   }
 
-  const options: Completion[] = (items ?? []).map((it) => {
-    const c: Completion = { label: it.label, detail: it.detail, type: kindToType(it.kind) };
+  // The backend already ordered these by relevance — what the receiver is, how far up the
+  // hierarchy the member was found, whether it is deprecated, whether this file already uses it.
+  // CodeMirror re-scores by fuzzy match and would throw all of that away, so the position in the
+  // list is carried across as a `boost` (see `completion-rank`).
+  const options: Completion[] = (items ?? []).map((it, rank) => {
+    const c: Completion = {
+      label: it.label,
+      detail: it.detail,
+      type: kindToType(it.kind),
+      boost: boostForRank(rank, RESOLVED, it.preselect),
+    };
     // A type-name completion with a single importable class carries its FQN — on accept, insert the
     // name AND (when auto-import is on) add its import in the same gesture ("IntelliJ-style").
     if (it.auto_import) {
@@ -410,9 +432,28 @@ const javaCompletionSource: CompletionSource = async (
     appendFallbackCompletions(ctx, word ? word.text : '', new Set(options.map((o) => o.label)), options);
   }
 
+  appendPostfixCompletions(ctx, from, options);
+
   if (options.length === 0) return null;
   return { from, options, validFor: /^[\w$]*$/ };
 };
+
+// ── Postfix templates ───────────────────────────────────────────────────────────
+//
+// Merged into the member list rather than registered as a second source, because they occupy the
+// same completion range: both replace the word after the dot, so two sources would produce two
+// popups competing for one caret. The templates themselves are a table (`java-postfix.ts`) read by
+// the shared engine — the level is consulted per keystroke because a project can be opened, closed
+// and reopened without this module being reloaded.
+
+/** Append the postfix templates applicable at the caret, if the ranges line up. */
+function appendPostfixCompletions(ctx: CompletionContext, from: number, options: Completion[]) {
+  const source = postfixCompletion(javaPostfixTemplates({ level: javaLevelStore.level }));
+  const result = source(ctx);
+  // Same `from` or nothing: an item whose range disagrees with the list's would be applied over the
+  // wrong text. This is a guard on an invariant, not a fallback — they are computed the same way.
+  if (result && result.from === from) options.push(...result.options);
+}
 
 // ── Hover source (symbol signature + `var`/`val` inferred type) ──────────────────
 //

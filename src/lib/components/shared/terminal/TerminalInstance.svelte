@@ -1,12 +1,14 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
-  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-  import { Terminal }    from '@xterm/xterm';
-  import { FitAddon }    from '@xterm/addon-fit';
-  import { WebLinksAddon } from '@xterm/addon-web-links';
-  import { terminalWrite, terminalResize, terminalClose } from '$lib/ipc/terminal';
-  import { terminalStore } from '$lib/stores/terminal.svelte';
-  import '@xterm/xterm/css/xterm.css';
+  /**
+   * A viewport onto one terminal.
+   *
+   * It owns no terminal and no process: both live in {@link terminalSession}, outside the
+   * component tree, because the bottom dock unmounts this every time you switch to Stage, Jobs or
+   * Pipelines — and a build running in a terminal must survive that. This mounts the session's
+   * element, keeps it fitted to the space it has, and hands it back on unmount.
+   */
+  import { terminalResize } from '$lib/ipc/terminal';
+  import { terminalSession } from './session';
 
   // ── Props ─────────────────────────────────────────────────────────────────
   let {
@@ -17,135 +19,52 @@
     active?: boolean;
   } = $props();
 
-  // ── Refs ──────────────────────────────────────────────────────────────────
   let container: HTMLDivElement;
 
-  // ── xterm internals ───────────────────────────────────────────────────────
-  let term:    Terminal   | null = null;
-  let fit:     FitAddon   | null = null;
-  let resizeObs: ResizeObserver | null = null;
-  let unlistenOutput: UnlistenFn | null = null;
-  let unlistenClosed: UnlistenFn | null = null;
+  /**
+   * Adopt the session's element, and give it back when this viewport goes away.
+   *
+   * `appendChild` MOVES the element, so there is never a second copy and never a re-created one:
+   * the same xterm, with the same scrollback, simply changes parent. The teardown does not dispose
+   * anything — see the module docs on `session.ts` for what that used to cost.
+   */
+  $effect(() => {
+    if (!container) return;
+    const session = terminalSession(id);
+    container.appendChild(session.host);
+    refit();
 
-  // ── Read terminal theme from CSS variables ────────────────────────────────
-  function getTerminalTheme() {
-    const s = getComputedStyle(document.documentElement);
-    const v = (name: string) => s.getPropertyValue(name).trim();
-    return {
-      background:    v('--terminal-bg'),
-      foreground:    v('--terminal-fg'),
-      cursor:        v('--terminal-cursor'),
-      cursorAccent:  v('--terminal-bg'),
-      selectionBackground: v('--terminal-selection-bg') || 'rgba(107,155,218,0.25)',
-      black:         v('--terminal-black'),
-      red:           v('--terminal-red'),
-      green:         v('--terminal-green'),
-      yellow:        v('--terminal-yellow'),
-      blue:          v('--terminal-blue'),
-      magenta:       v('--terminal-magenta'),
-      cyan:          v('--terminal-cyan'),
-      white:         v('--terminal-white'),
-      brightBlack:   v('--terminal-bright-black'),
-      brightRed:     v('--terminal-bright-red'),
-      brightGreen:   v('--terminal-bright-green'),
-      brightYellow:  v('--terminal-bright-yellow'),
-      brightBlue:    v('--terminal-bright-blue'),
-      brightMagenta: v('--terminal-bright-magenta'),
-      brightCyan:    v('--terminal-bright-cyan'),
-      brightWhite:   v('--terminal-bright-white'),
+    const observer = new ResizeObserver(refit);
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+      // Back to the parking space, still running, still holding everything it has printed.
+      session.host.remove();
     };
-  }
+  });
 
-  // ── Initialise once the element is in the DOM ─────────────────────────────
+  /** When this tab becomes the visible one, it finally has a size — fit to it and take focus. */
   $effect(() => {
-    if (!container || term) return; // already initialised
-
-    term = new Terminal({
-      fontFamily:     '"JetBrains Mono", "Cascadia Code", "Fira Code", monospace',
-      fontSize:       13,
-      lineHeight:     1.2,
-      cursorBlink:    true,
-      cursorStyle:    'bar',
-      scrollback:     5000,
-      theme:          getTerminalTheme(),
-      allowProposedApi: true,
+    if (!active) return;
+    requestAnimationFrame(() => {
+      refit();
+      terminalSession(id).term.focus();
     });
+  });
 
-    fit  = new FitAddon();
-    term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
-    term.open(container);
+  /** Fit the terminal to the space it currently has, and tell the PTY the new geometry. A hidden
+   *  or parked element measures nothing useful, and reflowing to it would mangle the scrollback. */
+  function refit() {
+    if (!container?.clientWidth || !container.clientHeight) return;
+    const { term, fit } = terminalSession(id);
     fit.fit();
-
-    // ── Send keyboard input to the PTY ─────────────────────────────────────
-    term.onData((data) => {
-      terminalWrite(id, data).catch(() => {});
-    });
-
-    // ── Track dynamic title changes (OSC 0/2) ──────────────────────────────
-    term.onTitleChange((title) => {
-      if (title) terminalStore.renameTab(id, title);
-    });
-
-    // ── Listen for PTY output events ───────────────────────────────────────
-    listen<string>(`terminal:output:${id}`, (evt) => {
-      if (!term) return;
-      // Payload is base64-encoded raw bytes
-      const bytes = Uint8Array.from(atob(evt.payload), c => c.charCodeAt(0));
-      term.write(bytes);
-    }).then(fn => { unlistenOutput = fn; });
-
-    // ── Listen for process-exited event ────────────────────────────────────
-    listen<null>(`terminal:closed:${id}`, () => {
-      term?.writeln('\r\n\x1b[2m[Process completed — closing…]\x1b[0m');
-      // Remove the tab quickly so the user isn't left with a dead terminal
-      setTimeout(() => terminalStore.removeTab(id), 400);
-    }).then(fn => { unlistenClosed = fn; });
-
-    // ── Auto-resize with ResizeObserver ────────────────────────────────────
-    resizeObs = new ResizeObserver(() => {
-      if (!fit || !term) return;
-      fit.fit();
-      const { cols, rows } = term;
-      terminalResize(id, cols, rows).catch(() => {});
-    });
-    resizeObs.observe(container);
-
-    return () => teardown();
-  });
-
-  // When the tab becomes active, refit to ensure correct sizing.
-  $effect(() => {
-    if (active && fit && term) {
-      // rAF ensures the element is visible before fitting
-      requestAnimationFrame(() => {
-        fit!.fit();
-        terminalResize(id, term!.cols, term!.rows).catch(() => {});
-        term!.focus();
-      });
-    }
-  });
-
-  function teardown() {
-    resizeObs?.disconnect();
-    unlistenOutput?.();
-    unlistenClosed?.();
-    term?.dispose();
-    term    = null;
-    fit     = null;
-    resizeObs = null;
+    terminalResize(id, term.cols, term.rows).catch(() => {});
   }
-
-  onDestroy(() => {
-    teardown();
-    // Kill the PTY process when the component is destroyed
-    terminalClose(id).catch(() => {});
-  });
 </script>
 
 <!--
-  The container div is always rendered (so xterm keeps its state), but hidden
-  when the tab is not active.  Visibility is managed by the parent's CSS.
+  Always rendered while the panel is open, hidden by CSS when this is not the active tab — the
+  session's element stays inside it either way.
 -->
 <div
   class="xterm-container"

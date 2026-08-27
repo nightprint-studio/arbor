@@ -1,7 +1,7 @@
 //! `references` domain — `bennu_references` (find-usages, docs §5 #7).
 //!
 //! The read-only twin of `bennu_rename_plan`: it classifies the symbol under the caret
-//! against the owning project's rename engine (the whole-project reference index +
+//! against the owning project's semantic engine (the whole-project reference index +
 //! resolver built off-thread on `bennu_open_project`) and returns every resolved use site.
 //! Unlike rename, it never edits — it only reports where a declaration is used, for the
 //! FE's find-usages panel.
@@ -60,14 +60,20 @@ pub(crate) fn bennu_references(
 
 /// Map an intel [`ReferencesResult`] onto the wire [`UsagesResult`].
 fn usages_result_of(result: ReferencesResult) -> UsagesResult {
-    UsagesResult {
-        target_label: result.target.label(),
-        usages: result.usages.into_iter().map(usage_hit).collect(),
+    // The direct hits first, then each generated member's — tagged with what it is called, so the
+    // list can say why `order.getName()` is a use of the field `name`. One flat list rather than
+    // groups on the wire: they are all uses of the same declaration, the count in the header is the
+    // total, and `via` is what a reader needs to tell them apart.
+    let mut usages: Vec<UsageHit> = result.usages.into_iter().map(|u| usage_hit(u, None)).collect();
+    for alias in result.aliases {
+        let label = alias.label;
+        usages.extend(alias.usages.into_iter().map(|u| usage_hit(u, Some(label.clone()))));
     }
+    UsagesResult { target_label: result.target.label(), usages }
 }
 
-/// Map an intel [`UsageLocation`] onto the wire [`UsageHit`] (field-for-field).
-fn usage_hit(u: UsageLocation) -> UsageHit {
+/// Map an intel [`UsageLocation`] onto the wire [`UsageHit`].
+fn usage_hit(u: UsageLocation, via: Option<String>) -> UsageHit {
     UsageHit {
         file: u.file,
         start: u.start,
@@ -75,5 +81,6 @@ fn usage_hit(u: UsageLocation) -> UsageHit {
         line: u.line,
         col: u.col,
         preview: u.preview,
+        via,
     }
 }
