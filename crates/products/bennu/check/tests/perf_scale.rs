@@ -105,6 +105,13 @@ fn medium_file(idx: usize, methods: usize) -> String {
     s
 }
 
+// A PROFILER, not a regression guard: its assertions check that this file's own generator produced
+// the shape it meant to, never that the code under test is fast. Left un-ignored it ran on every
+// `cargo test`, in DEBUG — which is both the slowest way to run it and the least meaningful, since
+// the numbers it prints only mean something optimised. Run it deliberately:
+//
+//     cargo test -p bennu-check --release --test perf_scale -- --ignored --nocapture
+#[ignore = "profiler — run explicitly, in release; see the note above"]
 #[test]
 fn validate_thousands_of_files_no_temporal_drift() {
     const FILES: usize = 3000;

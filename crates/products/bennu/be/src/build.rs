@@ -1059,18 +1059,82 @@ pub(crate) fn module_dirs(root: &Path) -> Vec<PathBuf> {
 ///
 /// mvn often echoes the same javac error both raw and wrapped in `[ERROR]`; identical
 /// diagnostics are de-duped.
+///
+/// javac's CONTINUATION lines are folded into the diagnostic they belong to. `cannot find symbol`
+/// on its own says nothing — the name it could not find is on the `symbol:` line underneath, and
+/// the place it looked on the `location:` line. Reading the output one line at a time dropped both,
+/// so the marker in the buffer read `cannot find symbol  (build)` and left the reader to go and
+/// find out which symbol.
 pub fn parse_diagnostics(raw: &str) -> Vec<BuildDiagnostic> {
-    let mut out = Vec::new();
+    let mut out: Vec<BuildDiagnostic> = Vec::new();
     let mut seen = HashSet::new();
+    // The diagnostic the next continuation line belongs to. `None` after a line that was not a
+    // diagnostic, and after a DUPLICATE one — mvn echoes each javac error twice, continuations and
+    // all, and appending the echo's would say everything twice.
+    let mut open: Option<usize> = None;
     for line in raw.lines() {
         if let Some(d) = parse_line(line) {
             let key = (d.file.clone(), d.line, d.col, d.message.clone());
             if seen.insert(key) {
                 out.push(d);
+                open = Some(out.len() - 1);
+            } else {
+                open = None;
             }
+            continue;
+        }
+        match (open, continuation(line)) {
+            (Some(i), Some(text)) => append_continuation(&mut out[i].message, &text),
+            // A line that is neither a diagnostic nor a continuation ends the group: javac prints
+            // the offending source line and a `^` caret between them, and the next error's
+            // continuations must not land on this one.
+            (_, None) => {}
+            (None, Some(_)) => {}
         }
     }
     out
+}
+
+/// javac's continuation keys, normalised to `key: value` with single spaces. `None` for anything
+/// else — the echoed source line, the `^` caret, blank lines, and every other build-tool line.
+///
+/// A closed set rather than "any indented line": build output is full of indented text, and
+/// swallowing it would turn one unreadable message into a longer one.
+fn continuation(line: &str) -> Option<String> {
+    const KEYS: &[&str] = &["symbol", "location", "required", "found", "reason"];
+    let (_, body) = strip_mvn_prefix(line.trim_end());
+    // Indentation is what marks it as belonging to the line above; javac uses two spaces.
+    if !body.starts_with(' ') && !body.starts_with('\t') {
+        return None;
+    }
+    let body = body.trim();
+    let (key, value) = body.split_once(':')?;
+    let key = key.trim();
+    if !KEYS.contains(&key) {
+        return None;
+    }
+    let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if value.is_empty() {
+        return None;
+    }
+    Some(format!("{key}: {value}"))
+}
+
+/// Fold one continuation into a message, on one line — a lint tooltip renders its text in a single
+/// block, so a newline here would come out as a space anyway and read as a run-on.
+///
+/// `cannot find symbol` + `symbol: method build()` reads as `cannot find symbol: method build()`,
+/// because repeating the word is what makes the pair look like two separate facts.
+fn append_continuation(message: &mut String, text: &str) {
+    if let Some(sym) = text.strip_prefix("symbol: ") {
+        if message.ends_with("cannot find symbol") {
+            message.push_str(": ");
+            message.push_str(sym);
+            return;
+        }
+    }
+    message.push_str(" · ");
+    message.push_str(text);
 }
 
 fn parse_line(line: &str) -> Option<BuildDiagnostic> {
@@ -1411,6 +1475,64 @@ mod tests {
         assert_eq!(d[0].line, Some(12));
         assert_eq!(d[0].severity, "error");
         assert_eq!(d[0].message, "cannot find symbol");
+    }
+
+    /// `cannot find symbol` on its own names nothing. javac puts the name on the next line and the
+    /// place it looked on the one after, and reading the output line by line dropped both — the
+    /// marker in the buffer said `cannot find symbol  (build)` and left the reader to go and find
+    /// out which symbol.
+    #[test]
+    fn javac_continuation_lines_are_folded_into_their_diagnostic() {
+        let raw = "Foo.java:12: error: cannot find symbol\n\
+                   \x20       Arrays.asList(xs)\n\
+                   \x20       ^\n\
+                   \x20 symbol:   variable Arrays\n\
+                   \x20 location: class Foo\n";
+        let d = parse_diagnostics(raw);
+        assert_eq!(d.len(), 1, "the source echo and the caret are not diagnostics: {d:?}");
+        assert_eq!(
+            d[0].message,
+            "cannot find symbol: variable Arrays · location: class Foo"
+        );
+    }
+
+    /// mvn echoes each javac error twice — raw, then wrapped in `[ERROR]` — continuations and all.
+    /// The duplicate is dropped, and so are ITS continuations: appending them to the surviving copy
+    /// would say everything twice.
+    #[test]
+    fn a_duplicated_diagnostics_continuations_are_not_appended_twice() {
+        let raw = "Foo.java:12: error: cannot find symbol\n\
+                   \x20 symbol:   variable Arrays\n\
+                   [ERROR] Foo.java:12: error: cannot find symbol\n\
+                   [ERROR]   symbol:   variable Arrays\n";
+        let d = parse_diagnostics(raw);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].message, "cannot find symbol: variable Arrays");
+    }
+
+    /// Only javac's own continuation keys are absorbed. Build output is full of indented text, and
+    /// swallowing it would turn one unreadable message into a longer one.
+    #[test]
+    fn indented_build_noise_is_not_absorbed() {
+        let raw = "Foo.java:12: error: cannot find symbol\n\
+                   \x20 at org.apache.maven.Something.run(Something.java:1)\n\
+                   \x20 Downloading from central: https://repo/x.jar\n";
+        let d = parse_diagnostics(raw);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].message, "cannot find symbol");
+    }
+
+    /// The `required` / `found` pair, which is the other message javac splits across lines.
+    #[test]
+    fn a_type_mismatch_keeps_both_halves() {
+        let raw = "Foo.java:4: error: incompatible types\n\
+                   \x20 required: int\n\
+                   \x20 found: java.lang.String\n";
+        let d = parse_diagnostics(raw);
+        assert_eq!(
+            d[0].message,
+            "incompatible types · required: int · found: java.lang.String"
+        );
     }
 
     #[test]

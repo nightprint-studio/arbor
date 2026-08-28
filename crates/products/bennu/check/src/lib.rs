@@ -92,6 +92,7 @@ pub mod switch_flow;
 pub mod switches;
 pub mod syntax;
 pub mod text;
+pub mod supertypes;
 pub mod throws_of;
 pub mod throws_widen;
 pub mod type_arg_arity;

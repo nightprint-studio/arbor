@@ -189,6 +189,11 @@ function createProjectStore() {
     return bennuSettingsStore.autosave;
   }
 
+  // When each open file's buffer was last edited. Not reactive: it is only ever read alongside a
+  // signal that already is (the build's own diagnostics), and making it reactive would re-run every
+  // dependent derivation on every keystroke.
+  const editedAt = new Map<string, number>();
+
   /** Recompute `path`'s dirty state from its live text vs the last-saved snapshot. */
   function markDirty(path: string, text: string) {
     if (text !== (savedContent.get(path) ?? text)) dirty.add(path);
@@ -602,6 +607,9 @@ function createProjectStore() {
     // a preview tab would otherwise be silent data loss.
     if (opensAsPreview(path)) return false;
     sources.set(path, text);
+    // A write is an edit too — a rename splices its files through here, never through `setSource`.
+    // Without this, the build's marks on a renamed file would outlive the rename that moved them.
+    editedAt.set(path, Date.now());
     if (isDemoPath(path)) {
       // MOCK — no disk behind a demo file; treat it as saved so the tab goes clean.
       markSaved(path, text);
@@ -1221,9 +1229,17 @@ function createProjectStore() {
      *  live re-index (so the BE index tracks the edit), and schedule a debounced autosave. */
     setSource(path: string, text: string) {
       sources.set(path, text);
+      editedAt.set(path, Date.now());
       markDirty(path, text);
       scheduleReindex(path);
       scheduleAutosave(path);
+    },
+
+    /** When `path`'s buffer was last edited (epoch ms), or 0 if it has not been since the project
+     *  opened. What tells a COMPILER diagnostic from a live one: a build's errors describe the text
+     *  the compiler read, so once the buffer has moved they describe nothing. */
+    editedAt(path: string): number {
+      return editedAt.get(path) ?? 0;
     },
 
     /** Force an immediate live re-index of `path` (explicit save — flushes any

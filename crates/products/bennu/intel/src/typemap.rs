@@ -249,21 +249,27 @@ fn simple_to_binary(names: &FileNames, owner: &str, simple: &str) -> String {
         .to_string()
 }
 
-/// Parse `Foo`, `a.b.Foo`, `List<Foo>`, `Map<K, V<X>>` into a [`Parsed`] tree.
+/// Parse `Foo`, `a.b.Foo`, `List<Foo>`, `Map<K, V<X>>`, `Class<?>[]` into a [`Parsed`] tree.
 fn parse_type(s: &str) -> Option<Parsed> {
-    let s = s.trim();
-    if s.is_empty() {
+    // The array dimensions are written AFTER the type arguments, so finding the `<` first drops
+    // them: `Class<?>[]` parsed as `Class`, which is its own ELEMENT type. The `[]` rides along on
+    // the name, where `resolve_written_type` peels it off again and resolves the element.
+    let (element, dims) = bennu_java::prelude::split_array_dims(s);
+    if element.is_empty() {
         return None;
     }
-    let (name, rest) = match s.find('<') {
-        Some(i) => (s[..i].trim().to_string(), Some(&s[i..])),
-        None => (s.to_string(), None),
-    };
-    let args = match rest {
-        Some(inner) => parse_args(inner)?,
+    // The NAME is the text with every argument list stripped, not the text before the first `<`:
+    // `AbstractMultiset<E>.EntrySet` names a nested type, and cutting at the `<` loses it. The
+    // ARGUMENTS come from the first list, which is the one that binds the outer type's variables.
+    let name = bennu_java::prelude::erase_type_arguments(element).into_owned();
+    let args = match element.find('<') {
+        Some(i) => parse_args(&element[i..])?,
         None => Vec::new(),
     };
-    Some(Parsed { name, args })
+    Some(Parsed {
+        name: format!("{name}{}", "[]".repeat(dims)),
+        args,
+    })
 }
 
 /// Parse a `<A, B<C>>` argument list (including the surrounding angle brackets),

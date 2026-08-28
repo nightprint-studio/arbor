@@ -232,6 +232,18 @@ pub trait TypeResolver {
         Vec::new()
     }
 
+    /// The types declared DIRECTLY inside `binary_name`, as binary names (`p/Outer/Inner`).
+    ///
+    /// A nested type is a member of its outer, reachable as `Outer.Inner` with no import — so
+    /// anything that lists what `Outer.` offers has to ask for these as well as for its fields and
+    /// methods. Completion did not, and a project's own `Outer.Inner` could not be completed at all.
+    ///
+    /// The default is empty, and — like [`Self::class_annotations`] — empty means **"none, or not
+    /// read"**. A caller must not conclude from it that a type declares none.
+    fn nested_types(&self, _binary_name: &str) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Resolve a simple type name (`ArrayList`) to a binary name, using the file's
     /// imports for disambiguation. `None` when unresolvable.
     fn resolve_simple_name(&self, name: &str, imports: &[crate::symbols::Import])

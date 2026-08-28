@@ -16,6 +16,10 @@
   import {
     EditorState, Compartment, StateEffect, StateField, Transaction, type Extension,
   } from '@codemirror/state';
+  // The undo/redo history as a serialisable field — see `emitViewState`.
+  import { historyField } from '@codemirror/commands';
+  // The explicit "ask for completions here" command — see `requestCompletion`.
+  import { startCompletion } from '@codemirror/autocomplete';
   import {
     Decoration,
     EditorView,
@@ -256,10 +260,24 @@
   let scrollRaf = 0;
 
   /** Report the current cursor + scroll to the host (for per-tab restore). */
-  function emitViewState() {
+  /**
+   * Report cursor + scroll to the host, which remembers them per tab.
+   *
+   * `withHistory` serialises the undo/redo history alongside them. Only true on teardown: the
+   * history is a growing structure and this runs on every cursor move, so paying to serialise it
+   * there would be paying thousands of times for something read once.
+   */
+  function emitViewState(withHistory = false) {
     if (!view || !onViewState) return;
     const sel = view.state.selection.main;
-    onViewState({ anchor: sel.anchor, head: sel.head, scrollTop: view.scrollDOM.scrollTop });
+    onViewState({
+      anchor: sel.anchor,
+      head: sel.head,
+      scrollTop: view.scrollDOM.scrollTop,
+      history: withHistory
+        ? (view.state.toJSON({ history: historyField }) as { history?: unknown }).history
+        : undefined,
+    });
   }
 
   // ── Byte-span diagnostics → CM lint markers ───────────────────────────────────
@@ -589,7 +607,8 @@
       }
     });
 
-    const state = EditorState.create({
+    // The extension set is the same either way; only where the initial state comes FROM differs.
+    const stateConfig = {
       doc: value,
       extensions: [
         // First, so the toggle column sits OUTSIDE the line numbers — furthest from the text
@@ -606,7 +625,27 @@
         wrap ? EditorView.lineWrapping : [],
         updateListener,
       ],
-    });
+    };
+    // A returning tab gets its undo history back. `fromJSON` is the only way to seed a field's
+    // value into a fresh state, and it wants the doc and selection in the same object — so the
+    // doc is passed through it rather than through `create`. A stored history that no longer
+    // fits the document (the file changed on disk while the tab was away) would apply changes at
+    // positions that belonged to text no longer there, so it is dropped rather than trusted.
+    const storedHistory = initialState?.history;
+    let state: EditorState;
+    if (storedHistory !== undefined) {
+      try {
+        state = EditorState.fromJSON(
+          { doc: value, selection: { main: 0, ranges: [{ anchor: 0, head: 0 }] }, history: storedHistory },
+          stateConfig,
+          { history: historyField },
+        );
+      } catch {
+        state = EditorState.create(stateConfig);
+      }
+    } else {
+      state = EditorState.create(stateConfig);
+    }
     view = new EditorView({ state, parent: target });
     pushDiagnostics();
     pushMarks();
@@ -662,6 +701,8 @@
   onDestroy(() => {
     if (scrollRaf) cancelAnimationFrame(scrollRaf);
     detachScroll?.();
+    // Last chance to hand the host this tab's undo history — the view is about to go.
+    emitViewState(true);
     view?.destroy();
     view = undefined;
   });
@@ -696,6 +737,20 @@
 
   // ── Imperative API ────────────────────────────────────────────────────────────
   export function focus() { view?.focus(); }
+
+  /**
+   * Ask for completions here, as an explicit request.
+   *
+   * Exported rather than left to the keymap alone: the host binds the shortcut through its own
+   * window handler, which is the one mechanism in this app that is known to fire on every layout
+   * and platform. A keymap entry that quietly never matches is indistinguishable from a backend
+   * with nothing to say, and that is the confusion this exists to remove.
+   */
+  export function requestCompletion(): boolean {
+    if (!view) return false;
+    view.focus();
+    return startCompletion(view);
+  }
 
   export function getValue(): string {
     return view?.state.doc.toString() ?? value;

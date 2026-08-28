@@ -84,7 +84,9 @@
   it. The count includes <code>@Value</code>, <code>@ConditionalOnProperty</code>,
   <code>@ConfigurationProperties</code> fields and XML <code>value="$&#123;…&#125;"</code>, and
   both spellings of a relaxed-binding key (<code>readTimeout</code> and
-  <code>read-timeout</code>) count as one.
+  <code>read-timeout</code>) count as one. The counts follow the code: saving a file that changes
+  what reads a key refreshes them shortly afterwards, and a rename touching hundreds of files
+  refreshes them once.
 </p>
 <p>
   <strong>Writing a property file.</strong> An <code>application*.yml</code> or

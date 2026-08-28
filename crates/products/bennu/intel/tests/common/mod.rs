@@ -78,7 +78,7 @@ pub struct Project {
     /// The engine's own resolver is `project_only` + private; completion wants an
     /// `IndexResolver` it can pass to `completion(...)`, so we open one here. It mmaps the
     /// index files, so it must drop before `_temp` (declared before it).
-    completion_resolver: IndexResolver<NoJdk>,
+    completion_resolver: IndexResolver<StreamJdk>,
     sources: HashMap<String, String>,
     _temp: TempDir,
 }
@@ -153,9 +153,21 @@ impl Project {
         )
         .expect("build semantic engine");
 
-        // A completion resolver over the same on-disk index (JDK-free — project types only).
+        // A completion resolver over the same on-disk index, WITH the faked JDK.
+        //
+        // It used to be JDK-free, which read as "project types only" and was fine while every
+        // completion test asked about a member of a project class. It stopped being fine the moment
+        // one asked about a lambda parameter: typing that walks the receiver's hierarchy to find the
+        // functional interface, the walk crosses `java/lang/Object`, and a hierarchy with an
+        // unresolvable link is abandoned rather than guessed at — so the answer was empty for a
+        // reason that had nothing to do with the code under test.
+        //
+        // Production completion runs on the provider's FULL resolver (see `IndexService::completion`
+        // — "the project's FULL resolver, the one completion uses"), so a JDK-free one here was
+        // testing a configuration that does not exist. `StreamJdk` is the same fake the engine
+        // resolver already uses.
         let persisted = PersistedIndex::open(&blob, &fst).expect("open index for completion");
-        let mut completion_resolver = IndexResolver::new(persisted, NoJdk);
+        let mut completion_resolver = IndexResolver::new(persisted, StreamJdk);
         for (simple, binary) in &pairs {
             completion_resolver.add_simple_hint(simple, binary);
         }
@@ -271,6 +283,43 @@ impl Project {
         self.engine.hierarchy_step(&item.handle, direction)
     }
 
+    /// Every diagnostic the validator reports for `file`, against this project's **real** index.
+    ///
+    /// The corpus runs kept finding false positives that no unit test could have caught, because a
+    /// check's own tests are written against a mock resolver by the person who wrote the check —
+    /// and the false positives were all cases where the *index* answered something the mock never
+    /// would (one binary per simple name, a nested type of the wrong outer). Reproducing one needs
+    /// the real thing: several files, a real build, a real resolver.
+    ///
+    /// `java_major` is 21 and the classpath is declared incomplete, matching what the be layer
+    /// passes for a project whose dependencies are not all resolvable.
+    pub fn validate(&self, file: &str) -> Vec<bennu_proto::prelude::Diagnostic> {
+        let ctx = bennu_check::prelude::FileContext {
+            file_stem: std::path::Path::new(file)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string()),
+            expected_package: None,
+            java_major: Some(21),
+            classpath_complete: false,
+        };
+        bennu_check::prelude::check_file_resolved(
+            self.source(file),
+            &ctx,
+            &self.completion_resolver,
+            true,
+        )
+    }
+
+    /// The `code`s of the ERROR-severity diagnostics on `file` — what a false-positive test asserts
+    /// is empty.
+    pub fn validate_errors(&self, file: &str) -> Vec<String> {
+        self.validate(file)
+            .into_iter()
+            .filter(|d| d.severity == "error")
+            .map(|d| format!("{}: {}", d.code, d.message))
+            .collect()
+    }
+
     /// The inherited ("super") members of the type named `type_name` declared at `file`:`line`
     /// (1-based). Lists SUPERCLASS + INTERFACE members (not the type's own), project supertypes
     /// only (the engine resolver is project-only, so JDK `Object` members never appear).
@@ -329,6 +378,10 @@ fn iface(type_params: &[&str], methods: Vec<CpMember>) -> CpClassMembers {
     }
 }
 
+/// A CONCRETE method. Abstract is the exception and is spelled out with [`abstract_`], because
+/// getting this backwards is not cosmetic: `java.lang.Object.toString()` is concrete, and a fake JDK
+/// that says otherwise gives every interface in the fixture a second abstract method — so nothing
+/// looks like a functional interface any more, and every lambda parameter loses its type.
 fn method(name: &str, params: Vec<CpTypeRef>, ret: CpTypeRef) -> CpMember {
     CpMember {
         name: name.to_string(),
@@ -336,13 +389,19 @@ fn method(name: &str, params: Vec<CpTypeRef>, ret: CpTypeRef) -> CpMember {
         return_type: ret,
         params,
         is_static: false,
-        is_abstract: true,
+        is_abstract: false,
         is_default: false,
         is_final: false,
         visibility: CpVisibility::Public,
         raw_signature: name.to_string(),
         throws: Vec::new(),
     }
+}
+
+/// Mark a fake-JDK method abstract — for a real SAM like `Function.apply`.
+fn abstract_(mut m: CpMember) -> CpMember {
+    m.is_abstract = true;
+    m
 }
 
 /// A generic reference: `applied("java/util/List", ["E"])` is `List<E>`.
@@ -378,11 +437,11 @@ impl CpMemberIndex for StreamJdk {
             // abstract method's parameter type IS the lambda parameter's type.
             "java/util/function/Function" => iface(
                 &["T", "R"],
-                vec![method(
+                vec![abstract_(method(
                     "apply",
                     vec![CpTypeRef::plain("T")],
                     CpTypeRef::plain("R"),
-                )],
+                ))],
             ),
             // Every enum implicitly extends this, and `name()` / `ordinal()` are declared nowhere in
             // the project — so a project enum's `e.name()` resolves only if the walk can see it.

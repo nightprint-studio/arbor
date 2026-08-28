@@ -219,7 +219,7 @@ fn boolean_is_underscore_getter_resolves_on_an_enum() {
 /// `name()` and the setter `name(String)` differ ONLY in arity. Completion deduplicated by name+kind,
 /// so the getter (offered first) swallowed the setter and the fluent setters looked unsupported.
 #[test]
-fn fluent_accessors_offer_both_the_getter_and_the_setter() {
+fn fluent_accessors_reach_completion_as_one_row_that_counts_both() {
     let p = Project::new(&[
         (
             "Order.java",
@@ -248,22 +248,22 @@ fn fluent_accessors_offer_both_the_getter_and_the_setter() {
         .filter(|i| i.label == "customer" && i.kind == "method")
         .filter_map(|i| i.detail.as_deref())
         .collect();
-    assert_eq!(accessors.len(), 2, "getter AND setter, got {accessors:?}");
+    // Completion folds a name's overloads into ONE row (`collapse_overloads`) — accepting a
+    // completion writes the name, not the arguments, so a second row would be a second chance to
+    // choose with one outcome. What this test is really about is that BOTH accessors reach the fold:
+    // Lombok generates them from one field, and a dedup keyed on the name alone used to drop one.
+    assert_eq!(accessors.len(), 1, "one folded row, got {accessors:?}");
     assert!(
-        accessors.iter().any(|d| d.contains("customer(String)")),
-        "the fluent setter takes the field's type, got {accessors:?}"
+        accessors[0].contains("overload"),
+        "the row must say the setter is there too, got {accessors:?}"
     );
     assert!(
         accessors.iter().any(|d| d.contains("customer() : String")),
         "the fluent getter returns it, got {accessors:?}"
     );
-    // `chain = true` → the setter returns the owner, so `o.customer("x").customer("y")` chains.
-    assert!(
-        accessors
-            .iter()
-            .any(|d| d.contains("customer(String) : Order")),
-        "chained setter returns the owner, got {accessors:?}"
-    );
+    // The chained setter's RETURN type (`Order`, from `chain = true`) is not asserted HERE: the
+    // fold shows one detail and it is the getter's. It is observable on hover, which picks the
+    // overload by the call's arity — see `the_chained_setter_is_what_hover_answers_for_a_one_arg_call`.
     // No get/set-prefixed names exist at all under `fluent`.
     let labels = p.complete_labels("Use.java", off);
     assert!(
@@ -274,9 +274,63 @@ fn fluent_accessors_offer_both_the_getter_and_the_setter() {
     );
 }
 
-/// The same dedup collapsed every ordinary **overload**, Lombok or not — this is the general case.
+/// Hover picks the overload the CALL binds to, by arity.
+///
+/// The two fluent accessors differ only in arity — `customer()` returns `String`, `customer(String)`
+/// returns `Order` because of `chain = true`. Hover used to take the first member of the name it met
+/// walking the hierarchy, so pointing at `o.customer("x")` described the getter: a card stating the
+/// wrong return type for the expression right under the caret.
 #[test]
-fn overloads_are_offered_one_entry_per_signature() {
+fn the_chained_setter_is_what_hover_answers_for_a_one_arg_call() {
+    let p = Project::new(&[
+        (
+            "Order.java",
+            "package shop;\n\
+             import lombok.Data;\n\
+             import lombok.experimental.Accessors;\n\
+             @Data\n\
+             @Accessors(chain = true, fluent = true)\n\
+             public class Order {\n\
+             \x20   private String customer;\n\
+             }\n",
+        ),
+        (
+            "Use.java",
+            "package shop;\n\
+             public class Use {\n\
+             \x20   void run(Order o) { o.customer(\"x\"); String c = o.customer(); }\n\
+             }\n",
+        ),
+    ]);
+    let src = p.source("Use.java").to_string();
+
+    let setter = at(&src, "o.customer(\"x\")") + "o.".len();
+    let h = p.hover("Use.java", setter).expect("hover on the setter call");
+    assert!(
+        h.signature.contains("String") && h.signature.contains('('),
+        "the one-argument overload was not chosen: {:?}",
+        h.signature
+    );
+    assert!(
+        !h.signature.contains("customer()"),
+        "hover answered with the no-argument getter: {:?}",
+        h.signature
+    );
+
+    let getter = at(&src, "o.customer()") + "o.".len();
+    let h = p.hover("Use.java", getter).expect("hover on the getter call");
+    assert!(
+        h.signature.contains("customer()"),
+        "the no-argument overload was not chosen: {:?}",
+        h.signature
+    );
+}
+
+/// The general case of the same thing: every overload of a name reaches completion and is folded
+/// into one row carrying the count. What the dedup must NOT do is lose one on the way — a row
+/// saying `+2 overloads` is the evidence all three arrived.
+#[test]
+fn overloads_are_folded_into_one_row_that_counts_them() {
     let p = Project::new(&[
         (
             "Fmt.java",
@@ -303,7 +357,11 @@ fn overloads_are_offered_one_entry_per_signature() {
         .filter(|i| i.label == "render")
         .filter_map(|i| i.detail)
         .collect();
-    assert_eq!(renders.len(), 3, "all three overloads, got {renders:?}");
+    assert_eq!(renders.len(), 1, "one folded row, got {renders:?}");
+    assert!(
+        renders[0].contains("+2 overloads"),
+        "all three arrived and the row says so, got {renders:?}"
+    );
 }
 
 /// The dedup still has to do its actual job: an override must not appear twice, once from the

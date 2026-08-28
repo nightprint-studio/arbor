@@ -69,7 +69,7 @@
 
 <h3>Completion</h3>
 <p>
-  <kbd>Ctrl</kbd> + <kbd>Space</kbd>, or just type. What is offered depends on where the caret is:
+  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd>, or just type. What is offered depends on where the caret is:
 </p>
 <ul>
   <li><strong>in a <code>[header]</code></strong> — the tables, with the ones the file already has

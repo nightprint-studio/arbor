@@ -34,7 +34,7 @@ use crate::nodes::{child_of_kind, simple_name};
 
 use crate::checked_throw::is_checked;
 use crate::resolve::type_binary;
-use crate::method_sig::{method_param_binaries, superclass_text};
+use crate::method_sig::method_param_binaries;
 use crate::nodes::{text};
 use crate::walk::{for_each_supertype, hierarchy_fully_known, reaches};
 
@@ -72,8 +72,11 @@ fn check_type_widening(
     // `throws`, so it can never PERMIT a checked exception — including it would only add SKIP-able
     // noise, never a positive. We compare against the explicit `extends` chain (walked transitively
     // by `for_each_supertype`). If the `extends` type doesn't resolve → no supers → nothing to flag.
-    let Some(ext) = superclass_text(n, bytes) else { return }; // no `extends` → not an override → SKIP
-    let Some(sup_bin) = type_binary(&ext, symbols, resolver) else { return }; // unresolvable → SKIP
+    // no `extends` → not an override → SKIP; unresolvable → SKIP.
+    let Some(sup) = crate::supertypes::superclass(n, bytes) else { return };
+    let Some(sup_bin) = crate::supertypes::binary(&sup.text, n, bytes, symbols, resolver) else {
+        return;
+    };
 
     // Each method declared directly in this type: if it has an explicit `throws` clause, does it widen?
     let mut bc = body.walk();

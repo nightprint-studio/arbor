@@ -9,6 +9,16 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **Completion answers on a type you have not imported yet.** Typing `Arrays.` in a file with no `import java.util.Arrays;` offered nothing — the same answer a typo gets — and since the import is what accepting a completion adds, there was no way to reach the state where it would have worked. Its members are offered now, and accepting one adds the import. An ambiguous simple name is still left alone rather than guessed at.
+
+- **A type receiver offers its nested types.** `Outer.` lists `Inner` beside the statics and constants, which is how a nested type is named.
+
+- **A lambda parameter that shadows a name already in scope is reported.** `filter(it -> stream(it).anyMatch(it -> …))` does not compile — a lambda body shares the enclosing scope rather than opening a class-like one — and it read as correct code. A field may still be shadowed, which is legal.
+
+- **A library type offers its nested types too.** `Map.` lists `Entry` beside its statics, the same way your own `Outer.` lists `Inner` — the project index knows nothing about a class in a jar, so this half comes from the classpath's own names. It is what `AddHeader.Kind` needs when the annotation comes from a dependency.
+
+- **Ctrl+Shift+Space requests completions.** macOS reserves Ctrl+Space for switching input source, so on a Mac the explicit request could not be made at all.
+
 - **Bennu checks names against the convention a project declares.** Off until you turn it on, per kind of declaration, under Project Configuration → Naming conventions; a name that breaks the rule is a weak warning carrying the name that would satisfy it, and Alt+Enter renames to it — straight away for a Java local or parameter, through the rename preview for anything a caller could also be using. Generated code, constructors, `@Override` methods and platform-mandated names are never reported.
 
 - **Fix every naming violation at once.** *Fix naming in file* and *Fix naming in project* in the Command Palette open a review that fills in as the plan is built, with progress and a Stop button — how many names, across how many files, and every name left alone with the reason — then apply it as a single Undo.
@@ -57,6 +67,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **An annotation written twice where Java allows it once.** Repeating annotations are opt-in — the annotation type must carry `@Repeatable` — and without it the second one is a compile error rather than a second value. On a declaration long enough for anyone to write the second by accident, the two are rarely adjacent.
 
+- **An annotation value the element's type cannot hold.** A list where the element holds one value (`@Ann(length = {1, 2})`), or a literal of the wrong kind — a string where a number is declared, a number where a `String` is. Java's single-element shorthand (`@Column(tags = "one")` for a `String[]`) stays untouched, and so does a `char` given to a numeric element, which widens.
+
 - **An annotation value that cannot be a constant.** `@Column(name = config.get("k"))` reads like configuration and does not compile: an annotation is recorded at compile time, so a call, a `new` or a lambda can never be one of its values.
 
 - **A capturing local class created from its own `static` member.** It holds a hidden reference to the variable it captured, and a `static` member has no enclosing instance to take it from. Java 16 and up, where a local class may have `static` members at all.
@@ -72,6 +84,26 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Optimize imports** (Ctrl+Shift+O, Java). Drops what the file does not use and orders the rest — everything else, then `javax` and `java`, then the statics — as one undo step. It never folds a package into a wildcard and never adds an import, and it uses the same judgement the `unused-import` warning does, so the command and the squiggle cannot disagree.
 
 ### Fixed
+
+- **Postfix templates are no longer offered after a type name.** `Headers.` filled the popup with `nn`, `var`, `sout` and the rest — every one of which wraps its subject in an expression, and a type name is not one: `if (Headers != null)` does not compile. They crowded out the constants you were reaching for.
+
+- **A tab keeps its undo history while it is open.** The editor is rebuilt when you switch tabs, so coming back to a file gave you your edits with no way to take them back. The history now travels with the tab's cursor and scroll, and goes when the tab closes.
+
+- **A supertype named through a parameterised qualifier is no longer lost.** `class EntrySet extends AbstractMultiset<E>.EntrySet` — guava's shape — was truncated at the first `<`, so the supertype read as `AbstractMultiset`: an abstract class whose six abstract methods were then all reported as unimplemented on a class that inherits them.
+
+- **A class that declares its methods is no longer reported for not implementing them.** A file may declare several types with the same simple name — guava's `Maps.java` has two `KeySet`, `ConcurrentHashMultiset.java` two `EntrySet` — and the check read one class's declared methods as the other's, so eight guava classes were reported for methods they declare on themselves.
+
+- **The count of who reads a configuration key follows the code.** The model behind it was built once, when the project was first asked a framework question, and nothing ever refreshed it: renaming a key left the old name still counted and the new one reading as unused until the project was reopened. Saving now refreshes it shortly afterwards, and a rename touching hundreds of files refreshes it once.
+
+- **A class that declares a nested type of the same name as the interface it implements is no longer reported.** A member type is in scope inside its class's *body*, not in its `extends`/`implements` clause — so `class HashCodeBuilder implements Builder<Integer>` names the same-package interface even where a nested `Builder` also exists. Reading the header inside the body bound it to the class, and the six classes commons-lang writes that way were each reported as implementing a non-interface, taking their overrides and covariant returns with them.
+
+- **An annotation element declared `Class<?>[]` accepts a list.** The array marker was parsed away with the generic argument list, so the element read as a single-valued `Class` and every list given to one was reported. The opposite case — a list given to an element that really does hold one value — is now caught as well.
+
+- **Hover names the overload the call binds to.** It answered with the first method of that name it met, so pointing at `order.customer("x")` described the no-argument getter and stated the wrong return type for the expression under the caret.
+
+- **A compiler error says which symbol it could not find.** javac puts the name on the line below `cannot find symbol` and the place it looked on the one after; both were dropped, leaving a marker in the buffer that named nothing. The same for the `required`/`found` pair of a type mismatch.
+
+- **A compiler error disappears when you fix it.** Build diagnostics are placed in the buffer by line and column, so editing the file slid them onto whatever line moved into place — a stale `cannot find symbol` could end up marking an unrelated method that compiles. A file's build marks now clear the moment its buffer moves past the build that produced them, and live validation covers it until the next one.
 
 - **A library class in Go-to-Class wears its own kind.** Every result from a dependency jar was drawn as an archive box, so an interface, an enum and an `@interface` were indistinguishable in a list where telling them apart is most of why you are looking. They now carry the same lettered mark a project type does — and the jar they came from was already shown beside them.
 

@@ -85,6 +85,18 @@ fn check_annotation(
                 key_node,
                 format!("`{}` declares no element `{key}`", simple(&binary)),
             ));
+            continue;
+        }
+        // The element exists — is the value a shape its declared type can hold?
+        let Some(element) = members
+            .methods
+            .iter()
+            .find(|m| m.kind == MemberKind::Method && m.name == key)
+        else {
+            continue;
+        };
+        if let Some(value) = pair.child_by_field_name("value") {
+            check_value_type(value, &element.return_type.binary_name, key, bytes, out);
         }
     }
 }
@@ -119,6 +131,10 @@ mod tests {
         }
     }
 
+    fn element_of(name: &str, ty: &str) -> Member {
+        Member { return_type: TypeRef::simple(ty), ..element(name) }
+    }
+
     fn element(name: &str) -> Member {
         Member {
             name: name.to_string(),
@@ -151,7 +167,17 @@ mod tests {
         let mut members = HashMap::new();
         members.insert(
             "javax/persistence/Column".into(),
-            ann(vec![element("name"), element("nullable"), element("length")]),
+            ann(vec![
+                element("name"),
+                element_of("nullable", "boolean"),
+                element_of("length", "int"),
+                element_of("tags", "java/lang/String[]"),
+                // `Class<?>[]` — the array marker survives the generic argument list now (it used
+                // to be parsed away, leaving a name indistinguishable from a plain `Class`).
+                element_of("kind", "java/lang/Class[]"),
+                // And a genuinely single-valued `Class<?>`, to pin the other side of it.
+                element_of("one_kind", "java/lang/Class"),
+            ]),
         );
         members.insert("com/acme/Marker".into(), ann(Vec::new()));
         members.insert("com/acme/Tag".into(), ann(vec![element("v")]));
@@ -290,10 +316,11 @@ mod tests {
         assert_eq!(codes(r#"class A { @Column(name = () -> 1) String f; }"#), ["non-constant-annotation-value"]);
     }
 
-    /// Inside an array initialiser too.
+    /// Inside an array initialiser too — on an element that really is an array, so the only thing
+    /// wrong with it is the call.
     #[test]
     fn a_call_inside_an_array_value_is_flagged() {
-        let src = r#"class A { @Column(name = {"a", helper.get()}) String f; }"#;
+        let src = r#"class A { @Column(tags = {"a", helper.get()}) String f; }"#;
         assert_eq!(codes(src), ["non-constant-annotation-value"]);
     }
 
@@ -311,6 +338,65 @@ mod tests {
     fn a_nested_annotation_value_is_not_reported_twice() {
         let src = r#"class A { @Column(name = @Tag(v = helper.get())) String f; }"#;
         assert_eq!(codes(src), ["non-constant-annotation-value"]);
+    }
+
+    /// javac's `annotation.value.not.allowable.type`: a list where the element holds one value.
+    #[test]
+    fn a_list_given_to_a_single_valued_element_is_flagged() {
+        assert_eq!(codes(r#"class A { @Column(length = {1, 2}) String f; }"#), ["annotation-value-type"]);
+    }
+
+    /// A list given to a `Class<?>[]` element is what that element is FOR. The array marker used to
+    /// be parsed away with the generic argument list, so the element read as a plain `Class` and
+    /// every one of commons-lang's eleven was reported.
+    #[test]
+    fn a_list_given_to_a_generic_array_element_is_fine() {
+        assert!(codes(r#"class A { @Column(kind = {String.class, Integer.class}) String f; }"#).is_empty());
+    }
+
+    /// The other side of the same fix: a `Class<?>` element really does hold one value, and now
+    /// that array-ness is trustworthy in both directions, a list given to it is reported — which is
+    /// javac's `annotation.value.not.allowable.type`, and used to be suppressed along with the rest.
+    #[test]
+    fn a_list_given_to_a_single_valued_generic_element_is_flagged() {
+        assert_eq!(
+            codes(r#"class A { @Column(one_kind = {String.class, Integer.class}) String f; }"#),
+            ["annotation-value-type"]
+        );
+    }
+
+    /// The reverse is Java's single-element shorthand and is legal.
+    #[test]
+    fn one_value_given_to_an_array_element_is_the_shorthand() {
+        assert!(codes(r#"class A { @Column(tags = "one") String f; }"#).is_empty());
+        assert!(codes(r#"class A { @Column(tags = {"a", "b"}) String f; }"#).is_empty());
+    }
+
+    #[test]
+    fn a_literal_of_the_wrong_kind_is_flagged() {
+        assert_eq!(codes(r#"class A { @Column(length = "no") String f; }"#), ["annotation-value-type"]);
+        assert_eq!(codes(r#"class A { @Column(name = 1) String f; }"#), ["annotation-value-type"]);
+        assert_eq!(codes(r#"class A { @Column(nullable = 3) String f; }"#), ["annotation-value-type"]);
+    }
+
+    #[test]
+    fn a_literal_of_the_right_kind_is_fine() {
+        assert!(codes(r#"class A { @Column(length = 20) String f; }"#).is_empty());
+        assert!(codes(r#"class A { @Column(name = "a") String f; }"#).is_empty());
+        assert!(codes(r#"class A { @Column(nullable = true) String f; }"#).is_empty());
+    }
+
+    /// `char` widens to every integral type — `@Ann(i = 'x')` compiles, and calling it a mismatch
+    /// would be exactly the false positive this check must not produce.
+    #[test]
+    fn a_char_given_to_a_numeric_element_is_legal() {
+        assert!(codes(r#"class A { @Column(length = 'x') String f; }"#).is_empty());
+    }
+
+    /// A bare name may be a `static final` of any type — not judged.
+    #[test]
+    fn a_constant_reference_is_never_judged() {
+        assert!(codes(r#"class A { @Column(length = Helper.MAX) String f; }"#).is_empty());
     }
 
     #[test]
@@ -436,4 +522,107 @@ fn scan_value(value: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
         value,
         format!("an annotation value must be a constant, and {what} is not one"),
     ));
+}
+
+
+// ── a value the declared type cannot hold ────────────────────────────────────
+
+/// An annotation element given a value whose type its declaration cannot accept.
+///
+/// Two shapes, both decided from the value's SYNTAX against the element's declared type — no
+/// inference, so nothing here needs the type checker:
+///
+///   * **an array where the element is not one** — `@Ann(i = {1, 2})` with `int i()`. This is
+///     javac's `annotation.value.not.allowable.type` proper. The reverse is legal and is NOT
+///     flagged: `@Column(name = "a")` for a `String[]` element is Java's single-element shorthand.
+///   * **a literal of the wrong kind** — a string where a number is declared, a number where a
+///     `String` is, a boolean where either is. javac reports these as plain incompatible types.
+///
+/// Only LITERALS are judged. A bare name may be a `static final` constant of any type, and deciding
+/// that needs the resolver plus constant folding — so it is left alone, along with everything else.
+/// This is the half of the question the tree can answer; the other half is the type checker's.
+fn check_value_type(
+    value: Node,
+    declared: &str,
+    key: &str,
+    bytes: &[u8],
+    out: &mut Vec<Diagnostic>,
+) {
+    // Array-ness is read off the declared binary name, and it is trustworthy in both directions:
+    // a library element's type comes from a bytecode descriptor, a project element's from
+    // `resolve_written_type`, and both spell an array `elem[]`.
+    //
+    // They did not always agree. The written-type parse used to stop at the closing `>` of a
+    // generic argument list, so `Class<?>[]` was recorded as `Class` with the array marker silently
+    // gone — commons-lang has eleven such elements, and every one was reported for the list it is
+    // supposed to hold. The dimensions are peeled BEFORE the arguments now (see
+    // `bennu_java::typename::split_array_dims`), so this needs no gate.
+    let is_array = declared.contains('[');
+    if value.kind() == "element_value_array_initializer" {
+        if !is_array {
+            out.push(CheckId::AnnotationValueType.at(
+                value,
+                format!("`{key}` is declared `{}`, which holds one value, not a list", pretty(declared)),
+            ));
+        }
+        return;
+    }
+    if is_array {
+        // The single-element shorthand — `@Ann(arr = "one")` for a `String[]`. Legal, and the
+        // element type would have to be compared against the value, which is the same question one
+        // level down; not worth a second, weaker copy of it here.
+        return;
+    }
+    let Some(got) = literal_kind(value) else { return };
+    let want = declared_kind(declared);
+    let Some(want) = want else { return };
+    if got != want {
+        let _ = bytes;
+        out.push(CheckId::AnnotationValueType.at(
+            value,
+            format!("`{key}` is declared `{}`, and this is {got}", pretty(declared)),
+        ));
+    }
+}
+
+/// What a literal IS, in the only three families an annotation element can declare.
+///
+/// `char` is deliberately read as a number, because it widens to every integral type — `@Ann(i =
+/// 'x')` compiles, and calling it a mismatch would be exactly the false positive this check must
+/// not produce.
+fn literal_kind(value: Node) -> Option<&'static str> {
+    Some(match value.kind() {
+        "string_literal" | "text_block" => "a string",
+        "decimal_integer_literal"
+        | "hex_integer_literal"
+        | "octal_integer_literal"
+        | "binary_integer_literal"
+        | "decimal_floating_point_literal"
+        | "hex_floating_point_literal"
+        | "character_literal" => "a number",
+        "true" | "false" => "a boolean",
+        _ => return None,
+    })
+}
+
+/// What family a declared element type belongs to. `None` for anything else — an enum, an
+/// annotation, a `Class`, a type we could not read — where a literal says nothing conclusive.
+fn declared_kind(binary: &str) -> Option<&'static str> {
+    Some(match binary {
+        "java/lang/String" => "a string",
+        "int" | "long" | "short" | "byte" | "char" | "float" | "double" => "a number",
+        "boolean" => "a boolean",
+        _ => return None,
+    })
+}
+
+/// A declared type as a Java reader would write it.
+fn pretty(binary: &str) -> String {
+    let base = binary.trim_end_matches("[]");
+    let name = base.rsplit(['/', '$']).next().unwrap_or(base);
+    if binary.contains('[') {
+        format!("{name}[]")
+    } else {
+        name.to_string()
+    }
 }

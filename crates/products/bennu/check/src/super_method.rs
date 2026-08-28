@@ -20,7 +20,7 @@ use bennu_java::prelude::{FileSymbols, InferCache, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::nodes::simple_name;
+use crate::nodes::{is_class_type_node, simple_name};
 use crate::resolve::type_binary;
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
 
@@ -246,10 +246,6 @@ fn interface_texts(class: Node, bytes: &[u8]) -> Vec<String> {
 /// Whether a kind is a REFERENCE type as written — the only thing an `extends`, `implements` or
 /// `throws` list can hold. Primitives and arrays are excluded on purpose; see
 /// `erasure_clash::is_written_type_node` for the predicate that includes them.
-fn is_class_type_node(kind: &str) -> bool {
-    matches!(kind, "type_identifier" | "scoped_type_identifier" | "generic_type")
-}
-
 fn class_name<'a>(class: Node, bytes: &'a [u8]) -> Option<&'a str> {
     class.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok())
 }

@@ -220,6 +220,12 @@ function createBennuRunStore() {
   let tool = $state('');
   let ok = $state<boolean | null>(null);
   let diagnostics = $state<BuildDiagnostic[]>([]);
+  // When those diagnostics were produced (epoch ms). A compiler diagnostic is a statement about the
+  // text the compiler read; the moment a file's buffer moves past this, its marks are describing
+  // something that is no longer there — and they DRIFT, because their line/column are re-mapped
+  // against the current buffer. One stale `cannot find symbol` rode an edit onto an unrelated
+  // method and read as a false positive on code that compiles.
+  let diagnosticsAt = $state(0);
   let lines = $state<RunLogLine[]>([]);
 
   // ── the Run console: one tab per run ────────────────────────────────────────
@@ -442,6 +448,7 @@ function createBennuRunStore() {
       tool = res.tool;
       ok = res.ok;
       diagnostics = res.diagnostics;
+      diagnosticsAt = Date.now();
       push(
         res.ok
           ? `Build succeeded (${res.tool}).`
@@ -962,6 +969,8 @@ function createBennuRunStore() {
     get tool() { return tool; },
     get ok() { return ok; },
     get diagnostics() { return diagnostics; },
+    /** When {@link diagnostics} were produced (epoch ms); 0 when no build has run. */
+    get diagnosticsAt() { return diagnosticsAt; },
     /** The BUILD log (mvn / javac / validation). */
     get lines() { return lines; },
 

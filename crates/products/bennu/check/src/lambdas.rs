@@ -12,6 +12,8 @@ use std::collections::HashSet;
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::scopes::enclosing_executable_scope;
+
 /// All "modifies a captured local" errors in `root`.
 pub fn lambda_capture_errors(root: Node, source: &str) -> Vec<Diagnostic> {
     lambda_capture_errors_nodes(&crate::check::collect_nodes(root), source)
@@ -81,28 +83,6 @@ fn check_lambda(lambda: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
             });
         }
     }
-}
-
-/// The nearest enclosing method / constructor / lambda of `node` (the scope whose locals it can
-/// capture). Stops at a type declaration (a field initializer has no capturable method locals).
-/// The nearest executable scope around `node`, or `None` when a type boundary comes first.
-///
-/// NOT the same question as `checked_throw::enclosing_callable`, which returns the boundary node
-/// ITSELF so its caller can see what it was and skip. Here a boundary means "no answer". Two
-/// contracts, and they carried one name — merging them would have been a silent behaviour change in
-/// whichever check lost.
-fn enclosing_executable_scope(node: Node) -> Option<Node> {
-    let mut cur = node.parent();
-    while let Some(n) = cur {
-        match n.kind() {
-            "method_declaration" | "constructor_declaration" | "lambda_expression" => return Some(n),
-            "class_declaration" | "interface_declaration" | "enum_declaration"
-            | "record_declaration" => return None,
-            _ => {}
-        }
-        cur = n.parent();
-    }
-    None
 }
 
 fn collect_param_names(params: Node, bytes: &[u8], into: &mut HashSet<String>) {

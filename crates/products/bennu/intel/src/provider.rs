@@ -1435,7 +1435,11 @@ impl IntelProvider for NativeJavaProvider {
                 &disk
             }
         };
-        let member = bennu_query::prelude::completion(text, at.offset, resolver);
+        // The classpath's type-name catalog rides along: a receiver you have not imported yet
+        // (`Arrays.`) is one you are in the middle of writing, and refusing it is refusing the very
+        // gesture that adds the import. See `TypeNameCatalog`.
+        let member =
+            bennu_query::prelude::completion_in(text, at.offset, resolver, Some(&self.class_names));
         if !member.is_empty() {
             return Ok(member);
         }

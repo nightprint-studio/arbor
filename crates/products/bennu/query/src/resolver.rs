@@ -398,6 +398,34 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         found.class.iter().map(convert_annotation).collect()
     }
 
+    fn nested_types(&self, binary_name: &str) -> Vec<String> {
+        // The index files every declared type under its BINARY name, so a nested type of `p/Outer`
+        // is literally the key `p/Outer/Inner` — a prefix scan on the fst, which costs the matches
+        // and nothing else. Only the PROJECT tier answers: the bytecode reader does not decode the
+        // `InnerClasses` attribute, so a library type reports none, which the seam's contract reads
+        // as "not read" rather than "has none".
+        let prefix = format!("{binary_name}/");
+        let mut out: Vec<String> = self
+            .project
+            .prefix(&prefix)
+            .into_iter()
+            .filter(is_type_symbol)
+            .map(|s| s.fqn)
+            .filter(|fqn| {
+                // DIRECTLY inside: one more segment, not a whole subtree. And never an anonymous
+                // class, whose name is the ordinal javac assigns it — offering `1` in a completion
+                // popup is offering something nobody can type.
+                let Some(tail) = fqn.strip_prefix(&prefix) else { return false };
+                !tail.is_empty()
+                    && !tail.contains('/')
+                    && !tail.bytes().all(|b| b.is_ascii_digit())
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
     fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String> {
         // Imports win (a `java.util.List` import binds `List`).
         for imp in imports {

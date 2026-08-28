@@ -39,6 +39,9 @@
 <ul>
   <li>Open a file from the <strong>Project</strong> tree or a <strong>Find in project</strong> hit — it joins the tab strip.</li>
   <li>Switch tabs with a click; the <strong>×</strong> closes one and a neighbour takes focus.</li>
+  <li>A tab keeps its cursor, its scroll position and its <strong>undo history</strong> while it is
+    open, so coming back to a file lands you where you left it and <kbd>Ctrl/Cmd</kbd> + <kbd>Z</kbd>
+    still takes back what you typed there. Closing the tab lets them go.</li>
 </ul>
 <h2>Code folding</h2>
 <p>

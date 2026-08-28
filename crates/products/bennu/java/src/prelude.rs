@@ -9,7 +9,9 @@
 pub use crate::infer::{
     enclosing_type_fqn, infer_expression_type, infer_expression_type_at,
     infer_expression_type_cached, infer_node_type_cached, infer_receiver_type,
-    infer_receiver_type_at, infer_receiver_type_cached, InferCache, MethodResolution,
+    infer_receiver_type_at, infer_receiver_type_cached, method_admits_argc, type_decl_at,
+    InferCache,
+    MethodResolution,
 };
 pub use crate::symbols::{extract_symbols, extract_symbols_from_root};
 
@@ -29,9 +31,9 @@ pub use crate::symbols::{
     anonymous_supertype_name, anonymous_type_name, is_anonymous_body, parameter_name_node,
 };
 pub use crate::typename::{
-    inherited_member_type, inherited_member_type_of, is_primitive, is_resolved_binary,
-    java_lang_implicit, known_spelling, resolve_written_type, same_binary_type, NameScope,
-    TypeName,
+    declared_type_in_scope, erase_type_arguments, inherited_member_type, inherited_member_type_of, is_primitive,
+    is_resolved_binary, java_lang_implicit, split_array_dims, known_spelling, resolve_written_type, same_binary_type,
+    NameScope, TypeName,
 };
 
 pub use crate::import_hint::simple_type_needing_import;
@@ -57,4 +59,4 @@ pub use crate::scaffold::{
 };
 
 // Declaration-site name-span + binary-name CST scans (go-to-declaration / rename / inherited).
-pub use crate::spans::{binary_of_type_at, enclosing_type_binary, find_type_name_span};
+pub use crate::spans::{binary_of_type_at, call_arity_at, enclosing_type_binary, find_type_name_span};

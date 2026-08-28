@@ -90,6 +90,17 @@ pub(crate) fn modifier_keywords<'a>(node: Node, bytes: &'a [u8]) -> Vec<&'a str>
 ///
 /// Splits on both separators because a nested type has two spellings in circulation (`Outer/Inner`
 /// from source, `Outer$Inner` from bytecode) and a message should read the same either way.
+/// Whether `kind` names a node that is a written REFERENCE type: `Foo`, `a.b.Foo`, `Foo<Bar>`.
+///
+/// Excludes primitives and arrays on purpose — the callers are all asking "is this a class or
+/// interface name I can resolve". There were three copies of this list, and a fourth that also
+/// accepted array and primitive nodes under the same name; that one is
+/// [`is_written_type_node`](crate::erasure_clash), and keeping the two apart is why they are named
+/// differently.
+pub(crate) fn is_class_type_node(kind: &str) -> bool {
+    matches!(kind, "type_identifier" | "scoped_type_identifier" | "generic_type")
+}
+
 pub(crate) fn simple_name(binary: &str) -> &str {
     binary.rsplit(['/', '$']).next().unwrap_or(binary)
 }

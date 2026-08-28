@@ -38,7 +38,7 @@
 <h2>Completions</h2>
 <p>
   Typing <code>.</code> after an expression offers member completions; press
-  <kbd>Ctrl</kbd> + <kbd>Space</kbd> to request them explicitly. In Java, completions come from the
+  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> (or <kbd>Ctrl</kbd> + <kbd>Space</kbd>) to request them explicitly. In Java, completions come from the
   project index and appear once it is warm. Edits re-index in the background as you type, so
   completion and go-to-definition track your changes without reopening the project. (In
   <code>.dig</code> they are answered locally — see <em>geode <code>.dig</code> scripts</em> above.)
@@ -51,6 +51,17 @@
   also <strong>adds its import</strong> automatically (turn this off with Settings → Completion →
   <em>Auto-import on accept</em>). When the name is ambiguous — several packages — only the name is
   inserted; press <kbd>Alt</kbd> + <kbd>Enter</kbd> → <strong>Import '…'</strong> to pick the package.
+</p>
+<p>
+  A receiver whose type is <strong>not imported yet</strong> still completes: typing
+  <code>Arrays.</code> in a file with no <code>import java.util.Arrays;</code> offers that class's
+  members, and accepting one adds the import along with it. Only an unambiguous name is taken — a
+  simple name several packages declare is left alone rather than guessed at.
+</p>
+<p>
+  A type receiver also offers its <strong>nested types</strong>: <code>Outer.</code> lists
+  <code>Inner</code> beside the statics and constants, since that is how a nested type is named.
+  This holds for a library type as well — <code>Map.</code> offers <code>Entry</code>.
 </p>
 <p>
   In <strong>TypeScript</strong> and <strong>JavaScript</strong> — and in a <code>.svelte</code>

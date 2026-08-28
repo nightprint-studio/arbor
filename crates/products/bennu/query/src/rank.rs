@@ -94,6 +94,20 @@ impl Context {
         }
         Self { receiver_is_type, uses }
     }
+
+    /// How relevant a NESTED TYPE of the receiver is — `Outer.Inner`.
+    ///
+    /// Ranked as a static member, because that is what it behaves like: it is only reachable through a
+    /// type receiver, and reaching for one is the same gesture as reaching for a constant. It does not
+    /// get the constant's extra nudge: a type name is what you want less often than `Outer.MAX`, and
+    /// the file's own usage count settles the rest.
+    pub fn score_nested_type(&self, simple: &str) -> i32 {
+        let mut s = 25;
+        if let Some(n) = self.uses.get(simple) {
+            s += 6 * (*n).min(MAX_COUNTED_USES) as i32;
+        }
+        s
+    }
 }
 
 /// How relevant `m` is, where `declaring` is the binary that declares it and `depth` is how many
@@ -150,7 +164,7 @@ pub fn score(m: &Member, declaring: &str, depth: usize, ctx: &Context) -> i32 {
     s
 }
 
-/// Whether the member is marked `@Deprecated`.
+/// Whether the member is marked `@Deprecated`./// Whether the member is marked `@Deprecated`.
 ///
 /// Source-only, and knowingly: a member decoded from a class file carries no annotations through
 /// the seam, so this never fires for a JDK or dependency member. The effect is that the signal is

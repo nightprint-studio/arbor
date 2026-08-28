@@ -11,6 +11,21 @@ use std::collections::HashMap;
 #[derive(Default, Debug)]
 pub struct ClassNameIndex {
     by_simple: HashMap<String, Vec<String>>,
+    /// Outer binary name (`java/util/Map`) → the types nested DIRECTLY inside it, as binary names
+    /// with the JVM's `$` spelling (`java/util/Map$Entry`), sorted and unique.
+    ///
+    /// Filled from the same enumeration that fills [`by_simple`], which is why it is here and not
+    /// behind a bytecode read: the classpath walk already sees every `Outer$Inner` name and was
+    /// throwing them away.
+    ///
+    /// The class file's `InnerClasses` attribute is the precise source — it names the outer
+    /// explicitly instead of inferring it from a `$`, so it tells a genuinely nested class from a
+    /// top-level one whose name happens to contain one. The reader exposes it
+    /// (`cafebabe::attributes::AttributeData::InnerClasses`); `bennu-classpath` does not decode it.
+    /// Worth doing the day something needs the distinction — a name is all completion offers, and
+    /// reading the attribute would mean decoding the outer class to answer a question about its
+    /// members' names.
+    nested: HashMap<String, Vec<String>>,
     /// Every distinct simple name, sorted — the prefix-search axis for type-name completion. Built by
     /// [`finalize`](Self::finalize) once, after all classes are added (kept empty until then).
     sorted_simples: Vec<String>,
@@ -25,6 +40,19 @@ impl ClassNameIndex {
     /// top-level type: inner classes (`Foo$Bar`), `module-info`/`package-info`, and default-package
     /// classes (no `/` — an unqualified type can't be imported). Idempotent.
     pub fn add_binary(&mut self, binary: &str) {
+        // A nested name is not importable by its own simple name, so `normalize_binary` refuses it
+        // — but it IS a member of its outer, and that is a question completion asks.
+        if let Some((outer, _)) = binary.rsplit_once('$') {
+            // Directly inside, and never an anonymous class: `Outer$1` is an ordinal javac assigns,
+            // and offering `1` in a popup offers something nobody can type.
+            let last = &binary[outer.len() + 1..];
+            if !last.is_empty() && !last.bytes().all(|b| b.is_ascii_digit()) {
+                let v = self.nested.entry(outer.to_string()).or_default();
+                if let Err(pos) = v.binary_search(&binary.to_string()) {
+                    v.insert(pos, binary.to_string());
+                }
+            }
+        }
         if let Some((simple, fqn)) = normalize_binary(binary) {
             self.insert(simple, fqn);
         }
@@ -66,6 +94,17 @@ impl ClassNameIndex {
         self.by_simple.get(simple).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    /// The types nested directly inside `binary`, as binary names. Accepts either spelling of the
+    /// outer — source writes `p/Outer/Inner`, bytecode writes `p/Outer$Inner`, and a caller holds
+    /// whichever its own path produced.
+    pub fn nested_types(&self, binary: &str) -> &[String] {
+        self.nested
+            .get(binary)
+            .or_else(|| self.nested.get(&binary.replace('/', "$")))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     /// Up to `limit` distinct simple names starting with `prefix` (case-sensitive — Java type names are
     /// capitalised), in sorted order — the type-name completion candidates. Empty until
     /// [`finalize`](Self::finalize) has run.
@@ -91,6 +130,21 @@ impl ClassNameIndex {
 
     pub fn is_empty(&self) -> bool {
         self.by_simple.is_empty()
+    }
+}
+
+/// The completion path's view of the same table — see [`bennu_query::prelude::TypeNameCatalog`].
+///
+/// It is the SAME index the "Import class" intention reads, deliberately: the type completion
+/// offers a name and the import intention adds it, and if they disagreed about which classes exist,
+/// a name you could complete would be one you could not import.
+impl bennu_query::prelude::TypeNameCatalog for ClassNameIndex {
+    fn candidates(&self, simple: &str) -> Vec<String> {
+        ClassNameIndex::candidates(self, simple).to_vec()
+    }
+
+    fn nested_types(&self, binary: &str) -> Vec<String> {
+        ClassNameIndex::nested_types(self, binary).to_vec()
     }
 }
 

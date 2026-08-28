@@ -86,11 +86,10 @@ fn check_reference(
     let inferred = infer_node_type_cached(root, source, symbols, qualifier, resolver, cache)
         .or_else(|| {
             let text = qualifier.utf8_text(bytes).ok()?;
-            let owner = bennu_java::prelude::enclosing_type_fqn(qualifier, bytes, symbols)
-                .map(|fqn| fqn.replace('.', "/"));
+            let scope = crate::resolve::enclosing_scope(*qualifier, bytes, symbols);
             let binary = bennu_java::prelude::resolve_written_type(
                 text,
-                &crate::type_scope::FileScope { symbols, resolver, owner },
+                &crate::type_scope::FileScope { symbols, resolver, scope },
             )
             .resolved()?;
             resolver

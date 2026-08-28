@@ -73,16 +73,85 @@ impl TypeName {
     }
 }
 
+/// Split a written type into its ELEMENT text and its array dimension count: `Class<?>[]` →
+/// `("Class<?>", 1)`, `int[][]` → `("int", 2)`, `String` → `("String", 0)`.
+///
+/// The dimensions are written AFTER the type arguments, so anything that splits on `<` first loses
+/// them — which is what happened: `Class<?>[]` went into the index as `Class`, indistinguishable
+/// from its own element type, and an annotation whose element is declared `Class<?>[]` was judged
+/// against a non-array `Class`.
+pub fn split_array_dims(text: &str) -> (&str, usize) {
+    let mut rest = text.trim();
+    let mut dims = 0usize;
+    while let Some(head) = rest.strip_suffix(']') {
+        // `String [ ]` is legal Java; the whitespace is not part of either bracket.
+        let Some(head) = head.trim_end().strip_suffix('[') else { break };
+        rest = head.trim_end();
+        dims += 1;
+    }
+    (rest, dims)
+}
+
+/// Strip every type-argument list from a written type, keeping the dotted structure:
+/// `AbstractMultiset<E>.EntrySet` → `AbstractMultiset.EntrySet`, `Map<K, V>.Entry` → `Map.Entry`,
+/// `Outer<A>.Inner<B>` → `Outer.Inner`.
+///
+/// Splitting at the FIRST `<` — which is what this replaced — throws away everything after the
+/// matching `>`, and what lives there is the nested type being named. Guava writes
+/// `class EntrySet extends AbstractMultiset<E>.EntrySet`, and the supertype came out as
+/// `AbstractMultiset`: an abstract class with six abstract methods, none of which the subclass
+/// declares, so all six were reported as unimplemented on a class that implements none of them
+/// because it inherits them.
+///
+/// Borrows when there is nothing to strip, which is the overwhelming majority of type names.
+pub fn erase_type_arguments(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains('<') {
+        return std::borrow::Cow::Borrowed(text.trim());
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut depth = 0usize;
+    for c in text.chars() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    std::borrow::Cow::Owned(out.trim().to_string())
+}
+
 /// Resolve a type as it is WRITTEN in source (`Map<String, Object>`, `Outer.Nested`, `int[]`) to a
 /// binary name. Generic arguments are ignored — a caller that needs them parses them itself and
 /// resolves each through here.
+///
+/// An array resolves to its ELEMENT's binary name plus the `[]` suffixes, which is the spelling
+/// bytecode already produces (`java/util/List[]`). The written element used to be kept verbatim, so
+/// a source `String[]` and a bytecode `java/lang/String[]` were the same type under two names that
+/// never compared equal.
 pub fn resolve_written_type(text: &str, scope: &dyn NameScope) -> TypeName {
-    let base = text.split('<').next().unwrap_or(text).trim();
+    let (element, dims) = split_array_dims(text);
+    if dims == 0 {
+        return resolve_element(element, scope);
+    }
+    let suffix = "[]".repeat(dims);
+    match resolve_element(element, scope) {
+        TypeName::Resolved(b) => TypeName::Resolved(format!("{b}{suffix}")),
+        // An array is a type whatever its element turns out to be, and every caller downstream only
+        // ever tests the `[]` suffix — so an unresolved element must not turn the whole thing into
+        // an unknown, or a varargs/array parameter stops being readable at all.
+        TypeName::Unknown(t) => TypeName::Resolved(format!("{t}{suffix}")),
+    }
+}
+
+fn resolve_element(text: &str, scope: &dyn NameScope) -> TypeName {
+    let erased = erase_type_arguments(text);
+    let base = erased.as_ref();
     if base.is_empty() {
         return TypeName::Unknown(String::new());
     }
-    // An array or a primitive is not a name to look up; it is already the answer.
-    if base.ends_with("[]") || is_primitive(base) {
+    // A primitive is not a name to look up; it is already the answer.
+    if is_primitive(base) {
         return TypeName::Resolved(base.to_string());
     }
     let Some((head, rest)) = base.split_once('.') else {
@@ -278,6 +347,53 @@ pub fn inherited_member_type_of(
         queue.extend(cm.interfaces.iter().cloned());
     }
     None
+}
+
+/// The type THIS FILE declares that `simple` denotes when written in `owner`'s scope.
+///
+/// Java reads a simple type name in the innermost scope that declares one (JLS §6.5.5.1), and the
+/// scope of a member type is the **body** of its class (JLS §6.3). Searching a file's declarations
+/// flat, by simple name — which every caller here used to do — gets both halves wrong at once:
+///
+///   * it lets a nested type answer for a name written OUTSIDE it. `class HashCodeBuilder implements
+///     Builder<Integer>` declares its own nested `Builder`, and the `implements` clause sits in the
+///     class HEADER, not its body — so javac binds it to the same-package `Builder` interface and
+///     compiles, while the flat search bound it to the class. Six of commons-lang's classes are
+///     written that way, and each was reported as implementing something that is not an interface,
+///     taking its overrides and covariant returns down with it: thirteen of that project's
+///     seventeen false positives, from one rule.
+///   * it lets one nested class answer for a SIBLING's namesake, since neither is more "found"
+///     than the other in a flat list.
+///
+/// `owner` is the innermost enclosing type as a binary name (`p/Outer/Inner`), or `None` for the
+/// compilation unit's own scope — which is what a top-level type's header is read in. The climb
+/// stops when the next prefix is no longer a type this file declares: what is above the outermost
+/// type is the package, whose types are bound by a different rule at a lower precedence.
+pub fn declared_type_in_scope(
+    symbols: &crate::symbols::FileSymbols,
+    owner: Option<&str>,
+    simple: &str,
+) -> Option<String> {
+    let declared = |dotted: &str| symbols.types.iter().any(|t| t.fqn == dotted);
+    let mut scope = owner.map(|o| o.replace('/', "."));
+    while let Some(s) = scope {
+        let candidate = format!("{s}.{simple}");
+        if declared(&candidate) {
+            return Some(candidate.replace('.', "/"));
+        }
+        scope = s.rfind('.').map(|i| s[..i].to_string()).filter(|p| declared(p));
+    }
+    // The compilation unit: a TOP-LEVEL type of this file. Top-level is exactly "no type declared
+    // in this file encloses it", which is what makes this the last scope rather than another rung.
+    symbols
+        .types
+        .iter()
+        .find(|t| {
+            t.name == simple
+                && !t.is_anonymous
+                && t.fqn.rsplit_once('.').is_none_or(|(outer, _)| !declared(outer))
+        })
+        .map(|t| t.fqn.replace('.', "/"))
 }
 
 /// Whether `binary` is a name we actually RESOLVED, as opposed to the raw token
@@ -563,3 +679,59 @@ mod inherited_tests {
         );
     }
 }
+
+    /// The array dimensions come after the type arguments, so a reader that splits on `<` first
+    /// loses them — `Class<?>[]` went into the index as `Class`.
+    #[test]
+    fn array_dimensions_survive_a_generic_argument_list() {
+        assert_eq!(split_array_dims("Class<?>[]"), ("Class<?>", 1));
+        assert_eq!(split_array_dims("Map<String, int[]>[][]"), ("Map<String, int[]>", 2));
+        assert_eq!(split_array_dims("int[][]"), ("int", 2));
+        assert_eq!(split_array_dims("String [ ]"), ("String", 1));
+        assert_eq!(split_array_dims("String"), ("String", 0));
+        assert_eq!(split_array_dims("List<int[]>"), ("List<int[]>", 0));
+    }
+
+    /// A nested type named through a PARAMETERISED qualifier. Splitting at the first `<` threw the
+    /// nested name away, so guava's `extends AbstractMultiset<E>.EntrySet` resolved to
+    /// `AbstractMultiset` — and its six abstract methods were all reported as unimplemented.
+    #[test]
+    fn a_type_argument_list_does_not_swallow_the_nested_name() {
+        assert_eq!(erase_type_arguments("AbstractMultiset<E>.EntrySet"), "AbstractMultiset.EntrySet");
+        assert_eq!(erase_type_arguments("Map<K, V>.Entry"), "Map.Entry");
+        assert_eq!(erase_type_arguments("Outer<A>.Inner<B>"), "Outer.Inner");
+        assert_eq!(erase_type_arguments("List<Map<K, V>>"), "List");
+        assert_eq!(erase_type_arguments("String"), "String");
+    }
+
+    /// An array resolves to its ELEMENT's binary plus the suffix — the spelling bytecode already
+    /// uses, so a source `String[]` and a bytecode `java/lang/String[]` finally compare equal.
+    #[test]
+    fn an_array_resolves_its_element() {
+        struct Scope;
+        impl NameScope for Scope {
+            fn simple(&self, name: &str) -> Option<String> {
+                match name {
+                    "String" => Some("java/lang/String".into()),
+                    "Class" => Some("java/lang/Class".into()),
+                    _ => None,
+                }
+            }
+            fn is_type(&self, _binary: &str) -> bool {
+                false
+            }
+        }
+        assert_eq!(
+            resolve_written_type("Class<?>[]", &Scope).text(),
+            "java/lang/Class[]"
+        );
+        assert_eq!(
+            resolve_written_type("String[]", &Scope).text(),
+            "java/lang/String[]"
+        );
+        assert_eq!(resolve_written_type("int[][]", &Scope).text(), "int[][]");
+        // An element nothing binds still leaves an ARRAY: every caller downstream only tests the
+        // suffix, and answering `Unknown` here would make a varargs parameter unreadable.
+        let t = resolve_written_type("T[]", &Scope);
+        assert!(t.is_resolved() && t.text() == "T[]", "{t:?}");
+    }

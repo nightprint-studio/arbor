@@ -1116,24 +1116,16 @@ impl Ctx<'_> {
     ///      `Format.format(…)` → `StringBuffer`);
     ///   3. otherwise narrow the tie by argument types, rejecting only a DEFINITE primitive/reference
     ///      clash, and use the return type iff it is now unique;
-    ///   4. still not unique → `None`. An ambiguous overload is never guessed: a wrong return type
-    ///      mistypes the expression and risks a false "cannot resolve member" / assignment diagnostic.
-    fn select_overload_return(
-        &self,
-        candidates: &[Member],
-        args: &[Node],
-        enclosing: Option<&str>,
-    ) -> Option<TypeRef> {
-        self.select_overload(candidates, args, enclosing).map(|(ret, _)| ret)
-    }
-
-    /// [`Self::select_overload_return`], plus the member the return type came from **when exactly one
-    /// candidate survived**.
+    ///   4. still not unique → `None` for the return type. An ambiguous overload is never guessed: a
+    ///      wrong return type mistypes the expression and risks a false "cannot resolve member" /
+    ///      assignment diagnostic.
     ///
-    /// The distinction matters to [`Self::bind_method_type_vars`] and to nothing else: several
-    /// overloads can agree on a return type while differing in their parameters, and reading a type
-    /// variable's binding off the parameters of a method the call might not have chosen would be a
-    /// guess. `None` there means "the return type is trustworthy, the parameter list is not".
+    /// The second half of the pair is the MEMBER the return type came from, and only **when exactly
+    /// one candidate survived**. The distinction matters to [`Self::bind_method_type_vars`] and to
+    /// nothing else: several overloads can agree on a return type while differing in their
+    /// parameters, and reading a type variable's binding off the parameters of a method the call
+    /// might not have chosen would be a guess. `None` there means "the return type is trustworthy,
+    /// the parameter list is not".
     fn select_overload<'m>(
         &self,
         candidates: &'m [Member],
@@ -1940,6 +1932,27 @@ fn find_receiver<'t>(root: &Node<'t>, byte_offset: usize) -> Option<Node<'t>> {
 /// Derived exactly as the reference index derives it (`anonymous_type_name` + the outer FQN), so
 /// the two cannot disagree about what an anonymous type is called — which would be worse than
 /// either answer, since a key nothing looks up is silence that looks like success.
+/// The [`TypeDecl`](crate::symbols::TypeDecl) the extractor produced for the type declaration at
+/// `node`, found by POSITION.
+///
+/// Not by simple name, which is what every caller used to do. A file may declare several types with
+/// the same simple name — guava's `Maps.java` declares two `KeySet`, `ConcurrentHashMultiset.java`
+/// two `EntrySet` — and a search by name answers with whichever the extractor listed first. Every
+/// consumer of that answer then reads one class's declared members as another's: eight of guava's
+/// classes were reported for not implementing methods they declare on themselves, and the FQN
+/// recovery below handed out the wrong owner for anything written inside them.
+///
+/// `node` is the type DECLARATION node. The extractor records each type's whole span, so the match
+/// is an equality on the start offset — exact, with no containment ambiguity between a nested type
+/// and the type it is nested in.
+pub fn type_decl_at<'s>(node: &Node, symbols: &'s FileSymbols) -> Option<&'s crate::symbols::TypeDecl> {
+    let start = node.start_byte();
+    symbols
+        .types
+        .iter()
+        .find(|t| t.span.map(|s| s.start) == Some(start))
+}
+
 pub fn enclosing_type_fqn(node: &Node, bytes: &[u8], symbols: &FileSymbols) -> Option<String> {
     let mut cur = node.parent();
     while let Some(n) = cur {
@@ -1964,13 +1977,14 @@ pub fn enclosing_type_fqn(node: &Node, bytes: &[u8], symbols: &FileSymbols) -> O
                 | "enum_declaration"
                 | "record_declaration"
         ) {
+            // Recover the FQN from the extracted TypeDecl at this exact position. By NAME, this
+            // answered with whichever same-named type the file listed first — see `type_decl_at`.
+            if let Some(td) = type_decl_at(&n, symbols) {
+                return Some(td.fqn.clone());
+            }
             let name = n
                 .child_by_field_name("name")
                 .and_then(|x| node_text(&x, bytes))?;
-            // Recover the FQN by matching the extracted TypeDecl on simple name.
-            if let Some(td) = symbols.types.iter().find(|t| t.name == name) {
-                return Some(td.fqn.clone());
-            }
             return Some(name);
         }
         cur = n.parent();
@@ -2050,6 +2064,17 @@ fn is_type_var(bn: &str) -> bool {
 /// call to a fixed `T[]` param supplies exactly one argument, matching the exact arm anyway).
 fn arity_admits(nparams: usize, last_is_array: bool, argc: usize) -> bool {
     argc == nparams || (last_is_array && argc + 1 >= nparams)
+}
+
+/// Whether `m`'s parameter list admits a call passing `argc` arguments: an exact arity, or a
+/// trailing array (the resolved shape of `T...`) soaking up any count from the fixed prefix on.
+///
+/// The ONE rule for "could this call have bound to this method". The inference walk narrows an
+/// overload set with it; hover picks which overload's signature to show with it. Before they shared
+/// it, hover took the first method of the name it found in the hierarchy — so `o.customer("x")`
+/// answered with the no-argument getter.
+pub fn method_admits_argc(m: &Member, argc: usize) -> bool {
+    arity_admits(m.params.len(), last_is_array(m), argc)
 }
 
 /// Whether a member's last parameter is an array type (`T[]`) — the resolved shape of a `T...` varargs

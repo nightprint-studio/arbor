@@ -623,6 +623,7 @@
     getCaretLine: () => number;
     openSearch: () => void;
     focusEditor: () => void;
+    requestCompletion: () => void;
     openIntentions: () => void;
     goToDefinition: () => void;
     openRename: () => void;
@@ -1858,6 +1859,14 @@
       e.preventDefault(); editor?.goToDefinition(); return;
     }
     if (mod && isKey(e, 'f')) { e.preventDefault(); editor?.openSearch(); return; }
+    // Explicit completions. macOS reserves Ctrl+Space for switching input source, so the editor's
+    // own keymap entry for it can never be pressed there — and the CodeMirror binding added
+    // alongside it did not fire either. Bound here instead: this handler is the one path in the
+    // app that is known to receive every shortcut on every layout. `e.ctrlKey` and not `mod`,
+    // because Cmd+Shift+Space is the macOS Character Viewer.
+    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && (e.key === ' ' || e.code === 'Space')) {
+      e.preventDefault(); editor?.requestCompletion(); return;
+    }
     // Implement / override methods (IntelliJ's Ctrl+I). Java-only: the picker reads a supertype
     // hierarchy, which is a question only the Java index can answer. `!e.shiftKey` because
     // Ctrl+Shift+I is Corvus's "Initialize repository" and the two windows share a vocabulary.

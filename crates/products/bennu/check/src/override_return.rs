@@ -28,7 +28,7 @@ use tree_sitter::Node;
 
 use crate::nodes::{is_primitive, is_type_var, simple_name};
 
-use crate::method_sig::{implements_texts, method_param_binaries, superclass_text};
+use crate::method_sig::method_param_binaries;
 use crate::nodes::{has_keyword, text};
 use crate::resolve::type_binary_at;
 use crate::walk::{for_each_supertype, hierarchy_fully_known, reaches};
@@ -65,17 +65,7 @@ fn check_type(
     // Resolved AT the class declaration, so a name written inside it is read in that class's scope.
     // Without the node this asked the file at large, and a file that declares several types with
     // several `Entry` in reach answered with whichever came first.
-    let mut supers: Vec<String> = Vec::new();
-    if let Some(ext) = superclass_text(n, bytes) {
-        if let Some(bin) = type_binary_at(&ext, n, bytes, symbols, resolver) {
-            supers.push(bin);
-        }
-    }
-    for iface in implements_texts(n, bytes) {
-        if let Some(bin) = type_binary_at(&iface, n, bytes, symbols, resolver) {
-            supers.push(bin);
-        }
-    }
+    let supers = crate::supertypes::binaries(n, bytes, symbols, resolver);
     if supers.is_empty() {
         return;
     }

@@ -233,13 +233,6 @@ fn check_reference(
     ));
 }
 
-/// A located top-level type: its CST node plus its declared simple name. (Same shape as
-/// [`crate::undefined_var`]'s.)
-struct TopType<'t> {
-    node: Node<'t>,
-    decl_name: String,
-}
-
 /// Whether `ref_node` sits in a STATIC context whose `this`-less scope is exactly the top type's:
 /// walking upward from the reference to `top`, the NEAREST enclosing executable member must be a
 /// `static` method or a `static_initializer`, crossing NO lambda and no nested/anonymous/local type

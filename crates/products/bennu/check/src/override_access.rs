@@ -23,9 +23,8 @@ use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
 use crate::check_id::CheckId;
-use crate::method_sig::{implements_texts, method_param_binaries, superclass_text};
+use crate::method_sig::method_param_binaries;
 use crate::nodes::{has_keyword, text};
-use crate::resolve::type_binary;
 use crate::walk::for_each_supertype;
 
 /// Every narrowing override in the pre-collected node slice.
@@ -54,17 +53,7 @@ fn check_type(
 ) {
     let Some(body) = n.child_by_field_name("body") else { return };
 
-    let mut supers: Vec<String> = Vec::new();
-    if let Some(ext) = superclass_text(n, bytes) {
-        if let Some(bin) = type_binary(&ext, symbols, resolver) {
-            supers.push(bin);
-        }
-    }
-    for iface in implements_texts(n, bytes) {
-        if let Some(bin) = type_binary(&iface, symbols, resolver) {
-            supers.push(bin);
-        }
-    }
+    let supers = crate::supertypes::binaries(n, bytes, symbols, resolver);
     if supers.is_empty() {
         return;
     }

@@ -404,6 +404,11 @@ fn bennu_write_file(_ctx: &BennuState, args: WriteFileArgs) -> Result<WriteResul
     // presses Ctrl+S would otherwise only ever see parse errors.
     crate::lsp_route::did_save(&args.file, &args.text);
 
+    // And tell the framework model the tree moved. It is built from a walk of the project, so it
+    // cannot see an unsaved buffer — a write is the only moment its answers can go stale. Coalesced
+    // onto a background worker; a rename touching four hundred files rebuilds it once.
+    crate::frameworks::FrameworkService::global().schedule_refresh(&args.file);
+
     Ok(result)
 }
 

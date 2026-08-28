@@ -236,6 +236,8 @@ pub enum CheckId {
     NotRepeatableAnnotation,
     /// An annotation element given a value that is not a constant expression.
     NonConstantAnnotationValue,
+    /// An annotation element given a value whose type cannot be the declared one.
+    AnnotationValueType,
 
     // ── pure-AST: syntax ─────────────────────────────────────────────────────────
     /// A tree-sitter `ERROR` node — a genuine syntax error.
@@ -334,6 +336,7 @@ impl CheckId {
             UnknownAnnotationElement => "unknown-annotation-element",
             NotRepeatableAnnotation => "not-repeatable-annotation",
             NonConstantAnnotationValue => "non-constant-annotation-value",
+            AnnotationValueType => "annotation-value-type",
             SyntaxError => "syntax-error",
             MissingToken => "missing-token",
         }
@@ -462,6 +465,7 @@ impl CheckId {
             UnknownAnnotationElement,
             NotRepeatableAnnotation,
             NonConstantAnnotationValue,
+            AnnotationValueType,
             SyntaxError,
             MissingToken,
         ]

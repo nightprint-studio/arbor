@@ -222,6 +222,47 @@ fn package_name(root: &Node, bytes: &[u8]) -> Option<String> {
     None
 }
 
+
+/// How many arguments the CALL under `byte_offset` passes, or how many parameters the METHOD
+/// DECLARATION under it takes. `None` when the caret is on neither.
+///
+/// It is what tells two overloads apart. Everything that answers a question about "the method
+/// called `x` on this type" gets a set, and a set is only narrowed by the call site: hover used to
+/// take the first member of the name it met walking the hierarchy, so `o.customer("x")` was
+/// answered with the no-argument getter.
+///
+/// A declaration answers with its OWN parameter count, which makes hovering a declaration exact
+/// rather than merely plausible.
+pub fn call_arity_at(source: &str, byte_offset: usize) -> Option<usize> {
+    let tree = crate::grammar::parse_java(source)?;
+    let node = tree
+        .root_node()
+        .named_descendant_for_byte_range(byte_offset, byte_offset)?;
+    let mut cur = Some(node);
+    while let Some(n) = cur {
+        let field = match n.kind() {
+            "method_invocation" => "arguments",
+            "method_declaration" | "constructor_declaration" => "parameters",
+            "object_creation_expression" => "arguments",
+            _ => {
+                cur = n.parent();
+                continue;
+            }
+        };
+        // Only when the caret is on the NAME — inside an argument the innermost call is a different
+        // one, and the walk must not answer for the enclosing call it happens to sit in.
+        if let Some(name) = n.child_by_field_name("name").or_else(|| n.child_by_field_name("type")) {
+            if name.start_byte() <= byte_offset && byte_offset <= name.end_byte() {
+                let list = n.child_by_field_name(field)?;
+                let mut c = list.walk();
+                return Some(list.named_children(&mut c).count());
+            }
+        }
+        cur = n.parent();
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

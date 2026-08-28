@@ -36,7 +36,7 @@
 <p>
   It is a real editor, not a text box. Placeholders, the clause words and a constraint are each
   coloured apart from the code around them — a hole that looks like the code it sits in is the one
-  thing a query field must not do — and <kbd>Ctrl</kbd> + <kbd>Space</kbd> completes the five
+  thing a query field must not do — and <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> completes the five
   things nobody can be expected to remember:
 </p>
 <ul>
@@ -58,7 +58,7 @@
 <ul>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> — open it.</li>
   <li><kbd>Ctrl</kbd> + <kbd>Enter</kbd> — run the query.</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Space</kbd> — completions.</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> (or <kbd>Ctrl</kbd> + <kbd>Space</kbd>) — completions.</li>
   <li><kbd>Esc</kbd> — close.</li>
   <li><kbd>Enter</kbd> on a result opens that place and closes the dialog.</li>
 </ul>

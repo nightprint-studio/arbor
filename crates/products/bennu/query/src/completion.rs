@@ -20,6 +20,35 @@ use crate::access::{same_package, same_top_level};
 use crate::rank;
 use crate::resolver::IndexResolver;
 
+/// Simple type name → the binary names on the classpath that could be it.
+///
+/// **Completion only.** A type that is not imported is not in scope, and every other consumer must
+/// go on saying exactly that — an unresolved name is an error the validator has to report, and a
+/// resolver that guessed one would report nothing. But a receiver you are completing is one you are
+/// in the middle of writing: `Arrays.` above a file with no `import java.util.Arrays;` is not a
+/// mistake, it is the moment before the import exists. Answering nothing there is the same answer a
+/// typo gets, and it is worse than unhelpful — the completion is the gesture that would have ADDED
+/// the import, so refusing it leaves no way to reach the state where it would have worked.
+///
+/// Only an unambiguous name is taken. `List` names two importable classes and picking one would be
+/// choosing the user's program for them; `Arrays` names one.
+pub trait TypeNameCatalog {
+    /// The importable binary names (`java/util/Arrays`) for a simple name, or empty.
+    fn candidates(&self, simple: &str) -> Vec<String>;
+
+    /// The types nested directly inside `binary`, as binary names — the LIBRARY half of the
+    /// question [`IndexResolver::nested_types`](crate::resolver::IndexResolver) answers for the
+    /// project. Default empty, so a catalog that cannot answer says "none, or not read".
+    ///
+    /// A nested type of a dependency is reached exactly as one of your own is — `AddHeader.Kind`
+    /// — and the project index knows nothing about a class in a jar. Without this, `AddHeader.`
+    /// offered a nested type when you had written the annotation and nothing when you had
+    /// imported it.
+    fn nested_types(&self, _binary: &str) -> Vec<String> {
+        Vec::new()
+    }
+}
+
 /// The identifier spliced in at the caret to make a `receiver.` buffer parse while the enclosing
 /// type is read off it. Its name never reaches an answer — only the type declaration around it
 /// does — so anything that lexes as a Java identifier would do.
@@ -34,6 +63,17 @@ pub fn completion<M: CpMemberIndex>(
     source: &str,
     byte_offset: usize,
     resolver: &IndexResolver<M>,
+) -> Vec<CompletionItem> {
+    completion_in(source, byte_offset, resolver, None)
+}
+
+/// [`completion`], with the classpath's type-name catalog — see [`TypeNameCatalog`] for why only
+/// this entry point gets one. `None` behaves exactly like [`completion`].
+pub fn completion_in<M: CpMemberIndex>(
+    source: &str,
+    byte_offset: usize,
+    resolver: &IndexResolver<M>,
+    catalog: Option<&dyn TypeNameCatalog>,
 ) -> Vec<CompletionItem> {
     // Guard the caret before any `&source[..]` slicing below: a stale/out-of-range offset, or one
     // that (defensively) isn't a char boundary, would panic. Clamp to len, then back off to the
@@ -61,6 +101,9 @@ pub fn completion<M: CpMemberIndex>(
     // Whether the receiver names a TYPE rather than a value — the ranking's strongest term, since
     // after `Color.` an instance member is not merely unlikely, it does not compile.
     let mut receiver_is_type = false;
+    // Set when the receiver was found ONLY through the catalog — i.e. it is not in scope yet. Every
+    // item then carries it, so accepting any member adds the receiver's import in the same gesture.
+    let mut needs_import: Option<String> = None;
     let recv = match infer_receiver_type(&repaired, dot_offset, resolver) {
         Some(r) => r,
         // A **type** receiver — `Color.RED`, `Files.copy(…)`, `Config.MAX`. Inference types
@@ -72,7 +115,14 @@ pub fn completion<M: CpMemberIndex>(
                 receiver_is_type = true;
                 r
             }
-            None => return Vec::new(),
+            None => match unimported_type_receiver(&repaired, dot_offset, resolver, catalog) {
+                Some((r, fqn)) => {
+                    receiver_is_type = true;
+                    needs_import = Some(fqn);
+                    r
+                }
+                None => return Vec::new(),
+            },
         },
     };
 
@@ -110,6 +160,13 @@ pub fn completion<M: CpMemberIndex>(
         &mut seen,
         &mut HashSet::new(),
     );
+    // A nested type is a member of its outer, named `Outer.Inner` with no import — so `Outer.`
+    // offers it alongside the statics. Only when the receiver IS a type: `instance.Inner` is not
+    // Java. The resolver answers for PROJECT types (the index keys them by binary name); a library
+    // type reports none, which the seam reads as "not read" rather than "declares none".
+    if receiver_is_type {
+        collect_nested_types(resolver, catalog, &recv.binary_name, &prefix, &ctx, &mut out, &mut seen);
+    }
     collapse_overloads(&mut out);
     // Most relevant first (see `rank`), and — because relevance ties are common and a popup that
     // reshuffles between keystrokes is unusable — the old deterministic order underneath it:
@@ -120,7 +177,68 @@ pub fn completion<M: CpMemberIndex>(
             .then(a.item.kind.cmp(&b.item.kind))
             .then(a.item.label.cmp(&b.item.label))
     });
-    out.into_iter().map(|r| r.item).collect()
+    out.into_iter()
+        .map(|r| match &needs_import {
+            Some(fqn) => CompletionItem { auto_import: Some(fqn.clone()), ..r.item },
+            None => r.item,
+        })
+        .collect()
+}
+
+/// The receiver read as a type name the file has NOT imported: `Arrays.` with no
+/// `import java.util.Arrays;`. Returns the type and the FQN to import on accept.
+///
+/// Asked only after both inference and the in-scope type reading have declined, so a name that IS
+/// in scope never reaches here and nothing already resolvable changes meaning.
+fn unimported_type_receiver<M: CpMemberIndex>(
+    source: &str,
+    dot_offset: usize,
+    resolver: &IndexResolver<M>,
+    catalog: Option<&dyn TypeNameCatalog>,
+) -> Option<(TypeRef, String)> {
+    let catalog = catalog?;
+    let name = written_receiver_name(source, dot_offset)?;
+    // A qualified name is already unambiguous and needs no import — `type_receiver` handles it, and
+    // if it declined, the type is simply not on the classpath.
+    if name.contains('.') {
+        return None;
+    }
+    let candidates = catalog.candidates(&name);
+    let [only] = candidates.as_slice() else { return None };
+    let binary = only.replace('.', "/");
+    resolver.members_of(&binary)?;
+    Some((TypeRef::simple(binary), only.replace('/', ".")))
+}
+
+/// Offer the types nested directly inside `owner` — `Outer.Inner`, which is a member access like
+/// any other and was the one kind of member the walk never listed.
+#[allow(clippy::too_many_arguments)]
+fn collect_nested_types<M: CpMemberIndex>(
+    resolver: &IndexResolver<M>,
+    catalog: Option<&dyn TypeNameCatalog>,
+    owner: &str,
+    prefix: &str,
+    ctx: &rank::Context,
+    out: &mut Vec<Ranked>,
+    seen: &mut HashSet<String>,
+) {
+    // The project tier answers from the index, the classpath tier from the name enumeration. Both,
+    // because a receiver is a project type or a library one and the caller does not know which.
+    let library = catalog.map(|c| c.nested_types(owner)).unwrap_or_default();
+    for binary in resolver.nested_types(owner).into_iter().chain(library) {
+        let Some(simple) = binary.rsplit(['/', '$']).next() else { continue };
+        if !simple.starts_with(prefix) || !seen.insert(format!("type:{simple}")) {
+            continue;
+        }
+        let item = CompletionItem {
+            label: simple.to_string(),
+            kind: "class".to_string(),
+            detail: Some(binary.replace('/', ".")),
+            ..Default::default()
+        };
+        let score = ctx.score_nested_type(simple);
+        out.push(Ranked { score, item });
+    }
 }
 
 /// Fold a method's overloads into ONE row, counted in its detail.
@@ -196,10 +314,29 @@ fn type_receiver<M: CpMemberIndex>(
     dot_offset: usize,
     resolver: &IndexResolver<M>,
 ) -> Option<TypeRef> {
+    let name = written_receiver_name(source, dot_offset)?;
+    let name = name.as_str();
+    if name.contains('.') {
+        // Already qualified: it names a type exactly when the classpath holds one.
+        let binary = name.replace('.', "/");
+        return resolver
+            .members_of(&binary)
+            .is_some()
+            .then(|| TypeRef::simple(binary));
+    }
+    let imports = extract_symbols(source).imports;
+    resolver
+        .resolve_simple_name(name, &imports)
+        .map(TypeRef::simple)
+}
+
+/// The plain (possibly dotted) NAME written just left of the dot: `Foo`, `a.b.Foo`.
+///
+/// `None` when what is there is not a name — a `)` or a `]` means the receiver was an expression
+/// that inference has already failed to type, and guessing a type from one of those would complete
+/// the wrong thing rather than nothing.
+fn written_receiver_name(source: &str, dot_offset: usize) -> Option<String> {
     let bytes = source.as_bytes();
-    // Back over `Foo`, `a.b.Foo` — but not over a `)` or a `]`, which mean the receiver was an
-    // expression that inference already failed to type. Guessing a type from one of those would
-    // complete the wrong thing rather than nothing.
     let mut start = dot_offset.checked_sub(1)?; // the dot itself
     while start > 0 {
         let c = bytes[start - 1];
@@ -213,18 +350,7 @@ fn type_receiver<M: CpMemberIndex>(
     if name.is_empty() || !name.starts_with(|c: char| c.is_alphabetic() || c == '_') {
         return None;
     }
-    if name.contains('.') {
-        // Already qualified: it names a type exactly when the classpath holds one.
-        let binary = name.replace('.', "/");
-        return resolver
-            .members_of(&binary)
-            .is_some()
-            .then(|| TypeRef::simple(binary));
-    }
-    let imports = extract_symbols(source).imports;
-    resolver
-        .resolve_simple_name(name, &imports)
-        .map(TypeRef::simple)
+    Some(name.to_string())
 }
 
 /// Split the caret into `(dot_offset, typed_prefix)`: scan back over identifier chars;
@@ -245,7 +371,8 @@ fn split_prefix(source: &str, caret: usize) -> (usize, String) {
 
 /// Walk `recv`'s class + its superclass/interfaces, collecting members whose name
 /// starts with `prefix`. Picks up inherited members; dedups overrides by [`dedup_key`] — which keeps
-/// overloads distinct, so an overload set is offered one entry per signature.
+/// overloads distinct, so every signature survives the walk. They are folded into one row later, by
+/// [`collapse_overloads`]; keeping them apart HERE is what lets that row count them.
 ///
 /// `depth` is how far up the hierarchy this level is (`0` = the receiver's own type). It is carried
 /// rather than recomputed because the walk is the only thing that knows it, and it is the term that

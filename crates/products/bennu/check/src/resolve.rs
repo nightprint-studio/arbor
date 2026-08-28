@@ -19,8 +19,7 @@ use bennu_java::prelude::{FileSymbols, TypeResolver};
 ///      same-package code. We check `com/acme/C` directly (a unique binary key) instead.
 ///   5. otherwise the resolver's global lookup (wildcard imports, JDK, project simple-name index).
 pub fn type_binary(text: &str, symbols: &FileSymbols, resolver: &dyn TypeResolver) -> Option<String> {
-    let simple = text.split('<').next().unwrap_or(text).trim();
-    if simple.is_empty() {
+    if text.trim().is_empty() {
         return None;
     }
     // One reading of a written type name for the whole workspace — see `bennu_java::typename`. This
@@ -29,9 +28,29 @@ pub fn type_binary(text: &str, symbols: &FileSymbols, resolver: &dyn TypeResolve
     // `None` means "nothing bound this name" — the contract every caller reads, and now the one
     // the shared resolver states in its return type rather than leaving to be inferred from the
     // shape of a string.
+    type_binary_in(text, crate::type_scope::TypeScope::Unknown, symbols, resolver)
+}
+
+/// [`type_binary`], told exactly WHERE the name is written — the one entry point that takes a
+/// [`TypeScope`](crate::type_scope::TypeScope). The two wrappers above pick a scope for their
+/// callers; anything with a real position should come through here.
+pub fn type_binary_in(
+    text: &str,
+    scope: crate::type_scope::TypeScope,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<String> {
+    if text.trim().is_empty() {
+        return None;
+    }
+    // The full written text, NOT its prefix before the first `<`. Truncating there throws away a
+    // nested type named through a parameterised qualifier — guava writes
+    // `extends AbstractMultiset<E>.EntrySet`, which came out as `AbstractMultiset`, an abstract
+    // class whose six abstract methods were then all reported as unimplemented. The argument lists
+    // are erased segment by segment inside `resolve_written_type`.
     bennu_java::prelude::resolve_written_type(
-        simple,
-        &crate::type_scope::FileScope { symbols, resolver, owner: None },
+        text,
+        &crate::type_scope::FileScope { symbols, resolver, scope },
     )
     .resolved()
     .filter(|b| bennu_java::prelude::is_resolved_binary(b, resolver))
@@ -48,18 +67,27 @@ pub fn type_binary_at(
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
 ) -> Option<String> {
-    let simple = text.split('<').next().unwrap_or(text).trim();
-    if simple.is_empty() {
+    if text.trim().is_empty() {
         return None;
     }
-    let owner = bennu_java::prelude::enclosing_type_fqn(&node, bytes, symbols)
-        .map(|fqn| fqn.replace('.', "/"));
-    bennu_java::prelude::resolve_written_type(
-        simple,
-        &crate::type_scope::FileScope { symbols, resolver, owner },
-    )
-    .resolved()
-    .filter(|b| bennu_java::prelude::is_resolved_binary(b, resolver))
+    type_binary_in(text, enclosing_scope(node, bytes, symbols), symbols, resolver)
+}
+
+/// The scope a name written AT `node` is read in: the body of the type that encloses it, or the
+/// compilation unit when nothing does.
+///
+/// `enclosing_type_fqn` starts at the node's PARENT, so passing a type declaration itself yields
+/// the scope its HEADER is read in — which is the whole point of the distinction (see
+/// [`TypeScope`](crate::type_scope::TypeScope)).
+pub fn enclosing_scope(
+    node: tree_sitter::Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+) -> crate::type_scope::TypeScope {
+    match bennu_java::prelude::enclosing_type_fqn(&node, bytes, symbols) {
+        Some(fqn) => crate::type_scope::TypeScope::Inside(fqn.replace('.', "/")),
+        None => crate::type_scope::TypeScope::CompilationUnit,
+    }
 }
 
 /// A member type named `simple` **inherited** by `owner` (a binary name), searching its supertype

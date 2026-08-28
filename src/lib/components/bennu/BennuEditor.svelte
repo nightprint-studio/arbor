@@ -153,6 +153,8 @@
 
   type EditorController = {
     focus: () => void;
+    /** Ask for completions at the caret — the explicit request. */
+    requestCompletion: () => boolean;
     getValue: () => string;
     getSelectionText: () => string;
     openSearch: () => void;
@@ -241,8 +243,19 @@
 
   // Per-tab cursor + scroll, so switching away and back restores where you left off.
   // The editor remounts on tab switch ({#key activePath}); it emits `onViewState` while
-  // a tab is active and reads `initialState` for the returning tab from this map.
+  // a tab is active and reads `initialState` for the returning tab from this map. The snapshot
+  // carries the tab's undo/redo HISTORY as well as its cursor and scroll — a remount builds a
+  // fresh CodeMirror state, so without it everything you had typed in a file you came back to
+  // was still there and none of it was undoable.
   const viewStates = new Map<string, EditorViewSnapshot>();
+  // A closed tab's snapshot goes with it. The history is the largest thing in there, and it is
+  // bounded by the tabs you have open rather than by everything you have opened this session.
+  $effect(() => {
+    const open = new Set(projectStore.openFilePaths);
+    for (const path of [...viewStates.keys()]) {
+      if (!open.has(path)) viewStates.delete(path);
+    }
+  });
   // The editor language for the active file — Java (tree-sitter) or a CodeMirror
   // built-in / legacy mode (XML, JSP, YAML, JSON, …) picked by extension.
   const editorLanguage = $derived(languageForPath(activePath));
@@ -640,8 +653,16 @@
   // The last build's compiler errors/warnings for THIS file, placed in the buffer. Derived
   // rather than fetched: the run store already holds them, and re-deriving on every build
   // means a rebuild that fixes an error clears its mark without anyone clearing anything.
+  //
+  // Dropped the moment the buffer moves past the build. A compiler diagnostic describes the text
+  // the compiler read, and its line/column are re-mapped against the CURRENT buffer — so an edit
+  // that fixes the error does not remove the mark, it slides it onto whatever line now sits there.
+  // One `cannot find symbol` rode an edit onto an unrelated method and read as a false positive on
+  // code that compiles. Live validation covers the file from here until the next build.
   const buildDiags = $derived(
-    activePath && projectStore.project
+    activePath
+      && projectStore.project
+      && projectStore.editedAt(activePath) <= bennuRunStore.diagnosticsAt
       ? buildDiagnosticsFor(
           projectStore.project.root,
           activePath,
@@ -1771,7 +1792,18 @@
   }
   /** Open the editor's in-buffer search panel (Ctrl+F when the pane is focused). */
   export function openSearch() { editorComp?.openSearch(); }
-  export function focusEditor() { editorComp?.focus(); }
+  /** Ask for completions at the caret — the explicit request behind Ctrl+Shift+Space. */
+  export function requestCompletion() { editorComp?.requestCompletion(); }
+  /**
+   * Put the caret back in the buffer.
+   *
+   * After a `tick`, deliberately. Every caller is closing something that has just written to the
+   * file — a rename, an intention, a generated body — and that write flows back through the store
+   * into the editor's controlled value. Focusing before that settles focuses a view the update then
+   * takes focus away from again, which is what left the tab drawn as if the pane were inactive
+   * until you clicked into the code.
+   */
+  export function focusEditor() { void tick().then(() => editorComp?.focus()); }
   /** The editor's current selection text ('' when nothing selected) — used by the window to
    *  seed Find-in-project / Go-to navigator fields from what the user highlighted. */
   export function getSelectedText(): string { return editorComp?.getSelectionText() ?? ''; }
@@ -2174,7 +2206,7 @@
     renameOpen = false;
     renameCtx = null;
     renameAnchor = null;
-    if (refocus) editorComp?.focus();
+    if (refocus) focusEditor();
   }
 
   /** Strip anything that can't appear in a Java identifier as it's typed (spaces, `.`,

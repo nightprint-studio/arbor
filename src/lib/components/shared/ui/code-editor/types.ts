@@ -107,6 +107,18 @@ export interface EditorViewSnapshot {
   anchor: number;
   head: number;
   scrollTop: number;
+  /**
+   * The undo/redo history, serialised — CodeMirror's `historyField` as JSON.
+   *
+   * The editor is remounted per tab, so its state (and its history with it) is built fresh every
+   * time you come back to a file: everything you had typed there was still on disk, and nothing
+   * of it was undoable. Carried here so a host that already remembers a tab's cursor can remember
+   * how it got there too.
+   *
+   * Only emitted when the editor is torn down — serialising a history on every cursor move would
+   * pay for it thousands of times to use it once.
+   */
+  history?: unknown;
 }
 
 /**

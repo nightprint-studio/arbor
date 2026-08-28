@@ -577,7 +577,9 @@ impl SemanticEngine {
                 &live.project_types,
             )?
         };
-        let mut info = hover_for_key(&key, &*self.resolver);
+        // How many arguments the call under the caret passes — what tells two overloads apart.
+        let argc = bennu_java::prelude::call_arity_at(source, offset);
+        let mut info = hover_for_key(&key, &*self.resolver, argc);
         // Best-effort: attach the leading Javadoc of the PROJECT declaration this key
         // resolves to (None for a classpath-only / JDK symbol we can't read the source of).
         info.doc = self.project_doc_for_key(&key);

@@ -312,9 +312,19 @@ export function createCodeEditorExtensions(
     // inserted. `Prec.highest` puts it above the base keymap regardless of push order; each
     // binding no-ops (returns false) when the popup is closed, so Enter/Tab fall through to
     // newline / indent normally. `Tab` is added to accept too (IntelliJ muscle memory).
+    //
+    // `Ctrl+Shift+Space` requests completions too. CodeMirror's own `completionKeymap` offers only
+    // Ctrl+Space, which macOS reserves for switching input source — so on a Mac the explicit
+    // request could not be made at all. Not `Mod-i`, the obvious alternative: that is IntelliJ's
+    // Implement/override, which Bennu already binds. Ctrl+Space stays bound for anyone who has
+    // freed it.
     exts.push(
       Prec.highest(
-        keymap.of([{ key: 'Tab', run: acceptCompletion }, ...completionKeymap]),
+        keymap.of([
+          { key: 'Tab', run: acceptCompletion },
+          { key: 'Ctrl-Shift-Space', run: startCompletion },
+          ...completionKeymap,
+        ]),
       ),
     );
     // Tab stops of an accepted snippet. AFTER the completion keymap and at the same precedence, so

@@ -72,7 +72,7 @@
     { keys: ['Ctrl', 'G'],          description: 'Go to line' },
     { keys: ['Ctrl', 'F'],          description: 'Find in file' },
     { keys: ['Ctrl', 'Shift', 'F'], description: 'Find in project' },
-    { keys: ['Ctrl', 'Space'],      description: 'Completions' },
+    { keys: ['Ctrl', 'Shift', 'Space'], description: 'Completions' },
     { keys: ['Alt', '1'],           description: 'Toggle Project' },
     { keys: ['Alt', '2'],           description: 'Toggle Structure' },
   ];

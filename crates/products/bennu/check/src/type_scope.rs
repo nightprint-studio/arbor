@@ -1,5 +1,4 @@
-//! The [`NameScope`] a CHECK reads a written type name in — the file's imports, its own types, then
-//! the resolver.
+//! Where in a file a written type name is being read, and the [`NameScope`] that reads it.
 //!
 //! Its own module because two things need it and neither owns it: a check that resolves a type name
 //! it found in the source, and (through `bennu-java`) the inference walk. Sharing the *policy* is
@@ -7,32 +6,81 @@
 
 use bennu_java::prelude::{FileSymbols, NameScope, TypeResolver};
 
+/// The innermost type scope a name is written in.
+///
+/// The distinction that matters is between a type's BODY and its HEADER. A member type's scope is
+/// the body of its class (JLS §6.3), so the `extends` / `implements` clause of `Outer` does not see
+/// `Outer`'s own member types — it is read one scope out. Commons-lang writes
+/// `class HashCodeBuilder implements Builder<Integer>` in a class that also declares a nested
+/// `Builder`, and reading the header inside the body bound the interface it implements to that
+/// class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeScope {
+    /// Inside the BODY of this type (a binary name): its member types, and its enclosing types',
+    /// are in scope.
+    Inside(String),
+    /// The compilation unit itself — a top-level type's HEADER. Only the file's top-level types are
+    /// in scope from here.
+    CompilationUnit,
+    /// The caller has no position in hand.
+    ///
+    /// Most checks resolve a name they found while walking, with no node to hand: they get the
+    /// file's declarations searched FLAT, by simple name, which is what every caller had before
+    /// this distinction existed. It is a guess — a nested type answers for a name written anywhere
+    /// in the file — so prefer a real scope wherever the node is available.
+    Unknown,
+}
+
+impl TypeScope {
+    /// The enclosing type, when there is one.
+    fn owner(&self) -> Option<&str> {
+        match self {
+            TypeScope::Inside(b) => Some(b),
+            TypeScope::CompilationUnit | TypeScope::Unknown => None,
+        }
+    }
+}
+
 /// A written type name resolved against one file.
 pub struct FileScope<'a> {
     pub symbols: &'a FileSymbols,
     pub resolver: &'a dyn TypeResolver,
-    /// The type the name was written INSIDE, as a binary name, when the caller knows it.
+    /// Where the name is written — see [`TypeScope`].
     ///
-    /// It decides which supertype chain an inherited member type comes from, and a file with
+    /// It also decides which supertype chain an inherited member type comes from, and a file with
     /// several nested classes has several. Guava's `Synchronized.java` declares classes implementing
     /// `Multiset` (whose `Entry` takes one type argument) and classes implementing `Map` (whose
-    /// `Entry` takes two); without the owner, whichever was declared first answered for both, and
-    /// every `Entry<K, V>` in the file was judged against the wrong arity.
-    pub owner: Option<String>,
+    /// `Entry` takes two); without it, whichever was declared first answered for both, and every
+    /// `Entry<K, V>` in the file was judged against the wrong arity.
+    pub scope: TypeScope,
 }
 
 impl NameScope for FileScope<'_> {
     fn simple(&self, simple: &str) -> Option<String> {
         // A type declared in THIS file is authoritative: its FQN is right here, so it never depends
-        // on a project-wide map that keeps one binary per simple name.
-        if let Some(td) = self.symbols.types.iter().find(|t| t.name == simple) {
-            return Some(td.fqn.replace('.', "/"));
+        // on a project-wide map that keeps one binary per simple name. WHICH of them, though, is a
+        // scope question — see `TypeScope`.
+        match self.scope {
+            TypeScope::Unknown => {
+                if let Some(td) = self.symbols.types.iter().find(|t| t.name == simple) {
+                    return Some(td.fqn.replace('.', "/"));
+                }
+            }
+            _ => {
+                if let Some(b) = bennu_java::prelude::declared_type_in_scope(
+                    self.symbols,
+                    self.scope.owner(),
+                    simple,
+                ) {
+                    return Some(b);
+                }
+            }
         }
         // A member type INHERITED from a supertype is in scope with no import at all (JLS §8.1.5) —
         // `Entry` inside a `Map` implementation — and a nested class also sees what its ENCLOSING
         // classes inherit (JLS §8.1.3), so the search climbs out through them. This is CLASS scope,
         // which is inner to the compilation unit's, so it is asked before the file's imports.
-        if let Some(owner) = self.owner.as_deref() {
+        if let Some(owner) = self.scope.owner() {
             let mut scope = owner;
             loop {
                 if let Some(bn) =

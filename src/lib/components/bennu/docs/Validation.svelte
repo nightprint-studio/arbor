@@ -60,7 +60,9 @@
     branches) is allowed.</li>
   <li><strong>Duplicate declarations</strong> — two fields, two method/constructor parameters, two
     local variables in one block, or two types with the same name in one scope (in addition to two
-    methods/constructors with the same signature).</li>
+    methods/constructors with the same signature). Also a <strong>lambda parameter that shadows</strong>
+    a name already in scope where the lambda is written — an enclosing lambda's parameter, the
+    method's parameter, or a local declared before it. A field may be shadowed, and is not reported.</li>
   <li><strong>Unreachable code</strong> — a statement that can never run because the line before it
     always <code>return</code>s, <code>throw</code>s, <code>break</code>s or <code>continue</code>s.</li>
   <li><strong>Switch</strong> — a <code>switch</code> on a type it doesn't accept
@@ -130,6 +132,12 @@
 <p>
   It's a best-effort check, so it complements <strong>Build</strong> (which runs the real compiler)
   rather than replacing it — more type checks arrive as the semantic engine grows.
+</p>
+<p>
+  The compiler's own errors appear in the buffer too, marked <em>(build)</em> and carrying whatever
+  javac said about them — the symbol it could not find, the type it required against the one it
+  found. They describe the file as the compiler read it, so editing it clears them and live
+  validation covers the file until the next build.
 </p>
 
 <h2>Data flow</h2>

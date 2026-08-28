@@ -27,6 +27,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use bennu_core::prelude::BennuState;
@@ -75,6 +76,35 @@ pub struct FrameworkService {
     building: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Every project root the shell has opened, normalised — see [`register_root`].
     roots: Mutex<Vec<String>>,
+    /// Per-root coalescing state for [`FrameworkService::schedule_refresh`]: how many refreshes
+    /// have been asked for, and whether a worker already owns the rebuild.
+    refresh: Mutex<HashMap<String, Arc<RefreshState>>>,
+}
+
+/// The coalescing state of one root's background model refresh.
+#[derive(Default)]
+struct RefreshState {
+    requested: std::sync::atomic::AtomicU64,
+    running: std::sync::atomic::AtomicBool,
+}
+
+/// How long a refresh waits before running, absorbing the rest of a burst of saves.
+///
+/// A framework model is built from a walk of the whole project, so this is not a per-save cost that
+/// can be paid eagerly. Long enough that applying a rename across four hundred files rebuilds once;
+/// short enough that saving a file and looking at the yaml shows the new answer.
+const FRAMEWORK_REFRESH_COALESCE_MS: u64 = 1500;
+
+/// Whether writing `file` can change what a framework model says.
+///
+/// The model is built from Java sources, bean/config XML, and the resource files a placeholder
+/// resolves against. A `.md` or a `.png` cannot move any of it, and rebuilding for one would be a
+/// whole-project scan bought with nothing.
+fn affects_framework_model(file: &str) -> bool {
+    let lower = file.to_ascii_lowercase();
+    [".java", ".xml", ".yml", ".yaml", ".properties", ".jsp", ".ron", ".rs"]
+        .iter()
+        .any(|ext| lower.ends_with(ext))
 }
 
 impl FrameworkService {
@@ -84,6 +114,7 @@ impl FrameworkService {
             slots: Mutex::new(HashMap::new()),
             building: Mutex::new(HashMap::new()),
             roots: Mutex::new(Vec::new()),
+            refresh: Mutex::new(HashMap::new()),
         })
     }
 
@@ -162,6 +193,60 @@ impl FrameworkService {
             map.insert(key, Arc::new(slot));
         }
         true
+    }
+
+    /// Rebuild the model for the project owning `file`, in the background and coalesced.
+    ///
+    /// The model was built ONCE, on the first question asked of it, and nothing ever invalidated
+    /// it. So the count of who reads a configuration key, and the jump from a `@Value` to the yaml
+    /// line it names, went on answering from the project as it was when it was opened: renaming a
+    /// key left the old name still counted and the new one reading as unused, and no amount of
+    /// editing changed that — only `bennu_spring_refresh`, or reopening the project.
+    ///
+    /// Coalesced onto one worker per root, and deliberately triggered by a WRITE rather than a
+    /// keystroke: the scan reads the tree from disk, so an unsaved buffer would change nothing it
+    /// could see. Same shape as the config-graph rebuild in `index_service`, for the same reason.
+    pub fn schedule_refresh(&self, file: &str) {
+        if !affects_framework_model(file) {
+            return;
+        }
+        let Some(root) = self.root_for_file(file) else { return };
+        // Nothing has ever asked this project a framework question → no model to keep fresh, and
+        // building one now would be a whole-project scan nobody wanted.
+        if self.cached(&norm(&root)).is_none() {
+            return;
+        }
+        let state = {
+            let mut map = self.refresh.lock().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(map.entry(norm(&root)).or_default())
+        };
+        state.requested.fetch_add(1, Ordering::SeqCst);
+        if state.running.swap(true, Ordering::SeqCst) {
+            return; // a worker owns it and will observe the newer `requested`
+        }
+        std::thread::spawn(move || {
+            let svc = FrameworkService::global();
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(
+                    FRAMEWORK_REFRESH_COALESCE_MS,
+                ));
+                let target = state.requested.load(Ordering::SeqCst);
+                svc.refresh(&root);
+                // Saves that landed DURING the (slow) rebuild advanced `requested` past `target`
+                // → go round again; otherwise try to retire the worker.
+                if state.requested.load(Ordering::SeqCst) != target {
+                    continue;
+                }
+                state.running.store(false, Ordering::SeqCst);
+                // Close the lost-wakeup race: a save between the check above and this store bumps
+                // `requested`, sees `running == true`, and returns trusting us.
+                if state.requested.load(Ordering::SeqCst) == target
+                    || state.running.swap(true, Ordering::SeqCst)
+                {
+                    break;
+                }
+            }
+        });
     }
 
     /// Scan `root` and build its registry.

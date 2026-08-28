@@ -144,8 +144,33 @@ pub(crate) fn declares_name_in_scope(scope: Node, name: &str, bytes: &[u8]) -> b
     false
 }
 
+/// The nearest enclosing method / constructor / lambda of `node` — the scope whose parameters and
+/// locals are in scope there, and whose locals a closure can capture.
+///
+/// `None` when a TYPE declaration comes first: a class body starts a new scope, so a field
+/// initializer has no capturable method locals and a method of an anonymous class may legally
+/// re-use a name from the method the anonymous class is written in.
+///
+/// NOT the same question as `checked_throw::enclosing_callable`, which returns the boundary node
+/// ITSELF so its caller can see what it was and skip. Here a boundary means "no answer". Two
+/// contracts, and they carried one name — merging them would have been a silent behaviour change in
+/// whichever check lost.
+pub(crate) fn enclosing_executable_scope(node: Node) -> Option<Node> {
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        match n.kind() {
+            "method_declaration" | "constructor_declaration" | "lambda_expression" => return Some(n),
+            "class_declaration" | "interface_declaration" | "enum_declaration"
+            | "record_declaration" => return None,
+            _ => {}
+        }
+        cur = n.parent();
+    }
+    None
+}
+
 /// Whether a parameter-bearing scope declares `name` in its `parameters` list.
-fn params_declare(member: Node, name: &str, bytes: &[u8]) -> bool {
+pub(crate) fn params_declare(member: Node, name: &str, bytes: &[u8]) -> bool {
     let Some(params) = member.child_by_field_name("parameters") else { return false };
     let mut c = params.walk();
     for p in params.named_children(&mut c) {

@@ -33,7 +33,7 @@ import {
 import {
   boostForRank, FALLBACK, RESOLVED,
 } from '$lib/components/shared/ui/code-editor/completion-rank';
-import { postfixCompletion } from '$lib/components/shared/ui/code-editor/postfix';
+import { expressionStart, postfixCompletion } from '$lib/components/shared/ui/code-editor/postfix';
 import { javaPostfixTemplates } from './java-postfix';
 import { javaLevelStore } from '$lib/stores/bennu/java-level.svelte';
 import {
@@ -446,8 +446,36 @@ const javaCompletionSource: CompletionSource = async (
 // the shared engine — the level is consulted per keystroke because a project can be opened, closed
 // and reopened without this module being reloaded.
 
+/**
+ * Whether the text a postfix template would wrap is a TYPE NAME rather than a value.
+ *
+ * Every template wraps its subject in an expression — `.nn` becomes `if (subject != null)`, `.var`
+ * declares a local holding it — and a type name is not one: `Headers.nn` is `if (Headers != null)`,
+ * which does not compile. Offering them after `Headers.` fills the popup with things that cannot be
+ * accepted, which is worst exactly where they crowd out the enum constants you were reaching for.
+ *
+ * The test is Java's own naming convention, which the type-name completion already relies on: a
+ * SINGLE identifier in PascalCase — an initial capital and at least one lowercase letter. That
+ * leaves every value alone, including the ones a capital could be mistaken for: `CODICE` and
+ * `MAX_VALUE` are constants, `order` and `x` are locals, and `Headers.CODICE` is a chain whose
+ * subject is the constant, not the type.
+ */
+function subjectIsTypeName(doc: string, dot: number): boolean {
+  const start = expressionStart(doc, dot);
+  if (start === null) return false;
+  const subject = doc.slice(start, dot);
+  return /^[A-Z][A-Za-z0-9_$]*$/.test(subject) && /[a-z]/.test(subject);
+}
+
 /** Append the postfix templates applicable at the caret, if the ranges line up. */
 function appendPostfixCompletions(ctx: CompletionContext, from: number, options: Completion[]) {
+  // The dot the subject ends at — one before the word being completed.
+  const word = ctx.matchBefore(/[\w$]*$/);
+  const dot = (word ? word.from : ctx.pos) - 1;
+  if (dot >= 0 && ctx.state.doc.sliceString(dot, dot + 1) === '.'
+      && subjectIsTypeName(ctx.state.doc.toString(), dot)) {
+    return;
+  }
   const source = postfixCompletion(javaPostfixTemplates({ level: javaLevelStore.level }));
   const result = source(ctx);
   // Same `from` or nothing: an item whose range disagrees with the list's would be applied over the

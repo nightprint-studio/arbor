@@ -27,7 +27,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use bennu_java::prelude::{find_type_name_span, TypeResolver};
+use bennu_java::prelude::{find_type_name_span, Member, TypeResolver};
 use bennu_query::prelude::PlanFile;
 use bennu_web::prelude::bean_class_value_spans;
 use tree_sitter::Node;
@@ -704,7 +704,11 @@ pub struct HoverInfo {
 /// Build a [`HoverInfo`] for a classified [`DeclKey`], resolving a member's signature from
 /// the resolver's [`bennu_java::prelude::ClassMembers`] (falling back to a synthesized
 /// `name(...)` when the class isn't on the resolvable classpath or carries no signature).
-pub(crate) fn hover_for_key(key: &DeclKey, resolver: &dyn TypeResolver) -> HoverInfo {
+pub(crate) fn hover_for_key(
+    key: &DeclKey,
+    resolver: &dyn TypeResolver,
+    argc: Option<usize>,
+) -> HoverInfo {
     match key {
         DeclKey::Type { binary } => {
             // What the type IS, not "class" for everything — an interface reported as a class
@@ -737,7 +741,7 @@ pub(crate) fn hover_for_key(key: &DeclKey, resolver: &dyn TypeResolver) -> Hover
             }
         }
         DeclKey::Method { owner, name } => {
-            let found = member_signature(resolver, owner, name, true);
+            let found = member_signature(resolver, owner, name, true, argc);
             let (signature, declaring) =
                 found.unwrap_or_else(|| (format!("{name}(…)"), owner.clone()));
             HoverInfo {
@@ -750,7 +754,7 @@ pub(crate) fn hover_for_key(key: &DeclKey, resolver: &dyn TypeResolver) -> Hover
             }
         }
         DeclKey::Field { owner, name } => {
-            let found = member_signature(resolver, owner, name, false);
+            let found = member_signature(resolver, owner, name, false, None);
             let (signature, declaring) = found.unwrap_or_else(|| (name.clone(), owner.clone()));
             HoverInfo {
                 signature,
@@ -766,11 +770,17 @@ pub(crate) fn hover_for_key(key: &DeclKey, resolver: &dyn TypeResolver) -> Hover
 /// walk's `declaring_owner`), with the binary name of the type that actually declares it.
 /// `None` when the class isn't resolvable or the member is nowhere in the hierarchy (the
 /// caller then synthesizes a fallback).
+///
+/// `argc` is how many arguments the call site passes (or how many parameters the declaration under
+/// the caret takes) — the only thing that tells two overloads apart. Without it this took the first
+/// member of the name it met, and `o.customer("x")` was answered with the no-argument getter. A
+/// name with one member is unaffected, which is the overwhelming majority of hovers.
 fn member_signature(
     resolver: &dyn TypeResolver,
     owner: &str,
     name: &str,
     is_method: bool,
+    argc: Option<usize>,
 ) -> Option<(String, String)> {
     let mut visited = std::collections::HashSet::new();
     let mut stack = vec![owner.to_string()];
@@ -784,7 +794,7 @@ fn member_signature(
             continue;
         };
         let pool = if is_method { &cm.methods } else { &cm.fields };
-        if let Some(m) = pool.iter().find(|m| m.name == name) {
+        if let Some(m) = pick_member(pool, name, argc) {
             if !m.raw_signature.is_empty() {
                 return Some((m.raw_signature.clone(), bn.clone()));
             }
@@ -804,6 +814,21 @@ fn member_signature(
         stack.extend(cm.interfaces.iter().cloned());
     }
     None
+}
+
+/// The member of `pool` named `name` that a call passing `argc` arguments would bind to.
+///
+/// An exact parameter count wins outright; a varargs / trailing-array method that ADMITS the count
+/// is the runner-up; failing both — and whenever the caret gave no count — the first of the name, as
+/// before. Only the first of these is a real answer, and the others are the honest fallbacks: a
+/// hover must show something.
+fn pick_member<'m>(pool: &'m [Member], name: &str, argc: Option<usize>) -> Option<&'m Member> {
+    let named = || pool.iter().filter(|m| m.name == name);
+    let Some(argc) = argc else { return named().next() };
+    named()
+        .find(|m| m.params.len() == argc)
+        .or_else(|| named().find(|m| bennu_java::prelude::method_admits_argc(m, argc)))
+        .or_else(|| named().next())
 }
 
 // ── local variable / parameter: scope-exact single-file ──────────────────────────

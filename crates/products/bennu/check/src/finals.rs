@@ -23,9 +23,8 @@ use tree_sitter::Node;
 #[cfg(test)]
 use tree_sitter::Parser;
 
-use crate::method_sig::{method_param_binaries, superclass_text};
+use crate::method_sig::method_param_binaries;
 use crate::nodes::{has_keyword, text};
-use crate::resolve::type_binary;
 use crate::walk::for_each_supertype;
 
 /// Parse `source` and flag illegal reassignment of `final` locals and fields.
@@ -306,11 +305,9 @@ fn check_type_final_overrides(
     // Supertypes to scan: the explicit `extends` (if resolvable) plus `java/lang/Object` — whose
     // `final` methods (`wait`, `getClass`, …) apply to every class even with no explicit `extends`.
     let mut supers: Vec<String> = vec!["java/lang/Object".to_string()];
-    if let Some(ext) = superclass_text(n, bytes) {
-        if let Some(bin) = type_binary(&ext, symbols, resolver) {
-            supers.push(bin);
-        }
-    }
+    supers.extend(crate::supertypes::superclass(n, bytes).and_then(|sup| {
+        crate::supertypes::binary(&sup.text, n, bytes, symbols, resolver)
+    }));
 
     // name → the set of erased parameter-type lists of `final`, overridable supertype methods.
     let mut final_methods: HashMap<String, Vec<Vec<String>>> = HashMap::new();

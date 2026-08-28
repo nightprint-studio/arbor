@@ -4,7 +4,7 @@
 //! `bennu_query::prelude::...`.
 
 // Member-access completion (the SEAM's `completion(pos)`).
-pub use crate::completion::completion;
+pub use crate::completion::{completion, completion_in, TypeNameCatalog};
 
 // The resolver + the `Send + Sync` JDK member-index wrapper it composes, plus the two-tier
 // classpath index (JDK + optional per-project dependency tier) the completion/validation resolver
