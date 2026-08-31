@@ -60,6 +60,14 @@ use crate::error::AppError;
 use crate::ipc::split_broker::SplitBroker;
 use crate::AppState;
 
+/// The programs that run a Lua plugin host of their own.
+///
+/// A plugin is loaded once per product that enabled it — separate processes, separate VMs —
+/// so anything the shell has to deliver *to a plugin* (see
+/// [`fire_plugin_hook_on_backends`]) has to go to each of these, not to whichever one came
+/// first. Add a product here the same commit it calls `App::plugin_host`.
+const PLUGIN_HOST_PROGRAMS: &[&str] = &["corvus", "bennu"];
+
 /// The **async** handlers, grouped by program, collected once from the
 /// `arbor-rpc` inventory. These are network/credential handlers the host awaits
 /// directly on the runtime (no blocking-pool thread held for the round-trip) —
@@ -653,6 +661,50 @@ fn host_dispatch(
             spec.interface, spec.version, spec.id, spec.method);
         return crate::ext::call(&spec);
     }
+    // The byte-shaped pair. Both run here rather than in the backend because this is where the
+    // wasm engine lives, and both take the file by PATH: the two processes share a machine, so
+    // the bytes never enter the pipe.
+    if method == "__ext_call_to_file" {
+        let (plugin, spec, file) = ext_file_params("arbor.ext.call_to_file", &params)?;
+        tracing::debug!("[{plugin}] ext.call_to_file {}@{}/{} {} -> {}",
+            spec.interface, spec.version, spec.id, spec.method, file.path);
+        return crate::ext::call_to_file(&spec, &file).map(|n| serde_json::json!(n));
+    }
+    if method == "__ext_call_from_file" {
+        let (plugin, spec, file) = ext_file_params("arbor.ext.call_from_file", &params)?;
+        tracing::debug!("[{plugin}] ext.call_from_file {}@{}/{} {} <- {}",
+            spec.interface, spec.version, spec.id, spec.method, file.path);
+        return crate::ext::call_from_file(&spec, &file);
+    }
+
+    // The OAuth engine, driven by whichever plugin asked. `start` blocks only long enough to
+    // bind the listener and build the URL — the wait for the person is a spawned task, and the
+    // answer reaches the plugin as the hook its spec named.
+    if method == "__oauth_start" || method == "__oauth_refresh" {
+        let who = if method == "__oauth_start" { "arbor.oauth.start" } else { "arbor.oauth.refresh" };
+        let plugin = params
+            .get("plugin")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| format!("{who}: missing `plugin`"))?
+            .to_string();
+        let spec_v = params
+            .get("spec")
+            .cloned()
+            .ok_or_else(|| format!("{who}: missing `spec`"))?;
+        if method == "__oauth_start" {
+            let spec: crate::auth::oauth_plugin::StartSpec =
+                serde_json::from_value(spec_v).map_err(|e| format!("{who}: {e}"))?;
+            let url = tauri::async_runtime::block_on(crate::auth::oauth_plugin::start(
+                app.clone(),
+                plugin,
+                spec,
+            ))?;
+            return Ok(serde_json::Value::String(url));
+        }
+        let spec: crate::auth::oauth_plugin::RefreshSpec =
+            serde_json::from_value(spec_v).map_err(|e| format!("{who}: {e}"))?;
+        return tauri::async_runtime::block_on(crate::auth::oauth_plugin::refresh(plugin, spec));
+    }
 
     if method == "__open_path" {
         let path = params.get("path").and_then(|v| v.as_str()).unwrap_or_default();
@@ -1128,11 +1180,6 @@ fn host_dispatch(
             params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
         ).map_err(|e| format!("invalid conn: {e}"))?;
         let bucket = params.get("bucket").and_then(|v| v.as_str());
-        // A wasm provider first, when one is installed for this connection's kind. `None`
-        // means nothing routes and the in-process implementation below answers, unchanged.
-        if let Some(r) = crate::cloud_guest::test_connection(&conn, bucket) {
-            return serde_json::to_value(&r?).map_err(|e| format!("{op} encode: {e}"));
-        }
         let r = tauri::async_runtime::block_on(crate::cloud::ops::test_connection(&conn, bucket))
             .map_err(|e| e.to_string())?;
         return serde_json::to_value(&r).map_err(|e| format!("{op} encode: {e}"));
@@ -1172,9 +1219,6 @@ fn host_dispatch(
             .ok_or_else(|| format!("{op}: missing required field `bucket`"))?;
         let prefix = params.get("prefix").and_then(|v| v.as_str()).unwrap_or_default();
         let limit = params.get("limit").and_then(|v| v.as_i64()).map(|n| n.max(0) as usize);
-        if let Some(page) = crate::cloud_guest::list(&conn, bucket, prefix, limit) {
-            return serde_json::to_value(&page?).map_err(|e| format!("{op} encode: {e}"));
-        }
         let page = tauri::async_runtime::block_on(crate::cloud::ops::list(&conn, bucket, prefix, limit))
             .map_err(|e| e.to_string())?;
         return serde_json::to_value(&page).map_err(|e| format!("{op} encode: {e}"));
@@ -1186,9 +1230,6 @@ fn host_dispatch(
         ).map_err(|e| format!("invalid conn: {e}"))?;
         let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?;
         let path = params.get("path").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `path`"))?;
-        if let Some(o) = crate::cloud_guest::stat(&conn, bucket, path) {
-            return serde_json::to_value(&o?).map_err(|e| format!("{op} encode: {e}"));
-        }
         let o = tauri::async_runtime::block_on(crate::cloud::ops::stat(&conn, bucket, path)).map_err(|e| e.to_string())?;
         return serde_json::to_value(&o).map_err(|e| format!("{op} encode: {e}"));
     }
@@ -1200,10 +1241,6 @@ fn host_dispatch(
         let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?;
         let path = params.get("path").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `path`"))?;
         let recursive = params.get("recursive").and_then(|v| v.as_bool()).unwrap_or(false);
-        if let Some(r) = crate::cloud_guest::delete(&conn, bucket, path, recursive) {
-            r?;
-            return Ok(serde_json::Value::Null);
-        }
         tauri::async_runtime::block_on(crate::cloud::ops::delete(&conn, bucket, path, recursive)).map_err(|e| e.to_string())?;
         return Ok(serde_json::Value::Null);
     }
@@ -1215,10 +1252,6 @@ fn host_dispatch(
         let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?;
         let src = params.get("src").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `src`"))?;
         let dst = params.get("dst").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `dst`"))?;
-        if let Some(r) = crate::cloud_guest::copy(&conn, bucket, src, dst) {
-            r?;
-            return Ok(serde_json::Value::Null);
-        }
         tauri::async_runtime::block_on(crate::cloud::ops::copy(&conn, bucket, src, dst)).map_err(|e| e.to_string())?;
         return Ok(serde_json::Value::Null);
     }
@@ -2610,29 +2643,45 @@ pub fn reload_corvus_plugins(state: &AppState) {
     let _ = dispatch_rpc(state, "corvus", "reload_plugins", serde_json::json!({}));
 }
 
-/// Relay a plugin hook fired **shell-side** to the product backend where the
-/// target plugin now runs. After the plugin-relocation flip, universal plugins
-/// (e.g. `cloud-storage`) load in `corvus-be`, so a hook the shell raises for them
+/// Relay a plugin hook fired **shell-side** to the product backends where the
+/// target plugin runs. After the plugin-relocation flip, universal plugins
+/// (e.g. `cloud-storage`) load in the product backends, so a hook the shell raises for them
 /// — the cloud stream callbacks (`cloud-storage:list-chunk`), OAuth-done, transfer
 /// job-done / progress — must be forwarded there or the plugin never sees it and
-/// the UI hangs (the "Loading…" stall). This routes through `corvus-be`'s
+/// the UI hangs (the "Loading…" stall). This routes through each backend's
 /// `fire_plugin_action` (the exact cross-process twin of the shell's plugin-
-/// targeted `fire_on`): same plugin, same callback name, same payload. Best-effort
-/// — the method is advertised only while `corvus-be` runs, so the call drops when
-/// it isn't. `payload_json` is the already-serialized hook payload, handed over
-/// verbatim as the context.
+/// targeted `fire_on`): same plugin, same callback name, same payload.
+///
+/// **Every** host, not just Corvus's: a universal plugin is loaded once per product that
+/// enabled it, and each of those is a separate Lua VM with its own subscribers. Sending only
+/// to Corvus was invisible while Corvus was the only host — and became "the panel loads in
+/// Corvus and hangs in Bennu" the moment a second one existed. The shell cannot tell which
+/// copy started the op (the reverse-channel call carries no host identity), so it tells all
+/// of them; a plugin that receives an id it never issued drops it, which is what the
+/// `stream_id` checks are for.
+///
+/// Best-effort: pure-OOP backends are skipped when they are not running (their window is
+/// closed), so a closed product costs nothing and logs nothing. `payload_json` is the
+/// already-serialized hook payload, handed over verbatim as the context.
 pub fn fire_plugin_hook_on_backends(app: &AppHandle, plugin: &str, hook: &str, payload_json: &str) {
     let state = app.state::<AppState>();
-    let _ = dispatch_rpc(
-        &state,
-        "corvus",
-        "fire_plugin_action",
-        serde_json::json!({
-            "plugin_name":  plugin,
-            "action":       hook,
-            "context_json": payload_json,
-        }),
-    );
+    for program in PLUGIN_HOST_PROGRAMS {
+        // Corvus is hybrid — its loopback answers even with the backend detached — so it is
+        // always asked. The others exist only as a child process.
+        if *program != "corvus" && !split_broker::is_attached(program) {
+            continue;
+        }
+        let _ = dispatch_rpc(
+            &state,
+            program,
+            "fire_plugin_action",
+            serde_json::json!({
+                "plugin_name":  plugin,
+                "action":       hook,
+                "context_json": payload_json,
+            }),
+        );
+    }
 }
 
 /// Route one BRP watch SSE event back to the `corvus-be` plugin that owns the
@@ -2775,4 +2824,28 @@ fn router_err_to_app(e: RouterError) -> AppError {
             IpcError::Transport(s) => AppError::Other(format!("ipc transport: {s}")),
         },
     }
+}
+
+/// Decode the three fields a byte-shaped extension call carries over the reverse channel.
+///
+/// Both `__ext_call_*_file` handlers take the same shape, and the error has to name the Lua
+/// function the plugin author called — not the wire method, which they have never heard of.
+fn ext_file_params<'a>(
+    who: &str,
+    params: &'a serde_json::Value,
+) -> Result<(&'a str, crate::ext::CallSpec, crate::ext::FileSpec), String> {
+    let plugin = params.get("plugin").and_then(|v| v.as_str()).unwrap_or("?");
+    let spec_v = params
+        .get("spec")
+        .cloned()
+        .ok_or_else(|| format!("{who}: missing `spec`"))?;
+    let file_v = params
+        .get("file")
+        .cloned()
+        .ok_or_else(|| format!("{who}: missing `file`"))?;
+    let spec: crate::ext::CallSpec =
+        serde_json::from_value(spec_v).map_err(|e| format!("{who}: {e}"))?;
+    let file: crate::ext::FileSpec =
+        serde_json::from_value(file_v).map_err(|e| format!("{who}: {e}"))?;
+    Ok((plugin, spec, file))
 }

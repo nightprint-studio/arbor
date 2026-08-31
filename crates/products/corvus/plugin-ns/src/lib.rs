@@ -23,10 +23,13 @@
 //! - one module per ported `ns_shell` namespace, each exposing an
 //!   `XInstaller` that holds an `Arc<dyn NsHost>`. Git/product namespaces
 //!   ([`notes`], [`repo`], [`workspace`], [`linked_worktrees`], [`mr`], [`ci`],
-//!   [`security`], [`issues`]) the host implements directly; platform namespaces
-//!   ([`toolchain`], [`job`], [`ui_branding`]) the host implements by proxying to
-//!   the shell over the reverse channel; [`tabs`] and [`terminal`] are emit /
-//!   local-process direct.
+//!   [`security`], [`issues`]) the host implements directly; the ones left that proxy to the
+//!   shell over the reverse channel ([`toolchain`], [`ui_branding`]) do so because the state
+//!   is the shell's; [`tabs`] and [`terminal`] are emit / local-process direct.
+//!
+//! What is NOT here: `arbor.job` and `arbor.cloud` moved to `arbor-plugin-ns`. Neither was
+//! ever about git — they sat here only because Corvus was the first product with a plugin
+//! host, and that made them unreachable from the second one.
 //!
 //! Public API is exposed through [`prelude`].
 //!
@@ -34,9 +37,7 @@
 
 pub mod brp;
 pub mod ci;
-pub mod cloud;
 pub mod issues;
-pub mod job;
 pub mod linked_worktrees;
 pub mod mr;
 pub mod notes;
@@ -56,7 +57,7 @@ use std::sync::Arc;
 use arbor_plugin_core::prelude::LuaNamespaceInstaller;
 
 use crate::prelude::{
-    BrpInstaller, CiInstaller, CloudInstaller, IssuesInstaller, JobInstaller,
+    BrpInstaller, CiInstaller, IssuesInstaller,
     LinkedWorktreesInstaller, MrInstaller, NotesInstaller, NsHost, PipelineInstaller,
     RepoInstaller, SecurityInstaller, TabsInstaller, TerminalInstaller, ToolchainInstaller,
     UiBrandingInstaller, WorkspaceInstaller,
@@ -83,9 +84,7 @@ pub fn installers(host: Arc<dyn NsHost>) -> Vec<Arc<dyn LuaNamespaceInstaller>> 
         Arc::new(IssuesInstaller::new(host.clone())),
         Arc::new(TerminalInstaller::new(host.clone())),
         // ── PROXY: state lives in the shell, reached over the reverse channel ──
-        Arc::new(JobInstaller::new(host.clone())),
         Arc::new(PipelineInstaller::new(host.clone())),
-        Arc::new(CloudInstaller::new(host.clone())),
         Arc::new(BrpInstaller::new(host.clone())),
         // UiBranding attaches onto the `arbor.ui` table the core install creates,
         // so it MUST come after the host-pure namespaces — keep it last.

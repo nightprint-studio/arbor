@@ -112,6 +112,77 @@ fn install_read_ops(lua: &Lua, fs_table: &Table, fp: &FsPerm) -> Result<()> {
         fs_table.set("read_bytes", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     }
 
+    // user_dirs() → { home, config, data, temp }
+    //
+    // Where this user's well-known folders are, so a plugin can find something another tool
+    // wrote: a `.gitconfig`, an `.npmrc`, a cloud SDK's credentials file. Every one of those
+    // lives at a path that differs per platform, and the alternative — reading environment
+    // variables — would mean handing plugins a way to read every environment variable,
+    // including the ones holding tokens.
+    //
+    // No permission needed, like `join`: these are locations, not contents. Reading anything
+    // there still goes through the `fs` gate, and the default sandbox does not include them —
+    // a plugin that wants to read a config file elsewhere declares `fs_scope` for it, and the
+    // user sees that when they install it.
+    //
+    // A folder the platform cannot name is absent from the table rather than empty: "there is
+    // no such directory here" and "it is the current directory" lead somewhere very different.
+    {
+        let fn_ = lua.create_function(move |lua_ctx, ()| {
+            let t = lua_ctx.create_table()?;
+            if let Some(home) = arbor_core::prelude::user_home() {
+                t.set("home", home.to_string_lossy().to_string())?;
+            }
+            if let Some(config) = dirs::config_dir() {
+                t.set("config", config.to_string_lossy().to_string())?;
+            }
+            if let Some(data) = dirs::data_dir() {
+                t.set("data", data.to_string_lossy().to_string())?;
+            }
+            t.set("temp", std::env::temp_dir().to_string_lossy().to_string())?;
+            Ok(t)
+        }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+        fs_table.set("user_dirs", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    }
+
+    // stat(path) → (info, nil) | (nil, err)
+    //
+    // Size and modification time, which `list` does not carry and several callers need: any
+    // comparison of "is the local copy current?" is built out of exactly these two, and
+    // without them a plugin can only re-transfer everything every time.
+    //
+    // `modified` is unix SECONDS, because that is what every remote store reports and the
+    // comparison is always against one of them. A filesystem that cannot report a time (or a
+    // clock before the epoch) yields `nil` rather than 0 — "unknown" and "1970" lead to
+    // opposite decisions in a sync.
+    {
+        let fp = fp.clone();
+        let fn_ = lua.create_function(move |lua_ctx, path: String| -> LuaTuple {
+            let p = PathBuf::from(&path);
+            check_fs_read(lua_ctx, &p, &fp)?;
+            let md = match std::fs::metadata(&p) {
+                Ok(m) => m,
+                Err(e) => return err2(lua_ctx, format!("fs.stat {path}: {e}")),
+            };
+            let modified = md
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs());
+            let t = lua_ctx.create_table()?;
+            t.set("size", md.len())?;
+            t.set("is_dir", md.is_dir())?;
+            t.set("is_file", md.is_file())?;
+            t.set("readonly", md.permissions().readonly())?;
+            match modified {
+                Some(secs) => t.set("modified", secs)?,
+                None => t.set("modified", mlua::Value::Nil)?,
+            }
+            ok2(lua_ctx, t)
+        }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+        fs_table.set("stat", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    }
+
     // list(dir) → (entries[], nil) | (nil, err)
     {
         let fp = fp.clone();

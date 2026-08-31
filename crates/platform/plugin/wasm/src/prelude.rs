@@ -11,10 +11,7 @@ pub use crate::report::{ExtensionProblemRow, ExtensionRow, ExtensionsReport};
 pub use crate::services::{HostRequest, HostResponse, HostServices, NoServices, Services};
 
 #[cfg(feature = "runtime")]
-pub use crate::dispatch::{
-    CloudError as GuestCloudError, CloudGuest, GuestObject, Listing as GuestListing,
-    Range as GuestRange, StudioGuest,
-};
+pub use crate::dispatch::StudioGuest;
 #[cfg(feature = "runtime")]
 pub use crate::dynamic::{DynGuest, FuncSig, InterfaceSurface};
 #[cfg(feature = "runtime")]

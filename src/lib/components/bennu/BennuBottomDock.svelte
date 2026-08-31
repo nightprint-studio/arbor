@@ -8,7 +8,9 @@
    * with the other. Corvus and Picus have had the other arrangement all along — a button opens
    * *its* panel, and the panel owns its title, its count, its actions and its close button — and
    * this is now that. Build and Problems are the one deliberate exception: two readings of the
-   * same run, so they share a panel (see {@link BennuBuildProblemsPanel}).
+   * same run, so they share a panel (see {@link BennuBuildProblemsPanel}). A plugin's own
+   * bottom panel lands here too, through the component Corvus renders it with — the dock is a
+   * slot, and what fills it is not this window's business.
    *
    * Which is why there is so little here. The sections stay MOUNTED and hidden rather than being
    * destroyed on a switch: a terminal session is a live PTY and a build log is a scroll position,
@@ -25,6 +27,8 @@
   import BennuCatalogPanel from './BennuCatalogPanel.svelte';
   import { isFrameworkCatalog } from './framework-catalogs';
   import PluginLogsPanel from '$lib/components/plugins/PluginLogsPanel.svelte';
+  import PluginPanelSurface from '$lib/components/plugins/PluginPanelSurface.svelte';
+  import { parsePluginKey } from '$lib/contributions/sidebar';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
 
   const active = $derived(bennuUiStore.bottomPanel ?? 'problems');
@@ -33,6 +37,10 @@
   // are mounted only while shown: their rows come from a store that caches per project,
   // so nothing is lost by unmounting and nothing is fetched while hidden.
   const catalog = $derived(isFrameworkCatalog(active) ? active : null);
+  // A panel a plugin registered with `position = "bottom"` — wide data it wants read beside
+  // the editor. Mounted only while shown, like Forms: the plugin pushes its content when the
+  // panel opens, so there is nothing to preserve while it is hidden.
+  const pluginKey = $derived(parsePluginKey(active));
 </script>
 
 <div class="dock">
@@ -69,6 +77,16 @@
   {#if catalog}
     <div class="dock-section">
       {#key catalog}<BennuCatalogPanel id={catalog} />{/key}
+    </div>
+  {/if}
+  {#if pluginKey}
+    <div class="dock-section">
+      <PluginPanelSurface
+        pluginName={pluginKey.plugin_name}
+        panelId={pluginKey.panel_id}
+        bottomMode
+        onClose={() => bennuUiStore.closeBottom()}
+      />
     </div>
   {/if}
   <div class="dock-section" class:hidden={active !== 'terminal'}>

@@ -1,7 +1,6 @@
-//! `arbor.cloud.*` — Lua surface for the cloud-storage plugin, ported to run
-//! through an [`NsHost`] instead of a `tauri::AppState`.
+//! `arbor.cloud.*` — the Lua surface the cloud-storage plugin is written against.
 //!
-//! Lua-visible surface mirrors the shell's `ns_shell/cloud.rs` byte-for-byte:
+//! Lua-visible surface mirrors the shell's original `ns_shell/cloud.rs` byte-for-byte:
 //! same namespace (`arbor.cloud`), same function names, same table-config arg
 //! shapes, same `(value, nil) | (nil, err)` / `(true|false, err)` tuple
 //! conventions, same `arbor.cloud.<op>: …` error prefixes.
@@ -10,37 +9,40 @@
 //! operators, the `ArborCloudHost` bridging into the shell's `JobRegistry` /
 //! `PluginHost` / Tauri events / cancellation maps, the OAuth refresher) lives
 //! in the **shell** (it is a platform program, earmarked for a WASM runtime).
-//! `corvus-be` can't host it, so every op round-trips over the reverse channel:
-//! the `CorvusNsHost` impl calls `host_call("__cloud_<op>", …)` and the matching
-//! shell handler in `src-tauri/src/ipc/mod.rs` runs exactly what
-//! `ns_shell/cloud.rs` ran (same `crate::cloud::{ops,transfer,oauth_google}`
-//! calls, same `AppState.cloud_*` maps, same emits). The error `String` is
-//! surfaced verbatim to Lua, so the shell handler carries the full text.
+//! A headless backend can't host it, so every op round-trips over the reverse
+//! channel: [`CloudHostOps`] calls `__cloud_<op>` and the matching shell handler
+//! in `src-tauri/src/ipc/mod.rs` runs exactly what the shell always ran (same
+//! `crate::cloud::{ops,transfer,oauth_google}` calls, same `AppState.cloud_*`
+//! maps, same emits). The error `String` is surfaced verbatim to Lua, so the
+//! shell handler carries the full text.
+//!
+//! ## Why this is not a Corvus namespace
+//!
+//! It used to be one, and that was a claim about the cloud that was never true: an object
+//! store has nothing to do with git. What made it Corvus's was that Corvus was the first
+//! product with a plugin host — so the day a second one (Bennu) grew one, the cloud panel
+//! could not follow, for no reason a user could see. Every op here is a forward to the
+//! shell, so the namespace is installable by ANY backend holding a
+//! [`HostCaller`](arbor_ipc::prelude::HostCaller): pass one to [`CloudHostOps::new`], hand
+//! the installer to `api_installer`, and that product has the cloud.
 //!
 //! ## ⚠️ Streaming / callback gap
 //!
-//! Several ops deliver their *results* asynchronously back into the **plugin
-//! host that started them** — and for a `corvus-be` plugin that host is the
-//! corvus-be plugin host, NOT the shell's. The proxy only forwards the *start*;
-//! the asynchronous tail (streamed pages, the async test reply, the
-//! reorder-modal confirmation) fires inside the SHELL's plugin host / FE and
-//! never reaches the corvus-be plugin that called the op. Concretely:
+//! Several ops deliver their *results* asynchronously, and the shell delivers them by firing
+//! the plugin hook on the product backends (`fire_plugin_hook_on_backends`) — every backend
+//! that hosts plugins, so the copy of the plugin that started the op is among them. What the
+//! shell does NOT know is which one that was, so a plugin enabled in two products also sees
+//! the other's pages; a stream id it never issued is stale by construction and the plugin
+//! drops it (which is what `cloud-storage`'s `stream_id` check has always been for).
 //!
-//! - `list_stream` / `search_stream` — the shell's `ArborCloudHost::fire_plugin_hook`
-//!   fires the per-page `on_*` hooks on the SHELL's plugins. A corvus-be plugin
-//!   gets the `stream_id` back and can `cancel` it, but never receives the
-//!   streamed pages. **Degraded to fire-and-forget.**
-//! - `test_connection_async` — the async reply is fired via `fire_broadcast`
-//!   into the SHELL's plugin host under `on_done`; a corvus-be subscriber never
-//!   sees it. (The synchronous `test_connection` works fully — it returns inline.)
-//! - `pick_chunk_order` — emits `arbor://cloud-chunk-order-open`; the modal's
-//!   confirm fires the `action` back through the SHELL's plugin host.
-//! - `oauth_start` — returns the auth URL inline (works), but the eventual
-//!   token-callback resolves inside the shell.
+//! The genuinely one-sided ones are the modal round-trips: `pick_chunk_order` emits
+//! `arbor://cloud-chunk-order-open` and the confirm fires `action` back through the shell's
+//! own host, and `oauth_start` returns the auth URL inline while the token callback
+//! resolves shell-side.
 //!
-//! `report_progress` / `report_done` are the inverse: a chunk-handler plugin
-//! *drives* the shell's OperationsOverlay card + JobRegistry. Those are proxied
-//! whole and work (they only push state INTO the shell).
+//! `report_progress` / `report_done` are the inverse: a chunk-handler plugin *drives* the
+//! shell's OperationsOverlay card + JobRegistry. Those only push state INTO the shell and
+//! work whole.
 
 use mlua::{Lua, LuaSerdeExt, Table};
 
@@ -49,15 +51,15 @@ use arbor_plugin_core::prelude::{
     PluginCoreResult,
 };
 
-use crate::nshost::NsHostHandle;
+use crate::cloud::host::CloudHostOps;
 
 /// `arbor.cloud.*` installer. Holds the host handle the closures call through.
 pub struct CloudInstaller {
-    host: NsHostHandle,
+    host: CloudHostOps,
 }
 
 impl CloudInstaller {
-    pub fn new(host: NsHostHandle) -> Self {
+    pub fn new(host: CloudHostOps) -> Self {
         Self { host }
     }
 }
@@ -108,11 +110,11 @@ fn table_to_json(lua: &Lua, t: Table, op: &str) -> std::result::Result<serde_jso
 
 // ── secrets ────────────────────────────────────────────────────────────────
 
-fn install_secrets(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_secrets(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let h = host.clone();
     let f = lua
         .create_function(move |lua_ctx, (r, v): (String, String)| -> LuaTuple {
-            match h.cloud_secret_set(&r, &v) {
+            match h.secret_set(&r, &v) {
                 Ok(()) => ok2(lua_ctx, mlua::Value::Boolean(true)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -124,7 +126,7 @@ fn install_secrets(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult
     let h = host.clone();
     let f = lua
         .create_function(move |lua_ctx, r: String| -> LuaTuple {
-            match h.cloud_secret_exists(&r) {
+            match h.secret_exists(&r) {
                 Ok(b) => ok2(lua_ctx, mlua::Value::Boolean(b)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -136,7 +138,7 @@ fn install_secrets(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult
     let h = host.clone();
     let f = lua
         .create_function(move |lua_ctx, r: String| -> LuaTuple {
-            match h.cloud_secret_delete(&r) {
+            match h.secret_delete(&r) {
                 Ok(()) => ok2(lua_ctx, mlua::Value::Boolean(true)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -149,7 +151,7 @@ fn install_secrets(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult
 
 // ── test_connection ────────────────────────────────────────────────────────
 
-fn install_test_connection(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_test_connection(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.test_connection";
@@ -157,7 +159,7 @@ fn install_test_connection(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCo
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_test_connection(opts_json) {
+            match host.test_connection(opts_json) {
                 Ok(reply) => ok2(lua_ctx, json_to_lua(lua_ctx, &reply)?),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -172,7 +174,7 @@ fn install_test_connection(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCo
 /// (see the module-level streaming-callback gap note) — a corvus-be subscriber
 /// won't see it. Forwarded for surface fidelity; returns `true` immediately.
 fn install_test_connection_async(
-    host: NsHostHandle,
+    host: CloudHostOps,
     lua: &Lua,
     t: &Table,
 ) -> PluginCoreResult<()> {
@@ -183,7 +185,7 @@ fn install_test_connection_async(
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_test_connection_async(opts_json) {
+            match host.test_connection_async(opts_json) {
                 Ok(()) => ok2(lua_ctx, mlua::Value::Boolean(true)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -196,7 +198,7 @@ fn install_test_connection_async(
 
 // ── list / stat / delete / copy ────────────────────────────────────────────
 
-fn install_list(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_list(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.list";
@@ -204,7 +206,7 @@ fn install_list(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_list(opts_json) {
+            match host.list(opts_json) {
                 Ok(page) => ok2(lua_ctx, json_to_lua(lua_ctx, &page)?),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -215,7 +217,7 @@ fn install_list(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()
     Ok(())
 }
 
-fn install_stat(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_stat(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.stat";
@@ -223,7 +225,7 @@ fn install_stat(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_stat(opts_json) {
+            match host.stat(opts_json) {
                 Ok(o) => ok2(lua_ctx, json_to_lua(lua_ctx, &o)?),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -234,7 +236,7 @@ fn install_stat(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()
     Ok(())
 }
 
-fn install_delete(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_delete(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.delete";
@@ -242,7 +244,7 @@ fn install_delete(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_delete(opts_json) {
+            match host.delete(opts_json) {
                 Ok(()) => ok2(lua_ctx, mlua::Value::Boolean(true)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -253,7 +255,7 @@ fn install_delete(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<
     Ok(())
 }
 
-fn install_copy(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_copy(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.copy";
@@ -261,7 +263,7 @@ fn install_copy(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_copy(opts_json) {
+            match host.copy(opts_json) {
                 Ok(()) => ok2(lua_ctx, mlua::Value::Boolean(true)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -274,7 +276,7 @@ fn install_copy(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()
 
 // ── streams (cancel-driven; per-page events fire shell-side) ────────────────
 
-fn install_list_stream(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_list_stream(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.list_stream";
@@ -284,7 +286,7 @@ fn install_list_stream(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreRe
             };
             // Returns the `stream_id` (so the plugin can `cancel` it) — but the
             // streamed pages fire into the SHELL's plugin host, not here.
-            match host.cloud_list_stream(opts_json) {
+            match host.list_stream(opts_json) {
                 Ok(stream_id) => {
                     ok2(lua_ctx, mlua::Value::String(lua_ctx.create_string(&stream_id)?))
                 }
@@ -297,7 +299,7 @@ fn install_list_stream(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreRe
     Ok(())
 }
 
-fn install_search_stream(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_search_stream(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.search_stream";
@@ -305,7 +307,7 @@ fn install_search_stream(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCore
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_search_stream(opts_json) {
+            match host.search_stream(opts_json) {
                 Ok(stream_id) => {
                     ok2(lua_ctx, mlua::Value::String(lua_ctx.create_string(&stream_id)?))
                 }
@@ -318,11 +320,11 @@ fn install_search_stream(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCore
     Ok(())
 }
 
-fn install_cancel(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_cancel(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, stream_id: String| -> LuaTuple {
             // Best-effort: the shell flips the cancel flag if it exists. Never an error.
-            let _ = host.cloud_cancel(&stream_id);
+            let _ = host.cancel(&stream_id);
             ok2(lua_ctx, mlua::Value::Boolean(true))
         })
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -331,10 +333,10 @@ fn install_cancel(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<
     Ok(())
 }
 
-fn install_is_cancelled(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_is_cancelled(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, stream_id: String| -> LuaTuple {
-            let cancelled = host.cloud_is_cancelled(&stream_id).unwrap_or(false);
+            let cancelled = host.is_cancelled(&stream_id).unwrap_or(false);
             ok2(lua_ctx, mlua::Value::Boolean(cancelled))
         })
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -345,7 +347,7 @@ fn install_is_cancelled(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreR
 
 // ── transfers (return job_id / stream_id) ──────────────────────────────────
 
-fn install_download(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_download(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.download";
@@ -353,7 +355,7 @@ fn install_download(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResul
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_download(opts_json) {
+            match host.download(opts_json) {
                 Ok(id) => ok2(lua_ctx, mlua::Value::String(lua_ctx.create_string(&id)?)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -364,7 +366,7 @@ fn install_download(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResul
     Ok(())
 }
 
-fn install_upload(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_upload(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.upload";
@@ -372,7 +374,7 @@ fn install_upload(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_upload(opts_json) {
+            match host.upload(opts_json) {
                 Ok(id) => ok2(lua_ctx, mlua::Value::String(lua_ctx.create_string(&id)?)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -383,7 +385,7 @@ fn install_upload(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<
     Ok(())
 }
 
-fn install_sync(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_sync(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.sync";
@@ -393,7 +395,7 @@ fn install_sync(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()
             };
             // The `direction` validation (must be "up"/"down") runs shell-side so
             // the `direction must be "up" or "down", got …` error matches verbatim.
-            match host.cloud_sync(opts_json) {
+            match host.sync(opts_json) {
                 Ok(id) => ok2(lua_ctx, mlua::Value::String(lua_ctx.create_string(&id)?)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -404,7 +406,7 @@ fn install_sync(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()
     Ok(())
 }
 
-fn install_download_many(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_download_many(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.download_many";
@@ -414,7 +416,7 @@ fn install_download_many(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCore
             };
             // `paths` / `extra_steps` parsing + the empty-paths guard run shell-side
             // (same `\`paths\` must contain at least one entry` text).
-            match host.cloud_download_many(opts_json) {
+            match host.download_many(opts_json) {
                 Ok(job_id) => {
                     ok2(lua_ctx, mlua::Value::String(lua_ctx.create_string(&job_id)?))
                 }
@@ -429,7 +431,7 @@ fn install_download_many(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCore
 
 // ── concat_files ───────────────────────────────────────────────────────────
 
-fn install_concat_files(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_concat_files(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.concat_files";
@@ -437,7 +439,7 @@ fn install_concat_files(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreR
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_concat_files(opts_json) {
+            match host.concat_files(opts_json) {
                 Ok(()) => ok2(lua_ctx, mlua::Value::Boolean(true)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -450,7 +452,7 @@ fn install_concat_files(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreR
 
 // ── report_progress / report_done (push state INTO the shell — work fully) ──
 
-fn install_report_progress(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_report_progress(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.report_progress";
@@ -458,7 +460,7 @@ fn install_report_progress(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCo
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_report_progress(opts_json) {
+            match host.report_progress(opts_json) {
                 Ok(()) => ok2(lua_ctx, mlua::Value::Boolean(true)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -469,7 +471,7 @@ fn install_report_progress(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCo
     Ok(())
 }
 
-fn install_report_done(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_report_done(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.report_done";
@@ -477,7 +479,7 @@ fn install_report_done(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreRe
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_report_done(opts_json) {
+            match host.report_done(opts_json) {
                 Ok(()) => ok2(lua_ctx, mlua::Value::Boolean(true)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -490,7 +492,7 @@ fn install_report_done(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreRe
 
 // ── pick_chunk_order (emits the modal; confirm fires shell-side) ────────────
 
-fn install_pick_chunk_order(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_pick_chunk_order(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.pick_chunk_order";
@@ -500,7 +502,7 @@ fn install_pick_chunk_order(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginC
             };
             // `action` required-field check runs shell-side. The modal-confirm
             // `action` callback fires into the SHELL's plugin host (gap).
-            match host.cloud_pick_chunk_order(opts_json) {
+            match host.pick_chunk_order(opts_json) {
                 Ok(()) => ok2(lua_ctx, mlua::Value::Boolean(true)),
                 Err(e) => err2(lua_ctx, e),
             }
@@ -513,7 +515,7 @@ fn install_pick_chunk_order(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginC
 
 // ── oauth start (returns the URL inline; token-callback resolves shell-side) ─
 
-fn install_oauth_start(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_oauth_start(host: CloudHostOps, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
     let f = lua
         .create_function(move |lua_ctx, opts: Table| -> LuaTuple {
             let op = "arbor.cloud.oauth_start";
@@ -521,7 +523,7 @@ fn install_oauth_start(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreRe
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match host.cloud_oauth_start(opts_json) {
+            match host.oauth_start(opts_json) {
                 Ok(url) => ok2(lua_ctx, mlua::Value::String(lua_ctx.create_string(&url)?)),
                 Err(e) => err2(lua_ctx, e),
             }

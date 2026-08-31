@@ -17,19 +17,14 @@
    * buttons").
    */
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { pluginStore } from '$lib/stores/plugin.svelte';
-  import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { activityBarConfigStore } from '$lib/stores/corvus/activityBarConfig.svelte';
   import type { PluginSidebarSection } from '$lib/types/plugin';
-  import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
+  import { enabledSidebarSections, sidebarKey } from '$lib/contributions/sidebar';
   import PluginIcon from '../plugins/PluginIcon.svelte';
   import ActivityBar from '$lib/components/shared/ui/ActivityBar.svelte';
   // Right-side activity bar: tooltips fly out to the left away from the bar.
   import { tooltipLeft as tooltip } from '$lib/actions/tooltip';
 
-  function sectionKey(s: PluginSidebarSection): string {
-    return `plugin:${s.plugin_name}:${s.id}`;
-  }
 
   // Only non-legacy sections land on the right; legacy ones always go left.
   // We resolve ORDERING + VISIBILITY through `activityBarConfigStore`: the
@@ -37,17 +32,14 @@
   // `right_bottom_items`, and this is the one place that consumes them. If
   // the user hides an icon, `isVisible` returns false and we skip rendering.
   const rightSections = $derived(
-    contributionStore.forPoint(SIDEBAR_POINT)
-      .filter(c => !pluginStore.disabledPlugins.has(c.plugin_name))
-      .map(parseSidebarSection)
-      .filter(s => s.side === 'right')
+    enabledSidebarSections().filter(s => s.side === 'right')
   );
 
   /** Resolve the ordered, visibility-filtered list of sections for a given
    *  position by running the registered ids through the config merger. */
   function resolveOrdered(position: 'top' | 'bottom'): PluginSidebarSection[] {
     const bySide = rightSections.filter(s => s.position === position);
-    const byKey = new Map(bySide.map(s => [sectionKey(s), s]));
+    const byKey = new Map(bySide.map(s => [sidebarKey(s), s]));
     const pluginIds = bySide.map(sectionKey);
     const merged = position === 'top'
       ? activityBarConfigStore.mergeRightTop(pluginIds)
@@ -74,7 +66,7 @@
     uiStore.toggleRightSidebar(key);
   }
   function onClickBottom(s: PluginSidebarSection) {
-    uiStore.toggleBottomSection(sectionKey(s) as any);
+    uiStore.toggleBottomSection(sidebarKey(s) as any);
   }
 </script>
 
@@ -97,7 +89,7 @@
 
     {#snippet bottom()}
       {#each bottomSections as s (s.plugin_name + ':' + s.id)}
-        {@const key = sectionKey(s)}
+        {@const key = sidebarKey(s)}
         <button
           class="ab-btn"
           class:ab-active={uiStore.activeBottomSection === key}

@@ -1,0 +1,20 @@
+[package]
+name         = "arbor-plugin-ns"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The `arbor.*` Lua namespaces that belong to the platform rather than to one product (`arbor.job`, and `arbor.cloud` while it is on its way out of Arbor). Each is a proxy: the state lives in the shell, so every op is a reverse-channel round-trip and any backend holding a `HostCaller` can publish the surface."
+
+[dependencies]
+arbor-plugin-core = { path = "../core" }
+# The reverse channel (`HostCaller`) every op goes through. No product crate here by
+# construction — that is what makes the namespace installable from any `*-be`.
+arbor-ipc = { path = "../../../foundation/ipc" }
+
+serde_json = { workspace = true }
+
+# Workspace-pinned (see root) so the installer's `&Lua` is the very same type the
+# host's `register_lua_api` builds — one shared mlua artifact.
+mlua = { workspace = true }

@@ -426,48 +426,6 @@ pub trait NsHost: Send + Sync {
         cwd: Option<&str>,
     ) -> Result<(i32, String, String), String>;
 
-    // ── job (`arbor.job.*`) ──────────────────────────────────────────────────
-    //
-    // PROXY namespace: the `JobRegistry` (and the OS process the job drives) lives
-    // in the SHELL's `AppState` (`jobs`), so every op is a reverse-channel
-    // round-trip (`host_call("__job_<op>", …)`). `job_new_id` reuses the
-    // pre-existing `__job_register` handler to reserve an id; the other ops route
-    // to the new `__job_spawn`/`__job_list`/`__job_cancel`/`__job_dismiss`/
-    // `__job_clear_finished` handlers, which mirror `ns_shell/job.rs` byte-for-byte.
-
-    /// Reserve a job id from the shell registry (`__job_register`), registering a
-    /// Running `JobInfo`, so the synthetic on_done hook name and the
-    /// `arbor://job-started` payload can carry the real id before the spawn.
-    fn job_new_id(
-        &self,
-        name: &str,
-        plugin_name: &str,
-        command: &str,
-        category: Option<&str>,
-        hidden: bool,
-        target: Option<&str>,
-    ) -> Result<String, String>;
-
-    /// `arbor.job.spawn(config)` — drive the real process spawn for an
-    /// already-reserved job: the shell emits `arbor://job-started` and runs
-    /// `crate::jobs::spawn_job`. `spec` carries the resolved job fields.
-    fn job_spawn(&self, spec: serde_json::Value) -> Result<(), String>;
-
-    /// `arbor.job.list()` — the serde-serialized job list as a JSON array.
-    fn job_list(&self) -> Result<serde_json::Value, String>;
-
-    /// `arbor.job.cancel(job_id)` — best-effort cancel (never fails on the Lua
-    /// surface; the installer swallows any host-call error).
-    fn job_cancel(&self, job_id: &str) -> Result<(), String>;
-
-    /// `arbor.job.dismiss(job_id)` — drop a terminal-state job; `true` when
-    /// removed, `false` for running/unknown (or a host-call error).
-    fn job_dismiss(&self, job_id: &str) -> Result<bool, String>;
-
-    /// `arbor.job.clear_finished()` — drop every terminal-state job; returns the
-    /// ids dismissed.
-    fn job_clear_finished(&self) -> Result<Vec<String>, String>;
-
     // ── ui branding (`arbor.ui.{set,clear}_branding` + theme tokens) ─────────
     //
     // PROXY namespace: the Tauri window-icon API + `AppState.branding` store +
@@ -594,42 +552,6 @@ pub trait NsHost: Send + Sync {
     /// `arbor.pipeline.list_ops()` — all registered pipeline ops across enabled
     /// plugins as a JSON array of `"<plugin>.<op>"` strings.
     fn pipeline_list_ops(&self) -> Result<serde_json::Value, String>;
-
-    // ── cloud (`arbor.cloud.*`) ──────────────────────────────────────────────
-    //
-    // PROXY namespace: the whole cloud stack (arbor-cloud operators, ArborCloudHost,
-    // OAuth refresher, AppState.cloud_* maps) lives in the SHELL. Every method is a
-    // reverse-channel round-trip to the matching `__cloud_<op>` handler in
-    // src-tauri/src/ipc/mod.rs, which runs exactly what ns_shell/cloud.rs ran. The
-    // error String carries the shell's full `arbor.cloud.<op>: …` text, surfaced
-    // verbatim to Lua. `opts` is the serde-JSON of the Lua opts table; all field
-    // validation (require_conn / req_str / direction / paths) runs shell-side so the
-    // error strings match byte-for-byte. ⚠️ Streaming/async-reply tail of
-    // list_stream/search_stream/test_connection_async/pick_chunk_order fires into the
-    // SHELL's plugin host, NOT corvus-be's — proxy forwards only the start.
-
-    fn cloud_secret_set(&self, secret_ref: &str, value: &str) -> Result<(), String>;
-    fn cloud_secret_exists(&self, secret_ref: &str) -> Result<bool, String>;
-    fn cloud_secret_delete(&self, secret_ref: &str) -> Result<(), String>;
-    fn cloud_test_connection(&self, opts: serde_json::Value) -> Result<serde_json::Value, String>;
-    fn cloud_test_connection_async(&self, opts: serde_json::Value) -> Result<(), String>;
-    fn cloud_list(&self, opts: serde_json::Value) -> Result<serde_json::Value, String>;
-    fn cloud_list_stream(&self, opts: serde_json::Value) -> Result<String, String>;
-    fn cloud_search_stream(&self, opts: serde_json::Value) -> Result<String, String>;
-    fn cloud_cancel(&self, stream_id: &str) -> Result<(), String>;
-    fn cloud_is_cancelled(&self, stream_id: &str) -> Result<bool, String>;
-    fn cloud_stat(&self, opts: serde_json::Value) -> Result<serde_json::Value, String>;
-    fn cloud_delete(&self, opts: serde_json::Value) -> Result<(), String>;
-    fn cloud_copy(&self, opts: serde_json::Value) -> Result<(), String>;
-    fn cloud_download(&self, opts: serde_json::Value) -> Result<String, String>;
-    fn cloud_upload(&self, opts: serde_json::Value) -> Result<String, String>;
-    fn cloud_sync(&self, opts: serde_json::Value) -> Result<String, String>;
-    fn cloud_download_many(&self, opts: serde_json::Value) -> Result<String, String>;
-    fn cloud_concat_files(&self, opts: serde_json::Value) -> Result<(), String>;
-    fn cloud_report_progress(&self, opts: serde_json::Value) -> Result<(), String>;
-    fn cloud_report_done(&self, opts: serde_json::Value) -> Result<(), String>;
-    fn cloud_pick_chunk_order(&self, opts: serde_json::Value) -> Result<(), String>;
-    fn cloud_oauth_start(&self, opts: serde_json::Value) -> Result<String, String>;
 
     // ── brp (`arbor.brp.*`) ──────────────────────────────────────────────────
     //

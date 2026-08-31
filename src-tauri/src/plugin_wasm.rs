@@ -116,7 +116,8 @@ impl HostServices for TauriHostServices {
 /// `Store`, and every guest gets its own.
 static ENGINE: OnceLock<Result<WasmHost, String>> = OnceLock::new();
 
-/// The engine, for host code that drives a guest directly (see `crate::cloud_guest`).
+/// The engine, for host code that drives a guest (see `crate::ext`, the one caller left —
+/// everything else reaches an extension through `arbor.ext.*`).
 pub fn engine() -> Result<&'static WasmHost, String> {
     ENGINE
         .get_or_init(|| WasmHost::new().map_err(|e| e.to_string()))

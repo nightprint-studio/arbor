@@ -61,8 +61,16 @@
      * so we don't double-stack header bars under the AppShell wrapper.
      */
     bottomMode?: boolean;
+    /**
+     * How the dock is closed, when the consumer owns that state.
+     *
+     * Defaults to Corvus's shared `uiStore` — which is a no-op in a product whose bottom
+     * dock is its own store, and that is exactly how the X on this header did nothing in
+     * Bennu. A product that mounts this passes its own closer.
+     */
+    onClose?:    () => void;
   }
-  let { pluginName, panelId, bottomMode = false }: Props = $props();
+  let { pluginName, panelId, bottomMode = false, onClose }: Props = $props();
 
   // Reactive view of the cached content. NEVER written from this component.
   const content = $derived(
@@ -356,7 +364,7 @@
 
 <div class="plugin-panel">
   {#if bottomMode}
-    <BottomPanelHeader title={title || pluginName} onClose={() => uiStore.setActiveBottomSection(null)} />
+    <BottomPanelHeader title={title || pluginName} onClose={() => (onClose ? onClose() : uiStore.setActiveBottomSection(null))} />
   {:else if title}
     <div class="panel-header">
       <span class="panel-title">{title}</span>

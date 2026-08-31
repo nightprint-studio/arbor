@@ -67,7 +67,14 @@
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import PluginOverlays from '$lib/components/plugins/PluginOverlays.svelte';
   import PluginViewPanel from '$lib/components/plugins/PluginViewPanel.svelte';
+  import PluginPanelSurface from '$lib/components/plugins/PluginPanelSurface.svelte';
+  import PluginIcon from '$lib/components/plugins/PluginIcon.svelte';
+  import CloudChunkOrderModal from '$lib/components/shared/CloudChunkOrderModal.svelte';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
+  import {
+    enabledSidebarSections, findSidebarSection, parsePluginKey, sidebarKey,
+  } from '$lib/contributions/sidebar';
+  import type { PluginSidebarSection } from '$lib/types/plugin';
   import { setupTauriListeners } from '$lib/utils/tauri-listeners';
   import type { IconComponent } from '$lib/types/icon';
 
@@ -248,6 +255,12 @@
           // Unknown ids are ignored rather than opening an empty panel: a plugin asking for
           // something it never registered is a plugin bug, and a blank split is a worse way
           // to report it than its own log.
+          //
+          // A panel resolves to wherever the plugin asked to live; a view has only one home
+          // here, the right split. Checked in that order because the two id spaces are
+          // separate and a key is only ever one of them.
+          const section = findSidebarSection({ plugin_name: plugin, panel_id });
+          if (section) { showPluginPanel(section); return; }
           const known = pluginViews.some((v) => v.plugin_name === plugin && v.id === panel_id);
           if (!known) return;
           bennuUiStore.showRight(`plugin:${plugin}:${panel_id}`);
@@ -880,6 +893,69 @@
     void watchRoots([...roots]).catch(() => { /* no live updates; the tree still refreshes by hand */ });
   });
 
+  // ── Plugin panels (arbor.ui.add_sidebar) ───────────────────────────────────
+  //
+  // A plugin says where it wants to live — left or right rail, top or bottom cluster — and
+  // this window puts it there, the same way Corvus does. Bennu could already host a plugin's
+  // VIEW (the right split); a panel had nowhere to go, so a package that drew a sidebar was
+  // simply invisible here, with nothing saying why.
+  //
+  // The rail is Bennu's own tools plus these: they go through `applyRailOrder` like every
+  // other button, so the user can reorder or hide them in Customize rails.
+  const pluginSidebars = $derived(enabledSidebarSections());
+
+  /** Which dock a section belongs in, as this window arranges them. */
+  function panelOf(s: PluginSidebarSection): 'left' | 'right' | 'bottom' {
+    if (s.position === 'bottom') return 'bottom';
+    return s.side === 'left' ? 'left' : 'right';
+  }
+
+  /** The rail buttons for one cluster. `iconName` rather than a component: what a plugin asks
+   *  for is a string (a Lucide name, an emoji, or an SVG it registered), and only
+   *  `PluginIcon` knows how to read all three — the rail renders it through `iconFor`. */
+  function pluginRail(side: 'left' | 'right', position: 'top' | 'bottom'): ActivityRailButton[] {
+    return pluginSidebars
+      .filter((s) => (s.side === 'left' ? 'left' : 'right') === side && s.position === position)
+      .map((s) => {
+        const key = sidebarKey(s);
+        const dock = panelOf(s);
+        const active = dock === 'bottom'
+          ? bennuUiStore.bottomPanel === key
+          : dock === 'left'
+            ? bennuUiStore.leftPanel === key
+            : bennuUiStore.rightPanel === key;
+        return {
+          id: key,
+          tooltip: s.tooltip ?? s.label,
+          iconName: s.icon,
+          active,
+          onclick: () => togglePluginPanel(s),
+        } satisfies ActivityRailButton;
+      });
+  }
+
+  function togglePluginPanel(s: PluginSidebarSection) {
+    const key = sidebarKey(s);
+    switch (panelOf(s)) {
+      case 'bottom': bennuUiStore.toggleBottom(key); break;
+      case 'left':   bennuUiStore.toggleLeft(key); break;
+      default:       bennuUiStore.toggleRight(key); break;
+    }
+  }
+
+  function showPluginPanel(s: PluginSidebarSection) {
+    const key = sidebarKey(s);
+    switch (panelOf(s)) {
+      case 'bottom': bennuUiStore.showBottom(key); break;
+      case 'left':   bennuUiStore.showLeft(key); break;
+      default:       bennuUiStore.showRight(key); break;
+    }
+  }
+
+  /** The plugin panel showing in each dock, if the open one is a plugin's. */
+  const leftPluginKey   = $derived(parsePluginKey(bennuUiStore.leftPanel));
+  const rightPluginKey  = $derived(parsePluginKey(bennuUiStore.rightPanel));
+
   const leftTopRaw = $derived<ActivityRailButton[]>([
     { id: 'project',   tooltip: 'Project',   shortcut: 'Alt+1', icon: FolderTree, active: bennuUiStore.leftPanel === 'project',   onclick: () => bennuUiStore.toggleLeft('project') },
     // Every project kind. The panel answers for a `.java` from Bennu's own scan, for a JSP or an
@@ -891,6 +967,7 @@
     // Both ecosystems: the panel answers for a Maven reactor and for a Cargo workspace, from one
     // report shape.
     { id: 'dependencies', tooltip: 'Dependencies', shortcut: 'Alt+N', icon: Library, active: bennuUiStore.leftPanel === 'dependencies', onclick: () => bennuUiStore.toggleLeft('dependencies') },
+    ...pluginRail('left', 'top'),
   ]);
   // Left rail bottom cluster: only the bottom-dock toggles (Terminal, Problems).
   // Docs/Settings moved to the titlebar's right cluster (IntelliJ/Corvus layout).
@@ -921,6 +998,7 @@
     { id: 'problems', tooltip: 'Problems', shortcut: 'Alt+6',   icon: AlertTriangle,  active: bennuUiStore.bottomPanel === 'problems', onclick: () => bennuUiStore.toggleBottom('problems') },
     { id: 'todos',    tooltip: 'TODO', shortcut: 'Alt+7',       icon: ListTodo,       active: bennuUiStore.bottomPanel === 'todos',    onclick: () => bennuUiStore.toggleBottom('todos') },
     { id: 'terminal', tooltip: 'Terminal', shortcut: 'Alt+F12', icon: TerminalSquare, active: bennuUiStore.bottomPanel === 'terminal', onclick: () => bennuUiStore.toggleBottom('terminal') },
+    ...pluginRail('left', 'bottom'),
   ]);
   /** The build tool's own window — Maven's goals or Cargo's crates. One slot, because a project is
    *  one or the other, and Alt+8 means "the build tool" either way. */
@@ -954,6 +1032,7 @@
           { id: 'ast', tooltip: 'Trees — the parse, and the model Bennu derives from it', shortcut: 'Alt+9', icon: Braces, active: bennuUiStore.rightPanel === 'ast', onclick: () => bennuUiStore.toggleRight('ast') },
         ]
       : []),
+    ...pluginRail('right', 'top'),
   ]);
   // Forms drives the BOTTOM dock (wide, horizontal data), not a side panel — its toggle sits
   // in the right rail's bottom cluster; the active state mirrors the dock's open tab.
@@ -978,6 +1057,7 @@
         active: bennuUiStore.bottomPanel === c.id,
         onclick: () => bennuUiStore.toggleBottom(c.id),
       })),
+    ...pluginRail('right', 'bottom'),
   ]);
 
   // ── The user's arrangement ───────────────────────────────────────────────────
@@ -1044,10 +1124,20 @@
     return pluginViews.find((v) => `plugin:${v.plugin_name}:${v.id}` === key) ?? null;
   });
 
+  /** The plugin PANEL showing in the right split, if the open key is one.
+   *
+   *  A panel and a view are both `plugin:` keys in the same slot; the view wins, because a
+   *  key is only ever registered as one of the two and resolving both would render twice. */
+  const rightPluginPanel = $derived(
+    rightPluginKey && !activePluginView ? findSidebarSection(rightPluginKey) : null,
+  );
+
   // A plugin view gets the wide default too: whatever it renders (a viewport, a chart, a
   // rendered document) is the kind of thing 200px cannot show, or the plugin would have
   // written a list.
-  const wideRight  = $derived(bennuUiStore.rightPanel === 'i18n' || activePluginView !== null);
+  const wideRight  = $derived(
+    bennuUiStore.rightPanel === 'i18n' || activePluginView !== null || rightPluginPanel !== null,
+  );
   const showBottom = $derived(bennuUiStore.bottomPanel !== null);
   // A job's output was opened from the (shared) Jobs overlay — the shared uiStore drives it, exactly
   // like corvus. It takes the bottom slot while shown; closing it (its back/close button clears the
@@ -1373,6 +1463,17 @@
         icon: v.icon ?? 'layout',
         shortcut: undefined as string | undefined,
         action: () => run(() => bennuUiStore.showRight(`plugin:${v.plugin_name}:${v.id}`)),
+        when: true,
+      })),
+      // The same for a plugin's PANEL. A rail button can be hidden from Customize rails, and
+      // an entry here is what keeps the panel reachable when it is — the palette is the one
+      // route that never disappears.
+      ...pluginSidebars.map((s) => ({
+        id: `ppanel:${s.plugin_name}:${s.id}`,
+        title: `Open Panel: ${s.label}`,
+        icon: s.icon ?? 'layout',
+        shortcut: undefined as string | undefined,
+        action: () => run(() => showPluginPanel(s)),
         when: true,
       })),
       ...JPA_PALETTE_ACTIONS.map((a) => ({
@@ -1891,6 +1992,12 @@
   }
 </script>
 
+<!-- What a plugin asked for, drawn: a Lucide name, an emoji, or an SVG it registered. The rail
+     stays app-agnostic and hands the string back here, which is the side that knows. -->
+{#snippet iconFor(name: string, size: number)}
+  <PluginIcon {name} {size} />
+{/snippet}
+
 <svelte:window onkeydown={onKeyDown} />
 
 <div class="shell">
@@ -1899,10 +2006,10 @@
   <div class="content-area">
     <WorkspaceShell>
       {#snippet leftRail()}
-        <ActivityBar side="left" ariaLabel="Tool windows" topItems={leftTop} bottomItems={leftBottom} />
+        <ActivityBar side="left" ariaLabel="Tool windows" topItems={leftTop} bottomItems={leftBottom} {iconFor} />
       {/snippet}
       {#snippet rightRail()}
-        <ActivityBar side="right" ariaLabel="Inspection rail" topItems={rightTop} bottomItems={rightBottom} />
+        <ActivityBar side="right" ariaLabel="Inspection rail" topItems={rightTop} bottomItems={rightBottom} {iconFor} />
       {/snippet}
 
       {#snippet panels()}
@@ -1916,7 +2023,13 @@
           >
             {#if bennuUiStore.leftPanel === 'project'}<BennuSidebar />
             {:else if bennuUiStore.leftPanel === 'structure'}<BennuStructurePanel />
-            {:else if bennuUiStore.leftPanel === 'dependencies'}<BennuDependenciesPanel />{/if}
+            {:else if bennuUiStore.leftPanel === 'dependencies'}<BennuDependenciesPanel />
+            {:else if leftPluginKey}
+              <PluginPanelSurface
+                pluginName={leftPluginKey.plugin_name}
+                panelId={leftPluginKey.panel_id}
+              />
+            {/if}
           </PanelCard>
         {/if}
 
@@ -1994,6 +2107,13 @@
                 icon={v.icon}
                 placement={v.placement}
                 onClose={() => bennuUiStore.closeRight()}
+              />
+            {:else if rightPluginPanel && rightPluginKey}
+              <!-- A plugin's own panel — a tree or a form-DSL surface, rendered by the same
+                   component Corvus uses, so a package draws the same panel in both. -->
+              <PluginPanelSurface
+                pluginName={rightPluginKey.plugin_name}
+                panelId={rightPluginKey.panel_id}
               />
             {/if}
           </PanelCard>
@@ -2096,6 +2216,10 @@
      emits, and nothing happens anywhere. AFTER `PluginTools` — see its header for why the
      order matters. -->
 <PluginOverlays />
+<!-- Self-mounts on `arbor://cloud-chunk-order-open`. Here for the same reason
+     `PluginOverlays` is: a plugin talking to the user is universal, and a product that hosts
+     plugins mounts the surfaces they talk through. -->
+<CloudChunkOrderModal />
 {#if bennuUiStore.aboutOpen}
   <BennuAboutModal onClose={() => bennuUiStore.closeAbout()} />
 {/if}

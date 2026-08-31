@@ -9,6 +9,20 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **A plugin can move a payload without it passing through Lua.** `arbor.ext.call_to_file` and `call_from_file` transfer bytes straight between an installed extension and a local file, so a download or an upload is no longer a JSON array of numbers held in three processes at once.
+
+- **A plugin can run an OAuth sign-in for any provider.** `arbor.oauth.start` / `refresh` supply the two halves a package cannot hold — the loopback listener and the keychain — while the endpoints, client and scopes come from the plugin, so no provider is written into Arbor.
+
+- **Form nodes gained `reorder_list`, a list whose order is the answer.** Fully keyboard-driven: Alt+↑/↓ move the row.
+
+- **`arbor.fs.stat` answers with a file's size and modification time.** What every "is this copy still current?" question is built from, and what `list` does not carry.
+
+- **`arbor.fs.user_dirs` says where the user's home, config, data and temp folders are.** For finding a file another tool wrote, without handing plugins the environment — where the tokens live.
+
+- **A plugin's panels appear in Bennu's activity bar.** A package that registers a sidebar was invisible there — Bennu rendered a plugin's view but had nowhere to put its panel.
+
+- **Plugins hosted by Bennu can report background jobs and browse cloud storage.** `arbor.job` and `arbor.cloud` were Corvus-only for no reason that was ever about git.
+
 - **Completion answers on a type you have not imported yet.** Typing `Arrays.` in a file with no `import java.util.Arrays;` offered nothing — the same answer a typo gets — and since the import is what accepting a completion adds, there was no way to reach the state where it would have worked. Its members are offered now, and accepting one adds the import. An ambiguous simple name is still left alone rather than guessed at.
 
 - **A type receiver offers its nested types.** `Outer.` lists `Inner` beside the statics and constants, which is how a nested type is named.
@@ -84,6 +98,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Optimize imports** (Ctrl+Shift+O, Java). Drops what the file does not use and orders the rest — everything else, then `javax` and `java`, then the statics — as one undo step. It never folds a package into a wildcard and never adds an import, and it uses the same judgement the `unused-import` warning does, so the command and the squiggle cannot disagree.
 
 ### Fixed
+
+- **A plugin hosted by a product other than Corvus never received its own callbacks.** Anything Arbor raised for a plugin — a cloud listing's pages, a transfer finishing, an OAuth result — went to Corvus's host alone, so the same plugin enabled elsewhere sat on "Loading…" forever.
+
 
 - **Postfix templates are no longer offered after a type name.** `Headers.` filled the popup with `nn`, `var`, `sout` and the rest — every one of which wraps its subject in an expression, and a type name is not one: `if (Headers != null)` does not compile. They crowded out the constants you were reaching for.
 

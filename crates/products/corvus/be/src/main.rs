@@ -25,6 +25,7 @@ use corvus_git_provider_api::prelude::{
     CiFilter, FindingState, MrFilter, ProviderError, SecurityFilters, Severity,
 };
 use arbor_plugin_core::prelude::build_hook_dispatcher;
+use arbor_plugin_ns::prelude::{CloudHostOps, CloudInstaller, JobHostOps, JobInstaller};
 use corvus_plugin::prelude::corvus_be_api_installer;
 use corvus_plugin_ns::prelude::NsHost;
 use serde_json::json;
@@ -1160,64 +1161,6 @@ impl NsHost for CorvusNsHost {
         Ok((exit_code, stdout, stderr))
     }
 
-    // ── job ───────────────────────────────────────────────────────────────────
-    //
-    // PROXY: the `JobRegistry` (and the OS process) live in the shell's
-    // `AppState`, so every op round-trips. `job_new_id` reuses the pre-existing
-    // `__job_register` handler to reserve an id + register a Running `JobInfo`; the
-    // rest route to the new `__job_*` handlers.
-
-    fn job_new_id(
-        &self,
-        name: &str,
-        plugin_name: &str,
-        command: &str,
-        category: Option<&str>,
-        hidden: bool,
-        target: Option<&str>,
-    ) -> Result<String, String> {
-        let spec = json!({
-            "name": name,
-            "plugin_name": plugin_name,
-            "command": command,
-            "category": category,
-            "non_cancellable": false,
-            "hidden": hidden,
-            "is_system": false,
-            "target": target,
-        });
-        let v = self.state.host_call("__job_register", spec)?;
-        v.as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| "job.spawn: __job_register returned non-string id".to_string())
-    }
-
-    fn job_spawn(&self, spec: serde_json::Value) -> Result<(), String> {
-        self.state.host_call("__job_spawn", spec).map(|_| ())
-    }
-
-    fn job_list(&self) -> Result<serde_json::Value, String> {
-        self.state.host_call("__job_list", json!({}))
-    }
-
-    fn job_cancel(&self, job_id: &str) -> Result<(), String> {
-        self.state
-            .host_call("__job_cancel", json!({ "job_id": job_id }))
-            .map(|_| ())
-    }
-
-    fn job_dismiss(&self, job_id: &str) -> Result<bool, String> {
-        let v = self
-            .state
-            .host_call("__job_dismiss", json!({ "job_id": job_id }))?;
-        Ok(v.as_bool().unwrap_or(false))
-    }
-
-    fn job_clear_finished(&self) -> Result<Vec<String>, String> {
-        let v = self.state.host_call("__job_clear_finished", json!({}))?;
-        serde_json::from_value(v).map_err(|e| format!("job.clear_finished decode: {e}"))
-    }
-
     // ── ui branding ───────────────────────────────────────────────────────────
     //
     // PROXY: the Tauri window-icon API + `AppState.branding` + `arbor://*`
@@ -1380,107 +1323,6 @@ impl NsHost for CorvusNsHost {
         self.state.host_call("__pipeline_list_ops", json!({}))
     }
 
-    // ── cloud ─────────────────────────────────────────────────────────────────
-    // PROXY: every op round-trips to the `__cloud_<op>` handler in the shell
-    // (src-tauri/src/ipc/mod.rs). The host_call error String is surfaced verbatim.
-
-    fn cloud_secret_set(&self, secret_ref: &str, value: &str) -> Result<(), String> {
-        self.state.host_call("__cloud_secret_set", json!({ "secret_ref": secret_ref, "value": value })).map(|_| ())
-    }
-
-    fn cloud_secret_exists(&self, secret_ref: &str) -> Result<bool, String> {
-        let v = self.state.host_call("__cloud_secret_exists", json!({ "secret_ref": secret_ref }))?;
-        Ok(v.as_bool().unwrap_or(false))
-    }
-
-    fn cloud_secret_delete(&self, secret_ref: &str) -> Result<(), String> {
-        self.state.host_call("__cloud_secret_delete", json!({ "secret_ref": secret_ref })).map(|_| ())
-    }
-
-    fn cloud_test_connection(&self, opts: serde_json::Value) -> Result<serde_json::Value, String> {
-        self.state.host_call("__cloud_test_connection", opts)
-    }
-
-    fn cloud_test_connection_async(&self, opts: serde_json::Value) -> Result<(), String> {
-        self.state.host_call("__cloud_test_connection_async", opts).map(|_| ())
-    }
-
-    fn cloud_list(&self, opts: serde_json::Value) -> Result<serde_json::Value, String> {
-        self.state.host_call("__cloud_list", opts)
-    }
-
-    fn cloud_list_stream(&self, opts: serde_json::Value) -> Result<String, String> {
-        let v = self.state.host_call("__cloud_list_stream", opts)?;
-        Ok(v.as_str().unwrap_or_default().to_string())
-    }
-
-    fn cloud_search_stream(&self, opts: serde_json::Value) -> Result<String, String> {
-        let v = self.state.host_call("__cloud_search_stream", opts)?;
-        Ok(v.as_str().unwrap_or_default().to_string())
-    }
-
-    fn cloud_cancel(&self, stream_id: &str) -> Result<(), String> {
-        self.state.host_call("__cloud_cancel", json!({ "stream_id": stream_id })).map(|_| ())
-    }
-
-    fn cloud_is_cancelled(&self, stream_id: &str) -> Result<bool, String> {
-        let v = self.state.host_call("__cloud_is_cancelled", json!({ "stream_id": stream_id }))?;
-        Ok(v.as_bool().unwrap_or(false))
-    }
-
-    fn cloud_stat(&self, opts: serde_json::Value) -> Result<serde_json::Value, String> {
-        self.state.host_call("__cloud_stat", opts)
-    }
-
-    fn cloud_delete(&self, opts: serde_json::Value) -> Result<(), String> {
-        self.state.host_call("__cloud_delete", opts).map(|_| ())
-    }
-
-    fn cloud_copy(&self, opts: serde_json::Value) -> Result<(), String> {
-        self.state.host_call("__cloud_copy", opts).map(|_| ())
-    }
-
-    fn cloud_download(&self, opts: serde_json::Value) -> Result<String, String> {
-        let v = self.state.host_call("__cloud_download", opts)?;
-        Ok(v.as_str().unwrap_or_default().to_string())
-    }
-
-    fn cloud_upload(&self, opts: serde_json::Value) -> Result<String, String> {
-        let v = self.state.host_call("__cloud_upload", opts)?;
-        Ok(v.as_str().unwrap_or_default().to_string())
-    }
-
-    fn cloud_sync(&self, opts: serde_json::Value) -> Result<String, String> {
-        let v = self.state.host_call("__cloud_sync", opts)?;
-        Ok(v.as_str().unwrap_or_default().to_string())
-    }
-
-    fn cloud_download_many(&self, opts: serde_json::Value) -> Result<String, String> {
-        let v = self.state.host_call("__cloud_download_many", opts)?;
-        Ok(v.as_str().unwrap_or_default().to_string())
-    }
-
-    fn cloud_concat_files(&self, opts: serde_json::Value) -> Result<(), String> {
-        self.state.host_call("__cloud_concat_files", opts).map(|_| ())
-    }
-
-    fn cloud_report_progress(&self, opts: serde_json::Value) -> Result<(), String> {
-        self.state.host_call("__cloud_report_progress", opts).map(|_| ())
-    }
-
-    fn cloud_report_done(&self, opts: serde_json::Value) -> Result<(), String> {
-        self.state.host_call("__cloud_report_done", opts).map(|_| ())
-    }
-
-    fn cloud_pick_chunk_order(&self, opts: serde_json::Value) -> Result<(), String> {
-        self.state.host_call("__cloud_pick_chunk_order", opts).map(|_| ())
-    }
-
-    fn cloud_oauth_start(&self, opts: serde_json::Value) -> Result<String, String> {
-        let v = self.state.host_call("__cloud_oauth_start", opts)?;
-        Ok(v.as_str().unwrap_or_default().to_string())
-    }
-
     // ── brp ────────────────────────────────────────────────────────────────────
     //
     // PROXY: the `BrpRegistry` lives in the shell's `AppState.brp`, so each op is
@@ -1635,7 +1477,15 @@ fn main() {
     let ns_host: Arc<dyn NsHost> = Arc::new(CorvusNsHost::new(Arc::clone(&state)));
     // The ordered git/product namespace set (and the UiBranding-after-core
     // invariant) is owned by `corvus-plugin-ns`, not spelled out here.
-    app.api_installer(corvus_be_api_installer(corvus_plugin_ns::installers(ns_host.clone())));
+    let mut namespaces = corvus_plugin_ns::installers(ns_host.clone());
+    // `arbor.job` and `arbor.cloud` are NOT among them any more: every op forwards to the
+    // shell, and neither is about git, so they live in `arbor-plugin-ns` and Bennu installs
+    // the identical pair. Appended after the ordered set because each publishes its own table
+    // and touches nothing the others build — the "UiBranding last" invariant is about
+    // `arbor.ui`, which neither goes near.
+    namespaces.push(Arc::new(JobInstaller::new(JobHostOps::new(app.host_caller()))));
+    namespaces.push(Arc::new(CloudInstaller::new(CloudHostOps::new(app.host_caller()))));
+    app.api_installer(corvus_be_api_installer(namespaces));
 
     // Publish the plugin host for the Plugin-Manager RPC adapter
     // (`plugin_rpc::CorvusRpcCtx`): after the Phase-2 flip the shell stops loading

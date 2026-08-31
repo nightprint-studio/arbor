@@ -1,6 +1,10 @@
 pub mod credential_store;
 pub mod oauth_jira;
 pub mod oauth_linear;
+// The provider-agnostic engine plugins drive through `arbor.oauth`. Beside the two
+// provider-specific flows and not merged with them: those two know Jira and Linear, this one
+// is forbidden to know anybody.
+pub mod oauth_plugin;
 pub mod vault;
 
 // `oauth_github` and `oauth_gitlab` were relocated to

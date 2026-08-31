@@ -384,7 +384,19 @@ fn main() {
     app.plugin_host("bennu", arbor_plugin_core::prelude::host_pure_hook_dispatcher);
     // NOT host-pure any more: bennu publishes `arbor.shader`, so a plugin can ask the editor
     // what a WGSL material declares instead of parsing it again. See `plugin_ns`.
-    app.api_installer(bennu_plugin::prelude::bennu_api_installer());
+    //
+    // Plus the platform's own namespaces, which are nobody's product: `arbor.job` (a plugin
+    // reporting progress needs the operations card wherever it is hosted) and `arbor.cloud`
+    // (every op forwards to the shell, so the panel is a plugin like any other). Corvus
+    // installs the identical pair — see `arbor-plugin-ns`.
+    app.api_installer(bennu_plugin::prelude::bennu_api_installer(vec![
+        Arc::new(arbor_plugin_ns::prelude::JobInstaller::new(
+            arbor_plugin_ns::prelude::JobHostOps::new(app.host_caller()),
+        )),
+        Arc::new(arbor_plugin_ns::prelude::CloudInstaller::new(
+            arbor_plugin_ns::prelude::CloudHostOps::new(app.host_caller()),
+        )),
+    ]));
     // Published so the plugin RPC adapter can reach the same host the App just built. Without
     // it the Plugin Manager opened from Bennu answers `unknown command: list_plugin_info`.
     host_handle::install(app.plugin_host_handle());

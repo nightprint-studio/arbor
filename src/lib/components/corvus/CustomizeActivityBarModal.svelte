@@ -40,7 +40,7 @@
   import { pluginStore } from '$lib/stores/plugin.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { ACTIVITY_BAR_POINT, parseActivityBarEntry } from '$lib/contributions/activity-bar';
-  import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
+  import { enabledSidebarSections } from '$lib/contributions/sidebar';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -54,11 +54,7 @@
       .map(parseActivityBarEntry)
       .filter((e): e is ActivityBarEntry => e !== null);
   }
-  function sidebarSections() {
-    return contributionStore.forPoint(SIDEBAR_POINT)
-      .filter((c) => !pluginStore.disabledPlugins.has(c.plugin_name))
-      .map(parseSidebarSection);
-  }
+  const sidebarSections = enabledSidebarSections;
 
   function pluginEntryId(entry: ActivityBarEntry, sepIndex: number): string {
     if (entry.kind === 'action')    return `plugin:${entry.plugin_name}:${entry.action}`;

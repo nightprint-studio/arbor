@@ -9,9 +9,9 @@
 //! It is not built in any more — the panel is the `cloud` plugin, and its calls go
 //! `arbor.cloud.*` → the corvus plugin namespace → the `__cloud_*` methods on the shell's
 //! reverse channel. So these had no callers left, and that is worse than dead code: they were
-//! a **second implementation of the same operations**, reached by a different name, which the
-//! wasm provider routing in [`crate::cloud_guest`] does not touch. A listing that came back
-//! through here would silently bypass an installed provider, and nothing would say so.
+//! a **second implementation of the same operations**, reached by a different name. A listing
+//! that came back through here would answer differently from the one the panel gets, and
+//! nothing would say so.
 //!
 //! What survives is the pair the download-progress modal actually calls. They belong to the
 //! frontend rather than to the plugin: the modal owns a Cancel button, and cancellation is a

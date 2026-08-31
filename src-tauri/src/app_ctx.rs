@@ -89,6 +89,54 @@ impl AppCtx for TauriAppCtx {
         serde_json::to_string(&out).map_err(|e| e.to_string())
     }
 
+    fn ext_call_to_file(
+        &self,
+        plugin: &str,
+        spec_json: &str,
+        file_json: &str,
+    ) -> Result<u64, String> {
+        let (spec, file) = ext_file_specs("arbor.ext.call_to_file", spec_json, file_json)?;
+        tracing::debug!("[{plugin}] ext.call_to_file {}@{}/{} {} -> {}",
+            spec.interface, spec.version, spec.id, spec.method, file.path);
+        crate::ext::call_to_file(&spec, &file)
+    }
+
+    fn ext_call_from_file(
+        &self,
+        plugin: &str,
+        spec_json: &str,
+        file_json: &str,
+    ) -> Result<String, String> {
+        let (spec, file) = ext_file_specs("arbor.ext.call_from_file", spec_json, file_json)?;
+        tracing::debug!("[{plugin}] ext.call_from_file {}@{}/{} {} <- {}",
+            spec.interface, spec.version, spec.id, spec.method, file.path);
+        let out = crate::ext::call_from_file(&spec, &file)?;
+        serde_json::to_string(&out).map_err(|e| e.to_string())
+    }
+
+    fn oauth_start(&self, plugin: &str, spec_json: &str) -> Result<String, String> {
+        let spec: crate::auth::oauth_plugin::StartSpec =
+            serde_json::from_str(spec_json).map_err(|e| format!("arbor.oauth.start: {e}"))?;
+        // Blocking on the runtime here is bounded and short: `start` binds the loopback
+        // listener and builds the URL, then hands the waiting-for-a-human half to a spawned
+        // task. It is the wait that would have been unacceptable, and it is not here.
+        tauri::async_runtime::block_on(crate::auth::oauth_plugin::start(
+            self.handle.clone(),
+            plugin.to_string(),
+            spec,
+        ))
+    }
+
+    fn oauth_refresh(&self, plugin: &str, spec_json: &str) -> Result<String, String> {
+        let spec: crate::auth::oauth_plugin::RefreshSpec =
+            serde_json::from_str(spec_json).map_err(|e| format!("arbor.oauth.refresh: {e}"))?;
+        let out = tauri::async_runtime::block_on(crate::auth::oauth_plugin::refresh(
+            plugin.to_string(),
+            spec,
+        ))?;
+        serde_json::to_string(&out).map_err(|e| e.to_string())
+    }
+
     fn credential_get(&self, plugin: &str, key: &str) -> Result<Option<String>, String> {
         let account = arbor_plugin_types::prelude::credential_account(plugin, key)
             .map_err(|e| e.to_string())?;
@@ -138,4 +186,21 @@ impl AppCtx for TauriAppCtx {
             }
         });
     }
+}
+
+/// Decode the two JSON documents a byte-shaped extension call carries.
+///
+/// Shared by the two `ext_call_*_file` capabilities above: both take the same pair (where to
+/// call, and which file), and both must name themselves in the error — a plugin author reads
+/// `arbor.ext.call_to_file: …`, not a decode failure with no origin.
+fn ext_file_specs(
+    who: &str,
+    spec_json: &str,
+    file_json: &str,
+) -> Result<(crate::ext::CallSpec, crate::ext::FileSpec), String> {
+    let spec: crate::ext::CallSpec =
+        serde_json::from_str(spec_json).map_err(|e| format!("{who}: {e}"))?;
+    let file: crate::ext::FileSpec =
+        serde_json::from_str(file_json).map_err(|e| format!("{who}: {e}"))?;
+    Ok((spec, file))
 }

@@ -356,6 +356,45 @@ function Fs.write_bytes(path, content) end
 ---@return arbor.FsEntry[]
 function Fs.list(dir) end
 
+---@class arbor.FsStat
+---@field size     integer  Bytes.
+---@field modified integer|nil  Unix SECONDS, or nil when the filesystem reports none.
+---@field is_dir   boolean
+---@field is_file  boolean
+---@field readonly boolean
+
+---Size and modification time — what `list` does not carry.
+---
+---Every "is this copy still current?" question is built out of these two, and `modified` is
+---in unix seconds because that is what a remote store reports and what it gets compared to.
+---An unknown time is `nil` rather than 0: "unknown" and "1970" lead a sync to opposite
+---decisions. Requires `fs = "read"`.
+---@param  path string
+---@return arbor.FsStat|nil info
+---@return string|nil       err
+function Fs.stat(path) end
+
+---@class arbor.UserDirs
+---@field home   string|nil  The user's home directory.
+---@field config string|nil  OS config dir — `%APPDATA%` on Windows, `~/.config` elsewhere.
+---@field data   string|nil  OS data dir.
+---@field temp   string      Temporary directory.
+
+---Where this user's well-known folders are.
+---
+---For finding something ANOTHER tool wrote — a `.gitconfig`, an `.npmrc`, a cloud SDK's
+---credentials file — each of which lives at a per-platform path. Reading environment
+---variables would be the other way, and would mean handing every plugin every variable,
+---including the ones holding tokens.
+---
+---No permission needed: these are locations, not contents. Reading anything there still goes
+---through the `fs` gate, and the default sandbox does not include them — declare `fs_scope`
+---for what you actually need, which is also what the user sees when installing you.
+---
+---A folder the platform cannot name is ABSENT from the table rather than empty.
+---@return arbor.UserDirs
+function Fs.user_dirs() end
+
 ---Join path segments using the OS path separator. No filesystem permission needed.
 ---@param  ... string
 ---@return string
@@ -937,6 +976,134 @@ function ExtApi.list() end
 ---@param  spec arbor.ExtCallSpec
 ---@return any
 function ExtApi.call(spec) end
+
+-- =============================================================================
+-- Payloads: bytes that must not become JSON
+-- =============================================================================
+--
+-- `call` answers in JSON, which is the wrong shape for a blob: a megabyte of
+-- payload becomes six megabytes of number-array, serialised and parsed once in
+-- every process it crosses. When the payload IS the point, these two move it
+-- between the extension and a local file — never through Lua.
+--
+--   -- Download: the extension's bytes go straight to the file.
+--   local written = arbor.ext.call_to_file{
+--     interface = "cloud-provider", id = "gcs", method = "read",
+--     args = { key, { start = 0, ["end"] = 8 * 1024 * 1024 } },
+--     path = dest, append = true,
+--   }
+--
+--   -- Upload: the file's bytes are lowered into argument 2.
+--   arbor.ext.call_from_file{
+--     interface = "cloud-provider", id = "gcs", method = "write",
+--     args = { key, false, "application/octet-stream" }, file_arg = 2,
+--     path = src, offset = 0, length = 8 * 1024 * 1024,
+--   }
+--
+-- A large transfer is a loop of these: ranged reads appended in order, or
+-- successive slices of the local file sent as separate calls. Neither side ever
+-- holds the whole object.
+--
+-- REQUIRES `service_call` like `call` does, AND the `fs` permission for the
+-- path — these touch the disk, so the path goes through the same permission and
+-- scope check as arbor.fs.*. A relative path resolves against the active project.
+
+---@class arbor.ExtToFileSpec : arbor.ExtCallSpec
+---@field path   string   Where to write. Absolute, or relative to the active project.
+---@field append boolean? Add to the file instead of replacing it. False by default;
+---                       true is what a chunked download uses after the first chunk.
+
+---@class arbor.ExtFromFileSpec : arbor.ExtCallSpec
+---@field path     string   The file to read from.
+---@field file_arg integer  Which positional argument the bytes are lowered into,
+---                         1-BASED like every Lua index. Whatever `args` holds
+---                         there is ignored — write `false`, since `nil` would
+---                         end the list.
+---@field offset   integer? Start reading here. 0 by default.
+---@field length   integer? Read at most this many bytes; 0 (the default) means
+---                         to the end of the file.
+
+---Call one function and write the bytes it returns into a local file.
+---@param  spec arbor.ExtToFileSpec
+---@return integer bytes_written
+function ExtApi.call_to_file(spec) end
+
+---Call one function passing the contents of a local file as one of its arguments.
+---@param  spec arbor.ExtFromFileSpec
+---@return any
+function ExtApi.call_from_file(spec) end
+
+-- =============================================================================
+-- arbor.oauth — signing in, without Arbor knowing the provider
+-- =============================================================================
+--
+-- Two halves of an OAuth flow cannot live in a package: the LOOPBACK LISTENER
+-- the browser redirects to with the authorization code, and the KEYCHAIN the
+-- tokens belong in. Arbor supplies exactly those two. Everything else — the
+-- endpoints, the client, the scopes, the dialect a provider insists on — is
+-- data you pass, so no provider is written down anywhere in Arbor.
+--
+--   local url = arbor.oauth.start{
+--     slot          = "oauth",       -- one of YOUR [[credentials]] slots
+--     auth_url      = "https://accounts.example/o/oauth2/v2/auth",
+--     token_url     = "https://oauth2.example/token",
+--     client_id     = cfg.client_id,
+--     scope         = { "https://example/auth/storage.read_write" },
+--     redirect_port = 7732,
+--     extra_params  = { access_type = "offline", prompt = "consent" },
+--     on_done       = "myplugin:oauth-done",   -- fired with { ok, error? }
+--   }
+--   arbor.ui.open_url(url)
+--
+-- `start` returns as soon as there is a URL to open — it never waits for the
+-- person. The outcome arrives as the `on_done` hook, on your plugin's own host.
+--
+-- What lands in the slot is a JSON document: refresh_token, access_token,
+-- expires_at, and the client the tokens were issued to. That shape is documented
+-- because it has a second reader — an EXTENSION of yours reads `access_token`
+-- out of the same slot through `arbor:host/secrets`, which is how a compiled
+-- provider authenticates without ever being part of the flow.
+
+---@class arbor.OAuthStartSpec
+---@field slot          string   One of your [[credentials]] slots. Anything else is refused.
+---@field auth_url      string
+---@field token_url     string
+---@field client_id     string
+---@field client_secret string?
+---@field scope         string|string[]?  A list is joined with spaces, as the spec writes it.
+---@field redirect_port integer  The loopback port your redirect URI names.
+---@field extra_params  table?   Provider dialect on the authorize URL, e.g.
+---                              { access_type = "offline", prompt = "consent" }.
+---                              Pass a list of pairs instead when the order matters.
+---@field json_token_request boolean?  The token endpoint wants JSON, not form encoding.
+---@field label         string?  Shown on the page the browser lands on.
+---@field on_done       string?  Hook fired with { ok, error? } when it finishes.
+---@field require_refresh_token boolean?  Default true: a flow that finishes without one
+---                              looks like a success and fails an hour later.
+
+---@class arbor.OAuthRefreshSpec
+---@field slot               string
+---@field token_url          string
+---@field json_token_request boolean?
+---@field min_remaining_secs integer?  Renew only if the stored token expires within this
+---                                    many seconds. 0 (the default) always renews.
+
+---@class arbor.OAuthRefreshResult
+---@field refreshed  boolean  False when the stored token was still good.
+---@field expires_in integer  Seconds the access token has left.
+
+---@class arbor.OAuth
+local OAuthApi = {}
+
+---Begin an installed-app flow. Returns the URL to open in a browser.
+---@param  spec arbor.OAuthStartSpec
+---@return string auth_url
+function OAuthApi.start(spec) end
+
+---Renew the access token in one of your slots from the refresh token beside it.
+---@param  spec arbor.OAuthRefreshSpec
+---@return arbor.OAuthRefreshResult
+function OAuthApi.refresh(spec) end
 
 
 -- =============================================================================
@@ -2365,6 +2532,8 @@ function Ci.runs(opts) end
 ---@field meta         arbor.Meta
 ---@field settings     arbor.Settings
 ---@field credentials arbor.Credentials   Your own secrets, in the OS keychain
+---@field oauth        arbor.OAuth         Sign-in flows: Arbor runs them, you name the provider
+---@field ext          arbor.Ext           Calling an installed extension
 ---@field terminal     arbor.Terminal
 ---@field job          arbor.Job
 ---@field timer        arbor.Timer

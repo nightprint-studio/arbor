@@ -27,6 +27,15 @@
     emoji?: string;
     /** Custom icon renderer — brand marks, plugin icons, anything bespoke. */
     iconSnippet?: Snippet;
+    /**
+     * Icon named as a string, drawn by the rail's `iconFor` snippet.
+     *
+     * For items whose icon is only known at runtime — what a plugin asked for, what a
+     * config file says — where `icon` (a component) cannot be resolved when the item list is
+     * built. The rail stays agnostic: it hands the string back to the consumer, which is the
+     * side that knows what the names mean.
+     */
+    iconName?: string;
     /** Lit/accent state — the side-aware active bar is drawn for this button. */
     active?: boolean;
     /**
@@ -87,6 +96,9 @@
     bottomItems?: ActivityRailItem[];
     top?: Snippet;
     bottom?: Snippet;
+    /** Renderer for `iconName` items: `(name, size)`. Required only if the item lists
+     *  actually use `iconName`. */
+    iconFor?: Snippet<[string, number]>;
   }
 
   let {
@@ -96,6 +108,7 @@
     bottomItems,
     top,
     bottom,
+    iconFor,
   }: Props = $props();
 </script>
 
@@ -116,6 +129,8 @@
     >
       {#if item.iconSnippet}
         {@render item.iconSnippet()}
+      {:else if item.iconName && iconFor}
+        {@render iconFor(item.iconName, item.iconSize ?? 18)}
       {:else if item.emoji}
         <span class="ab-emoji">{item.emoji}</span>
       {:else if Icon}

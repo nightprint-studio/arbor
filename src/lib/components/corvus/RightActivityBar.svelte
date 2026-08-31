@@ -17,11 +17,9 @@
    * buttons").
    */
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { pluginStore } from '$lib/stores/plugin.svelte';
-  import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { activityBarConfigStore } from '$lib/stores/corvus/activityBarConfig.svelte';
   import type { PluginSidebarSection } from '$lib/types/plugin';
-  import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
+  import { enabledSidebarSections } from '$lib/contributions/sidebar';
   import PluginIcon from '../plugins/PluginIcon.svelte';
   import { tooltipLeft as tooltip } from '$lib/actions/tooltip';
 
@@ -36,10 +34,7 @@
   // `right_bottom_items`, and this is the one place that consumes them. If
   // the user hides an icon, `isVisible` returns false and we skip rendering.
   const rightSections = $derived(
-    contributionStore.forPoint(SIDEBAR_POINT)
-      .filter(c => !pluginStore.disabledPlugins.has(c.plugin_name))
-      .map(parseSidebarSection)
-      .filter(s => s.side === 'right')
+    enabledSidebarSections().filter(s => s.side === 'right')
   );
 
   /** Resolve the ordered, visibility-filtered list of sections for a given

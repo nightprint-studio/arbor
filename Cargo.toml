@@ -55,6 +55,10 @@ members = [
     "crates/platform/plugin/api",
     "crates/platform/plugin/core",
     "crates/platform/plugin/marketplace",
+    # The platform's own Lua namespaces (`arbor.job`, `arbor.cloud`): product-agnostic by
+    # construction — every op forwards to the shell — so any backend with a reverse channel
+    # installs them (Corvus and Bennu both do).
+    "crates/platform/plugin/ns",
     "crates/platform/plugin/rpc",
     "crates/platform/plugin/types",
     # The wasm extension host. Separate from `plugin/core` (the Lua host) because the two

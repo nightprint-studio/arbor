@@ -14,8 +14,7 @@
   import ParkedModalsDock from './ParkedModalsDock.svelte';
   import ActivityBarLeft from './ActivityBarLeft.svelte';
   import ActivityBarRight from './ActivityBarRight.svelte';
-  import PluginSidebarPanel from '../plugins/PluginSidebarPanel.svelte';
-  import PluginTreeSidebar from '../plugins/PluginTreeSidebar.svelte';
+  import PluginPanelSurface from '../plugins/PluginPanelSurface.svelte';
   import PluginViewPanel from '../plugins/PluginViewPanel.svelte';
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
@@ -145,7 +144,7 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import { pluginStore } from '$lib/stores/plugin.svelte';
   import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
-  import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
+  import { findSidebarSection, parsePluginKey, sidebarKey } from '$lib/contributions/sidebar';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
   import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import { diffStore } from '$lib/stores/corvus/diff.svelte';
@@ -1595,12 +1594,9 @@
         handler: (e: { payload: { plugin: string; panel_id: string } }) => {
           const { plugin, panel_id } = e.payload;
           if (!plugin || !panel_id) return;
-          const section = contributionStore.forPoint(SIDEBAR_POINT)
-            .filter(c => !pluginStore.disabledPlugins.has(c.plugin_name))
-            .map(parseSidebarSection)
-            .find(s => s.plugin_name === plugin && s.id === panel_id);
+          const section = findSidebarSection({ plugin_name: plugin, panel_id });
           if (!section) return;
-          const key = `plugin:${plugin}:${panel_id}`;
+          const key = sidebarKey({ plugin_name: plugin, id: panel_id });
           if (section.position === 'bottom') {
             uiStore.setActiveBottomSection(key as any);
           } else if (section.side === 'right') {
@@ -1704,27 +1700,6 @@
   );
   const showSidebar       = $derived(hasRepo && uiStore.activeSidebarSection !== null);
   const showRightSidebar  = $derived(hasRepo && uiStore.activeRightSidebar !== null);
-
-  /** Parse `"plugin:<name>:<id>"` into `{plugin_name, panel_id}`. */
-  function parsePluginKey(key: string | null): { plugin_name: string; panel_id: string } | null {
-    if (!key || !key.startsWith('plugin:')) return null;
-    const rest = key.slice('plugin:'.length);
-    const colon = rest.indexOf(':');
-    if (colon < 0) return null;
-    return { plugin_name: rest.slice(0, colon), panel_id: rest.slice(colon + 1) };
-  }
-
-  /** True when the section identified by `key` was registered with kind="tree".
-   *  Falls back to false (form-DSL) for any unknown section so a stale id
-   *  doesn't break rendering. */
-  function isTreeKind(key: { plugin_name: string; panel_id: string } | null): boolean {
-    if (!key) return false;
-    const s = contributionStore.forPoint(SIDEBAR_POINT)
-      .filter(c => !pluginStore.disabledPlugins.has(c.plugin_name))
-      .map(parseSidebarSection)
-      .find(sec => sec.plugin_name === key.plugin_name && sec.id === key.panel_id);
-    return s?.kind === 'tree';
-  }
 
   const leftPluginKey  = $derived(parsePluginKey(uiStore.activeSidebarSection));
   const rightPluginKey = $derived(parsePluginKey(uiStore.activeRightSidebar));
@@ -2075,11 +2050,7 @@
               {:else if uiStore.activeSidebarSection === 'studio'}
                 <StudioPanel />
               {:else if leftPluginKey}
-                {#if isTreeKind(leftPluginKey)}
-                  <PluginTreeSidebar pluginName={leftPluginKey.plugin_name} panelId={leftPluginKey.panel_id} />
-                {:else}
-                  <PluginSidebarPanel pluginName={leftPluginKey.plugin_name} panelId={leftPluginKey.panel_id} />
-                {/if}
+                <PluginPanelSurface pluginName={leftPluginKey.plugin_name} panelId={leftPluginKey.panel_id} />
               {:else}
                 <Sidebar />
               {/if}
@@ -2163,19 +2134,11 @@
                 {:else if showPluginLogs}
                   <PluginLogsPanel onClose={() => uiStore.setActiveBottomSection(null)} />
                 {:else if showPluginBottom && bottomPluginKey}
-                  {#if isTreeKind(bottomPluginKey)}
-                    <PluginTreeSidebar
-                      pluginName={bottomPluginKey.plugin_name}
-                      panelId={bottomPluginKey.panel_id}
-                      bottomMode
-                    />
-                  {:else}
-                    <PluginSidebarPanel
-                      pluginName={bottomPluginKey.plugin_name}
-                      panelId={bottomPluginKey.panel_id}
-                      bottomMode
-                    />
-                  {/if}
+                  <PluginPanelSurface
+                    pluginName={bottomPluginKey.plugin_name}
+                    panelId={bottomPluginKey.panel_id}
+                    bottomMode
+                  />
                 {/if}
               </PanelCard>
             {/if}
@@ -2191,17 +2154,10 @@
               maxSize={500}
               onResize={uiStore.setRightSidebarWidth}
             >
-              {#if isTreeKind(rightPluginKey)}
-                <PluginTreeSidebar
-                  pluginName={rightPluginKey.plugin_name}
-                  panelId={rightPluginKey.panel_id}
-                />
-              {:else}
-                <PluginSidebarPanel
-                  pluginName={rightPluginKey.plugin_name}
-                  panelId={rightPluginKey.panel_id}
-                />
-              {/if}
+              <PluginPanelSurface
+                pluginName={rightPluginKey.plugin_name}
+                panelId={rightPluginKey.panel_id}
+              />
             </PanelCard>
           {/if}
         {/snippet}

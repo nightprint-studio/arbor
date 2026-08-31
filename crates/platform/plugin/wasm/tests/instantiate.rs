@@ -45,9 +45,11 @@ fn a_real_component_instantiates() {
     let services: Services = Arc::new(NoServices);
 
     let result = match world.as_str() {
-        "cloud-provider" => host.open_cloud(&module, caps, services).map(|_| ()),
+        // Only `studio-format` still has a typed opener — it is Arbor's own interface. Every
+        // other world, the cloud provider included, comes up through the dynamic path, which
+        // is also how a plugin reaches it.
         "studio-format" => host.open_studio(&module, caps, services).map(|_| ()),
-        other => panic!("unknown world '{other}'"),
+        _ => host.open_dynamic(&module, caps, services).map(|_| ()),
     };
     result.unwrap_or_else(|e| panic!("{} did not come up: {e}", module.display()));
 }
@@ -64,8 +66,8 @@ fn the_same_component_can_come_up_twice() {
         let caps = GuestCaps::new(format!("fixture-{i}"), vec![], vec![]);
         let services: Services = Arc::new(NoServices);
         let r = match world.as_str() {
-            "cloud-provider" => host.open_cloud(&module, caps, services).map(|_| ()),
-            _ => host.open_studio(&module, caps, services).map(|_| ()),
+            "studio-format" => host.open_studio(&module, caps, services).map(|_| ()),
+            _ => host.open_dynamic(&module, caps, services).map(|_| ()),
         };
         r.unwrap_or_else(|e| panic!("instance {i} did not come up: {e}"));
     }
@@ -73,7 +75,7 @@ fn the_same_component_can_come_up_twice() {
 
 /// Open any component through the **dynamic** path and print what it exports.
 ///
-/// The one that matters now: the typed openers know two worlds, and the whole point of the
+/// The one that matters now: the typed opener knows one world, and the whole point of the
 /// extension seam is that a package can export an interface this crate has never heard of.
 /// This proves that end — a module comes up, and its own type information says what is
 /// callable on it, with no `bindgen!` anywhere in the loop.

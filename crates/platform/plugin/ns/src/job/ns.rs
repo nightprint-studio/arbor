@@ -1,38 +1,41 @@
-//! `arbor.job` (background job spawning + introspection), ported to run through
-//! an [`NsHost`] instead of a `tauri::AppState`.
+//! `arbor.job` — background jobs: spawn one, list them, cancel, dismiss.
 //!
-//! Lua-visible surface is **byte-for-byte** that of the shell's
-//! `ns_shell/job.rs`: same namespace (`arbor.job`), same function names
-//! (`spawn` / `list` / `cancel` / `dismiss` / `clear_finished`), same argument
-//! shapes, same return conventions, same validation `RuntimeError` strings, same
-//! `job.<op> …: …` error prefixes.
+//! Lua-visible surface is **byte-for-byte** the one the shell published before the plugin
+//! hosts moved into the product backends: same namespace (`arbor.job`), same function names
+//! (`spawn` / `list` / `cancel` / `dismiss` / `clear_finished`), same argument shapes, same
+//! return conventions, same validation `RuntimeError` strings, same `job.<op> …: …` prefixes.
 //!
-//! This is a **PROXY** namespace: the `JobRegistry` (and the OS process the job
-//! drives) lives in the shell's `AppState` (`jobs`), not in `corvus-be`. So
-//! every op round-trips through the captured `Arc<dyn NsHost>` whose `corvus-be`
-//! impl calls back over the reverse channel (`host_call("__job_<op>", …)`); the
-//! matching shell handlers in `src-tauri/src/ipc/mod.rs` read/mutate the real
-//! `AppState` registry and (for `spawn`) drive the real `crate::jobs::spawn_job`
-//! exactly as `ns_shell/job.rs` did. The registry is **not** repo-scoped — it is
-//! a single global, so none of these read `__arbor_current_repo__`.
+//! ## Why this is not a product namespace
 //!
-//! Calling convention (unchanged from the shell — see `ns_shell/job.rs`):
-//!   · `spawn(config)` is a table-config returning `(job_id, nil) | (nil, err)`.
-//!     Validation problems (missing `command`, reserved `system` category) RAISE
-//!     installer-side, byte-for-byte with the shell; mutex / spawn failures come
-//!     back as the `(nil, err)` tuple.
+//! It was one — Corvus's — and nothing about it was ever git. A job is a process the user
+//! started, a card in the operations overlay and a line in the Jobs panel; the registry that
+//! owns them is a single global in the shell, shared by every window. A plugin that wants to
+//! show progress needs this wherever it is hosted, and while it lived in `corvus-plugin-ns`
+//! the answer to "can my plugin report progress in Bennu?" was no, for a reason that was
+//! purely about where the file sat.
+//!
+//! ## PROXY
+//!
+//! The `JobRegistry` (and the OS process a job drives) lives in the shell's `AppState`, not in
+//! a backend, so every op round-trips over the reverse channel to the matching `__job_<op>`
+//! handler, which reads/mutates the real registry and — for `spawn` — runs the real
+//! `crate::jobs::spawn_job`. The registry is **not** repo-scoped: it is one global, so none of
+//! these read the current repo.
+//!
+//! Calling convention:
+//!   · `spawn(config)` is a table-config returning `(job_id, nil) | (nil, err)`. Validation
+//!     problems (missing `command`, reserved `system` category) RAISE; registry / spawn
+//!     failures come back as the `(nil, err)` tuple.
 //!   · `list()` returns `(jobs_array, nil) | (nil, err)`.
 //!   · `cancel(job_id)` returns `nil` (best-effort, never fails).
-//!   · `dismiss(job_id)` returns `bool` (true if removed; false if running /
-//!     unknown).
+//!   · `dismiss(job_id)` returns `bool` (true if removed; false if running / unknown).
 //!   · `clear_finished()` returns `string[]` (ids of dismissed jobs).
 //!
-//! The `spawn` config table mirrors the shell exactly:
-//! `{ name?, command, cwd?, env?, category?, on_done_action?, on_done?, hidden?,
-//! target? }`. The `on_done` Lua callback is registered into **this** host's
-//! `__arbor_hooks__` registry under a synthetic action name (`__job_done_<id>__`)
-//! and that synthetic name is forwarded as the effective `on_done_action`, so the
-//! plugin's closure is what runs when the job finishes — same as the shell.
+//! The `spawn` config table: `{ name?, command, cwd?, env?, category?, on_done_action?,
+//! on_done?, hidden?, target? }`. The `on_done` Lua closure is registered into **this** host's
+//! `__arbor_hooks__` registry under a synthetic action name (`__job_done_<id>__`) and that
+//! name is forwarded as the effective `on_done_action`, so the plugin's closure is what runs
+//! when the job finishes — and it runs in the host that spawned it.
 
 use mlua::{Lua, LuaSerdeExt, Table};
 
@@ -40,15 +43,15 @@ use arbor_plugin_core::prelude::{
     err2, ok2, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError, PluginCoreResult,
 };
 
-use crate::nshost::NsHostHandle;
+use crate::job::host::JobHostOps;
 
 /// `arbor.job.*` installer. Holds the host handle the closures call through.
 pub struct JobInstaller {
-    host: NsHostHandle,
+    host: JobHostOps,
 }
 
 impl JobInstaller {
-    pub fn new(host: NsHostHandle) -> Self {
+    pub fn new(host: JobHostOps) -> Self {
         Self { host }
     }
 }
@@ -73,7 +76,7 @@ impl LuaNamespaceInstaller for JobInstaller {
 }
 
 fn install_spawn(
-    host: NsHostHandle,
+    host: JobHostOps,
     ctx: &ApiCtx,
     lua: &Lua,
     job_table: &Table,
@@ -138,7 +141,7 @@ fn install_spawn(
             // `JobRegistry::new_id`), so the synthetic on_done hook name and the
             // `arbor://job-started` payload carry the real id, exactly as the
             // shell did inline under its `jobs.lock()`.
-            let job_id = match host.job_new_id(
+            let job_id = match host.new_id(
                 &name,
                 &pname,
                 &command,
@@ -177,7 +180,7 @@ fn install_spawn(
 
             // Drive the real spawn shell-side (registry already holds the job,
             // the shell emits `arbor://job-started` and calls `spawn_job`).
-            if let Err(e) = host.job_spawn(serde_json::json!({
+            if let Err(e) = host.spawn(serde_json::json!({
                 "job_id":         job_id,
                 "name":           name,
                 "plugin_name":    pname,
@@ -202,7 +205,7 @@ fn install_spawn(
 }
 
 fn install_list(
-    host: NsHostHandle,
+    host: JobHostOps,
     _ctx: &ApiCtx,
     lua: &Lua,
     job_table: &Table,
@@ -210,7 +213,7 @@ fn install_list(
     let list_fn = lua
         .create_function(move |lua_ctx, ()| -> LuaTuple {
             // Host returns the serde-serialized job list as a JSON array.
-            let json = match host.job_list() {
+            let json = match host.list() {
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
@@ -227,7 +230,7 @@ fn install_list(
 }
 
 fn install_cancel(
-    host: NsHostHandle,
+    host: JobHostOps,
     _ctx: &ApiCtx,
     lua: &Lua,
     job_table: &Table,
@@ -237,7 +240,7 @@ fn install_cancel(
         .create_function(move |_lua_ctx, job_id: String| {
             // Best-effort: the shell's `cancel` never fails; swallow any
             // host-call error so the Lua surface stays `→ nil` unconditionally.
-            let _ = host.job_cancel(&job_id);
+            let _ = host.cancel(&job_id);
             Ok(())
         })
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -248,7 +251,7 @@ fn install_cancel(
 }
 
 fn install_dismiss(
-    host: NsHostHandle,
+    host: JobHostOps,
     _ctx: &ApiCtx,
     lua: &Lua,
     job_table: &Table,
@@ -261,7 +264,7 @@ fn install_dismiss(
         .create_function(move |_lua_ctx, job_id: String| {
             // A poisoned-mutex / channel error maps to `false` (not removed),
             // matching the shell's `else { false }` fallback.
-            let dismissed = host.job_dismiss(&job_id).unwrap_or(false);
+            let dismissed = host.dismiss(&job_id).unwrap_or(false);
             Ok(dismissed)
         })
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -272,7 +275,7 @@ fn install_dismiss(
 }
 
 fn install_clear_finished(
-    host: NsHostHandle,
+    host: JobHostOps,
     _ctx: &ApiCtx,
     lua: &Lua,
     job_table: &Table,
@@ -284,7 +287,7 @@ fn install_clear_finished(
         .create_function(move |lua_ctx, ()| {
             // A channel/mutex error maps to an empty list, matching the shell's
             // `else { Vec::new() }` fallback.
-            let cleared: Vec<String> = host.job_clear_finished().unwrap_or_default();
+            let cleared: Vec<String> = host.clear_finished().unwrap_or_default();
             let out = lua_ctx.create_table()?;
             for id in cleared {
                 out.push(id)?;

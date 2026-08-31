@@ -207,6 +207,101 @@ end`, '.lua')}</pre>
   <code>none</code> and <code>some(none)</code>.
 </p>
 
+<h3>Payloads: call_to_file and call_from_file</h3>
+<p>
+  <code>call</code> answers in JSON, which is the wrong shape for a blob: a megabyte of payload
+  becomes six megabytes of number-array, serialised and parsed once in every process it
+  crosses. When the payload <em>is</em> the point, two calls move it between the extension and
+  a local file without it ever becoming a document — or passing through Lua.
+</p>
+<pre class="language-lua">{@html highlight(`-- Download: the extension's bytes go straight to the file.
+local written = arbor.ext.call_to_file{
+  interface = "cloud-provider", id = "gcs", method = "read",
+  args = { key, { start = 0, ["end"] = 8 * 1024 * 1024 } },
+  path = dest, append = true,
+}
+
+-- Upload: the file's bytes are lowered into argument 2.
+arbor.ext.call_from_file{
+  interface = "cloud-provider", id = "gcs", method = "write",
+  args = { key, false, "application/octet-stream" }, file_arg = 2,
+  path = src, offset = 0, length = 8 * 1024 * 1024,
+}`, '.lua')}</pre>
+<p>
+  <code>call_to_file</code> answers with the number of bytes written; <code>append</code>
+  decides whether it adds to the file or replaces it, so a large transfer is a loop of ranged
+  calls appending in order. <code>call_from_file</code> answers with the call's own return
+  value; <code>file_arg</code> is <strong>1-based</strong> like every Lua index, and whatever
+  <code>args</code> holds at that position is ignored — write <code>false</code> there, since
+  <code>nil</code> would end the list.
+</p>
+<p>
+  Both need <code>service_call</code> like <code>call</code> does, <em>and</em> the
+  <code>fs</code> permission for the path: they touch the disk, so the path goes through the
+  same permission and scope check as <code>arbor.fs.*</code>. A relative path resolves against
+  the active project.
+</p>
+
+<h3>arbor.fs.stat and arbor.fs.user_dirs</h3>
+<p>
+  <code>stat(path)</code> answers with <code>size</code>, <code>modified</code> (unix seconds,
+  or <code>nil</code> when the filesystem reports none), <code>is_dir</code>,
+  <code>is_file</code>, <code>readonly</code>. It is what <code>list</code> does not carry, and
+  what every "is this copy still current?" comparison is built from. Needs
+  <code>fs = "read"</code>.
+</p>
+<p>
+  <code>user_dirs()</code> answers with <code>home</code>, <code>config</code>,
+  <code>data</code> and <code>temp</code> — for finding a file another tool wrote, at a path
+  that differs per platform. It needs no permission (these are locations, not contents) and
+  reading anything there still goes through the <code>fs</code> gate. Reading environment
+  variables would be the alternative, and would mean every plugin could read every variable,
+  including the ones holding tokens.
+</p>
+
+<h2>arbor.oauth — signing in, without Arbor knowing the provider</h2>
+<p>
+  Two halves of an OAuth flow cannot live in a package: the <strong>loopback listener</strong>
+  the browser redirects to with the authorization code, and the <strong>keychain</strong> the
+  tokens belong in. Arbor supplies exactly those two. Everything else — the endpoints, the
+  client, the scopes, the dialect a particular provider insists on — is data you pass, so no
+  provider is written down anywhere in Arbor.
+</p>
+<pre class="language-lua">{@html highlight(`local url, err = arbor.oauth.start{
+  slot          = "oauth",                   -- one of your [[credentials]] slots
+  auth_url      = "https://accounts.example/o/oauth2/v2/auth",
+  token_url     = "https://oauth2.example/token",
+  client_id     = cfg.client_id,
+  client_secret = cfg.client_secret,          -- optional
+  scope         = { "https://example/auth/storage.read_write" },
+  redirect_port = 7732,
+  extra_params  = { access_type = "offline", prompt = "consent" },
+  label         = "Example Storage",
+  on_done       = "myplugin:oauth-done",      -- fired with { ok, error? }
+}
+arbor.ui.open_url(url)
+
+-- Later, before a request: renew only if the stored token is nearly out.
+local r = arbor.oauth.refresh{ slot = "oauth", token_url = "…", min_remaining_secs = 60 }
+-- r.refreshed == false  → the stored one was still good`, '.lua')}</pre>
+<p>
+  <code>start</code> returns as soon as there is a URL to open — it never waits for the person.
+  The outcome arrives as the <code>on_done</code> hook, on your plugin's own host.
+</p>
+<p>
+  What lands in the slot is a JSON document: <code>refresh_token</code>,
+  <code>access_token</code>, <code>expires_at</code>, and the client the tokens were issued to.
+  That shape is documented because it has a second reader — an <strong>extension</strong> of
+  yours can read <code>access_token</code> out of the same slot through
+  <code>arbor:host/secrets</code>, which is how a compiled provider authenticates without ever
+  being part of the flow.
+</p>
+<p>
+  The slot must be one your manifest declared in <code>[[credentials]]</code>. The check is the
+  same call that builds the account name, so there is no order in which a plugin could reach
+  the store without having passed it.
+</p>
+
 <h2>arbor.json — encode / decode</h2>
 <pre class="language-lua">{@html highlight(`local s, err = arbor.json.encode({ key = "val", n = 42 })
 -- s = '{"key":"val","n":42}'   err = nil on success

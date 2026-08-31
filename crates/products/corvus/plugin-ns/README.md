@@ -30,9 +30,11 @@ concrete backend.
 | `TabsInstaller` | `arbor.tabs.*`: `open_repo`. **DIRECT** — emits `arbor://open-repo-tab`. |
 | `IssuesInstaller` | `arbor.issues.*`: `search` / `get` / `lookup` / `transition` / `comment` / `branch_name`. **DIRECT** — corvus-be owns the issue-tracker registry. |
 | `TerminalInstaller` | `arbor.terminal.*`: `exec`. **DIRECT** — runs the command in-process. |
-| `JobInstaller` | `arbor.job.*`: `new_id` / `spawn` / `list` / `cancel` / `dismiss` / `clear_finished`. **PROXY** (`__job_*`) — the `JobRegistry` + OS process live in the shell. |
 | `PipelineInstaller` | `arbor.pipeline.*`: `define` / `run` / `resume` / `discard` / `is_locked` / `list` / `get` / `cancel` / `list_runs` / `get_run` / `list_ops` (`register_op`/`unregister_op` are Lua-local). **PROXY** (`__pipeline_*`) — the `PipelineEngine`/`PipelineRuntime` live in the shell. ⚠️ `lua_op` callback-into-BE delivery degrades (same gap as `arbor.job.on_done`). |
-| `CloudInstaller` | `arbor.cloud.*`: secrets / `test_connection[_async]` / `list[_stream]` / `search_stream` / `stat` / `delete` / `copy` / `download[_many]` / `upload` / `sync` / `concat_files` / `cancel` / `is_cancelled` / `report_progress` / `report_done` / `pick_chunk_order` / `oauth_start`. **PROXY** (`__cloud_*`) — the whole cloud stack lives in the shell. ⚠️ streamed/async-reply tails fire on the shell's plugin host, not corvus-be's. |
+
+`JobInstaller` and `CloudInstaller` used to be in this table and are now in
+`arbor-plugin-ns`. Neither was ever about git: they were here because Corvus was the first
+product with a plugin host, and that made them unreachable from the second one.
 | `BrpInstaller` | `arbor.brp.*`: `connect` / `disconnect` / `status` / `call` / `watch` / `unwatch`. **PROXY** (`__brp_*`) — the `BrpRegistry` (HTTP client + SSE) lives in the shell. ⚠️ `watch` SSE events fire shell-side and never reach corvus-be VMs. |
 
 Every installer is byte-for-byte the shell's surface (names, arg shapes,

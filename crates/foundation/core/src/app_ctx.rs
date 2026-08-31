@@ -132,6 +132,62 @@ pub trait AppCtx: Any + Send + Sync {
         Err("extensions: not supported by this host".to_string())
     }
 
+    /// Call one function and write the bytes it returns into a local file, answering with how
+    /// many were written.
+    ///
+    /// Separate from [`ext_call`](Self::ext_call) because of what a blob costs as JSON: a
+    /// megabyte of payload becomes six megabytes of number-array, serialised, parsed and held
+    /// once in each process it crosses. Anything moving bytes — a download written chunk by
+    /// chunk — uses this and they never become a document.
+    ///
+    /// `file_json` is the destination: the absolute path, and whether to append. The path is
+    /// checked against the calling plugin's `fs` permission BEFORE this is reached, in the
+    /// namespace that has the plugin's context; a host implementing this writes where it is
+    /// told.
+    fn ext_call_to_file(
+        &self,
+        _plugin: &str,
+        _spec_json: &str,
+        _file_json: &str,
+    ) -> Result<u64, String> {
+        Err("extensions: not supported by this host".to_string())
+    }
+
+    /// Call one function passing the contents of a local file as one of its arguments — the
+    /// upload direction of [`ext_call_to_file`](Self::ext_call_to_file), with the same
+    /// reasoning and the same permission rule. Answers with the call's return value as JSON.
+    fn ext_call_from_file(
+        &self,
+        _plugin: &str,
+        _spec_json: &str,
+        _file_json: &str,
+    ) -> Result<String, String> {
+        Err("extensions: not supported by this host".to_string())
+    }
+
+    // ── OAuth ────────────────────────────────────────────────────────────
+    //
+    // The engine, never the provider. Which endpoints, which scopes, which client: all of
+    // that arrives as data in `spec_json`, from the plugin that knows. What the host
+    // contributes is the two halves a plugin cannot have — the loopback listener the browser
+    // redirects to, and the credential store the tokens land in.
+    //
+    // The slot named in the spec was already checked against the plugin's declared
+    // `[[credentials]]` by `arbor.oauth`, in the host that holds the manifest.
+
+    /// Begin an installed-app flow; answers with the URL to open in a browser. The outcome
+    /// arrives later as the plugin hook the spec named.
+    fn oauth_start(&self, _plugin: &str, _spec_json: &str) -> Result<String, String> {
+        Err("oauth: not supported by this host".to_string())
+    }
+
+    /// Renew the access token in a plugin's slot from the refresh token beside it. Answers
+    /// `{ refreshed, expires_in }` as JSON — `refreshed: false` when the stored one still had
+    /// enough life left to be worth keeping.
+    fn oauth_refresh(&self, _plugin: &str, _spec_json: &str) -> Result<String, String> {
+        Err("oauth: not supported by this host".to_string())
+    }
+
     /// Dispatch a gated host built-in command (`arbor:area.verb`) a plugin
     /// invoked through the command-invocation protocol. Resolution + both
     /// capability gates already ran in the plugin host; this only runs the

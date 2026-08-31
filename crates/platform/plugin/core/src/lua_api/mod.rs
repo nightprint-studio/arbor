@@ -92,6 +92,8 @@ pub fn register(
     ns::meta::install(&ctx, lua, &arbor)?;
     ns::settings::install(&ctx, lua, &arbor)?;
     ns::credentials::install(&ctx, lua, &arbor)?;
+    // After `credentials`: the same store, reached through a flow instead of by hand.
+    ns::oauth::install(&ctx, lua, &arbor)?;
     ns::ext::install(&ctx, lua, &arbor)?;
     ns::http::install(&ctx, lua, &arbor)?;
     ns::timer::install(&ctx, lua, &arbor)?;

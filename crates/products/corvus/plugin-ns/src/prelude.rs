@@ -9,9 +9,7 @@ pub use crate::installers;
 
 pub use crate::brp::BrpInstaller;
 pub use crate::ci::CiInstaller;
-pub use crate::cloud::CloudInstaller;
 pub use crate::issues::IssuesInstaller;
-pub use crate::job::JobInstaller;
 pub use crate::linked_worktrees::LinkedWorktreesInstaller;
 pub use crate::mr::MrInstaller;
 pub use crate::notes::NotesInstaller;

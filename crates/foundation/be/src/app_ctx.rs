@@ -44,6 +44,43 @@ impl BackendAppCtx {
         self.host = Some(host);
         self
     }
+
+    /// The shared half of the two OAuth calls: the spec crosses as JSON, the handler differs.
+    fn oauth_call(
+        &self,
+        method: &str,
+        plugin: &str,
+        spec_json: &str,
+    ) -> Result<serde_json::Value, String> {
+        let spec: serde_json::Value =
+            serde_json::from_str(spec_json).map_err(|e| format!("arbor.oauth: {e}"))?;
+        match &self.host {
+            Some(h) => h.call(method, serde_json::json!({ "plugin": plugin, "spec": spec })),
+            None => Err("arbor.oauth: no reverse channel to the shell".to_string()),
+        }
+    }
+
+    /// The shared half of the two byte-shaped extension calls: same two documents, same
+    /// missing-channel message, different handler.
+    fn ext_file_call(
+        &self,
+        method: &str,
+        plugin: &str,
+        spec_json: &str,
+        file_json: &str,
+    ) -> Result<serde_json::Value, String> {
+        let spec: serde_json::Value =
+            serde_json::from_str(spec_json).map_err(|e| format!("arbor.ext: {e}"))?;
+        let file: serde_json::Value =
+            serde_json::from_str(file_json).map_err(|e| format!("arbor.ext: {e}"))?;
+        match &self.host {
+            Some(h) => h.call(
+                method,
+                serde_json::json!({ "plugin": plugin, "spec": spec, "file": file }),
+            ),
+            None => Err("arbor.ext: no reverse channel to the shell".to_string()),
+        }
+    }
 }
 
 impl AppCtx for BackendAppCtx {
@@ -107,6 +144,42 @@ impl AppCtx for BackendAppCtx {
                 .map(|v| v.to_string()),
             None => Err("arbor.ext: no reverse channel to the shell".to_string()),
         }
+    }
+
+    // The two byte-shaped calls. The FILE is what crosses, not the bytes: both processes are
+    // on the same machine, so naming the path costs nothing and carrying a download through
+    // the pipe as a JSON number-array would cost everything.
+    fn ext_call_to_file(
+        &self,
+        plugin: &str,
+        spec_json: &str,
+        file_json: &str,
+    ) -> Result<u64, String> {
+        let v = self.ext_file_call("__ext_call_to_file", plugin, spec_json, file_json)?;
+        Ok(v.as_u64().unwrap_or(0))
+    }
+
+    fn ext_call_from_file(
+        &self,
+        plugin: &str,
+        spec_json: &str,
+        file_json: &str,
+    ) -> Result<String, String> {
+        Ok(self.ext_file_call("__ext_call_from_file", plugin, spec_json, file_json)?.to_string())
+    }
+
+    // The OAuth engine is the shell's: it owns the loopback listener and the keychain. A
+    // backend only carries the plugin's spec across.
+    fn oauth_start(&self, plugin: &str, spec_json: &str) -> Result<String, String> {
+        self.oauth_call("__oauth_start", plugin, spec_json).map(|v| {
+            // The URL comes back as a JSON string; a plugin opens it, so it must not still be
+            // wearing its quotes.
+            v.as_str().unwrap_or_default().to_string()
+        })
+    }
+
+    fn oauth_refresh(&self, plugin: &str, spec_json: &str) -> Result<String, String> {
+        Ok(self.oauth_call("__oauth_refresh", plugin, spec_json)?.to_string())
     }
 
     fn open_path(&self, path: &str) -> Result<(), String> {

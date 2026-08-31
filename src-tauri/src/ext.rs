@@ -38,7 +38,7 @@
 use std::sync::Arc;
 
 use arbor_plugin_wasm::prelude::{
-    ExtensionEntry, ExtensionIndex, GuestCaps, InterfaceSurface, Services,
+    DynGuest, ExtensionEntry, ExtensionIndex, GuestCaps, InterfaceSurface, Services,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -79,6 +79,33 @@ pub struct CallSpec {
 
 fn one() -> u32 {
     1
+}
+
+/// Where the bytes of a byte-shaped call come from, or go.
+///
+/// Paired with a [`CallSpec`] by [`call_to_file`] / [`call_from_file`]. The path arrives
+/// already absolute and already checked against the calling plugin's `fs` permission — that
+/// check belongs to the plugin's own context, which lives in the backend, so it happens there
+/// and this side does not repeat it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileSpec {
+    /// Absolute path of the local file.
+    pub path: String,
+    /// Append rather than truncate (`call_to_file`). A chunked download is a sequence of ranged
+    /// reads appended in order, so this is the normal case after the first chunk.
+    #[serde(default)]
+    pub append: bool,
+    /// Which positional argument the file's bytes are lowered into (`call_from_file`), 1-based
+    /// to match Lua's own indexing. Whatever `args` holds at that position is ignored.
+    #[serde(default)]
+    pub file_arg: usize,
+    /// Read from this offset (`call_from_file`). Lets an upload be chunked without the caller
+    /// holding the file.
+    #[serde(default)]
+    pub offset: u64,
+    /// Read at most this many bytes; `0` means to the end.
+    #[serde(default)]
+    pub length: u64,
 }
 
 fn index() -> Option<(ExtensionIndex, Vec<arbor_plugin_types::prelude::Manifest>)> {
@@ -186,8 +213,12 @@ fn resolve_export(
     }
 }
 
-/// Call one function on one extension.
-pub fn call(spec: &CallSpec) -> Result<Json, String> {
+/// Open the guest a spec addresses, and resolve which of its exports to look in.
+///
+/// The three entry points below differ only in what they do with the call's bytes; getting to
+/// the call is the same every time, and a second copy of it would be a second place for the
+/// "not installed / would not start / which export" messages to drift.
+fn open(spec: &CallSpec) -> Result<(DynGuest, Option<String>), String> {
     let (index, manifests) = index().ok_or("plugins could not be read")?;
     let entry = index
         .resolve(&spec.interface, spec.version, &spec.id)
@@ -206,7 +237,86 @@ pub fn call(spec: &CallSpec) -> Result<Json, String> {
 
     let exports = guest.surface(host.engine());
     let export = resolve_export(&exports, &spec.interface, spec.export.as_deref())?;
+    Ok((guest, export))
+}
+
+/// Call one function on one extension.
+pub fn call(spec: &CallSpec) -> Result<Json, String> {
+    let (mut guest, export) = open(spec)?;
     guest.call(export.as_deref(), &spec.method, &spec.args)
+}
+
+/// Call one function and write its bytes to a local file. Returns how many were written.
+///
+/// Why this exists rather than the caller doing it: the answer is a blob, and the way back to
+/// a plugin is JSON. A megabyte of object becomes six megabytes of number-array to serialise,
+/// parse and hold — once in each process it passes through. Here the bytes go from the guest
+/// to the file and are never a document.
+///
+/// It is also what keeps the host out of the domain. Arbor is not learning what a download is;
+/// it is writing the result of a call it knows nothing about into a path the caller named.
+pub fn call_to_file(spec: &CallSpec, file: &FileSpec) -> Result<u64, String> {
+    use std::io::Write;
+
+    let (mut guest, export) = open(spec)?;
+    let bytes = guest.call_to_bytes(export.as_deref(), &spec.method, &spec.args)?;
+
+    let path = std::path::Path::new(&file.path);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut out = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(file.append)
+        .truncate(!file.append)
+        .open(path)
+        .map_err(|e| format!("arbor.ext.call_to_file {}: {e}", file.path))?;
+    out.write_all(&bytes)
+        .map_err(|e| format!("arbor.ext.call_to_file {}: {e}", file.path))?;
+    Ok(bytes.len() as u64)
+}
+
+/// Call one function passing the contents of a local file as one of its arguments.
+///
+/// The upload direction of [`call_to_file`], and the same reasoning: an argument that is a blob
+/// has no business being a JSON array. `offset` / `length` are what make a chunked upload
+/// possible without the caller holding the whole file.
+pub fn call_from_file(spec: &CallSpec, file: &FileSpec) -> Result<Json, String> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let bytes_at = byte_arg_index(file.file_arg, spec.args.len())?;
+
+    let mut f = std::fs::File::open(&file.path)
+        .map_err(|e| format!("arbor.ext.call_from_file {}: {e}", file.path))?;
+    if file.offset > 0 {
+        f.seek(SeekFrom::Start(file.offset))
+            .map_err(|e| format!("arbor.ext.call_from_file {}: {e}", file.path))?;
+    }
+    let mut bytes = Vec::new();
+    let read = if file.length > 0 {
+        f.take(file.length).read_to_end(&mut bytes)
+    } else {
+        f.read_to_end(&mut bytes)
+    };
+    read.map_err(|e| format!("arbor.ext.call_from_file {}: {e}", file.path))?;
+
+    let (mut guest, export) = open(spec)?;
+    guest.call_with_bytes(export.as_deref(), &spec.method, &spec.args, bytes_at, &bytes)
+}
+
+/// Turn the caller's 1-based `file_arg` into the 0-based position the bridge wants.
+///
+/// 1-based on the way in because the caller is writing Lua, where every index is; converted
+/// here, once, rather than at the call site where an off-by-one would surface as bytes landing
+/// in the wrong parameter.
+fn byte_arg_index(file_arg: usize, argc: usize) -> Result<usize, String> {
+    if file_arg == 0 || file_arg > argc {
+        return Err(format!(
+            "arbor.ext.call_from_file: `file_arg` must name one of the {argc} argument(s) (1-based)"
+        ));
+    }
+    Ok(file_arg - 1)
 }
 
 #[cfg(test)]
@@ -260,6 +370,30 @@ mod tests {
         // `None` means "look the function up at the top level", which is what a component
         // exporting bare functions needs.
         assert_eq!(resolve_export(&[], "anything", None).unwrap(), None);
+    }
+
+    #[test]
+    fn a_byte_argument_is_named_the_way_lua_counts() {
+        assert_eq!(byte_arg_index(1, 3).unwrap(), 0);
+        assert_eq!(byte_arg_index(3, 3).unwrap(), 2);
+    }
+
+    #[test]
+    fn a_byte_argument_outside_the_call_is_refused() {
+        // Zero is the give-away that somebody wrote a 0-based index; past the end is a spec
+        // that no longer matches the call it was written for. Both would otherwise reach the
+        // bridge as a position it cannot check against anything.
+        assert!(byte_arg_index(0, 2).is_err());
+        assert!(byte_arg_index(3, 2).is_err());
+    }
+
+    #[test]
+    fn a_file_spec_defaults_to_truncating_a_whole_file() {
+        // Every field optional: the common call is "write the answer here", and the chunked
+        // variants are the ones that say more.
+        let file: FileSpec = serde_json::from_value(serde_json::json!({ "path": "/tmp/x" })).unwrap();
+        assert!(!file.append);
+        assert_eq!((file.file_arg, file.offset, file.length), (0, 0, 0));
     }
 
     #[test]

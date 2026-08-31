@@ -26,6 +26,10 @@ arbor-plugin-core = { path = "../../../platform/plugin/core" }
 # dispatch/introspection), added to the dispatch builder as the `PluginRpc`
 # bundle and run against the local `CorvusRpcCtx` adapter (`plugin_rpc.rs`).
 arbor-plugin-rpc  = { path = "../../../platform/plugin/rpc" }
+# The platform's Lua namespaces (`arbor.job`, `arbor.cloud`): product-agnostic by
+# construction — every op forwards to the shell over the reverse channel — so they are a
+# platform crate this backend installs rather than namespaces of its own.
+arbor-plugin-ns   = { path = "../../../platform/plugin/ns" }
 # The Tauri-free job model (`JobSpec`/`JobStatus`): OOP handlers drive jobs in the
 # shell's single-source `JobRegistry` over the reverse channel (`be/src/jobs.rs`).
 arbor-feedback    = { path = "../../../platform/feedback" }

@@ -1,12 +1,19 @@
 /**
- * Pure mapping `PluginContribution → PluginSidebarSection`.
+ * The `arbor:sidebar` contribution point: the mapping to a typed section, and the two
+ * lookups every consumer of it needs.
  *
- * Consumers (ActivityBarLeft, ActivityBarRight, CustomizeActivityBarModal,
- * AppShell, PluginTreeSidebar) read
- * `contributionStore.forPoint('arbor:sidebar')`, filter out items from
- * disabled plugins, then run each entry through `parseSidebarSection` to
- * get a typed shape.
+ * A plugin registers a panel with `arbor.ui.add_sidebar{…}` and says where it wants to
+ * live (`side`, `position`) — the product puts a button on the matching rail and renders
+ * the panel when it is pressed. Corvus does that, and so does Bennu.
+ *
+ * `enabledSidebarSections()` and `findSidebarSection()` are here rather than restated at
+ * each call site because "the sections that count" is one rule — registered, from a plugin
+ * that is enabled — and it was already written out four times inside Corvus's shell alone.
+ * A `plugin:<name>:<id>` key is the identity a panel is addressed by across the two products
+ * (rail button, active-panel state, `arbor.ui.open_panel`), so it is built here too.
  */
+import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
+import { pluginStore } from '$lib/stores/plugin.svelte';
 import type { PluginContribution } from '$lib/types/corvus/contribution';
 import type { PluginSidebarSection, PluginSidebarSearch } from '$lib/types/plugin';
 
@@ -58,4 +65,41 @@ export function parseSidebarSection(c: PluginContribution): PluginSidebarSection
     kind:        p.kind ?? 'form',
     search:      parseSearch(p.search),
   };
+}
+
+/** The `plugin:<name>:<id>` key a panel is addressed by — rail button id, active-panel
+ *  state, and the pair `arbor.ui.open_panel` arrives as. */
+export function sidebarKey(s: { plugin_name: string; id: string }): string {
+  return `plugin:${s.plugin_name}:${s.id}`;
+}
+
+/** Split a `plugin:<name>:<id>` key back into its halves; `null` for anything else (a
+ *  product's own panel id, or a key from a plugin that has since gone). */
+export function parsePluginKey(
+  key: string | null | undefined,
+): { plugin_name: string; panel_id: string } | null {
+  if (!key || !key.startsWith('plugin:')) return null;
+  const rest  = key.slice('plugin:'.length);
+  const colon = rest.indexOf(':');
+  if (colon < 0) return null;
+  return { plugin_name: rest.slice(0, colon), panel_id: rest.slice(colon + 1) };
+}
+
+/** Every sidebar panel registered by a plugin that is currently enabled. Reads the
+ *  contribution store, so it is reactive inside a `$derived` / `$effect`. */
+export function enabledSidebarSections(): PluginSidebarSection[] {
+  return contributionStore.forPoint(SIDEBAR_POINT)
+    .filter((c) => pluginStore.isEnabled(c.plugin_name))
+    .map(parseSidebarSection);
+}
+
+/** The registration behind a `plugin:<name>:<id>` key, or `null` when there is none —
+ *  a stale key (plugin disabled, panel unregistered) is not an error, it just has
+ *  nothing to render. */
+export function findSidebarSection(
+  key: { plugin_name: string; panel_id: string } | null,
+): PluginSidebarSection | null {
+  if (!key) return null;
+  return enabledSidebarSections()
+    .find((s) => s.plugin_name === key.plugin_name && s.id === key.panel_id) ?? null;
 }

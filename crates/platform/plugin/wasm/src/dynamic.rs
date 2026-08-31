@@ -145,6 +145,60 @@ impl DynGuest {
         func: &str,
         args: &[Json],
     ) -> Result<Json, String> {
+        let results = self.invoke(interface, func, args, None)?;
+        lift(func, results)
+    }
+
+    /// Call a function whose answer is a blob, and get the blob.
+    ///
+    /// Same call as [`call`](Self::call), different lift: a `list<u8>` result comes back as
+    /// `Vec<u8>` instead of a JSON array of numbers. That is not a convenience — a JSON array
+    /// spends five or six bytes and a parse on every byte, which turns "read 8 MB of an
+    /// object" into tens of megabytes of text nobody reads. A caller moving bytes (the host
+    /// writing a download to disk) uses this; a caller reading a value uses `call`.
+    ///
+    /// A result that is not a byte list is refused by name, because the alternative is
+    /// silently writing a file full of something else.
+    pub fn call_to_bytes(
+        &mut self,
+        interface: Option<&str>,
+        func: &str,
+        args: &[Json],
+    ) -> Result<Vec<u8>, String> {
+        let results = self.invoke(interface, func, args, None)?;
+        bytes_from(func, unwrap_result(func, results)?)
+    }
+
+    /// Call a function passing raw bytes as one of its arguments.
+    ///
+    /// `bytes_at` is the 0-based position of a `list<u8>` parameter; whatever `args` holds at
+    /// that position is ignored and the bytes are lowered in its place. The mirror of
+    /// [`call_to_bytes`](Self::call_to_bytes), for the upload direction.
+    pub fn call_with_bytes(
+        &mut self,
+        interface: Option<&str>,
+        func: &str,
+        args: &[Json],
+        bytes_at: usize,
+        bytes: &[u8],
+    ) -> Result<Json, String> {
+        let results = self.invoke(interface, func, args, Some((bytes_at, bytes)))?;
+        lift(func, results)
+    }
+
+    /// Resolve the export, lower the arguments, call, and hand back the raw results.
+    ///
+    /// The three entry points above differ only in how they read the answer, so this is
+    /// everything that happens before that — including `post_return`, which is required
+    /// before the next call on this instance and whose absence shows up much later as an
+    /// unrelated failure.
+    fn invoke(
+        &mut self,
+        interface: Option<&str>,
+        func: &str,
+        args: &[Json],
+        bytes_at: Option<(usize, &[u8])>,
+    ) -> Result<Vec<Val>, String> {
         let idx = match interface {
             Some(iface) => {
                 let parent = self
@@ -177,8 +231,11 @@ impl DynGuest {
             .iter()
             .zip(args)
             .enumerate()
-            .map(|(i, (ty, arg))| {
-                json_to_val(ty, arg).map_err(|e| format!("'{func}' argument {i}: {e}"))
+            .map(|(i, (ty, arg))| match bytes_at {
+                // The byte argument never becomes JSON: it is lowered straight into the
+                // component-model list, which is the whole point of the byte-shaped calls.
+                Some((at, bytes)) if at == i => lower_bytes(ty, func, i, bytes),
+                _ => json_to_val(ty, arg).map_err(|e| format!("'{func}' argument {i}: {e}")),
             })
             .collect::<Result<_, _>>()?;
 
@@ -191,16 +248,66 @@ impl DynGuest {
         f.post_return(&mut self.store)
             .map_err(|e| format!("'{func}' post-return: {e}"))?;
 
-        match results.into_iter().next() {
-            None => Ok(Json::Null),
-            Some(Val::Result(Ok(v))) => Ok(v.map(|b| val_to_json(&b)).unwrap_or(Json::Null)),
-            Some(Val::Result(Err(e))) => Err(match e {
-                Some(b) => describe_error(&val_to_json(&b)),
-                None => format!("'{func}' failed"),
-            }),
-            Some(v) => Ok(val_to_json(&v)),
-        }
+        Ok(results)
     }
+}
+
+/// Read a call's single result as bytes.
+///
+/// A result that is not a byte list is refused by name: the alternative is silently writing a
+/// file full of something else, and the caller would find out about it much later, from a file
+/// that will not open.
+fn bytes_from(func: &str, val: Option<Val>) -> Result<Vec<u8>, String> {
+    match val {
+        Some(Val::List(items)) => items
+            .iter()
+            .map(|v| match v {
+                Val::U8(b) => Ok(*b),
+                other => Err(format!(
+                    "'{func}' returned a list of something other than bytes ({other:?})"
+                )),
+            })
+            .collect(),
+        Some(other) => Err(format!(
+            "'{func}' does not return bytes (got {other:?}) — call it with `call` instead"
+        )),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Lower a byte slice into a `list<u8>` parameter.
+///
+/// The type is checked rather than assumed: a caller that named the wrong position would
+/// otherwise get a trap from inside the guest, which reads as the extension being broken.
+fn lower_bytes(ty: &Type, func: &str, i: usize, bytes: &[u8]) -> Result<Val, String> {
+    match ty {
+        Type::List(l) if matches!(l.ty(), Type::U8) => {
+            Ok(Val::List(bytes.iter().map(|b| Val::U8(*b)).collect()))
+        }
+        _ => Err(format!("'{func}' argument {i} is not a list<u8>, so bytes cannot go there")),
+    }
+}
+
+/// The single result of a call, with a `result<_, E>` unwrapped into this call's `Err`.
+fn unwrap_result(func: &str, results: Vec<Val>) -> Result<Option<Val>, String> {
+    match results.into_iter().next() {
+        None => Ok(None),
+        Some(Val::Result(Ok(v))) => Ok(v.map(|b| *b)),
+        Some(Val::Result(Err(e))) => Err(match e {
+            Some(b) => describe_error(&val_to_json(&b)),
+            None => format!("'{func}' failed"),
+        }),
+        Some(v) => Ok(Some(v)),
+    }
+}
+
+/// The JSON reading of a call's results.
+///
+/// A function whose single result is a `result<_, E>` is unwrapped: an `err` becomes this
+/// call's error. That is the shape every interface in practice uses to report failure, and
+/// leaving it wrapped would make every caller unwrap it identically.
+fn lift(func: &str, results: Vec<Val>) -> Result<Json, String> {
+    Ok(unwrap_result(func, results)?.map(|v| val_to_json(&v)).unwrap_or(Json::Null))
 }
 
 /// Render a guest's error payload as a line a person reads.
@@ -484,6 +591,32 @@ pub fn val_to_json(v: &Val) -> Json {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn a_byte_list_comes_back_as_bytes() {
+        let v = Some(Val::List(vec![Val::U8(1), Val::U8(255)]));
+        assert_eq!(bytes_from("read", v).unwrap(), vec![1, 255]);
+    }
+
+    #[test]
+    fn a_result_that_is_not_bytes_is_refused_rather_than_written() {
+        // The caller is about to write this to a file. Coercing a string into "bytes" here
+        // would produce a file that opens as garbage, and the message would be about the
+        // file rather than about the call that was wrong.
+        let err = bytes_from("catalogue", Some(Val::String("nope".into()))).unwrap_err();
+        assert!(err.contains("does not return bytes"), "{err}");
+
+        let err = bytes_from("read", Some(Val::List(vec![Val::U32(9)]))).unwrap_err();
+        assert!(err.contains("other than bytes"), "{err}");
+    }
+
+    #[test]
+    fn a_call_with_no_result_reads_as_no_bytes() {
+        // A `func() -> result<_, error>` succeeding carries nothing, and "nothing" is an
+        // empty write, not a failure.
+        assert!(bytes_from("write", None).unwrap().is_empty());
+    }
     /// Un campo kebab arriva anche in snake_case.
     ///
     /// La regressione che questo fissa e' costata a un pacchetto mesh tutti i suoi parametri:
@@ -503,8 +636,6 @@ mod tests {
         // Un campo senza trattino resta uno solo: l'alias non e' rumore su ogni chiave.
         assert_eq!(obj.len(), 3);
     }
-
-    use super::*;
 
     #[test]
     fn scalars_coerce_from_the_json_a_plugin_would_write() {

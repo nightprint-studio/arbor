@@ -24,8 +24,13 @@ import type { FrameworkCatalogId } from '$lib/components/bennu/framework-catalog
 import { SvelteSet } from 'svelte/reactivity';
 import type { GenerateMode } from '$lib/components/bennu/bennu-intentions';
 
-/** Left tool windows (activity bar, top group). */
-export type LeftPanel = 'project' | 'structure' | 'dependencies';
+/** Left tool windows (activity bar, top group).
+ *
+ *  `plugin:<plugin>:<panel_id>` is a panel a plugin registered with `arbor.ui.add_sidebar`
+ *  asking for the left side — the plugin says where it wants to live and Bennu puts it there,
+ *  the same as Corvus does. Which of the three docks a plugin panel lands in is the plugin's
+ *  `side`/`position`, so all three panel types carry the key shape. */
+export type LeftPanel = 'project' | 'structure' | 'dependencies' | `plugin:${string}`;
 /**
  * Right tool windows (activity bar).
  *
@@ -95,6 +100,9 @@ export type BottomPanel =
    *  and closed from its own header. */
   | 'hierarchy'
   | 'forms'
+  /** A plugin panel registered with `position = "bottom"` — wide data a plugin wants read
+   *  beside the editor rather than in a column. Same key shape as the other two docks. */
+  | `plugin:${string}`
   | FrameworkCatalogId;
 
 /** Which tab the Go-to navigator opens on. */
@@ -326,14 +334,14 @@ function createBennuUiStore() {
      * side rail never reads as broken.
      */
     dropUnavailablePanels(keep: { left: LeftPanel[]; right: RightPanel[]; bottom: BottomPanel[] }) {
-      if (leftPanel && !keep.left.includes(leftPanel)) leftPanel = 'project';
-      // Plugin views are exempt: what a plugin offers is decided by the plugin's own targets
-      // and by whether it is enabled, never by whether the project is Maven or Cargo. Listing
-      // them in `keep.right` would mean the caller enumerating packages it cannot know.
-      if (rightPanel && !rightPanel.startsWith('plugin:') && !keep.right.includes(rightPanel)) {
-        rightPanel = null;
-      }
-      if (bottomPanel && !keep.bottom.includes(bottomPanel)) bottomPanel = null;
+      // Anything a plugin owns is exempt, in all three docks: what a plugin offers is decided
+      // by the plugin's own targets and by whether it is enabled, never by whether the project
+      // is Maven or Cargo. Listing them in `keep` would mean the caller enumerating packages
+      // it cannot know.
+      const plugin = (p: string | null) => !!p?.startsWith('plugin:');
+      if (leftPanel && !plugin(leftPanel) && !keep.left.includes(leftPanel)) leftPanel = 'project';
+      if (rightPanel && !plugin(rightPanel) && !keep.right.includes(rightPanel)) rightPanel = null;
+      if (bottomPanel && !plugin(bottomPanel) && !keep.bottom.includes(bottomPanel)) bottomPanel = null;
     },
 
     /** Open Settings, optionally landing on a specific page.

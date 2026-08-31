@@ -47,8 +47,9 @@ pub struct ArborCloudHost {
     plugin_host:   Arc<Mutex<PluginHost>>,
     sink:          Arc<dyn EventSink>,
     /// Handle to forward plugin hooks to the product backends where the
-    /// cloud-storage plugin now actually runs (post-flip it loads in `corvus-be`,
-    /// not the shell's `plugin_host`). See [`fire_plugin_hook`](Self::fire_plugin_hook).
+    /// cloud-storage plugin actually runs (post-flip it loads in the product backends —
+    /// `corvus-be`, `bennu-be` — not the shell's `plugin_host`). See
+    /// [`fire_plugin_hook`](Self::fire_plugin_hook).
     app:           AppHandle,
 }
 
@@ -83,12 +84,13 @@ impl CloudHost for ArborCloudHost {
     fn pending_ops(&self)    -> &CloudPendingOps   { &self.pending_ops }
 
     fn fire_plugin_hook(&self, plugin: &str, hook: &str, payload_json: &str) {
-        // The cloud-storage plugin is universal, so after the plugin-relocation
-        // flip it loads in `corvus-be`, NOT the shell's `plugin_host`. Fire on the
-        // shell host (a no-op unless something still loads cloud here) AND forward
-        // to the product backends where the plugin actually runs — otherwise every
-        // async cloud result (list-chunk pages, oauth-done, transfer job-done /
-        // progress) fires into the void and the UI hangs (e.g. "Loading…").
+        // The cloud-storage plugin is universal, so after the plugin-relocation flip it
+        // loads in the PRODUCT backends — one VM per product that enabled it — and not in
+        // the shell's `plugin_host`. Fire on the shell host (a no-op unless something still
+        // loads cloud here) AND forward to every backend that hosts plugins, otherwise an
+        // async cloud result (list-chunk pages, oauth-done, transfer job-done / progress)
+        // fires into the void for whichever product the user actually started it from, and
+        // that panel hangs on "Loading…".
         match self.plugin_host.lock() {
             Ok(host) => arbor_plugin_core::prelude::fire_on(&host, plugin, hook, payload_json),
             Err(e)   => tracing::warn!("plugin_host poisoned, dropping hook {plugin}:{hook}: {e}"),
@@ -161,12 +163,7 @@ pub fn install(app: &AppHandle) {
     //    `refresh_with` against the auth_gcs OnceLock.
     arbor_cloud::oauth_google::install_refresher();
 
-    // 2. Transport resolver — teaches the transfer loops how to find a provider package.
-    //    Installed unconditionally: it answers `None` when nothing is installed, which is
-    //    what keeps a machine with no packages on exactly the path it was on before.
-    arbor_cloud::transport::install_resolver(crate::cloud_guest::transport_resolver);
-
-    // 3. CloudHost — built once, shared via Arc so spawned tokio tasks
+    // 2. CloudHost — built once, shared via Arc so spawned tokio tasks
     //    inside arbor-cloud can clone cheaply.
     let state: tauri::State<'_, AppState> = app.state();
     // Cloud is a non-critical plugin feature: if the event sink isn't wired yet

@@ -28,6 +28,7 @@
                                data_table, filter_bar
     · FormNodeField          — every value-bearing node (text/select/file/
                                tree/table/kv_list/…) + the leaf `field`
+    · FormNodeReorderList    — a list whose ORDER is the answer (keyboard-first)
     · FormNodeVecField       — Vec2/Vec3/Vec4/Quat editor
     · FormNodePipelineEditor — wraps PluginPipelineEditor
 
@@ -73,6 +74,7 @@
   import FormNodeDiff          from './form-nodes/FormNodeDiff.svelte';
   import FormNodeTree          from './form-nodes/FormNodeTree.svelte';
   import FormNodeEmbed         from './form-nodes/FormNodeEmbed.svelte';
+  import FormNodeReorderList   from './form-nodes/FormNodeReorderList.svelte';
   import FormNodeVecField      from './form-nodes/FormNodeVecField.svelte';
   import FormNodePropertyGrid  from './form-nodes/FormNodePropertyGrid.svelte';
   import FormNodePipelineEditor from './form-nodes/FormNodePipelineEditor.svelte';
@@ -1237,6 +1239,8 @@
       <FormNodeEmbed {node} {ctx} />
     {:else if (node.type as string) === 'vec_field'}
       <FormNodeVecField {node} {ctx} />
+    {:else if (node.type as string) === 'reorder_list'}
+      <FormNodeReorderList {node} {ctx} />
     {:else if (node.type as string) === 'property_grid'}
       <FormNodePropertyGrid {node} {ctx} {renderNode} />
     {:else}

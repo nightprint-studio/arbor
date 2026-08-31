@@ -29,10 +29,9 @@
   import { untrack } from 'svelte';
   import { Search, Filter, Globe } from 'lucide-svelte';
   import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
-  import { pluginStore } from '$lib/stores/plugin.svelte';
   import { firePluginAction }  from '$lib/ipc/plugin';
   import { whenMatches }       from '$lib/contributions/when';
-  import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
+  import { findSidebarSection } from '$lib/contributions/sidebar';
   import PluginIcon      from './PluginIcon.svelte';
   import PanelShell      from '$lib/components/shared/ui/PanelShell.svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
@@ -59,18 +58,21 @@
      * close X is integrated into the same standardized chrome bar.
      */
     bottomMode?: boolean;
+    /**
+     * How the dock is closed, when the consumer owns that state.
+     *
+     * Defaults to Corvus's shared `uiStore` — which is a no-op in a product whose bottom
+     * dock is its own store, and that is exactly how the X on this header did nothing in
+     * Bennu. A product that mounts this passes its own closer.
+     */
+    onClose?:    () => void;
   }
-  let { pluginName, panelId, bottomMode = false }: Props = $props();
+  let { pluginName, panelId, bottomMode = false, onClose }: Props = $props();
 
   const ns = $derived(`${pluginName}:${panelId}`);
 
   // ── Section metadata (for header label / icon / tooltip) ──────────────────
-  const section = $derived(
-    contributionStore.forPoint(SIDEBAR_POINT)
-      .filter(c => !pluginStore.disabledPlugins.has(c.plugin_name))
-      .map(parseSidebarSection)
-      .find(s => s.plugin_name === pluginName && s.id === panelId) ?? null
-  );
+  const section = $derived(findSidebarSection({ plugin_name: pluginName, panel_id: panelId }));
 
   // ── Tree snapshot ─────────────────────────────────────────────────────────
   const snapshot = $derived(contributionStore.tree(pluginName, panelId));
@@ -468,7 +470,7 @@
      keep the same affordances regardless of dock side. -->
 <div class="plugin-tree-root" class:bottom-stack={bottomMode}>
 {#if bottomMode}
-  <BottomPanelHeader title={title || 'Plugin'} onClose={() => uiStore.setActiveBottomSection(null)}>
+  <BottomPanelHeader title={title || 'Plugin'} onClose={() => (onClose ? onClose() : uiStore.setActiveBottomSection(null))}>
     {#snippet icon()}
       {#if section?.icon}
         <PluginIcon name={section.icon} size={13} />

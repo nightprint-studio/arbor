@@ -500,6 +500,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbor-plugin-ns"
+version = "0.3.0"
+dependencies = [
+ "arbor-ipc",
+ "arbor-plugin-core",
+ "mlua",
+ "serde_json",
+]
+
+[[package]]
 name = "arbor-plugin-rpc"
 version = "0.3.0"
 dependencies = [
@@ -941,6 +951,7 @@ dependencies = [
  "arbor-ipc",
  "arbor-logscan",
  "arbor-plugin-core",
+ "arbor-plugin-ns",
  "arbor-plugin-rpc",
  "arbor-process-ext",
  "arbor-rpc",
@@ -2235,6 +2246,7 @@ dependencies = [
  "arbor-feedback",
  "arbor-ipc",
  "arbor-plugin-core",
+ "arbor-plugin-ns",
  "arbor-plugin-rpc",
  "arbor-process-ext",
  "arbor-rpc",

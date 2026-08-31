@@ -23,6 +23,10 @@ arbor-be   = { path = "../../../foundation/be" }
 arbor-plugin-core = { path = "../../../platform/plugin/core" }
 # The Plugin Manager's RPC surface, generic over a context — see `plugin_rpc.rs`.
 arbor-plugin-rpc  = { path = "../../../platform/plugin/rpc" }
+# The platform's Lua namespaces (`arbor.job`, `arbor.cloud`): product-agnostic by
+# construction — every op forwards to the shell over the reverse channel — so they are a
+# platform crate this backend installs rather than namespaces of its own.
+arbor-plugin-ns   = { path = "../../../platform/plugin/ns" }
 # The profile-aware config/data-path resolver: `init_active_profile()` seeds the
 # active profile FIRST in `main`, so the `bennu_*` config/data dirs resolve under the
 # launcher's profile.

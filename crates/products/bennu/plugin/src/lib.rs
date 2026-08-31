@@ -341,10 +341,19 @@ pub fn namespaces() -> Vec<Arc<dyn LuaNamespaceInstaller>> {
 
 /// The `arbor.*` installer bennu-be wires at boot.
 ///
-/// The host-pure namespaces plus this crate's own, in that order — `register_lua_api` runs the
-/// extras last so they can see everything already published.
-pub fn bennu_api_installer() -> Arc<dyn arbor_plugin_core::prelude::LuaApiInstaller> {
-    Arc::new(BennuApiInstaller { extra: namespaces() })
+/// The host-pure namespaces, then this crate's own, then whatever the backend adds — in that
+/// order, because `register_lua_api` runs the extras last so they can see everything already
+/// published.
+///
+/// `extra` is for the namespaces that are neither host-pure nor Bennu's: `arbor.cloud` is one,
+/// a platform surface that needs the backend's reverse channel and therefore cannot be built
+/// here (this crate has no `App`). Pass an empty vec for a plain host.
+pub fn bennu_api_installer(
+    extra: Vec<Arc<dyn LuaNamespaceInstaller>>,
+) -> Arc<dyn arbor_plugin_core::prelude::LuaApiInstaller> {
+    let mut all = namespaces();
+    all.extend(extra);
+    Arc::new(BennuApiInstaller { extra: all })
 }
 
 struct BennuApiInstaller {

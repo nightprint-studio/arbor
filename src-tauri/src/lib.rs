@@ -42,7 +42,6 @@ mod plugin_logs;
 mod plugin_wasm;
 // Routing the cloud's five storage primitives through a wasm provider when one is installed,
 // and falling through to the in-process implementation when none is.
-mod cloud_guest;
 mod ext;
 mod pipeline;
 mod git_provider;

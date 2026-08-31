@@ -14,7 +14,7 @@
   import BrandIcon from '$lib/components/shared/internal/BrandIcon.svelte';
   import type { ActivityBarEntry, ComboOption } from '$lib/types/plugin';
   import { ACTIVITY_BAR_POINT, parseActivityBarEntry } from '$lib/contributions/activity-bar';
-  import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
+  import { enabledSidebarSections, sidebarKey } from '$lib/contributions/sidebar';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
   import { activityBarConfigStore } from '$lib/stores/corvus/activityBarConfig.svelte';
   import PluginIcon from '../plugins/PluginIcon.svelte';
@@ -94,16 +94,11 @@
   // Right-side entries are owned by ActivityBarRight.svelte.
   // Ordering + visibility flow through `activityBarConfigStore` so the user
   // can hide / reorder them via the Customize Activity Bar modal.
-  function _leftSectionKey(s: { plugin_name: string; id: string }): string {
-    return `plugin:${s.plugin_name}:${s.id}`;
-  }
   function _leftResolveOrdered(position: 'top' | 'bottom') {
-    const sections = contributionStore.forPoint(SIDEBAR_POINT)
-      .filter(c => !pluginStore.disabledPlugins.has(c.plugin_name))
-      .map(parseSidebarSection)
+    const sections = enabledSidebarSections()
       .filter(s => s.side === 'left' && s.position === position);
-    const byKey = new Map(sections.map(s => [_leftSectionKey(s), s]));
-    const pluginIds = sections.map(_leftSectionKey);
+    const byKey = new Map(sections.map(s => [sidebarKey(s), s]));
+    const pluginIds = sections.map(sidebarKey);
     const merged = position === 'top'
       ? activityBarConfigStore.mergeTop(pluginIds)
       : activityBarConfigStore.mergeBottom(pluginIds);

@@ -22,6 +22,7 @@ pub(crate) mod keybinding;
 pub(crate) mod log;
 pub(crate) mod meta;
 pub(crate) mod notify;
+pub(crate) mod oauth;
 pub(crate) mod properties_studio;
 pub(crate) mod ron_studio;
 pub(crate) mod scheduler;
