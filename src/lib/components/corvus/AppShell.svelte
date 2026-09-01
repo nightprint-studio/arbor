@@ -73,12 +73,6 @@
   import { whatsNewStore } from '$lib/stores/whats_new.svelte';
   import { gitCliStore } from '$lib/stores/corvus/gitCli.svelte';
   import RepoBrowserModal from './RepoBrowserModal.svelte';
-  // Cloud bulk transfers surface via the standard JobRegistry → JobsOverlay
-  // flow: every download_many / sync registers a JobInfo with category
-  // "Cloud Storage". The bespoke aggregate-progress floater that used to
-  // live here was duplicative — the user already sees the running job in
-  // JobsOverlay and gets per-file detail in JobOutputPanel.
-  import CloudChunkOrderModal from '../shared/CloudChunkOrderModal.svelte';
   import { repoBrowserStore } from '$lib/stores/corvus/repoBrowser.svelte';
   import FileExplorerModal from '../sitta/FileExplorerModal.svelte';
   import BisectBanner from './BisectBanner.svelte';
@@ -2421,12 +2415,6 @@
       onClose={() => { uiStore.closeRepoBrowser(); repoBrowserStore.reset(); }}
     />
   {/if}
-
-  <!-- Cloud-storage chunk-order picker. Self-mounts on the Tauri event
-       `arbor://cloud-chunk-order-open`. Bulk-transfer progress is no longer
-       a separate floater — it surfaces through the standard JobsOverlay
-       (each download_many / sync is a JobInfo). -->
-  <CloudChunkOrderModal />
 
   <!-- Stats Overlay — self-contained (uses shared Modal shell). -->
   {#if statsOverlayOpen}

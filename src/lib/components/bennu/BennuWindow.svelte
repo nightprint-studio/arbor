@@ -69,7 +69,6 @@
   import PluginViewPanel from '$lib/components/plugins/PluginViewPanel.svelte';
   import PluginPanelSurface from '$lib/components/plugins/PluginPanelSurface.svelte';
   import PluginIcon from '$lib/components/plugins/PluginIcon.svelte';
-  import CloudChunkOrderModal from '$lib/components/shared/CloudChunkOrderModal.svelte';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
   import {
     enabledSidebarSections, findSidebarSection, parsePluginKey, sidebarKey,
@@ -2216,10 +2215,6 @@
      emits, and nothing happens anywhere. AFTER `PluginTools` — see its header for why the
      order matters. -->
 <PluginOverlays />
-<!-- Self-mounts on `arbor://cloud-chunk-order-open`. Here for the same reason
-     `PluginOverlays` is: a plugin talking to the user is universal, and a product that hosts
-     plugins mounts the surfaces they talk through. -->
-<CloudChunkOrderModal />
 {#if bennuUiStore.aboutOpen}
   <BennuAboutModal onClose={() => bennuUiStore.closeAbout()} />
 {/if}

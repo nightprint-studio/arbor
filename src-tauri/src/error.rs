@@ -50,23 +50,6 @@ pub enum AppError {
     Other(String),
 }
 
-/// Bridge `arbor_cloud::prelude::CloudError` into the host error enum so cloud
-/// commands can `?`-propagate without bespoke mapping at every call site.
-/// Mapping is variant-by-variant to preserve the existing wire shape (the
-/// frontend matches on the prefix in the message string).
-impl From<arbor_cloud::prelude::CloudError> for AppError {
-    fn from(e: arbor_cloud::prelude::CloudError) -> Self {
-        use arbor_cloud::prelude::CloudError as C;
-        match e {
-            C::Io(e)          => AppError::Io(e),
-            C::Json(e)        => AppError::Json(e),
-            C::AuthFailed(s)  => AppError::AuthFailed(s),
-            C::Cancelled     => AppError::Cancelled,
-            C::Other(s)       => AppError::Other(s),
-        }
-    }
-}
-
 /// Bridge `arbor_core::prelude::CoreError` (paths / http builder failures) into the
 /// host enum. Mapped to existing variants so the wire shape stays
 /// untouched.

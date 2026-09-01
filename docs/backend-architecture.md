@@ -399,7 +399,7 @@ At the arbor **root** (cross-profile, not in a profile): `oauth.toml` (OAuth ove
 `arbor/cache`, `toolchains/*.json` (Windows JDK paths), the portable git binary.
 
 **Secrets** are **not on disk**: the OS keyring holds OAuth tokens / SSH creds
-(`keyring` service `"arbor"`, plus `"arbor-cloud-storage"` for the cloud plugin), shared
+(`keyring` service `"arbor"`; a plugin's own secrets go in its credential slots), shared
 across profiles. They **do not migrate** between machines — re-authenticate on the new one.
 
 Per-repo config lives inside the working tree at `<repo>/.arbor/config.toml` (`RepoConfig`)

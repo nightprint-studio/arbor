@@ -17,6 +17,12 @@
   import Kbd             from './internal/Kbd.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';
   import { tooltip } from '$lib/actions/tooltip';
+  import { surfaceDef } from '$lib/stores/surfaces.svelte';
+
+  // This is Corvus's welcome page — it opens repositories, lists Corvus's recents, and only
+  // Corvus renders it. It used to say "Arbor", which is the app the product runs in, not the
+  // product; the name comes from the surface catalogue so it is spelled in one place.
+  const product = surfaceDef('corvus').label;
 
   let {
     onOpen,
@@ -171,7 +177,7 @@
            branding overrides paint here too without touching this file. -->
       <ArborLogo size={88} />
     </div>
-    <h1>Arbor</h1>
+    <h1>{product}</h1>
     <p class="subtitle">Git GUI Client</p>
 
     <div class="action-row">

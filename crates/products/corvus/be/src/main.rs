@@ -25,7 +25,7 @@ use corvus_git_provider_api::prelude::{
     CiFilter, FindingState, MrFilter, ProviderError, SecurityFilters, Severity,
 };
 use arbor_plugin_core::prelude::build_hook_dispatcher;
-use arbor_plugin_ns::prelude::{CloudHostOps, CloudInstaller, JobHostOps, JobInstaller};
+use arbor_plugin_ns::prelude::{JobHostOps, JobInstaller};
 use corvus_plugin::prelude::corvus_be_api_installer;
 use corvus_plugin_ns::prelude::NsHost;
 use serde_json::json;
@@ -1478,13 +1478,12 @@ fn main() {
     // The ordered git/product namespace set (and the UiBranding-after-core
     // invariant) is owned by `corvus-plugin-ns`, not spelled out here.
     let mut namespaces = corvus_plugin_ns::installers(ns_host.clone());
-    // `arbor.job` and `arbor.cloud` are NOT among them any more: every op forwards to the
-    // shell, and neither is about git, so they live in `arbor-plugin-ns` and Bennu installs
-    // the identical pair. Appended after the ordered set because each publishes its own table
-    // and touches nothing the others build — the "UiBranding last" invariant is about
-    // `arbor.ui`, which neither goes near.
+    // `arbor.job` is NOT among them: every op forwards to the shell and none of it is about
+    // git, so it lives in `arbor-plugin-ns` and Bennu installs the identical namespace.
+    // Appended after the ordered set because it publishes its own table and touches nothing
+    // the others build — the "UiBranding last" invariant is about `arbor.ui`, which it never
+    // goes near.
     namespaces.push(Arc::new(JobInstaller::new(JobHostOps::new(app.host_caller()))));
-    namespaces.push(Arc::new(CloudInstaller::new(CloudHostOps::new(app.host_caller()))));
     app.api_installer(corvus_be_api_installer(namespaces));
 
     // Publish the plugin host for the Plugin-Manager RPC adapter

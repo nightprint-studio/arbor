@@ -86,6 +86,13 @@ pub struct Manifest {
     pub experimental: bool,
 
     // ── Sections ──────────────────────────────────────────────────────────────
+    /// What the plugin may reach. **Absent means none**, which is why this defaults rather than
+    /// being required: a package that computes and nothing else — a wasm library linked by other
+    /// plugins, with no network, no filesystem and no credential slots — has nothing to declare,
+    /// and demanding an empty `[permissions]` from it rejected the manifest outright with a TOML
+    /// error pointing at line 1. `Permissions::default()` grants nothing, so the lenient parse is
+    /// also the closed one.
+    #[serde(default)]
     pub permissions: Permissions,
     #[serde(default)]
     pub sandbox:     Sandbox,
@@ -199,6 +206,20 @@ author       = \"a\"
 
     fn parse(extra: &str) -> Manifest {
         Manifest::from_toml_str(&format!("{HEAD}{extra}"), Path::new("/p")).expect("parse")
+    }
+
+    /// A package with nothing to declare — no `[permissions]` at all. This is what a pure-wasm
+    /// library linked by other plugins looks like, and requiring the section rejected it with a
+    /// TOML error at line 1 that named the whole file rather than the missing block.
+    #[test]
+    fn a_manifest_without_a_permissions_section_parses_and_grants_nothing() {
+        let m = Manifest::from_toml_str(
+            "name = \"x\"\nversion = \"1.0.0\"\ndescription = \"d\"\nauthor = \"a\"\n",
+            Path::new("/p"),
+        )
+        .expect("a manifest that grants nothing is still a manifest");
+        assert!(m.permissions.network.is_empty());
+        assert_eq!(m.permissions.fs, crate::permissions::AccessLevel::None);
     }
 
     #[test]

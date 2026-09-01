@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 
-use arbor_cloud::host::CloudHost;
 use arbor_ipc::prelude::EventSink;
 use arbor_plugin_api::prelude::HookDispatcher;
 use arbor_plugin_core::prelude::{PluginHost, ToolchainRegistry};
@@ -27,7 +26,6 @@ use arbor_brp::prelude::BrpRegistry;
 use corvus_core::prelude::CorvusState;
 
 use crate::branding::BrandingState;
-use crate::cloud::{CloudCancellations, CloudPendingOps};
 use crate::config::app_config::AppConfig;
 use crate::deep_link::DeepLinkBuffer;
 use crate::error::{AppError, Result};
@@ -43,10 +41,9 @@ use crate::terminal::TerminalManager;
 // ---------------------------------------------------------------------------
 
 pub struct AppState {
-    /// Arc-wrapped because the `arbor-cloud` CloudHost impl holds a clone —
-    /// both AppState's `lock_plugin_host()` helper and the cloud crate's
-    /// `host.fire_plugin_hook()` need access. Arc<Mutex<—>> keeps both
-    /// pointing at the same lock without ownership tricks.
+    /// Arc-wrapped so a background task can hold a clone alongside AppState's own
+    /// `lock_plugin_host()` helper. Arc<Mutex<—>> keeps both pointing at the same
+    /// lock without ownership tricks.
     pub plugin_host:    Arc<Mutex<PluginHost>>,
     /// Runtime-agnostic hook broker (PR #4 — `arbor-plugin-core`). Built once
     /// in `new()` with the static `HOOK_CATALOG` registered and a single
@@ -58,9 +55,8 @@ pub struct AppState {
     pub hook_dispatcher: Arc<HookDispatcher>,
     pub config:         Mutex<AppConfig>,
     pub terminals:      Mutex<TerminalManager>,
-    /// Arc-wrapped for the same reason as `plugin_host` — the cloud
-    /// crate's CloudHost impl needs to register/append/set status on jobs
-    /// from its spawned tokio tasks.
+    /// Arc-wrapped for the same reason as `plugin_host` — a spawned task needs to
+    /// register/append/set status on jobs after the command that started it returned.
     pub jobs:           Arc<Mutex<JobRegistry>>,
     /// Ring-buffer of recent `arbor.log.*` entries from every plugin —
     /// powers the Plugin Logs bottom panel. Arc-wrapped so the pipeline
@@ -100,25 +96,10 @@ pub struct AppState {
     /// `project_studio_multi_format.md`. JSON state lives inside
     /// `JsonBackend` since Phase 3.a — no separate AppState field.
     pub studio_registry: Arc<StudioRegistry>,
-    /// Per-job cancellation flags for cloud-storage transfer tasks (which
-    /// run as in-process tokio tasks, not subprocesses — so the standard
-    /// PID-kill cancel path doesn't apply). `cancel_job` flips the right
-    /// flag before falling through. Earmarked to be deleted alongside the
-    /// rest of the cloud-storage host code when WASM lands.
-    pub cloud_cancellations: Arc<CloudCancellations>,
     /// Generic streaming-seam cancellation registry (stream_id → cancel token),
     /// shared via `Arc` so a producer's spawned task can remove its entry on
     /// completion. The generic `cancel_stream` handler flips a token here.
     pub streams: Arc<crate::ipc::stream_registry::StreamRegistry>,
-    /// stream_id — JobRegistry job_id for `download_many` calls with
-    /// `keep_open=true` (chunk-merge flow). `cloud_report_done` reads +
-    /// removes the entry to finalize the job once the merge phase ends.
-    pub cloud_pending_ops: Arc<CloudPendingOps>,
-    /// The cloud host singleton, published by `cloud::install()`. The single
-    /// home of the `Arc<dyn CloudHost>`: both the platform command handlers and
-    /// the Lua `ns_shell/cloud.rs` path reach it via `cloud_host()` — no
-    /// Tauri-managed state is involved.
-    pub cloud_host: Arc<OnceLock<Arc<dyn CloudHost>>>,
     /// Bevy Remote Protocol — singleton live session against one Bevy game
     /// at a time. Read-only HTTP for Phase 1; SSE watch + editing in later
     /// phases. See `project_bevy_brp_client.md` memory.
@@ -406,10 +387,7 @@ impl AppState {
             // Fully-wired registry (all 5 backends + schema/index
             // providers) now lives in `arbor-studio-api` (Stage 4).
             studio_registry:        Arc::new(arbor_studio_api::studio_registry()),
-            cloud_cancellations:    Arc::new(Mutex::new(HashMap::new())),
             streams:                Arc::new(crate::ipc::stream_registry::StreamRegistry::default()),
-            cloud_pending_ops:      Arc::new(Mutex::new(HashMap::new())),
-            cloud_host:             Arc::new(OnceLock::new()),
             brp:                    Mutex::new(BrpRegistry::default()),
             marketplace:            Mutex::new(crate::marketplace::build_registry()),
             boot_done:              Arc::new(AtomicBool::new(false)),
@@ -477,13 +455,6 @@ impl AppState {
     /// every command sees `Some`.
     pub fn router(&self) -> Option<Arc<Router>> {
         self.router.get().cloned()
-    }
-
-    /// The cloud host, once `cloud::install()` has built it. Returns `None`
-    /// during the brief window between `AppState::new()` and `install()`
-    /// completing — in practice every cloud command sees `Some`.
-    pub fn cloud_host(&self) -> Option<Arc<dyn CloudHost>> {
-        self.cloud_host.get().cloned()
     }
 
     /// Seed the headless Corvus backend state (the in-process `corvus-be`) and

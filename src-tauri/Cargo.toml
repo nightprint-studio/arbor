@@ -77,7 +77,6 @@ arbor-ipc         = { path = "../crates/foundation/ipc" }
 arbor-shell-common = { path = "../crates/foundation/shell-common" }
 arbor-rpc         = { path = "../crates/foundation/rpc" }
 arbor-feedback    = { path = "../crates/platform/feedback" }
-arbor-cloud       = { path = "../crates/wasm/cloud" }
 arbor-auth        = { path = "../crates/platform/auth" }
 arbor-core        = { path = "../crates/foundation/core" }
 arbor-plugin-api  = { path = "../crates/platform/plugin/api" }
@@ -200,12 +199,9 @@ zip          = "2"
 uuid     = { workspace = true }
 libc     = "0.2"
 
-# --- Cloud storage (cloud-storage plugin) ---
-# opendal + the aws-lc-sys NASM-prebuilt pin live in `crates/arbor-cloud` as
-# of the Phase A split. The plugin host command layer (`commands/cloud_commands.rs`
-# + `plugin/api/ns/cloud.rs`) consumes the cloud crate via `arbor-cloud` above.
-# Same WASM-migration earmark applies — when the WASM plugin runtime lands,
-# the cloud crate + cloud_commands + ns/cloud.rs all get deleted together.
+# (Object storage — opendal, the `aws-lc-sys` NASM pin, the GCS/OAuth code — is gone
+# with `arbor-cloud`: the cloud is the `cloud-storage` plugin and its wasm providers,
+# and the shell holds none of it.)
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [

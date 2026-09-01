@@ -13,9 +13,9 @@ subscriptions. The Tauri command + plugin-namespace layers consume it.
 
 Earmarked to become a **WASM plugin**: its long-lived SSE streaming and tokio
 task lifecycle (`AbortHandle` cancellation) need native async that a Lua plugin
-can't provide, so it sits under `crates/wasm/` alongside `arbor-cloud`. Until the
-WASM plugin runtime lands it's used in-process by the launcher; isolating it as a
-crate keeps that future cut clean.
+can't provide, so it sits under `crates/wasm/` — where `arbor-cloud` sat until the
+cloud left Arbor for good. Until it makes the same trip it's used in-process by the
+launcher; isolating it as a crate keeps that cut clean.
 
 ## Public API: use the prelude
 

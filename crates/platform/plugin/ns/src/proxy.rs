@@ -1,9 +1,9 @@
 //! [`HostProxy`] — the shared half of every namespace in this crate.
 //!
 //! All of these namespaces are the same shape: the state lives in the shell (the job
-//! registry, the cloud stack, the OAuth engine + vault), and the plugin host is a separate
-//! process, so each Lua call is a `__<domain>_<op>` round-trip on the reverse channel. Only
-//! the method names and the reply shapes differ.
+//! registry, the OAuth engine + vault), and the plugin host is a separate process, so each
+//! Lua call is a `__<domain>_<op>` round-trip on the reverse channel. Only the method names
+//! and the reply shapes differ.
 //!
 //! So the round-trip lives once. What a domain module adds on top is the vocabulary — which
 //! method, which arguments, how the reply reads — and that is all it should have to add.

@@ -99,20 +99,31 @@ download, so the temp directory and the second pass over the bytes are gone (and
 `chunk-merger-bin`, whose whole job that was, is retired). Progress is `arbor.ui.operation`,
 cancellation is a flag the loop checks, ordering is a `reorder_list` form node.
 
-### Phase 4 — demolition
+### Phase 4 — demolition (done)
 
-Delete `arbor-cloud`, `src-tauri/src/cloud*`, the 22 `__cloud_*` handlers, the `arbor.cloud`
-namespace (i.e. `crates/platform/plugin/ns/src/cloud/`, which exists only as the bridge that
-keeps the panel working meanwhile) and the chunk-order modal. `arbor-plugin-ns` is left holding
-`arbor.job`.
+Gone, and with it the last line in Arbor that knows what a bucket is:
+
+| Deleted | What it was |
+|---|---|
+| `crates/wasm/cloud` (`arbor-cloud`) | opendal operators, transfers, GCS auth, Google OAuth, secrets — and with it the `opendal` / `aws-lc-sys` workspace pins |
+| `src-tauri/src/cloud/` | the job-registry bridge and the `Arc<dyn CloudHost>` singleton |
+| `AppState::{cloud_cancellations, cloud_pending_ops, cloud_host}` | the cloud's three fields on the shell's state, plus the `cancel_job` hop that existed only for transfer tasks |
+| the 22 `__cloud_*` handlers in `src-tauri/src/ipc/mod.rs` | the reverse channel the namespace round-tripped through |
+| `crates/platform/plugin/ns/src/cloud/` | the `arbor.cloud` Lua namespace — the bridge, expired |
+| `src-tauri/src/ipc/platform/cloud.rs` | `cloud_cancel` / `cloud_is_cancelled`, the last two shell handlers |
+| `CloudChunkOrderModal.svelte`, `CloudDownloadProgressModal.svelte`, `ipc/cloud.ts`, `types/cloud.ts` | the chunk-order picker (now a `reorder_list` node) and the progress floater, which nothing had mounted since Phase 3 |
+
+`arbor-plugin-ns` is left holding `arbor.job`, which is what it was always for.
 
 ## The bridge, and its expiry
 
-`arbor.cloud` currently lives in `arbor-plugin-ns` so the existing plugin keeps working — and
-works in Bennu too — while the phases land. It is marked as a staging post in its own module
-doc. **Do not grow it**: a new cloud capability belongs in the plugin, and anything it needs
-from Arbor should arrive as a generic capability like the four above, or it is a sign the line
-is in the wrong place.
+`arbor.cloud` lived in `arbor-plugin-ns` so the existing plugin kept working — and worked in
+Bennu too — while the phases landed. It expired with Phase 4.
+
+The rule it was written under still applies to whatever lands there next: **do not grow a
+staging post**. A new cloud capability belongs in the plugin, and anything it needs from Arbor
+should arrive as a generic capability like the four in Phase 0, or it is a sign the line is in
+the wrong place.
 
 ## The rule this is all measured against
 

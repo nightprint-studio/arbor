@@ -7,6 +7,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Removed
+
+- **Object storage left Arbor.** The cloud is the `cloud-storage` plugin and its provider packages, and the app no longer carries buckets, transfers, a Google sign-in or a chunk-order dialog of its own. The panel, its connections and its keychain secrets are unaffected — everything it used from the host stayed, as capabilities that name no bucket.
+
+- **`arbor.cloud` is gone.** A plugin reaches storage through a provider extension (`arbor.ext.call` / `call_to_file`) instead. Progress is `arbor.job` and `arbor.ui.operation`, sign-in is `arbor.oauth`, and a merge order is asked for with the `reorder_list` form node.
+
 ### Added
 
 - **A plugin can move a payload without it passing through Lua.** `arbor.ext.call_to_file` and `call_from_file` transfer bytes straight between an installed extension and a local file, so a download or an upload is no longer a JSON array of numbers held in three processes at once.
@@ -21,7 +27,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **A plugin's panels appear in Bennu's activity bar.** A package that registers a sidebar was invisible there — Bennu rendered a plugin's view but had nowhere to put its panel.
 
-- **Plugins hosted by Bennu can report background jobs and browse cloud storage.** `arbor.job` and `arbor.cloud` were Corvus-only for no reason that was ever about git.
+- **Plugins hosted by Bennu can report background jobs.** `arbor.job` was Corvus-only for no reason that was ever about git.
 
 - **Completion answers on a type you have not imported yet.** Typing `Arrays.` in a file with no `import java.util.Arrays;` offered nothing — the same answer a typo gets — and since the import is what accepting a completion adds, there was no way to reach the state where it would have worked. Its members are offered now, and accepting one adds the import. An ambiguous simple name is still left alone rather than guessed at.
 
@@ -30,6 +36,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **A lambda parameter that shadows a name already in scope is reported.** `filter(it -> stream(it).anyMatch(it -> …))` does not compile — a lambda body shares the enclosing scope rather than opening a class-like one — and it read as correct code. A field may still be shadowed, which is legal.
 
 - **A library type offers its nested types too.** `Map.` lists `Entry` beside its statics, the same way your own `Outer.` lists `Inner` — the project index knows nothing about a class in a jar, so this half comes from the classpath's own names. It is what `AddHeader.Kind` needs when the annotation comes from a dependency.
+
+- **Four annotation mistakes Bennu used to compile past.** An element with no `default` left unsupplied (`@Column` where `name()` is required); a single value given to an annotation that declares no `value()`; a variable used where a constant is required; and an `@interface` element declared with a type an annotation cannot have — the last of which made every *use* of that element look like the mistake.
 
 - **Ctrl+Shift+Space requests completions.** macOS reserves Ctrl+Space for switching input source, so on a Mac the explicit request could not be made at all.
 
@@ -98,6 +106,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Optimize imports** (Ctrl+Shift+O, Java). Drops what the file does not use and orders the rest — everything else, then `javax` and `java`, then the statics — as one undo step. It never folds a package into a wildcard and never adds an import, and it uses the same judgement the `unused-import` warning does, so the command and the squiggle cannot disagree.
 
 ### Fixed
+
+- **Corvus opened on the welcome page and no repositories.** A renamed helper left one stale call behind in the right-hand activity bar, which threw while the shell was rendering and took the whole window down with it — including the tabs it was restoring.
+
+- **A plugin that declares no permissions loads again.** A package with nothing to reach — a wasm library other plugins link — has no `[permissions]` to write, and the manifest refused it with a TOML error pointing at line 1. An absent section grants nothing, which is what it always meant.
+
+- **Corvus's welcome page says Corvus.** It said Arbor, which is the app the product runs in, not the product.
 
 - **A plugin hosted by a product other than Corvus never received its own callbacks.** Anything Arbor raised for a plugin — a cloud listing's pages, a transfer finishing, an OAuth result — went to Corvus's host alone, so the same plugin enabled elsewhere sat on "Loading…" forever.
 

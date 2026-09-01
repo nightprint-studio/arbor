@@ -40,8 +40,8 @@ mod plugin_logs;
 // which package may reach what, and in which order — and none of the reaching; this is the
 // half that touches the keychain and the network.
 mod plugin_wasm;
-// Routing the cloud's five storage primitives through a wasm provider when one is installed,
-// and falling through to the in-process implementation when none is.
+// Routing a call to the wasm extension that provides the requested interface, and reporting
+// plainly when none does.
 mod ext;
 mod pipeline;
 mod git_provider;
@@ -49,7 +49,6 @@ mod provider_connect;
 mod branding;
 mod deep_link;
 mod studio;
-mod cloud;
 mod marketplace;
 mod ipc;
 // The AI tool surface (MCP): the loopback endpoint, the permission model that gates it,

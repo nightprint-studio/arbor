@@ -15,7 +15,7 @@
 //!
 //! A plugin calls this through `arbor.ext.*`, and the frontend calls it through the
 //! `ext_call` platform handler. They are the same function: a second route with its own
-//! implementation is how the two drift, and it is what the cloud surface had before this
+//! implementation is how the two drift, and it is what the extension surface had before this
 //! session removed it.
 //!
 //! In practice **the plugin decides** — it is the thing that knows which extension to call and

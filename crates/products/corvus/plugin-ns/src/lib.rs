@@ -27,9 +27,9 @@
 //!   shell over the reverse channel ([`toolchain`], [`ui_branding`]) do so because the state
 //!   is the shell's; [`tabs`] and [`terminal`] are emit / local-process direct.
 //!
-//! What is NOT here: `arbor.job` and `arbor.cloud` moved to `arbor-plugin-ns`. Neither was
-//! ever about git — they sat here only because Corvus was the first product with a plugin
-//! host, and that made them unreachable from the second one.
+//! What is NOT here: `arbor.job` moved to `arbor-plugin-ns`. It was never about git — it sat
+//! here only because Corvus was the first product with a plugin host, and that made it
+//! unreachable from the second one.
 //!
 //! Public API is exposed through [`prelude`].
 //!

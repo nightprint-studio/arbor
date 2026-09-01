@@ -464,7 +464,7 @@ mod tests {
     fn the_catalog_lists_every_kind() {
         assert_eq!(
             CheckId::ALL.len(),
-            88,
+            90,
             "a new check kind must be added to `CheckId::ALL` (and this count bumped)"
         );
     }

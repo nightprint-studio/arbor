@@ -250,18 +250,17 @@ function createUiStore() {
       setActiveRightSidebar(last);
       return;
     }
-    // No history — pick the first available right-side plugin section if
-    // any.  Imported lazily to avoid a top-level circular dep with the
-    // contribution store.
-    Promise.all([
-      import('./corvus/contribution.svelte'),
-      import('$lib/contributions/sidebar'),
-    ]).then(([{ contributionStore }, { SIDEBAR_POINT, parseSidebarSection }]) => {
-      const first = contributionStore.forPoint(SIDEBAR_POINT)
-        .map(parseSidebarSection)
-        .find(s => s.side === 'right');
-      if (first) setActiveRightSidebar(`plugin:${first.plugin_name}:${first.id}`);
-    }).catch(() => { /* ignore */ });
+    // No history — pick the first available right-side plugin section if any. Imported
+    // lazily to avoid a top-level circular dep with the contribution store, and read
+    // through `enabledSidebarSections` like every other consumer: this used to walk the
+    // contribution point itself and skipped the enabled filter, so the panel it auto-opened
+    // could belong to a plugin the user had turned off.
+    import('$lib/contributions/sidebar')
+      .then(({ enabledSidebarSections, sidebarKey }) => {
+        const first = enabledSidebarSections().find(s => s.side === 'right');
+        if (first) setActiveRightSidebar(sidebarKey(first));
+      })
+      .catch(() => { /* ignore */ });
   }
 
   /**

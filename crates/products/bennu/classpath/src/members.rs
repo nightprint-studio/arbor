@@ -283,6 +283,14 @@ fn signature_attr<'a>(attrs: &'a [AttributeInfo]) -> Option<&'a str> {
     })
 }
 
+/// Whether a method carries an `AnnotationDefault` attribute — i.e. it is an annotation-type
+/// element with a `default` clause, so a use site need not give it a value.
+fn has_annotation_default(attrs: &[AttributeInfo]) -> bool {
+    attrs
+        .iter()
+        .any(|a| matches!(a.data, AttributeData::AnnotationDefault(_)))
+}
+
 /// The declared checked exceptions from a method's `Exceptions` attribute — binary/internal names
 /// with slashes (`java/io/IOException`), or empty when the attribute is absent (no `throws` clause).
 fn exceptions_attr(attrs: &[AttributeInfo]) -> Vec<String> {
@@ -351,7 +359,13 @@ fn decode_method(m: &MethodInfo, class_is_interface: bool) -> Member {
     let visibility = method_visibility(m.access_flags);
     // A concrete instance method inside an interface is a `default` method (JLS §9.4). `<clinit>`
     // (the static initialiser) is neither, but it's static so already excluded.
-    let is_default = class_is_interface && !is_abstract && !is_static;
+    //
+    // An annotation-type element with a `default` clause sets the SAME bit, and the two readings
+    // cannot collide: an element is always abstract, so it never satisfies the interface arm. Both
+    // say the one thing every consumer asks — *the user of this type need not supply it* — which
+    // is why this is one flag and not two.
+    let is_default =
+        (class_is_interface && !is_abstract && !is_static) || has_annotation_default(&m.attributes);
     // Declared checked exceptions (`Exceptions` attribute) — independent of the Signature/erased path.
     let throws = exceptions_attr(&m.attributes);
 

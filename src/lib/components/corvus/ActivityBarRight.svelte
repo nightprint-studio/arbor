@@ -40,7 +40,7 @@
   function resolveOrdered(position: 'top' | 'bottom'): PluginSidebarSection[] {
     const bySide = rightSections.filter(s => s.position === position);
     const byKey = new Map(bySide.map(s => [sidebarKey(s), s]));
-    const pluginIds = bySide.map(sectionKey);
+    const pluginIds = bySide.map(sidebarKey);
     const merged = position === 'top'
       ? activityBarConfigStore.mergeRightTop(pluginIds)
       : activityBarConfigStore.mergeRightBottom(pluginIds);
@@ -62,8 +62,7 @@
   const hasVisibleEntries = $derived(topSections.length + bottomSections.length > 0);
 
   function onClickTop(s: PluginSidebarSection) {
-    const key = `plugin:${s.plugin_name}:${s.id}`;
-    uiStore.toggleRightSidebar(key);
+    uiStore.toggleRightSidebar(sidebarKey(s));
   }
   function onClickBottom(s: PluginSidebarSection) {
     uiStore.toggleBottomSection(sidebarKey(s) as any);

@@ -63,6 +63,11 @@ pub struct Member {
     #[serde(default)]
     pub is_abstract: bool,
     /// An interface `default` method — a concrete method that satisfies the interface contract.
+    ///
+    /// On an **annotation type** the same bit means the element has a `default` clause, so a use
+    /// site need not give it a value. One flag, because both say the same thing to every consumer
+    /// — *the user of this type need not supply it* — and the two readings cannot collide: an
+    /// annotation element is always abstract, so it never satisfies the interface arm.
     #[serde(default)]
     pub is_default: bool,
     /// A `final` method (can't be overridden) or `final` field (can't be reassigned).

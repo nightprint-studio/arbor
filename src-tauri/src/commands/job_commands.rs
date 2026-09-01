@@ -13,15 +13,6 @@ pub fn cancel_job(
     state: State<'_, AppState>,
     job_id: String,
 ) -> Result<(), AppError> {
-    // Cloud-storage transfer jobs run as in-process tokio tasks (no PID),
-    // so the standard kill path is a no-op for them — flip the cooperative
-    // cancellation flag here, then fall through. Tasks check the flag at
-    // every chunk boundary and abort the next opendal read/write.
-    if let Ok(map) = state.cloud_cancellations.lock() {
-        if let Some(flag) = map.get(&job_id) {
-            flag.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
     let mut jobs = state.lock_jobs()?;
     jobs.cancel(&job_id);
     Ok(())

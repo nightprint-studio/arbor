@@ -141,12 +141,6 @@ fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // launcher and the non-git product windows never pay for a git backend they
     // don't use.
 
-    // Wire the `arbor-cloud` crate against AppState: registers the Google OAuth
-    // refresher and publishes the `Arc<dyn CloudHost>` into Tauri state. Must
-    // run after the event sink is wired above (the host stores the sink for
-    // `emit_event`).
-    crate::cloud::install(app.handle());
-
     // Give every previously-installed package a product, once, BEFORE any host reads the
     // states file. Runs here rather than lazily because the first reader is a plugin host
     // deciding what to load, and it must not see the un-scoped answer even once.

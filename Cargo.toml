@@ -8,7 +8,6 @@ resolver = "2"
 members = [
     "src-tauri",
     "crates/platform/auth",
-    "crates/wasm/cloud",
     "crates/platform/process-ext",
     "crates/platform/feedback",
     "crates/foundation/core",
@@ -55,9 +54,9 @@ members = [
     "crates/platform/plugin/api",
     "crates/platform/plugin/core",
     "crates/platform/plugin/marketplace",
-    # The platform's own Lua namespaces (`arbor.job`, `arbor.cloud`): product-agnostic by
-    # construction — every op forwards to the shell — so any backend with a reverse channel
-    # installs them (Corvus and Bennu both do).
+    # The platform's own Lua namespaces (`arbor.job`): product-agnostic by construction —
+    # every op forwards to the shell — so any backend with a reverse channel installs them
+    # (Corvus and Bennu both do).
     "crates/platform/plugin/ns",
     "crates/platform/plugin/rpc",
     "crates/platform/plugin/types",
@@ -229,15 +228,6 @@ similar = { version = "2", features = ["text", "unicode", "bytes", "inline"] }
 
 # Tauri (member crates that need AppHandle / Manager pull this in)
 tauri = { version = "2.11.0", features = ["tray-icon", "image-png", "image-ico", "protocol-asset"] }
-
-# Cloud-only — pinned here so the eventual WASM-migration only edits one place
-opendal = { version = "0.56", default-features = false, features = [
-  "services-gcs",
-  "services-s3",
-  "services-azblob",
-  "reqwest-rustls-tls",
-] }
-aws-lc-sys = { version = "0.41", features = ["prebuilt-nasm"] }
 
 # ── Release profile ─────────────────────────────────────────────────────────
 # Moved from src-tauri/Cargo.toml: profile sections must live at workspace root.

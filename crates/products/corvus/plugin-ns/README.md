@@ -32,9 +32,9 @@ concrete backend.
 | `TerminalInstaller` | `arbor.terminal.*`: `exec`. **DIRECT** — runs the command in-process. |
 | `PipelineInstaller` | `arbor.pipeline.*`: `define` / `run` / `resume` / `discard` / `is_locked` / `list` / `get` / `cancel` / `list_runs` / `get_run` / `list_ops` (`register_op`/`unregister_op` are Lua-local). **PROXY** (`__pipeline_*`) — the `PipelineEngine`/`PipelineRuntime` live in the shell. ⚠️ `lua_op` callback-into-BE delivery degrades (same gap as `arbor.job.on_done`). |
 
-`JobInstaller` and `CloudInstaller` used to be in this table and are now in
-`arbor-plugin-ns`. Neither was ever about git: they were here because Corvus was the first
-product with a plugin host, and that made them unreachable from the second one.
+`JobInstaller` used to be in this table and is now in `arbor-plugin-ns`. It was never about
+git: it was here because Corvus was the first product with a plugin host, and that made it
+unreachable from the second one.
 | `BrpInstaller` | `arbor.brp.*`: `connect` / `disconnect` / `status` / `call` / `watch` / `unwatch`. **PROXY** (`__brp_*`) — the `BrpRegistry` (HTTP client + SSE) lives in the shell. ⚠️ `watch` SSE events fire shell-side and never reach corvus-be VMs. |
 
 Every installer is byte-for-byte the shell's surface (names, arg shapes,

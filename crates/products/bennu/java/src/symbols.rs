@@ -1423,6 +1423,12 @@ fn parse_constructor(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
 /// return type, implicitly public + abstract) — mirroring how a library annotation's elements decode
 /// from bytecode. Without this, accessing an element on a project annotation (`ann.value()`) can't
 /// resolve its method and would be wrongly flagged "cannot resolve method".
+///
+/// `is_default` records the `default` clause — the element need not be given a value at the use
+/// site. That is the same bit an interface `default` method sets, and it means the same thing to
+/// every consumer (*the user of this type need not supply it*); the two readings cannot collide
+/// because an annotation element is always abstract. The bytecode side reads it from the
+/// `AnnotationDefault` attribute.
 fn parse_annotation_element(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
     let name = node
         .child_by_field_name("name")
@@ -1439,7 +1445,7 @@ fn parse_annotation_element(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
         is_static: false,
         visibility: Visibility::Public,
         is_abstract: true,
-        is_default: false,
+        is_default: node.child_by_field_name("value").is_some(),
         is_final: false,
         throws: Vec::new(),
         annotations: collect_annotations(node, bytes),
@@ -2074,6 +2080,20 @@ mod tests {
             t.methods.iter().any(|m| m.name == "count"),
             "element with a default is indexed too"
         );
+    }
+
+    /// The `default` clause rides on `is_default`, which is what tells a required element from an
+    /// optional one at every use site. Get it wrong and either every `@Ann` looks incomplete or no
+    /// missing element is ever seen.
+    #[test]
+    fn an_annotation_elements_default_clause_is_recorded() {
+        let t = one_type(
+            "@interface Route { String value(); int count() default 3; Class<?> k() default Object.class; }",
+        );
+        let by = |n: &str| t.methods.iter().find(|m| m.name == n).expect(n).is_default;
+        assert!(!by("value"), "`value()` has no default and is required");
+        assert!(by("count"), "`count() default 3` is optional");
+        assert!(by("k"), "a class-literal default counts too");
     }
 
     #[test]

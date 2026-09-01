@@ -5,7 +5,7 @@ edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
-description  = "The `arbor.*` Lua namespaces that belong to the platform rather than to one product (`arbor.job`, and `arbor.cloud` while it is on its way out of Arbor). Each is a proxy: the state lives in the shell, so every op is a reverse-channel round-trip and any backend holding a `HostCaller` can publish the surface."
+description  = "The `arbor.*` Lua namespaces that belong to the platform rather than to one product (`arbor.job`). Each is a proxy: the state lives in the shell, so every op is a reverse-channel round-trip and any backend holding a `HostCaller` can publish the surface."
 
 [dependencies]
 arbor-plugin-core = { path = "../core" }

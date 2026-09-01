@@ -345,7 +345,7 @@ pub fn namespaces() -> Vec<Arc<dyn LuaNamespaceInstaller>> {
 /// order, because `register_lua_api` runs the extras last so they can see everything already
 /// published.
 ///
-/// `extra` is for the namespaces that are neither host-pure nor Bennu's: `arbor.cloud` is one,
+/// `extra` is for the namespaces that are neither host-pure nor Bennu's: `arbor.job` is one,
 /// a platform surface that needs the backend's reverse channel and therefore cannot be built
 /// here (this crate has no `App`). Pass an empty vec for a plain host.
 pub fn bennu_api_installer(

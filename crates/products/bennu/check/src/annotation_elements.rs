@@ -37,6 +37,11 @@ pub fn annotation_element_errors_in(
                 check_annotation(n, bytes, symbols, resolver, &mut out);
                 check_values(n, bytes, &mut out);
             }
+            // A marker (`@Column`) carries no values, so it has nothing to check about the ones it
+            // gives — but it is exactly the shape that gives NONE, and an element with no `default`
+            // still has to be supplied. It reaches the same reading, which finds every required
+            // element missing.
+            "marker_annotation" => check_annotation(n, bytes, symbols, resolver, &mut out),
             "modifiers" => check_repeats(n, bytes, symbols, resolver, &mut out),
             _ => {}
         }
@@ -60,46 +65,93 @@ fn check_annotation(
     if !members.flags.is_annotation {
         return;
     }
-    let declared: Vec<&str> = members
+    let elements: Vec<&bennu_java::prelude::Member> = members
         .methods
         .iter()
         .filter(|m| m.kind == MemberKind::Method)
-        .map(|m| m.name.as_str())
         .collect();
     // An annotation type with no elements at all is more likely one we decoded poorly than one
     // someone is passing arguments to.
-    if declared.is_empty() {
+    if elements.is_empty() {
         return;
     }
+    let declares = |name: &str| elements.iter().any(|m| m.name == name);
 
-    let Some(args) = n.child_by_field_name("arguments") else { return };
-    let mut cw = args.walk();
-    for pair in args.named_children(&mut cw) {
-        if pair.kind() != "element_value_pair" {
-            continue;
-        }
-        let Some(key_node) = pair.child_by_field_name("key") else { continue };
-        let Ok(key) = key_node.utf8_text(bytes) else { continue };
-        if !declared.contains(&key) {
-            out.push(CheckId::UnknownAnnotationElement.at(
-                key_node,
-                format!("`{}` declares no element `{key}`", simple(&binary)),
-            ));
-            continue;
-        }
-        // The element exists — is the value a shape its declared type can hold?
-        let Some(element) = members
-            .methods
-            .iter()
-            .find(|m| m.kind == MemberKind::Method && m.name == key)
-        else {
-            continue;
-        };
-        if let Some(value) = pair.child_by_field_name("value") {
-            check_value_type(value, &element.return_type.binary_name, key, bytes, out);
+    // What the use site actually gave a value for — the other half of the vocabulary question.
+    let mut supplied: HashSet<&str> = HashSet::new();
+
+    if let Some(args) = n.child_by_field_name("arguments") {
+        let mut cw = args.walk();
+        for pair in args.named_children(&mut cw) {
+            if pair.kind() != "element_value_pair" {
+                // `@Foo("x")` — the single-element shorthand, which IS `value = "x"`. Legal only
+                // when the type declares `value()`; javac otherwise reports it as a `value()` it
+                // cannot find, which is the same sentence as any other unknown element.
+                supplied.insert("value");
+                if !declares("value") {
+                    out.push(CheckId::UnknownAnnotationElement.at(
+                        pair,
+                        format!(
+                            "`{}` declares no element `value`, so this value needs a name",
+                            simple(&binary)
+                        ),
+                    ));
+                }
+                continue;
+            }
+            let Some(key_node) = pair.child_by_field_name("key") else { continue };
+            let Ok(key) = key_node.utf8_text(bytes) else { continue };
+            supplied.insert(key);
+            if !declares(key) {
+                out.push(CheckId::UnknownAnnotationElement.at(
+                    key_node,
+                    format!("`{}` declares no element `{key}`", simple(&binary)),
+                ));
+                continue;
+            }
+            // The element exists — is the value a shape its declared type can hold?
+            let Some(element) = elements.iter().find(|m| m.name == key) else { continue };
+            if let Some(value) = pair.child_by_field_name("value") {
+                let declared = &element.return_type.binary_name;
+                check_value_type(value, declared, key, bytes, out);
+                check_constant_names(value, declared, bytes, symbols, resolver, out);
+            }
         }
     }
+
+    // An element with no `default` MUST be given a value. `is_default` carries the `default` clause
+    // for a project element (the source `annotation_type_element_declaration`) and the
+    // `AnnotationDefault` attribute for a library one, so both sides answer the same question — and
+    // a resolver that could not answer it at all would have failed one of the gates above.
+    let missing: Vec<&str> = elements
+        .iter()
+        .filter(|m| !m.is_default && !supplied.contains(m.name.as_str()))
+        .map(|m| m.name.as_str())
+        .collect();
+    if !missing.is_empty() {
+        out.push(CheckId::MissingAnnotationElement.at(
+            name_node,
+            format!(
+                "`{}` requires a value for {}",
+                simple(&binary),
+                list(&missing)
+            ),
+        ));
+    }
 }
+
+/// `["a"]` → ``` `a` ```; `["a", "b"]` → ``` `a` and `b` ```; more → a comma list ending in "and".
+fn list(names: &[&str]) -> String {
+    match names {
+        [one] => format!("`{one}`"),
+        [head @ .., last] => format!(
+            "{} and `{last}`",
+            head.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ")
+        ),
+        [] => String::new(),
+    }
+}
+
 
 fn simple(binary: &str) -> &str {
     binary.rsplit(['/', '$']).next().unwrap_or(binary)
@@ -135,6 +187,18 @@ mod tests {
         Member { return_type: TypeRef::simple(ty), ..element(name) }
     }
 
+    /// An element with NO `default` — one a use site has to supply.
+    fn required(name: &str) -> Member {
+        Member { is_default: false, ..element(name) }
+    }
+
+    /// A required element of a given type.
+    fn required_of(name: &str, ty: &str) -> Member {
+        Member { return_type: TypeRef::simple(ty), ..required(name) }
+    }
+
+    /// An element with a `default` clause, which is what nearly every configuration annotation
+    /// declares — `@Column` has a default for all eight of its own. `is_default` carries that.
     fn element(name: &str) -> Member {
         Member {
             name: name.to_string(),
@@ -143,7 +207,7 @@ mod tests {
             params: Vec::new(),
             is_static: false,
             is_abstract: true,
-            is_default: false,
+            is_default: true,
             is_final: false,
             visibility: Visibility::Public,
             raw_signature: String::new(),
@@ -182,6 +246,44 @@ mod tests {
         members.insert("com/acme/Marker".into(), ann(Vec::new()));
         members.insert("com/acme/Tag".into(), ann(vec![element("v")]));
         members.insert("com/acme/Quiet".into(), ann(vec![element("v")]));
+        // An annotation with a REQUIRED element (no `default`) beside an optional one — the shape
+        // every `@Column`-style configuration annotation has at least one of.
+        members.insert(
+            "com/acme/Named".into(),
+            ann(vec![required("id"), element_of("size", "int")]),
+        );
+        // A single-element annotation, so the `@Only("x")` shorthand is legal on it.
+        members.insert("com/acme/Only".into(), ann(vec![required("value")]));
+        // Two required elements, to pin how several missing ones are worded.
+        members.insert("com/acme/Pair".into(), ann(vec![required("left"), required("right")]));
+        // An element whose declared type is an ENUM — a name written for it is an enum constant,
+        // which is not a constant expression and must never be judged as one.
+        members.insert("com/acme/Level".into(), ann(vec![required_of("at", "com/acme/Where")]));
+        members.insert(
+            "com/acme/Where".into(),
+            ClassMembers {
+                flags: ClassFlags { is_enum: true, ..ClassFlags::default() },
+                ..ann(Vec::new())
+            },
+        );
+        // The class the constant-name tests resolve against: one mutable field, one `static final`
+        // `String` (a constant variable), and one `final` of a class type (`final`, and still not
+        // a constant — the clause `final` alone does not decide).
+        members.insert(
+            "com/acme/Holder".into(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: Some("java/lang/Object".into()),
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: vec![
+                    Member::field("MUTABLE", TypeRef::simple("java/lang/String")).stat(),
+                    Member::field("CONST", TypeRef::simple("java/lang/String")).stat().final_(),
+                    Member::field("OBJS", TypeRef::simple("com/acme/MyObj[]")).stat().final_(),
+                ],
+                flags: ClassFlags::default(),
+            },
+        );
         // A plain class that happens to be written where an annotation goes — never judged.
         members.insert(
             "com/acme/NotAnAnnotation".into(),
@@ -200,6 +302,12 @@ mod tests {
             ("Tag", "com/acme/Tag"),
             ("Quiet", "com/acme/Quiet"),
             ("NotAnAnnotation", "com/acme/NotAnAnnotation"),
+            ("Named", "com/acme/Named"),
+            ("Only", "com/acme/Only"),
+            ("Pair", "com/acme/Pair"),
+            ("Level", "com/acme/Level"),
+            ("Where", "com/acme/Where"),
+            ("Holder", "com/acme/Holder"),
         ]
         .iter()
         .map(|(a, b)| (a.to_string(), b.to_string()))
@@ -224,6 +332,14 @@ mod tests {
         MapResolver { members, simple, own }
     }
 
+    fn diags(src: &str) -> Vec<Diagnostic> {
+        let tree = bennu_java::prelude::parse_java(src).expect("parse");
+        let root = tree.root_node();
+        let nodes = crate::check::collect_nodes(root);
+        let symbols = bennu_java::prelude::extract_symbols_from_root(&root, src);
+        annotation_element_errors_in(&nodes, src, &symbols, &resolver())
+    }
+
     fn codes(src: &str) -> Vec<String> {
         let tree = bennu_java::prelude::parse_java(src).expect("parse");
         let root = tree.root_node();
@@ -233,6 +349,112 @@ mod tests {
             .into_iter()
             .map(|d| d.code)
             .collect()
+    }
+
+    // ── an element that has to be supplied ───────────────────────────────────
+
+    /// The other half of the vocabulary question: an element with no `default` is not optional, and
+    /// leaving it out is a compile error javac reports at the `@`.
+    #[test]
+    fn a_required_element_left_out_is_flagged() {
+        assert_eq!(codes(r#"class A { @Named(size = 2) String f; }"#), ["missing-annotation-element"]);
+    }
+
+    /// A marker is the shape that supplies NOTHING, so every required element is missing — and it
+    /// reaches the check through its own node kind, which `annotation` does not cover.
+    #[test]
+    fn a_marker_of_an_annotation_with_a_required_element_is_flagged() {
+        assert_eq!(codes(r#"class A { @Named String f; }"#), ["missing-annotation-element"]);
+    }
+
+    /// The everyday shape, and the one a wrong `is_default` would flood: an annotation whose
+    /// elements all have defaults, used with none of them.
+    #[test]
+    fn a_marker_of_an_all_default_annotation_is_fine() {
+        assert!(codes(r#"class A { @Column String f; }"#).is_empty());
+        assert!(codes(r#"class A { @Column(name = "c") String f; }"#).is_empty());
+    }
+
+    #[test]
+    fn a_required_element_that_is_supplied_is_fine() {
+        assert!(codes(r#"class A { @Named(id = "x") String f; }"#).is_empty());
+    }
+
+    /// Several missing elements are ONE diagnostic listing them — javac emits one per element, and
+    /// three errors on one `@` reads as three problems when it is one.
+    #[test]
+    fn two_missing_elements_are_listed_together() {
+        let ds = diags(r#"class A { @Pair String f; }"#);
+        assert_eq!(ds.len(), 1);
+        assert!(ds[0].message.contains("`left` and `right`"), "{}", ds[0].message);
+    }
+
+    // ── the single-value shorthand ───────────────────────────────────────────
+
+    /// `@Only("x")` IS `value = "x"`, and legal exactly when the type declares `value()`.
+    #[test]
+    fn the_shorthand_is_fine_on_a_type_that_declares_value() {
+        assert!(codes(r#"class A { @Only("x") String f; }"#).is_empty());
+    }
+
+    /// javac reports this as a `value()` it cannot find — the same sentence as any other unknown
+    /// element, plus the required element the shorthand did not supply.
+    #[test]
+    fn the_shorthand_on_a_type_without_value_is_flagged() {
+        let mut got = codes(r#"class A { @Named("x") String f; }"#);
+        got.sort();
+        assert_eq!(got, ["missing-annotation-element", "unknown-annotation-element"]);
+    }
+
+    // ── a name that is not a constant ────────────────────────────────────────
+
+    /// The report this exists for: a variable passed where a constant is required. `MUTABLE` is not
+    /// `final`, so it is never a constant, whatever it holds.
+    #[test]
+    fn a_non_final_field_as_a_value_is_flagged() {
+        assert_eq!(
+            codes(r#"class A { @Named(id = Holder.MUTABLE) String f; }"#),
+            ["non-constant-annotation-value"]
+        );
+    }
+
+    /// `final` and of a `String` type — a constant variable, and the spelling everyone writes.
+    #[test]
+    fn a_static_final_string_field_as_a_value_is_fine() {
+        assert!(codes(r#"class A { @Named(id = Holder.CONST) String f; }"#).is_empty());
+    }
+
+    /// `final` is necessary and not sufficient (JLS §4.12.4): a constant variable is also of a
+    /// primitive or `String` type, so a `final` array of a class type is not one.
+    #[test]
+    fn a_final_field_of_a_class_type_as_a_value_is_flagged() {
+        let ds = diags(r#"class A { @Named(id = Holder.OBJS) String f; }"#);
+        assert_eq!(ds.len(), 1);
+        assert_eq!(ds[0].code, "non-constant-annotation-value");
+        assert!(ds[0].message.contains("MyObj[]"), "{}", ds[0].message);
+    }
+
+    /// An ENUM-typed element takes an enum constant, which is a `static final` field of a class
+    /// type — exactly the shape the rule above rejects. Judging it by that rule would report the
+    /// only correct spelling, so an element of any other family is never judged.
+    #[test]
+    fn a_name_written_for_an_enum_element_is_never_judged() {
+        assert!(codes(r#"class A { @Level(at = Holder.OBJS) String f; }"#).is_empty());
+    }
+
+    /// A name inside a method body may be a local shadowing the field, and then the field's own
+    /// modifiers say nothing about what the name means.
+    #[test]
+    fn a_name_inside_a_body_is_left_alone() {
+        let src = r#"class A { void m() { @Named(id = MUTABLE) int i = 0; } }"#;
+        assert!(!codes(src).iter().any(|c| c == "non-constant-annotation-value"));
+    }
+
+    /// Reading out of an array is never constant, even when the array itself is `static final`.
+    #[test]
+    fn an_array_access_as_a_value_is_flagged() {
+        assert!(codes(r#"class A { @Named(id = Holder.CONST[0]) String f; }"#)
+            .contains(&"non-constant-annotation-value".to_string()));
     }
 
     /// The typo this check exists for: nothing reads `nulable`, so the column stays NOT NULL.
@@ -510,18 +732,165 @@ fn scan_value(value: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
         "method_invocation" => "a method call",
         "object_creation_expression" => "a `new`",
         "array_creation_expression" => "a `new` array",
+        // Reading an element out of an array is never constant, even when the array itself is a
+        // `static final` — javac calls this one `expression.not.allowable.as.annotation.value`.
+        "array_access" => "an array access",
         "lambda_expression" => "a lambda",
         "method_reference" => "a method reference",
         "assignment_expression" => "an assignment",
         "ternary_expression" => "a conditional",
         "update_expression" => "an increment",
+        // A bare name is NOT judged here. Whether it may be one depends on the element's declared
+        // type — an enum element takes an enum constant, a `Class` element a class literal — so it
+        // is decided in `check_annotation`, which is the only place that holds the declaration.
         _ => return,
     };
-    let _ = bytes;
     out.push(CheckId::NonConstantAnnotationValue.at(
         value,
         format!("an annotation value must be a constant, and {what} is not one"),
     ));
+}
+
+/// A name written for an element whose declared type demands a **constant expression**, checked
+/// against what that name actually is.
+///
+/// Only elements of a primitive or `String` type get here. The other legal element types take
+/// something a constant expression never is — an enum element takes an enum constant, a `Class`
+/// element a class literal, an annotation element an annotation — so a name written for one of
+/// those is not this check's business, and judging it by these rules would report the correct
+/// spelling.
+///
+/// Descends an array initialiser, because `{A, B}` given to a `String[]` element asks the question
+/// once per entry.
+fn check_constant_names(
+    value: Node,
+    declared: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    out: &mut Vec<Diagnostic>,
+) {
+    let (base, _) = bennu_java::prelude::split_array_dims(declared);
+    if !(crate::nodes::is_primitive(base) || base == "java/lang/String") {
+        return;
+    }
+    if value.kind() == "element_value_array_initializer" {
+        let mut c = value.walk();
+        for el in value.named_children(&mut c) {
+            check_constant_names(el, declared, bytes, symbols, resolver, out);
+        }
+        return;
+    }
+    if let Some(why) = not_a_constant_variable(value, bytes, symbols, resolver) {
+        out.push(CheckId::NonConstantAnnotationValue.at(
+            value,
+            format!("an annotation value must be a constant, and {why}"),
+        ));
+    }
+}
+
+/// Why the name `value` reads is **provably** not a constant variable — or `None` when it may be
+/// one, or is not a name we can resolve at all.
+///
+/// Java's rule (JLS §4.12.4): a constant variable is `final`, of a primitive or `String` type, and
+/// initialised with a constant expression. Two of the three clauses are decided here, and both are
+/// decided from the index rather than guessed:
+///
+///   * **not `final`** — never a constant, whatever it holds;
+///   * **`final`, but not of a primitive or `String` type** — `static final MyObj[] OBJ = …` is as
+///     `final` as anything and still not a constant variable, so `final` alone proves nothing.
+///
+/// The third clause is deliberately not attempted. `static final String N = f();` and
+/// `static final int LEN = "abc".length();` are both rejected by javac, but telling them from
+/// `static final String N = "n"` needs the initializer and constant folding — and guessing there
+/// would flag the legal spelling, which is the overwhelmingly common one.
+///
+/// Two things narrow it further, both to avoid saying something wrong:
+///   * a bare name written anywhere inside a `block`, a lambda or a parameter list is skipped — a
+///     local or a parameter can shadow the field, and then the field's own modifiers say nothing
+///     about what the name means;
+///   * a name that resolves to nothing (a static import, a field of an ENCLOSING class rather than
+///     a supertype, an unindexed type) yields `None` and no diagnostic.
+fn not_a_constant_variable(
+    value: Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<String> {
+    let (owner, name) = match value.kind() {
+        "identifier" => {
+            if shadowable_position(value) {
+                return None;
+            }
+            let name = value.utf8_text(bytes).ok()?;
+            let crate::type_scope::TypeScope::Inside(owner) =
+                crate::resolve::enclosing_scope(value, bytes, symbols)
+            else {
+                return None;
+            };
+            (owner, name)
+        }
+        // `Other.K` — a qualified read, so no local can shadow it. The receiver has to name a TYPE:
+        // an instance receiver could not be constant in the first place, and whatever produced it
+        // would already have been reported by the shape scan.
+        "field_access" => {
+            let object = value.child_by_field_name("object")?;
+            let field = value.child_by_field_name("field")?;
+            let owner = crate::resolve::type_binary_at(
+                object.utf8_text(bytes).ok()?,
+                value,
+                bytes,
+                symbols,
+                resolver,
+            )?;
+            (owner, field.utf8_text(bytes).ok()?)
+        }
+        _ => return None,
+    };
+    let field = find_field(resolver, &owner, name)?;
+    if !field.is_final {
+        return Some(format!("`{name}` is not `final`"));
+    }
+    let (base, _) = bennu_java::prelude::split_array_dims(&field.return_type.binary_name);
+    if crate::nodes::is_primitive(base) || base == "java/lang/String" {
+        return None; // final and of the right family — the initializer is the part we do not judge
+    }
+    Some(format!(
+        "`{name}` is declared `{}`, and only a `final` primitive or `String` is one",
+        pretty(&field.return_type.binary_name)
+    ))
+}
+
+/// Whether `node` sits somewhere a local or a parameter could shadow a field of the same name.
+fn shadowable_position(node: Node) -> bool {
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        if matches!(n.kind(), "block" | "formal_parameters" | "lambda_expression") {
+            return true;
+        }
+        cur = n.parent();
+    }
+    false
+}
+
+/// The field named `name` on `owner` or any KNOWN supertype — `None` when nothing declares it (the
+/// hierarchy may simply be incomplete, which is why the caller treats `None` as "say nothing").
+fn find_field(
+    resolver: &dyn TypeResolver,
+    owner: &str,
+    name: &str,
+) -> Option<bennu_java::prelude::Member> {
+    let mut found = None;
+    crate::walk::for_each_supertype(resolver, owner, &mut |_, cm| {
+        if found.is_none() {
+            found = cm
+                .fields
+                .iter()
+                .find(|f| f.name == name && f.kind == MemberKind::Field)
+                .cloned();
+        }
+    });
+    found
 }
 
 

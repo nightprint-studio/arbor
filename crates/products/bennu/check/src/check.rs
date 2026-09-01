@@ -265,6 +265,7 @@ pub fn check_file_resolved(
         timed!("static_access", crate::static_access::static_access_errors_in(root, &nodes, source, &symbols, resolver));
         timed!("dead_catch", crate::dead_catch::dead_catch_errors_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("annotation_elements", crate::annotation_elements::annotation_element_errors_in(&nodes, source, &symbols, resolver));
+        timed!("annotation_decl", crate::annotation_decl::annotation_decl_errors_in(&nodes, source, &symbols, resolver));
         timed!("static_via_instance", crate::static_via_instance::static_via_instance_warnings_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("visibility", crate::visibility::visibility_errors_in(root, &nodes, source, &symbols, resolver, &cache));
     }

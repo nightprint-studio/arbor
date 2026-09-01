@@ -232,6 +232,12 @@ pub enum CheckId {
     DuplicateAnnotationValue,
     /// A value given for an element the annotation type does not declare (`@Column(nulable = true)`).
     UnknownAnnotationElement,
+    /// An annotation used without giving a value for an element that has no `default` (`@Column`
+    /// where `name()` is required).
+    MissingAnnotationElement,
+    /// An `@interface` element declared with a type an annotation element cannot have
+    /// (`MyObj[] o();`).
+    InvalidAnnotationElementType,
     /// The same annotation written twice on one declaration, without being `@Repeatable`.
     NotRepeatableAnnotation,
     /// An annotation element given a value that is not a constant expression.
@@ -334,6 +340,8 @@ impl CheckId {
             SelfReferencingInitializer => "self-referencing-initializer",
             DuplicateAnnotationValue => "duplicate-annotation-value",
             UnknownAnnotationElement => "unknown-annotation-element",
+            MissingAnnotationElement => "missing-annotation-element",
+            InvalidAnnotationElementType => "invalid-annotation-element-type",
             NotRepeatableAnnotation => "not-repeatable-annotation",
             NonConstantAnnotationValue => "non-constant-annotation-value",
             AnnotationValueType => "annotation-value-type",
@@ -463,6 +471,8 @@ impl CheckId {
             SelfReferencingInitializer,
             DuplicateAnnotationValue,
             UnknownAnnotationElement,
+            MissingAnnotationElement,
+            InvalidAnnotationElementType,
             NotRepeatableAnnotation,
             NonConstantAnnotationValue,
             AnnotationValueType,
