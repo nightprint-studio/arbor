@@ -148,6 +148,10 @@ mod intentions;
 // New-file scaffolding: `bennu_new_file` — a Java class/interface/enum/record (package inferred
 // from the dir) / JSP / XML / plain file's name + initial content for the tree "New…" menu.
 mod new_file;
+// New-folder creation: `bennu_new_folder` — one line of typing becomes a directory chain
+// (`assets/icons`), or a package (`it.acme.web`) under a Java source root. Only the levels that
+// are missing get created.
+mod new_folder;
 // Index inspector: `bennu_index_stats` — a cheap snapshot of the per-project index (symbol
 // + config counts, JDK level, build-ready flag) for an inspector panel.
 mod index_stats;

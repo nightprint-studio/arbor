@@ -63,6 +63,26 @@
 </ul>
 <p>Settings are stored under <code>[terminals]</code> in <code>~/.config/arbor/config.toml</code>.</p>
 
+<h2>Login shells and your environment</h2>
+<p>
+  On Linux and macOS a terminal opens as a <strong>login shell</strong>, the same way
+  <code>Terminal.app</code> and other terminal emulators do. That is what runs your profile —
+  <code>/etc/zprofile</code>, <code>~/.zprofile</code>, <code>~/.bash_profile</code> — and builds
+  the <code>PATH</code> those files set up, so toolchains installed through Homebrew, rustup or a
+  version manager are available exactly as they are outside Arbor.
+</p>
+<p>
+  It matters because a desktop app started from the Dock or a file manager inherits a minimal
+  <code>PATH</code> from the session manager rather than the one a shell builds for itself. The
+  <code>sh</code> entry is the deliberate exception and stays bare. <strong>Custom terminals</strong>
+  are spawned exactly as you spelled them, arguments included — add <code>-l</code> yourself if you
+  want the profile loaded.
+</p>
+<p>
+  With no default shell configured, Arbor opens the shell your account uses (<code>$SHELL</code>)
+  on Linux and macOS, and Command Prompt on Windows.
+</p>
+
 <h2>Features</h2>
 <div class="feature-grid">
   <div class="feature-card">

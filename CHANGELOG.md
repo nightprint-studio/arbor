@@ -13,7 +13,41 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **`arbor.cloud` is gone.** A plugin reaches storage through a provider extension (`arbor.ext.call` / `call_to_file`) instead. Progress is `arbor.job` and `arbor.ui.operation`, sign-in is `arbor.oauth`, and a merge order is asked for with the `reorder_list` form node.
 
+### Fixed
+
+- **An annotation that was never imported is reported.** `@SpringBootApplication` with no import above it read as clean while javac refused the file — an annotation's name is not written in a type position, and the unresolved-type check only looked at type positions. `Alt+Enter` on it now offers the import too, for the same reason.
+
+- **A failed Maven dependency resolve now says what Maven said.** It reported `exit Some(0)` with an empty stderr tail on a project whose build was broken — Maven logs its errors to stdout, which nothing was reading — and blamed the launcher (`Maven could not be run`) for failures where Maven had run fine.
+
+- **Bennu's project name follows its manifest.** Renaming an `<artifactId>` left the old name in the window title, the workspace switcher and the recents until the project was closed and reopened.
+
+- **A module is named after itself, not after its parent.** A POM that declares a `<parent>` writes the reactor's coordinates first, and Bennu read the first `<artifactId>` in the file — so every module of a reactor showed the reactor's name, and renaming a module's own artifactId changed nothing. `<name>` had the same problem one step further out, where an `<organization>` or a `<license>` could supply it.
+
+### Changed
+
+- **Bennu's project-tree `＋` opens the New menu instead of the Java-class dialog.** It used to pick a template for you and only ask for a name; it now offers the same entries as the right-click.
+
 ### Added
+
+- **Bennu speaks geode's playtest scenarios (`.dev`).** A scenario is a batch of console commands — `unlock while`, `set money 0`, `play playtest/crescita.dig`, `watch 30m --every 2m` — and until now it opened as plain text. It is now coloured, completed and checked: an unknown command, an option that command does not take, a value outside a closed set, and — the one that pays for the rest — a `play` naming a file that is not there, or whose `@requires` the scenario never unlocks. That last check has a documented cost in geode: a thirty-minute measured run on a frozen field, with the report blaming the wrong thing.
+
+- **`.dig` and `.dev` have icons of their own.** A faceted amethyst in the game's own violet, and a stopwatch — a scenario is a measured run, and the stopwatch says so without knowing anything about moles or crystals.
+
+- **An `import` completes as you type it.** `import org.` offers `springframework`, one segment at a time, packages beside the classes in them — the one line in a Java file written entirely in fully-qualified names had no completion at all. The same answers a name written out in full in code, where member completion cannot help: a package has no members.
+
+- **A class name is found the way people type one.** After the first letter the match ignores case and follows the camel humps, so `SBA` and `SprBoot` both reach `SpringBootApplication`. Your own types come before a jar's, and the list is ranked rather than cut off alphabetically at fifty.
+
+- **The index inspector reports how many type names completion knows.** It is what tells "completion is not offering my library classes" apart from "the library classes were never loaded" — from the popup the two look identical.
+
+- **The elements a schema insists on are checked.** A `<servlet>` with no `<servlet-name>`, an `<init-param>` with no `<param-value>` — for any `web.xml`, `struts.xml` or Spring file whose DTD or XSD resolves. Only unambiguous demands: neither branch of a choice is ever asked for, nor anything under an optional group, and an element holding a child from a namespace with no schema is left alone.
+
+- **A `pom.xml` is checked for the fields Maven requires.** A `<dependency>` with no `<artifactId>`, an incomplete `<parent>`, a root POM that never says who it is. `<groupId>` and `<version>` are only required when there is no `<parent>`, and a missing `<version>` on a dependency or a plugin is never reported — it can come from dependency management or from a parent the file cannot see.
+
+- **Bennu's project tree can create folders.** `New › Directory` on any row — `Package` inside a Java source root — reachable the same way from the header's `＋`, the tool-window menu and the command palette. The name is a path: `assets/icons` makes two folders, and in a package a dot separates too, so `it.acme.web` makes three. Levels that already exist are stepped through, so `src/main/resources` under an existing `src/main` creates `resources` alone.
+
+- **`New file…` reached the Bennu command palette.** It was right-click-only.
+
+- **Right-clicking the empty space in Bennu's project tree targets the project root.** It answered nothing, so there was no way to create anything beside the `pom.xml`.
 
 - **A plugin can move a payload without it passing through Lua.** `arbor.ext.call_to_file` and `call_from_file` transfer bytes straight between an installed extension and a local file, so a download or an upload is no longer a JSON array of numbers held in three processes at once.
 
@@ -105,7 +139,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **Optimize imports** (Ctrl+Shift+O, Java). Drops what the file does not use and orders the rest — everything else, then `javax` and `java`, then the statics — as one undo step. It never folds a package into a wildcard and never adds an import, and it uses the same judgement the `unused-import` warning does, so the command and the squiggle cannot disagree.
 
+### Changed
+
+- **`.dig` files are answered by geode's own language server.** Completion and hover came from a copy of the vocabulary generated into Bennu, which could not know a content pack's crystals, how many arguments a function takes, or which `let` is actually in scope. They now come from **nd-dig-lsp**, the server geode builds from the same analysis the game's in-game editor uses, so the two cannot disagree — and go-to and diagnostics come with it. Add it under `[[lsp.servers]]` like any other server; without it the file is still highlighted and folded, and the two hooks stay silent rather than answering from a stale copy.
+
 ### Fixed
+
+- **`.dig` comments were never highlighted.** They rendered as plain default text, and the reason was a level below the grammar: geode's scanner consumes `#` lines while working out a block's indentation, so the parser never produces a comment node and the highlighter had nothing to colour. They are painted from the line instead — with the `@title:` directives geode actually reads, backticked code and `**emphasis**` each getting their own shade of the comment colour, matching what the game's own editor shows.
+
+- **The terminal on Linux and macOS has your environment in it.** It opened `bash` — a shell most macOS users have no configuration for — and never as a login shell, so nothing built the `PATH` a desktop app does not inherit: no Homebrew, no rustup, no version manager. It now opens your own shell (`$SHELL`) as a login shell, the way any terminal emulator does.
+
+- **The shell picker no longer hides shells you have installed.** Detection searched the app's inherited `PATH`, which under a desktop launch does not include Homebrew, so fish, Nushell and PowerShell showed up as missing.
 
 - **Corvus opened on the welcome page and no repositories.** A renamed helper left one stale call behind in the right-hand activity bar, which threw while the shell was rendering and took the whole window down with it — including the tabs it was restoring.
 

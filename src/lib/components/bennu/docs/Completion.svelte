@@ -53,6 +53,22 @@
   inserted; press <kbd>Alt</kbd> + <kbd>Enter</kbd> → <strong>Import '…'</strong> to pick the package.
 </p>
 <p>
+  <strong>The name does not have to be spelled the way the class is.</strong> The first letter is
+  taken as written — a type is capitalised — and everything after it is matched three ways, best
+  first: what you typed as a prefix, the same ignoring case, then the <strong>camel humps</strong>.
+  So <code>SBA</code> reaches <code>SpringBootApplication</code> and <code>SprBoot</code> reaches
+  it too. Within each of those, a type <em>your project</em> declares comes before one out of a jar,
+  and the shorter name before the longer.
+</p>
+<p>
+  <strong>A qualified name completes one segment at a time</strong> — in an <code>import</code>, and
+  anywhere a name is written out in full. Typing <code>import org.</code> offers
+  <code>springframework</code>, not everything beneath it; <code>import
+  org.springframework.boot.</code> offers the packages under it beside the classes in it, and a
+  class row shows the full name it lands on. An <code>import</code> is the one line in a Java file
+  written entirely in fully-qualified names, and it is the one an editor can help with most.
+</p>
+<p>
   A receiver whose type is <strong>not imported yet</strong> still completes: typing
   <code>Arrays.</code> in a file with no <code>import java.util.Arrays;</code> offers that class's
   members, and accepting one adds the import along with it. Only an unambiguous name is taken — a

@@ -193,7 +193,11 @@ fn resolve_via_maven(root: &Path, jdk_version: &str) -> Result<(Vec<String>, Opt
                 root.display(),
                 opts.mvn_path
             );
-            Err(format!("Maven could not be run ({}): {e}", opts.mvn_path))
+            // NOT "Maven could not be run" any more: that is one of the reasons, and the
+            // resolver already says so (`spawn mvn (…)`) when it is the one that happened.
+            // Claiming it for every failure is what buried "your pom doesn't build" under a
+            // sentence about the launcher — the one thing that was working.
+            Err(format!("{e} (launcher: {})", opts.mvn_path))
         }
     }
 }

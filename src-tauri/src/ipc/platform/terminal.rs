@@ -73,7 +73,7 @@ fn terminal_list(state: &AppState) -> Result<Vec<TerminalInfo>, AppError> {
 
 #[platform::handler(program = "platform")]
 fn terminal_default_shell(_state: &AppState) -> Result<String, AppError> {
-    Ok(terminal::platform_default().to_string())
+    Ok(terminal::platform_default())
 }
 
 // ---------------------------------------------------------------------------

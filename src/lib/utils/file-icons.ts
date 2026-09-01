@@ -123,8 +123,65 @@ import folderTypesOpen     from '@iconify-icons/vscode-icons/folder-type-typescr
 
 // ── Lookup maps ─────────────────────────────────────────────────────────────
 
+// ── Icone di casa ────────────────────────────────────────────────────────────
+//
+// Due estensioni che nessun set generico conosce, disegnate qui. Sono oggetti `IconifyIcon`
+// come gli altri — `body` è il markup interno di un `<svg viewBox="0 0 32 32">` — quindi
+// stanno nella stessa mappa e si comportano allo stesso modo.
+//
+// ⚠️ Vincolo di progetto: si guardano a **16 px**, nell'albero dei file e sulle linguette.
+// Niente tratti sottili, niente dettaglio fine, e una silhouette che si riconosca prima del
+// colore. Le prime versioni sbagliavano proprio lì — un cristallo troppo stretto diventava una
+// scheggia, e il pulsante del cronometro si staccava e sembrava una stella.
+
+/**
+ * `.dig` — il linguaggio di **Nobody Digs Anymore**.
+ *
+ * Un cristallo sfaccettato, che nel gioco è tutto: si semina, cresce, si raccoglie e si vende —
+ * l'intera economia passa di lì, e il titolo parla di scavare per trovarli. I viola sono quelli
+ * veri dell'ametista (`content/core/crystals/amethyst.ron`), così il file e la gemma che il
+ * programma pianta hanno lo stesso colore.
+ */
+const digIcon: IconifyIcon = {
+  width: 32,
+  height: 32,
+  body:
+    '<path d="M16 3 4.5 12.5 16 29 27.5 12.5z" fill="#8047cc"/>' +
+    '<path d="M16 3 4.5 12.5 16 29z" fill="#5b2e96"/>' +
+    '<path d="M10.4 12.5 16 29l5.6-16.5z" fill="#a273e6"/>' +
+    '<path d="M16 3l-5.6 9.5h11.2z" fill="#c9a4f2"/>' +
+    '<path d="M4.5 12.5 10.4 12.5 16 3z" fill="#b98bee"/>' +
+    '<path d="M21.6 12.5h5.9L16 3z" fill="#9b63de"/>' +
+    '<path d="M4.5 12.5h23L16 29z" fill="#000" opacity=".07"/>',
+};
+
+/**
+ * `.dev` — uno **scenario di playtest**: un banco che prepara il mondo, lancia un programma e
+ * chiede di essere misurato.
+ *
+ * Un cronometro, e non qualcosa di geode: il formato è quello della console di fulcrum, quindi
+ * l'icona deve valere per qualunque gioco ci giri sopra. Un banco è una **corsa misurata** —
+ * `watch 30m --every 2m` è letteralmente la sua ultima riga — e il cronometro lo dice senza
+ * sapere niente di talpe né di cristalli.
+ */
+const devIcon: IconifyIcon = {
+  width: 32,
+  height: 32,
+  body:
+    '<rect x="13" y="1.8" width="6" height="3.8" rx="1.5" fill="#b96f10"/>' +
+    '<path d="M23.4 5.4l3.1-2.2 2.1 2.9-3.1 2.2z" fill="#b96f10"/>' +
+    '<circle cx="16" cy="19" r="12" fill="#f0a030"/>' +
+    '<circle cx="16" cy="19" r="9.4" fill="#2a2017"/>' +
+    '<path d="M16 19V11.9" stroke="#ffd582" stroke-width="2.4" stroke-linecap="round"/>' +
+    '<path d="M16 19l4.6 3.1" stroke="#ffd582" stroke-width="2.4" stroke-linecap="round"/>' +
+    '<circle cx="16" cy="19" r="1.4" fill="#fff"/>',
+};
+
 /** lowercase extension → icon */
 const EXT_ICONS: Record<string, IconifyIcon> = {
+  // Le due di casa: vedi sopra.
+  dig: digIcon,
+  dev: devIcon,
   rs: rustIcon,
   ts: tsIcon, tsx: tsIcon,
   js: jsIcon, jsx: jsIcon, mjs: jsIcon, cjs: jsIcon,

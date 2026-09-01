@@ -41,11 +41,34 @@
   during a scan — only when you follow the link.
 </p>
 <p>
-  <strong>What it will not do.</strong> Say anything at all without a schema. No grammar resolved
+  <strong>The elements a schema insists on.</strong> A <code>&lt;servlet&gt;</code> with no
+  <code>&lt;servlet-name&gt;</code>, a Spring <code>&lt;bean&gt;</code> missing what its schema
+  demands, a Struts <code>&lt;action&gt;</code> without its <code>&lt;result&gt;</code> — the
+  schema already says these are errors, and Bennu reads it and says so. The demand has to be
+  unambiguous: where the grammar offers a <em>choice</em> — a servlet may name a class
+  <em>or</em> a JSP — neither side is ever asked for, and anything the schema wraps in an
+  optional group is not asked for either. What it will not say is <em>how many</em> of something
+  is allowed.
+</p>
+<p>
+  <strong>The POM's required fields are checked.</strong> A <code>&lt;dependency&gt;</code> with no
+  <code>&lt;artifactId&gt;</code>, a <code>&lt;parent&gt;</code> missing its version, a root POM
+  that never says who it is — Maven refuses to build all of them, and being told at build time is
+  what this is here to stop. The conditional ones are honoured: <code>&lt;groupId&gt;</code> and
+  <code>&lt;version&gt;</code> are only required when the POM has no <code>&lt;parent&gt;</code>,
+  and a missing <code>&lt;version&gt;</code> on a dependency or a plugin is never reported — it may
+  come from <code>&lt;dependencyManagement&gt;</code> or from a parent this file cannot see.
+</p>
+<p>
+  <strong>What it will not do.</strong> Check <em>how many</em> of something is legal, or what
+  belongs in an element's text. Nor will it say anything at all
+  without a schema. No grammar resolved
   means no completion, no ghost text and no warnings — a vocabulary guessed from the tags already
   in the file would confidently propose whatever typo is already there. And where a schema says
   content is unconstrained (<code>ANY</code>, <code>xs:any</code>, a POM
   <code>&lt;configuration&gt;</code>) nothing inside is checked. Prefixed names are never reported
   either: a document mixing four namespaces usually has schemas for one of them, and the rest must
-  be invisible rather than wrong.
+  be invisible rather than wrong — and an element that <em>contains</em> a prefixed child is left
+  alone for the same reason, since the namespace nobody here can read may be supplying exactly
+  what looks missing.
 </p>

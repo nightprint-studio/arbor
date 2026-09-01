@@ -58,8 +58,32 @@ report:
 - an element whose **parent** the grammar does not know is not judged either: the position is
   unknown, so nothing about it can be.
 
-Nothing checks text content or cardinality. The grammar records both, and a flattened or curated
-one is exactly the wrong place to be confident about either.
+Cardinality is checked in **one direction only**: a child the grammar is certain a document must
+contain and that the document has not written (`Child::required`). Nothing counts *how many* of
+something is legal and nothing checks text content — a repeat bound and a text type are things a
+grammar records but a flattened or curated one cannot be trusted on.
+
+The certainty comes from the schema readers, not from a guess made here: `bennu-xsd` sets the flag
+only on a particle path that demands the name at every step, `bennu-dtd` derives it from the
+content-model tree (a choice demands only what *every* branch demands), and the curated tables in
+`builtin.rs` never set it at all. Merging two declarations of one name **intersects** the demands
+while it unions the names — what a document may contain is the union, what it must contain is the
+intersection.
+
+Two gates on top of the three above, both about not knowing enough rather than about being wrong:
+`xsi:nil="true"` says the element is deliberately absent, and an element carrying any **prefixed**
+child is left alone — a namespace this grammar does not cover may be supplying exactly what looks
+missing.
+
+The Maven POM's **required fields** are checked separately, from a curated list in
+`builtin.rs` beside the curated vocabulary, for the same reason the vocabulary is there: few,
+documented, unchanged since 4.0.0, and not a matter of opinion — Maven refuses to build without
+them — and because the real Maven XSD marks nearly all of them `minOccurs="0"`, so the generic
+check above cannot find them however well it reads the schema. The list carries no `<version>`
+anywhere and excuses `<groupId>`/`<version>` on a POM that has a `<parent>`, because those are the
+cases this file cannot know. The check is keyed on the **document**, not on the grammar that
+answered, so it holds for a project that vendors the real schema too; where the two can reach the
+same field, the duplicate is dropped.
 
 ## One name, several declarations
 

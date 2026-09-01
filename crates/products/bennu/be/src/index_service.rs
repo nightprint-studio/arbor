@@ -384,6 +384,8 @@ struct ProjectSlot {
     /// surfaced by `bennu_index_stats` without re-walking the project.
     types: AtomicUsize,
     members: AtomicUsize,
+    /// Distinct type names the built provider can complete — see [`IndexStats::type_names`].
+    type_names: AtomicUsize,
     /// Whether the last build FULLY completed — provider + reference walk + config graph all
     /// swapped in. Set only at the end of the build thread (NOT when completion first goes
     /// live), so `index_stats.ready` — which the FE's "Indexing" card finishes on — stays
@@ -711,6 +713,7 @@ impl IndexService {
             dep_jars: RwLock::new(Vec::new()),
             types: AtomicUsize::new(0),
             members: AtomicUsize::new(0),
+            type_names: AtomicUsize::new(0),
             ready: AtomicBool::new(false),
             indexed_hashes: Mutex::new(HashMap::new()),
             config_rebuild: ConfigRebuild::default(),
@@ -856,6 +859,7 @@ impl IndexService {
             // per-project.
             match NativeJavaProvider::for_project(&index_dir, &jdk_version, &pairs, jdk_index_path(&jdk_version), deps) {
                 Ok(p) => {
+                    slot.type_names.store(p.class_name_count(), Ordering::Relaxed);
                     *slot.provider.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(p);
                     // NB: completion is live here, but the index is NOT fully built yet — the
                     // O(N) reference walk still runs below. `slot.ready` (→ `index_stats.ready`,
@@ -2522,6 +2526,7 @@ impl IndexService {
                 actions: 0,
                 beans: 0,
                 relations: 0,
+                type_names: 0,
                 ready: false,
                 engine: String::new(),
             };
@@ -2550,6 +2555,7 @@ impl IndexService {
             actions,
             beans,
             relations,
+            type_names: slot.type_names.load(Ordering::Relaxed),
             ready: slot.ready.load(Ordering::Relaxed),
             // Filled by the caller that knows the project kind — see `index_stats::for_agent`.
             // Not here, because this method is also the editor's own poll and the editor already

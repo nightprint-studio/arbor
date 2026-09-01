@@ -1,9 +1,14 @@
 <script lang="ts">
   /**
    * BennuIndexInspectorModal — a filterable, inspectable browser of the project's
-   * semantic index. Headline stat cards (types / members / jars / JDK / beans /
-   * actions / relations) from `bennu_index_stats`, plus a KIND selector that swaps the
-   * list below between the seven index kinds.
+   * semantic index. Headline stat cards (types / members / jars / type names / JDK /
+   * beans / actions / relations) from `bennu_index_stats`, plus a KIND selector that
+   * swaps the list below between the seven index kinds.
+   *
+   * Most cards double as that selector; `Type names` does not, because there is no
+   * per-entry endpoint behind it — it is a count of what completion can offer, and it
+   * earns its place by telling "completion is not offering my library classes" apart
+   * from "the library classes were never loaded".
    *
    * The `Types` kind reads the real `bennu_class_index` (via the per-root cache) and
    * filters by BOTH simple name and fqcn. Every other kind reads the generic
@@ -82,6 +87,7 @@
           { id: 'types', label: 'Types', value: stats.types },
           { id: 'members', label: 'Members', value: stats.members },
           { id: 'jars', label: 'Jars', value: stats.jar_count },
+          { id: null, label: 'Type names', value: stats.type_names },
           { id: 'jdk', label: 'JDK', value: stats.jdk_version || '—' },
           { id: 'beans', label: 'Beans', value: stats.beans },
           { id: 'actions', label: 'Actions', value: stats.actions },
@@ -270,16 +276,23 @@
     {:else}
       <div class="stats">
         {#each cards as c (c.label)}
-          <button
-            class="stat"
-            type="button"
-            class:sel={kind === c.id}
-            onclick={() => (kind = c.id as IndexKind)}
-            aria-pressed={kind === c.id}
-          >
-            <span class="s-val">{c.value}</span>
-            <span class="s-label">{c.label}</span>
-          </button>
+          {#if c.id}
+            <button
+              class="stat"
+              type="button"
+              class:sel={kind === c.id}
+              onclick={() => (kind = c.id as IndexKind)}
+              aria-pressed={kind === c.id}
+            >
+              <span class="s-val">{c.value}</span>
+              <span class="s-label">{c.label}</span>
+            </button>
+          {:else}
+            <div class="stat static">
+              <span class="s-val">{c.value}</span>
+              <span class="s-label">{c.label}</span>
+            </div>
+          {/if}
         {/each}
       </div>
 
@@ -382,8 +395,13 @@
 
   .body { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 
-  /* Stat cards double as a coarse kind selector — clicking one activates its kind. */
-  .stats { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 14px 16px 10px; flex-shrink: 0; }
+  /* Stat cards double as a coarse kind selector — clicking one activates its kind. The ones with
+     no kind behind them are `.static`: a button that does nothing is worse than a figure. */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    gap: 6px; padding: 14px 16px 10px; flex-shrink: 0;
+  }
   .stat {
     display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px;
     background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
@@ -391,6 +409,8 @@
     transition: border-color var(--transition-fast), background var(--transition-fast);
   }
   .stat:hover { border-color: var(--border-default); background: var(--bg-hover); }
+  .stat.static { cursor: default; }
+  .stat.static:hover { border-color: var(--border-subtle); background: var(--bg-elevated); }
   .stat.sel { border-color: var(--accent); background: var(--accent-subtle); }
   .s-val { font-size: var(--font-size-lg); font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
   .stat.sel .s-val { color: var(--accent); }

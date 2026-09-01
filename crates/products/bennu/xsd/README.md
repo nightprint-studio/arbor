@@ -26,10 +26,17 @@ know them:
 ## Two deliberate simplifications
 
 **Particles are flattened.** `xs:sequence`, `xs:choice` and `xs:all` all become "these elements
-may appear here", with cardinality kept per element. An editor's questions are *may this element
-appear inside that one* and *what may I type here*, and the flattened form answers both.
-Reconstructing the order would let a checker report an out-of-order child — and a false one of
-those is worse than the true ones are worth, which is the standing rule for every check in bennu.
+may appear here". An editor's questions are *may this element appear inside that one* and *what
+may I type here*, and the flattened form answers both. Reconstructing the order would let a
+checker report an out-of-order child — and a false one of those is worse than the true ones are
+worth, which is the standing rule for every check in bennu.
+
+The names flatten; the **cardinality does not**. `XsdElement::required` is computed during the
+walk, not read off `minOccurs` afterwards — by then the `xs:choice` that made three of five names
+optional is gone, and every branch of it looks mandatory. The flag survives only a path that
+demands it at every step: no multi-branch choice, no `minOccurs="0"` on any wrapper, and not the
+head of a substitution group (whose members a document may write instead). It only ever narrows,
+so a schema this reader does not fully understand yields *fewer* demands, never invented ones.
 
 **Namespaces are carried, not enforced.** The target namespace is recorded once; matching a
 document's prefixes back to it is the consumer's job, because a document mixing four namespaces is

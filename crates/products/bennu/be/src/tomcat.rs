@@ -305,19 +305,12 @@ fn context_candidates(root: &str) -> Vec<String> {
     out
 }
 
-/// The project's own `<artifactId>` — the first one OUTSIDE the `<parent>…</parent>` block (a
-/// child pom lists the parent's artifactId first). Best-effort text extraction.
+/// The project's own `<artifactId>`, from the one reader that knows the difference between it
+/// and the `<parent>`'s. This used to strip the `<parent>` block by hand — a second answer to a
+/// question `bennu-project` already answers, and the place the two would drift apart.
 fn pom_artifact_id(pom: &str) -> Option<String> {
-    let without_parent = match (pom.find("<parent>"), pom.find("</parent>")) {
-        (Some(a), Some(b)) if b > a => {
-            let mut s = String::with_capacity(pom.len());
-            s.push_str(&pom[..a]);
-            s.push_str(&pom[b + "</parent>".len()..]);
-            s
-        }
-        _ => pom.to_string(),
-    };
-    xml_first_tag(&without_parent, "artifactId")
+    let id = bennu_project::prelude::parse_pom(pom).artifact_id;
+    (!id.is_empty()).then_some(id)
 }
 
 /// The trimmed text content of the first `<tag>…</tag>` in `xml`, or `None`.

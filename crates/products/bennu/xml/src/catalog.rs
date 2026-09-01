@@ -235,7 +235,7 @@ mod tests {
                    \"http://struts.apache.org/dtds/struts-2.5.dtd\">\n<struts><package/></struts>";
         let g = c.grammar_for("/p/src/main/resources/struts.xml", &scan(src)).unwrap();
         assert_eq!(g.source, "struts2-core-2.5.30.jar!/struts-2.5.dtd");
-        assert_eq!(g.element("struts").unwrap().children, ["package"]);
+        assert_eq!(g.element("struts").unwrap().child_names(), ["package"]);
         assert!(g.element("package").unwrap().attributes[0].required);
     }
 

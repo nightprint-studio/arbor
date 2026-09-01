@@ -197,6 +197,30 @@ pub(crate) fn open_and_start(
     Ok(info)
 }
 
+/// Args for [`bennu_project_info`].
+#[derive(Deserialize)]
+pub struct ProjectInfoArgs {
+    /// Absolute path to an already-open project root.
+    pub root: String,
+}
+
+/// Re-read a project's model — name, modules, JDK, capabilities, declared encoding — and
+/// nothing else.
+///
+/// The manifest is not frozen at open: an `<artifactId>` gets renamed, a module is added, the
+/// compiler level moves. [`bennu_open_project`] is not the way to notice, because it also
+/// warm-starts a language server, registers the root and kicks off an index build — everything
+/// it does beyond parsing is exactly what must NOT happen every time somebody saves a `pom.xml`.
+///
+/// So the parse stands alone here, and the model on screen can follow the file that defines it.
+#[arbor_rpc::handler]
+fn bennu_project_info(_ctx: &BennuState, args: ProjectInfoArgs) -> Result<ProjectInfo, String> {
+    let cfg = bennu_core::config::load();
+    let jdk_override = cfg.jdk_overrides.get(&args.root).map(|s| s.as_str());
+    let opts = OpenOptions { default_encoding: &cfg.default_encoding, jdk_override };
+    open_project(Path::new(&args.root), &opts).map_err(String::from)
+}
+
 /// Args for [`bennu_project_tree`].
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct ProjectTreeArgs {

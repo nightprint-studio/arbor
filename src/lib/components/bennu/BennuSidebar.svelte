@@ -22,7 +22,7 @@
     FolderOpen, Folder, FileCode2, FolderTree, Plus, Crosshair,
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical, FileType2,
-    History, Tag, Trash2, ExternalLink,
+    History, Tag, Trash2, ExternalLink, FolderPlus, Package,
   } from 'lucide-svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { tick, untrack } from 'svelte';
@@ -33,6 +33,7 @@
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
   import BennuNewFileModal from './BennuNewFileModal.svelte';
+  import BennuNewFolderModal from './BennuNewFolderModal.svelte';
   import BennuRenameFileModal from './BennuRenameFileModal.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -50,7 +51,7 @@
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import type { DiscoveredRustTest, DiscoveredTest, TreeNode } from '$lib/types/bennu';
   import type { NewFileKind } from '$lib/ipc/bennu/scaffold';
-  import { packageTree, isInPackageRoot } from './package-tree';
+  import { packageTree, isInPackageRoot, isSourceRoot } from './package-tree';
   // The shared file-icon vocabulary — the same one Corvus's tree and Sitta's explorer draw
   // from, so a `pom.xml` looks like a `pom.xml` wherever you meet it.
   import IconifyIconView from '@iconify/svelte';
@@ -332,21 +333,53 @@
   }
 
   // ── Right-click context menu (read-only; FS mutations are a later wave) ──────
-  /** What "New ›" offers. Two entries for now — a Java type, and a plain file — because
-   *  those are the two the tree is actually used to create; the dialog behind the first one
-   *  is where the choice between class / interface / enum / … is made, exactly where
-   *  IntelliJ puts it. Adding a third here is one line plus a case below. */
-  const NEW_SUBMENU: MenuItem[] = $derived(
-    projectStore.isCargo
-      ? [
-          { id: 'new-class', label: 'Rust File', icon: FileCode2 },
-          { id: 'new-file',  label: 'File',      icon: FileText },
-        ]
-      : [
-          { id: 'new-class', label: 'Java Class', icon: FileCode2 },
-          { id: 'new-file',  label: 'File',       icon: FileText },
-        ],
-  );
+  /** What "New ›" offers on a row: a typed file, a plain file, and a directory. The dialog
+   *  behind the first one is where the choice between class / interface / enum / … is made,
+   *  exactly where IntelliJ puts it.
+   *
+   *  A function of the target directory rather than a constant, because the last entry is
+   *  named after what a directory *is* there: inside a Java source root it is a package, and
+   *  calling it "Directory" would be naming the mechanism instead of the thing. */
+  function newSubmenu(dir: string): MenuItem[] {
+    return [
+      projectStore.isCargo
+        ? { id: 'new-class', label: 'Rust File',  icon: FileCode2 }
+        : { id: 'new-class', label: 'Java Class', icon: FileCode2 },
+      { id: 'new-file', label: 'File', icon: FileText },
+      { separator: true, id: 'sep-new-kind', label: '' },
+      isPackageDir(dir)
+        ? { id: 'new-folder', label: 'Package',   icon: Package }
+        : { id: 'new-folder', label: 'Directory', icon: FolderPlus },
+    ];
+  }
+
+  /** Whether a directory is package territory — a Java source root, or inside one. The same
+   *  list the tree collapses package rows with, so the menu, the dialog's title and the row
+   *  it will create cannot disagree about what `it.acme.web` means. */
+  function isPackageDir(dir: string): boolean {
+    return isSourceRoot(dir) || isInPackageRoot(dir);
+  }
+
+  /** Open the dialog a "New ›" entry stands for, in `dir`.
+   *
+   *  One dispatcher for four doors — a row's menu, the tree background's, the header's ＋ and
+   *  the kebab — because the entry that behaves differently depending on which one you came
+   *  through is the entry nobody trusts. */
+  function runNew(id: string, dir: string) {
+    if (id === 'new-folder') { openNewFolder(dir); return; }
+    newFileKind = id === 'new-file' ? 'file' : defaultKind();
+    newFileDir = dir;
+  }
+
+  /** {@link newSubmenu}, as dropdown items. The two menu widgets take different shapes for the
+   *  same list, so the list is written once and translated rather than kept twice. */
+  function newDropdownItems(dir: string): DropdownItem[] {
+    return newSubmenu(dir).map((m): DropdownItem =>
+      m.separator
+        ? { kind: 'separator' }
+        : { kind: 'item', id: m.id, label: m.label, icon: m.icon, onclick: () => runNew(m.id, dir) },
+    );
+  }
 
   /** The Local History submenu.
    *
@@ -435,7 +468,7 @@
       : [];
     const items: MenuItem[] = node.is_dir
       ? [
-          { id: 'new', label: 'New', icon: Plus, children: NEW_SUBMENU },
+          { id: 'new', label: 'New', icon: Plus, children: newSubmenu(newDir) },
           { separator: true, id: 'sep-new', label: '' },
           ...runItem,
           { id: 'delete', label: 'Delete…', icon: Trash2, shortcut: 'Del', danger: true },
@@ -452,7 +485,7 @@
         ]
       : [
           { id: 'open',          label: 'Open',               icon: FolderOpen },
-          { id: 'new', label: 'New', icon: Plus, children: NEW_SUBMENU },
+          { id: 'new', label: 'New', icon: Plus, children: newSubmenu(newDir) },
           { separator: true, id: 'sep-file', label: '' },
           // Files only. Renaming a DIRECTORY is a different operation — for Rust it moves a whole
           // module path, and `willRenameFiles` would have to be asked per file inside it — so it is
@@ -471,9 +504,10 @@
     bennuContextMenuStore.show(x, y, items, (id) => {
       switch (id) {
         // The submenu leaf decides which shape the dialog opens in — a Java type, with its
-        // kind list, or a plain file that only wants a name.
-        case 'new-class': newFileKind = defaultKind(); newFileDir = newDir; break;
-        case 'new-file':  newFileKind = 'file';  newFileDir = newDir; break;
+        // kind list, a plain file that only wants a name, or a directory.
+        case 'new-class':
+        case 'new-file':
+        case 'new-folder': runNew(id, newDir); break;
         case 'run-tests': runTestsFor(node); break;
         case 'rename':    renamePath = node.path; break;
         case 'delete':    deleting = node; break;
@@ -493,6 +527,56 @@
         case 'collapse':  bennuUiStore.setExpanded(node.path, false); break;
       }
     });
+  }
+
+  /**
+   * The menu for the tree's **empty space** — the project root.
+   *
+   * The root has no row of its own (the tree renders the root's children as its top level), so
+   * without this there is no way to create anything *at* the root: right-clicking the blank
+   * area below the last row is where every file manager puts that, and here it answered
+   * nothing.
+   *
+   * Not the row menu with a synthetic node: half of it would be about a row that does not
+   * exist. Delete would offer to remove the project, Reveal in Project would scroll to
+   * nowhere, and Expand/Collapse would key off a path with no disclosure triangle behind it.
+   */
+  function openRootMenu(x: number, y: number) {
+    const root = projectStore.project?.root;
+    if (!root) return;
+    const items: MenuItem[] = [
+      { id: 'new', label: 'New', icon: Plus, children: newSubmenu(root) },
+      { separator: true, id: 'sep-root-new', label: '' },
+      { id: 'expand',   label: 'Expand all',   icon: ChevronsUpDown },
+      { id: 'collapse', label: 'Collapse all', icon: ChevronsDownUp },
+      { separator: true, id: 'sep-root-tree', label: '' },
+      { id: 'history', label: 'Local History', icon: History, children: HISTORY_SUBMENU },
+      { separator: true, id: 'sep-root-hist', label: '' },
+      { id: 'copy-path', label: 'Copy path', icon: Copy },
+      { id: 'reveal-fs', label: 'Reveal in File Explorer', icon: ExternalLink },
+    ];
+    bennuContextMenuStore.show(x, y, items, (id) => {
+      switch (id) {
+        case 'new-class':
+        case 'new-file':
+        case 'new-folder': runNew(id, root); break;
+        case 'expand':    expandAll(); break;
+        case 'collapse':  collapseAll(); break;
+        // Whole-project scope, because that is what the empty space stands for.
+        case 'hist-show':
+        case 'hist-label': bennuHistoryStore.showProject(root); break;
+        case 'hist-deleted': bennuHistoryStore.showDeleted(root); break;
+        case 'copy-path': void copyToClipboard(root); break;
+        case 'reveal-fs': void openFolder(root); break;
+      }
+    });
+  }
+
+  /** Right-click on the tree's background. A row's own handler stops propagation, so anything
+   *  arriving here landed on empty space. */
+  function onTreeContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    openRootMenu(e.clientX, e.clientY);
   }
 
   // ── Delete ──────────────────────────────────────────────────────────────────
@@ -585,9 +669,9 @@
 
   // The directory a New-file modal is open for (null = closed).
   let newFileDir = $state<string | null>(null);
-  /** Which shape the New dialog opens in — set by the submenu leaf that opened it. The
-   *  header's `＋` leaves it at the typed default, the overwhelmingly common thing to create
-   *  here; which template that is follows the project (a struct on Cargo, a class on Maven). */
+  /** Which shape the New dialog opens in — set by the menu leaf that opened it, always
+   *  through {@link runNew}. The typed leaf follows the project (a struct on Cargo, a class
+   *  on Maven); the plain one only asks for a name. */
   let newFileKind = $state<NewFileKind>('class');
 
   /** The typed default for this project. Read at the moment the dialog is opened rather
@@ -596,24 +680,61 @@
     return projectStore.isCargo ? 'rust_struct' : 'class';
   }
 
+  /** The directory a New-folder modal is open for (null = closed), and whether that
+   *  directory is package territory — resolved when it opens, like the file kinds above. */
+  let newFolderDir = $state<string | null>(null);
+  let newFolderAsPackage = $state(false);
+
+  function openNewFolder(dir: string) {
+    // Nothing to create in without a project — the kebab is reachable before one is open.
+    if (!projectStore.project) return;
+    newFolderAsPackage = isPackageDir(dir);
+    newFolderDir = dir;
+  }
+
+  // The palette's "New file… / New folder…" — the tree owns WHERE, so the relay only says
+  // which dialog. Same nonce shape as the reveal relay above, for the same reason: asking
+  // twice for the same thing has to fire twice.
+  let lastNew = 0;
+  $effect(() => {
+    const { what, nonce } = bennuUiStore.newTarget;
+    if (nonce === lastNew) return;
+    lastNew = nonce;
+    if (!projectStore.project) return;
+    const dir = defaultNewDir();
+    if (what === 'folder') { openNewFolder(dir); return; }
+    newFileKind = defaultKind();
+    newFileDir = dir;
+  });
+
   // ── Options kebab ────────────────────────────────────────────────────────────
-  const optionsMenu: DropdownItem[] = [
+  // Derived, not a constant: the New submenu is built for a directory that moves with the
+  // open file, and a list frozen at mount would keep creating in whatever was open first.
+  const optionsMenu = $derived<DropdownItem[]>([
     { kind: 'item', id: 'expand',   label: 'Expand all',   icon: ChevronsUpDown,   onclick: expandAll },
     { kind: 'item', id: 'collapse', label: 'Collapse all', icon: ChevronsDownUp,   onclick: collapseAll },
     { kind: 'separator' },
     { kind: 'item', id: 'reveal',   label: 'Select opened file', icon: Crosshair, onclick: revealActive },
     { kind: 'separator' },
-    { kind: 'item', id: 'newfile',  label: 'New file…', icon: Plus,
-      onclick: () => { newFileKind = defaultKind(); newFileDir = defaultNewDir(); } },
-  ];
+    { kind: 'submenu', id: 'new', label: 'New', icon: Plus, items: newDropdownItems(defaultNewDir()) },
+  ]);
 </script>
 
 <PanelShell title="Project">
   {#snippet icon()}<FolderTree size={13} />{/snippet}
   {#snippet actions()}
-    <button class="ps-btn" type="button" onclick={() => { newFileKind = defaultKind(); newFileDir = defaultNewDir(); }} disabled={!projectStore.project} use:tooltip={'New file'} aria-label="New file">
-      <Plus size={14} />
-    </button>
+    <!-- A menu and not a shortcut to one template: ＋ used to open the Java-class dialog
+         without asking, which is only ever right by accident. The entries are the row menu's
+         own, so the button and the right-click cannot offer different things. -->
+    <Dropdown items={newDropdownItems(defaultNewDir())} position="fixed" direction="down" width="200px">
+      {#snippet trigger({ open, toggle })}
+        <button class="ps-btn" class:ps-btn-active={open} type="button" onclick={toggle}
+          disabled={!projectStore.project} use:tooltip={'New…'} aria-label="New"
+          aria-haspopup="menu" aria-expanded={open}>
+          <Plus size={14} />
+        </button>
+      {/snippet}
+    </Dropdown>
     <button class="ps-btn" type="button" onclick={revealActive} disabled={!projectStore.activeFilePath} use:tooltip={'Select opened file'} aria-label="Select opened file">
       <Crosshair size={14} />
     </button>
@@ -639,7 +760,7 @@
 
   {#if projectStore.project}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <div class="bs-tree" onkeydown={onTreeKeydown} role="presentation">
+    <div class="bs-tree" onkeydown={onTreeKeydown} oncontextmenu={onTreeContextMenu} role="presentation">
       <Tree
         bind:this={treeRef}
         nodes={rootChildren}
@@ -707,6 +828,14 @@
     dir={newFileDir}
     initialKind={newFileKind}
     onClose={() => (newFileDir = null)}
+  />
+{/if}
+
+{#if newFolderDir !== null}
+  <BennuNewFolderModal
+    dir={newFolderDir}
+    asPackage={newFolderAsPackage}
+    onClose={() => (newFolderDir = null)}
   />
 {/if}
 

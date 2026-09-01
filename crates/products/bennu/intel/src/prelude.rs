@@ -10,7 +10,7 @@ pub use crate::provider::{
 };
 
 // The class-name index behind the "Import class" intention (simple name → importable FQNs).
-pub use crate::class_names::ClassNameIndex;
+pub use crate::class_names::{ClassNameIndex, Segment};
 
 // The wire types the provider produces, re-exported so a consumer (bennu-be) reaches
 // them through the intel prelude it already imports.

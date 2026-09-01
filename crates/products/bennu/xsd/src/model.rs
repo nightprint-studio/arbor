@@ -29,6 +29,13 @@ pub struct Xsd {
     /// `schemaLocation`s of `xs:include` / `xs:import` / `xs:redefine`, in document order.
     /// **Recorded, not followed** — see the crate docs.
     pub includes: Vec<String>,
+    /// The names that are **heads of a substitution group** — every `substitutionGroup="…"` this
+    /// schema mentions, unqualified.
+    ///
+    /// Nothing here resolves substitution, and that is the point of recording them: a document
+    /// may write a member of the group wherever the head is expected, so a head can never be
+    /// reported as missing. See [`XsdElement::required`].
+    pub substitution_heads: Vec<String>,
 }
 
 impl Xsd {
@@ -123,8 +130,16 @@ pub struct XsdElement {
     /// Enumerated values, for an element whose type is a simple type with an enumeration.
     /// Resolved at parse time when the type is inline; a named one is looked up by the consumer.
     pub values: Vec<String>,
-    /// `minOccurs="0"` → optional. Kept per element rather than per group: see the crate docs on
-    /// why particles are flattened.
+    /// A document that omits this element is invalid — **as far as one schema file can tell**.
+    ///
+    /// Not simply `minOccurs != 0`. That attribute says what the element's *own* particle demands
+    /// and nothing about the particles above it, so reading it alone calls every branch of an
+    /// `xs:choice` mandatory. It is set here only when the whole path from the type down to the
+    /// declaration demands it: no multi-branch `xs:choice` on the way, no group with
+    /// `minOccurs="0"` wrapping it, and the name not the head of a substitution group.
+    ///
+    /// False is the safe answer and the one taken whenever the schema leaves any doubt — see the
+    /// crate docs.
     pub required: bool,
     /// `maxOccurs` other than `1`.
     pub repeats: bool,

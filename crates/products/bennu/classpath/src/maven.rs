@@ -244,18 +244,86 @@ pub fn resolve_maven_classpath(
     // the deps it *could* resolve before failing on a private-repo one.
     let produced = find_output_files(project_dir);
     if produced.is_empty() {
-        // Nothing written anywhere → surface a readable reason from the stderr tail.
+        // Nothing written anywhere → say what Maven actually said. The whole run goes to this
+        // process's stderr as well: this path is rare, and it is exactly the moment somebody
+        // wants the full log rather than three lines of it.
+        let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let tail: String = stderr.lines().rev().take(6).collect::<Vec<_>>().join(" | ");
+        eprintln!(
+            "bennu-classpath: mvn dependency:build-classpath wrote nothing in {} (exit {:?})\n\
+             ----- mvn stdout -----\n{stdout}\n----- mvn stderr -----\n{stderr}",
+            project_dir.display(),
+            output.status.code(),
+        );
         return Err(format!(
-            "mvn build-classpath produced no output file (exit {:?}). stderr tail: {tail}",
-            output.status.code()
+            "mvn dependency:build-classpath wrote no classpath. {}",
+            maven_failure_reason(&stdout, &stderr)
         ));
     }
 
     let (jars, unresolved) = classify_entries(union_entries(&produced));
 
     Ok(MavenClasspath { jars, unresolved, mvn_ok })
+}
+
+/// What Maven said went wrong, in one line fit for a notification.
+///
+/// ## Why stdout
+///
+/// Maven logs **everything** — `[ERROR]` included — to **stdout**; stderr is very nearly always
+/// empty. Reading only stderr is why this used to report `exit Some(0)` with an empty tail on a
+/// project whose `mvn clean package` was broken: the run really did exit 0 (`--fail-never` is
+/// passed, so one module's failure must not abort the reactor), and the sentence naming the
+/// failure was sitting in the stream nobody read.
+///
+/// ## Why the first error lines and not the last
+///
+/// A Maven failure ends with four lines of boilerplate — `-> [Help 1]`, the `-X` suggestion, the
+/// wiki URL — so a *tail* is reliably the part that says nothing. The first `[ERROR]` line is the
+/// one that names the goal and the project that failed.
+fn maven_failure_reason(stdout: &str, stderr: &str) -> String {
+    /// How many error lines make it into the notification. Enough for "Failed to execute goal X
+    /// on project Y" plus the cause under it; past that it stops being readable in a toast.
+    const KEEP: usize = 3;
+
+    let errors: Vec<&str> = stdout
+        .lines()
+        .chain(stderr.lines())
+        .filter_map(|l| {
+            let l = l.trim();
+            l.strip_prefix("[ERROR]").or_else(|| l.strip_prefix("[FATAL]")).map(str::trim)
+        })
+        .filter(|l| !l.is_empty() && !is_maven_boilerplate(l))
+        .take(KEEP)
+        .collect();
+    if !errors.is_empty() {
+        return format!("Maven said: {}", errors.join(" | "));
+    }
+
+    // No tagged error at all — a launcher that printed a shell error, a JVM that refused to
+    // start. Whatever came out is better than silence.
+    let loose: Vec<&str> = stderr
+        .lines()
+        .chain(stdout.lines())
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(KEEP)
+        .collect();
+    if !loose.is_empty() {
+        return format!("Maven said: {}", loose.join(" | "));
+    }
+    "Maven printed nothing — run `mvn dependency:build-classpath` in the project to see why."
+        .to_string()
+}
+
+/// The lines every Maven failure ends with, which say nothing about this one.
+fn is_maven_boilerplate(line: &str) -> bool {
+    line.starts_with("->")
+        || line.starts_with("Re-run Maven")
+        || line.starts_with("To see the full stack trace")
+        || line.starts_with("For more information about the errors")
+        || line.starts_with("http://")
+        || line.starts_with("https://")
 }
 
 /// The deduplicated union of the classpath entries written in `files`, in first-seen order.
@@ -575,6 +643,33 @@ mod tests {
             assert!(entries.iter().any(|e| e == expected), "missing {expected}: {entries:?}");
         }
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn failure_reason_reads_maven_errors_off_stdout() {
+        // The shape of a real run: `--fail-never` swallows the exit code, `-q` swallows INFO,
+        // stderr is empty, and the whole story is on stdout.
+        let stdout = "[ERROR] Failed to execute goal on project portal-web: Could not resolve \
+                      dependencies for project it.acme:portal-web:war:1.0\n\
+                      [ERROR] -> [Help 1]\n\
+                      [ERROR] To see the full stack trace of the errors, re-run with -e.\n";
+        let reason = maven_failure_reason(stdout, "");
+        assert!(reason.starts_with("Maven said: "), "{reason}");
+        assert!(reason.contains("portal-web"), "{reason}");
+        assert!(!reason.contains("[Help 1]"), "boilerplate should be dropped: {reason}");
+    }
+
+    #[test]
+    fn failure_reason_falls_back_to_whatever_was_printed() {
+        // No `[ERROR]` tag at all — a launcher that failed before Maven ever logged anything.
+        let reason = maven_failure_reason("", "env: java: No such file or directory\n");
+        assert!(reason.contains("No such file or directory"), "{reason}");
+    }
+
+    #[test]
+    fn failure_reason_says_so_when_maven_printed_nothing() {
+        let reason = maven_failure_reason("", "");
+        assert!(reason.contains("printed nothing"), "{reason}");
     }
 
     #[test]

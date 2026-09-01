@@ -250,6 +250,29 @@ export const codeEditorTheme = EditorView.theme(
     // a real .java file: keywords burnt-orange, types blue, method calls gold,
     // strings green, annotations olive, fields/`this` violet.
     '.cm-tok-comment':     { color: 'var(--syntax-comment, #808080)', fontStyle: 'italic' },
+    // ── Structure inside a comment ──
+    //
+    // Mixed *from* the comment colour towards the accent each part echoes, instead of taking
+    // that accent whole: a `@title:` is a comment first and metadata second, and painting it
+    // full keyword-orange turns a twenty-line doc block into the loudest thing on screen.
+    // Starting at the comment grey and stepping towards the accent keeps the hierarchy and
+    // still says which part is which. The italic stays for the same reason.
+    '.cm-tok-comment-directive': {
+      color: 'color-mix(in srgb, var(--syntax-comment, #808080) 38%, var(--syntax-keyword, #cc7832))',
+      fontStyle: 'italic',
+      fontWeight: '600',
+    },
+    '.cm-tok-comment-code': {
+      color: 'color-mix(in srgb, var(--syntax-comment, #808080) 38%, var(--syntax-function, #ffc66d))',
+      fontStyle: 'italic',
+    },
+    // Emphasis does not change subject, it raises the voice: no hue of its own, just
+    // brighter than the prose around it.
+    '.cm-tok-comment-strong': {
+      color: 'color-mix(in srgb, var(--syntax-comment, #808080) 45%, var(--text-primary))',
+      fontStyle: 'italic',
+      fontWeight: '600',
+    },
     '.cm-tok-string':      { color: 'var(--syntax-string, #6a8759)' },
     '.cm-tok-number':      { color: 'var(--syntax-number, #6897bb)' },
     '.cm-tok-constant':    { color: 'var(--syntax-constant, #9876aa)', fontStyle: 'italic' },

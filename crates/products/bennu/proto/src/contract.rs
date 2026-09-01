@@ -699,6 +699,15 @@ pub struct IndexStats {
     pub beans: usize,
     /// Config-graph relations / edges (0 when no config / not built).
     pub relations: usize,
+    /// Distinct type **names** completion can offer — the JDK's, every resolved dependency jar's,
+    /// and the project's own.
+    ///
+    /// Reported because it is the one number that tells "completion is not offering my library
+    /// classes" apart from "the library classes were never loaded". From the popup the two look
+    /// identical, and only one of them is a completion problem: a few thousand is a JDK alone, a
+    /// jarful project is tens of thousands.
+    #[serde(default)]
+    pub type_names: usize,
     /// Whether **the engine that serves this project** can answer.
     ///
     /// Not "the Java index build has finished", which is what it used to mean and what made it

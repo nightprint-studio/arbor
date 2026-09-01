@@ -44,8 +44,10 @@ file is a fair answer, landing inside an unrelated declaration is not.
 ## The content model is a tree, not a set
 
 `(a, (b | c)+, d?)` says things a set of child names cannot, and `Particle` keeps all of it.
-`Content::child_names()` gives the flattened set for completion; the tree is there for the checks
-that need order.
+`Content::child_names()` gives the flattened set for completion; the tree answers the questions
+the set cannot. `Content::required_child_names()` is the one with a consumer today: it walks the
+tree to say what a document *must* contain, which is not what it may — `?` and `*` demand nothing,
+and a choice demands only what every one of its branches demands.
 
 ## What it deliberately does not do
 

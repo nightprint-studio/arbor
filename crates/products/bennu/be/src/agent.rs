@@ -3659,6 +3659,7 @@ mod next_steps_tests {
             actions: 0,
             beans: 0,
             relations: 0,
+            type_names: 0,
             ready: false,
             engine: String::new(),
         }

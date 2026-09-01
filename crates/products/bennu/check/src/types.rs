@@ -2,6 +2,12 @@
 //! `extends Barr`, `List<Bazz>`, `catch (Quxx e)`) that resolves to nothing. Catches the classic
 //! typo'd class name before javac does.
 //!
+//! **An annotation's name counts as a type position**, and it is the one that does not look like
+//! one in the tree: `@SpringBootApplication` puts its name in the `name` field of a
+//! `marker_annotation` as a plain `identifier`, never as a `type_identifier`. So a file missing
+//! that import used to read as clean here while javac refused it — and an annotation is exactly
+//! where a missing import is easy to leave behind, because the code around it still makes sense.
+//!
 //! This is the most false-positive-prone check, so the gate is deliberately tight (docs: never a
 //! false "cannot resolve"):
 //!   * runs only when `jdk_available` — otherwise `java.lang` / library types wouldn't resolve and
@@ -58,21 +64,46 @@ pub fn unresolved_types_in(
     let mut inherited = InheritedTypes::new(symbols, resolver);
     let mut out = Vec::new();
     for &n in nodes {
-        if n.kind() != "type_identifier" {
-            continue;
-        }
-        // Qualified name segment (`a.b.C`) or a *declared* type-parameter name → not a use we judge.
-        if matches!(n.parent().map(|p| p.kind()), Some("scoped_type_identifier") | Some("type_parameter")) {
-            continue;
-        }
-        // The qualifier of a method reference (`x::method`) — tree-sitter parses the LHS as a
-        // `type_identifier` even when it's actually a VARIABLE / field / parameter (`list::add`,
-        // `helper::process`), which it can't disambiguate from a class (`Integer::parseInt`). Since a
-        // method-ref qualifier can legitimately be a value, never flag it as an unresolved type (only
-        // a genuine `TypoClass::method` slips through — the conservative trade for zero false positives).
-        if n.parent().map(|p| p.kind()) == Some("method_reference") {
-            continue;
-        }
+        // Two shapes in the tree name a type, and only one of them is called `type_identifier`.
+        //
+        // An annotation's own name is parsed as a plain `identifier` (or `scoped_identifier`),
+        // because it sits in the `name` field of `marker_annotation` / `annotation` rather than in
+        // a type position — which is why this loop used to walk straight past
+        // `@SpringBootApplication` with no import above it. javac calls that "cannot find symbol"
+        // like any other, so it is reported here like any other.
+        let name_node = match n.kind() {
+            "type_identifier" => {
+                // Qualified name segment (`a.b.C`) or a *declared* type-parameter name → not a use
+                // we judge.
+                if matches!(
+                    n.parent().map(|p| p.kind()),
+                    Some("scoped_type_identifier") | Some("type_parameter")
+                ) {
+                    continue;
+                }
+                // The qualifier of a method reference (`x::method`) — tree-sitter parses the LHS as
+                // a `type_identifier` even when it's actually a VARIABLE / field / parameter
+                // (`list::add`, `helper::process`), which it can't disambiguate from a class
+                // (`Integer::parseInt`). Since a method-ref qualifier can legitimately be a value,
+                // never flag it as an unresolved type (only a genuine `TypoClass::method` slips
+                // through — the conservative trade for zero false positives).
+                if n.parent().map(|p| p.kind()) == Some("method_reference") {
+                    continue;
+                }
+                n
+            }
+            "marker_annotation" | "annotation" => {
+                let Some(name) = n.child_by_field_name("name") else { continue };
+                // `@org.junit.Test` is a written FQN — left alone for the same reason a
+                // `scoped_type_identifier` is: we do not second-guess a name somebody spelled out.
+                if name.kind() != "identifier" {
+                    continue;
+                }
+                name
+            }
+            _ => continue,
+        };
+        let n = name_node;
         let Ok(name) = n.utf8_text(bytes) else { continue };
         if name == "var" || known.contains(name) || JAVA_LANG.contains(&name) {
             continue;
@@ -296,6 +327,58 @@ mod tests {
         let d2: Vec<String> = unresolved_types(bad, &r).into_iter().map(|x| x.message).collect();
         assert_eq!(d2.len(), 1, "{d2:?}");
         assert!(d2[0].contains("Nonesuch"), "{d2:?}");
+    }
+
+    #[test]
+    fn an_annotation_that_was_never_imported_is_flagged() {
+        // The case that started this: the class around it is perfectly ordinary, so nothing else
+        // in the file looks wrong — and javac refuses it.
+        let d = diags("@SpringBootApplication\nclass App {}");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("SpringBootApplication"), "{d:?}");
+    }
+
+    #[test]
+    fn an_annotation_with_arguments_is_flagged_the_same_way() {
+        // `annotation` rather than `marker_annotation` — a different node kind, the same question.
+        let d = diags("class C { @RequestMapping(\"/x\") void m() {} }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("RequestMapping"), "{d:?}");
+    }
+
+    #[test]
+    fn a_resolvable_annotation_is_not_flagged() {
+        let mut r = resolver();
+        r.simple.insert("Service".to_string(), "org/springframework/stereotype/Service".to_string());
+        let d: Vec<String> =
+            unresolved_types("@Service\nclass C {}", &r).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn an_annotation_imported_by_name_resolves() {
+        let src = "import org.junit.Test;\nclass C { @Test void t() {} }";
+        let d: Vec<String> =
+            unresolved_types(src, &resolver()).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "the import is the whole point: {d:?}");
+    }
+
+    #[test]
+    fn the_jdk_annotations_that_need_no_import_are_never_flagged() {
+        assert!(diags("class C { @Override public String toString() { return \"\"; } }").is_empty());
+        assert!(diags("@Deprecated class C {}").is_empty());
+        assert!(diags("class C { @SuppressWarnings(\"unchecked\") void m() {} }").is_empty());
+    }
+
+    #[test]
+    fn an_annotation_declared_in_this_file_is_not_flagged() {
+        assert!(diags("@interface Marker {}\n@Marker class C {}").is_empty());
+    }
+
+    #[test]
+    fn a_fully_qualified_annotation_is_left_alone() {
+        // A written FQN is not second-guessed, exactly as a `scoped_type_identifier` is not.
+        assert!(diags("class C { @org.junit.Test void t() {} }").is_empty());
     }
 
     #[test]

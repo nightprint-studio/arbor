@@ -248,6 +248,13 @@ function createBennuUiStore() {
   // for the same target fire twice.
   let revealTarget = $state<{ path: string | null; nonce: number }>({ path: null, nonce: 0 });
 
+  // The Project tree's "New…" dialogs, asked for from outside it (the command palette).
+  //
+  // A relay and not a piece of shared state, for the same reason as the one above: WHERE a new
+  // file or folder is created is the tree's own question — the directory it is sitting on — and
+  // the palette has no business answering it. It only says which of the two dialogs to open.
+  let newTarget = $state<{ what: 'file' | 'folder'; nonce: number }>({ what: 'file', nonce: 0 });
+
   return {
     get caretLine() { return caretLine; },
     get caretCol()  { return caretCol; },
@@ -291,6 +298,7 @@ function createBennuUiStore() {
     get gotoTarget()   { return gotoTarget; },
     get gotoOffsetTarget() { return gotoOffsetTarget; },
     get revealTarget() { return revealTarget; },
+    get newTarget() { return newTarget; },
     get treeExpanded() { return treeExpanded; },
 
     /** Toggle a left tool window (clicking the active one closes it). */
@@ -498,6 +506,13 @@ function createBennuUiStore() {
     focusInTree(path: string) {
       leftPanel = 'project';
       revealTarget = { path, nonce: revealTarget.nonce + 1 };
+    },
+
+    /** Open the Project tree's New-file / New-folder dialog (ensures Project is open + bumps
+     *  the relay the sidebar watches). The tree decides which directory it creates in. */
+    newInTree(what: 'file' | 'folder') {
+      leftPanel = 'project';
+      newTarget = { what, nonce: newTarget.nonce + 1 };
     },
 
     // ── Project-tree expansion (controlled) ──────────────────────────────────

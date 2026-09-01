@@ -407,6 +407,10 @@ export interface IndexStats {
   beans: number;
   /** Config-graph relations (edges). */
   relations: number;
+  /** Distinct type names completion can offer — the JDK's, every resolved dependency jar's and the
+   *  project's own. Tells "completion isn't offering my library classes" apart from "the library
+   *  classes were never loaded", which look identical from the popup. */
+  type_names: number;
   /** Whether **the engine that serves this project** can answer. On a Cargo root that is the
    *  language server, not the Java index — which has nothing to build there and so said `false`
    *  for ever. */

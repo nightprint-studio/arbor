@@ -1,4 +1,4 @@
-<!-- Bennu docs — the project tree: what its marks mean, and creating files from it. -->
+<!-- Bennu docs — the project tree: what its marks mean, and creating files and folders from it. -->
 <h1>The project tree</h1>
 <p class="doc-lead">
   The left rail's file tree, what its icons and dimming are telling you, and everything you can do
@@ -23,9 +23,15 @@
 </p>
 <h2>New files</h2>
 <p>
-  The Project tree's <strong>＋</strong> button — or <strong>New file…</strong> from a right-click
-  (or the tool-window menu) — scaffolds a file in the chosen directory. It opens the new file and
-  reveals it in the tree; it never overwrites an existing one.
+  <strong>New ›</strong> from a right-click, from the Project header's <strong>＋</strong>, or from
+  the tool-window menu — the same three entries wherever you open it: a typed file, a plain file,
+  and a directory. The file entries scaffold in the chosen directory, open the new file and reveal
+  it in the tree; they never overwrite an existing one.
+</p>
+<p>
+  Right-clicking the <strong>empty space</strong> below the last row targets the
+  <strong>project root</strong> — that is where you create something beside the
+  <code>pom.xml</code> rather than inside whatever folder happens to be selected.
 </p>
 <p>
   <strong>The templates follow the project.</strong> On a Maven root: a Java
@@ -44,6 +50,27 @@
   kind that creates a directory (<code>atlas_player/mod.rs</code>), because <code>foo.rs</code> and
   <code>foo/mod.rs</code> are two different decisions about how the module will grow.
 </p>
+<h2>New folders and packages</h2>
+<p>
+  <strong>New › Directory</strong> — from a row's right-click menu, from the header's
+  <strong>＋</strong>, from the tool-window menu, or as <strong>New folder or package…</strong> in
+  the command palette — creates a directory in the chosen folder, and reveals it.
+</p>
+<p>
+  <strong>The name is a path.</strong> <code>assets/icons</code> creates two folders, one inside
+  the other; there is no need to open the dialog once per level. Inside a
+  <strong>source root</strong> the entry is called <strong>Package</strong> instead, and a
+  <strong>dot</strong> separates as well — <code>it.acme.web</code> is three folders, written the
+  way the package itself is written. Everywhere else a dot is just a character in a name, so
+  <code>.github</code> and <code>my.config</code> stay one folder each. The line under the field
+  shows what will exist before you press <kbd>Enter</kbd>.
+</p>
+<p>
+  Levels that are <strong>already there</strong> are stepped through, not objected to: typing
+  <code>src/main/resources</code> where <code>src/main</code> exists creates <code>resources</code>
+  and nothing else, and the confirmation says exactly what was created.
+</p>
+
 <h2>Renaming a file</h2>
 <p>
   <kbd>F2</kbd> on a file in the Project tree — or <strong>Rename…</strong> from its right-click menu.
@@ -77,9 +104,9 @@
   refusing to settle at exactly the moment the machine is busiest.
 </p>
 <p>
-  The <strong>Project</strong> panel header carries quick actions: create a new file, locate the open
-  file in the tree, collapse or expand the whole tree, and an options menu. Right-clicking a file or
-  folder opens a context menu (Open · Rename · Delete · Local History · Copy path · Reveal in
+  The <strong>Project</strong> panel header carries quick actions: a <strong>New</strong> menu,
+  locate the open file in the tree, collapse or expand the whole tree, and an options menu. Right-clicking a file or
+  folder opens a context menu (New · Open · Rename · Delete · Local History · Copy path · Reveal in
   Project · Reveal in File Explorer). <kbd>Shift</kbd>+<kbd>F10</kbd> — or the Menu key — opens the
   same menu on the focused row, so every entry in it is reachable without the mouse.
 </p>

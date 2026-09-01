@@ -35,6 +35,11 @@
 //! markup as an error, which is what makes people turn the whole thing off. Where go-to jumps
 //! still comes from the first declaration seen.
 //!
+//! Union is the wrong direction for exactly one thing, and [`Child::required`] is it. What a
+//! document *may* contain is the union of every declaration; what it *must* contain is the
+//! intersection, because a declaration that lets you leave a child out is proof that leaving it
+//! out can be right. Merging therefore unions the names and intersects the demands.
+//!
 //! [`bennu-dtd`]: https://docs.rs/bennu-dtd
 //! [`bennu-xsd`]: https://docs.rs/bennu-xsd
 
@@ -105,7 +110,7 @@ impl Grammar {
     /// parent the schema never declared would be a list of plausible-looking wrong answers.
     pub fn children_of(&self, parent: &str) -> Vec<&Element> {
         let Some(e) = self.element(parent) else { return Vec::new() };
-        e.children.iter().filter_map(|n| self.element(n)).collect()
+        e.children.iter().filter_map(|c| self.element(&c.name)).collect()
     }
 
     /// Merge another grammar in. Used to fold an `xs:include` chain into one answer.
@@ -128,13 +133,27 @@ impl Grammar {
     }
 }
 
+/// One element name a parent may contain, and whether leaving it out is an error.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Child {
+    /// Local name.
+    pub name: String,
+    /// A document that omits it is invalid — **and the grammar is sure of it**.
+    ///
+    /// False is the answer wherever a schema leaves room: a branch of an `xs:choice`, anything
+    /// under a `minOccurs="0"` group, a DTD `?`/`*`, a substitution group head, a name one of two
+    /// declarations lets you skip. Nothing built from a curated table sets it at all — see
+    /// [`crate::builtin`], which knows the vocabulary and not the cardinality.
+    pub required: bool,
+}
+
 /// One element the grammar declares.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Element {
     /// Local name.
     pub name: String,
-    /// Local names of the children it may contain, in declaration order.
-    pub children: Vec<String>,
+    /// The children it may contain, in declaration order.
+    pub children: Vec<Child>,
     pub attributes: Vec<Attribute>,
     /// Character data is legal inside it.
     pub text: bool,
@@ -152,6 +171,22 @@ impl Element {
         self.attributes.iter().find(|a| a.name == local)
     }
 
+    /// The children a document must write inside this element. Empty whenever the grammar cannot
+    /// be certain, which for a curated or a permissive schema is always.
+    pub fn required_children(&self) -> impl Iterator<Item = &Child> {
+        self.children.iter().filter(|c| c.required)
+    }
+
+    /// Just the names, for the places that only ever wanted the vocabulary.
+    pub fn child_names(&self) -> Vec<&str> {
+        self.children.iter().map(|c| c.name.as_str()).collect()
+    }
+
+    pub fn child(&self, name: &str) -> Option<&Child> {
+        let local = local_name(name);
+        self.children.iter().find(|c| c.name == local)
+    }
+
     /// Fold another declaration of the same name into this one.
     ///
     /// Union on everything that says what is *legal* — children, attributes, and both "anything
@@ -165,9 +200,15 @@ impl Element {
     /// own. Documentation is the first **non-empty** one: only one of two declarations usually
     /// carries an `xs:annotation`, and letting the bare one win would lose the prose for no reason.
     pub fn merge(&mut self, other: Element) {
+        // Demands are intersected before anything is added, so a name only one side declares
+        // ends up optional whichever side declared it: the other declaration is a way of being
+        // right that leaves the name out entirely.
+        for mine in self.children.iter_mut() {
+            mine.required &= other.children.iter().any(|c| c.name == mine.name && c.required);
+        }
         for c in other.children {
-            if !self.children.contains(&c) {
-                self.children.push(c);
+            if !self.children.iter().any(|x| x.name == c.name) {
+                self.children.push(Child { required: false, ..c });
             }
         }
         for a in other.attributes {
@@ -206,29 +247,39 @@ pub fn from_dtd(dtd: &dtd::Dtd, source: &str) -> Grammar {
     let elements = dtd
         .elements
         .iter()
-        .map(|e| Element {
-            name: e.name.clone(),
-            children: e.content.child_names(),
-            text: e.content.allows_text(),
-            open: matches!(e.content, dtd::Content::Any),
-            doc: e.doc.clone(),
-            decl: Decl { file: source.to_string(), offset: e.offset, line: e.line },
-            attributes: dtd
-                .attributes_of(&e.name)
-                .into_iter()
-                .map(|a| Attribute {
-                    name: a.name.clone(),
-                    required: a.required(),
-                    values: a.values().to_vec(),
-                    default: a.default.value().to_string(),
-                    fixed: match &a.default {
-                        dtd::DefaultDecl::Fixed(v) => v.clone(),
-                        _ => String::new(),
-                    },
-                    doc: String::new(),
-                    decl: Decl { file: source.to_string(), offset: a.offset, line: a.line },
-                })
-                .collect(),
+        .map(|e| {
+            // What the content model *demands*, which the flat name list cannot carry: `?`, `*`
+            // and every branch of a choice contribute a name without contributing an obligation.
+            let demanded = e.content.required_child_names();
+            Element {
+                name: e.name.clone(),
+                children: e
+                    .content
+                    .child_names()
+                    .into_iter()
+                    .map(|n| Child { required: demanded.contains(&n), name: n })
+                    .collect(),
+                text: e.content.allows_text(),
+                open: matches!(e.content, dtd::Content::Any),
+                doc: e.doc.clone(),
+                decl: Decl { file: source.to_string(), offset: e.offset, line: e.line },
+                attributes: dtd
+                    .attributes_of(&e.name)
+                    .into_iter()
+                    .map(|a| Attribute {
+                        name: a.name.clone(),
+                        required: a.required(),
+                        values: a.values().to_vec(),
+                        default: a.default.value().to_string(),
+                        fixed: match &a.default {
+                            dtd::DefaultDecl::Fixed(v) => v.clone(),
+                            _ => String::new(),
+                        },
+                        doc: String::new(),
+                        decl: Decl { file: source.to_string(), offset: a.offset, line: a.line },
+                    })
+                    .collect(),
+            }
         })
         .collect();
     // A DTD names no root: the document's own `DOCTYPE` does. Left empty, which the checks read
@@ -268,7 +319,10 @@ pub fn from_xsd(schema: &xsd::Xsd, source: &str) -> Grammar {
         let children = schema.children_of(e);
         let declared = Element {
             name: e.name.clone(),
-            children: children.iter().map(|c| c.name.clone()).collect(),
+            children: children
+                .iter()
+                .map(|c| Child { name: c.name.clone(), required: c.required })
+                .collect(),
             attributes: schema
                 .attributes_of(e)
                 .into_iter()
@@ -311,6 +365,10 @@ pub fn from_xsd(schema: &xsd::Xsd, source: &str) -> Grammar {
 mod tests {
     use super::*;
 
+    fn kid(name: &str, required: bool) -> Child {
+        Child { name: name.to_string(), required }
+    }
+
     #[test]
     fn a_dtd_becomes_a_grammar_with_its_attributes_attached() {
         let d = bennu_dtd::prelude::parse(
@@ -322,7 +380,7 @@ mod tests {
         );
         let g = from_dtd(&d, "/p/struts-2.5.dtd");
         assert_eq!(g.kind, Some(GrammarKind::Dtd));
-        assert_eq!(g.element("struts").unwrap().children, ["package"]);
+        assert_eq!(g.element("struts").unwrap().child_names(), ["package"]);
         assert_eq!(g.element("struts").unwrap().doc, "The root.");
 
         let p = g.element("package").unwrap();
@@ -360,13 +418,39 @@ mod tests {
         .unwrap();
         let g = from_xsd(&x, "/p/maven-4.0.0.xsd");
         assert_eq!(g.roots, ["project"]);
-        assert_eq!(g.element("project").unwrap().children, ["dependencies"]);
-        assert_eq!(g.element("dependencies").unwrap().children, ["dependency"]);
+        assert_eq!(g.element("project").unwrap().child_names(), ["dependencies"]);
+        assert_eq!(g.element("dependencies").unwrap().child_names(), ["dependency"]);
         // Reached through a NAMED type — the walk has to follow those or it stops one level in.
         let dep = g.element("dependency").unwrap();
-        assert_eq!(dep.children, ["groupId"]);
+        assert_eq!(dep.child_names(), ["groupId"]);
         assert_eq!(dep.attributes[0].values, ["compile", "test"]);
         assert!(dep.attributes[0].required);
+    }
+
+    /// Cardinality has to survive the trip through both adapters, or the check that reads it is
+    /// reading a flag nobody set.
+    #[test]
+    fn what_a_document_must_contain_survives_both_adapters() {
+        let d = bennu_dtd::prelude::parse(
+            "<!ELEMENT servlet (servlet-name, (servlet-class | jsp-file), init-param*)>\n             <!ELEMENT servlet-name (#PCDATA)>",
+        );
+        let g = from_dtd(&d, "/p/web-app.dtd");
+        let e = g.element("servlet").unwrap();
+        assert_eq!(e.required_children().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["servlet-name"]);
+        assert_eq!(e.child_names().len(), 4, "and everything legal is still offered");
+
+        let x = bennu_xsd::prelude::parse(
+            r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                 <xs:element name="bean"><xs:complexType><xs:sequence>
+                   <xs:element name="class" type="xs:string"/>
+                   <xs:element name="property" type="xs:string" minOccurs="0"/>
+                 </xs:sequence></xs:complexType></xs:element>
+               </xs:schema>"#,
+        )
+        .unwrap();
+        let g = from_xsd(&x, "/p/beans.xsd");
+        let e = g.element("bean").unwrap();
+        assert_eq!(e.required_children().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["class"]);
     }
 
     #[test]
@@ -418,10 +502,10 @@ mod tests {
         let g = from_xsd(&x, "/p/maven-4.0.0.xsd");
         let plugin = g.element("plugin").unwrap();
         for expected in ["artifactId", "executions", "reportSets"] {
-            assert!(plugin.children.contains(&expected.to_string()), "{expected} is missing");
+            assert!(plugin.child_names().contains(&expected), "{expected} is missing");
         }
         // And the walk reached inside the type that only one of the two declarations named.
-        assert_eq!(g.element("executions").unwrap().children, ["execution"]);
+        assert_eq!(g.element("executions").unwrap().child_names(), ["execution"]);
     }
 
     /// An element that may contain itself is ordinary in XML and would otherwise not terminate.
@@ -437,7 +521,7 @@ mod tests {
         )
         .unwrap();
         let g = from_xsd(&x, "/p/x.xsd");
-        assert_eq!(g.element("node").unwrap().children, ["node"]);
+        assert_eq!(g.element("node").unwrap().child_names(), ["node"]);
     }
 
     #[test]
@@ -447,7 +531,7 @@ mod tests {
                 Element {
                     name: "bean".into(),
                     doc: "mine".into(),
-                    children: vec!["property".into()],
+                    children: vec![kid("property", true)],
                     ..Element::default()
                 },
                 Element { name: "alias".into(), ..Element::default() },
@@ -460,7 +544,7 @@ mod tests {
                 Element {
                     name: "bean".into(),
                     doc: "imported".into(),
-                    children: vec!["property".into(), "constructor-arg".into()],
+                    children: vec![kid("property", true), kid("constructor-arg", true)],
                     open: true,
                     ..Element::default()
                 },
@@ -474,7 +558,12 @@ mod tests {
         });
         let bean = a.element("bean").unwrap();
         assert_eq!(bean.doc, "mine", "identity is the document's own schema");
-        assert_eq!(bean.children, ["property", "constructor-arg"], "but nothing legal is dropped");
+        assert_eq!(bean.child_names(), ["property", "constructor-arg"], "but nothing legal is dropped");
+        assert!(bean.child("property").unwrap().required, "both sides demanded it");
+        assert!(
+            !bean.child("constructor-arg").unwrap().required,
+            "and one side has no opinion on it at all, which settles it"
+        );
         assert!(bean.open, "and neither is a reason to stop checking");
         assert_eq!(a.element("alias").unwrap().doc, "an alias");
         assert!(a.element("import").is_some());

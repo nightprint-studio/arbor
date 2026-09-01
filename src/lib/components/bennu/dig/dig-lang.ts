@@ -18,13 +18,30 @@
  * The token classes follow `nd-lang-syntax/src/highlight.rs` so a `.dig` file reads the
  * same in Bennu as in the game's editor, including the two rules that are not obvious:
  *
- * - **An initial capital means a type**, not a variable — `Crystal`, `Plan`, `Tool` are
- *   namespaces and struct names, and there is no other marker for them in the grammar.
+ * - **An initial capital is not enough to make a type.** `Tool` and `East` both start with
+ *   one, but the first is a namespace and the second is a value — the same value `Tool.Pick`
+ *   is, written out. What decides is the **position**, which the grammar already names
+ *   (see {@link isTypePosition}): a struct name, a parameter's or a **field's** annotation, a
+ *   return type, anything inside a `Fn(Int) -> Bool` signature, the object of a dotted access,
+ *   a called constructor, a pattern's constructor. Everything
+ *   else capitalised is a symbol, i.e. a value — which is also the compiler's rule, where an
+ *   unresolved bare PascalCase becomes a `Sym`.
  * - **A single-token rule carries the rule's name, not the word.** `pass_statement: _ =>
  *   'pass'` makes tree-sitter absorb the anonymous child, so the leaf's type is
  *   `pass_statement`. geode hit this and solved it by falling back to the leaf's *text*
  *   against the keyword list; the same fallback is here, so `pass` / `continue` / `break`
  *   are coloured and a future rule of the same shape is born coloured.
+ *
+ * ## ⚠️ Comments do not come from the tree at all
+ *
+ * The scanner that owns indentation consumes `#` lines while producing its newline/indent
+ * tokens — it has to, since a comment line must not change a block's indent — so the parser
+ * never sees them and there is no `comment` node. `classify`'s comment branch therefore never
+ * fired, and `.dig` comments were rendering as plain default text.
+ *
+ * They are highlighted by a line pass instead ({@link import('./dig-comments').digCommentHighlight},
+ * wired through `extraHighlight`), which is the same answer geode's own editor gives — with
+ * the same rules and the same four classes, so a file reads the same in both.
  *
  * ## Folding is header-driven, because the blocks are not braced
  *
@@ -34,14 +51,38 @@
  * statement itself (`fn_definition`, `if_statement`, …), and the range runs from just
  * after the `:` that ends its header to the end of its body.
  *
- * Intelligence (completion + hover) comes from `dig-intel.ts` and is entirely local —
- * see its module doc.
+ * ## Intelligence comes from the language server
+ *
+ * Completion and hover go through the shared `backendCompletionSource` /
+ * `backendHoverSource`, which the backend answers with whichever engine owns the file —
+ * for a `.dig` that is **nd-dig-lsp**, geode's own server (`crates/tools/nd-dig-lsp`
+ * over there), wrapping the same analysis service the game's in-game editor calls.
+ *
+ * It used to be `dig-intel.ts`: 255 lines that resolved completion and hover locally
+ * from the generated catalog. That was the right call while `.dig` had no server, and it
+ * carried the limits its own doc admitted — no type inference, every `let` in the file
+ * offered instead of the ones in scope, `import` lines not completed at all. The server
+ * holds the AST, so it answers all three properly, and it knows things Bennu could not
+ * invent: which crystals a content pack adds, which functions take how many arguments,
+ * what a declared parameter type opens up after a `.`.
+ *
+ * ⚠️ The trade is **graceful silence**, not a fallback: with no server installed the two
+ * hooks answer nothing, where the local path always answered something. That is the same
+ * deal every server-backed language here already takes, and it is the honest one — an
+ * answer from a stale local copy of geode's vocabulary is worse than no answer. (It is
+ * silence and not noise: `IndexService::completion` gates on `understands(file)`, so a
+ * `.dig` never falls through to the Java index.)
+ *
+ * Highlighting and folding stay local and stay here. They come from the grammar, cost no
+ * round-trip, and work while the server is down or absent — trading them for semantic
+ * tokens would mean a file that opens grey and colours a second later.
  */
 
 import { Parser, Language, type Node } from 'web-tree-sitter';
 import type { LanguageDescriptor, TokenClass } from '$lib/components/shared/ui/code-editor';
+import { backendCompletionSource, backendHoverSource } from '../lsp-lang';
 import { DIG_CATALOG } from './catalog';
-import { createDigIntel } from './dig-intel';
+import { digCommentHighlight } from './dig-comments';
 
 const RUNTIME_WASM = '/bennu/tree-sitter.wasm';
 const GRAMMAR_WASM = '/bennu/tree-sitter-geode.wasm';
@@ -116,6 +157,40 @@ function isCallee(node: Node): boolean {
   return false;
 }
 
+/** The field each parent names for the child that is a **type**. `enum_pattern` is absent
+ *  because it names no fields at all — see {@link isTypePosition}. */
+const TYPE_FIELD_BY_PARENT: Record<string, string> = {
+  struct_definition: 'name',
+  parameter: 'type',
+  // A struct field may declare its own type too (`fondo: Int`).
+  struct_field: 'type',
+  fn_definition: 'ret',
+  member_expression: 'object',
+  call_expression: 'callee',
+  constructor_pattern: 'ctor',
+};
+
+/**
+ * `true` when the identifier sits where the grammar expects a **type** (or a namespace,
+ * which in this language is the same slot).
+ *
+ * There is nothing to guess: the positions are the ones the grammar gives a field name to,
+ * plus the first part of a dotted `match` pattern (`Crystal.Amethyst`), which is a dotted
+ * access written without fields.
+ */
+function isTypePosition(node: Node, field: string | null, parentType: string | null): boolean {
+  if (!parentType) return false;
+  const wanted = TYPE_FIELD_BY_PARENT[parentType];
+  if (wanted) return field === wanted;
+  if (parentType === 'enum_pattern') return node.parent?.child(0)?.id === node.id;
+  // `Fn(Int) -> Bool`: the type's own name and its return.
+  if (parentType === 'fn_type') return field === 'name' || field === 'ret';
+  // Its parameters carry no field name — inside a type list *everything* is a type, by
+  // construction, so there is nothing to distinguish.
+  if (parentType === 'type_list') return true;
+  return false;
+}
+
 /**
  * Classify a leaf. Mirrors geode's `highlight.rs` classifier, with the extra distinctions
  * Arbor's theme can render that a Bevy-side one could not: a declaration name reads
@@ -137,11 +212,12 @@ function classify(
       if (parentType === 'struct_field') return 'field';
       if (parentType === 'keyword_argument') return 'label';
     }
-    // An initial capital is the language's only marker for a type / namespace.
+    // A capital says "not a local"; the position says whether it is a type or a value.
+    // `Tool.Pick` and `move(East)` pass the same kind of thing, and used to be coloured
+    // differently only because one of them was written out.
     const first = node.text[0] ?? '';
     if (first !== first.toLowerCase()) {
-      // `Crystal.Amethyst` — the member is a *value*, the namespace a type.
-      return field === 'property' ? 'constant' : 'type';
+      return isTypePosition(node, field, parentType) ? 'type' : 'constant';
     }
     if (isCallee(node)) return 'function';
     if (field === 'property') return 'field';
@@ -155,7 +231,8 @@ function classify(
     return 'constant';
   }
   if (STRING_PARTS.has(type)) return 'string';
-  if (type === 'comment') return 'comment';
+  // ⚠️ No `comment` branch: the scanner eats comment lines, so one never arrives here.
+  // Keeping a dead arm would have kept the wrong model alive — see the module doc.
   if (KEYWORDS.has(type)) return 'keyword';
   if (OPERATORS.has(type)) return 'operator';
   if (PUNCTUATION.has(type)) return 'punctuation';
@@ -207,15 +284,17 @@ function foldNode(node: Node): { from: number; to: number } | null {
 
 // ── The descriptor ─────────────────────────────────────────────────────────────
 
-/** The `.dig` language: geode's grammar, geode's token classes, local intelligence. */
+/** The `.dig` language: geode's grammar and token classes, geode's server for the rest. */
 export const digLanguage: LanguageDescriptor = {
   id: 'dig',
   createParser: createDigParser,
   classify,
   foldNode,
+  // Comments never reach the tree — see the module doc and `dig-comments.ts`.
+  extraHighlight: digCommentHighlight,
   // `#` to end of line — the grammar's only comment form, so `Ctrl+/` works. A
   // tree-sitter descriptor bypasses CodeMirror's `Language`, so it carries no built-in
   // comment data and this is the only way the toggle learns it.
   commentTokens: { line: '#' },
-  intel: createDigIntel(),
+  intel: { completion: backendCompletionSource, hover: backendHoverSource },
 };

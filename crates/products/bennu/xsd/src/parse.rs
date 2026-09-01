@@ -16,6 +16,18 @@
 //! **not** flattened the same way — those stay as a `base` name and are walked by
 //! [`Xsd::children_of`], because a type's own particles and its inherited ones are worth telling
 //! apart when reporting where something came from.
+//!
+//! ## Flattened names, but not flattened cardinality
+//!
+//! The particle *tree* is not kept — `sequence`, `choice` and `all` all collapse into one list of
+//! names. What survives the collapse is the one thing that cannot be recovered afterwards:
+//! whether a document that omits a name is thereby invalid. It is computed **during** the walk,
+//! by carrying a single `mandatory` flag down through the particles, because by the time the list
+//! is flat the `xs:choice` that made three of its five names optional is gone.
+//!
+//! That flag only ever narrows. A name is left required exactly when every particle between the
+//! type and the declaration demanded it; a multi-branch `xs:choice`, a `minOccurs="0"` on any
+//! wrapper, or a substitution group head clears it and it is never set again.
 
 use roxmltree::{Document, Node, ParsingOptions};
 
@@ -37,6 +49,7 @@ pub fn parse(source: &str) -> Option<Xsd> {
     let mut xsd = Xsd {
         target_namespace: root.attribute("targetNamespace").unwrap_or_default().to_string(),
         qualified: root.attribute("elementFormDefault") == Some("qualified"),
+        substitution_heads: substitution_heads(root),
         ..Xsd::default()
     };
 
@@ -131,9 +144,10 @@ fn element_decl<'a>(node: Node<'a, 'a>, source: &str, xsd: &Xsd) -> XsdElement {
         type_name: node.attribute("type").unwrap_or_default().to_string(),
         values: inline_simple.map(enumeration_of).unwrap_or_default(),
         inline_type: inline_complex,
-        // `minOccurs` defaults to 1 — the schema's own rule, and the reason an element with no
-        // occurrence attributes at all is required.
-        required: node.attribute("minOccurs").unwrap_or("1") != "0",
+        // What this declaration's OWN particle demands. The particles above it can only take it
+        // away, and `collect_elements` is where that happens — a global declaration, which has no
+        // particle above it at all, keeps this answer.
+        required: demands_one(node),
         repeats: !matches!(node.attribute("maxOccurs"), None | Some("1")),
         doc: documentation(node),
         offset: node.range().start,
@@ -180,26 +194,33 @@ fn simple_type<'a>(node: Node<'a, 'a>, source: &str) -> SimpleType {
 
 // ── Particles ────────────────────────────────────────────────────────────────
 
-/// Every element a node's particles permit, flattened.
+/// Every element a node's particles permit, flattened — with the cardinality the *whole* path of
+/// particles implies, not the one written on each declaration.
 ///
-/// `sequence`, `choice` and `all` are walked identically on purpose — see the crate docs. A
-/// `group ref` contributes the members of the group it names.
+/// `sequence`, `choice` and `all` contribute the same names on purpose — see the crate docs. A
+/// `group ref` contributes the members of the group it names, demoted to optional when the
+/// reference itself is.
+///
+/// A name reached twice keeps the **weaker** answer. A schema that writes an element once in a
+/// sequence and once inside a choice has said, between the two, that a document may leave it out;
+/// taking whichever the walk saw first would make the answer depend on declaration order.
 fn collect_elements<'a>(node: Node<'a, 'a>, source: &str, xsd: &Xsd) -> Vec<XsdElement> {
     let mut out: Vec<XsdElement> = Vec::new();
-    walk_particles(node, &mut |child| match tag(child) {
+    walk_particles(node, true, &mut |child, mandatory| match tag(child) {
         "element" => {
-            let e = element_decl(child, source, xsd);
-            if !e.name.is_empty() && !out.iter().any(|x| x.name == e.name) {
-                out.push(e);
+            let mut e = element_decl(child, source, xsd);
+            if !e.name.is_empty() {
+                e.required = mandatory && !xsd.substitution_heads.contains(&e.name);
+                add(&mut out, e);
             }
         }
         "group" => {
             if let Some(name) = child.attribute("ref") {
                 if let Some(g) = xsd.groups.iter().find(|g| g.name == local(name)) {
                     for e in &g.members {
-                        if !out.iter().any(|x| x.name == e.name) {
-                            out.push(e.clone());
-                        }
+                        let mut e = e.clone();
+                        e.required &= mandatory;
+                        add(&mut out, e);
                     }
                 }
             }
@@ -209,9 +230,17 @@ fn collect_elements<'a>(node: Node<'a, 'a>, source: &str, xsd: &Xsd) -> Vec<XsdE
     out
 }
 
+/// Add a declaration to a flattened list, keeping the **weaker** demand on a name already there.
+fn add(out: &mut Vec<XsdElement>, e: XsdElement) {
+    match out.iter_mut().find(|x| x.name == e.name) {
+        Some(seen) => seen.required &= e.required,
+        None => out.push(e),
+    }
+}
+
 fn collect_attributes<'a>(node: Node<'a, 'a>, source: &str, xsd: &Xsd) -> Vec<XsdAttribute> {
     let mut out: Vec<XsdAttribute> = Vec::new();
-    walk_particles(node, &mut |child| match tag(child) {
+    walk_particles(node, true, &mut |child, _| match tag(child) {
         "attribute" => {
             let Some(name) = child.attribute("name").or_else(|| child.attribute("ref")) else {
                 return;
@@ -255,20 +284,58 @@ fn collect_attributes<'a>(node: Node<'a, 'a>, source: &str, xsd: &Xsd) -> Vec<Xs
 const TRANSPARENT: &[&str] =
     &["sequence", "choice", "all", "complexContent", "simpleContent", "extension", "restriction"];
 
-fn walk_particles<'a>(node: Node<'a, 'a>, f: &mut impl FnMut(Node<'a, 'a>)) {
+/// The particles that count as branches of an `xs:choice`. `annotation` is not one of them, and
+/// counting it would turn a single-branch choice with a comment on it into a multi-branch one.
+const PARTICLES: &[&str] = &["element", "group", "choice", "sequence", "all", "any"];
+
+/// Walk a type's particles, carrying whether the path so far **demands** what it reaches.
+fn walk_particles<'a>(node: Node<'a, 'a>, mandatory: bool, f: &mut impl FnMut(Node<'a, 'a>, bool)) {
+    // A choice offering more than one branch makes every one of them optional on its own: a
+    // document satisfies it by taking a different branch, so nothing below may be demanded.
+    let picks_one = tag(node) == "choice"
+        && node.children().filter(|n| n.is_element() && PARTICLES.contains(&tag(*n))).count() > 1;
     for child in node.children().filter(|n| n.is_element()) {
-        f(child);
+        let here = mandatory && !picks_one && demands_one(child);
+        f(child, here);
         if TRANSPARENT.contains(&tag(child)) {
-            walk_particles(child, f);
+            walk_particles(child, here, f);
         }
     }
+}
+
+/// Whether a particle demands at least one occurrence of itself. `minOccurs` defaults to `1` —
+/// the schema language's own rule, and the reason a declaration with no occurrence attributes at
+/// all is required. A wrapper that cannot carry `minOccurs` at all (`extension`,
+/// `complexContent`) is simply never optional, which is the same answer.
+fn demands_one<'a>(node: Node<'a, 'a>) -> bool {
+    node.attribute("minOccurs").unwrap_or("1") != "0"
+}
+
+/// Every name this schema uses as a substitution group head.
+///
+/// A document may write any member of the group where the head is expected, and nothing here
+/// resolves that — so a head is a name whose absence proves nothing, and the flatten clears its
+/// `required` for exactly that reason.
+fn substitution_heads<'a>(root: Node<'a, 'a>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        if let Some(head) = n.attribute("substitutionGroup") {
+            let head = local(head).to_string();
+            if !out.contains(&head) {
+                out.push(head);
+            }
+        }
+        stack.extend(n.children().filter(|c| c.is_element()));
+    }
+    out
 }
 
 /// Whether an `xs:any` appears in this type's particles — the signal that anything at all may be
 /// written, and therefore that nothing here may be reported as unexpected.
 fn has_any<'a>(node: Node<'a, 'a>) -> bool {
     let mut found = false;
-    walk_particles(node, &mut |child| {
+    walk_particles(node, true, &mut |child, _| {
         found |= matches!(tag(child), "any" | "anyAttribute");
     });
     found
@@ -393,6 +460,121 @@ mod tests {
         let attrs = x.attributes_of(e);
         assert_eq!(attrs.len(), 1);
         assert!(attrs[0].required);
+    }
+
+    /// The reason `minOccurs` cannot be read on its own. Every branch of a choice carries the
+    /// default `minOccurs="1"`, so reading the attribute alone calls all four of these required
+    /// and a document that picks one — which is what a choice is for — is reported three times.
+    #[test]
+    fn a_branch_of_a_choice_is_never_required() {
+        let x = schema(
+            r#"<xs:complexType name="Result">
+                 <xs:sequence>
+                   <xs:element name="name" type="xs:string"/>
+                   <xs:choice>
+                     <xs:element name="dispatcher" type="xs:string"/>
+                     <xs:element name="redirect" type="xs:string"/>
+                   </xs:choice>
+                 </xs:sequence>
+               </xs:complexType>
+               <xs:element name="result" type="Result"/>"#,
+        );
+        let kids = x.children_of(x.element("result").unwrap());
+        let must: Vec<&str> =
+            kids.iter().filter(|k| k.required).map(|k| k.name.as_str()).collect();
+        assert_eq!(must, ["name"]);
+    }
+
+    /// A choice offering exactly one thing is not a choice, and treating it as one would throw
+    /// away a demand the schema really made.
+    #[test]
+    fn a_choice_with_one_branch_still_demands_it() {
+        let x = schema(
+            r#"<xs:element name="e"><xs:complexType>
+                 <xs:choice><xs:element name="only" type="xs:string"/></xs:choice>
+               </xs:complexType></xs:element>"#,
+        );
+        assert!(x.children_of(x.element("e").unwrap())[0].required);
+    }
+
+    /// `minOccurs` on a *wrapper* is the other half: the elements inside a group nobody has to
+    /// write are not required either, however their own declarations read.
+    #[test]
+    fn an_optional_group_makes_everything_under_it_optional() {
+        let x = schema(
+            r#"<xs:element name="e"><xs:complexType>
+                 <xs:sequence>
+                   <xs:element name="always" type="xs:string"/>
+                   <xs:sequence minOccurs="0">
+                     <xs:element name="inner" type="xs:string"/>
+                   </xs:sequence>
+                   <xs:group ref="Extra" minOccurs="0"/>
+                 </xs:sequence>
+               </xs:complexType></xs:element>
+               <xs:group name="Extra">
+                 <xs:sequence><xs:element name="fromGroup" type="xs:string"/></xs:sequence>
+               </xs:group>"#,
+        );
+        let kids = x.children_of(x.element("e").unwrap());
+        let must: Vec<&str> =
+            kids.iter().filter(|k| k.required).map(|k| k.name.as_str()).collect();
+        assert_eq!(must, ["always"]);
+        assert_eq!(kids.len(), 3, "and all three are still legal there");
+    }
+
+    /// A group referenced where it *is* mandatory keeps what it demands — otherwise the whole
+    /// mechanism would only ever subtract.
+    #[test]
+    fn a_mandatory_group_reference_keeps_its_demands() {
+        let x = schema(
+            r#"<xs:element name="e"><xs:complexType>
+                 <xs:sequence><xs:group ref="Core"/></xs:sequence>
+               </xs:complexType></xs:element>
+               <xs:group name="Core">
+                 <xs:sequence>
+                   <xs:element name="id" type="xs:string"/>
+                   <xs:element name="note" type="xs:string" minOccurs="0"/>
+                 </xs:sequence>
+               </xs:group>"#,
+        );
+        let kids = x.children_of(x.element("e").unwrap());
+        let must: Vec<&str> =
+            kids.iter().filter(|k| k.required).map(|k| k.name.as_str()).collect();
+        assert_eq!(must, ["id"]);
+    }
+
+    /// A document may write any member of a substitution group where the head is expected, and
+    /// nothing here resolves that — so the head's absence proves nothing.
+    #[test]
+    fn a_substitution_group_head_is_never_required() {
+        let x = schema(
+            r#"<xs:element name="shape" type="xs:string"/>
+               <xs:element name="square" type="xs:string" substitutionGroup="shape"/>
+               <xs:element name="drawing"><xs:complexType><xs:sequence>
+                 <xs:element ref="shape"/>
+               </xs:sequence></xs:complexType></xs:element>"#,
+        );
+        assert_eq!(x.substitution_heads, ["shape"]);
+        assert!(!x.children_of(x.element("drawing").unwrap())[0].required);
+    }
+
+    /// Written twice, once where it must appear and once where it need not: between them the
+    /// schema has said a document may leave it out.
+    #[test]
+    fn a_name_reached_twice_keeps_the_weaker_demand() {
+        let x = schema(
+            r#"<xs:element name="e"><xs:complexType>
+                 <xs:sequence>
+                   <xs:element name="a" type="xs:string"/>
+                   <xs:choice>
+                     <xs:element name="a" type="xs:string"/>
+                     <xs:element name="b" type="xs:string"/>
+                   </xs:choice>
+                 </xs:sequence>
+               </xs:complexType></xs:element>"#,
+        );
+        let kids = x.children_of(x.element("e").unwrap());
+        assert!(!kids.iter().find(|k| k.name == "a").unwrap().required);
     }
 
     #[test]

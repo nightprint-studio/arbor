@@ -21,12 +21,18 @@
 //! useful when right and invisible when incomplete — and the only check it feeds is "this
 //! element is not one the POM has", which a curated table can answer honestly.
 //!
+//! [`POM_REQUIRED`] is the one thing here that IS a validation rule, and it is a separate list on
+//! purpose: it is not read off the vocabulary, it is Maven's own documented set of obligations,
+//! and it is written where its own reasoning can be read beside it.
+//!
 //! If the real schema *is* reachable (a project that vendors it, an `xsi:schemaLocation` pointing
 //! at a local copy) that wins: [`crate::catalog::Catalog::grammar_for`] tries the real one first
 //! and only falls back here.
 
-use crate::grammar::{Element, Grammar, GrammarKind};
-use crate::scan::{Scan, TagKind};
+use bennu_proto::prelude::Diagnostic;
+
+use crate::grammar::{Child, Element, Grammar, GrammarKind};
+use crate::scan::{local_name, Scan, TagKind};
 
 /// `(element, children, documentation)`. Children are space-separated; an empty list means the
 /// element holds text.
@@ -356,6 +362,77 @@ pub fn pom() -> Grammar {
     table("Maven POM (built in)", "project", POM)
 }
 
+// ── What a POM cannot leave out ──────────────────────────────────────────────
+//
+// The vocabulary table above deliberately says nothing about cardinality (see the module docs),
+// and for a schema in general that is the right call: a curated list is the wrong place to be
+// confident about how many of something is legal.
+//
+// Maven's *required* fields are the exception, and for the same reason the vocabulary is here at
+// all. They are few, they are documented, they have not moved since 4.0.0, and getting them wrong
+// is not a style question — Maven refuses to build. `<dependency>` with no `<artifactId>` is not
+// an opinion about the file, it is a file that does not work, and being told at deploy time is
+// exactly what this crate exists to stop.
+//
+// Nothing conditional is guessed at. `<version>` is absent from every row: a dependency may take
+// it from `<dependencyManagement>`, a plugin from `<pluginManagement>`, either from a parent this
+// file cannot see — so a missing version is unknowable here, and an unknowable rule is not a rule.
+
+/// `(element, required children, the sibling that excuses them)`.
+///
+/// The third column is what makes the `<project>` rows honest: `groupId` and `version` are
+/// required *unless* the POM has a `<parent>`, which is most modules of most reactors. Without
+/// it this check would fire on every one of them, which is the fastest way to teach someone to
+/// ignore a whole diagnostic class.
+const POM_REQUIRED: &[(&str, &str, &str)] = &[
+    ("project", "modelVersion artifactId", ""),
+    ("project", "groupId version", "parent"),
+    ("parent", "groupId artifactId version", ""),
+    ("dependency", "groupId artifactId", ""),
+    ("exclusion", "groupId artifactId", ""),
+    ("extension", "groupId artifactId", ""),
+    // `groupId` is absent on purpose: it defaults to `org.apache.maven.plugins`, and the
+    // overwhelming majority of `<plugin>` blocks in the wild rely on that.
+    ("plugin", "artifactId", ""),
+    ("repository", "id url", ""),
+    ("pluginRepository", "id url", ""),
+];
+
+/// The fields this POM leaves out that Maven will not.
+///
+/// Keyed on the **document** rather than on whichever grammar answered for it: a project that
+/// vendors the real `maven-4.0.0.xsd` gets the real grammar, and the rules below are no less true
+/// there. Returns nothing for a document that is not a POM.
+pub fn pom_diagnostics(scan: &Scan) -> Vec<Diagnostic> {
+    if !is_pom(scan) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (tag, children) in scan.direct_children() {
+        for (element, required, unless) in POM_REQUIRED {
+            if *element != tag.local() {
+                continue;
+            }
+            if !unless.is_empty() && children.iter().any(|c| local_name(c) == *unless) {
+                continue;
+            }
+            for name in required.split_whitespace() {
+                if children.iter().any(|c| local_name(c) == name) {
+                    continue;
+                }
+                out.push(Diagnostic {
+                    message: format!("`{}` requires `<{name}>`", tag.local()),
+                    severity: "error".to_string(),
+                    code: "pom.missing-element".to_string(),
+                    start: tag.name_start,
+                    end: tag.name_end,
+                });
+            }
+        }
+    }
+    out
+}
+
 /// One of these tables as a [`Grammar`]. Shared by both built-ins so a third costs a table and
 /// a name rather than a copy of this.
 fn table(source: &str, root: &str, rows: &[(&str, &str, &str)]) -> Grammar {
@@ -367,7 +444,14 @@ fn table(source: &str, root: &str, rows: &[(&str, &str, &str)]) -> Grammar {
             .iter()
             .map(|(name, children, doc)| Element {
                 name: name.to_string(),
-                children: children.split_whitespace().map(str::to_string).collect(),
+                // A curated table is a vocabulary, not a content model: it says which names are
+                // legal here and takes no position on which of them a document must write. The
+                // POM's own demands are the exception, and they live in `POM_REQUIRED` rather
+                // than in these rows, because they are conditional in a way a flag cannot say.
+                children: children
+                    .split_whitespace()
+                    .map(|n| Child { name: n.to_string(), required: false })
+                    .collect(),
                 attributes: Vec::new(),
                 text: children.is_empty(),
                 open: OPEN.contains(name),
@@ -395,19 +479,119 @@ mod tests {
         assert!(grammar_for(&scan("<struts/>")).is_none());
     }
 
+    fn pom_checks(src: &str) -> Vec<String> {
+        pom_diagnostics(&scan(src)).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn a_dependency_without_coordinates_is_reported() {
+        let out = pom_checks(
+            "<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId>\
+             <artifactId>a</artifactId><version>1</version>\
+             <dependencies><dependency><version>2</version></dependency></dependencies></project>",
+        );
+        assert_eq!(out, ["`dependency` requires `<groupId>`", "`dependency` requires `<artifactId>`"]);
+    }
+
+    #[test]
+    fn a_dependency_with_no_version_is_left_alone() {
+        // It may come from `<dependencyManagement>` or from a parent this file cannot see, so a
+        // missing version is unknowable here — and an unknowable rule is not a rule.
+        let out = pom_checks(
+            "<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId>\
+             <artifactId>a</artifactId><version>1</version>\
+             <dependencies><dependency><groupId>x</groupId><artifactId>y</artifactId></dependency>\
+             </dependencies></project>",
+        );
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    #[test]
+    fn a_parent_excuses_the_group_and_version() {
+        // The commonest module of the commonest reactor. If this fired, the whole diagnostic
+        // class would be noise on every multi-module project.
+        let out = pom_checks(
+            "<project><modelVersion>4.0.0</modelVersion>\
+             <parent><groupId>g</groupId><artifactId>p</artifactId><version>1</version></parent>\
+             <artifactId>child</artifactId></project>",
+        );
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    #[test]
+    fn a_root_pom_without_a_parent_must_say_who_it_is() {
+        let out = pom_checks("<project><modelVersion>4.0.0</modelVersion><artifactId>a</artifactId></project>");
+        assert_eq!(out, ["`project` requires `<groupId>`", "`project` requires `<version>`"]);
+    }
+
+    #[test]
+    fn an_incomplete_parent_is_reported() {
+        let out = pom_checks(
+            "<project><modelVersion>4.0.0</modelVersion>\
+             <parent><groupId>g</groupId></parent><artifactId>c</artifactId></project>",
+        );
+        assert_eq!(out, ["`parent` requires `<artifactId>`", "`parent` requires `<version>`"]);
+    }
+
+    #[test]
+    fn a_plugin_needs_only_its_artifact() {
+        // `groupId` defaults to `org.apache.maven.plugins`, and nearly every `<plugin>` in the
+        // wild relies on it — checking for it would report correct POMs as wrong.
+        let out = pom_checks(
+            "<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId>\
+             <artifactId>a</artifactId><version>1</version>\
+             <build><plugins><plugin><artifactId>maven-compiler-plugin</artifactId></plugin>\
+             </plugins></build></project>",
+        );
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    #[test]
+    fn the_same_name_at_two_depths_is_judged_separately() {
+        // `groupId` inside `<parent>` does not satisfy `<project>`, and vice versa — the whole
+        // reason the walk collects DIRECT children rather than everything underneath.
+        let out = pom_checks(
+            "<project><modelVersion>4.0.0</modelVersion>\
+             <dependencies><dependency><groupId>g</groupId><artifactId>a</artifactId></dependency>\
+             </dependencies></project>",
+        );
+        assert_eq!(
+            out,
+            [
+                "`project` requires `<artifactId>`",
+                "`project` requires `<groupId>`",
+                "`project` requires `<version>`",
+            ],
+        );
+    }
+
+    #[test]
+    fn a_document_that_is_not_a_pom_is_not_judged_by_maven_rules() {
+        assert!(pom_checks("<project><other/></project>").is_empty());
+        assert!(pom_checks("<taglib><tag/></taglib>").is_empty());
+    }
+
+    #[test]
+    fn a_pom_being_typed_is_still_checked() {
+        // No close tags at all. A check that waited for a well-formed file would be silent
+        // exactly while the mistake is being written.
+        let out = pom_checks("<project><modelVersion>4.0.0</modelVersion><dependencies><dependency>");
+        assert!(out.iter().any(|m| m == "`dependency` requires `<artifactId>`"), "{out:?}");
+    }
+
     #[test]
     fn the_nesting_people_actually_type_resolves() {
         let g = pom();
-        assert!(g.element("project").unwrap().children.contains(&"dependencies".to_string()));
+        assert!(g.element("project").unwrap().child_names().contains(&"dependencies"));
         assert_eq!(g.children_of("dependencies").len(), 1);
         let dep = g.element("dependency").unwrap();
-        assert!(dep.children.contains(&"artifactId".to_string()));
-        assert!(dep.children.contains(&"scope".to_string()));
+        assert!(dep.child_names().contains(&"artifactId"));
+        assert!(dep.child_names().contains(&"scope"));
         assert!(g.element("artifactId").unwrap().text, "a leaf holds text");
         // Every child named anywhere in the table is itself declared, or completion would offer
         // a name and then know nothing about it.
         for e in &g.elements {
-            for c in &e.children {
+            for c in e.child_names() {
                 assert!(g.element(c).is_some(), "`{c}` is a child of `{}` but is not declared", e.name);
             }
         }
@@ -431,12 +615,12 @@ mod tests {
         let g = taglib();
         let tag = g.element("tag").expect("declares <tag>");
         // The 1.2 spelling and the 1.1 one, because both are open in the same project.
-        assert!(tag.children.contains(&"tag-class".to_string()));
-        assert!(tag.children.contains(&"tagclass".to_string()));
-        assert!(g.element("attribute").unwrap().children.contains(&"rtexprvalue".to_string()));
+        assert!(tag.child_names().contains(&"tag-class"));
+        assert!(tag.child_names().contains(&"tagclass"));
+        assert!(g.element("attribute").unwrap().child_names().contains(&"rtexprvalue"));
         // Same rule as the POM's: a name offered must be a name the table knows.
         for e in &g.elements {
-            for c in &e.children {
+            for c in e.child_names() {
                 assert!(g.element(c).is_some(), "`{c}` is a child of `{}` but is not declared", e.name);
             }
         }
@@ -455,7 +639,7 @@ mod tests {
             ("goals", "goal"),
         ] {
             assert!(
-                g.element(parent).unwrap().children.contains(&child.to_string()),
+                g.element(parent).unwrap().child_names().contains(&child),
                 "{parent} → {child}",
             );
         }

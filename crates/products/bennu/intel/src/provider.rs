@@ -702,6 +702,11 @@ impl NativeJavaProvider {
         let (ident_start, prefix) = ident_prefix(text, offset);
         // A type reference starts with an uppercase letter; requiring it keeps the list focused and
         // avoids firing on a variable / method prefix (which member completion, not this, serves).
+        //
+        // Only the FIRST letter is held to it. What follows is matched by
+        // [`ClassNameIndex::matches_for_prefix`], which also answers to the wrong case and to the
+        // camel humps — `SBA` finds `SpringBootApplication`, which is how a name you already know
+        // is actually reached for.
         if prefix.is_empty() || !prefix.starts_with(|c: char| c.is_ascii_uppercase()) {
             return Vec::new();
         }
@@ -710,7 +715,7 @@ impl NativeJavaProvider {
             return Vec::new();
         }
         self.class_names
-            .simple_names_with_prefix(&prefix, MAX)
+            .matches_for_prefix(&prefix, MAX)
             .into_iter()
             .map(|simple| {
                 let candidates = self.class_names.candidates(simple);
@@ -726,6 +731,58 @@ impl NativeJavaProvider {
                 }
             })
             .collect()
+    }
+
+    /// Completions for a **qualified** name — the segment after the last dot of a dotted path.
+    ///
+    /// Two carets, one answer, because they are the same question asked in two places:
+    ///
+    /// - `import org.springframework.b|`, where nothing was offered at all. An import is the one
+    ///   line in a Java file written entirely in fully-qualified names, and it was the only kind
+    ///   of name completion could not help with — you had to know it already, which is exactly
+    ///   what an editor is for;
+    /// - `org.springframework.boot.Sprin|` written out in code, where member completion cannot
+    ///   help either: the receiver is a package, and a package is not a value with members.
+    ///
+    /// One segment at a time (see [`ClassNameIndex::segments_under`]): `import org.|` offers
+    /// `springframework`, not every class beneath it. That is also what the editor can insert
+    /// without rewriting the line — the token it replaces is the word under the caret, and a
+    /// whole dotted name pasted there would be appended to the qualifier already written.
+    ///
+    /// Outside an `import`, a bare word with no qualifier is left to
+    /// [`type_completions`](Self::type_completions): offering `javax` where a class name is being
+    /// written would be answering a question nobody asked.
+    fn qualified_completions(&self, text: &str, offset: usize) -> Vec<CompletionItem> {
+        const MAX: usize = 50;
+        let (ident_start, typed) = ident_prefix(text, offset);
+        let qualifier = dotted_qualifier(text, ident_start);
+        if qualifier.is_empty() && !in_import_statement(text, ident_start) {
+            return Vec::new();
+        }
+        self.class_names
+            .segments_under(&qualifier, &typed, MAX)
+            .into_iter()
+            .map(|seg| CompletionItem {
+                label: seg.name,
+                kind: if seg.is_class { "class" } else { "package" }.to_string(),
+                // The full name a class row lands on. A package row says nothing extra: its own
+                // label plus the qualifier already on screen is the whole of what it is.
+                detail: seg.fqn,
+                // Never an auto-import: the name being written IS the import, or is already
+                // qualified at the point of use.
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    /// How many distinct type names completion can offer — the JDK's, every dependency jar's and
+    /// the project's own.
+    ///
+    /// Reported by the index inspector because it is the one number that separates "Bennu does not
+    /// complete my library classes" from "Bennu never loaded them": the two look identical from
+    /// the popup, and only one of them is about completion.
+    pub fn class_name_count(&self) -> usize {
+        self.class_names.len()
     }
 
     /// Build a provider for a project: open the persisted index at `index_dir`, resolve
@@ -1366,6 +1423,62 @@ fn ident_prefix(text: &str, caret: usize) -> (usize, String) {
     (start, text[start..caret].to_string())
 }
 
+/// The largest offset at or before `caret` that a `&str` may be sliced at.
+///
+/// The editor's caret arrives over IPC and the buffer may have moved on since it was taken, so it
+/// is neither guaranteed to be in range nor to land on a character boundary. Every reader below
+/// slices with it.
+fn char_boundary_at_or_before(text: &str, caret: usize) -> usize {
+    let mut at = caret.min(text.len());
+    while at > 0 && !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
+}
+
+/// The dotted path written immediately before `ident_start`, trailing dot included
+/// (`"org.springframework."`), or empty when there is none.
+///
+/// No whitespace is crossed, unlike [`is_member_access`]: a qualified name is written in one
+/// piece, and tolerating a gap would read `foo() . Bar` as a package walk.
+fn dotted_qualifier(text: &str, ident_start: usize) -> String {
+    let bytes = text.as_bytes();
+    if ident_start == 0 || bytes[ident_start - 1] != b'.' {
+        return String::new();
+    }
+    let mut start = ident_start;
+    while start > 0 {
+        let c = bytes[start - 1];
+        if c == b'.' || c == b'_' || c == b'$' || c.is_ascii_alphanumeric() {
+            start -= 1;
+        } else {
+            break;
+        }
+    }
+    // A chain that opens with its own dot is the tail of an expression the walk could not see the
+    // start of (`a.b().c.`), not a package.
+    //
+    // `start` is always a char boundary: the walk only steps over bytes it accepts, all of which
+    // are ASCII, so it can never come to rest inside a multi-byte character.
+    match bytes.get(start) {
+        Some(b'.') => String::new(),
+        _ => text[start..ident_start].to_string(),
+    }
+}
+
+/// Whether `pos` sits in the qualified name of an `import` declaration.
+///
+/// Read off the line rather than the parse tree: a half-written import is a syntax error, which is
+/// the only state this is ever asked about.
+fn in_import_statement(text: &str, pos: usize) -> bool {
+    let pos = pos.min(text.len());
+    let line_start = text[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let head = text[line_start..pos].trim_start();
+    let Some(rest) = head.strip_prefix("import") else { return false };
+    // `import` alone is the keyword being typed, not a name after it.
+    rest.starts_with(|c: char| c.is_whitespace())
+}
+
 /// Whether the identifier starting at `ident_start` is a member access — the nearest non-whitespace
 /// char before it is a `.` (`recv.Foo`), so it's a member, not a bare type reference.
 fn is_member_access(text: &str, ident_start: usize) -> bool {
@@ -1435,18 +1548,29 @@ impl IntelProvider for NativeJavaProvider {
                 &disk
             }
         };
+        // The caret, made safe to slice at, ONCE. `completion_in` guards its own copy — a stale or
+        // out-of-range offset would panic on the first `&text[..]` — but it kept the clamped value
+        // to itself, so the two paths below were still indexing with the raw one.
+        let offset = char_boundary_at_or_before(text, at.offset);
         // The classpath's type-name catalog rides along: a receiver you have not imported yet
         // (`Arrays.`) is one you are in the middle of writing, and refusing it is refusing the very
         // gesture that adds the import. See `TypeNameCatalog`.
         let member =
-            bennu_query::prelude::completion_in(text, at.offset, resolver, Some(&self.class_names));
+            bennu_query::prelude::completion_in(text, offset, resolver, Some(&self.class_names));
         if !member.is_empty() {
             return Ok(member);
         }
-        // No member candidates — offer TYPE-NAME completion when the caret sits on a bare, capitalised
-        // identifier prefix (not a member access after a `.`). Selecting a name inserts it; the "Import
-        // class" intention (Alt+Enter) then adds the import.
-        Ok(self.type_completions(text, at.offset))
+        // No member candidates. A dotted path is the next thing it could be — an `import`, or a
+        // name written out qualified — and that is a question about the classpath's *names*,
+        // which is the one thing member inference cannot answer: a package has no members.
+        let qualified = self.qualified_completions(text, offset);
+        if !qualified.is_empty() {
+            return Ok(qualified);
+        }
+        // Otherwise TYPE-NAME completion, when the caret sits on a bare, capitalised identifier
+        // prefix (not a member access after a `.`). Selecting a name inserts it; the "Import class"
+        // intention (Alt+Enter) then adds the import.
+        Ok(self.type_completions(text, offset))
     }
 
     fn hover(&self, _at: &Position) -> Result<Option<String>, IntelError> {
@@ -1850,6 +1974,36 @@ mod tests {
         assert!(super::is_member_access("recv.  Foo", 7));
         // start of buffer → not a member access.
         assert!(!super::is_member_access("Foo", 0));
+    }
+
+    #[test]
+    fn a_qualified_name_is_read_back_off_the_line() {
+        use super::dotted_qualifier as q;
+        assert_eq!(q("import org.springframework.boot.Spring", 32), "org.springframework.boot.");
+        assert_eq!(q("import org.", 11), "org.");
+        // A bare word has no qualifier, and neither has one written after a space.
+        assert_eq!(q("new Foo", 4), "");
+        assert_eq!(q("recv . Foo", 7), "");
+        // The tail of an expression the walk cannot see the start of is not a package.
+        assert_eq!(q("a.b().c.Foo", 8), "");
+        assert_eq!(q("Foo", 0), "");
+        // A non-ASCII identifier stops the walk on the dot in front of it, which reads as the
+        // opens-with-its-own-dot case: no qualifier, and nothing sliced mid-character.
+        assert_eq!(q("a.café.Foo", "a.café.".len()), "");
+    }
+
+    #[test]
+    fn an_import_line_is_recognised_while_it_is_being_typed() {
+        use super::in_import_statement as imp;
+        assert!(imp("import org.spring", 11));
+        assert!(imp("package a;\nimport java.", 22));
+        assert!(imp("  import  javax.", 16), "indented, and spaced how it likes");
+        assert!(imp("import static java.util.Arrays.", 31));
+        // The keyword itself is not a name after it.
+        assert!(!imp("import", 6));
+        // And an ordinary line is not an import however it starts.
+        assert!(!imp("importantThing.foo", 15));
+        assert!(!imp("class Foo {", 10));
     }
 
     #[test]

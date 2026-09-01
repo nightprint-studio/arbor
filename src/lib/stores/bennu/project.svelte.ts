@@ -22,6 +22,7 @@ import {
   openProject as ipcOpenProject,
   activateProject as ipcActivateProject,
   projectTree as ipcProjectTree,
+  projectInfo as ipcProjectInfo,
   readFile as ipcReadFile,
   writeFile as ipcWriteFile,
   fileStamps as ipcFileStamps,
@@ -564,8 +565,8 @@ function createProjectStore() {
 
   /** Fetch `root`'s file tree in the background, updating BOTH the stashed session and — when it's
    *  the active project — the live `tree`. The root guard drops a stale tree from a superseded open. */
-  function loadTreeInto(root: string) {
-    void ipcProjectTree(root)
+  function loadTreeInto(root: string): Promise<void> {
+    return ipcProjectTree(root)
       .then((t) => {
         const ct = canonTree(t);
         const s = sessions.get(root);
@@ -935,11 +936,17 @@ function createProjectStore() {
     /** MOCK — explicitly load the built-in demo project. Remove with the mock. */
     loadDemo() { loadDemoProject(); },
 
-    /** Re-fetch the active project's file tree (e.g. after creating a new file on disk, so it
-     *  appears in the Project tool). No-op when no project is open / on the demo. */
-    refreshTree() {
+    /**
+     * Re-fetch the active project's file tree (e.g. after creating a new file on disk, so it
+     * appears in the Project tool). No-op when no project is open / on the demo.
+     *
+     * Awaitable, because revealing what was just created has to happen *after* the row for it
+     * exists: the tree is the list the reveal searches, and asking it to sit on a path it has
+     * not been told about yet answers "that isn't inside this project".
+     */
+    refreshTree(): Promise<void> {
       const r = project?.root;
-      if (r && !isDemo) loadTreeInto(r);
+      return r && !isDemo ? loadTreeInto(r) : Promise.resolve();
     },
 
     /**
@@ -957,6 +964,40 @@ function createProjectStore() {
         return;
       }
       if (workspaceRoots.includes(root)) loadTreeInto(root);
+    },
+
+    /**
+     * Re-read `root`'s project model from its manifest — name, modules, JDK, capabilities,
+     * declared encoding — and put it back wherever that root's model is held.
+     *
+     * The manifest is not frozen at open. Renaming an `<artifactId>` renames the project, and
+     * until this existed the new name reached nothing that was already showing the old one: the
+     * window title, the workspace switcher and Canopy's recents all kept it until the project was
+     * closed and opened again. Deliberately NOT a re-open — that would restart a language server
+     * and rebuild an index every time somebody saves a pom.
+     *
+     * Silent on failure: a pom mid-edit does not parse, and the model already on screen is a
+     * better answer than an error about a file the user is in the middle of writing.
+     */
+    async refreshProjectInfo(root: string): Promise<void> {
+      if (isDemo) return;
+      const canon = canonPath(root);
+      if (project?.root !== canon && !sessions.has(canon)) return;
+      let info: ProjectInfo;
+      try {
+        info = await ipcProjectInfo(canon);
+      } catch {
+        return;
+      }
+      // `root` from the canonical key, not from the reply: every tab, session and lookup in this
+      // store is keyed by the canonical form, and a native-separator root here would key a
+      // second, parallel copy of the same project.
+      const next: ProjectInfo = { ...info, root: canon };
+      const s = sessions.get(canon);
+      if (s) s.info = next;
+      // Assigned rather than mutated: `project` is the reactive handle the title bar, the
+      // switcher and the recents effect all read, and only a new object re-fires them.
+      if (project?.root === canon) project = next;
     },
 
     /** The active workspace's session snapshot (open tabs per member project). The workspace store

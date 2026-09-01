@@ -6,8 +6,9 @@
  *
  * 1. **tree-sitter grammars** — Java ({@link javaLanguage}: semantic highlight, folding,
  *    go-to, backend completion), JSP ({@link jspLanguage}: namespaced taglibs,
- *    scriptlets, EL/OGNL), geode's `.dig` ({@link digLanguage}: highlight, folding,
- *    and completion/hover over its closed vocabulary — all local, no backend) and
+ *    scriptlets, EL/OGNL), geode's `.dig` ({@link digLanguage}: highlight and folding from
+ *    the grammar, completion/hover from geode's own **nd-dig-lsp** — a hybrid, and the
+ *    reason the tiers are about *where the answers come from*, not about the file) and
  *    merula's `.merula` ({@link merulaLanguage}: highlight + folding, sharing the very
  *    grammar wasm the Merula window parses with).
  * 2. **Lezer languages** — HTML (`@codemirror/lang-html`, with embedded JS/CSS and tag
@@ -59,6 +60,7 @@ import { packageJsonLanguage, isPackageManifest } from './package-json-lang';
 import { xmlSchemaLang } from './xml-schema-lang';
 import { jspLanguage } from './jsp-lang';
 import { digLanguage } from './dig/dig-lang';
+import { devLanguage } from './dig/dev-lang';
 import { merulaLanguage } from './merula-lang';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
 
@@ -284,8 +286,12 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'java': return javaLanguage;
     case 'rs': return rustLang;
     case 'toml': return tomlLang;
-    // geode's mole scripts — the one non-Java tree-sitter language here.
+    // geode's mole scripts: the grammar colours and folds them here, `nd-dig-lsp` answers
+    // completion and hover. See `dig/dig-lang.ts` for why the two halves are split that way.
     case 'dig': return digLanguage;
+    // geode's playtest scenarios: a batch of console commands, not a program. Shape from a local
+    // stream mode, correctness from `nd-dig-lsp` — see `dig/dev-lang.ts`.
+    case 'dev': return devLanguage;
     // Merula's own grammar, not a second one — see `merula-lang.ts`. Highlight, folding and
     // comment toggle only: completion and hover need the DSL catalogue, which lives behind
     // `merula-be`, and spawning that backend to open a text file is a bigger decision than

@@ -235,6 +235,9 @@ export function createCodeEditorExtensions(
     highlightSelectionMatches(),
     search({ top: true }),
     useCm ? (lang.cmExtension as Extension) : highlight,
+    // Text the grammar never handed to `classify` — see `LanguageDescriptor.extraHighlight`.
+    // Absent for every language whose grammar covers its own document.
+    ...(lang.extraHighlight ? [lang.extraHighlight] : []),
     // Semantic highlighting, LAYERED over whichever highlighter ran above. Installed
     // unconditionally: with no tokens pushed it is one state field holding an empty decoration
     // set, and a language with no server never pushes any. Layering (rather than replacing) is

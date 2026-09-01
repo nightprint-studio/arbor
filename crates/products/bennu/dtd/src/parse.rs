@@ -571,4 +571,30 @@ mod tests {
         assert!(!particle("(a, b?)").unwrap().optional());
         assert!(particle("(a | b?)").unwrap().optional());
     }
+
+    /// What a content model *demands*, which is not what it permits. `struts.xml` is the case
+    /// this is for: `(result-type?, interceptors?, action*)` permits four things and demands
+    /// none, while an `<action>` really does demand a `<result>`.
+    #[test]
+    fn a_content_model_says_what_a_document_must_contain() {
+        let required = |src: &str| {
+            parse(&format!("<!ELEMENT e {src}>"))
+                .element("e")
+                .unwrap()
+                .content
+                .required_child_names()
+        };
+        assert_eq!(required("(name, value)"), ["name", "value"]);
+        assert_eq!(required("(name, value?)"), ["name"]);
+        assert_eq!(required("(name, value*)"), ["name"]);
+        assert_eq!(required("(name, value+)"), ["name", "value"]);
+        assert_eq!(required("(name)?"), Vec::<String>::new());
+        // A choice is satisfied by one branch, so it demands only what every branch demands.
+        assert_eq!(required("(a | b)"), Vec::<String>::new());
+        assert_eq!(required("((id, a) | (id, b))"), ["id"]);
+        // And the shapes that cannot demand anything by construction.
+        assert!(required("ANY").is_empty());
+        assert!(required("EMPTY").is_empty());
+        assert!(required("(#PCDATA | a)*").is_empty());
+    }
 }

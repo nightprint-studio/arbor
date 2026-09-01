@@ -6,6 +6,13 @@
   build model: the display name, the modules or workspace crates, and — for Maven — the JDK
   language level and the domain frameworks the code relies on.
 </p>
+<p>
+  That model <strong>follows the manifest</strong>. Saving a <code>pom.xml</code> or a
+  <code>Cargo.toml</code> re-reads it, so renaming an <code>&lt;artifactId&gt;</code> renames the
+  project everywhere it is shown — the window title, the workspace switcher, the Canopy recents —
+  without closing anything. Only the model is re-read: the index is not rebuilt and no language
+  server is restarted.
+</p>
 
 <h2>Maven and Cargo</h2>
 <p>

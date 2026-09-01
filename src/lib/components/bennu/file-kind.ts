@@ -69,8 +69,10 @@ export function isLspFile(path: string | null | undefined): boolean {
  */
 export { isImageFile };
 
-/** A geode `.dig` mole script. Highlighted, folded, and completed from its (closed)
- *  vocabulary — but its navigation is a later story, so not in {@link supportsCodeNav}. */
+/** A geode `.dig` mole script. Highlighted and folded from its grammar; everything else —
+ *  completion, hover, go-to, diagnostics — comes from **nd-dig-lsp**, so it reaches the
+ *  navigation and diagnostics sets through {@link isLspFile} like any other served language,
+ *  and only once the user has that server registered. */
 export function isDigFile(path: string | null | undefined): boolean {
   return ext(path) === 'dig';
 }
@@ -81,10 +83,10 @@ export function isDigFile(path: string | null | undefined): boolean {
  * statements). This is the one list; the two predicates below name the two things callers
  * actually want to know, so the set can grow in a single place.
  *
- * `.dig`, `.sql` and the plain text kinds are out: they are *edited* in Bennu (highlighted, and
- * `.dig` completed) but no analyzer in `bennu-be` can say anything about them. `.rs` is out of
- * *this* set too — nothing Java can read it — and in the unions below, because a language server
- * can; so is a `Cargo.toml`, which has its own validator.
+ * `.sql` and the plain text kinds are out: they are *edited* in Bennu (highlighted) but no
+ * analyzer in `bennu-be` can say anything about them. `.rs` and `.dig` are out of *this* set too
+ * — nothing Java can read either — but they reach the unions below through {@link isLspFile},
+ * because a language server can; so is a `Cargo.toml`, which has its own validator.
  */
 function isAnalyzedFile(path: string | null | undefined): boolean {
   return isJavaFile(path) || isJspFile(path) || isXmlFile(path);
@@ -95,10 +97,10 @@ function isAnalyzedFile(path: string | null | undefined): boolean {
  * rename, file structure.
  *
  * Either engine qualifies: the Java analyzers for a `.java`/`.jsp`/config XML, a language
- * server for anything it serves. `.dig` stays out — it is highlighted and completed from its
- * own closed vocabulary, but resolving a declaration across files needs a cross-file pass it
- * does not have, and a go-to that silently does nothing is worse than an action that is not
- * offered.
+ * server for anything it serves — which now includes `.dig` when geode's **nd-dig-lsp** is
+ * registered, and does not when it is not. That is the whole reason {@link isLspFile} asks the
+ * backend catalogue instead of a list here: a go-to that silently does nothing is worse than an
+ * action that is not offered, and only the catalogue knows which of the two this file is.
  */
 export function supportsCodeNav(path: string | null | undefined): boolean {
   return isAnalyzedFile(path) || isLspFile(path) || isWgslFile(path);

@@ -26,7 +26,7 @@
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck, History,
     Palette,
     TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart, Bug, Braces, Languages,
-    Cog, Network, Plug, Store, ScrollText, LayoutDashboard,
+    Cog, Network, Plug, Store, ScrollText, LayoutDashboard, FilePlus2, FolderPlus,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -335,7 +335,14 @@
     // with the first one. The paths are still worth carrying: they say WHICH root changed.
     let unlistenTree: (() => void) | undefined;
     void listen<TreeChanged>(TREE_CHANGED, (e) => {
-      if (e.payload?.root) projectStore.refreshTreeOf(e.payload.root);
+      const root = e.payload?.root;
+      if (!root) return;
+      projectStore.refreshTreeOf(root);
+      // A manifest is the one file whose CONTENT the tree cannot express: rename an
+      // `<artifactId>` and the project is called something else, but nothing on screen was
+      // told — the title bar, the switcher and Canopy's recents all kept the old name until
+      // the project was closed and reopened. Re-read only the model, never re-open.
+      if (manifestChanged(e.payload)) void projectStore.refreshProjectInfo(root);
     }).then((un) => { unlistenTree = un; });
 
     // Subscribe to the build/run + index-progress event streams for this window;
@@ -1193,6 +1200,8 @@
     'shield': ShieldCheck as unknown as IconComponent,
     'palette': Palette as unknown as IconComponent,
     'history': History as unknown as IconComponent,
+    'file-plus': FilePlus2 as unknown as IconComponent,
+    'folder-plus': FolderPlus as unknown as IconComponent,
     // The two framework catalogs that were falling through to the generic `command` glyph:
     // a bound-properties list and the property reference read out of the dependency jars.
     // (`list` is declared once, above — a second entry here silently shadowed it.)
@@ -1214,6 +1223,19 @@
    *  is the Forms panel's, not lucide's `List`. Everything a plugin can name that Bennu has no
    *  word for — `Eye`, `GitBranch`, `Rocket` — comes from the second lookup, which is what
    *  stops every contributed command from rendering as the same ⌘. */
+  /** Whether a watcher burst touched a build manifest — the file the project's own name,
+   *  modules and JDK come out of.
+   *
+   *  A truncated burst counts: the paths are capped, so "not in the list" is not "did not
+   *  change", and re-reading one manifest is cheaper than being wrong about it. */
+  function manifestChanged(payload: TreeChanged): boolean {
+    if (payload.truncated) return true;
+    return payload.paths.some((p) => {
+      const name = p.split('/').pop() ?? p;
+      return name === 'pom.xml' || name === 'Cargo.toml';
+    });
+  }
+
   function iconResolver(name: string): IconComponent {
     return ICONS[name] ?? (PLUGIN_ICONS[name] as IconComponent | undefined) ?? ICONS.command;
   }
@@ -1345,6 +1367,12 @@
         action: () => run(() => bennuUiStore.openFind(editor?.getSelectedText() ?? '')), when: true },
       { id: 'reveal', title: 'Select opened file in tree', icon: 'folder-tree',
         action: () => run(() => bennuUiStore.revealActiveInTree()), when: !!projectStore.activeFilePath },
+      // The two the project tree could only be right-clicked for. WHERE they create is the
+      // tree's answer — the directory it is sitting on — so these only open the dialog.
+      { id: 'newfile', title: 'New file…', icon: 'file-plus',
+        action: () => run(() => bennuUiStore.newInTree('file')), when: !!projectStore.project },
+      { id: 'newfolder', title: 'New folder or package…', icon: 'folder-plus',
+        action: () => run(() => bennuUiStore.newInTree('folder')), when: !!projectStore.project },
       { id: 'generate', title: 'Generate…', icon: 'wand', shortcut: 'Alt+Insert',
         action: () => run(() => bennuUiStore.openGenerate()), when: isJava },
       { id: 'override', title: 'Implement / override methods…', icon: 'wand', shortcut: 'Ctrl+I',

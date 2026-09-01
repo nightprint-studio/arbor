@@ -88,6 +88,49 @@ impl Scan {
     pub fn parent_at(&self, offset: usize) -> Option<&str> {
         self.path_at(offset).last().copied()
     }
+
+    /// Every opening tag paired with the names of the tags **directly** inside it, as written.
+    ///
+    /// One traversal rather than a [`Scan::path_at`] per tag: `path_at` replays the whole tag list
+    /// from the start, so asking it once per tag is quadratic on a document where the answer is a
+    /// single walk. Names keep their prefix — whether a child is prefixed is the one thing a check
+    /// about namespaces needs, and [`local_name`] is one call away for the checks that do not.
+    ///
+    /// An element whose close tag never arrives is still reported, keeping whatever it had
+    /// collected. That is the right way round: a file being typed is missing its close tags most
+    /// of the time, and an answer that waited for a well-formed document would be absent exactly
+    /// while the mistake is being written.
+    pub fn direct_children(&self) -> Vec<(&Tag, Vec<&str>)> {
+        let mut open: Vec<(&Tag, Vec<&str>)> = Vec::new();
+        let mut done: Vec<(&Tag, Vec<&str>)> = Vec::new();
+        for t in &self.tags {
+            match t.kind {
+                TagKind::Open => {
+                    if let Some((_, kids)) = open.last_mut() {
+                        kids.push(&t.name);
+                    }
+                    open.push((t, Vec::new()));
+                }
+                TagKind::SelfClose => {
+                    if let Some((_, kids)) = open.last_mut() {
+                        kids.push(&t.name);
+                    }
+                    // Reported on too: `<dependency/>` is missing everything, and skipping it
+                    // would make the emptiest possible form the only one nobody checks.
+                    done.push((t, Vec::new()));
+                }
+                TagKind::Close => {
+                    // Unwound the way `path_at` does — to the matching name, ignoring a close tag
+                    // that matches nothing, so a half-typed `</` does not pop a level.
+                    if let Some(i) = open.iter().rposition(|(t2, _)| t2.name == t.name) {
+                        done.extend(open.drain(i..));
+                    }
+                }
+            }
+        }
+        done.extend(open);
+        done
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

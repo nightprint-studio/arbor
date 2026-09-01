@@ -16,8 +16,10 @@
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Pom {
     /// `<name>` (else `<artifactId>`, else empty — the caller falls back to the dir).
+    /// The project's **own**, never one read out of a nested block — see [`root_child_text`].
     pub name: String,
-    /// `<artifactId>` of the project itself (first one outside `<dependencies>`).
+    /// `<artifactId>` of the project itself — the direct child of `<project>`, not the
+    /// `<parent>`'s and not a dependency's.
     pub artifact_id: String,
     /// The `<modules><module>` entries (empty for single-module).
     pub modules: Vec<String>,
@@ -34,6 +36,63 @@ pub struct Pom {
     pub compiler_target: Option<String>,
     /// Whether a `<toolchains>` / `maven-toolchains-plugin` element is present.
     pub has_toolchains: bool,
+}
+
+/// The trimmed text of a **direct child** of the document's root element.
+///
+/// The reason this exists rather than [`tag_text`]: a child POM writes its parent's coordinates
+/// first, so the first `<artifactId>` in the file is `<parent><artifactId>`. Read that way, every
+/// module of a reactor is named after the reactor — and renaming a module's own artifactId
+/// changes nothing on screen, because the name never came from it. `<name>` has the same problem
+/// one step further out: `<organization>`, `<licenses>` and half the plugin configurations in the
+/// wild each carry one.
+///
+/// Depth is the only thing that separates them, so this counts it. Still no DOM: comments, CDATA,
+/// processing instructions and the prolog are skipped whole, and anything it cannot make sense of
+/// simply ends the scan — a field it cannot find is absent, which is this module's contract.
+fn root_child_text<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+    let mut depth = 0usize;
+    let mut i = 0usize;
+    while let Some(rel) = xml[i..].find('<') {
+        let lt = i + rel;
+        let rest = &xml[lt..];
+        if let Some(skip) = inert_len(rest) {
+            i = lt + skip;
+            continue;
+        }
+        let Some(gt) = rest.find('>') else { break };
+        let inner = &rest[1..gt];
+        i = lt + gt + 1;
+        if inner.starts_with('/') {
+            depth = depth.saturating_sub(1);
+            continue;
+        }
+        // `<foo/>` opens and closes at once: it never becomes the enclosing element, and it can
+        // hold no text worth returning.
+        if inner.ends_with('/') {
+            continue;
+        }
+        depth += 1;
+        // `depth` is now the depth OF this element — 1 is the root, 2 is a direct child of it.
+        if depth == 2 && inner.split(|c: char| c.is_whitespace()).next() == Some(tag) {
+            let close = format!("</{tag}>");
+            let end = xml[i..].find(&close)?;
+            return Some(xml[i..i + end].trim());
+        }
+    }
+    None
+}
+
+/// How far past `<` a comment, CDATA section, processing instruction or doctype runs — the spans
+/// that carry no structure and must not move the depth. Ordered so `<!--` and `<![CDATA[` are
+/// recognised before the bare `<!` that both start with.
+fn inert_len(rest: &str) -> Option<usize> {
+    for (open, close) in [("<!--", "-->"), ("<![CDATA[", "]]>"), ("<?", "?>"), ("<!", ">")] {
+        if rest.starts_with(open) {
+            return Some(rest.find(close).map(|p| p + close.len()).unwrap_or(rest.len()));
+        }
+    }
+    None
 }
 
 /// Extract the inner text of the first `<tag>…</tag>` in `xml`, trimmed. `None` when
@@ -76,14 +135,12 @@ fn all_tag_texts(xml: &str, tag: &str) -> Vec<String> {
 pub fn parse(xml: &str) -> Pom {
     let mut pom = Pom::default();
 
-    // Project-level artifactId: the first `<artifactId>` NOT inside `<dependencies>`
-    // / `<plugin>`. Cheap heuristic: take the first one before the `<dependencies>`
-    // block, else the first overall.
-    let deps_start = xml.find("<dependencies>").unwrap_or(xml.len());
-    pom.artifact_id =
-        tag_text(&xml[..deps_start], "artifactId").unwrap_or_default().to_string();
+    // The project's own identity, and only ever its own: a direct child of `<project>`. A POM
+    // that declares neither leaves both empty, and the caller falls back to the directory —
+    // which is right, and is not the same wrong answer as its parent's name.
+    pom.artifact_id = root_child_text(xml, "artifactId").unwrap_or_default().to_string();
 
-    pom.name = tag_text(xml, "name")
+    pom.name = root_child_text(xml, "name")
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .unwrap_or_else(|| pom.artifact_id.clone());
@@ -208,6 +265,63 @@ mod tests {
         assert!(pom.has_dependency("struts2-core"));
         assert!(pom.has_dependency("spring-jdbc"));
         assert!(!pom.has_dependency("mybatis"));
+    }
+
+    /// The one that was wrong: a module POM lists its parent's coordinates first, so the first
+    /// `<artifactId>` in the file belongs to the reactor. Reading that one names every module
+    /// after its parent — and renaming the module's own artifactId then changes nothing at all,
+    /// because the name was never coming from it.
+    #[test]
+    fn the_projects_own_artifact_id_wins_over_its_parents() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+          <project xmlns="http://maven.apache.org/POM/4.0.0">
+            <modelVersion>4.0.0</modelVersion>
+            <parent>
+              <groupId>it.acme</groupId>
+              <artifactId>acme-reactor</artifactId>
+              <version>2.1.0</version>
+            </parent>
+            <artifactId>acme-web</artifactId>
+          </project>"#;
+        let pom = parse(xml);
+        assert_eq!(pom.artifact_id, "acme-web");
+        assert_eq!(pom.name, "acme-web", "and the display name follows it");
+    }
+
+    /// `<name>` is worse than `<artifactId>`, not better: a POM that does not declare one still
+    /// has several further in, and the first of them is never the project's.
+    #[test]
+    fn a_name_nested_in_another_block_is_not_the_projects_name() {
+        let xml = r#"<project>
+            <parent><artifactId>reactor</artifactId></parent>
+            <artifactId>acme-web</artifactId>
+            <organization><name>Acme S.p.A.</name></organization>
+            <licenses><license><name>Apache-2.0</name></license></licenses>
+          </project>"#;
+        let pom = parse(xml);
+        assert_eq!(pom.name, "acme-web");
+    }
+
+    /// A comment holding what looks like markup must not move the depth — otherwise everything
+    /// after it is read one level out.
+    #[test]
+    fn comments_and_self_closing_tags_do_not_shift_the_depth() {
+        let xml = r#"<project>
+            <!-- <artifactId>commented-out</artifactId> -->
+            <parent><artifactId>reactor</artifactId><relativePath/></parent>
+            <artifactId>acme-web</artifactId>
+          </project>"#;
+        assert_eq!(parse(xml).artifact_id, "acme-web");
+    }
+
+    /// A POM that declares neither leaves both empty rather than borrowing from somewhere: the
+    /// caller falls back to the directory name, which is at least the module's own.
+    #[test]
+    fn a_pom_without_its_own_identity_says_so() {
+        let xml = r#"<project><parent><artifactId>reactor</artifactId></parent></project>"#;
+        let pom = parse(xml);
+        assert!(pom.artifact_id.is_empty());
+        assert!(pom.name.is_empty());
     }
 
     #[test]

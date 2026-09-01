@@ -34,6 +34,15 @@ export function openProject(root: string, active = true): Promise<ProjectInfo> {
   return bennu('bennu_open_project', { args: { root, active } });
 }
 
+/** Re-read an already-open project's model — name, modules, JDK, capabilities, encoding.
+ *
+ *  Distinct from {@link openProject}, which also warm-starts a language server and kicks off an
+ *  index build: those are right once, and wrong every time a `pom.xml` is saved. This one only
+ *  parses. Wire: `bennu_project_info` — `ProjectInfoArgs { root }`. */
+export function projectInfo(root: string): Promise<ProjectInfo> {
+  return bennu('bennu_project_info', { args: { root } });
+}
+
 /** Say that an already-open project is now the one on screen — starts its language server if it
  *  has none, and claims it so an idle reaper leaves it alone.
  *  Wire: `bennu_activate_project` — `ActivateProjectArgs { root }`. */

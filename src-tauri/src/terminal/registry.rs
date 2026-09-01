@@ -45,6 +45,7 @@ pub const BUILTIN_SHELLS: &[BuiltinShell] = &[
         fallbacks: &[
             r"C:\Program Files\PowerShell\7\pwsh.exe",
             r"/usr/local/bin/pwsh",
+            r"/opt/homebrew/bin/pwsh",
             r"/opt/microsoft/powershell/7/pwsh",
         ],
         platforms: &["any"],
@@ -54,7 +55,7 @@ pub const BUILTIN_SHELLS: &[BuiltinShell] = &[
         name: "Bash",
         cmd: "bash",
         args: &[],
-        fallbacks: &["/bin/bash", "/usr/bin/bash"],
+        fallbacks: &["/bin/bash", "/usr/bin/bash", "/opt/homebrew/bin/bash"],
         platforms: &["any"],
     },
     BuiltinShell {
@@ -100,7 +101,7 @@ pub const BUILTIN_SHELLS: &[BuiltinShell] = &[
         name: "Zsh",
         cmd: "zsh",
         args: &[],
-        fallbacks: &["/bin/zsh", "/usr/bin/zsh"],
+        fallbacks: &["/bin/zsh", "/usr/bin/zsh", "/opt/homebrew/bin/zsh"],
         platforms: &["unix"],
     },
     BuiltinShell {
@@ -108,7 +109,7 @@ pub const BUILTIN_SHELLS: &[BuiltinShell] = &[
         name: "Fish",
         cmd: "fish",
         args: &[],
-        fallbacks: &["/usr/bin/fish", "/usr/local/bin/fish"],
+        fallbacks: &["/usr/bin/fish", "/usr/local/bin/fish", "/opt/homebrew/bin/fish"],
         platforms: &["any"],
     },
     BuiltinShell {
@@ -116,7 +117,7 @@ pub const BUILTIN_SHELLS: &[BuiltinShell] = &[
         name: "Nushell",
         cmd: "nu",
         args: &[],
-        fallbacks: &["/usr/bin/nu", "/usr/local/bin/nu"],
+        fallbacks: &["/usr/bin/nu", "/usr/local/bin/nu", "/opt/homebrew/bin/nu"],
         platforms: &["any"],
     },
     BuiltinShell {
@@ -124,7 +125,7 @@ pub const BUILTIN_SHELLS: &[BuiltinShell] = &[
         name: "Xonsh",
         cmd: "xonsh",
         args: &[],
-        fallbacks: &[],
+        fallbacks: &["/usr/local/bin/xonsh", "/opt/homebrew/bin/xonsh"],
         platforms: &["any"],
     },
     BuiltinShell {
@@ -132,7 +133,7 @@ pub const BUILTIN_SHELLS: &[BuiltinShell] = &[
         name: "Elvish",
         cmd: "elvish",
         args: &[],
-        fallbacks: &[],
+        fallbacks: &["/usr/local/bin/elvish", "/opt/homebrew/bin/elvish"],
         platforms: &["any"],
     },
     BuiltinShell {
@@ -197,15 +198,7 @@ pub fn detect_available_shells(
                     };
                 }
             }
-            let mut found = which_command(s.cmd);
-            if found.is_none() {
-                for fb in s.fallbacks {
-                    if Path::new(fb).exists() {
-                        found = Some((*fb).to_string());
-                        break;
-                    }
-                }
-            }
+            let found = probe_executable(s.cmd, s.fallbacks);
             DetectedShell {
                 id:            s.id.to_string(),
                 name:          s.name.to_string(),
@@ -216,11 +209,58 @@ pub fn detect_available_shells(
         .collect()
 }
 
+/// PATH used when probing for shell executables.
+///
+/// A GUI process launched from Finder/Dock inherits launchd's environment, in
+/// which `PATH` is only `/usr/bin:/bin:/usr/sbin:/sbin` — a `which` that
+/// trusted it would report every Homebrew-installed shell as missing. The
+/// usual install prefixes are *appended*, never prepended, so an entry the
+/// user really has on PATH still wins.
+#[cfg(not(windows))]
+fn probe_path() -> String {
+    const EXTRA: &[&str] = &[
+        "/opt/homebrew/bin", // Homebrew, Apple Silicon
+        "/usr/local/bin",    // Homebrew on Intel + most manual installs
+        "/opt/local/bin",    // MacPorts
+        "/usr/bin",
+        "/bin",
+    ];
+    let mut parts: Vec<String> = std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect();
+    for extra in EXTRA {
+        if !parts.iter().any(|p| p == extra) {
+            parts.push((*extra).to_string());
+        }
+    }
+    parts.join(":")
+}
+
+/// Locate a shell executable: PATH first, then the entry's absolute fallbacks
+/// (shells installed outside PATH — Git Bash on Windows, Homebrew formulae
+/// under a GUI-inherited PATH). Shared by detection and spawn so the picker
+/// can never advertise a shell the spawn path would then fail to find.
+pub fn probe_executable(cmd: &str, fallbacks: &[&str]) -> Option<String> {
+    if let Some(found) = which_command(cmd) {
+        return Some(found);
+    }
+    fallbacks
+        .iter()
+        .find(|fb| Path::new(fb).exists())
+        .map(|fb| (*fb).to_string())
+}
+
 pub fn which_command(cmd: &str) -> Option<String> {
     #[cfg(windows)]
     let output = std::process::Command::new("where").arg(cmd).no_window().output();
     #[cfg(not(windows))]
-    let output = std::process::Command::new("which").arg(cmd).output();
+    let output = std::process::Command::new("which")
+        .arg(cmd)
+        .env("PATH", probe_path())
+        .output();
 
     match output {
         Ok(o) if o.status.success() => {
@@ -246,33 +286,178 @@ pub fn resolve_shell(
     };
 
     if id.is_empty() {
-        return (platform_default().to_string(), Vec::new());
+        return spawn_default();
     }
 
+    // Custom shells are spelled out by the user, command and args both: adding
+    // anything of ours would override an explicit choice.
     if let Some(custom) = cfg.custom_shells.iter().find(|s| s.id == id) {
         return (custom.command.clone(), custom.args.clone());
     }
 
     if let Some(builtin) = BUILTIN_SHELLS.iter().find(|s| s.id == id) {
-        let exe = if let Some(ov) = cfg.path_overrides.get(id) {
-            if !ov.is_empty() { ov.clone() } else { builtin.cmd.to_owned() }
-        } else {
-            builtin.cmd.to_owned()
+        let exe = match cfg.path_overrides.get(id) {
+            Some(ov) if !ov.is_empty() => ov.clone(),
+            // Resolve to an absolute path with the same probe the picker used:
+            // spawning by bare name would search the process PATH, which under
+            // a GUI-inherited environment does not contain Homebrew.
+            _ => probe_executable(builtin.cmd, builtin.fallbacks)
+                .unwrap_or_else(|| builtin.cmd.to_owned()),
         };
-        let args = builtin.args.iter().map(|a| (*a).to_string()).collect();
+        let mut args: Vec<String> = builtin.args.iter().map(|a| (*a).to_string()).collect();
+        args.extend(login_args(&exe));
         return (exe, args);
     }
 
     if id.contains(['/', '\\']) || id.ends_with(".exe") {
-        return (id.to_string(), Vec::new());
+        let args = login_args(id);
+        return (id.to_string(), args);
     }
 
-    (platform_default().to_string(), Vec::new())
+    spawn_default()
 }
 
-pub fn platform_default() -> &'static str {
+/// The default shell plus the flags it needs — the fallback of `resolve_shell`
+/// in both the "nothing configured" and the "configured id is unknown" cases.
+fn spawn_default() -> (String, Vec<String>) {
+    let exe = platform_default();
+    let args = login_args(&exe);
+    (exe, args)
+}
+
+/// Flags that make a shell start as a **login** shell, keyed by its basename.
+///
+/// This is what repairs the environment on macOS. A GUI app inherits launchd's
+/// `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`) and only a login shell rebuilds it:
+/// `/etc/zprofile` runs `path_helper`, `~/.zprofile` runs `brew shellenv`, and
+/// user toolchains live behind exactly those. `portable_pty` sets the login `-`
+/// argv0 only for its own default program — a `CommandBuilder::new(prog)` gets
+/// argv0 verbatim — and we cannot dash argv0 ourselves because it is also what
+/// it resolves the executable from. So the flag is passed explicitly.
+///
+/// Empty on Windows, and for `sh`: that entry is the deliberate bare-shell
+/// escape hatch, and loading a profile into it would defeat the point.
+fn login_args(exe: &str) -> Vec<String> {
     #[cfg(target_os = "windows")]
-    { "cmd.exe" }
+    {
+        let _ = exe;
+        Vec::new()
+    }
     #[cfg(not(target_os = "windows"))]
-    { "bash" }
+    {
+        let base = Path::new(exe)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(exe);
+        match base {
+            "zsh" | "bash" | "fish" | "tcsh" | "csh" | "ksh" => vec!["-l".to_string()],
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// The shell a terminal opens when the user has not configured one.
+///
+/// On unix `$SHELL` is the user's own choice — set by the login session, and
+/// by the passwd entry when the app is launched from Finder — so it is the
+/// only honest default. Hard-coding `bash` handed macOS users a shell whose
+/// rc files (`~/.bashrc`, `~/.bash_profile`) most of them do not even have,
+/// which read as "the terminal has nothing in it".
+pub fn platform_default() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        "cmd.exe".to_string()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var("SHELL")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| unix_baseline_shell().to_string())
+    }
+}
+
+/// Fallback when `$SHELL` is unset — the platform's own stock login shell.
+#[cfg(not(target_os = "windows"))]
+fn unix_baseline_shell() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "/bin/zsh"
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "/bin/bash"
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn login_flag_is_keyed_on_the_basename_not_the_path() {
+        assert_eq!(login_args("/opt/homebrew/bin/zsh"), vec!["-l".to_string()]);
+        assert_eq!(login_args("zsh"), vec!["-l".to_string()]);
+        assert_eq!(login_args("/bin/bash"), vec!["-l".to_string()]);
+    }
+
+    #[test]
+    fn sh_and_non_posix_shells_stay_bare() {
+        assert!(login_args("/bin/sh").is_empty());
+        assert!(login_args("/opt/homebrew/bin/nu").is_empty());
+        assert!(login_args("/usr/local/bin/pwsh").is_empty());
+    }
+
+    #[test]
+    fn default_shell_is_a_login_shell() {
+        let (exe, args) = spawn_default();
+        assert!(!exe.is_empty());
+        // Whatever `$SHELL` says, a POSIX shell must be asked to log in — that
+        // is the whole point of the default path on macOS.
+        if matches!(
+            Path::new(&exe).file_name().and_then(|s| s.to_str()),
+            Some("zsh" | "bash" | "fish")
+        ) {
+            assert_eq!(args, vec!["-l".to_string()]);
+        }
+    }
+
+    #[test]
+    fn builtin_shells_resolve_with_login_flags() {
+        let cfg = crate::config::app_config::TerminalsConfig::default();
+        let (exe, args) = resolve_shell(Some("zsh"), &cfg);
+        assert!(exe.ends_with("zsh"), "unexpected exe: {exe}");
+        assert_eq!(args, vec!["-l".to_string()]);
+
+        let (_, sh_args) = resolve_shell(Some("sh"), &cfg);
+        assert!(sh_args.is_empty());
+    }
+
+    #[test]
+    fn probe_path_adds_the_install_prefixes_without_duplicating_them() {
+        let path = probe_path();
+        let entries: Vec<&str> = path.split(':').collect();
+        let inherited: Vec<String> = std::env::var("PATH")
+            .unwrap_or_default()
+            .split(':')
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .collect();
+
+        for prefix in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
+            let was = inherited.iter().filter(|e| *e == prefix).count();
+            let now = entries.iter().filter(|e| **e == prefix).count();
+            // Present exactly once when we had to add it, and untouched when
+            // the inherited PATH already carried it (however many times).
+            assert_eq!(now, was.max(1), "{prefix} mishandled in {path}");
+        }
+
+        // Appended, never prepended — an inherited entry keeps its precedence.
+        assert_eq!(entries[..inherited.len()], inherited[..]);
+    }
 }

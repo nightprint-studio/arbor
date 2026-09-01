@@ -14,6 +14,12 @@
 <p>
   The <strong>Index inspector</strong> (Command Palette → <em>Index inspector…</em>) browses what the
   index holds — types, members, jars, JDK, beans, actions and relations — with a filter and jump-to.
+  It also reports <strong>Type names</strong>: how many distinct class names completion can offer,
+  counting the JDK's, every resolved dependency jar's and your project's own. That figure is what
+  tells <em>completion is not offering my library classes</em> apart from <em>the library classes
+  were never loaded</em> — from the popup the two look the same, and only the first is about
+  completion. A few thousand means the JDK alone answered; a project with jars runs to tens of
+  thousands.
   If something looks stale or a class you know exists isn't turning up, press <strong>Rebuild</strong>
   there (or run <em>Rebuild index</em> from the palette) to invalidate the index and recompute it from
   scratch. This is a pure re-scan of the sources on disk — it doesn't compile the project (that's

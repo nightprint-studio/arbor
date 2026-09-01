@@ -19,11 +19,18 @@ pub fn simple_type_needing_import(source: &str, offset: usize) -> Option<String>
     let node = root.named_descendant_for_byte_range(offset, offset)?;
     // Only a simple type reference. A `class Foo` declaration's name is an `identifier` (not a
     // `type_identifier`), so declarations never match — we only ever fire on a type USAGE.
-    if node.kind() != "type_identifier" {
+    //
+    // The one `identifier` that IS a type usage is an **annotation's name**: `@Service` puts its
+    // name in the `name` field of a `marker_annotation`, never in a type position, so the caret on
+    // it used to find nothing to import. That is the place a missing import is easiest to leave
+    // behind — the code around an annotation still reads correctly without it.
+    if node.kind() != "type_identifier" && !is_annotation_name(&node) {
         return None;
     }
     // A qualified name (`Outer.Inner`, `pkg.Type`) has the inner part as a `type_identifier` under a
-    // `scoped_type_identifier` — it's already qualified, so no import is needed.
+    // `scoped_type_identifier` — it's already qualified, so no import is needed. `@org.junit.Test`
+    // is the same case one node over: its parts sit under a `scoped_identifier`, which is not the
+    // annotation's `name` child, so `is_annotation_name` already declined it.
     if node.parent().map(|p| p.kind()) == Some("scoped_type_identifier") {
         return None;
     }
@@ -49,6 +56,22 @@ pub fn simple_type_needing_import(source: &str, offset: usize) -> Option<String>
     Some(simple)
 }
 
+/// Whether `node` is the name of an annotation **use** — the `name` child of a `marker_annotation`
+/// (`@Service`) or an `annotation` (`@RequestMapping("/x")`).
+///
+/// Deliberately the `name` field and not "any identifier under an annotation": an argument's own
+/// name in `@Column(name = "x")` is an identifier under the same node, and it imports nothing. An
+/// `@interface Marker {}` **declaration** is excluded for free — its name hangs off an
+/// `annotation_type_declaration`.
+fn is_annotation_name(node: &tree_sitter::Node) -> bool {
+    if node.kind() != "identifier" {
+        return false;
+    }
+    let Some(parent) = node.parent() else { return false };
+    matches!(parent.kind(), "marker_annotation" | "annotation")
+        && parent.child_by_field_name("name").map(|n| n.id()) == Some(node.id())
+}
+
 /// A conventional type-variable name: a single uppercase letter, or one uppercase letter followed by
 /// digits (`T`, `E`, `K`, `T1`, `T2`) — never a real, importable class name.
 fn looks_like_type_variable(name: &str) -> bool {
@@ -66,6 +89,47 @@ mod tests {
     /// Offset of the first occurrence of `needle` in `src`, plus 1 (so the caret sits INSIDE the token).
     fn caret(src: &str, needle: &str) -> usize {
         src.find(needle).expect("needle present") + 1
+    }
+
+    #[test]
+    fn an_annotation_name_is_importable() {
+        let src = "package a;\n@SpringBootApplication\nclass App {}";
+        assert_eq!(
+            simple_type_needing_import(src, caret(src, "SpringBootApplication")).as_deref(),
+            Some("SpringBootApplication"),
+        );
+        // With arguments — a different node kind, the same answer.
+        let with_args = "package a;\nclass C { @RequestMapping(\"/x\") void m() {} }";
+        assert_eq!(
+            simple_type_needing_import(with_args, caret(with_args, "RequestMapping")).as_deref(),
+            Some("RequestMapping"),
+        );
+    }
+
+    #[test]
+    fn an_annotation_argument_name_is_not_a_type() {
+        // `name` in `@Column(name = "x")` is an identifier under the same annotation node, and
+        // importing it would be nonsense.
+        let src = "package a;\nimport x.Column;\nclass C { @Column(name = \"x\") int f; }";
+        assert_eq!(simple_type_needing_import(src, caret(src, "name = ")), None);
+    }
+
+    #[test]
+    fn an_annotation_declaration_is_not_a_usage() {
+        let src = "package a;\n@interface Marker {}";
+        assert_eq!(simple_type_needing_import(src, caret(src, "Marker")), None);
+    }
+
+    #[test]
+    fn a_qualified_annotation_needs_no_import() {
+        let src = "package a;\nclass C { @org.junit.Test void t() {} }";
+        assert_eq!(simple_type_needing_import(src, caret(src, "Test")), None);
+    }
+
+    #[test]
+    fn an_already_imported_annotation_is_not_offered() {
+        let src = "package a;\nimport org.junit.Test;\nclass C { @Test void t() {} }";
+        assert_eq!(simple_type_needing_import(src, caret(src, "@Test") + 1), None);
     }
 
     #[test]

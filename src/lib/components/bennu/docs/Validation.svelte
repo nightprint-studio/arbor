@@ -35,7 +35,11 @@
   <li><strong>Unresolved import</strong> — an <code>import</code> of a type that doesn't exist (a
     typo or a removed class). Needs the project classpath to be complete.</li>
   <li><strong>Unresolved type</strong> — a type name that doesn't resolve to any class (a typo'd
-    class name in a declaration, <code>extends</code>, generics or <code>catch</code>).</li>
+    class name in a declaration, <code>extends</code>, generics or <code>catch</code>).
+    <strong>An annotation counts</strong>: <code>&#64;SpringBootApplication</code> with no import
+    above it is the same "cannot find symbol", and it is the easiest one to leave behind, because
+    the code around an annotation still reads correctly without it.
+    <kbd>Alt</kbd> + <kbd>Enter</kbd> on the name offers the import.</li>
   <li><strong>Type incompatibility</strong> — an impossible cast (<code>(String) anInteger</code>),
     and an assignment or <code>return</code> whose value isn't of the declared type — including
     <code>String</code>/number mixups like <code>int x = "1";</code> or <code>int y = "1" + 1;</code>.

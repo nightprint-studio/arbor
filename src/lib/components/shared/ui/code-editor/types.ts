@@ -208,6 +208,22 @@ export interface LanguageDescriptor {
   injections?: Record<string, StreamParser<unknown>>;
 
   /**
+   * Optional highlight for text the grammar **does not put in the tree**, painted from the
+   * raw document instead.
+   *
+   * The rovescio of {@link injections}: that one refines a leaf the tree does have, this one
+   * covers text it never produced. An external scanner can consume input while deciding a
+   * token — geode's `.dig` scanner eats `#` comment lines whole, because to compute a line's
+   * indentation it has to treat them as blank — and everything it swallows is invisible to
+   * `classify`, which only ever sees leaves. The symptom is a construct that renders as
+   * default text with no error anywhere, which reads as "the theme is wrong".
+   *
+   * Installed alongside the highlighter (either kind) and **under** the semantic layer, so a
+   * server that later says something better about the same range still wins.
+   */
+  extraHighlight?: Extension;
+
+  /**
    * Optional comment syntax for the toggle-comment command (`Ctrl+/`). Shaped exactly
    * like CodeMirror's `commentTokens` language-data so the core surfaces it via the
    * `EditorState.languageData` facet; `@codemirror/commands`' `toggleComment` (already

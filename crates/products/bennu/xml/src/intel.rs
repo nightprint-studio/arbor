@@ -20,8 +20,12 @@
 //! - an element whose **parent** the grammar does not know is not judged either: the position is
 //!   unknown, so nothing about it can be.
 //!
-//! Nothing here checks text content or cardinality. The grammar records both, and a curated or
-//! flattened one is exactly the wrong place to be confident about either.
+//! Cardinality is checked in one direction only: a child the grammar is **certain** a document
+//! must contain, and that the document has not written. Nothing counts *how many* of something is
+//! legal and nothing checks text content — a repeat bound and a text type are things the grammar
+//! records but a flattened or curated one cannot be trusted on. The certainty is the schema
+//! reader's answer, not this module's guess ([`crate::grammar::Child::required`]), and a curated
+//! table never claims it.
 
 use bennu_complete::prelude::{ghost, token_after, within, Proposal, Proposals};
 use bennu_ext::prelude::{ExtHover, ExtTarget};
@@ -230,9 +234,13 @@ pub fn hover(grammar: &Grammar, scan: &Scan, source: &str, offset: usize) -> Opt
         // Worth saying out loud: it explains why nothing inside is ever flagged.
         lines.push("Holds any content, so nothing inside it is checked.".to_string());
     } else if !element.children.is_empty() {
-        lines.push(format!("Contains: {}", element.children.join(", ")));
+        lines.push(format!("Contains: {}", element.child_names().join(", ")));
     } else if element.text {
         lines.push("Holds text.".to_string());
+    }
+    let must: Vec<&str> = element.required_children().map(|c| c.name.as_str()).collect();
+    if !must.is_empty() {
+        lines.push(format!("Must contain: {}", must.join(", ")));
     }
     let required: Vec<&str> =
         element.attributes.iter().filter(|a| a.required).map(|a| a.name.as_str()).collect();
@@ -312,6 +320,10 @@ pub fn diagnostics(grammar: &Grammar, scan: &Scan) -> Vec<Diagnostic> {
         return Vec::new();
     }
     let mut out = Vec::new();
+    // One traversal for the whole document, keyed by where each tag starts. Asking for a tag's
+    // children one at a time would replay the tag list once per tag.
+    let written: Vec<(usize, Vec<&str>)> =
+        scan.direct_children().into_iter().map(|(t, kids)| (t.start, kids)).collect();
     for tag in &scan.tags {
         if tag.kind == TagKind::Close || !tag.closed || tag.name.contains(':') {
             continue;
@@ -339,7 +351,7 @@ pub fn diagnostics(grammar: &Grammar, scan: &Scan) -> Vec<Diagnostic> {
         // an element the schema says contains nothing may still be one this grammar flattened
         // (see `bennu-xsd` on particles), and guessing there would report correct files as wrong.
         if let Some(p) = grammar.element(parent) {
-            if !p.children.is_empty() && !p.children.iter().any(|c| c == &tag.name) {
+            if !p.children.is_empty() && !p.children.iter().any(|c| c.name == tag.name) {
                 out.push(diagnostic(
                     format!("`{}` is not allowed inside `{parent}`", tag.name),
                     "xml.misplaced-element",
@@ -367,6 +379,34 @@ pub fn diagnostics(grammar: &Grammar, scan: &Scan) -> Vec<Diagnostic> {
                 out.push(diagnostic(
                     format!("`{}` requires the attribute `{}`", tag.name, declared.name),
                     "xml.missing-attribute",
+                    tag.name_start,
+                    tag.name_end,
+                ));
+            }
+        }
+
+        // Children the schema demands and the document has not written. Two gates on top of the
+        // ones above, both about not knowing enough rather than about being wrong:
+        //
+        // - `xsi:nil="true"` says the element is deliberately absent, and an absent element owes
+        //   nobody its children;
+        // - a **prefixed** child means a namespace this grammar very likely does not cover, and a
+        //   grammar that cannot see half the content may not pronounce on what the half it sees
+        //   is missing. Same rule that keeps prefixed names from being reported at all, applied
+        //   one level up.
+        if element.open || tag.attr("xsi:nil").is_some_and(|a| a.value == "true") {
+            continue;
+        }
+        let kids = written.iter().find(|(at, _)| *at == tag.start).map(|(_, k)| k.as_slice());
+        let Some(kids) = kids else { continue };
+        if kids.iter().any(|c| c.contains(':')) {
+            continue;
+        }
+        for demanded in element.required_children() {
+            if !kids.iter().any(|c| local_name(c) == demanded.name) {
+                out.push(diagnostic(
+                    format!("`{}` requires `<{}>`", tag.name, demanded.name),
+                    "xml.missing-element",
                     tag.name_start,
                     tag.name_end,
                 ));
@@ -675,5 +715,73 @@ mod tests {
     #[test]
     fn an_unterminated_tag_is_not_reported() {
         assert!(check("<struts><packg").is_empty());
+    }
+
+    // ── Required children ────────────────────────────────────────────────────
+
+    /// `web.xml` in miniature: a `<servlet>` really does have to say which servlet it is, and a
+    /// document that leaves it out is refused by the container rather than merely frowned at.
+    const WEB: &str = "<!ELEMENT web-app (servlet*, filter*)>\n        <!ELEMENT servlet (servlet-name, (servlet-class | jsp-file), init-param*)>\n        <!ELEMENT servlet-name (#PCDATA)>\n        <!ELEMENT servlet-class (#PCDATA)>\n        <!ELEMENT jsp-file (#PCDATA)>\n        <!ELEMENT init-param (param-name, param-value)>\n        <!ELEMENT param-name (#PCDATA)>\n        <!ELEMENT param-value (#PCDATA)>\n        <!ELEMENT filter ANY>";
+
+    fn web_check(src: &str) -> Vec<String> {
+        let g = from_dtd(&bennu_dtd::prelude::parse(WEB), "/p/web-app_2_3.dtd");
+        diagnostics(&g, &scan(src)).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn a_child_the_schema_demands_and_the_document_omits_is_reported() {
+        assert_eq!(
+            web_check("<web-app><servlet><servlet-class>A</servlet-class></servlet></web-app>"),
+            ["`servlet` requires `<servlet-name>`"],
+        );
+        assert!(
+            web_check(
+                "<web-app><servlet><servlet-name>a</servlet-name>                 <servlet-class>A</servlet-class></servlet></web-app>"
+            )
+            .is_empty(),
+            "and says nothing once it is there"
+        );
+        // The emptiest possible form is checked too, in both spellings.
+        assert_eq!(web_check("<web-app><servlet/></web-app>").len(), 1);
+        assert_eq!(web_check("<web-app><servlet></servlet></web-app>").len(), 1);
+    }
+
+    /// The half the schema left open: a document satisfies `(servlet-class | jsp-file)` by
+    /// writing either, so neither may be demanded of it.
+    #[test]
+    fn neither_branch_of_a_choice_is_demanded() {
+        assert!(web_check(
+            "<web-app><servlet><servlet-name>a</servlet-name>             <jsp-file>/x.jsp</jsp-file></servlet></web-app>"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn the_demand_is_not_made_where_the_grammar_cannot_see_the_content() {
+        // Under an ANY element nothing is judged, including what is missing from it.
+        assert!(web_check("<web-app><filter><servlet/></filter></web-app>").is_empty());
+        // A prefixed child means a namespace with no schema here — it may be supplying exactly
+        // what looks absent.
+        assert!(web_check(
+            "<web-app><servlet><x:name>a</x:name><servlet-class>A</servlet-class></servlet></web-app>"
+        )
+        .is_empty());
+        // An element declared absent owes nobody its children.
+        assert!(web_check("<web-app><servlet xsi:nil=\"true\"/></web-app>").is_empty());
+        // And a curated table states a vocabulary, never a demand.
+        let pom = crate::builtin::pom();
+        assert!(pom.elements.iter().all(|e| e.required_children().next().is_none()));
+    }
+
+    /// Nesting: `<init-param>` demands two children of its own, and the walk has to find them on
+    /// the element that holds them rather than anywhere below the servlet.
+    #[test]
+    fn the_demand_is_read_against_direct_children_only() {
+        assert_eq!(
+            web_check(
+                "<web-app><servlet><servlet-name>a</servlet-name>                 <servlet-class>A</servlet-class>                 <init-param><param-name>k</param-name></init-param></servlet></web-app>"
+            ),
+            ["`init-param` requires `<param-value>`"],
+        );
     }
 }

@@ -74,6 +74,21 @@ impl Content {
         }
     }
 
+    /// Every child name a valid document **must** contain, in declaration order.
+    ///
+    /// Only [`Content::Children`] can demand anything: `(#PCDATA | a | b)*` demands nothing by
+    /// construction, and `ANY` and `EMPTY` say the opposite of a demand.
+    pub fn required_child_names(&self) -> Vec<String> {
+        match self {
+            Content::Children(p) => {
+                let mut out = Vec::new();
+                p.collect_required(&mut out);
+                out
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Whether character data is legal here.
     pub fn allows_text(&self) -> bool {
         matches!(self, Content::PcData | Content::Mixed(_) | Content::Any)
@@ -102,6 +117,42 @@ impl Particle {
             }
             Particle::Seq(ps) | Particle::Choice(ps) => ps.iter().for_each(|p| p.collect_names(out)),
             Particle::Repeat(p, _) => p.collect_names(out),
+        }
+    }
+
+    /// The names this particle demands of every document that satisfies it.
+    ///
+    /// A sequence demands whatever each of its members does. A **choice** demands only what
+    /// *every* branch demands — a document satisfies it by taking one branch, so a name written
+    /// in three of four is not required by any of them. `?` and `*` demand nothing; `+` and a
+    /// bare particle demand what they wrap.
+    fn collect_required(&self, out: &mut Vec<String>) {
+        match self {
+            Particle::Name(n) => {
+                if !out.contains(n) {
+                    out.push(n.clone());
+                }
+            }
+            Particle::Seq(ps) => ps.iter().for_each(|p| p.collect_required(out)),
+            Particle::Choice(ps) => {
+                let Some((first, rest)) = ps.split_first() else { return };
+                let mut common = Vec::new();
+                first.collect_required(&mut common);
+                for p in rest {
+                    let mut theirs = Vec::new();
+                    p.collect_required(&mut theirs);
+                    common.retain(|n| theirs.contains(n));
+                }
+                for n in common {
+                    if !out.contains(&n) {
+                        out.push(n);
+                    }
+                }
+            }
+            Particle::Repeat(p, o) => match o {
+                Occurs::Opt | Occurs::Star => {}
+                Occurs::One | Occurs::Plus => p.collect_required(out),
+            },
         }
     }
 

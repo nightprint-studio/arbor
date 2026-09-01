@@ -27,6 +27,7 @@ use bennu_ext::prelude::{
 };
 use bennu_proto::prelude::{CapabilitySet, CompletionItem, Diagnostic};
 
+use crate::builtin;
 use crate::catalog::{Catalog, SchemaFile};
 use crate::grammar::Grammar;
 use crate::intel;
@@ -155,7 +156,24 @@ impl FrameworkExtension for XmlExtension {
 
     fn diagnostics(&self, ctx: &FileCtx<'_>) -> Vec<Diagnostic> {
         match self.context(ctx) {
-            Some((doc, grammar)) => intel::diagnostics(&grammar, &doc),
+            Some((doc, grammar)) => {
+                let mut out = intel::diagnostics(&grammar, &doc);
+                // The POM's required fields, which no grammar here can state on its own: the
+                // built-in table carries no cardinality by design, and the real Maven XSD marks
+                // nearly every one of them `minOccurs="0"` — Maven enforces them, its schema does
+                // not. So the one vocabulary whose obligations are documented, small and fixed is
+                // checked from a curated list beside the curated table, keyed on the document so
+                // it holds for a project that vendors the real schema too.
+                //
+                // Both can therefore reach the same field, and a POM whose schema *does* demand
+                // one would otherwise be told twice in the same words.
+                for d in builtin::pom_diagnostics(&doc) {
+                    if !out.iter().any(|x| x.start == d.start && x.message == d.message) {
+                        out.push(d);
+                    }
+                }
+                out
+            }
             None => Vec::new(),
         }
     }
