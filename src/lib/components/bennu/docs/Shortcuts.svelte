@@ -47,7 +47,13 @@
   <li><kbd>Ctrl</kbd> + <kbd>S</kbd> — <strong>save</strong> the current file</li>
   <li><kbd>Ctrl</kbd> + <kbd>F</kbd> — find in the current file</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> — find in project</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> or <kbd>Ctrl</kbd> + <kbd>Space</kbd> — completions (member access on <kbd>.</kbd>)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Space</kbd> or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> —
+    on macOS <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> — <strong>completions</strong> at
+    the caret. Member access also opens on <kbd>.</kbd>, and a command language such as
+    <code>.dev</code> asks after a space too. When the request finds nothing, the footer says so for
+    a moment, naming the position it asked at. <strong>The Mac spelling is not a preference</strong>:
+    macOS takes the whole Control + Space family for switching input source, above the application,
+    so no program on that system receives those two</li>
   <li><kbd>Ctrl</kbd> + <kbd>/</kbd> — toggle line / block <strong>comment</strong> on the selection (Java <code>//</code>, JSP <code>&lt;%-- --%&gt;</code>, XML <code>&lt;!-- --&gt;</code>)</li>
   <li>Auto-close brackets and quotes — typing <kbd>(</kbd> <kbd>[</kbd> <kbd>&#123;</kbd> <kbd>"</kbd> <kbd>'</kbd> inserts the matching closer; <kbd>Backspace</kbd> on an empty pair removes both</li>
   <li><kbd>Alt</kbd> + <kbd>Enter</kbd> (<kbd>Option</kbd> + <kbd>Enter</kbd> on a Mac) — show

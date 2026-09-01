@@ -64,6 +64,8 @@
   import Spinner from './Spinner.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { isMac } from '$lib/utils/platform';
+  import { macKeyLabel } from '$lib/utils/keybindings';
 
   interface Props {
     onClose: () => void;
@@ -214,8 +216,16 @@
     }
   }
 
+  /**
+   * The caps to draw for an item's chord.
+   *
+   * Folded to macOS glyphs there, the same way `formatBinding` does for the keybinding settings:
+   * a palette that prints `Ctrl` on a Mac is telling the user to press a key that, for most of
+   * Arbor's chords, is spelled ⌘ — and for the ones on the Space bar is not merely spelled
+   * differently but genuinely does not work.
+   */
   function shortcutKeys(s: string): string[] {
-    return s.split('+').map((k) => k.trim()).filter(Boolean);
+    return (isMac ? macKeyLabel(s) : s).split('+').map((k) => k.trim()).filter(Boolean);
   }
 </script>
 

@@ -38,10 +38,39 @@
 <h2>Completions</h2>
 <p>
   Typing <code>.</code> after an expression offers member completions; press
-  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> (or <kbd>Ctrl</kbd> + <kbd>Space</kbd>) to request them explicitly. In Java, completions come from the
-  project index and appear once it is warm. Edits re-index in the background as you type, so
-  completion and go-to-definition track your changes without reopening the project. (In
-  <code>.dig</code> they are answered locally — see <em>geode <code>.dig</code> scripts</em> above.)
+  <kbd>Ctrl</kbd> + <kbd>Space</kbd> (or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd>) to
+  request them explicitly, anywhere — on macOS <kbd>Cmd</kbd> + <kbd>Shift</kbd> +
+  <kbd>Space</kbd>. In Java, completions
+  come from the project index and appear once it is warm. Edits re-index in the background as you
+  type, so completion and go-to-definition track your changes without reopening the project. In
+  <code>.dig</code> and <code>.dev</code> they come from <strong>nd-dig-lsp</strong>, geode's own
+  language server — see <em>geode <code>.dig</code> scripts</em> above.
+</p>
+<p>
+  <strong>Command languages ask on every position.</strong> A <code>.dev</code> scenario or a
+  <code>.dig</code> line is words and arguments rather than dotted paths, and its vocabulary lives
+  right after a space: with the caret at the end of <code>unlock&nbsp;</code> the server already
+  knows what may follow, so it is asked there too — not only after a trigger character.
+</p>
+<p>
+  When an explicit request finds nothing, the editor footer says so for a moment
+  (<em>No suggestions here</em>, or <em>No engine answered for this file</em> when no server or
+  index is up). Silence would mean the same thing as a shortcut that never arrived, and those two
+  have opposite fixes.
+</p>
+<p>
+  <strong>On macOS the chord is <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd></strong>, and
+  that is not a style choice. macOS claims the whole <kbd>Ctrl</kbd> + <kbd>Space</kbd> family for
+  switching input source, and it claims it <em>above</em> applications: those two chords produce no
+  key event at all in any program, so there is nothing an editor could bind them to.
+  <kbd>Cmd</kbd> + <kbd>Space</kbd> is left alone as well — it is Spotlight — which is what the
+  <kbd>Shift</kbd> is for.
+</p>
+<p>
+  If a shortcut seems to do nothing at all, turn on <strong>Show keyboard inputs</strong>
+  (<kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>K</kbd>, or the Command Palette) and press it again:
+  the overlay draws every chord the window receives. Nothing drawn means the key never arrived,
+  which is a keyboard conflict outside Bennu and not something Bennu can answer.
 </p>
 <p>
   Typing a <strong>capitalised name</strong> (not after a dot) offers <strong>type-name

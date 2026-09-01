@@ -53,7 +53,7 @@
  *
  * ## Intelligence comes from the language server
  *
- * Completion and hover go through the shared `backendCompletionSource` /
+ * Completion and hover go through the shared `eagerBackendCompletionSource` /
  * `backendHoverSource`, which the backend answers with whichever engine owns the file —
  * for a `.dig` that is **nd-dig-lsp**, geode's own server (`crates/tools/nd-dig-lsp`
  * over there), wrapping the same analysis service the game's in-game editor calls.
@@ -80,7 +80,7 @@
 
 import { Parser, Language, type Node } from 'web-tree-sitter';
 import type { LanguageDescriptor, TokenClass } from '$lib/components/shared/ui/code-editor';
-import { backendCompletionSource, backendHoverSource } from '../lsp-lang';
+import { eagerBackendCompletionSource, backendHoverSource } from '../lsp-lang';
 import { DIG_CATALOG } from './catalog';
 import { digCommentHighlight } from './dig-comments';
 
@@ -296,5 +296,7 @@ export const digLanguage: LanguageDescriptor = {
   // tree-sitter descriptor bypasses CodeMirror's `Language`, so it carries no built-in
   // comment data and this is the only way the toggle learns it.
   commentTokens: { line: '#' },
-  intel: { completion: backendCompletionSource, hover: backendHoverSource },
+  // Same bargain as `.dev`: a `.dig` line is words and arguments, not dotted paths, so the
+  // server is asked wherever the caret is rather than only after a trigger character.
+  intel: { completion: eagerBackendCompletionSource, hover: backendHoverSource },
 };

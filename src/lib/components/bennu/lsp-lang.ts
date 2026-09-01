@@ -34,6 +34,7 @@ import { insertCompletionText, type Completion, type CompletionContext, type Com
   from '@codemirror/autocomplete';
 import type { EditorView, Tooltip } from '@codemirror/view';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
+import { completionNoteStore } from '$lib/stores/bennu/completion-note.svelte';
 import { completion as ipcCompletion } from '$lib/ipc/bennu';
 import { hover as ipcHover } from '$lib/ipc/bennu/nav';
 import {
@@ -157,62 +158,121 @@ function docDom(text: string): HTMLElement {
 }
 
 
-/** The completion source for anything the **backend** answers about.
+/**
+ * Say "nothing here", **naming where "here" was**.
  *
- *  Fires on an in-progress identifier, and on the trigger characters a server cares about. The
- *  backend works out *which* trigger the caret follows from the buffer itself, so this does not
- *  need to know that Rust triggers on `::` and not only on `.`.
- *
- *  Exported because "server-backed" is not the boundary it looks like. This calls
- *  `bennu_completion`, which the backend answers with *whichever engine owns the file* — a
- *  language server for a `.rs`, its own scanner for a `.wgsl` with nothing installed. A language
- *  whose only difference is that no server exists for it still wants exactly this. */
-export const backendCompletionSource: CompletionSource = async (
-  ctx: CompletionContext,
-): Promise<CompletionResult | null> => {
-  // A conservative trigger set that covers the languages in the catalogue: a word being typed,
-  // or a member/path/attribute punctuation right before the caret.
-  const word = ctx.matchBefore(/[\w$]*$/);
-  const punct = ctx.matchBefore(/[.:>@#/\\-]$/) != null;
-  if (!ctx.explicit && !punct && (!word || word.from === word.to)) return null;
+ * The position is in the message on purpose. An explicit request that comes back empty raises two
+ * different questions — did the engine have nothing to say, or was it asked about the wrong
+ * place? — and they have nothing in common except how they look. Printing the caret the query
+ * actually ran at answers the second one without a debugger: it either matches the Ln/Col beside
+ * it in the same footer, or the request is not being made where the user is standing.
+ */
+export function sayNoSuggestions(ctx: CompletionContext): void {
+  const line = ctx.state.doc.lineAt(ctx.pos);
+  completionNoteStore.say(`No suggestions at Ln ${line.number}, Col ${ctx.pos - line.from + 1}`);
+}
 
-  const path = projectStore.activeFilePath;
-  if (!path) return null;
+/** How a server-backed source decides whether the caret is worth a round-trip. */
+interface BackendCompletionOptions {
+  /**
+   * Ask the server **wherever the caret is**, not only on an in-progress word or a trigger
+   * character.
+   *
+   * The default gate is written for languages made of dotted paths: something typed, or a `.` /
+   * `::` / `@` right behind. A command language has neither. In a `.dev` scenario the vocabulary
+   * lives exactly where that gate says there is nothing — `unlock ` with the caret after the
+   * space is the moment the server knows the answer and the only moment the user wants it — so
+   * for those the gate is not conservative, it is simply wrong.
+   *
+   * The cost is one call per keystroke on a language whose files are short and whose server is
+   * local, and it buys the rule the descriptor already states: shape is ours, vocabulary is the
+   * server's. Deciding there is nothing to offer is the server's half of that bargain.
+   */
+  eager?: boolean;
+}
 
-  const src = ctx.state.doc.toString();
-  const byteOffset = makeU16ToByte(src)(ctx.pos);
+/** Build a completion source backed by `bennu_completion`. See {@link backendCompletionSource}. */
+function makeBackendCompletionSource(opts: BackendCompletionOptions = {}): CompletionSource {
+  return async (ctx: CompletionContext): Promise<CompletionResult | null> => {
+    // A conservative trigger set that covers the languages in the catalogue: a word being typed,
+    // or a member/path/attribute punctuation right before the caret.
+    const word = ctx.matchBefore(/[\w$]*$/);
+    const punct = ctx.matchBefore(/[.:>@#/\\-]$/) != null;
+    if (!opts.eager && !ctx.explicit && !punct && (!word || word.from === word.to)) return null;
 
-  const seq = ++completionSeq;
-  let items: CompletionItem[];
-  try {
-    items = await ipcCompletion(path, byteOffset, src);
-  } catch {
-    return null; // the backend is absent — no popup, no error
-  }
-  if (seq !== completionSeq) return null; // superseded by a newer keystroke
-  if (!items.length) return null;
+    const path = projectStore.activeFilePath;
+    if (!path) return null;
 
-  // Sort by the server's own key before handing the list over. CodeMirror's own scoring is a
-  // fuzzy match on the label, which for Rust puts `zip` above `iter` when you typed `it` —
-  // rust-analyzer's `sortText` already encodes relevance (locals before trait methods before
-  // the rest) and is the better order.
-  const sorted = [...items].sort(compareBySortText);
+    const src = ctx.state.doc.toString();
+    const byteOffset = makeU16ToByte(src)(ctx.pos);
 
-  // The token CodeMirror should replace. Preferring the provider's own range would be more
-  // precise, but it is expressed in byte offsets per item and CodeMirror wants one `from` for
-  // the whole list — so the identifier under the caret it is, which is what every item's range
-  // agrees on in practice.
-  const from = word ? word.from : ctx.pos;
+    const seq = ++completionSeq;
+    let items: CompletionItem[];
+    try {
+      items = await ipcCompletion(path, byteOffset, src);
+    } catch {
+      // The backend is absent. Silent while typing — but an explicit press is a question, and a
+      // question deserves an answer even when the answer is "nobody is listening".
+      if (ctx.explicit) completionNoteStore.say('No engine answered for this file');
+      return null;
+    }
+    if (seq !== completionSeq) return null; // superseded by a newer keystroke
+    if (!items.length) {
+      if (ctx.explicit) sayNoSuggestions(ctx);
+      return null;
+    }
 
-  return {
-    from,
-    options: sorted.map((it, rank) => toCompletion(it, rank, path)),
-    // Keep the popup open while the user keeps typing identifier characters. A server that
-    // marked its list incomplete would want a re-request per keystroke; treating every list as
-    // filterable is the cheaper default and is right for the languages here.
-    validFor: /^[\w$]*$/,
+    // Sort by the server's own key before handing the list over. CodeMirror's own scoring is a
+    // fuzzy match on the label, which for Rust puts `zip` above `iter` when you typed `it` —
+    // rust-analyzer's `sortText` already encodes relevance (locals before trait methods before
+    // the rest) and is the better order.
+    const sorted = [...items].sort(compareBySortText);
+
+    // The token CodeMirror should replace. Preferring the provider's own range would be more
+    // precise, but it is expressed in byte offsets per item and CodeMirror wants one `from` for
+    // the whole list — so the identifier under the caret it is, which is what every item's range
+    // agrees on in practice.
+    //
+    // A command language widens it: an argument is `playtest/crescita.dig` or `--every`, one token
+    // to the user and four to an identifier regex. Replacing only the tail would append the
+    // suggestion to the half-typed path instead of replacing it.
+    const token = opts.eager ? ctx.matchBefore(/[\w$./\\-]*$/) : word;
+    const from = token ? token.from : ctx.pos;
+
+    return {
+      from,
+      options: sorted.map((it, rank) => toCompletion(it, rank, path)),
+      // Keep the popup open while the user keeps typing identifier characters. A server that
+      // marked its list incomplete would want a re-request per keystroke; treating every list as
+      // filterable is the cheaper default and is right for the languages here.
+      validFor: opts.eager ? /^[\w$./\\-]*$/ : /^[\w$]*$/,
+    };
   };
-};
+}
+
+/**
+ * The completion source for anything the **backend** answers about.
+ *
+ * Fires on an in-progress identifier, and on the trigger characters a server cares about. The
+ * backend works out *which* trigger the caret follows from the buffer itself, so this does not
+ * need to know that Rust triggers on `::` and not only on `.`.
+ *
+ * Exported because "server-backed" is not the boundary it looks like. This calls
+ * `bennu_completion`, which the backend answers with *whichever engine owns the file* — a
+ * language server for a `.rs`, its own scanner for a `.wgsl` with nothing installed. A language
+ * whose only difference is that no server exists for it still wants exactly this.
+ */
+export const backendCompletionSource: CompletionSource = makeBackendCompletionSource();
+
+/**
+ * The same source for a **command language** — one whose vocabulary sits after a space rather
+ * than after a dot (`.dev`, `.dig`).
+ *
+ * See {@link BackendCompletionOptions.eager}: the difference is only *when* the server is asked,
+ * never what is done with the answer.
+ */
+export const eagerBackendCompletionSource: CompletionSource =
+  makeBackendCompletionSource({ eager: true });
 
 /** Order by the provider's `sort_text` when both have one, else by label. */
 function compareBySortText(a: CompletionItem, b: CompletionItem): number {

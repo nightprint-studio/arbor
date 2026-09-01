@@ -46,6 +46,7 @@ import { hover as ipcHover, libraryHover as ipcLibraryHover } from '$lib/ipc/ben
 import { extHover, extCompletion } from '$lib/ipc/bennu/ext';
 import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
+import { sayNoSuggestions } from './lsp-lang';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
 import { makeHoverSource } from './bennu-hover';
 import { javaStringPaste } from './java-string-paste';
@@ -434,7 +435,12 @@ const javaCompletionSource: CompletionSource = async (
 
   appendPostfixCompletions(ctx, from, options);
 
-  if (options.length === 0) return null;
+  if (options.length === 0) {
+    // An explicit press asked a question; answering it with nothing on screen is what makes a
+    // working shortcut look like a dead one. See `sayNoSuggestions`.
+    if (ctx.explicit) sayNoSuggestions(ctx);
+    return null;
+  }
   return { from, options, validFor: /^[\w$]*$/ };
 };
 

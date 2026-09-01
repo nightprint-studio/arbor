@@ -15,6 +15,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **Explicit completion works on macOS.** It was bound to `Ctrl+Space` and `Ctrl+Shift+Space`, which macOS claims for switching input source above the application — neither produces a key event there, so the shortcut was unreachable rather than broken. On a Mac the chord is now `Cmd+Shift+Space`; the Control ones are unchanged everywhere else.
+
+- **A completion request that finds nothing says so.** An explicit press that came back empty looked exactly like a shortcut that had not arrived; the editor footer now answers it for a moment.
+
+- **`.dev` and `.dig` files offer completions after a space.** Their vocabulary follows a command word rather than a dot, and the trigger was written for dotted paths — so the server was never asked in the one place it had the answer.
+
 - **An annotation that was never imported is reported.** `@SpringBootApplication` with no import above it read as clean while javac refused the file — an annotation's name is not written in a type position, and the unresolved-type check only looked at type positions. `Alt+Enter` on it now offers the import too, for the same reason.
 
 - **A failed Maven dependency resolve now says what Maven said.** It reported `exit Some(0)` with an empty stderr tail on a project whose build was broken — Maven logs its errors to stdout, which nothing was reading — and blamed the launcher (`Maven could not be run`) for failures where Maven had run fine.
@@ -25,9 +31,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- **The Command Palette writes chords the Mac way on a Mac.** They were printed verbatim — `Ctrl` where the key to press is ⌘, and where for some chords Control genuinely does not work.
+
 - **Bennu's project-tree `＋` opens the New menu instead of the Java-class dialog.** It used to pick a template for you and only ask for a name; it now offers the same entries as the right-click.
 
 ### Added
+
+- **"Suggest completions" is in Bennu's Command Palette.** The same request as the shortcut, from a list — which matters here because a keyboard shortcut is something the operating system can take away.
+
+- **The keyboard-inputs overlay works in every window, not only in the Git one.** `Alt+Shift+K` draws each chord as it arrives, which is the only way to tell a shortcut the window ignored from one that never reached it.
 
 - **Bennu speaks geode's playtest scenarios (`.dev`).** A scenario is a batch of console commands — `unlock while`, `set money 0`, `play playtest/crescita.dig`, `watch 30m --every 2m` — and until now it opened as plain text. It is now coloured, completed and checked: an unknown command, an option that command does not take, a value outside a closed set, and — the one that pays for the rest — a `play` naming a file that is not there, or whose `@requires` the scenario never unlocks. That last check has a documented cost in geode: a thirty-minute measured run on a frozen field, with the report blaming the wrong thing.
 

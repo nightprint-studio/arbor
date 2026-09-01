@@ -34,7 +34,10 @@
   import { animStore } from '$lib/stores/animations.svelte';
   import { signalWindowReady } from '$lib/ipc/window';
   import { syncWindowTitle } from '$lib/utils/window-title.svelte';
-  import { isKey } from '$lib/utils/keybindings';
+  import { isKey, matchesBinding } from '$lib/utils/keybindings';
+  import { keybindingsStore } from '$lib/stores/keybindings.svelte';
+  import { keystrokesStore } from '$lib/stores/keystrokes.svelte';
+  import KeystrokesOverlay from '../shared/KeystrokesOverlay.svelte';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import { profileStore } from '$lib/stores/profiles.svelte';
   import { recordRecentProject, onOpenIntent } from '$lib/ipc/recents';
@@ -1377,6 +1380,11 @@
         action: () => run(() => bennuUiStore.openGenerate()), when: isJava },
       { id: 'override', title: 'Implement / override methods…', icon: 'wand', shortcut: 'Ctrl+I',
         action: () => run(() => void openOverrides()), when: isJava },
+      // The same request the shortcut makes, from a list instead. Worth an entry beyond the usual
+      // discoverability argument: `Ctrl+Space` is a chord the operating system can take away
+      // (macOS binds it to switching input source), and this is then the only way left to ask.
+      { id: 'completions', title: 'Suggest completions', icon: 'bulb', shortcut: 'Ctrl+Shift+Space',
+        action: () => run(() => editor?.requestCompletion()), when: !!projectStore.activeFilePath },
       { id: 'intentions', title: 'Show intentions', icon: 'bulb', shortcut: 'Alt+Enter',
         // Also the language-server quick-fix list for a server-backed buffer — the user's gesture
         // is "what can you do here", and which engine answers is not their problem.
@@ -1627,6 +1635,10 @@
       { id: 'tour', title: 'Welcome tour', icon: 'book',
         action: () => run(() => bennuOnboardingStore.show()), when: true },
       { id: 'settings', title: 'Settings', icon: 'command', shortcut: 'Ctrl+,', action: () => run(() => bennuUiStore.openSettings()), when: true },
+      // Not only for screencasts: it is the one way to see whether a chord reaches this window,
+      // which is what a shortcut that "does nothing" is really asking.
+      { id: 'keystrokes', title: 'Show keyboard inputs', icon: 'command',
+        shortcut: 'Alt+Shift+K', action: () => run(() => keystrokesStore.toggle()), when: true },
       { id: 'customizerails', title: 'Customize Activity Bar…', icon: 'sliders',
         action: () => run(() => bennuUiStore.openCustomizeRails()), when: true },
       // The three doors of the plugin host. They were in the hamburger only — which is the
@@ -1683,6 +1695,15 @@
     if (!surfaceStore.hasFocus('bennu')) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && isKey(e, 'k')) { e.preventDefault(); bennuUiStore.togglePalette(); return; }
+    // The keyboard-inputs overlay, on the same binding as everywhere else. Handled BEFORE the
+    // palette guard — like the shell does — because the moment you want it is the moment
+    // something else is in the way: it is how you find out whether a chord reaches the window at
+    // all, and a chord that does not arrive is indistinguishable from a feature that ignores it.
+    if (matchesBinding(e, keybindingsStore.getBinding('toggle_keystrokes'))) {
+      e.preventDefault();
+      keystrokesStore.toggle();
+      return;
+    }
     if (bennuUiStore.paletteOpen) return; // the palette owns the keyboard while open
 
     // F1 toggles docs from anywhere; Docs/Settings/Find modals own Esc themselves.
@@ -1987,12 +2008,33 @@
       e.preventDefault(); editor?.goToDefinition(); return;
     }
     if (mod && isKey(e, 'f')) { e.preventDefault(); editor?.openSearch(); return; }
-    // Explicit completions. macOS reserves Ctrl+Space for switching input source, so the editor's
-    // own keymap entry for it can never be pressed there — and the CodeMirror binding added
-    // alongside it did not fire either. Bound here instead: this handler is the one path in the
-    // app that is known to receive every shortcut on every layout. `e.ctrlKey` and not `mod`,
-    // because Cmd+Shift+Space is the macOS Character Viewer.
-    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && (e.key === ' ' || e.code === 'Space')) {
+    /*
+     * Explicit completions — one gesture, spelled per platform.
+     *
+     * `Ctrl+Space` (IntelliJ's key) and `Ctrl+Shift+Space` where they can be pressed. **On macOS
+     * neither can**: the whole Control+Space family is claimed by the system for switching input
+     * source, above the application — the keyboard-inputs overlay, a capture-phase listener that
+     * draws every key the window receives, draws nothing for them. There is no event to bind.
+     * `Cmd+Shift+Space` does arrive, and is the Mac spelling.
+     *
+     * `Cmd+Space` is deliberately NOT matched: it is Spotlight, and the Shift is the whole of what
+     * keeps this gesture out of its way. `e.code` and not `e.key`, so no layout can move it.
+     *
+     * The editor's own keymap binds the same chords. That is not redundancy: this handler answers
+     * wherever focus is (a panel, the tree), the keymap answers inside the buffer.
+     */
+    const spaceKey = e.code === 'Space' || e.key === ' ';
+    const completionChord = !e.altKey && spaceKey
+      && (e.ctrlKey ? !e.metaKey : e.metaKey && e.shiftKey);
+    if (completionChord) {
+      // …but not out of somebody else's text field. The terminal, a search box and a rename input
+      // each have their own idea of the chord, and none of them is the buffer. The editor is
+      // recognised by its CodeMirror root rather than by "is it editable", because it is editable
+      // too — it is a `contenteditable`, which is exactly what this test would otherwise exclude.
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      const inForeignField = !!target?.closest('input, textarea, [contenteditable="true"]')
+        && !target.closest('.cm-editor');
+      if (inForeignField) return;
       e.preventDefault(); editor?.requestCompletion(); return;
     }
     // Implement / override methods (IntelliJ's Ctrl+I). Java-only: the picker reads a supertype
@@ -2159,6 +2201,11 @@
     {/snippet}
   </BennuStatusBar>
 </div>
+
+<!-- The keyboard-inputs overlay. Pure presentation: the store owns the capture listener and only
+     attaches it while the overlay is on. It lives in every window and not only in Corvus, because
+     "did that chord even reach me?" is a question you ask wherever you are. -->
+<KeystrokesOverlay />
 
 {#if bennuUiStore.paletteOpen}
   <CommandPaletteShell

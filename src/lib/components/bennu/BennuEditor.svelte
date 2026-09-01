@@ -60,6 +60,7 @@
   import SymbolKindIcon from './SymbolKindIcon.svelte';
   import { javaKindStore } from '$lib/stores/bennu/java-kinds.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { completionNoteStore } from '$lib/stores/bennu/completion-note.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -1792,8 +1793,28 @@
   }
   /** Open the editor's in-buffer search panel (Ctrl+F when the pane is focused). */
   export function openSearch() { editorComp?.openSearch(); }
-  /** Ask for completions at the caret — the explicit request behind Ctrl+Shift+Space. */
-  export function requestCompletion() { editorComp?.requestCompletion(); }
+  /**
+   * Ask for completions at the caret — the explicit request behind `Ctrl+Shift+Space`.
+   *
+   * The note is cleared first so every press answers for itself: either a popup opens, or a fresh
+   * line appears in the footer saying why it did not. A leftover message from the previous press
+   * would be the one thing worse than silence — an answer to a question nobody just asked.
+   */
+  export function requestCompletion() {
+    completionNoteStore.clear();
+    // After a `tick`, for the same reason `focusEditor` waits: the Command Palette entry closes an
+    // overlay in the same gesture, and asking while that overlay is still mounted opens a popup the
+    // teardown then blurs shut. From the keyboard nothing is pending and the tick costs a frame.
+    void tick().then(() => {
+      // `false` means the buffer carries no completion machinery at all — the language has no
+      // source, or the view is gone. It is the one outcome that never reaches a completion source,
+      // so it is the one the sources cannot report: without this the press would be silent for a
+      // reason none of the other messages covers.
+      if (editorComp && !editorComp.requestCompletion()) {
+        completionNoteStore.say('No completions available in this file');
+      }
+    });
+  }
   /**
    * Put the caret back in the buffer.
    *
@@ -3370,6 +3391,12 @@
 
   {#if activePath && !isPreviewTab}
     <div class="ed-footer">
+      <!-- What the last explicit completion request came back with, when it came back with
+           nothing. Left-aligned and transient: it is an answer to a key that was just pressed,
+           not a status the footer keeps. -->
+      {#if completionNoteStore.note}
+        <span class="ed-note">{completionNoteStore.note}</span>
+      {/if}
       <span class="ed-pos"><MapPin size={11} /> Ln {caretLine}, Col {caretCol}</span>
       <span class="ed-foot-sep">·</span>
       <span class="ed-enc" use:tooltip={'File encoding'}>{projectStore.activeEncoding}</span>
@@ -3542,6 +3569,15 @@
   .ed-health-item.ok { color: var(--success); }
 
   .ed-empty { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+
+  /* The transient completion answer. `margin-right: auto` pins it to the left while the
+     position + encoding stay right, so it never pushes them around as it comes and goes. */
+  .ed-note {
+    margin-right: auto;
+    color: var(--text-secondary);
+    font-style: italic;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
 
   .ed-footer {
     display: flex; align-items: center; justify-content: flex-end; gap: 8px;

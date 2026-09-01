@@ -316,16 +316,24 @@ export function createCodeEditorExtensions(
     // binding no-ops (returns false) when the popup is closed, so Enter/Tab fall through to
     // newline / indent normally. `Tab` is added to accept too (IntelliJ muscle memory).
     //
-    // `Ctrl+Shift+Space` requests completions too. CodeMirror's own `completionKeymap` offers only
-    // Ctrl+Space, which macOS reserves for switching input source — so on a Mac the explicit
-    // request could not be made at all. Not `Mod-i`, the obvious alternative: that is IntelliJ's
-    // Implement/override, which Bennu already binds. Ctrl+Space stays bound for anyone who has
-    // freed it.
+    // Three chords ask for completions, and the third exists because the first two are unreachable
+    // on one platform.
+    //
+    // `Ctrl+Space` is IntelliJ's basic completion and arrives with `completionKeymap` (whose entry
+    // is a literal `Ctrl-Space`, not `Mod-Space`); `Ctrl+Shift+Space` is its sibling. **On macOS
+    // neither produces a keydown at all** — the whole Control+Space family is taken by the system
+    // for switching input source, and it is taken above the application: a capture-phase listener
+    // on `window` never sees the event, which is how this was finally established rather than
+    // guessed. No binding, in any layer, can answer a key the process is not given.
+    //
+    // So on a Mac the chord is `Cmd+Shift+Space`, which does arrive. Not `Cmd+Space` — Spotlight —
+    // and the Shift is what keeps the two apart.
     exts.push(
       Prec.highest(
         keymap.of([
           { key: 'Tab', run: acceptCompletion },
           { key: 'Ctrl-Shift-Space', run: startCompletion },
+          { mac: 'Cmd-Shift-Space', run: startCompletion },
           ...completionKeymap,
         ]),
       ),

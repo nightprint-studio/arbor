@@ -28,7 +28,7 @@
 import { StreamLanguage } from '@codemirror/language';
 import type { StreamParser } from '@codemirror/language';
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
-import { backendCompletionSource, backendHoverSource } from '../lsp-lang';
+import { eagerBackendCompletionSource, backendHoverSource } from '../lsp-lang';
 
 /** Where the tokenizer is on the line: the first word of a command is special. */
 interface DevState {
@@ -91,5 +91,8 @@ export const devLanguage: LanguageDescriptor = {
   cmFold: false,
   serverFold: false,
   commentTokens: { line: '#' },
-  intel: { completion: backendCompletionSource, hover: backendHoverSource },
+  // A scenario is a batch of commands, so the vocabulary sits after a SPACE and never after a
+  // dot: `unlock ` with the caret at the end is exactly where the server knows the answer. The
+  // eager source asks it there, which the dotted-path gate of the default one never would.
+  intel: { completion: eagerBackendCompletionSource, hover: backendHoverSource },
 };
