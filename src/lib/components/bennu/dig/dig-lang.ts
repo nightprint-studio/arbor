@@ -296,7 +296,14 @@ export const digLanguage: LanguageDescriptor = {
   // tree-sitter descriptor bypasses CodeMirror's `Language`, so it carries no built-in
   // comment data and this is the only way the toggle learns it.
   commentTokens: { line: '#' },
-  // Same bargain as `.dev`: a `.dig` line is words and arguments, not dotted paths, so the
-  // server is asked wherever the caret is rather than only after a trigger character.
+  // Asked wherever the caret is, like `.dev`: a `.dig` line offers its vocabulary after a space
+  // (`equip `, the start of a statement), where the default dotted-path gate says there is
+  // nothing to ask about.
+  //
+  // ⚠️ But NOT the command source, and the difference is not cosmetic: a `.dig` line *does* have
+  // dotted paths — `Tool.Pick`, `Crystal.Amethyst`, `self.x`, `plan.append()` — so the token a
+  // suggestion replaces has to stop at the dot. Sharing `.dev`'s wide token is what made the
+  // members of an enum vanish from the popup they had just been fetched for; the story is on
+  // `BackendCompletionOptions.wideToken`.
   intel: { completion: eagerBackendCompletionSource, hover: backendHoverSource },
 };

@@ -189,6 +189,24 @@ interface BackendCompletionOptions {
    * server's. Deciding there is nothing to offer is the server's half of that bargain.
    */
   eager?: boolean;
+
+  /**
+   * The suggestion replaces a **whole argument** — `playtest/growth.dig`, `--every` — rather than
+   * the identifier under the caret.
+   *
+   * ⚠️ Right for a command language, and actively wrong wherever a `.` means member access. With a
+   * wide token the word behind the caret on `Tool.` is `Tool.`, so CodeMirror filters the labels
+   * the server has just sent (`Pick`, `Drill`, `Laser`) against that string, none of them match,
+   * and the popup comes back **empty on the very keystroke where the server had the most to say**.
+   * Accepting one would have been the other half of the same bug: the qualifier sits inside the
+   * replaced range, so `Tool.Pick` would have landed in the buffer as `Pick`.
+   *
+   * It used to ride on {@link eager}, which answers a different question — *when* to ask the
+   * server, not *what* the answer replaces. `.dev` wants both (its arguments are paths and flags:
+   * one token to the user, four to an identifier regex); `.dig` wants only the first — it is asked
+   * everywhere because its vocabulary sits after a space, but a dot in it is a member.
+   */
+  wideToken?: boolean;
 }
 
 /** Build a completion source backed by `bennu_completion`. See {@link backendCompletionSource}. */
@@ -236,7 +254,12 @@ function makeBackendCompletionSource(opts: BackendCompletionOptions = {}): Compl
     // A command language widens it: an argument is `playtest/crescita.dig` or `--every`, one token
     // to the user and four to an identifier regex. Replacing only the tail would append the
     // suggestion to the half-typed path instead of replacing it.
-    const token = opts.eager ? ctx.matchBefore(/[\w$./\\-]*$/) : word;
+    //
+    // ⚠️ On `wideToken`, and NOT on `eager`: a language can want to be asked everywhere and still
+    // have members after a dot. Riding on `eager` made `Tool.` a single token in `.dig`, which is
+    // how the members of an enum were filtered out of their own menu — see
+    // {@link BackendCompletionOptions.wideToken}.
+    const token = opts.wideToken ? ctx.matchBefore(/[\w$./\\-]*$/) : word;
     const from = token ? token.from : ctx.pos;
 
     return {
@@ -245,7 +268,9 @@ function makeBackendCompletionSource(opts: BackendCompletionOptions = {}): Compl
       // Keep the popup open while the user keeps typing identifier characters. A server that
       // marked its list incomplete would want a re-request per keystroke; treating every list as
       // filterable is the cheaper default and is right for the languages here.
-      validFor: opts.eager ? /^[\w$./\\-]*$/ : /^[\w$]*$/,
+      // Same token shape as `from` above, or the popup would stay open across a character that
+      // moved the range it is filtering against.
+      validFor: opts.wideToken ? /^[\w$./\\-]*$/ : /^[\w$]*$/,
     };
   };
 }
@@ -265,14 +290,26 @@ function makeBackendCompletionSource(opts: BackendCompletionOptions = {}): Compl
 export const backendCompletionSource: CompletionSource = makeBackendCompletionSource();
 
 /**
- * The same source for a **command language** — one whose vocabulary sits after a space rather
- * than after a dot (`.dev`, `.dig`).
+ * The same source for a language whose vocabulary sits **after a space** rather than after a dot,
+ * and is therefore worth asking about wherever the caret is (`.dig`).
  *
  * See {@link BackendCompletionOptions.eager}: the difference is only *when* the server is asked,
- * never what is done with the answer.
+ * never what is done with the answer. What the answer replaces stays the identifier under the
+ * caret — a `.dig` line is words and arguments *and* dotted members (`Tool.Pick`, `self.x`,
+ * `plan.append()`), and those need the narrow token.
  */
 export const eagerBackendCompletionSource: CompletionSource =
   makeBackendCompletionSource({ eager: true });
+
+/**
+ * The same source for a **command language** (`.dev`): asked everywhere, and its suggestions
+ * replace a whole argument rather than an identifier.
+ *
+ * The two halves are separate on purpose — see {@link BackendCompletionOptions.wideToken} for the
+ * bug that came of tying them together.
+ */
+export const commandBackendCompletionSource: CompletionSource =
+  makeBackendCompletionSource({ eager: true, wideToken: true });
 
 /** Order by the provider's `sort_text` when both have one, else by label. */
 function compareBySortText(a: CompletionItem, b: CompletionItem): number {
