@@ -44,6 +44,15 @@ pub struct QueryPlan {
     pub nodes: Vec<PlanNode>,
     /// The statement was executed. `false` means every number below is an estimate.
     pub analyzed: bool,
+    /// Cost the engine expects to pay before the plan's FIRST row appears, in its
+    /// own units.
+    ///
+    /// Reported beside [`Self::total_cost`] rather than instead of it because the
+    /// pair is the reading: `0.00..458.00` is a plan that starts answering
+    /// immediately, `458.00..458.05` is one that must finish before it says
+    /// anything — a sort, a hash build, an aggregate. Same total, opposite feel at
+    /// the other end of a cursor, and the total alone cannot tell them apart.
+    pub startup_cost: Option<f64>,
     /// Total estimated cost of the root node, in the engine's own units.
     pub total_cost: Option<f64>,
     /// Wall time of the whole plan when it was analysed.
@@ -62,6 +71,9 @@ pub struct PlanNode {
     pub label: String,
     /// The relation this node reads, when it reads one.
     pub relation: Option<String>,
+    /// Estimated cost before this node's first row — see [`QueryPlan::startup_cost`].
+    /// Inclusive of the subtree below it, exactly as [`Self::cost`] is.
+    pub startup_cost: Option<f64>,
     /// Estimated total cost.
     pub cost: Option<f64>,
     /// Estimated rows out.

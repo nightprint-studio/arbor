@@ -30,6 +30,11 @@ export interface PlanNode {
   label: string;
   /** The relation this node reads, when it reads one. */
   relation: string | null;
+  /**
+   * Estimated cost before this node's first row — see {@link QueryPlan.startupCost}.
+   * Inclusive of the subtree below it, exactly as {@link cost} is.
+   */
+  startupCost: number | null;
   /** Estimated total cost, in the engine's own units. */
   cost: number | null;
   /** Estimated rows out — **per loop**, like `actualRows` beside it. */
@@ -56,6 +61,15 @@ export interface QueryPlan {
    * screen it draws.
    */
   analyzed: boolean;
+  /**
+   * Cost the engine expects to pay before the **first** row appears.
+   *
+   * Reported beside {@link totalCost} rather than instead of it, because the pair
+   * is the reading: `0.00..458.00` starts answering immediately, `458.00..458.05`
+   * must finish before it says anything — a sort, a hash build, an aggregate. Same
+   * total, opposite behaviour at the other end of a cursor.
+   */
+  startupCost: number | null;
   /** Total estimated cost of the root node. */
   totalCost: number | null;
   /** Wall time of the whole plan, when it was analysed. */

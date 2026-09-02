@@ -100,6 +100,7 @@ pub mod type_arg_arity;
 pub mod type_use;
 pub mod types;
 pub mod undefined_var;
+pub mod unresolved_call;
 pub mod var_target;
 pub mod version;
 pub mod visibility;

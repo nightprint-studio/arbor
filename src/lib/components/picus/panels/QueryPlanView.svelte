@@ -26,7 +26,8 @@
   import type { PlanNode, QueryPlan } from '$lib/ipc/picus/plan';
   import QueryPlanGraph from './QueryPlanGraph.svelte';
   import {
-    deviation as deviationOf, formatCost as cost, formatRows as rows, MARK_FROM, SERIOUS_FROM,
+    deviation as deviationOf, formatCostRange as costRange, formatRows as rows,
+    MARK_FROM, SERIOUS_FROM,
   } from './plan-graph';
 
   interface Props {
@@ -73,8 +74,8 @@
     </span>
     <span class="pl-spacer"></span>
     {#if plan.totalCost !== null}
-      <span class="pl-total" use:tooltip={'Total estimated cost of the root node, in the planner’s own units — comparable between plans of the same statement, meaningless on its own.'}>
-        cost {cost(plan.totalCost)}
+      <span class="pl-total" use:tooltip={'Estimated cost of the whole plan — startup..total, in the planner’s own units. The left number is what it costs before the first row appears, the right one what the plan costs in full. Comparable between plans of the same statement, meaningless on its own.'}>
+        cost {costRange(plan.startupCost, plan.totalCost)}
       </span>
     {/if}
     {#if plan.analyzed && plan.actualMs !== null}
@@ -121,8 +122,8 @@
             <span class="pl-num" use:tooltip={'The planner’s estimate — rows out of this node, per loop.'}>
               ~{rows(node.rows)} rows
             </span>
-            <span class="pl-num pl-cost" use:tooltip={'Estimated total cost at this node.'}>
-              {cost(node.cost)}
+            <span class="pl-num pl-cost" use:tooltip={'Estimated cost at this node, subtree included — startup..total in the planner’s own units. The left number is what it costs before the first row appears; a gap between the two means the node must consume its input before producing anything.'}>
+              {costRange(node.startupCost, node.cost)}
             </span>
 
             {#if plan.analyzed}

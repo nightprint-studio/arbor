@@ -147,6 +147,7 @@ fn assemble(text: String, root: &Value, analyzed: bool, elapsed_ms: u64) -> Quer
 
     QueryPlan {
         text,
+        startup_cost: plan.and_then(|p| num(p, "Startup Cost")),
         total_cost: plan.and_then(|p| num(p, "Total Cost")),
         // The root node's own time is per loop and the root runs once, but the
         // server states the total separately and that is the number to trust.
@@ -184,6 +185,7 @@ fn one_node(node: &Value, depth: u32, analyzed: bool) -> PlanNode {
         depth,
         label: label(node),
         relation: text_of(node, "Relation Name"),
+        startup_cost: num(node, "Startup Cost"),
         cost: num(node, "Total Cost"),
         rows,
         actual_rows,
@@ -391,7 +393,7 @@ mod tests {
     #[test]
     fn the_tree_flattens_parent_first_with_its_depth() {
         let root = node(
-            r#"[{"Plan":{"Node Type":"Hash Join","Total Cost":42.5,"Plan Rows":10,
+            r#"[{"Plan":{"Node Type":"Hash Join","Startup Cost":12.0,"Total Cost":42.5,"Plan Rows":10,
                 "Plans":[
                   {"Node Type":"Seq Scan","Relation Name":"orders","Total Cost":18.5,"Plan Rows":8},
                   {"Node Type":"Hash","Total Cost":4.0,"Plan Rows":2,
@@ -412,6 +414,11 @@ mod tests {
             ],
         );
         assert_eq!(plan.total_cost, Some(42.5));
+        assert_eq!(plan.startup_cost, Some(12.0));
+        assert_eq!(plan.nodes[0].startup_cost, Some(12.0));
+        // A node the document gives no startup cost for reports none rather than zero:
+        // "the engine didn't say" and "free to start" are different claims.
+        assert_eq!(plan.nodes[1].startup_cost, None);
         assert_eq!(plan.nodes[1].relation.as_deref(), Some("orders"));
         assert!(!plan.analyzed, "nothing was run, so nothing may claim to have been measured");
         assert_eq!(plan.actual_ms, None);

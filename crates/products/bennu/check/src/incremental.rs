@@ -215,6 +215,7 @@ fn run_wholefile_checks<'a>(
     out.extend(crate::types::unresolved_types_in(nodes, source, symbols, resolver));
     out.extend(crate::type_arg_arity::type_arg_arity_errors_in(nodes, source, symbols, resolver));
     out.extend(crate::undefined_var::undefined_var_errors_in(root, nodes, source, symbols, resolver));
+    out.extend(crate::unresolved_call::unresolved_call_errors_in(root, nodes, source, symbols, resolver));
     out.extend(crate::inheritance::inheritance_errors_in(nodes, source, symbols, resolver));
     out.extend(crate::inheritance::missing_abstract_impls_in(nodes, source, symbols, resolver));
     out.extend(crate::functional::functional_errors_in(nodes, source, symbols, resolver));

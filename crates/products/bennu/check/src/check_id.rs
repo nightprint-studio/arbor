@@ -29,6 +29,9 @@ pub enum CheckId {
     ArgumentType,
     /// A `super.method()` whose name exists nowhere in the super-hierarchy.
     UnresolvedSuperMethod,
+    /// A bare call `foo()` whose name binds to nothing (javac's "cannot find symbol: method").
+    /// The receiver-less half of `cannot find symbol`; [`Self::UnknownMember`] is the other half.
+    UnresolvedCall,
 
     // ── types ───────────────────────────────────────────────────────────────────
     /// A written type name (in a type position) the resolver can't resolve.
@@ -262,6 +265,7 @@ impl CheckId {
             WrongArgumentCount => "wrong-argument-count",
             ArgumentType => "argument-type",
             UnresolvedSuperMethod => "unresolved-super-method",
+            UnresolvedCall => "unresolved-call",
             UnresolvedType => "unresolved-type",
             UnresolvedSymbol => "unresolved-symbol",
             WrongTypeArgumentCount => "wrong-type-argument-count",
@@ -383,8 +387,14 @@ impl CheckId {
     ///
     /// Hand-maintained beside the `code()` match rather than derived: there is no reflection over a
     /// Rust enum, and a catalog that silently missed a kind would be a check nobody could ever
-    /// configure. A new variant that is added to `code()` and not to this is the one mistake to
-    /// watch for — which is what `every_kind_is_in_the_catalog` is for.
+    /// configure.
+    ///
+    /// A new variant added to `code()` and not to this is the one mistake to watch for, and it is
+    /// worth being precise about what does and does not catch it. `code()` is an exhaustive match,
+    /// so the compiler forces a new variant to be handled THERE. Nothing forces it into this list —
+    /// no test can, short of deriving both from one macro. `catalog_codes_are_unique_and_kebab_case`
+    /// guards what is guardable (a code duplicated between two kinds, a mis-spelled slug); the rest
+    /// is the reviewer's job, so add the variant here in the same edit as `code()`.
     pub const ALL: &'static [CheckId] = {
         use CheckId::*;
         &[
@@ -393,6 +403,7 @@ impl CheckId {
             WrongArgumentCount,
             ArgumentType,
             UnresolvedSuperMethod,
+            UnresolvedCall,
             UnresolvedType,
             UnresolvedSymbol,
             WrongTypeArgumentCount,
@@ -480,4 +491,39 @@ impl CheckId {
             MissingToken,
         ]
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two kinds sharing a `code` would make them one kind to every consumer that keys off it — the
+    /// inspection policy, a suppression comment, a settings row — and the collision is invisible at
+    /// the call site. A slug that isn't kebab-case is the other half: `code()` is written into config
+    /// files and `// bennu:ignore` comments, so its spelling is a contract.
+    #[test]
+    fn catalog_codes_are_unique_and_kebab_case() {
+        let mut seen = std::collections::HashSet::new();
+        for id in CheckId::ALL {
+            let code = id.code();
+            assert!(!code.is_empty(), "{id:?} has an empty code");
+            assert!(
+                code.bytes().all(|b| b.is_ascii_lowercase() || b == b'-'),
+                "{id:?} code is not kebab-case: {code}"
+            );
+            assert!(seen.insert(code), "two kinds share the code {code}");
+        }
+    }
+
+    /// Severity is consumed as a wire string; a typo would silently render as an unknown level.
+    #[test]
+    fn every_severity_is_a_known_level() {
+        for id in CheckId::ALL {
+            assert!(
+                matches!(id.severity(), "error" | "warning"),
+                "{id:?} has an unknown severity: {}",
+                id.severity()
+            );
+        }
+    }
 }

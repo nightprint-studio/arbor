@@ -46,8 +46,11 @@ use bennu_java::prelude::{
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::scopes::{is_value_position, resolves_as_local, single_top_level_type};
+use crate::scopes::{
+    is_value_position, resolves_as_local, scope_is_directly_top, single_top_level_type,
+};
 
+use crate::nodes::has_generated_members;
 use crate::resolve::type_binary;
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
 
@@ -107,6 +110,15 @@ pub fn undefined_var_errors_in(
     let Some(top) = single_top_level_type(root, bytes) else {
         return Vec::new();
     };
+
+    // A member-generating annotation means the type's real member list is bigger than anything we
+    // can read: under Lombok's `@Slf4j` the bare `log` is a legal field reference declared in no
+    // source file, and `@Data`'s accessors are the same story for the call check next door. Flagging
+    // those is the fastest way to make someone close the Problems panel. See
+    // `crate::nodes::has_generated_members`.
+    if has_generated_members(top.node, bytes) {
+        return Vec::new();
+    }
 
     // Resolve the top-level type to a binary name and require its ENTIRE hierarchy be known — else a
     // field could live in an un-indexed base and every bare field reference would be a false positive.
@@ -257,50 +269,6 @@ fn collect_enum_constants(top: Node, bytes: &[u8], out: &mut HashSet<String>) {
     }
 }
 
-/// Whether `ident`'s nearest enclosing type is exactly `top`, crossing NO lambda and no
-/// nested/anonymous/local class body on the way up. Returns `false` (SKIP) on ANY intervening scope we
-/// don't fully model.
-///
-/// Subtlety: walking UPWARD from an identifier inside `top`'s own method, we necessarily cross
-/// `top`'s OWN body node (`class_body` / `enum_body`) BEFORE reaching the `top` declaration node
-/// itself. We must allow that one body but reject every OTHER `class_body`/`enum_body` (which belongs
-/// to a nested or anonymous type). So we pin `top`'s body node id up front and only skip on a body
-/// whose id differs. An anonymous class `new T(){…}` introduces its own `class_body`; a nested/local
-/// `class`/`enum`/`interface` introduces its own declaration node AND body — either trips the guard.
-fn scope_is_directly_top(ident: Node, top: Node) -> bool {
-    // `top`'s own body node id — the one body we're allowed to cross.
-    let top_body_id = top.child_by_field_name("body").map(|b| b.id());
-
-    let mut cur = ident.parent();
-    while let Some(p) = cur {
-        // Reached the top type without crossing a disallowed scope → good.
-        if p.id() == top.id() {
-            return true;
-        }
-        match p.kind() {
-            // A lambda: its parameters/captures live in a scope we don't fully model → SKIP.
-            "lambda_expression" => return false,
-            // Any nested/local type declaration between us and `top` → its members add/shadow names we
-            // didn't gather (we only gathered `top`'s fields + supertypes) → SKIP.
-            "class_declaration"
-            | "interface_declaration"
-            | "enum_declaration"
-            | "record_declaration"
-            | "annotation_type_declaration" => return false,
-            // A class/enum body: allowed ONLY if it's `top`'s own body. Any other body is a nested or
-            // anonymous type's body → SKIP.
-            "class_body" | "enum_body" | "enum_body_declarations" => {
-                if Some(p.id()) != top_body_id {
-                    return false;
-                }
-            }
-            _ => {}
-        }
-        cur = p.parent();
-    }
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,6 +415,14 @@ mod tests {
     }
 
     // ── NEGATIVES (must NOT flag) ────────────────────────────────────────────────────────────────
+
+    /// Lombok's `@Slf4j` injects a `log` field that exists in no source file. Reporting it was a
+    /// page of red on a class that compiles — see `crate::nodes::has_generated_members`.
+    #[test]
+    fn a_member_generating_annotation_skips_the_file() {
+        let src = "package com.acme;\n@Slf4j\nclass C extends Base { void m() { Object o = log; } }";
+        assert!(diags_with(src, &resolver()).is_empty());
+    }
 
     #[test]
     fn local_variable_is_resolved() {

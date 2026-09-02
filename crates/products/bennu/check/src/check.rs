@@ -243,6 +243,7 @@ pub fn check_file_resolved(
         timed!("unresolved_types", crate::types::unresolved_types_in(&nodes, source, &symbols, resolver));
         timed!("type_arg_arity", crate::type_arg_arity::type_arg_arity_errors_in(&nodes, source, &symbols, resolver));
         timed!("undefined_var", crate::undefined_var::undefined_var_errors_in(root, &nodes, source, &symbols, resolver));
+        timed!("unresolved_call", crate::unresolved_call::unresolved_call_errors_in(root, &nodes, source, &symbols, resolver));
         timed!("inheritance", crate::inheritance::inheritance_errors_in(&nodes, source, &symbols, resolver));
         timed!("missing_abstract", crate::inheritance::missing_abstract_impls_in(&nodes, source, &symbols, resolver));
         timed!("type_compat", crate::casts::type_compat_errors_in(root, &nodes, source, &symbols, resolver, &cache));

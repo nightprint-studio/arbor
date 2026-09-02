@@ -35,7 +35,7 @@
   import { formatElapsed } from '$lib/stores/picus/query.svelte';
   import type { QueryPlan } from '$lib/ipc/picus/plan';
   import {
-    edgePath, edgeWidth, formatCost, formatRows, layoutPlan, severityOf, deviation,
+    edgePath, edgeWidth, formatCostRange, formatRows, layoutPlan, severityOf, deviation,
     NODE_H, NODE_W,
   } from './plan-graph';
 
@@ -184,8 +184,8 @@
         <span class="pg-num" use:tooltip={'The planner’s estimate — rows out of this node, per loop.'}>
           ~{formatRows(chosen.node.rows)} rows
         </span>
-        <span class="pg-num" use:tooltip={'Estimated total cost at this node, subtree included.'}>
-          cost {formatCost(chosen.node.cost)}
+        <span class="pg-num" use:tooltip={'Estimated cost at this node, subtree included — startup..total in the planner’s own units. The left number is what it costs before the first row appears; a gap between the two means the node must consume its input before producing anything.'}>
+          cost {formatCostRange(chosen.node.startupCost, chosen.node.cost)}
         </span>
         {#if plan.analyzed}
           <span class="pg-num pg-actual" use:tooltip={'Rows this node really produced, per loop.'}>

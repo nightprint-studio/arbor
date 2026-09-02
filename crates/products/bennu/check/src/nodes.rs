@@ -121,3 +121,54 @@ pub(crate) fn is_primitive(binary: &str) -> bool {
 pub(crate) fn is_type_var(binary: &str) -> bool {
     binary.len() == 1 && binary.chars().all(|c| c.is_ascii_uppercase())
 }
+
+/// The simple names of the type-level annotations that make a class's member list **partly
+/// generated** — the members exist in the compiled class and nowhere in the source, so the index
+/// cannot see them and a "this name resolves to nothing" check would report every one of them.
+///
+/// Lombok is the whole reason this list exists: `@Data` on a class means `getName()` / `setName(…)`
+/// are legal bare calls inside it with no declaration anywhere to point at, and `@Slf4j` means the
+/// bare field `log` is too. A checker that does not know this reports a page of errors on a class
+/// that compiles, which is the single fastest way to make someone turn the Problems panel off.
+///
+/// Matched on the annotation's LAST name segment, so `@Data` and `@lombok.Data` read the same. Only
+/// ever used to SUPPRESS, so an over-broad entry costs coverage on one file, never correctness —
+/// which is the right side to err on.
+const MEMBER_GENERATING_ANNOTATIONS: &[&str] = &[
+    // Lombok — members added to the annotated type itself.
+    "Data", "Value", "Getter", "Setter", "Builder", "SuperBuilder", "Accessors", "With",
+    "RequiredArgsConstructor", "AllArgsConstructor", "NoArgsConstructor", "EqualsAndHashCode",
+    "ToString", "UtilityClass", "FieldNameConstants",
+    // Lombok's loggers — each injects a `log` field.
+    "Slf4j", "XSlf4j", "Log", "Log4j", "Log4j2", "CommonsLog", "JBossLog", "Flogger", "CustomLog",
+    // Other generators whose output lands on the annotated type.
+    "AutoValue", "Immutable", "Generated",
+];
+
+/// Whether the type declaration `decl` carries an annotation from
+/// [`MEMBER_GENERATING_ANNOTATIONS`] — i.e. whether its members are partly invisible to the index.
+///
+/// A `true` means every "does this name exist on this type?" check must stay silent for the file:
+/// the honest answer is "we cannot see all of them".
+pub(crate) fn has_generated_members(decl: Node, bytes: &[u8]) -> bool {
+    let mut c = decl.walk();
+    for ch in decl.named_children(&mut c) {
+        // Annotations sit in the declaration's `modifiers` node, before the `class`/`enum` keyword.
+        if ch.kind() != "modifiers" {
+            continue;
+        }
+        let mut mc = ch.walk();
+        for m in ch.named_children(&mut mc) {
+            if !matches!(m.kind(), "annotation" | "marker_annotation") {
+                continue;
+            }
+            let Some(name) = m.child_by_field_name("name") else { continue };
+            let Ok(t) = name.utf8_text(bytes) else { continue };
+            let simple = t.rsplit('.').next().unwrap_or(t);
+            if MEMBER_GENERATING_ANNOTATIONS.contains(&simple) {
+                return true;
+            }
+        }
+    }
+    false
+}

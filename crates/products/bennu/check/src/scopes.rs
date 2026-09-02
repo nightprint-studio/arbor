@@ -336,3 +336,47 @@ pub(crate) fn single_top_level_type<'t>(root: Node<'t>, bytes: &[u8]) -> Option<
     }
     found
 }
+
+/// Whether `node`'s nearest enclosing type is exactly `top`, crossing NO lambda and no
+/// nested/anonymous/local class body on the way up. Returns `false` (SKIP) on ANY intervening scope we
+/// don't fully model.
+///
+/// Subtlety: walking UPWARD from a node inside `top`'s own method, we necessarily cross
+/// `top`'s OWN body node (`class_body` / `enum_body`) BEFORE reaching the `top` declaration node
+/// itself. We must allow that one body but reject every OTHER `class_body`/`enum_body` (which belongs
+/// to a nested or anonymous type). So we pin `top`'s body node id up front and only skip on a body
+/// whose id differs. An anonymous class `new T(){…}` introduces its own `class_body`; a nested/local
+/// `class`/`enum`/`interface` introduces its own declaration node AND body — either trips the guard.
+pub(crate) fn scope_is_directly_top(node: Node, top: Node) -> bool {
+    // `top`'s own body node id — the one body we're allowed to cross.
+    let top_body_id = top.child_by_field_name("body").map(|b| b.id());
+
+    let mut cur = node.parent();
+    while let Some(p) = cur {
+        // Reached the top type without crossing a disallowed scope → good.
+        if p.id() == top.id() {
+            return true;
+        }
+        match p.kind() {
+            // A lambda: its parameters/captures live in a scope we don't fully model → SKIP.
+            "lambda_expression" => return false,
+            // Any nested/local type declaration between us and `top` → its members add/shadow names
+            // the caller didn't gather (it gathered `top`'s members + supertypes, nothing else) → SKIP.
+            "class_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "record_declaration"
+            | "annotation_type_declaration" => return false,
+            // A class/enum body: allowed ONLY if it's `top`'s own body. Any other body is a nested or
+            // anonymous type's body → SKIP.
+            "class_body" | "enum_body" | "enum_body_declarations" => {
+                if Some(p.id()) != top_body_id {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+        cur = p.parent();
+    }
+    false
+}

@@ -63,6 +63,18 @@ export function formatCost(n: number | null): string {
   return n === null ? '—' : n.toFixed(2);
 }
 
+/**
+ * The `startup..total` pair, the way every engine's own `EXPLAIN` prints it.
+ *
+ * Falls back to the total alone when the engine gave no startup figure, rather
+ * than printing `—..458.00`: a missing half is not a number worth showing, and the
+ * total on its own is still the thing people compare between plans.
+ */
+export function formatCostRange(startup: number | null, total: number | null): string {
+  if (startup === null) return formatCost(total);
+  return `${formatCost(startup)}..${formatCost(total)}`;
+}
+
 // ── Geometry ──────────────────────────────────────────────────────────────────
 
 /** Box size and spacing, in the SVG's own units. */

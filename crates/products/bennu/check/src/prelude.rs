@@ -48,6 +48,7 @@ pub use crate::text::{excerpt, short, EXCERPT_CHARS};
 pub use crate::type_arg_arity::type_arg_arity_errors;
 pub use crate::types::unresolved_types;
 pub use crate::undefined_var::undefined_var;
+pub use crate::unresolved_call::unresolved_call;
 pub use crate::var_target::var_target_errors_nodes;
 pub use crate::version::version_errors;
 

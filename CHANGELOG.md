@@ -37,6 +37,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **A call that resolves to nothing is now reported.** A method invoked with no receiver — `options()` with its `import static` forgotten — matched no check: the unknown-member check needs a receiver, the unresolved-symbol check judges variables, and nothing in between looked at a bare call. It reports as `unresolved-call`.
+
+- **Picus shows a plan's startup cost beside its total.** `EXPLAIN` now reads `cost 0.00..458.00`, per node and for the plan as a whole, so a plan that answers immediately is distinguishable from one that must finish before it says anything.
+
 - **"Suggest completions" is in Bennu's Command Palette.** The same request as the shortcut, from a list — which matters here because a keyboard shortcut is something the operating system can take away.
 
 - **The keyboard-inputs overlay works in every window, not only in the Git one.** `Alt+Shift+K` draws each chord as it arrives, which is the only way to tell a shortcut the window ignored from one that never reached it.
