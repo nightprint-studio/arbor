@@ -1,6 +1,6 @@
 <script lang="ts" module>
   /**
-   * A read-only unified diff of two texts.
+   * A read-only diff of two texts — unified, or side by side.
    *
    * ## What it is not
    *
@@ -19,6 +19,17 @@
    * a diff panel that renders four thousand rows to show you six is a panel that stalls
    * on open. Rows are flattened (hunk separators included) and handed to
    * {@link VirtualList}, which is why every row has to be exactly `rowHeight` tall.
+   *
+   * ## Two modes, one row model
+   *
+   * `unified` is the patch: one column, `+` and `−` in the margin. `split` is the two texts
+   * beside each other, which is how you read a *rewrite* — a line whose old and new form sit
+   * ten rows apart in a unified diff is one glance in a split one.
+   *
+   * Both are the same windowed list; only the pairing differs. A split row carries a left and
+   * a right line, either of which may be absent (a pure insertion has no left), and the pairing
+   * walks each hunk taking a run of deletions against the run of additions beside it — index
+   * for index, which is what puts a line above its own replacement.
    */
 
   /** What one line of the diff is. */
@@ -40,10 +51,54 @@
     lines: DiffLineModel[];
   }
 
-  /** A flattened row: either a line, or the gap between two hunks. */
+  /** How the two sides are laid out. */
+  export type DiffLayout = 'unified' | 'split';
+
+  /** A flattened row: a unified line, a side-by-side pair, or the gap between two hunks. */
   type Row =
     | { row: 'line'; line: DiffLineModel }
+    | { row: 'pair'; left: DiffLineModel | null; right: DiffLineModel | null }
     | { row: 'gap'; label: string };
+
+  /** One side-by-side row. Either side may be absent — that is the filler band. */
+  export interface DiffPair {
+    left: DiffLineModel | null;
+    right: DiffLineModel | null;
+  }
+
+  /**
+   * Pair one hunk's lines into left/right rows.
+   *
+   * Context lines pair with themselves. A **change block** — every consecutive line that is not
+   * context — is split into its deletions and its additions and zipped by index, so the first
+   * line removed sits opposite the first line added. The longer run's leftovers pair with
+   * nothing, which is what draws the filler band on the shorter side.
+   *
+   * Exported because it is the only real logic here and it is pure: the rest of this component
+   * is markup.
+   */
+  export function pairLines(lines: DiffLineModel[]): DiffPair[] {
+    const out: DiffPair[] = [];
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (line.kind === 'context') {
+        out.push({ left: line, right: line });
+        i++;
+        continue;
+      }
+      const dels: DiffLineModel[] = [];
+      const adds: DiffLineModel[] = [];
+      while (i < lines.length && lines[i].kind !== 'context') {
+        (lines[i].kind === 'del' ? dels : adds).push(lines[i]);
+        i++;
+      }
+      for (let k = 0; k < Math.max(dels.length, adds.length); k++) {
+        out.push({ left: dels[k] ?? null, right: adds[k] ?? null });
+      }
+    }
+    return out;
+  }
 </script>
 
 <script lang="ts">
@@ -53,6 +108,7 @@
   let {
     hunks,
     identical = false,
+    mode = 'unified',
     emptyMessage = 'Nothing to compare.',
     identicalMessage = 'The two versions are identical.',
     rowHeight = 19,
@@ -62,6 +118,8 @@
     /** The two sides are the same. Said out loud, because an empty panel reads as a
      *  failure to load rather than as an answer. */
     identical?: boolean;
+    /** `unified` (the patch) or `split` (the two texts beside each other). */
+    mode?: DiffLayout;
     emptyMessage?: string;
     identicalMessage?: string;
     /** Row height in px. Must match the CSS — the window arithmetic depends on it. */
@@ -78,9 +136,39 @@
         // only hint that they are not.
         out.push({ row: 'gap', label: `@@ ${h.old_start} → ${h.new_start} @@` });
       }
-      for (const line of h.lines) out.push({ row: 'line', line });
+      if (mode === 'split') {
+        for (const pair of pairLines(h.lines)) out.push({ row: 'pair', ...pair });
+      } else {
+        for (const line of h.lines) out.push({ row: 'line', line });
+      }
     }
     return out;
+  });
+
+  /**
+   * The width both columns are given, in characters of the longest line either side holds.
+   *
+   * A per-row `1fr 1fr` would let every row size its own columns, and the divider would
+   * zig-zag down the panel. One width for the whole diff keeps the two texts on rails: the
+   * columns still share any spare room equally (`flex: 1 1 0` below), so a short file fills the
+   * panel and a long-lined one scrolls sideways as a unit — the same escape hatch the unified
+   * mode already uses.
+   */
+  const sideChars = $derived.by(() => {
+    if (mode !== 'split') return 0;
+    let max = 0;
+    for (const h of hunks) {
+      for (const l of h.lines) {
+        // A tab advances to the next stop, so it is worth up to `tab-size` columns rather than
+        // one — and `tab-size` is pinned to 4 in the CSS precisely so this can be counted. An
+        // upper bound (a tab mid-column advances less), which is the right side to err on: too
+        // wide is a little empty room, too narrow is one column's text under the other's.
+        let width = l.text.length;
+        for (let i = 0; i < l.text.length; i++) if (l.text.charCodeAt(i) === 9) width += 3;
+        if (width > max) max = width;
+      }
+    }
+    return max;
   });
 
   function sign(kind: DiffLineKind): string {
@@ -100,10 +188,25 @@
     role="list"
     {ariaLabel}
     getKey={(_, i) => i}
+    scrollX
   >
     {#snippet row({ item })}
       {#if item.row === 'gap'}
         <div class="td-gap" style="height: {rowHeight}px">{item.label}</div>
+      {:else if item.row === 'pair'}
+        <div
+          class="td-pair"
+          style="height: {rowHeight}px; --td-side: calc({sideChars}ch + 64px)"
+        >
+          <div class="td-side {item.left ? `td-${item.left.kind}` : 'td-filler'}">
+            <span class="td-no">{item.left?.old ?? ''}</span>
+            <span class="td-text">{item.left ? item.left.text || ' ' : ''}</span>
+          </div>
+          <div class="td-side {item.right ? `td-${item.right.kind}` : 'td-filler'}">
+            <span class="td-no">{item.right?.new ?? ''}</span>
+            <span class="td-text">{item.right ? item.right.text || ' ' : ''}</span>
+          </div>
+        </div>
       {:else}
         <div class="td-line td-{item.line.kind}" style="height: {rowHeight}px">
           <span class="td-no">{item.line.old ?? ''}</span>
@@ -121,19 +224,46 @@
 
   :global(.td) {
     height: 100%;
-    /* The long-line escape hatch. A wrapped diff line would break the fixed row height
-       the window arithmetic depends on, so the panel scrolls sideways instead. */
-    overflow-x: auto;
+    /* The long-line escape hatch is `scrollX` on the list itself (a `overflow-x` here loses to
+       the widget's own scoped rule): a wrapped diff line would break the fixed row height the
+       window arithmetic depends on, so the panel scrolls sideways instead of wrapping. */
     font-family: var(--font-code);
     font-size: var(--font-size-xs);
+    /* Pinned rather than left to the browser's 8, so a tab is worth a known number of columns:
+       the side-by-side column width is computed in characters and a tab has to be counted. */
+    tab-size: 4;
   }
 
-  .td-line, .td-gap {
+  .td-line, .td-gap, .td-pair {
     display: flex;
     align-items: center;
     white-space: pre;
     line-height: 1;
     min-width: max-content;
+  }
+
+  /* Side-by-side. Each column is at least as wide as the diff's longest line (`--td-side`,
+     set per row from one figure for the whole diff) and shares any spare width equally, so
+     the divider is a straight line whether the panel scrolls sideways or not. */
+  .td-side {
+    display: flex;
+    align-items: center;
+    flex: 1 1 0;
+    min-width: var(--td-side, 320px);
+    height: 100%;
+    /* Backstop: the width above is an upper bound, so this should never fire — but one line
+       reaching under the other column would be worse than one line cut short. */
+    overflow: hidden;
+  }
+  .td-side + .td-side { border-left: 1px solid var(--border); }
+  /* The half of a row that has no line — a hatch rather than a colour, so it reads as
+     "nothing here" instead of as a third kind of change. */
+  .td-filler {
+    background: repeating-linear-gradient(
+      -45deg,
+      transparent 0 5px,
+      color-mix(in srgb, var(--text-faint) 12%, transparent) 5px 10px
+    );
   }
 
   .td-gap {

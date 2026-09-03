@@ -17,8 +17,11 @@
     Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
     DownloadCloud, FileDown, Variable, Database, Clock, Columns3, ListPlus, SquarePen,
     Languages, CaseSensitive,
+    // The gutter's ▶ and the two other things pressing it might have meant.
+    Play, Bug, SlidersHorizontal,
   } from 'lucide-svelte';
   import { tick, untrack } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
@@ -34,9 +37,15 @@
   import { languageForPath } from './languages';
   import {
     isImageFile, isJavaFile as isJavaFileOf, isJspFile as isJspFileOf,
-    isLspFile as isLspFileOf, isRustFile as isRustFileOf, hasPushedDiagnostics,
-    supportsCodeNav, supportsDiagnostics,
+    isLspFile as isLspFileOf, isRustFile as isRustFileOf, isMarkdownFile,
+    isRunnableScript, isHtmlFile, hasPushedDiagnostics, supportsCodeNav, supportsDiagnostics,
   } from './file-kind';
+  import BennuHtmlPreview from './BennuHtmlPreview.svelte';
+  import BennuTableInsert from './BennuTableInsert.svelte';
+  import BennuHtmlScriptsModal from './BennuHtmlScriptsModal.svelte';
+  import ResizablePanel from '$lib/components/shared/ui/ResizablePanel.svelte';
+  import Modal from '$lib/components/shared/Modal.svelte';
+  import MarkdownEditor from '$lib/components/shared/ui/MarkdownEditor.svelte';
   import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
   import {
     lspSemanticTokens, lspCodeActions, lspCodeLenses, lspExecuteCommand, lspExpandMacro,
@@ -48,7 +57,7 @@
   import {
     signatureHelp as ipcSignatureHelp, inlayHints as ipcInlayHints, type SignatureHelp,
   } from '$lib/ipc/bennu/hints';
-  import type { DiagnosticSeverity, SourceEdit } from '$lib/types/bennu';
+  import type { DiagnosticSeverity, SourceEdit, TreeNode } from '$lib/types/bennu';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
@@ -62,6 +71,8 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { completionNoteStore } from '$lib/stores/bennu/completion-note.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+  import { bennuMainClassStore } from '$lib/stores/bennu/main-classes.svelte';
+  import { emptyInvocation as emptyCargoInvocation } from '$lib/ipc/bennu/cargo';
   import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuI18nStore } from '$lib/stores/bennu/i18n.svelte';
@@ -69,7 +80,7 @@
   import { markupEdit } from './i18n/markup-edit';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
-  import { diagnostics as ipcDiagnostics } from '$lib/ipc/bennu';
+  import { diagnostics as ipcDiagnostics, projectTree as ipcProjectTree } from '$lib/ipc/bennu';
   import {
     definition as ipcDefinition, references as ipcReferences,
     actionUsages as ipcActionUsages,
@@ -236,6 +247,17 @@
   const isImageTab = $derived(isImageFile(activePath));
   const isDocxTab = $derived(isWordFile(activePath));
   const isFontTab = $derived(isFontFile(activePath));
+  /**
+   * A markdown document, which opens **rendered**.
+   *
+   * Unlike the three above it still has a buffer — it is edited, saved and made dirty like any
+   * other file, and the live preview edits it in place (the markup is revealed on the line the
+   * caret is on). What changes is only which editor is mounted, so the toolbar, the tab strip
+   * and Ctrl+S all keep working. The toggle beside them mounts the code editor instead, for
+   * when the markup itself is the thing being worked on.
+   */
+  const isMarkdownTab = $derived(isMarkdownFile(activePath));
+  const markdownLive = $derived(isMarkdownTab && bennuSettingsStore.markdownLivePreview);
   /** A tab with no buffer behind it — a viewer, not an editor. The toolbar and the caret
    *  footer are both about a document, so neither belongs above or below one. Keyed on the
    *  shared predicate rather than on the kinds listed above, because the last kind added
@@ -503,6 +525,199 @@
   function onInput(text: string) {
     if (activePath) projectStore.setSource(activePath, text);
     docRevision += 1;
+  }
+
+  // ── The markdown mount ───────────────────────────────────────────────────────
+  //
+  // The live-preview editor takes its document once, at mount, and keys off `docKey` — it has
+  // no controlled `value` the way `CodeEditor` does, because a preview that re-read the buffer
+  // on every keystroke would re-render the document under the caret. So the two ways the text
+  // can change are told apart here: an edit *from* the editor is already in the store and must
+  // not remount it; a change from anywhere else (a reload from disk, a revert, a plugin writing
+  // the file) must.
+  let mdRemounts = $state(0);
+  /** The text the mounted markdown editor is known to hold — what it last emitted, or what it
+   *  was mounted with. */
+  let mdMountedText: string | null = null;
+  /** The file that mount belongs to, so the first render of a tab is not read as a change. */
+  let mdMountedPath: string | null = null;
+  const mdDocKey = $derived(`${activePath ?? ''}#${mdRemounts}`);
+  /** The live-preview editor, for the one thing only it can do: land on a heading in a file
+   *  that a link has just opened. Typed by what is asked of it rather than by the component,
+   *  so this stays a contract and not a handle to poke at. */
+  let mdComp = $state<{ goToAnchor(slug: string): boolean } | null>(null);
+
+  /**
+   * Every file in the project, for the link completion behind `[…](`.
+   *
+   * Read once per project rather than from `projectStore.tree`: that one is the sidebar's, and
+   * the sidebar expands folders lazily — completing only inside the folders you happened to
+   * click open is the kind of half-answer that teaches people the feature doesn't work.
+   */
+  let mdFiles = $state<string[]>([]);
+  const projectFileIndex = () => mdFiles;
+
+  $effect(() => {
+    const root = markdownLive ? projectStore.project?.root : null;
+    if (!root) return;
+    let live = true;
+    void ipcProjectTree(root)
+      .then((tree) => {
+        if (live) mdFiles = flattenFiles(tree);
+      })
+      .catch(() => {
+        // A completion list is not worth a toast: the headings still complete.
+      });
+    return () => {
+      live = false;
+    };
+  });
+
+  function flattenFiles(node: TreeNode, into: string[] = []): string[] {
+    if (node.is_dir) for (const child of node.children) flattenFiles(child, into);
+    else into.push(node.path);
+    return into;
+  }
+
+  $effect(() => {
+    if (!markdownLive || !activePath) return;
+    const path = activePath;
+    const text = projectStore.sourceOf(path); // tracked: the store's copy
+    // Writes to state from inside an effect — untracked, or this re-enters itself.
+    untrack(() => {
+      if (mdMountedPath !== path) {
+        // First render of this tab: the editor is mounting with exactly this text, so there is
+        // nothing to remount for. Bumping here would tear down the mount that just happened.
+        mdMountedPath = path;
+        mdMountedText = text;
+        return;
+      }
+      if (text === mdMountedText) return; // our own edit, already in the editor
+      mdMountedText = text;
+      mdRemounts += 1;
+    });
+  });
+
+  function onMarkdownInput(text: string) {
+    mdMountedText = text;
+    onInput(text);
+  }
+
+  // ── HTML preview ────────────────────────────────────────────────────────────
+  //
+  // Rendering asks nothing. The frame is sandboxed with no origin of its own, so a page that
+  // only lays itself out cannot touch anything — and a dialog in front of every preview is a
+  // dialog that gets dismissed without being read, which is worse than none.
+  //
+  // **Running the page's own scripts** is the decision, and it is asked once per file. The answer
+  // can be kept for the session or remembered across launches (`bennuSettingsStore`), because a
+  // report you open every morning should not ask every morning — and it can be taken back from
+  // the preview's own bar, because a permission with no way out is not a permission.
+  const isHtmlTab = $derived(isHtmlFile(activePath));
+  /** Files previewing right now. Per session and per file: it is a view state, not a setting. */
+  const htmlPreviewOpen = new SvelteSet<string>();
+  /** Scripts allowed for this session only — the "just this once" answer. The remembered ones
+   *  live in the config; this set is what the two are unioned from. */
+  const htmlScriptsOnce = new SvelteSet<string>();
+  /** The file whose scripts dialog is open. */
+  let htmlAsk = $state<string | null>(null);
+  let htmlFullscreen = $state(false);
+
+  const htmlPreviewing = $derived(!!activePath && isHtmlTab && htmlPreviewOpen.has(activePath));
+  const htmlScriptsOn = $derived(
+    !!activePath
+      && (htmlScriptsOnce.has(activePath) || bennuSettingsStore.htmlScriptsRemembered(activePath)),
+  );
+
+  // A tab switch leaves the enlarged preview behind: it belongs to the page you were looking at,
+  // and the next file opening full-window because the last one did would be a surprise.
+  $effect(() => {
+    void activePath;
+    untrack(() => { htmlFullscreen = false; });
+  });
+
+  /** The bar's one switch. On asks; off is immediate and forgets both answers — taking a
+   *  permission back has to be as cheap as it was to give, or nobody does it. */
+  function toggleHtmlScripts(next: boolean) {
+    const path = activePath;
+    if (!path) return;
+    if (next) { htmlAsk = path; return; }
+    htmlScriptsOnce.delete(path);
+    bennuSettingsStore.setHtmlScriptsRemembered(path, false);
+  }
+
+  function allowHtmlScripts(remember: boolean) {
+    const path = htmlAsk;
+    htmlAsk = null;
+    if (!path) return;
+    if (remember) bennuSettingsStore.setHtmlScriptsRemembered(path, true);
+    else htmlScriptsOnce.add(path);
+  }
+
+  /**
+   * Write an empty `rows × cols` table into the buffer, under the caret's line.
+   *
+   * Through the store rather than through the editor: the markdown mount takes its document once
+   * and is re-mounted when the store's text changes from outside (see `mdMountedText`), which is
+   * exactly what an insertion from the toolbar is. The table lands on its own paragraph — a
+   * table glued to the line above it is not a table to the parser.
+   */
+  function insertMarkdownTable(rows: number, cols: number) {
+    const path = activePath;
+    if (!path) return;
+    const line = (cells: string) => `| ${Array(cols).fill(cells).join(' | ')} |`;
+    const table = [
+      line('   '),
+      `| ${Array(cols).fill('---').join(' | ')} |`,
+      ...Array.from({ length: rows }, () => line('   ')),
+    ].join('\n');
+    const source = projectStore.sourceOf(path);
+    const sep = source.length === 0 || source.endsWith('\n\n') ? '' : source.endsWith('\n') ? '\n' : '\n\n';
+    onMarkdownInput(`${source}${sep}${table}\n`);
+  }
+
+  /**
+   * A link in a rendered markdown document pointed at a file: open it in a tab.
+   *
+   * The editor has already resolved it against the document's own directory, so what arrives is
+   * an absolute path. A file outside the project opens all the same — a README linking to a
+   * sibling repository's notes is a normal thing to write, and refusing it would only send the
+   * reader to a file manager.
+   */
+  function openMarkdownLink(path: string, anchor: string | null) {
+    void projectStore
+      .openFile(path)
+      .then(() => {
+        if (anchor) jumpToAnchorWhenReady(path, anchor);
+      })
+      .catch(() => {
+        toastStore.show(`Could not open ${path.split(/[\\/]/).pop() ?? path}`, 'info');
+      });
+  }
+
+  /**
+   * The `#uso` half of a `guida.md#uso` link, once the file it names is the open one.
+   *
+   * The editor that saw the click is about to be replaced by the one for the file being opened,
+   * so there is nothing to ask until that one exists. Rather than guess how many frames a mount
+   * takes, ask every frame until the jump lands — it stops on the first success, and gives up
+   * after about a third of a second, which is the honest answer for a heading that isn't there.
+   */
+  function jumpToAnchorWhenReady(path: string, slug: string, tries = 20) {
+    const want = path.replace(/\\/g, '/');
+    requestAnimationFrame(() => {
+      if ((activePath ?? '').replace(/\\/g, '/') === want && mdComp?.goToAnchor(slug)) return;
+      if (tries > 0) jumpToAnchorWhenReady(path, slug, tries - 1);
+    });
+  }
+
+  /** The caret, for the footer. Deliberately not `onCaret`: that one drives occurrence
+   *  highlighting, the navigation history and the expand-selection run, all of which read
+   *  `editorComp` — which is the code editor, and is not mounted here. */
+  function onMarkdownCaret(line: number, col: number) {
+    caretLine = line;
+    caretCol = col;
+    bennuUiStore.setCaret(line, col);
   }
 
   // ── The syntax-tree panel, both directions ───────────────────────────────────
@@ -963,6 +1178,42 @@
    * to the server — and if the server does not own it either, the press says so rather than being
    * swallowed, which is the difference between a control that failed and one that looks broken.
    */
+  /**
+   * The `runnable` behind a rust-analyzer Run / Debug lens, or `null` for any other lens.
+   *
+   * Shaped defensively: the argument is whatever the server sent, and a version that changes the
+   * payload should make the lens do nothing rather than launch `cargo undefined`. Only the cargo
+   * kind is honoured — rust-analyzer can also emit a `shell` runnable, which is a different
+   * program with a different working directory and not something to guess at.
+   */
+  function rustRunnableOf(lens: LspLens): {
+    label: string;
+    cargoArgs: string[];
+    cargoExtraArgs: string[];
+    executableArgs: string[];
+    workspaceRoot: string;
+  } | null {
+    if (lens.command !== 'rust-analyzer.runSingle' && lens.command !== 'rust-analyzer.debugSingle') {
+      return null;
+    }
+    const first = lens.arguments?.[0] as
+      | { label?: unknown; kind?: unknown; args?: Record<string, unknown> }
+      | undefined;
+    const args = first?.args;
+    if (!args || (typeof first?.kind === 'string' && first.kind !== 'cargo')) return null;
+    const strings = (v: unknown): string[] =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+    const cargoArgs = strings(args.cargoArgs);
+    if (cargoArgs.length === 0) return null;
+    return {
+      label: typeof first?.label === 'string' ? first.label : lens.title,
+      cargoArgs,
+      cargoExtraArgs: strings(args.cargoExtraArgs),
+      executableArgs: strings(args.executableArgs),
+      workspaceRoot: typeof args.workspaceRoot === 'string' ? args.workspaceRoot : '',
+    };
+  }
+
   async function onLensPress(key: number) {
     const entry = lenses[key];
     if (!entry) return;
@@ -990,6 +1241,37 @@
     const path = activePath;
     const lens = entry.lens;
     if (!path || !lens.command || !editorComp) return;
+
+    // rust-analyzer's own ▶ Run / Debug. The server has already worked out the exact cargo
+    // invocation — which package, which binary, which test and with `--exact` — so the runner is
+    // handed those arguments **verbatim** rather than re-deriving them from the file. Re-deriving
+    // is how the ▶ above a `#[test]` ends up running the whole suite.
+    const runnable = rustRunnableOf(lens);
+    if (runnable) {
+      const root = projectStore.project?.root;
+      if (!root) return;
+      const [command, ...rest] = runnable.cargoArgs;
+      // ⚠️ rust-analyzer ends a test runnable's `cargoArgs` with a bare `--`, because in its own
+      // client the two lists are concatenated. Here the separator is added by the invocation
+      // builder before `args`, so leaving this one in produces `cargo test … -- -- name --exact`
+      // and the second `--` reaches the test harness as a filter that matches nothing: the ▶
+      // above one test would run zero.
+      while (rest.length && rest[rest.length - 1] === '--') rest.pop();
+      bennuUiStore.showBottom('run');
+      void bennuRunStore.runCargoCommand(
+        root,
+        {
+          ...emptyCargoInvocation(command || 'run'),
+          // Everything after the subcommand, as the server wrote it. `extra` is appended to the
+          // argv untouched, which is exactly what "the flags rust-analyzer chose" needs.
+          extra: [...rest, ...runnable.cargoExtraArgs],
+          args: runnable.executableArgs,
+        },
+        runnable.label,
+        { debug: lens.command === 'rust-analyzer.debugSingle', workingDir: runnable.workspaceRoot },
+      );
+      return;
+    }
 
     const source = editorComp.getValue();
     const anchor = editorComp.coordsAtByteOffset(lens.start);
@@ -1408,6 +1690,148 @@
     })),
   );
 
+  // ── The ▶ beside a `main` ────────────────────────────────────────────────────
+  //
+  // IntelliJ's green arrow, and the reason it is worth copying is not that it saves a menu: it is
+  // that it says *this class is a way in*. On a legacy project with four modules and eleven
+  // entry points, which file starts the thing is a question people answer by grepping.
+  //
+  // Two facts have to meet, and they come from different places on purpose. WHICH line is a
+  // question about the buffer in front of you — including the one you are typing right now, which
+  // no index has seen. WHAT to run is a question about the project, and it is answered by the
+  // backend's own entry-point scan (`bennuMainClassStore`), so the class that gets launched is the
+  // one the compiler will agree exists rather than a name assembled out of a `package` line that
+  // may be wrong. No entry, no arrow — a ▶ that fails when pressed is worse than none.
+
+  /** `public static void main(String[] args)`, in any of its spellings. */
+  const MAIN_METHOD = /^[^\S\r\n]*(?:public\s+)?(?:static\s+final\s+|final\s+static\s+|static\s+)void\s+main\s*\(\s*(?:final\s+)?String\s*(?:\[\s*\]|\.{3})/;
+
+  /** The entry points the backend found in THIS file. Loaded once per project (the store caches
+   *  and joins concurrent callers), and only for a Java project — a Cargo one has no such scan. */
+  const fileEntryPoints = $derived.by(() => {
+    const root = projectStore.project?.root;
+    const path = activePath;
+    if (!root || !path || projectStore.isCargo || !isJavaFile) return [];
+    const here = path.replace(/\\/g, '/');
+    return bennuMainClassStore.forRoot(root).filter((e) => e.source_file === here);
+  });
+
+  $effect(() => {
+    const root = projectStore.project?.root;
+    if (!root || projectStore.isCargo || !isJavaFile) return;
+    // Cached per project: this is a no-op after the first Java file of the session.
+    void bennuMainClassStore.load(root);
+  });
+
+  /** The 1-based lines of this buffer that declare a `main`. Read off the live text, so the
+   *  arrow appears with the method rather than after the next index build. */
+  const mainLines = $derived.by(() => {
+    if (!activePath || fileEntryPoints.length === 0) return [] as number[];
+    const out: number[] = [];
+    const lines = projectStore.sourceOf(activePath).split('\n');
+    for (let i = 0; i < lines.length; i++) if (MAIN_METHOD.test(lines[i])) out.push(i + 1);
+    return out;
+  });
+
+  /**
+   * A script is runnable as a whole, so its arrow goes on its first meaningful line — the shebang
+   * when it has one, because that line IS the statement "this file is a program", and line 1
+   * otherwise.
+   *
+   * Nothing is checked about the machine here. A `.bat` on a Mac still gets an arrow, and pressing
+   * it prints the reason in the console: a greyed-out control teaches nothing, and the refusal
+   * names the interpreter and where it was looked for.
+   */
+  const scriptRunLine = $derived.by(() => {
+    if (!activePath || !isRunnableScript(activePath)) return 0;
+    const first = projectStore.sourceOf(activePath).split('\n', 1)[0] ?? '';
+    return first.startsWith('#!') ? 1 : 1;
+  });
+
+  const runGutterMarks = $derived(
+    scriptRunLine
+      ? [{
+          line: scriptRunLine,
+          glyph: '▶',
+          tooltip: `Run ${activePath?.split(/[\\/]/).pop() ?? 'this script'}`,
+          className: 'cm-run-gutter',
+        }]
+      : mainLines.map((line) => ({
+          line,
+          glyph: '▶',
+          tooltip: fileEntryPoints[0]?.spring_boot
+            ? `Run ${fileEntryPoints[0].fqcn} (Spring Boot)`
+            : `Run ${fileEntryPoints[0]?.fqcn ?? 'this class'}`,
+          className: 'cm-run-gutter',
+        })),
+  );
+
+  /**
+   * The two gutters are one column, so they are merged here — the run arrow first, because a line
+   * that is both an entry point and a framework mark is a line you press to RUN. Nothing in the
+   * project marks a `main` line today; the order is stated so that the day something does, the
+   * answer is decided rather than incidental.
+   */
+  /** The lines the ▶ owns — a script's one line, or every `main` in a Java file. */
+  const runLines = $derived(runGutterMarks.map((m) => m.line));
+
+  const allGutterMarks = $derived([
+    ...runGutterMarks,
+    ...springGutterMarks.filter((g) => !runLines.includes(g.line)),
+  ]);
+
+  /**
+   * ▶ pressed: run it, or offer the other things you might have meant.
+   *
+   * A menu rather than an immediate launch, because Debug is the other half of the gesture and
+   * IntelliJ's own arrow opens one too. A file declaring **two** entry points (a secondary class
+   * with its own `main`) lists both: picking the first silently would be a launch of something
+   * you did not press.
+   */
+  function onRunGutterClick(line: number, event: MouseEvent) {
+    const root = projectStore.project?.root;
+    if (!root) return;
+    // A script has one way to be run and no debugger behind it, so the arrow just runs it —
+    // a menu with a single entry is a click spent on nothing.
+    if (activePath && isRunnableScript(activePath)) {
+      const path = activePath;
+      // Whatever is in the buffer is what should run: a script is edited and run in the same
+      // breath, and launching the version on disk would run the line you just fixed. A refused
+      // save is a conflict — the store raises it, and running the old text on top of that would
+      // be the second wrong thing to do about it.
+      void projectStore.saveActive().then((ok) => {
+        if (ok || !projectStore.isDirty(path)) void bennuRunStore.runScript(root, path);
+      });
+      return;
+    }
+    const entries = fileEntryPoints;
+    if (entries.length === 0) return;
+    void line;
+    const simple = (fqcn: string) => fqcn.split('.').pop() ?? fqcn;
+    const items: MenuItem[] = entries.flatMap((e, i) => [
+      { id: `run:${i}`, label: `Run ${simple(e.fqcn)}`, icon: Play,
+        shortcut: i === 0 && entries.length === 1 ? 'Shift+F10' : undefined },
+      { id: `debug:${i}`, label: `Debug ${entries.length > 1 ? simple(e.fqcn) : ''}`.trim(), icon: Bug },
+    ]);
+    items.push({ separator: true, id: 'sep-run', label: '' });
+    // The escape hatch from an ad-hoc launch: arguments, VM flags, a working directory. The
+    // arrow deliberately runs with none of those, so this is where you go when you need them.
+    items.push({ id: 'edit', label: 'Edit configurations…', icon: SlidersHorizontal });
+
+    bennuContextMenuStore.show(event.clientX, event.clientY, items, (id) => {
+      if (id === 'edit') { bennuUiStore.openRunConfig(); return; }
+      const [what, at] = id.split(':');
+      const entry = entries[Number(at)];
+      if (!entry) return;
+      void bennuRunStore.runMainClass(root, {
+        mainClass: entry.fqcn,
+        module: entry.module ?? '',
+        label: simple(entry.fqcn),
+        debug: what === 'debug',
+      });
+    });
+  }
+
   /**
    * Clicking a gutter icon opens what it points at — and when it points at more than one
    * thing, it asks.
@@ -1416,6 +1840,14 @@
    * the one it picks is the one *we* ranked rather than the one you meant. A bean injected in
    * six places has six real answers, so the menu is anchored at the pointer and lists them all.
    */
+  function onGutterClick(line: number, event: MouseEvent) {
+    if (runLines.includes(line)) {
+      onRunGutterClick(line, event);
+      return;
+    }
+    onSpringGutterClick(line, event);
+  }
+
   function onSpringGutterClick(line: number, event: MouseEvent) {
     const mark = springGutter.find((g) => g.line === line);
     if (!mark || mark.targets.length === 0) return;
@@ -3294,9 +3726,48 @@
           </Dropdown>
           <span class="ed-tsep"></span>
         {/if}
-        <IconButton tooltip="Go to line" shortcut="Ctrl+G" size={26} onclick={openGoto}>
-          <Hash size={13} />
-        </IconButton>
+        {#if isHtmlTab}
+          <!-- The page, rendered. Not a mode the editor is in — the source is one press away
+               again — and gated the first time, because a page can run its own code. -->
+          <IconButton
+            tooltip={htmlPreviewing ? 'Close the preview' : 'Preview this page beside the source'}
+            size={26}
+            active={htmlPreviewing}
+            onclick={() => {
+              if (!activePath) return;
+              if (htmlPreviewing) { htmlPreviewOpen.delete(activePath); htmlFullscreen = false; }
+              else htmlPreviewOpen.add(activePath);
+            }}
+          >
+            {#if htmlPreviewing}<FileCode2 size={13} />{:else}<Eye size={13} />{/if}
+          </IconButton>
+        {/if}
+        {#if markdownLive}
+          <!-- Only in the live preview: in the source view a table is markdown you type, and a
+               picker that inserted pipes into a code editor would be answering a question
+               nobody asked there. -->
+          <BennuTableInsert onPick={insertMarkdownTable} />
+        {/if}
+        {#if isMarkdownTab}
+          <!-- Rendered or raw. The rendered side is still an editor — this is not a preview
+               pane — so the toggle is about what the markup looks like while you work on it,
+               not about whether the file can be changed. -->
+          <IconButton
+            tooltip={markdownLive ? 'Edit the markdown source' : 'Live preview'}
+            size={26}
+            active={markdownLive}
+            onclick={() => bennuSettingsStore.setMarkdownLivePreview(!markdownLive)}
+          >
+            {#if markdownLive}<FileCode2 size={13} />{:else}<Eye size={13} />{/if}
+          </IconButton>
+        {/if}
+        {#if !markdownLive}
+          <!-- Go-to-line belongs to the code editor, and in the live preview there is not one
+               mounted to answer it. A button that quietly does nothing is worse than no button. -->
+          <IconButton tooltip="Go to line" shortcut="Ctrl+G" size={26} onclick={openGoto}>
+            <Hash size={13} />
+          </IconButton>
+        {/if}
       </div>
     </div>
     {/if}
@@ -3330,6 +3801,26 @@
     <!-- Same again, and every question about a font is visual: what it looks like, whether it
          has the accents this project needs, how it holds up small. -->
     <BennuFontView path={activePath} />
+  {:else if activePath && markdownLive}
+    <!-- Markdown, rendered as you type: the same live-preview editor Garrulus's notes and the
+         markdown modal use, so a README reads the same everywhere in the app. It edits the real
+         buffer — every change goes through `onInput` like the code editor's, so dirty state,
+         Ctrl+S and autosave are unchanged. No editor context menu: every entry on it (go to
+         declaration, find usages, the refactorings) is about code. -->
+    <div class="ed-editor-wrap">
+      <MarkdownEditor
+        bind:this={mdComp}
+        docKey={mdDocKey}
+        text={projectStore.sourceOf(activePath)}
+        docPath={activePath}
+        readOnly={isDecompiledView}
+        autofocus={false}
+        onChange={onMarkdownInput}
+        onCaret={onMarkdownCaret}
+        onOpenLink={openMarkdownLink}
+        fileIndex={projectFileIndex}
+      />
+    </div>
   {:else if activePath}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="ed-editor-wrap" oncontextmenu={onEditorContextMenu}>
@@ -3342,8 +3833,8 @@
           diagnostics={allDiags}
           marks={springMarks}
           lineHighlights={pausedLine}
-          gutterMarks={springGutterMarks}
-          onGutterClick={onSpringGutterClick}
+          gutterMarks={allGutterMarks}
+          onGutterClick={onGutterClick}
           flagMarks={canBreak ? breakpointMarks : undefined}
           canFlag={canFlagLine}
           onFlagClick={onBreakpointClick}
@@ -3355,6 +3846,18 @@
           indentGuides={bennuSettingsStore.indentGuides}
           stickyScroll={bennuSettingsStore.stickyScroll}
           emmet={emmetEnabled}
+          fontSize={bennuSettingsStore.fontSize}
+          wrap={bennuSettingsStore.wordWrap}
+          showWhitespace={bennuSettingsStore.showWhitespace}
+          lineNumbers={bennuSettingsStore.showLineNumbers}
+          highlightActiveLine={bennuSettingsStore.highlightCurrentLine}
+          folding={bennuSettingsStore.foldingEnabled}
+          foldBlockComments={bennuSettingsStore.foldBlockComments}
+          completion={{
+            autoPopup: bennuSettingsStore.autoPopup,
+            delayMs: bennuSettingsStore.popupDelayMs,
+            caseSensitive: bennuSettingsStore.caseSensitive,
+          }}
           tabSize={bennuSettingsStore.tabSize}
           indentUnit={bennuSettingsStore.indentStyle === 'tabs' ? '\t' : ' '.repeat(bennuSettingsStore.tabSize)}
           initialState={viewStates.get(activePath)}
@@ -3365,6 +3868,22 @@
           onLensPress={(key) => void onLensPress(key)}
         />
       {/key}
+      {#if htmlPreviewing && !htmlFullscreen}
+        <!-- Beside the source, not instead of it: a page is edited and looked at in the same
+             breath, and a preview that replaced the buffer would make every fix a round trip
+             through a toggle. Resizable, and ⤢ takes it to nearly the whole window when the
+             layout is what matters rather than the markup. -->
+        <ResizablePanel direction="horizontal" initialSize={520} minSize={220} maxSize={1400} reverse>
+          <BennuHtmlPreview
+            path={activePath}
+            html={projectStore.sourceOf(activePath)}
+            scripts={htmlScriptsOn}
+            onToggleScripts={toggleHtmlScripts}
+            onClose={() => activePath && htmlPreviewOpen.delete(activePath)}
+            onToggleFullscreen={() => (htmlFullscreen = true)}
+          />
+        </ResizablePanel>
+      {/if}
       <!-- IntelliJ-style file health badge, pinned top-right over the editor. -->
       {#if isJavaFile}
         <div class="ed-health" class:clean={diagCounts.errors === 0 && diagCounts.warnings === 0}
@@ -3459,6 +3978,43 @@
   />
 {/if}
 
+<!-- The page, filling the window. The same component as the inline preview — the frame is
+     re-created by the move, which is the honest behaviour: a preview that survived being resized
+     with its timers running would be a second document nobody asked to keep. -->
+{#if activePath && htmlPreviewing && htmlFullscreen}
+  <Modal
+    onClose={() => (htmlFullscreen = false)}
+    width="min(1720px, 97vw)"
+    height="min(1000px, 95vh)"
+    padBody={false}
+    ariaLabel={`Preview of ${activePath}`}
+  >
+    <!-- ⚠️ The wrapper is load-bearing. `.modal-body` is `flex: 1` inside the modal but is not
+         itself a flex container, so a child asking for `flex: 1` gets no flex context: the
+         preview collapsed to its content and the iframe fell back to its intrinsic ~150px,
+         which is the "the fullscreen preview is not full height" this fixes. -->
+    <div class="ed-fs-preview">
+      <BennuHtmlPreview
+        path={activePath}
+        html={projectStore.sourceOf(activePath)}
+        scripts={htmlScriptsOn}
+        onToggleScripts={toggleHtmlScripts}
+        onClose={() => { htmlFullscreen = false; if (activePath) htmlPreviewOpen.delete(activePath); }}
+        onToggleFullscreen={() => (htmlFullscreen = false)}
+        fullscreen
+      />
+    </div>
+  </Modal>
+{/if}
+
+{#if htmlAsk}
+  <BennuHtmlScriptsModal
+    path={htmlAsk}
+    onAllow={allowHtmlScripts}
+    onCancel={() => (htmlAsk = null)}
+  />
+{/if}
+
 <style>
   .ed {
     display: flex; flex-direction: column;
@@ -3544,6 +4100,9 @@
   .ed-sources-banner .ed-tbtn.primary:disabled:hover { filter: none; }
 
   .ed-editor-wrap { flex: 1; display: flex; min-width: 0; min-height: 0; position: relative; }
+  /* The modal body is a block box (see the note at the call site): this is the flex context the
+     preview needs to fill it. */
+  .ed-fs-preview { display: flex; width: 100%; height: 100%; min-height: 0; }
   .ed-editor-wrap > :global(.code-editor) { flex: 1; min-width: 0; min-height: 0; }
 
   /* IntelliJ-style file-health badge, pinned top-right over the editor (offset past the
@@ -3781,6 +4340,26 @@
   :global(.cm-content .cm-fw-jpa-query-string span) { color: var(--syntax-string, #6a8759); }
   :global(.cm-content .cm-fw-jpa-query-number),
   :global(.cm-content .cm-fw-jpa-query-number span) { color: var(--syntax-number, #6897bb); }
+
+  /* The run arrow. Green and clearly larger than the framework glyphs, because it is the one
+     gutter mark that DOES something rather than pointing somewhere — and because a green ▶ is
+     what a hand trained on IntelliJ looks for.
+     ⚠️ The selector carries `.code-editor .cm-host-gutter-icon` on purpose. The widget's own base
+     rule for a gutter icon is `.code-editor :global(.cm-host-gutter-icon)` — two classes — and a
+     bare `:global(.cm-run-gutter)` is one, so it LOST: the arrow rendered at the base rule's 10px
+     muted grey, which is exactly what it looked like. A host-supplied class has to out-specify
+     the default it is meant to replace. */
+  :global(.code-editor .cm-host-gutter-icon.cm-run-gutter) {
+    color: var(--success);
+    font-size: 15px;
+    line-height: 1;
+    width: 17px;
+    transform: translateY(-0.5px);
+  }
+  :global(.code-editor .cm-host-gutter-icon.cm-run-gutter:hover) {
+    color: color-mix(in srgb, var(--success) 70%, #fff);
+    transform: translateY(-0.5px) scale(1.12);
+  }
 
   /* Gutter icons: colour by what the mark means, so a glance separates "a bean is
      declared here" from "something is injected here" without reading the tooltip. */

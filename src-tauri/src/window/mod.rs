@@ -164,6 +164,20 @@ fn mac_traffic_light_y() -> f64 {
 pub fn native_titlebar<'a, R: Runtime, M: Manager<R>>(
     builder: WebviewWindowBuilder<'a, R, M>,
 ) -> WebviewWindowBuilder<'a, R, M> {
+    // ⚠️⚠️ **HTML5 drag-and-drop does not work while this is on**, and it fails in the way that
+    // costs the most time: the browser still draws the drag image, so it looks like the gesture
+    // is working, while `dragover` and `drop` never reach the page — no drop target lights up
+    // and nothing ever moves. Tauri turns the OS-level file-drop handler on by default and it
+    // swallows the webview's own drag session.
+    //
+    // Arbor listens for no `tauri://drag-drop` event anywhere, so this costs nothing and buys
+    // back every in-app drag: moving a file onto a folder in Bennu's project tree, and the
+    // reorderable trees a plugin form can declare.
+    //
+    // The method is spelled as the negative (`disable_…`) rather than as a flag: Tauri's own doc
+    // on it says "required to use HTML5 drag and drop APIs on the frontend", which is this
+    // exactly.
+    let builder = builder.disable_drag_drop_handler();
     #[cfg(target_os = "macos")]
     {
         use tauri::{LogicalPosition, TitleBarStyle};

@@ -343,6 +343,10 @@
     id:          string;
     hasChildren: boolean;
     expanded:    boolean;
+    /** The row this one sits under, or `null` at the top level. Carried for the drop target:
+     *  a drag over a leaf means its container, which is what every file manager does and what
+     *  stops half the rows in a tree from being dead zones during a drag. */
+    parent:      T | null;
   };
 
   const flat = $derived.by<FlatRow[]>(() => {
@@ -352,7 +356,7 @@
     void expandedIds; void expandOverride; void normalizedFilter;
     const out: FlatRow[] = [];
     const q = normalizedFilter;
-    const walk = (node: T, depth: number) => {
+    const walk = (node: T, depth: number, parent: T | null) => {
       if (!matchFn(node, q)) return;
       const kids   = getChildren(node) ?? [];
       // Lazy hosts (JSON Studio, …) override `hasChildren` so the chevron
@@ -361,10 +365,10 @@
       // kids-length check so non-lazy callers behave as before.
       const hasKids   = hasChildren ? hasChildren(node) : kids.length > 0;
       const expanded  = hasKids && effectiveExpanded(node);
-      out.push({ node, depth, id: getId(node), hasChildren: hasKids, expanded });
-      if (expanded) for (const k of kids) walk(k, depth + 1);
+      out.push({ node, depth, id: getId(node), hasChildren: hasKids, expanded, parent });
+      if (expanded) for (const k of kids) walk(k, depth + 1, node);
     };
-    if (nodes) for (const n of nodes) walk(n, 0);
+    if (nodes) for (const n of nodes) walk(n, 0, null);
     return out;
   });
 
@@ -556,31 +560,52 @@
     dropHoverId  = null;
     dragSourceNode = null;
   }
-  function canDropOn(target: T): boolean {
-    if (!dropTarget || !dropTarget(target)) return false;
-    if (!dragSourceId) return false;
-    if (getId(target) === dragSourceId) return false;
-    return true;
+  /**
+   * The row a drop over `node` would actually land in.
+   *
+   * A drag over a **leaf** resolves to its container. Without this, every file in the tree is a
+   * dead zone during a drag — the pointer is over a row, nothing lights up, and the only way to
+   * learn that you must aim at a folder is to try and have nothing happen. Aiming at a file and
+   * meaning "in there, beside it" is what every file manager already does.
+   *
+   * `null` when nothing up the chain accepts the drop, or when the answer is the dragged node
+   * itself (dropping a file into the folder it is already in is not a move).
+   */
+  function effectiveTarget(node: T): T | null {
+    if (!dropTarget || !dragSourceId) return null;
+    let current: T | null = node;
+    // The row list is flat, so the walk up is a lookup per level rather than a search.
+    while (current) {
+      if (dropTarget(current) && getId(current) !== dragSourceId) return current;
+      current = flat.find((r) => getId(r.node) === getId(current as T))?.parent ?? null;
+    }
+    return null;
   }
   function handleDragOver(node: T, e: DragEvent) {
-    if (!canDropOn(node)) return;
+    const target = effectiveTarget(node);
+    if (!target) return;
     e.preventDefault();        // accept the drop (without this, drop won't fire)
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-    const id = getId(node);
+    const id = getId(target);
     if (dropHoverId !== id) dropHoverId = id;
   }
   function handleDragLeave(node: T) {
+    // Keyed on the RESOLVED target, since that is what the class is on: leaving a file whose
+    // folder is highlighted must not clear the folder while the pointer is still inside it.
+    const target = effectiveTarget(node);
+    if (target && dropHoverId === getId(target)) return;
     if (dropHoverId === getId(node)) dropHoverId = null;
   }
   function handleDrop(node: T, e: DragEvent) {
-    if (!canDropOn(node)) return;
+    const target = effectiveTarget(node);
+    if (!target) return;
     e.preventDefault();
     e.stopPropagation();
     const src = dragSourceNode;
     dropHoverId  = null;
     dragSourceId = null;
     dragSourceNode = null;
-    if (src) onDropOnNode?.(src, node);
+    if (src) onDropOnNode?.(src, target);
   }
 
   function handleKeydown(node: T, hasKids: boolean, e: KeyboardEvent) {
@@ -634,6 +659,7 @@
           class:tree-row-expandable={r.hasChildren}
           class:tree-row-leaf={!r.hasChildren}
           class:tree-row-drop-hover={isDropHover}
+          class:tree-row-dragging={dragSourceId === r.id}
           data-tree-id={r.id}
           style="position: absolute; left: 0; right: 0; top: {(startIdx + vi) * rowHeight}px; height: {rowHeight}px; min-height: {rowHeight}px; padding-left: {basePadding + r.depth * indentSize}px; display: flex; align-items: center; gap: {cellGap}px; box-sizing: border-box;"
           role="treeitem"
@@ -758,11 +784,26 @@
   /* Drop-target hover (Phase 6.2). Inset outline so it sits inside the row
      rect — virtualised rows recycle on scroll, an outline outside the box
      would clip against the next row. */
-  :global(.tree .tree-row-drop-hover) {
-    background: color-mix(in srgb, var(--accent) 16%, transparent);
-    outline: 1px dashed var(--accent);
+  /* The destination, and it has to be unmistakable: a dashed hairline on a tinted row reads as
+     "something is happening here" rather than as "it goes in HERE", and on a dense tree the
+     difference decides whether the drop lands where it was meant to. A solid box plus a bar down
+     the leading edge — the bar is what survives at a glance, because it is the one mark at a
+     fixed x that the eye can track while the pointer moves. */
+  /* ⚠️ TWO classes on the row, not one, and that is the whole reason this was invisible: the
+     rule above is `.tree .tree-row:hover` — two classes and a pseudo-class, so (0,3,0) — and a
+     drag keeps the pointer ON the row it is over. A single-class `.tree-row-drop-hover` is
+     (0,2,0) and lost to `:hover` for the entire duration of the gesture, which is exactly when
+     it had something to say. */
+  :global(.tree .tree-row.tree-row-drop-hover) {
+    background: color-mix(in srgb, var(--accent) 26%, transparent);
+    outline: 2px solid var(--accent);
     outline-offset: -2px;
+    border-radius: 3px;
+    box-shadow: inset 3px 0 0 var(--accent);
   }
+  /* Where the file is coming FROM. Two rows are involved in a drag and only one of them was
+     ever marked; dimming the source is what makes the pair read as a move. */
+  :global(.tree .tree-row.tree-row-dragging) { opacity: 0.45; }
 
   /* Disclosure caret. Always reserves the same width whether or not
      the node has children, so labels line up across siblings. */

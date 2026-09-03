@@ -235,6 +235,30 @@ export interface RunOptions {
  *  as `arbor://bennu/run-output` and ending with `arbor://bennu/run-exit`. Resolves
  *  immediately with the run handle (which carries the command line that was actually spawned).
  *  Wire: `bennu_run` — `RunArgs { root, main_class, args?, vm_args?, working_dir?, env? }`. */
+/**
+ * Run a shell script — `.sh` / `.bash`, `.bat` / `.cmd`, `.ps1` — streaming into the same console
+ * a Java run uses, with the same stdin and the same Stop.
+ *
+ * The interpreter is the backend's business, and so are the refusals: a `.bat` asked for on macOS,
+ * or a `.sh` on a Windows machine with no Git Bash, come back as an error naming what was looked
+ * for. Wire: `bennu_run_script` — `{ root, file, args?, working_dir?, env? }`.
+ */
+export function runScript(
+  root: string,
+  file: string,
+  opts: { args?: string[]; workingDir?: string; env?: Record<string, string> } = {},
+): Promise<RunHandle> {
+  return bennu('bennu_run_script', {
+    args: {
+      root,
+      file,
+      args: opts.args ?? [],
+      working_dir: opts.workingDir ?? '',
+      env: opts.env ?? {},
+    },
+  });
+}
+
 export function run(root: string, mainClass: string, opts: RunOptions = {}): Promise<RunHandle> {
   return bennu('bennu_run', {
     args: {

@@ -22,7 +22,7 @@
     FolderOpen, Folder, FileCode2, FolderTree, Plus, Crosshair,
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical, FileType2,
-    History, Tag, Trash2, ExternalLink, FolderPlus, Package,
+    History, Tag, Trash2, ExternalLink, FolderPlus, FolderInput, Package,
   } from 'lucide-svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { tick, untrack } from 'svelte';
@@ -48,10 +48,11 @@
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
   import { bennuFileOpsStore } from '$lib/stores/bennu/file-ops.svelte';
+  import { lspWillRename } from '$lib/ipc/bennu/lsp';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import type { DiscoveredRustTest, DiscoveredTest, TreeNode } from '$lib/types/bennu';
   import type { NewFileKind } from '$lib/ipc/bennu/scaffold';
-  import { packageTree, isInPackageRoot, isSourceRoot } from './package-tree';
+  import { packageTree, isInPackageRoot, isSourceRoot, packageOfDir } from './package-tree';
   // The shared file-icon vocabulary — the same one Corvus's tree and Sitta's explorer draw
   // from, so a `pom.xml` looks like a `pom.xml` wherever you meet it.
   import IconifyIconView from '@iconify/svelte';
@@ -491,6 +492,10 @@
           // module path, and `willRenameFiles` would have to be asked per file inside it — so it is
           // absent rather than offered and then half-done.
           { id: 'rename',        label: 'Rename…',            icon: FileType2, shortcut: 'F2' },
+          // The same move a drag performs, for the hand that is not on the mouse — and for the
+          // destination that is nowhere near the source on screen, which is most of them in a
+          // project deep enough to want moving files around.
+          { id: 'move',          label: 'Move to folder…',    icon: FolderInput },
           { id: 'delete',        label: 'Delete…',            icon: Trash2, shortcut: 'Del', danger: true },
           { separator: true, id: 'sep-rename', label: '' },
           ...runItem,
@@ -510,6 +515,7 @@
         case 'new-folder': runNew(id, newDir); break;
         case 'run-tests': runTestsFor(node); break;
         case 'rename':    renamePath = node.path; break;
+        case 'move':      movePicker = node; break;
         case 'delete':    deleting = node; break;
         case 'open':      void projectStore.openFile(node.path); break;
         case 'copy-path': void copyToClipboard(node.path); break;
@@ -604,6 +610,115 @@
     if (!node || !root) return;
     await bennuFileOpsStore.delete(root, [node.path]);
   }
+
+  // ── Move (drag a file onto a folder) ────────────────────────────────────────
+  //
+  // A move is a rename with a different destination — `projectStore.moveFile` is literally the
+  // same call — so everything delicate about a rename is delicate here too, and the one thing a
+  // drag adds is that it happens in a gesture rather than in a dialog. Which is exactly why some
+  // of them have to ask first: dropping a file two folders down can rewrite code in files you are
+  // not looking at, and a refactor nobody asked for is worse than one that costs a click.
+
+  /** The file whose "Move to folder…" picker is open. */
+  let movePicker = $state<TreeNode | null>(null);
+
+  /** The move a confirmation is open for, with what it would set off. `null` = nothing pending. */
+  let moving = $state<{
+    file: TreeNode;
+    dir: TreeNode;
+    /** Files the language server says the move would edit (never the moved file itself). */
+    implied: string[];
+    /** The Java package the file would land in, when that changes what it must declare. */
+    newPackage: string | null;
+  } | null>(null);
+  let moveBusy = $state(false);
+
+  /** Move `file` into `dir` — asking first when the move sets off a refactor.
+   *
+   *  The question is asked BEFORE anything moves, and of the same `willRenameFiles` the move
+   *  itself will ask: a preview that came from somewhere else could disagree with what happens,
+   *  which is worse than no preview. A move that implies nothing just happens — dragging a
+   *  `.png` into `assets/` should not open a dialog. */
+  async function askMove(file: TreeNode, dir: TreeNode) {
+    if (file.is_dir || !dir.is_dir) return;
+    const target = `${dir.path.replace(/[\\/]+$/, '')}/${file.name}`;
+    // Already there: the drop is a no-op rather than an error.
+    if (target === file.path) return;
+    // A file cannot be dropped into the folder it already sits in, and the Tree only refuses
+    // self-drops — the parent is a different node.
+    if (file.path.replace(/[\\/][^\\/]*$/, '') === dir.path.replace(/[\\/]+$/, '')) return;
+
+    const implied = await lspWillRename(file.path, target)
+      .then((edits) => [...new Set(edits.map((e) => e.file))])
+      .catch(() => [] as string[]);
+    const newPackage = javaPackageChange(file.path, dir.path);
+
+    if (!implied.length && newPackage === null) {
+      await runMove(file, dir);
+      return;
+    }
+    moving = { file, dir, implied, newPackage };
+  }
+
+  /** The picker answered: run the same flow a drop runs, so a move asks the same questions
+   *  whichever way it was started. The picker's directory is a path rather than a tree node —
+   *  it can be anywhere, including a folder the tree has never expanded. */
+  async function movePicked(dir: string) {
+    const file = movePicker;
+    movePicker = null;
+    if (!file) return;
+    await askMove(file, { ...file, path: dir, name: dir.split(/[\\/]/).pop() ?? dir, is_dir: true, children: [] });
+  }
+
+  /** The package a `.java` would have to declare after the move, or `null` when the move does not
+   *  change it (not a Java file, or neither folder is under a source root). */
+  function javaPackageChange(file: string, dir: string): string | null {
+    if (!/\.java$/i.test(file)) return null;
+    const from = packageOfDir(file.replace(/[\\/][^\\/]*$/, ''));
+    const to = packageOfDir(dir);
+    if (to === null || from === to) return null;
+    return to;
+  }
+
+  async function runMove(file: TreeNode, dir: TreeNode) {
+    moveBusy = true;
+    try {
+      const newPath = await projectStore.moveFile(file.path, dir.path);
+      const n = moving?.implied.length ?? 0;
+      toastStore.show(
+        n ? `Moved ${file.name} · updated ${n} file${n === 1 ? '' : 's'}`
+          : `Moved ${file.name} to ${projectStore.relativePath(newPath.replace(/[\\/][^\\/]*$/, ''))}`,
+        'success',
+      );
+      moving = null;
+    } catch (e) {
+      toastStore.show(String(e instanceof Error ? e.message : e), 'error');
+    } finally {
+      moveBusy = false;
+    }
+  }
+
+  /** What the move confirmation says. Two different sentences, because they are two different
+   *  promises: the server's edits WILL be applied, the Java package declaration will NOT be. */
+  const moveDetail = $derived.by(() => {
+    const m = moving;
+    if (!m) return '';
+    const parts = [`${projectStore.relativePath(m.file.path)}  →  ${projectStore.relativePath(m.dir.path)}`];
+    if (m.implied.length) {
+      parts.push(
+        `${m.implied.length} other file${m.implied.length === 1 ? '' : 's'} will be updated so the code still refers to it:\n` +
+          m.implied.slice(0, 8).map((f) => `· ${projectStore.relativePath(f)}`).join('\n') +
+          (m.implied.length > 8 ? `\n· …and ${m.implied.length - 8} more` : ''),
+      );
+    }
+    if (m.newPackage !== null) {
+      parts.push(
+        `The file lands in the package ${m.newPackage || '(default)'}, and its own “package” line is NOT rewritten: ` +
+          'Bennu will flag the mismatch on the declaration, and Alt+Enter sets it. Whatever imports this class keeps naming the old package.',
+      );
+    }
+    return parts.join('\n\n');
+  });
 
   /**
    * The tree's own undo.
@@ -775,6 +890,9 @@
         onSelect={onRowSelect}
         onContextMenu={onRowContextMenu}
         onRowKeydown={onRowKeydown}
+        draggable={(n) => !n.is_dir}
+        dropTarget={(n) => n.is_dir}
+        onDropOnNode={(src, dst) => void askMove(src, dst)}
       >
         {#snippet row(ctx: RowSnippetCtx<TreeNode>)}
           {@const meta = iconFor(ctx.node)}
@@ -841,6 +959,30 @@
 
 {#if renamePath !== null}
   <BennuRenameFileModal path={renamePath} onClose={() => (renamePath = null)} />
+{/if}
+
+{#if movePicker}
+  <FileExplorerModal
+    mode="folder"
+    title={`Move ${movePicker.name} to…`}
+    initialPath={movePicker.path.replace(/[\\/][^\\/]*$/, '')}
+    onConfirm={(dir) => void movePicked(dir)}
+    onCancel={() => (movePicker = null)}
+    onClose={() => (movePicker = null)}
+  />
+{/if}
+
+{#if moving}
+  <ConfirmModal
+    title="Move this file?"
+    message={moving.file.name}
+    detail={moveDetail}
+    variant={moving.newPackage !== null ? 'warning' : 'info'}
+    confirmLabel="Move"
+    busy={moveBusy}
+    onConfirm={() => { const m = moving; if (m) void runMove(m.file, m.dir); }}
+    onCancel={() => (moving = null)}
+  />
 {/if}
 
 {#if deleting}

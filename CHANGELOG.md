@@ -13,7 +13,61 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **`arbor.cloud` is gone.** A plugin reaches storage through a provider extension (`arbor.ext.call` / `call_to_file`) instead. Progress is `arbor.job` and `arbor.ui.operation`, sign-in is `arbor.oauth`, and a merge order is asked for with the `reorder_list` form node.
 
+### Added
+
+- **C, C++ and Python files are coloured without a language server.** They mapped to no highlighter at all, so a `.py` build script or a `.cpp` beside a JNI library opened as plain text even though clangd and pyright were already in the catalogue. They now paint instantly from their own mode, and gain completion, hover and semantic colour when a server is installed.
+
+- **Markdown tables are edited as tables.** Putting the caret in one no longer turns the whole grid back into pipes: cells are edited in place (only the focused cell shows its own markdown), rows and columns are added, removed and aligned from a strip under the table, `Tab`/`Enter` walk it, and the toolbar's ⊞ inserts a new table from a size grid. Editing normalises that table's markdown.
+
+- **A `#heading` link finds its heading.** Ids are the heading's own text, by GitHub's rule character for character, so an anchor copied from a generated table of contents lands: accents are kept, repeated titles get `-1`, underlined headings count, and a `#` comment inside a code fence is no longer mistaken for a heading further up the document. A hand-written anchor is forgiven its missing accents and the doubled dashes GitHub leaves where punctuation stood between two spaces.
+
+- **`](` completes a link's target.** Every file in the project, written relative to the document being edited, and every heading in it — offered from the same scan the jump uses, so an id that appears in the list is one that lands. Typing `#` narrows it to headings, each shown with its title.
+
+- **Links in rendered markdown follow, on Ctrl/Cmd+click.** They did nothing at all: in ordinary text a link was painted as a coloured span with no address in it, so there was nothing for a click to follow — while the same link inside a table cell worked, which made the feature look present. External URLs, `#heading` anchors and relative file paths now open in the browser, jump to the heading, or open the file in a tab; a `guida.md#uso` link lands on the heading in the file it opens. A plain click still places the caret, and the hand cursor shows only while the key is held.
+
+- **Fixed: clicking a line in a markdown document landed on the line above.** The rendered-table widget carried a 10px vertical margin, and a margin sits outside the box the editor measures — so every line below a table was drawn about one line lower than the editor believed it was. The spacing is padding now.
+
+- **The language on a fenced code block reads as a caption** — smaller, italic and in the UI font — instead of looking like the block's first line of code.
+
+- **Mermaid source is highlighted.** Inside a fence with the caret in it, and in a `.mmd` file of its own: arrows, node labels and the diagram type each read apart from the node names around them. Prism's own mermaid grammar is replaced rather than used — it names its tokens things no theme here styles, which rendered a diagram as one orange keyword and a page of white.
+
+- **Mermaid diagrams render in markdown.** A ```mermaid fence is drawn in the theme's colours wherever Arbor shows markdown, with the caret inside it bringing the source back. The library is bundled but split out: a document with no diagram never loads it.
+
+- **An HTML file can be previewed beside its source.** A resizable split, in a sandboxed frame with no origin of its own — it cannot reach Arbor, its storage or your files — so rendering asks nothing. Its own scripts are the one question, answered from the preview's bar for this once or always for that file, and taken back from the same place. It renders the buffer rather than the file on disk, and ⤢ grows it to nearly the whole window.
+
+- **Scripts can be saved as run configurations.** A new *Script* category beside Application, Spring Boot, JUnit and Cargo — the file, its arguments, a working directory and environment variables — offered on every project, since a `.sh` or a `.ps1` lives in repositories of every kind.
+
+- **A `.merula` file has an icon of its own** — the product's step sequencer, reduced to what survives at 16px.
+
+- **Fixed: dragging inside the app did nothing.** Tauri's OS-level drag-and-drop handler is on by default and swallows the webview's own drag session, so no drop target ever lit up and nothing ever moved — while the drag image still followed the pointer, which made it look like the gesture was working. Turned off for every window; Arbor listens for no native drop event.
+
+- **The project tree says where a drag will land.** The destination folder is outlined rather than tinted, the dragged row dims, and a drag over a file now resolves to the folder that holds it — every row is a target instead of half of them being dead.
+
+- **The ▶ runs scripts and Rust too.** A `.sh`, `.bat`/`.cmd` or `.ps1` gets an arrow on its first line and runs in the Run console with the usual output, input and Stop — saving the buffer first. Rust gets rust-analyzer's own Run / Debug lenses, which were held back until the console could launch a `runnable`: pressing one runs the exact package, binary or single test the server names. A `.bat` off Windows, or a `.sh` on a Windows box without Git Bash, is refused with what was looked for and where.
+
+- **A green ▶ in the editor gutter runs a Java `main`.** It appears beside the method for any class the project's entry-point scan knows, and offers Run, Debug, or the configuration editor when the run needs arguments or VM flags. Running from the gutter saves no configuration.
+
+- **A file can be moved by dragging it onto a folder in Bennu's Project tree** (or with *Move to folder…* from its right-click menu). It is the same operation as a rename: the buffer is saved first, an open tab follows, the destination is never overwritten, and a language server's edits travel with it — the move asks for confirmation, naming the files it would edit, whenever it sets one of those off. Moving a `.java` into another package warns that its `package` line is not rewritten.
+
+- **Fenced code blocks highlight the languages Arbor is built around.** A ```dig, ```merula, ```wgsl or ```ron block in any markdown surface is coloured like the editor colours the file, instead of reading as grey text; `.properties` and JSP fences highlight too. Prism's `builtin`, `variable` and `symbol` tokens are styled at last, which also colours python builtins and shell variables in every other fence.
+
+- **Markdown alerts render as callouts.** `> [!WARNING]` (and `NOTE` / `TIP` / `IMPORTANT` / `CAUTION`, plus the Obsidian words that mean the same things) becomes a coloured band with an icon and a title, in every place Arbor shows markdown. The line under the caret still shows its markup, like the rest of the live preview.
+
+- **`.md` files open rendered in Bennu.** A README opens in the same live-preview editor Garrulus's notes use — tables, images, highlighted code — and stays an ordinary editable buffer: dirty state, `Ctrl+S` and autosave are unchanged. The toolbar button (and two Command Palette entries) switches to the markdown source, and the choice is remembered.
+
+- **Local History compares side by side.** Its diff pane now opens with the picked revision left and the file on disk right, each changed line opposite the one that replaced it; the header button (or `Alt+D`) switches back to the unified patch, and the choice is remembered. The window itself is larger, so the two columns have room.
+
 ### Fixed
+
+- **A bare `<https://…>` no longer vanishes from a rendered markdown document.** The angle brackets were hidden as markup and the address with them, leaving an empty line where the link had been written.
+
+- **The Editor, Completion and Java settings pages act on the editor.** Word wrap, whitespace glyphs, the line-number gutter, the current-line tint, code folding and "fold block comments on open", the completion popup's auto-open, its delay and case-sensitive matching, the default source encoding and the indexer's excluded directories were all values the settings modal stored and nothing read. Each now applies — the editor ones to the file already open — and persists with the rest of Bennu's configuration.
+
+- **The editor font size setting applies, and is remembered.** It was a number the settings modal stored and nothing read — the editor kept the app's code size, and closing the window forgot the choice. It now reaches the editing surface live and persists with the rest of Bennu's configuration.
+
+- **Redo works on Windows in merula's editor.** Delete-line had taken `Ctrl+Y`, which is the only redo that platform binds by default; it is on `Ctrl+Shift+Z` there now, as everywhere else.
+
+- **`Cmd+Backspace` deletes the whole line on a Mac.** It removed only the part left of the caret — CodeMirror's own binding — so IntelliJ's delete-line looked right only when the caret was already at the end of the line. `Ctrl+Y` is unchanged, and `Ctrl+Backspace` on Windows and Linux still deletes the previous word.
 
 - **Explicit completion works on macOS.** It was bound to `Ctrl+Space` and `Ctrl+Shift+Space`, which macOS claims for switching input source above the application — neither produces a key event there, so the shortcut was unreachable rather than broken. On a Mac the chord is now `Cmd+Shift+Space`; the Control ones are unchanged everywhere else.
 

@@ -16,25 +16,20 @@
  */
 
 import {
-  EditorView, lineNumbers, keymap, hoverTooltip,
+  EditorView, lineNumbers, keymap, hoverTooltip, highlightWhitespace,
   highlightActiveLine, highlightActiveLineGutter, drawSelection,
   ViewPlugin, Decoration, type DecorationSet, type KeyBinding, type PluginValue, type ViewUpdate,
 } from '@codemirror/view';
 import {
   Compartment, EditorState, StateField, StateEffect, Prec, type Extension, type Text,
 } from '@codemirror/state';
-import {
-  history, defaultKeymap, historyKeymap, indentWithTab, deleteLine, redo,
-  moveLineUp, moveLineDown,
-} from '@codemirror/commands';
+import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, indentOnInput, foldKeymap, foldGutter, codeFolding } from '@codemirror/language';
 import { lintGutter, lintKeymap } from '@codemirror/lint';
-import {
-  search, searchKeymap, highlightSelectionMatches, selectNextOccurrence,
-} from '@codemirror/search';
+import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import {
   autocompletion, completionKeymap, startCompletion, acceptCompletion,
-  closeBrackets, closeBracketsKeymap,
+  closeBrackets, closeBracketsKeymap, type CompletionSource,
 } from '@codemirror/autocomplete';
 
 import { documentHighlights, serverFolding } from './server-layers';
@@ -44,9 +39,9 @@ import { codeLensLayer } from './code-lens';
 import { snippetStops } from './snippet-stops';
 import type { LanguageDescriptor, Tree, Node } from './types';
 import { createHighlightPlugin } from './highlight';
-import { createFoldingExtension } from './folding';
+import { createFoldingExtension, foldBlockCommentsOnLoad } from './folding';
 import { emmetKeymap } from './emmet';
-import { duplicateSelection } from './commands';
+import { intellijEditingKeymap } from './intellij-keymap';
 import { rainbowBrackets } from './rainbow-brackets';
 import { indentGuides } from './indent-guides';
 import { stickyScroll } from './sticky-scroll';
@@ -122,8 +117,15 @@ export function historyReset() {
   return historyCompartment.reconfigure(history());
 }
 
-export interface CodeEditorExtensionsOptions {
-  readOnly?: boolean;
+/**
+ * The parts of the editing surface a **user setting** turns on and off.
+ *
+ * Separated from the rest of the options because they share one property none of the others
+ * have: the answer can change while a file is open. They live in {@link preferencesCompartment}
+ * and are rebuilt by the closure `createCodeEditorExtensions` hands back, so flipping "word
+ * wrap" reconfigures the buffer in front of you instead of the next one you open.
+ */
+export interface CodeEditorPreferences {
   /**
    * Show the line-number gutter. `true` by default — a buffer is navigated by line.
    *
@@ -133,6 +135,49 @@ export interface CodeEditorExtensionsOptions {
    * "line 2" is not how anyone refers to a part of a query they can see all of.
    */
   lineNumbers?: boolean;
+  /** Tint the line the caret is on (and its gutter number). `true` by default. */
+  highlightActiveLine?: boolean;
+  /** Render spaces and tabs as visible glyphs. Off by default — it is a mode you turn on to
+   *  answer a question about indentation, not a way to read code. */
+  showWhitespace?: boolean;
+  /** Wrap long lines to the viewport instead of scrolling sideways. Off for a document (a
+   *  source file has a column budget and the horizontal scrollbar is how you notice you blew
+   *  it); on for the editors that are a *field* in a narrow box. */
+  wrap?: boolean;
+  /** Install folding at all — the gutter arrows and the fold commands. `true` by default;
+   *  off leaves the gutter column back to the text. */
+  folding?: boolean;
+  /** Collapse the block comments of a file when it opens. Needs `folding`, and a language
+   *  that both folds and declares its block-comment tokens. */
+  foldBlockComments?: boolean;
+  /** How the completion popup behaves. Ignored by an editor whose language brings no
+   *  completion source, and by a read-only one. */
+  completion?: CompletionPreferences;
+}
+
+/** The completion-popup half of {@link CodeEditorPreferences}. */
+export interface CompletionPreferences {
+  /** Open the popup on its own while an identifier is being typed. `true` by default; off
+   *  leaves completion to the explicit chord. */
+  autoPopup?: boolean;
+  /** How long the typing must pause before the auto-popup opens, in milliseconds. */
+  delayMs?: number;
+  /** Require the candidate to start with the typed prefix, matching case. Off by default,
+   *  which is CodeMirror's fuzzy, case-insensitive matching. */
+  caseSensitive?: boolean;
+}
+
+/**
+ * The compartment holding whatever {@link CodeEditorPreferences} currently say.
+ *
+ * One module-level compartment is enough for every editor: a `Compartment` is an identity used
+ * as a key inside a state, not state itself, so two views can hold different contents under the
+ * same key (`historyCompartment` above works the same way).
+ */
+export const preferencesCompartment = new Compartment();
+
+export interface CodeEditorExtensionsOptions extends CodeEditorPreferences {
+  readOnly?: boolean;
   /** Draw a vertical margin guide at this 1-based character column (IntelliJ-style).
    *  Omitted / ≤ 0 → no ruler. */
   rulerColumn?: number;
@@ -178,9 +223,11 @@ export interface CodeEditorExtensionsOptions {
   keyBindings?: readonly KeyBinding[];
 }
 
-/** Build the full extension set for one editor bound to `lang`. Returns the
- *  extensions plus the `getTree` reader (so a host component can implement
- *  go-to-decl / structure against the same live tree the highlighter maintains). */
+/** Build the full extension set for one editor bound to `lang`. Returns the extensions, the
+ *  `getTree` reader (so a host component can implement go-to-decl / structure against the same
+ *  live tree the highlighter maintains), and `preferences` — the builder for
+ *  {@link preferencesCompartment}, so the host can reconfigure a live buffer when a setting
+ *  changes instead of waiting for the next mount. */
 /** The fold gutter's arrow. Shared by the Lezer and the provider-driven folding, so the two look the
  *  same — a fold is a fold, whoever found it. */
 function foldMarkerDOM(open: boolean): HTMLElement {
@@ -190,10 +237,65 @@ function foldMarkerDOM(open: boolean): HTMLElement {
   return el;
 }
 
+/**
+ * The completion popup, configured by the user's {@link CompletionPreferences}.
+ *
+ * `autoPopup` and its delay map straight onto CodeMirror's own options. **Case sensitivity does
+ * not**: the library ranks a case match above a case-insensitive one but still offers both, and
+ * there is no option to stop it. So it is enforced where the candidates are: the source is
+ * wrapped, and when the setting is on, an option whose label does not start with the typed
+ * prefix — same letters, same case — is dropped before the list is ever scored.
+ */
+function completionExtension(
+  source: CompletionSource,
+  prefs: CompletionPreferences | undefined,
+): Extension {
+  const autoPopup = prefs?.autoPopup !== false;
+  return [
+    autocompletion({
+      override: [prefs?.caseSensitive ? caseSensitiveSource(source) : source],
+      defaultKeymap: false,
+      activateOnTyping: autoPopup,
+      ...(prefs?.delayMs !== undefined ? { activateOnTypingDelay: Math.max(0, prefs.delayMs) } : {}),
+    }),
+    // Member-access trigger: CodeMirror's `activateOnTyping` only auto-opens the popup on
+    // identifier characters, so a bare `receiver.` never queries the source. Fire completion
+    // explicitly right after a `.` is typed (the source's dot branch returns an empty-prefix
+    // result → the popup opens on the members). Gated on the same preference: an editor told
+    // not to open the popup by itself must not open it on a dot either.
+    autoPopup
+      ? EditorView.updateListener.of((u) => {
+          if (!u.docChanged) return;
+          let typedDot = false;
+          u.changes.iterChanges((_fromA, _toA, _fromB, _toB, inserted) => {
+            if (inserted.sliceString(0).endsWith('.')) typedDot = true;
+          });
+          if (typedDot) startCompletion(u.view);
+        })
+      : [],
+  ];
+}
+
+/** Wrap a completion source so only candidates matching the typed prefix's CASE survive. */
+function caseSensitiveSource(source: CompletionSource): CompletionSource {
+  return async (context) => {
+    const result = await source(context);
+    if (!result) return result;
+    const typed = context.state.sliceDoc(result.from, context.pos);
+    if (!typed) return result;
+    const options = result.options.filter((o) => o.label.startsWith(typed));
+    return { ...result, options };
+  };
+}
+
 export function createCodeEditorExtensions(
   lang: LanguageDescriptor,
   opts: CodeEditorExtensionsOptions = {},
-): { extensions: Extension; getTree: ReturnType<typeof createHighlightPlugin>['getTree'] } {
+): {
+  extensions: Extension;
+  getTree: ReturnType<typeof createHighlightPlugin>['getTree'];
+  preferences: (prefs: CodeEditorPreferences) => Extension;
+} {
   const { plugin: highlight, getTree } = createHighlightPlugin(lang);
 
   // A descriptor may bring its own CodeMirror language extension (a `LanguageSupport`
@@ -206,13 +308,70 @@ export function createCodeEditorExtensions(
   // Client-side folding — installed only when the descriptor opts in via
   // `foldNode`. It reads the same live tree the highlighter maintains (no
   // backend), so folding is free once a grammar loads.
-  const folding = createFoldingExtension(lang, getTree);
+  //
+  // Collected rather than pushed: folding is one of the preferences (see
+  // `CodeEditorPreferences.folding`), so it lives in the compartment with them and the whole
+  // set — gutter, service, fold state — comes and goes together when the setting flips.
+  const foldingExts: Extension[] = [createFoldingExtension(lang, getTree)];
+
+  // Lezer folding for a `cmExtension` language that opts in (`cmFold`) — drives the
+  // fold gutter from the language's own `foldNodeProp` (e.g. `lang-html` folds tag
+  // bodies, `lang-json` folds objects). Tree-sitter descriptors fold via `foldNode`
+  // above; legacy StreamLanguage modes stay gutter-free (they carry no fold info).
+  if (useCm && lang.cmFold) {
+    foldingExts.push(codeFolding(), foldGutter({ markerDOM: foldMarkerDOM }));
+  }
+
+  // Folding from a PROVIDER's ranges, for a language whose descriptor says its folds come from
+  // outside the buffer. A legacy stream mode carries no fold information at all — which is why a
+  // `.rs` file had no fold gutter — and brace matching would find the function bodies and nothing
+  // else, where a server folds by item. The ranges are pushed by the host; this installs the
+  // machinery that uses them.
+  if (lang.serverFold) {
+    foldingExts.push(codeFolding(), foldGutter({ markerDOM: foldMarkerDOM }), serverFolding());
+  }
+
+  // The completion source a language brings, if it brings one. Read here because the popup's
+  // BEHAVIOUR is a preference (auto-popup, delay, case) while its CONTENT is the language's.
+  const completionSource = lang.intel?.completion;
+
+  // Each toggleable piece is built ONCE and composed by value below. Reconfiguring a
+  // compartment with the same extension value keeps the state field / view plugin behind it
+  // alive, so flipping word wrap doesn't re-run the one-shot comment fold or rebuild the gutter.
+  const lineNumberGutter = lineNumbers();
+  const activeLineHighlight = [highlightActiveLine(), highlightActiveLineGutter()];
+  const whitespaceGlyphs = highlightWhitespace();
+  const commentFoldOnLoad = foldBlockCommentsOnLoad(lang, getTree);
+
+  /**
+   * Build the contents of {@link preferencesCompartment} for one set of preferences.
+   *
+   * Everything a setting can turn on or off is assembled here and nowhere else, so a live
+   * reconfigure and a fresh mount cannot end up with different surfaces.
+   */
+  const buildPreferences = (prefs: CodeEditorPreferences): Extension => [
+    // Absent, not empty: an unwanted gutter still costs its horizontal column.
+    prefs.lineNumbers === false ? [] : lineNumberGutter,
+    prefs.highlightActiveLine === false ? [] : activeLineHighlight,
+    prefs.showWhitespace ? whitespaceGlyphs : [],
+    prefs.wrap ? EditorView.lineWrapping : [],
+    prefs.folding === false ? [] : foldingExts,
+    // Folding the comments needs the folding: `foldEffect` on a state with no fold field is
+    // dropped silently, which would look like a setting that works some days.
+    prefs.folding !== false && prefs.foldBlockComments ? commentFoldOnLoad : [],
+    completionSource && !opts.readOnly
+      ? completionExtension(completionSource, prefs.completion)
+      : [],
+  ];
 
   const exts: Extension[] = [
     codeEditorTheme,
     codeEditorHighlightStyle,
-    // Absent, not empty: an unwanted gutter still costs its horizontal column.
-    ...(opts.lineNumbers === false ? [] : [lineNumbers()]),
+    // The settings-driven half of the surface (line numbers, active line, whitespace glyphs,
+    // wrap, folding, completion behaviour). Here rather than anywhere else because it holds the
+    // line-number gutter, and gutter order follows extension order — earlier is further left,
+    // which is what keeps the host's breakpoint column outside the numbers.
+    preferencesCompartment.of(buildPreferences(opts)),
     // In a compartment so the host can RESET it. A controlled `value` swap replaces the whole
     // document without remounting the view, and the edits of the file that was there a moment
     // ago are still undoable — expressed as positions in a text that is gone. See
@@ -229,9 +388,6 @@ export function createCodeEditorExtensions(
     // both (via `closeBracketsKeymap`). Language-aware: the pairs come from the language
     // data (`closeBrackets`), so a JSP/XML descriptor won't try to close a `'` inside text.
     closeBrackets(),
-    folding,
-    highlightActiveLine(),
-    highlightActiveLineGutter(),
     highlightSelectionMatches(),
     search({ top: true }),
     useCm ? (lang.cmExtension as Extension) : highlight,
@@ -261,23 +417,6 @@ export function createCodeEditorExtensions(
   // to compose them into.
   if (lang.editing) exts.push(lang.editing);
 
-  // Lezer folding for a `cmExtension` language that opts in (`cmFold`) — drives the
-  // fold gutter from the language's own `foldNodeProp` (e.g. `lang-html` folds tag
-  // bodies, `lang-json` folds objects). Tree-sitter descriptors fold via `foldNode`
-  // above; legacy StreamLanguage modes stay gutter-free (they carry no fold info).
-  if (useCm && lang.cmFold) {
-    exts.push(codeFolding(), foldGutter({ markerDOM: foldMarkerDOM }));
-  }
-
-  // Folding from a PROVIDER's ranges, for a language whose descriptor says its folds come from
-  // outside the buffer. A legacy stream mode carries no fold information at all — which is why a
-  // `.rs` file had no fold gutter — and brace matching would find the function bodies and nothing
-  // else, where a server folds by item. The ranges are pushed by the host; this installs the
-  // machinery that uses them.
-  if (lang.serverFold) {
-    exts.push(codeFolding(), foldGutter({ markerDOM: foldMarkerDOM }), serverFolding());
-  }
-
   // Occurrence highlighting — where else the symbol under the caret appears. Installed whenever the
   // descriptor is provider-backed, because that is exactly when there is something to push: it costs
   // one state field holding an empty decoration set until the host pushes anything.
@@ -304,12 +443,11 @@ export function createCodeEditorExtensions(
   if (opts.stickyScroll) exts.push(stickyScroll());
   if (opts.scrollbarOverview) exts.push(scrollbarOverview());
 
-  // Language intelligence (autocomplete) — only when the descriptor supplies a
-  // completion source and the editor is editable. Added before the base keymap
-  // so its completion keymap (Enter / ↑↓ / Esc while the popup is open) wins.
-  const completionSource = lang.intel?.completion;
+  // Language intelligence (autocomplete) — only when the descriptor supplies a completion source
+  // and the editor is editable. The extension itself is a PREFERENCE (auto-popup, delay, case —
+  // see `completionExtension`) and lives in the compartment; only its keymap is installed here,
+  // before the base keymap, so Enter / ↑↓ / Esc while the popup is open win.
   if (completionSource && !opts.readOnly) {
-    exts.push(autocompletion({ override: [completionSource], defaultKeymap: false }));
     // The completion keymap MUST win over `defaultKeymap` while the popup is open, or
     // `defaultKeymap`'s Enter (insert newline) fires first and the accepted item is never
     // inserted. `Prec.highest` puts it above the base keymap regardless of push order; each
@@ -343,18 +481,6 @@ export function createCodeEditorExtensions(
     // only once it has closed does Tab walk the stops. Every binding returns false with no run
     // active, so Tab keeps its ordinary meaning the rest of the time.
     exts.push(snippetStops());
-    // Member-access trigger: CodeMirror's `activateOnTyping` only auto-opens the popup
-    // on identifier characters, so a bare `receiver.` never queries the source. Fire
-    // completion explicitly right after a `.` is typed (the source's dot branch returns
-    // an empty-prefix result → the popup opens on the members).
-    exts.push(EditorView.updateListener.of((u) => {
-      if (!u.docChanged) return;
-      let typedDot = false;
-      u.changes.iterChanges((_fromA, _toA, _fromB, _toB, inserted) => {
-        if (inserted.sliceString(0).endsWith('.')) typedDot = true;
-      });
-      if (typedDot) startCompletion(u.view);
-    }));
   }
 
   // Ghost text — the greyed continuation at the caret, Tab to accept. Installed
@@ -398,28 +524,10 @@ export function createCodeEditorExtensions(
 
   exts.push(
     keymap.of([
-      // IntelliJ: Ctrl+Y deletes the current line. First in the list so it wins over
-      // the Windows redo binding (Mod-y) that historyKeymap also maps to Ctrl-y.
-      { key: 'Ctrl-y', run: deleteLine, preventDefault: true },
-      // …which leaves the editor with NO redo on Windows and Linux: `historyKeymap` binds redo to
-      // `Mod-y` there and to `Mod-Shift-z` only on macOS, so taking `Ctrl-y` for delete-line took
-      // the only one there was. `Ctrl/Cmd+Shift+Z` is what IntelliJ and VS Code use everywhere.
-      { key: 'Mod-Shift-z', run: redo, preventDefault: true },
-      // The IDE verbs CodeMirror has no binding for. All three are keys an
-      // IntelliJ-trained hand presses without looking, and finding nothing there is
-      // what makes an editor feel like a text box.
-      //
-      // `Mod-d` duplicates: the most-used editing verb after copy and paste, and
-      // the one `defaultKeymap` has no command for at all.
-      { key: 'Mod-d', run: duplicateSelection, preventDefault: true },
-      // `Alt-j` adds the next occurrence of the selection as a second cursor —
-      // IntelliJ's own key for it. VS Code puts this on `Mod-d`; both cannot have
-      // it, and duplicating is asked for far more often than multi-select.
-      { key: 'Alt-j', run: selectNextOccurrence, preventDefault: true },
-      // Moving a line: `Alt+↑/↓` comes from `defaultKeymap`, and these are the
-      // IntelliJ spelling of the same thing. An alias, not a second feature.
-      { key: 'Mod-Shift-ArrowUp', run: moveLineUp, preventDefault: true },
-      { key: 'Mod-Shift-ArrowDown', run: moveLineDown, preventDefault: true },
+      // The IntelliJ keys, shared with merula's editor (see `./intellij-keymap`). First in
+      // the list because two of them are keys `defaultKeymap` / `historyKeymap` already
+      // bind — delete-line has to beat redo on Windows and delete-to-line-start on a Mac.
+      ...intellijEditingKeymap(),
       // Before the default keymap so Backspace deletes an empty auto-inserted pair.
       ...closeBracketsKeymap,
       ...defaultKeymap, ...historyKeymap, ...lintKeymap, ...foldKeymap,
@@ -485,7 +593,7 @@ export function createCodeEditorExtensions(
     exts.push(ctrlHoverLink());
   }
 
-  return { extensions: exts, getTree };
+  return { extensions: exts, getTree, preferences: buildPreferences };
 }
 
 // ── Ctrl/Cmd-hover link affordance ──────────────────────────────────────────────

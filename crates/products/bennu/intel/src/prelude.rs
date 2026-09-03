@@ -84,7 +84,7 @@ pub use crate::spell::{
 pub use crate::java_index::{
     background_workers, build_project_index, build_project_index_from_sources, collect_java,
     file_records_from_source, parallel_map, parallel_map_capped, project_type_map,
-    read_java_sources, read_source_for_index, set_background_workers, ClassDecl,
+    read_java_sources, read_source_for_index, set_background_workers, set_excluded_dirs, ClassDecl,
     NonCompliantSource, ProjectBuild, ProjectSources,
 };
 

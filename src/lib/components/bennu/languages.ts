@@ -13,14 +13,17 @@
  *    grammar wasm the Merula window parses with).
  * 2. **Lezer languages** — HTML (`@codemirror/lang-html`, with embedded JS/CSS and tag
  *    folding), JSON, Markdown.
- * 3. **language-server backed** — **Rust** ({@link lspLanguage}), plus **TypeScript**,
- *    **JavaScript**, **Svelte** and **HTML** ({@link lspLanguageFrom}): a base highlighter for
+ * 3. **language-server backed** — **Rust**, **C**, **C++** and **Python**
+ *    ({@link lspLanguage}), plus **TypeScript**, **JavaScript**, **Svelte** and **HTML**
+ *    ({@link lspLanguageFrom}): a base highlighter for
  *    the instant local colour — a legacy stream mode for Rust, a real Lezer grammar for the
  *    JS family and the two markup ones — plus completion and hover from the server, and
  *    semantic tokens layered on top by the editor host. Go-to, find-usages, diagnostics and
  *    rename ride the shared handlers, so they need nothing here. HTML is in this tier for
  *    **Angular**, whose server serves a project's templates; where no server serves the file
- *    the two hooks answer nothing and the tier costs nothing.
+ *    the two hooks answer nothing and the tier costs nothing — which is also what makes C,
+ *    C++ and Python worth putting here rather than in tier 4: with clangd or pyright installed
+ *    they gain completion, hover and semantic colour, and with neither they are still coloured.
  * 4. **legacy stream modes** — XML, YAML, `.properties`, CSS/SCSS/LESS, shell and
  *    **TOML**, plus SQL through the shared per-dialect modes. Colour only — except a
  *    `Cargo.toml`, which gets the manifest schema's completion and diagnostics on top
@@ -34,7 +37,7 @@
 
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
 import {
-  sqlHighlight, dtdLanguage, ronLanguageExtension, wgslLanguageExtension,
+  sqlHighlight, dtdLanguage, ronLanguageExtension, mermaidLanguageExtension, wgslLanguageExtension,
   type SqlDialect,
 } from '$lib/components/shared/ui/code-editor';
 import type { Extension } from '@codemirror/state';
@@ -46,6 +49,8 @@ import { yaml } from '@codemirror/legacy-modes/mode/yaml';
 import { rust } from '@codemirror/legacy-modes/mode/rust';
 import { toml } from '@codemirror/legacy-modes/mode/toml';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
+import { c, cpp } from '@codemirror/legacy-modes/mode/clike';
+import { python } from '@codemirror/legacy-modes/mode/python';
 import { json as jsonLang } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { html } from '@codemirror/lang-html';
@@ -182,6 +187,24 @@ const yamlLang = streamLang('yaml', yaml);
 const springYamlLang = springPropsLang('spring-yaml', yaml);
 const springPropertiesLang = springPropsLang('spring-properties', properties);
 const shellLang = streamLang('shell', shell);
+/**
+ * C, C++ and Python — coloured **whether or not a server is running**.
+ *
+ * clangd and pyright are both in the LSP catalogue, so navigation and completion were already
+ * offered on these files the moment one of them was installed. The colour was not: nothing mapped
+ * the extensions to a mode, so a `.py` beside a Java project — a build script, a one-off
+ * migration, the generator that writes half the resources — opened as plain text, and looked
+ * broken in a way that had nothing to do with any server.
+ *
+ * `lspLanguage` is the shape for exactly this: the stream mode paints the file instantly and
+ * locally, and whatever a server has to say arrives on top of it. With no server the file is
+ * still a coloured file, which is the whole point of asking.
+ *
+ * Built once — the identity has to be stable or the editor remounts on every keystroke.
+ */
+const cLang = lspLanguage('c', c, { line: '//', block: { open: '/*', close: '*/' } });
+const cppLang = lspLanguage('cpp', cpp, { line: '//', block: { open: '/*', close: '*/' } });
+const pythonLang = lspLanguage('python', python, { line: '#' });
 // Rust: the legacy mode for the instant local colour, plus everything a language server adds.
 // Built once — the identity has to be stable or the editor remounts on every keystroke.
 const rustLang = lspLanguage('rust', rust, {
@@ -203,6 +226,17 @@ const rustLang = lspLanguage('rust', rust, {
  * shared by both uses — the identity has to be stable or an editor remounts on every keystroke.
  */
 export const ronLanguage = cmLang('ron', ronLanguageExtension);
+
+/**
+ * Mermaid — the diagrams a `.md` in this project is full of, in a file of their own.
+ *
+ * The same source has two readers and they are coloured by two different things, which is worth
+ * saying once: a ```mermaid **fence** inside markdown goes through Prism (the markdown editor
+ * tokenises fences with it, and Prism ships a mermaid grammar), a `.mmd` **file** goes through
+ * this mode. Neither can serve the other — one paints a string, the other a buffer — so the pair
+ * is deliberate rather than duplicated.
+ */
+export const mermaidDiagramLanguage = cmLang('mermaid', mermaidLanguageExtension);
 /**
  * Rust source that is **not a file** — a macro expansion.
  *
@@ -321,9 +355,18 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'yml': case 'yaml': return yamlLang;
     case 'properties': case 'ini': case 'conf': case 'cfg': return propsLang;
     case 'ron': return ronLanguage;
+    case 'mmd': case 'mermaid': return mermaidDiagramLanguage;
     case 'wgsl': return wgslLang;
     case 'sql': return sqlLangFor(bennuSettingsStore.sqlDialect);
     case 'sh': case 'bash': case 'zsh': return shellLang;
+    case 'c': return cLang;
+    // ⚠️ A `.h` gets the **C++** mode, and the choice is not a coin toss: the two modes differ
+    // only in vocabulary, so a C header read as C++ has a few keywords coloured that it will
+    // never contain (harmless), while a C++ header read as C leaves `class`, `template` and
+    // `namespace` grey — which is most of what a C++ header is made of.
+    case 'cpp': case 'cc': case 'cxx': case 'c++':
+    case 'hpp': case 'hh': case 'hxx': case 'h': return cppLang;
+    case 'py': case 'pyi': case 'pyw': return pythonLang;
     default: return plainLang;
   }
 }

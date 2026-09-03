@@ -40,6 +40,8 @@ import 'prismjs/components/prism-powershell';
 import 'prismjs/components/prism-markup';             // HTML / XML / SVG (also the base for markup-templating)
 import 'prismjs/components/prism-markup-templating';  // base for template languages (JSP, PHP…)
 import 'prismjs/components/prism-docker';
+// `.properties` — a Java project's other configuration file, and the one a README quotes.
+import 'prismjs/components/prism-properties';
 
 // Custom grammars (Svelte, …). Each module registers itself into
 // `Prism.languages` on import.

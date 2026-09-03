@@ -21,6 +21,44 @@
   frames in it are links. A clean Java build re-indexes <code>target/classes</code>, so
   completion sees what you just compiled.
 </p>
+<h2>The ▶ in the gutter</h2>
+<p>
+  A Java file that declares a <code>main</code> gets a green <strong>▶</strong> beside that line,
+  in the same column the framework marks use. Pressing it offers <strong>Run</strong>,
+  <strong>Debug</strong> and <em>Edit configurations…</em>; running from here launches the class
+  straight away, with no arguments, no VM flags and the <code>runtime</code> classpath — a run
+  that needs any of those is a run that wants a configuration, which is what the third entry is
+  for. Nothing is saved behind your back: pressing ▶ eleven times leaves no configurations.
+</p>
+<p>
+  The arrow appears only for a class the project's <strong>entry-point scan</strong> knows, so what
+  gets launched is a class the compiler agrees exists rather than a name assembled from the
+  <code>package</code> line. Which <em>line</em> it sits on is read from the buffer in front of
+  you, so a <code>main</code> you have just typed gets its arrow without waiting for a reindex.
+</p>
+<p>
+  <strong>Rust</strong> gets its arrow from rust-analyzer, as a code lens above every
+  <code>fn main</code> and every <code>#[test]</code>. Pressing it runs exactly what the server
+  says: the package, the binary or the single test with <code>--exact</code>, with its own
+  arguments passed through untouched. <em>Debug</em> beside it builds first and launches the binary
+  under the debugger, because a native program cannot be debugged by starting it differently.
+</p>
+<p>
+  <strong>Scripts</strong> — <code>.sh</code>, <code>.bat</code> / <code>.cmd</code>,
+  <code>.ps1</code> — get one too, on their first line, and pressing it saves the buffer before
+  running: a script is edited and run in the same breath, and launching the copy on disk would run
+  the line you just fixed. Output, input and Stop are the console's usual ones.
+</p>
+<p>
+  What can actually run depends on the machine, and the refusal says so instead of the arrow going
+  grey: a <code>.bat</code> is <code>cmd.exe</code> syntax and only Windows has one; a
+  <code>.sh</code> on Windows needs <strong>Git Bash</strong> (looked for under Program Files and
+  <code>%LOCALAPPDATA%\Programs\Git</code>) — the <code>bash.exe</code> in <code>System32</code>
+  is deliberately not used, because that is the WSL launcher and a script run through it sees a
+  different filesystem; a <code>.ps1</code> outside Windows needs PowerShell 7
+  (<code>pwsh</code>).
+</p>
+
 <h2>Run configurations</h2>
 <p>
   A run configuration is a named launch target. They live in
@@ -60,6 +98,15 @@
     <strong>Program arguments</strong> after it). Everything but the arguments and the working
     directory is a picker, because the workspace already knows its crates, their targets and their
     features. Offered only on a Cargo project — and the JVM categories only on a Java one.</li>
+  <li><strong>Script</strong> — a <code>.sh</code>, <code>.bat</code> / <code>.cmd</code> or
+    <code>.ps1</code>, with its arguments, a working directory and environment variables. The file
+    is picked rather than typed, and the form says what will interpret it. Offered on
+    <em>every</em> project: a script that builds the front end, seeds a database or deploys
+    something lives in repositories of every kind, and the mixed ones have the most of them.
+    Whether it can run on <em>this</em> machine is answered at launch, not here — a configuration
+    written on Windows is still the right configuration when the repository is opened on a Mac.
+    There is no Debug: a shell script's debugger is <code>set -x</code>, and a 🐞 that quietly ran
+    it plainly would be lying about what happened.</li>
 </ul>
 <p>
   On a project with exactly one entry point you need none of this: press ▷ and Bennu finds it,

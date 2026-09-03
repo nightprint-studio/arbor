@@ -90,6 +90,12 @@
   and the shorter name before the longer.
 </p>
 <p>
+  <strong>Settings → Completion → Popup</strong> decides when the popup arrives and how forgiving
+  it is: whether it opens on its own while you type (and after how long a pause), or only on the
+  chord; and <em>case-sensitive matching</em>, which drops every candidate that does not start with
+  what you typed, spelled the way you typed it — the three ways above stop applying.
+</p>
+<p>
   <strong>A qualified name completes one segment at a time</strong> — in an <code>import</code>, and
   anywhere a name is written out in full. Typing <code>import org.</code> offers
   <code>springframework</code>, not everything beneath it; <code>import

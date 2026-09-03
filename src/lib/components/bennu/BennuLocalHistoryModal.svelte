@@ -23,7 +23,7 @@
    * Either alone is a folder listing that is quietly wrong in one direction, so the column
    * is both — with the ghosts drawn as ghosts.
    */
-  import { History, RotateCcw, Tag, Copy, Check } from 'lucide-svelte';
+  import { History, RotateCcw, Tag, Copy, Check, Columns2, AlignJustify } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
@@ -39,10 +39,12 @@
   import HistoryFolderList, { type FolderRow } from './history/HistoryFolderList.svelte';
   import { rowsFromGroups, rowsFromRevisions, type TimelineRow } from './history/timeline-rows';
   import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
+  import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { revisionContent } from '$lib/ipc/bennu/history';
   import { copyToClipboard } from '$lib/utils/clipboard';
+  import { isKey } from '$lib/utils/keybindings';
   import type { TreeNode } from '$lib/types/bennu';
 
   const s = bennuHistoryStore;
@@ -193,13 +195,41 @@
   function onTimelineSelect(row: TimelineRow) {
     s.select({ file: row.file, revision: row.revision });
   }
+
+  // ── how the diff is drawn ───────────────────────────────────────────────────
+  //
+  // Side by side by default: this window's question is "what did this line used to be", and a
+  // unified patch answers it by putting the old form and the new one rows apart. Remembered in
+  // the Bennu config rather than re-asked every time — a view mode is chosen once.
+  const split = $derived(bennuSettingsStore.historyDiffSplit);
+
+  /**
+   * `Alt+D` flips the layout while the window is open.
+   *
+   * Not Corvus's `Alt+1` / `Alt+2` for the same two verbs, which would have been the consistent
+   * choice: in a Bennu window those two already open the Project and Structure tool windows
+   * (IntelliJ's own), and a key that means two things in one window means neither.
+   *
+   * Only while we are open, and never while a field has focus — the label box is one Tab away.
+   * Matched with `isKey`, not against `event.key`: Option+D on a Mac arrives as `∂`.
+   */
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (!s.open || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (!isKey(e, 'd')) return;
+    const el = e.target as HTMLElement | null;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+    e.preventDefault();
+    bennuSettingsStore.setHistoryDiffSplit(!split);
+  }
 </script>
+
+<svelte:window onkeydown={onWindowKeydown} />
 
 {#if s.open}
   <Modal
     onClose={() => s.close()}
-    width="1120px"
-    height="680px"
+    width="min(1580px, 96vw)"
+    height="min(900px, 92vh)"
     padBody={false}
     ariaLabel="Local history"
   >
@@ -284,18 +314,35 @@
             {:else}
               Diff
             {/if}
-            {#if s.delta && !s.delta.identical}
-              <span class="lh-count">
-                <span class="add">+{s.delta.added}</span>
-                <span class="del">−{s.delta.removed}</span>
-              </span>
-            {/if}
-            {#if s.diffing}<Spinner size={11} />{/if}
+            <div class="lh-head-end">
+              {#if s.delta && !s.delta.identical}
+                <span class="lh-count">
+                  <span class="add">+{s.delta.added}</span>
+                  <span class="del">−{s.delta.removed}</span>
+                </span>
+              {/if}
+              {#if s.diffing}<Spinner size={11} />{/if}
+              <Button
+                size="xs"
+                variant="icon"
+                ariaLabel={split ? 'Show a unified diff' : 'Show the two versions side by side'}
+                tooltip={{
+                  content: split ? 'Unified diff' : 'Side by side',
+                  shortcut: 'Alt+D',
+                }}
+                onclick={() => bennuSettingsStore.setHistoryDiffSplit(!split)}
+              >
+                {#snippet iconStart()}
+                  {#if split}<AlignJustify size={13} />{:else}<Columns2 size={13} />{/if}
+                {/snippet}
+              </Button>
+            </div>
           </div>
           <div class="lh-diff">
             <TextDiff
               hunks={s.delta?.hunks ?? []}
               identical={s.delta?.identical ?? false}
+              mode={split ? 'split' : 'unified'}
               emptyMessage="Pick a revision to see what it changed."
               identicalMessage="This revision is identical to what is on disk."
             />
@@ -363,8 +410,8 @@
   .lh-cols { display: flex; flex: 1; min-height: 0; }
   .lh-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .lh-col + .lh-col { border-left: 1px solid var(--border-subtle); }
-  .lh-left { width: 300px; flex: none; }
-  .lh-mid { width: 250px; flex: none; }
+  .lh-left { width: 320px; flex: none; }
+  .lh-mid { width: 260px; flex: none; }
   .lh-right { flex: 1; }
 
   .lh-col-h {
@@ -374,6 +421,10 @@
     color: var(--text-faint); border-bottom: 1px solid var(--border-subtle);
   }
   .lh-count { margin-left: auto; display: flex; gap: 7px; text-transform: none; letter-spacing: 0; }
+  /* The diff header's trailing group — counts, spinner, layout toggle — as ONE item, so a
+     single auto margin puts the lot at the right edge whatever is currently in it. */
+  .lh-head-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .lh-head-end .lh-count { margin-left: 0; }
   .lh-count .add { color: var(--success); }
   .lh-count .del { color: var(--error); }
   .lh-diff-of {

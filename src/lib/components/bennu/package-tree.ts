@@ -57,6 +57,24 @@ export function isInPackageRoot(path: string): boolean {
 }
 
 /**
+ * The Java package a directory stands for, or `null` when it is not under a source root.
+ *
+ * `…/src/main/java/it/acme/web` → `it.acme.web`; the source root itself → `''` (the default
+ * package, which is a real answer and not "no answer"). Path-derived, like everything else here:
+ * the folder chain under a source root **is** the package, which is why a file moved between two
+ * of them needs its declaration rewritten and a file moved anywhere else does not.
+ */
+export function packageOfDir(path: string): string | null {
+  const fwd = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  for (const suffix of SOURCE_ROOT_SUFFIXES) {
+    if (fwd === suffix || fwd.endsWith('/' + suffix)) return '';
+    const at = fwd.indexOf('/' + suffix + '/');
+    if (at >= 0) return fwd.slice(at + suffix.length + 2).replace(/\//g, '.');
+  }
+  return null;
+}
+
+/**
  * A copy of `node` and everything under it.
  *
  * Load-bearing, not defensive: {@link compactMiddleDirs} rewrites names and children

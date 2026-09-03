@@ -125,7 +125,7 @@ import folderTypesOpen     from '@iconify-icons/vscode-icons/folder-type-typescr
 
 // ── Icone di casa ────────────────────────────────────────────────────────────
 //
-// Due estensioni che nessun set generico conosce, disegnate qui. Sono oggetti `IconifyIcon`
+// Tre estensioni che nessun set generico conosce, disegnate qui. Sono oggetti `IconifyIcon`
 // come gli altri — `body` è il markup interno di un `<svg viewBox="0 0 32 32">` — quindi
 // stanno nella stessa mappa e si comportano allo stesso modo.
 //
@@ -177,11 +177,54 @@ const devIcon: IconifyIcon = {
     '<circle cx="16" cy="19" r="1.4" fill="#fff"/>',
 };
 
+/**
+ * `.merula` — un **pattern** della DAW live-coding.
+ *
+ * Non un uccello, anche se il nome è quello del merlo: il marchio del prodotto
+ * (`static/products/merula.svg`) è un **sequencer**, una griglia di step accesi in ambra su viola
+ * scuro, e un'icona di file che partisse da un'altra idea farebbe sembrare i due oggetti di due
+ * applicazioni diverse. Questa è la stessa griglia, ridotta a quel che sopravvive a 16 px.
+ *
+ * Tre per tre e non cinque per cinque come il marchio: a 16 px una cella di una griglia 5×5 è
+ * meno di tre pixel, e la M che il marchio ci disegna diventa poltiglia. Con nove celle si può
+ * dire l'altra cosa che un sequencer è — **una colonna accesa e degli step dopo**, cioè una
+ * testina di riproduzione e un ritmo — e quella si legge anche piccola.
+ *
+ * I colori sono quelli veri del marchio: `#f2600c → #ffd166` per gli step accesi, il viola quasi
+ * nero del pannello. Lo spento è tenuto al 16% e non al 7% del marchio grande: lì è
+ * controforma, qui a 16 px sotto quella soglia sparisce e restano tre puntini che galleggiano.
+ */
+const merulaIcon: IconifyIcon = {
+  width: 32,
+  height: 32,
+  body:
+    '<rect x="1" y="1" width="30" height="30" rx="7" fill="#1b0e27"/>'
+    + '<rect x="1" y="1" width="30" height="30" rx="7" fill="none" stroke="#3a1f4a" stroke-width="1.5"/>'
+    // Gli step spenti: la griglia su cui si legge il ritmo.
+    + '<g fill="#ffd166" fill-opacity="0.16">'
+    + '<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="12.5" y="3.5" width="7" height="7" rx="2"/>'
+    + '<rect x="21.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="12.5" width="7" height="7" rx="2"/>'
+    + '<rect x="12.5" y="12.5" width="7" height="7" rx="2"/><rect x="21.5" y="12.5" width="7" height="7" rx="2"/>'
+    + '<rect x="3.5" y="21.5" width="7" height="7" rx="2"/><rect x="12.5" y="21.5" width="7" height="7" rx="2"/>'
+    + '<rect x="21.5" y="21.5" width="7" height="7" rx="2"/>'
+    + '</g>'
+    // La colonna che sta suonando, e i due colpi che seguono. L'ambra scende come nel marchio:
+    // il più caldo in basso, il più chiaro in alto.
+    + '<g>'
+    + '<rect x="3.5" y="3.5" width="7" height="7" rx="2" fill="#ffd166"/>'
+    + '<rect x="3.5" y="12.5" width="7" height="7" rx="2" fill="#ff8a1f"/>'
+    + '<rect x="3.5" y="21.5" width="7" height="7" rx="2" fill="#f2600c"/>'
+    + '<rect x="21.5" y="3.5" width="7" height="7" rx="2" fill="#ffb347"/>'
+    + '<rect x="12.5" y="21.5" width="7" height="7" rx="2" fill="#ff8a1f"/>'
+    + '</g>',
+};
+
 /** lowercase extension → icon */
 const EXT_ICONS: Record<string, IconifyIcon> = {
-  // Le due di casa: vedi sopra.
+  // Le tre di casa: vedi sopra.
   dig: digIcon,
   dev: devIcon,
+  merula: merulaIcon,
   rs: rustIcon,
   ts: tsIcon, tsx: tsIcon,
   js: jsIcon, jsx: jsIcon, mjs: jsIcon, cjs: jsIcon,

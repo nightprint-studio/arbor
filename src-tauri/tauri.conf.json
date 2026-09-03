@@ -23,6 +23,7 @@
         "shadow": true,
         "visible": false,
         "transparent": false,
+        "dragDropEnabled": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,InterestFeedContentSuggestions,WebRTC,AutofillServerCommunication"
       }
     ],
@@ -36,7 +37,9 @@
           "**/*.mp4", "**/*.webm", "**/*.ogg", "**/*.ogv",
           "**/*.mov", "**/*.m4v", "**/*.mkv",
           "**/*.mp3", "**/*.wav", "**/*.m4a", "**/*.flac",
-          "**/*.aac", "**/*.opus", "**/*.oga"
+          "**/*.aac", "**/*.opus", "**/*.oga",
+          "**/*.html", "**/*.htm", "**/*.xhtml", "**/*.css", "**/*.js", "**/*.mjs",
+          "**/*.woff", "**/*.woff2", "**/*.ttf", "**/*.otf"
         ]
       }
     }

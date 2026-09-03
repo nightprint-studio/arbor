@@ -30,6 +30,14 @@
   file it touched, marked in the folder column.
 </p>
 <p>
+  The right-hand pane is the comparison: the revision you picked against what is on disk now. It
+  opens <strong>side by side</strong> — the old text left, the current right, each changed line
+  opposite the line that replaced it, and a hatched band where one side has nothing. The button in
+  that pane's header (or <kbd>Alt</kbd> + <kbd>D</kbd>) switches to the <strong>unified</strong>
+  patch, one column with <code>+</code> and <code>−</code>, for when you want to read the change as
+  a change. Whichever you leave it on is the one it opens with next time.
+</p>
+<p>
   <strong>Put Label…</strong> pins a name on a moment (<em>before the atlas refactor</em>), and a
   labelled revision never expires. Everything else is kept for the number of days set in
   <strong>Settings → Editor → Local history</strong>, within a size budget per project; each file's

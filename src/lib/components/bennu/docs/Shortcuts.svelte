@@ -42,8 +42,9 @@
   <li><kbd>Del</kbd> / <kbd>⌫</kbd> — in the Project tree, <strong>delete</strong> the focused file or folder (it asks first)</li>
   <li><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Z</kbd> — with the Project tree focused, <strong>undo the last delete</strong>. In the editor the same keys undo typing: two stacks, and whichever has focus answers</li>
   <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> — <strong>local history</strong> of the open file. IntelliJ's own binding is <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + a letter, which Chromium drops on Italian, German, French and Spanish layouts to keep AltGr working</li>
+  <li><kbd>Alt</kbd> + <kbd>D</kbd> — inside that window, switch its comparison between <strong>side by side</strong> and the unified patch</li>
   <li><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> — <strong>undo</strong> / <strong>redo</strong>. The history belongs to the buffer you are in: opening another file starts a fresh one, so undo can never reach past the file in front of you</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Y</kbd> — delete the current line (IntelliJ's key; redo is on <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd>)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Y</kbd> — on a Mac also <kbd>Cmd</kbd> + <kbd>⌫</kbd> — delete the current line, whole, wherever in it the caret is (IntelliJ's keys; redo is on <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd>)</li>
   <li><kbd>Ctrl</kbd> + <kbd>S</kbd> — <strong>save</strong> the current file</li>
   <li><kbd>Ctrl</kbd> + <kbd>F</kbd> — find in the current file</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> — find in project</li>

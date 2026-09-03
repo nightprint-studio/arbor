@@ -366,6 +366,8 @@ export interface RunConfigDto {
   cargo_workspace?: boolean;
   /** Extra cargo flags, BEFORE the `--`. `program_args` goes after it. */
   cargo_args?: string;
+  /** `script` only — absolute path of the `.sh` / `.bat` / `.cmd` / `.ps1` to run. */
+  script_file?: string;
 }
 
 /** The per-repo run-config bundle stored in `<root>/.arbor/config.toml`. */

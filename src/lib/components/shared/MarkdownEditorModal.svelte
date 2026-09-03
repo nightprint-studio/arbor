@@ -13,14 +13,12 @@
       when the user just wants to scroll the rendered output.
     · `Ctrl/Cmd+S` saves; closing while dirty prompts via ConfirmModal.
 
-  Backed by `createMarkdownExtensions` (CodeMirror 6 + Lezer markdown),
-  defined in `$lib/utils/markdown-editor`.
+  Backed by `createMarkdownExtensions` (CodeMirror 6 + Lezer markdown), defined in
+  `$lib/utils/markdown-editor` and mounted by `shared/ui/MarkdownEditor` — the same mount
+  Garrulus's notes and Bennu's `.md` tabs use, so all three behave identically.
 -->
 <script lang="ts">
-  import { onMount, tick, untrack } from 'svelte';
   import { FileText, Save, Eye, Pencil, Loader2 } from 'lucide-svelte';
-  import { EditorState } from '@codemirror/state';
-  import { EditorView } from '@codemirror/view';
 
   import Modal from './Modal.svelte';
   import ModalHeader from './ModalHeader.svelte';
@@ -29,20 +27,13 @@
   import Button from './ui/Button.svelte';
   import Spinner from './ui/Spinner.svelte';
   import StateBlock from './ui/StateBlock.svelte';
-  import {
-    createMarkdownExtensions,
-    makeMarkdownCompartments,
-  } from '$lib/utils/markdown-editor';
+  import MarkdownEditor from './ui/MarkdownEditor.svelte';
   import { markdownStore } from '$lib/stores/markdown.svelte';
   import { fsReadTextFile, fsWriteTextFile } from '$lib/ipc/fs';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   // ── Component state ─────────────────────────────────────────────────────
-
-  let hostEl   = $state<HTMLDivElement | undefined>(undefined);
-  let view     = $state<EditorView | null>(null);
-  const compartments = makeMarkdownCompartments();
 
   let loading      = $state(true);
   let loadError    = $state<string | null>(null);
@@ -68,13 +59,6 @@
   async function loadFile(p: string) {
     loading   = true;
     loadError = null;
-    // Tear down any previous editor first — switching files starts fresh
-    // (the `bind:this` slot is going to be re-created when the `{#else}`
-    // branch re-renders below, so a stale `view` would leak).
-    untrack(() => {
-      view?.destroy();
-      view = null;
-    });
     try {
       const text = await fsReadTextFile(p);
       savedText   = text;
@@ -84,47 +68,10 @@
       loading   = false;
       return;
     }
-    // Flip the conditional render BEFORE awaiting tick, so the editor host
-    // div is in the DOM by the time we mount CodeMirror onto it.
+    // Flipping this renders the editor, which mounts itself on the loaded text: the
+    // `{#if}` below is the teardown of the previous file's view as well.
     loading = false;
-    await tick();
-    mountEditor();
   }
-
-  function mountEditor() {
-    if (!hostEl) return;
-    view = new EditorView({
-      parent: hostEl,
-      state: EditorState.create({
-        doc: currentText,
-        extensions: [
-          createMarkdownExtensions({ readOnly, docPath: path }, compartments),
-          EditorView.updateListener.of((u) => {
-            if (u.docChanged) {
-              currentText = u.state.doc.toString();
-            }
-          }),
-        ],
-      }),
-    });
-    // Focus the editor so typing flows immediately.
-    queueMicrotask(() => view?.focus());
-  }
-
-  // Apply read-only toggle without rebuilding the editor.
-  $effect(() => {
-    const ro = readOnly;
-    if (!view) return;
-    view.dispatch({
-      effects: compartments.readOnly.reconfigure(
-        EditorState.readOnly.of(ro),
-      ),
-    });
-  });
-
-  onMount(() => {
-    return () => { view?.destroy(); view = null; };
-  });
 
   // ── Save flow ───────────────────────────────────────────────────────────
 
@@ -207,7 +154,15 @@
       <StateBlock tone="error" label={`Could not open file: ${loadError}`} />
     </div>
   {:else}
-    <div class="editor-host" bind:this={hostEl}></div>
+    <div class="editor-host">
+      <MarkdownEditor
+        docKey={path ?? ''}
+        text={currentText}
+        docPath={path}
+        {readOnly}
+        onChange={(t) => (currentText = t)}
+      />
+    </div>
   {/if}
 
   {#snippet footer()}
@@ -289,7 +244,10 @@
     height: 100%;
   }
 
+  /* Flex, because the mount sizes itself with `flex: 1` — in a plain block it would be
+     auto-height and the editor's own `height: 100%` would resolve against nothing. */
   .editor-host {
+    display: flex;
     width: 100%;
     height: 100%;
     overflow: hidden;

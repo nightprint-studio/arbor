@@ -15,10 +15,10 @@
  * visible and its body collapses.
  */
 
-import { foldGutter, foldService, codeFolding } from '@codemirror/language';
+import { foldGutter, foldService, codeFolding, foldEffect } from '@codemirror/language';
 import type { Extension } from '@codemirror/state';
 import type { EditorState } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 
 import type { LanguageDescriptor, Tree, Node } from './types';
 
@@ -85,6 +85,83 @@ export function createFoldingExtension(
     // the live tree through its view.
     viewRegistry,
   ];
+}
+
+/**
+ * Collapse the file's **block comments** once, when it opens.
+ *
+ * IntelliJ's "fold block comments by default": the licence header and the long `/** … *\/`
+ * above every method are the two things you have already read, and on a legacy file they can be
+ * most of what is on screen. Folding them on open is different from folding them by hand —
+ * afterwards the buffer is yours, and nothing re-folds what you unfold.
+ *
+ * A comment is recognised from what the descriptor already declares: a foldable node whose text
+ * starts with the language's block-comment opener (`commentTokens.block.open`). No new hook, and
+ * nothing to keep in sync — a language that has no block comment simply has nothing to fold.
+ *
+ * Runs on the first update that has a tree (the grammar wasm loads asynchronously, so there is
+ * rarely one at mount) and then never again: this is an opening state, not a rule about how the
+ * buffer must look. The fold is dispatched from a microtask because a view plugin may not
+ * dispatch during the update it is reacting to.
+ */
+export function foldBlockCommentsOnLoad(lang: LanguageDescriptor, getTree: GetTree): Extension {
+  const foldNode = lang.foldNode;
+  const opener = lang.commentTokens?.block?.open;
+  if (!foldNode || !opener) return [];
+
+  return ViewPlugin.fromClass(
+    class {
+      /** One shot: set as soon as a tree has been seen, whether or not it held a comment. */
+      private done = false;
+
+      constructor(view: EditorView) {
+        this.foldOnce(view);
+      }
+
+      update(u: ViewUpdate) {
+        this.foldOnce(u.view);
+      }
+
+      private foldOnce(view: EditorView) {
+        if (this.done) return;
+        const tree = getTree(view);
+        if (!tree) return;
+        this.done = true;
+        const ranges: { from: number; to: number }[] = [];
+        collectCommentFolds(view.state, tree.rootNode, foldNode, opener, ranges);
+        if (!ranges.length) return;
+        // A view plugin may not dispatch during the update it is reacting to.
+        queueMicrotask(() => view.dispatch({ effects: ranges.map((r) => foldEffect.of(r)) }));
+      }
+    },
+  );
+}
+
+/** Walk the tree collecting the fold range of every block comment; a comment's subtree is not
+ *  entered (a comment inside a comment is the same fold). */
+function collectCommentFolds(
+  state: EditorState,
+  node: Node,
+  foldNode: (n: Node) => { from: number; to: number } | null,
+  opener: string,
+  out: { from: number; to: number }[],
+): void {
+  const isComment =
+    node.endIndex - node.startIndex >= opener.length &&
+    state.doc.sliceString(node.startIndex, node.startIndex + opener.length) === opener;
+  if (isComment) {
+    const range = foldNode(node);
+    // A single-line comment has nothing to hide — CodeMirror would draw a placeholder over
+    // text that was already one line.
+    if (range && state.doc.lineAt(range.from).number < state.doc.lineAt(range.to).number) {
+      out.push({ from: range.from, to: Math.min(range.to, state.doc.length) });
+    }
+    return;
+  }
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child) collectCommentFolds(state, child, foldNode, opener, out);
+  }
 }
 
 /** Find the smallest node starting on `[lineStart,lineEnd]` that `foldNode`

@@ -69,6 +69,41 @@ export function isLspFile(path: string | null | undefined): boolean {
  */
 export { isImageFile };
 
+/**
+ * A web page — the one file kind whose preview is a **program** rather than a picture.
+ *
+ * Named here so the editor's Preview toggle, and the consent that gates it, key off one list.
+ */
+export function isHtmlFile(path: string | null | undefined): boolean {
+  return ['html', 'htm', 'xhtml'].includes(ext(path));
+}
+
+/**
+ * A script the Run console can launch — and the FE half of a list the backend also holds
+ * (`run_script.rs::is_runnable_script`, which has the unit test pinning it). The two have to
+ * agree: an arrow on a file nothing can run is a control that fails when pressed, and a missing
+ * arrow on a file that runs fine is a feature nobody finds.
+ *
+ * Whether it can run *here* is a different question, and deliberately not asked until it is
+ * pressed: a `.bat` on a Mac and a `.sh` on a Windows box without Git Bash are both refusals that
+ * name what was missing, which teaches more than a greyed-out arrow.
+ */
+export function isRunnableScript(path: string | null | undefined): boolean {
+  return ['sh', 'bash', 'bat', 'cmd', 'ps1'].includes(ext(path));
+}
+
+/**
+ * A markdown document — the one file kind whose *rendering* is the point.
+ *
+ * A README is read far more often than it is edited, and what it says is in the rendering: a
+ * table is a table, a link is its label, an alert is a coloured box. So it opens in the live
+ * preview editor (`shared/ui/MarkdownEditor`) rather than in the code editor, with a toolbar
+ * toggle back to the source for the times you are editing the markup itself.
+ */
+export function isMarkdownFile(path: string | null | undefined): boolean {
+  return ['md', 'markdown', 'mdown', 'mkd'].includes(ext(path));
+}
+
 /** A geode `.dig` mole script. Highlighted and folded from its grammar; everything else —
  *  completion, hover, go-to, diagnostics — comes from **nd-dig-lsp**, so it reaches the
  *  navigation and diagnostics sets through {@link isLspFile} like any other served language,

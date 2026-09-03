@@ -26,6 +26,17 @@
   <kbd>Ctrl</kbd> + <kbd>F9</kbd>).
 </p>
 
+<h2>What it walks</h2>
+<p>
+  The scan reads every <code>.java</code> under the project root except the ones nothing should
+  index: hidden directories, and Maven's <code>target/</code> — apart from
+  <code>target/generated-sources</code>, which is where an annotation processor puts source that is
+  genuinely yours to navigate. <strong>Settings → Java → Excluded directories</strong> adds to that
+  list; the entries are folder <em>names</em>, matched at any depth, so <code>build</code> excludes
+  every <code>build</code> folder in a multi-module tree. A change applies to the next index build,
+  which <em>Rebuild index</em> gives you immediately.
+</p>
+
 <h2>It keeps up with your edits</h2>
 <p>
   The index is not a snapshot of the project as you opened it. As you type, the file you are editing

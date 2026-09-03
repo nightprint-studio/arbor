@@ -1210,6 +1210,14 @@ pub struct RunConfig {
     /// Distinct from [`RunConfig::program_args`], which goes AFTER the `--` and reaches the program
     /// (or the test harness). Conflating the two is how `--nocapture` ends up being handed to cargo.
     pub cargo_args: String,
+    /// `script` only — the absolute path of the `.sh` / `.bat` / `.cmd` / `.ps1` to run.
+    ///
+    /// A path and not a name: a project's scripts do not live in one place (`scripts/`, `bin/`,
+    /// beside the module they build), and the interpreter is chosen from the extension by
+    /// `bennu_run_script`. Whether it can run on *this* machine is answered when it is launched,
+    /// not when it is configured — a configuration written on Windows is still the right
+    /// configuration when the repository is opened on a Mac.
+    pub script_file: String,
 }
 
 impl Default for RunConfig {
@@ -1243,6 +1251,7 @@ impl Default for RunConfig {
             cargo_profile: String::new(),
             cargo_workspace: false,
             cargo_args: String::new(),
+            script_file: String::new(),
         }
     }
 }

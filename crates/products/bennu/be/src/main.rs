@@ -232,6 +232,10 @@ mod find;
 // cwd + env, stdin piped) / `bennu_run_input` / `bennu_cancel_run`. Makes the Run/Debug
 // buttons real + re-indexes target/classes.
 mod build;
+// The other things a project is run with: the `deploy.sh` beside the pom, a `.cmd`, a `.ps1`.
+// One handler (`bennu_run_script`) over the same streaming spawner the JVM runner uses, so a
+// script gets the console tab, the stdin and the Stop that a Java run already has.
+mod run_script;
 // Killing a child and everything it started (`taskkill /T` on Windows) — shared by the two
 // domains that launch long-lived children, `build`'s run and `tests`' `mvn test`.
 mod child;

@@ -744,6 +744,57 @@ function createProjectStore() {
     }
   }
 
+  /** The body a rename and a move both are: `path` ends up at `targetPath`, code and tabs
+   *  following. A closure and not a method, so the two callers reach it without `this` — the
+   *  store is an object literal, and a consumer that destructures a method would break one. */
+  async function relocate(path: string, targetPath: string): Promise<string> {
+    const target = canonPath(targetPath);
+    if (target === canonPath(path)) return path;
+
+    const wasOpen = openFilePaths.includes(path);
+    const source = sources.get(path) ?? (await loadText(path));
+    if (dirty.has(path) && !(await saveText(path, source))) {
+      throw new Error('The file changed on disk — resolve that first, then move it');
+    }
+
+    const res = await ipcRenamePath(project?.root ?? '', path, target);
+    const newPath = canonPath(res.new_path);
+
+    // Carry the cached text / encoding to the new key so a reopened tab is instant, and drop the
+    // old stamp: it describes a path that no longer exists, and a stale one would make the next
+    // save refuse for no reason.
+    sources.set(newPath, source);
+    const enc = encodings.get(path);
+    if (enc) encodings.set(newPath, enc);
+    savedContent.set(newPath, source);
+    sources.delete(path);
+    savedContent.delete(path);
+    stamps.delete(path);
+    dirty.delete(path);
+    conflicted.delete(path);
+    try {
+      const [fresh] = await ipcFileStamps([newPath]);
+      if (fresh?.stamp) stamps.set(newPath, fresh.stamp);
+    } catch { /* the guard simply stays off for this path until it is re-read */ }
+
+    // Re-point the tab only if one was open: renaming from the tree must not open the file.
+    openFilePaths = openFilePaths.filter((p) => p !== path);
+    if (wasOpen) await openFileInternal(newPath);
+    else if (activeFilePath === path) activeFilePath = openFilePaths[0] ?? null;
+
+    // AFTER the move: the edits are expressed against files as they are now, and one of them is
+    // very often the renamed file itself.
+    if (res.edits.length) {
+      const failed = await applyEditsAcrossFiles(res.edits);
+      if (failed) {
+        throw new Error(`Renamed, but ${failed} file(s) referring to it could not be updated`);
+      }
+    }
+    if (project?.root && !isDemo) loadTreeInto(project.root);
+    persistWorkspace();
+    return newPath;
+  }
+
   return {
     get project()        { return project; },
     get tree()           { return tree; },
@@ -1111,52 +1162,25 @@ function createProjectStore() {
       const trimmed = newName.trim();
       if (!trimmed) throw new Error('A file needs a name');
       const parent = path.replace(/[\\/][^\\/]*$/, '');
-      const target = canonPath(`${parent}/${trimmed}`);
-      if (target === canonPath(path)) return path;
-
-      const wasOpen = openFilePaths.includes(path);
-      const source = sources.get(path) ?? (await loadText(path));
-      if (dirty.has(path) && !(await saveText(path, source))) {
-        throw new Error('The file changed on disk — resolve that first, then rename it');
-      }
-
-      const res = await ipcRenamePath(project?.root ?? '', path, target);
-      const newPath = canonPath(res.new_path);
-
-      // Carry the cached text / encoding to the new key so a reopened tab is instant, and drop the
-      // old stamp: it describes a path that no longer exists, and a stale one would make the next
-      // save refuse for no reason.
-      sources.set(newPath, source);
-      const enc = encodings.get(path);
-      if (enc) encodings.set(newPath, enc);
-      savedContent.set(newPath, source);
-      sources.delete(path);
-      savedContent.delete(path);
-      stamps.delete(path);
-      dirty.delete(path);
-      conflicted.delete(path);
-      try {
-        const [fresh] = await ipcFileStamps([newPath]);
-        if (fresh?.stamp) stamps.set(newPath, fresh.stamp);
-      } catch { /* the guard simply stays off for this path until it is re-read */ }
-
-      // Re-point the tab only if one was open: renaming from the tree must not open the file.
-      openFilePaths = openFilePaths.filter((p) => p !== path);
-      if (wasOpen) await openFileInternal(newPath);
-      else if (activeFilePath === path) activeFilePath = openFilePaths[0] ?? null;
-
-      // AFTER the move: the edits are expressed against files as they are now, and one of them is
-      // very often the renamed file itself.
-      if (res.edits.length) {
-        const failed = await applyEditsAcrossFiles(res.edits);
-        if (failed) {
-          throw new Error(`Renamed, but ${failed} file(s) referring to it could not be updated`);
-        }
-      }
-      if (project?.root && !isDemo) loadTreeInto(project.root);
-      persistWorkspace();
-      return newPath;
+      return relocate(path, `${parent}/${trimmed}`);
     },
+
+    /**
+     * Move the file at `path` into the directory `dir`, keeping its name.
+     *
+     * The same operation as a rename — one `bennu_rename_path` with a different destination — and
+     * deliberately the same code, because everything that is delicate about it is delicate for
+     * both: the buffer that has to be saved first, the tab that has to follow, the caches keyed by
+     * a path that no longer exists, and the refactor edits the backend hands back.
+     *
+     * Throws when the destination already holds a file of that name — the backend refuses it
+     * (`rename_path`), because overwriting is not what dropping a file on a folder means.
+     */
+    async moveFile(path: string, dir: string): Promise<string> {
+      const name = path.split(/[\\/]/).pop() ?? path;
+      return relocate(path, `${dir.replace(/[\\/]+$/, '')}/${name}`);
+    },
+
 
     /** Move the file at `path` into the folder matching the `package` it declares (the filesystem
      *  alternative to the change-package edit). Saves the buffer first, moves it on disk, then

@@ -13,6 +13,11 @@
   encoding and shows which one won in the footer, so a mojibake surprise never slips in silently.
 </p>
 <p>
+  A project that declares nothing falls back to <strong>Settings → Java → Default source
+  encoding</strong>. It is only ever a fallback: a declared <code>sourceEncoding</code> wins over
+  it, and a per-file override wins over both.
+</p>
+<p>
   A <strong>Cargo</strong> project is always <code>UTF-8</code>: Rust source is UTF-8 by language
   definition, so the encoding default configured for a legacy Java tree never reaches it.
 </p>

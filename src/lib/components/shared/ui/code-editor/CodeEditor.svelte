@@ -36,7 +36,10 @@
   import { openSearchPanel } from '@codemirror/search';
 
   import type { LanguageDescriptor, EditorDiagnostic, EditorViewSnapshot } from './types';
-  import { createCodeEditorExtensions, historyReset, refTextAt } from './extensions';
+  import {
+    createCodeEditorExtensions, historyReset, refTextAt,
+    preferencesCompartment, type CodeEditorPreferences, type CompletionPreferences,
+  } from './extensions';
   import { minimapExtension } from './minimap';
   import { makeByteToU16 } from './highlight';
   import {
@@ -64,10 +67,16 @@
     scrollbarOverview = false,
     tabSize,
     indentUnit,
+    fontSize,
     initialState,
     placeholder,
     wrap = false,
     lineNumbers = true,
+    highlightActiveLine = true,
+    showWhitespace = false,
+    folding = true,
+    foldBlockComments = false,
+    completion,
     keyBindings,
     marks = [],
     lineHighlights = [],
@@ -109,6 +118,18 @@
     /** The whitespace inserted for one indent level — `'\t'` for tabs, `'    '` for N
      *  spaces. Omit to keep CodeMirror's default. Applied live via a compartment. */
     indentUnit?: string;
+    /**
+     * Font size of the editing surface, in pixels. Omit to inherit the app's code size
+     * (`--font-size-sm`), which is what every editor that is a *field* rather than a
+     * document wants.
+     *
+     * Applied as a CSS variable on the host node rather than through a theme compartment:
+     * a CodeMirror theme is a generated stylesheet, so a second one setting the same
+     * property on `&` wins or loses by mount order rather than by intent. The variable
+     * cascades into the gutters, the tooltips and the folded placeholders for free, and
+     * changes live without touching the editor's state.
+     */
+    fontSize?: number;
     /** Cursor + scroll to restore at mount (e.g. the tab's last-known position). */
     initialState?: EditorViewSnapshot;
     /**
@@ -126,7 +147,7 @@
      * is how you notice you blew it. On for the editors that are a *field* in a
      * narrow box: a structural pattern is one long statement, and in a 300px
      * panel it scrolled out of its own left edge, so you could not see the start
-     * of the thing you were typing. Static at mount, like the rest of the set.
+     * of the thing you were typing. Applied live (see `preferencesCompartment`).
      */
     wrap?: boolean;
     /**
@@ -134,10 +155,23 @@
      *
      * Turn it off for a **short input** that wants an editor for the highlighting and the
      * completion rather than for the chrome — a structural query is two or three lines, and a
-     * gutter numbering them is a column of noise beside a field. Static at mount, like the rest
-     * of the set.
+     * gutter numbering them is a column of noise beside a field. Applied live.
      */
     lineNumbers?: boolean;
+    /** Tint the line the caret is on (and its gutter number). `true` by default. Applied live. */
+    highlightActiveLine?: boolean;
+    /** Render spaces and tabs as visible glyphs. Off by default. Applied live. */
+    showWhitespace?: boolean;
+    /** Install folding — the gutter arrows and the fold commands. `true` by default, and only
+     *  ever visible for a language that folds at all. Applied live; turning it off drops the
+     *  folds with it, which is what "no folding" means. */
+    folding?: boolean;
+    /** Collapse the block comments of a file when it opens (needs `folding`). An opening state,
+     *  not a rule: nothing re-folds what you unfold. */
+    foldBlockComments?: boolean;
+    /** How the completion popup behaves — auto-popup, its delay, case sensitivity. Ignored by an
+     *  editor whose language brings no completion source. Applied live. */
+    completion?: CompletionPreferences;
     /**
      * Keys this host claims back from CodeMirror, e.g. `Mod-Enter` to run a
      * statement. Installed above every built-in binding — see the option of the
@@ -244,6 +278,13 @@
   const indentCompartment = new Compartment();
   // Minimap in its own compartment so the setting toggle reconfigures the OPEN buffer live.
   const minimapCompartment = new Compartment();
+  /** Builds the contents of `preferencesCompartment` for this editor's language — handed back by
+   *  `createCodeEditorExtensions` at mount, so a settings change reconfigures the open buffer. */
+  let buildPreferences: ((prefs: CodeEditorPreferences) => Extension) | null = null;
+  /** The preferences the view is currently configured with, serialised. The reconfigure effect
+   *  re-runs whenever a prop is re-read — including at mount, and whenever the host rebuilds the
+   *  `completion` object literal — and reconfiguring completion mid-typing would close the popup. */
+  let appliedPrefs = '';
   let suppressEmit = false;
 
   /** The `EditorState.tabSize` + `indentUnit` facets for the current props — empty when the
@@ -254,6 +295,12 @@
     if (indentUnit !== undefined) e.push(cmIndentUnit.of(indentUnit));
     return e;
   }
+  /** The user-facing preferences as one object — read in both places that need them (the mount
+   *  and the live reconfigure) so the two can never drift. */
+  function currentPreferences(): CodeEditorPreferences {
+    return { lineNumbers, highlightActiveLine, showWhitespace, wrap, folding, foldBlockComments, completion };
+  }
+
   let lastEmitted: string | null = null;
   // Scroll-listener teardown (emits `onViewState` so the host can persist scroll too).
   let detachScroll: (() => void) | null = null;
@@ -581,10 +628,12 @@
   }
 
   function mount(target: HTMLDivElement) {
-    const { extensions } = createCodeEditorExtensions(language, {
+    const { extensions, preferences } = createCodeEditorExtensions(language, {
       readOnly, onGoto, onLensPress, rulerColumn, emmet, indentGuides, stickyScroll,
-      scrollbarOverview, keyBindings, lineNumbers,
+      scrollbarOverview, keyBindings, ...currentPreferences(),
     });
+    buildPreferences = preferences;
+    appliedPrefs = JSON.stringify(currentPreferences());
 
     const updateListener = EditorView.updateListener.of((u) => {
       if (u.docChanged && !suppressEmit) {
@@ -622,7 +671,6 @@
         indentCompartment.of(indentExtensions()),
         minimapCompartment.of(minimap ? minimapExtension() : []),
         placeholder ? cmPlaceholder(placeholder) : [],
-        wrap ? EditorView.lineWrapping : [],
         updateListener,
       ],
     };
@@ -696,6 +744,17 @@
   $effect(() => {
     const on = minimap; // tracked dep
     view?.dispatch({ effects: minimapCompartment.reconfigure(on ? minimapExtension() : []) });
+  });
+
+  // Live preferences — line numbers, active line, whitespace glyphs, wrap, folding, completion
+  // behaviour. Same builder the mount used, so the surface a setting produces is identical
+  // whether it was set before the file opened or while you were looking at it.
+  $effect(() => {
+    const prefs = currentPreferences(); // reads every prop → tracked deps
+    const key = JSON.stringify(prefs);
+    if (!view || !buildPreferences || key === appliedPrefs) return;
+    appliedPrefs = key;
+    view.dispatch({ effects: preferencesCompartment.reconfigure(buildPreferences(prefs)) });
   });
 
   onDestroy(() => {
@@ -1229,7 +1288,11 @@
 
 <!-- CodeMirror mount host: the editable surface and all keyboard interaction live in
      CM inside this node. -->
-<div class="code-editor" bind:this={hostEl}></div>
+<div
+  class="code-editor"
+  bind:this={hostEl}
+  style={fontSize ? `--cm-font-size: ${fontSize}px` : undefined}
+></div>
 
 <style>
   .code-editor {

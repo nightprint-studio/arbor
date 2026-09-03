@@ -283,6 +283,45 @@ pub fn background_workers() -> usize {
     BACKGROUND_WORKERS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Directory names the walk skips, as the host set them from the user's settings.
+static EXCLUDED_DIRS: std::sync::RwLock<Vec<String>> = std::sync::RwLock::new(Vec::new());
+
+/// Set the directory NAMES [`collect_java`] refuses to walk into, on top of its own rules.
+///
+/// Set by the host for the same reason as [`set_background_workers`]: this crate is a leaf and
+/// knows nothing about where Bennu keeps its settings, and the walk is three layers down inside a
+/// recursion that would otherwise have to carry the list through every frame.
+///
+/// Names, not paths, and compared to each directory's own name at every depth — which is what a
+/// user typing `target, build` into a box means. `target` in the list changes nothing: the
+/// walker's own rule for it runs first, and that rule is the one that must win, because
+/// `target/generated-sources` is the only genuine source under it.
+pub fn set_excluded_dirs(names: Vec<String>) {
+    let cleaned = clean_dir_names(names);
+    if let Ok(mut g) = EXCLUDED_DIRS.write() {
+        *g = cleaned;
+    }
+}
+
+/// Trim each name and drop the empties — the list arrives from a comma-separated box, so
+/// `"target, , build "` is a normal thing for it to hold, and a `""` entry would match the name
+/// of nothing while looking like it matched everything.
+fn clean_dir_names(names: Vec<String>) -> Vec<String> {
+    names
+        .into_iter()
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .collect()
+}
+
+/// Whether `name` is one of the user's excluded directory names.
+fn is_excluded_dir(name: &str) -> bool {
+    EXCLUDED_DIRS
+        .read()
+        .map(|g| g.iter().any(|n| n == name))
+        .unwrap_or(false)
+}
+
 /// Like [`parallel_map`] but with an explicit worker cap. `max_workers == 0` uses the default
 /// background budget (`available_parallelism − 2`); any other value is clamped to `[1, cores]`.
 ///
@@ -766,7 +805,8 @@ pub fn project_type_map(root: &Path, encoding: &EncodingPlan) -> BTreeMap<String
     map
 }
 
-/// Recursively collect `.java` files under `dir`, skipping `target` / hidden dirs.
+/// Recursively collect `.java` files under `dir`, skipping hidden dirs, `target` (bar its
+/// generated sources) and whatever [`set_excluded_dirs`] names.
 pub fn collect_java(dir: &Path, out: &mut Vec<PathBuf>) {
     let rd = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
@@ -789,6 +829,11 @@ pub fn collect_java(dir: &Path, out: &mut Vec<PathBuf>) {
             }
             if name == "target" {
                 collect_generated(&p, out);
+                continue;
+            }
+            // The user's own list (Settings → Java → Excluded directories), after `target`
+            // so its generated-sources exception cannot be turned off by accident.
+            if is_excluded_dir(name) {
                 continue;
             }
             collect_java(&p, out);
@@ -845,6 +890,20 @@ mod tests {
     }
 
     use super::*;
+
+    /// The exclusion list comes from a comma-separated box, so blanks and stray spaces are the
+    /// normal shape of it — and an empty entry would be a name that matches nothing while
+    /// looking, in the list, like it matched everything.
+    #[test]
+    fn excluded_dir_names_are_trimmed_and_emptied_out() {
+        let cleaned = clean_dir_names(
+            ["target", " build ", "", "   ", "node_modules"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+        );
+        assert_eq!(cleaned, vec!["target", "build", "node_modules"]);
+    }
 
     /// The JPA static metamodel and its neighbours live under `target/generated-sources` and
     /// nowhere else, while every reference to them lives in `src/`. Out of the index, a Criteria

@@ -43,6 +43,16 @@
      * in view.
      */
     scrollTo?: number | null;
+    /**
+     * Let the list scroll **sideways** as well, for rows that are wider than the viewport.
+     *
+     * Off by default, and deliberately: a list of items wraps or ellipses, and a horizontal
+     * scrollbar under it would be a bug. A diff is the other case — a line is not allowed to
+     * wrap (the window arithmetic needs one row to be one line) and truncating it hides code —
+     * so the panel scrolls instead. When on, rows size to their content rather than to the
+     * viewport, so the consumer's own `min-width: max-content` is what decides the width.
+     */
+    scrollX?: boolean;
     class?: string;
     role?: string;
     ariaLabel?: string;
@@ -55,6 +65,7 @@
     overscan = 6,
     getKey,
     scrollTo = null,
+    scrollX = false,
     class: klass = '',
     role = 'listbox',
     ariaLabel,
@@ -105,6 +116,7 @@
   bind:this={viewport}
   bind:clientHeight={height}
   class="vl {klass}"
+  class:vl-x={scrollX}
   {role}
   aria-label={ariaLabel}
   tabindex="-1"
@@ -130,4 +142,11 @@
   /* The row box owns the height so the window arithmetic and the DOM agree; what the consumer
      renders inside it is free to be anything that fits. */
   .vl-row { overflow: hidden; }
+
+  /* `scrollX`: the window stops being pinned to both edges and takes its width from the rows,
+     which is what gives the viewport something to scroll horizontally. The rows stop clipping
+     for the same reason — with the width honoured, there is nothing to clip. */
+  .vl.vl-x { overflow-x: auto; }
+  .vl.vl-x .vl-window { right: auto; min-width: 100%; width: max-content; }
+  .vl.vl-x .vl-row { overflow: visible; }
 </style>

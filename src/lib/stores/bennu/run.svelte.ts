@@ -45,6 +45,7 @@ import {
   build as ipcBuild, validateProject as ipcValidateProject, run as ipcRun,
   cancelRun as ipcCancelRun, cancelValidation as ipcCancelValidation,
   runInput as ipcRunInput,
+  runScript as ipcRunScript,
 } from '$lib/ipc/bennu';
 import { getBennuConfig, setBennuConfig } from '$lib/ipc/bennu/config';
 import type {
@@ -125,7 +126,19 @@ export function formatMs(ms: number): string {
  * command line. Keeping one flat shape with half its fields unused would mean every reader had to
  * know which half applied, and `rerun` would have to guess.
  */
-type RunSpec = JvmRunSpec | CargoRunSpec;
+/** A shell script launch — `.sh`, `.cmd`/`.bat`, `.ps1`. */
+interface ScriptRunSpec {
+  kind: 'script';
+  root: string;
+  /** Absolute path of the script. The backend picks the interpreter from its extension. */
+  file: string;
+  args: string[];
+  workingDir: string;
+  env: Record<string, string>;
+  label: string;
+}
+
+type RunSpec = JvmRunSpec | CargoRunSpec | ScriptRunSpec;
 
 /** A `java` launch. */
 interface JvmRunSpec {
@@ -644,6 +657,32 @@ function createBennuRunStore() {
   }
 
   /**
+   * Launch a script, streaming into the Run console.
+   *
+   * No compile step and no build guard: a script is not built, and it is not what serializes on
+   * `target/` either. The refusals — a `.bat` on a Mac, a `.sh` on a Windows box with no Git Bash
+   * — arrive from the backend as an error, and are printed into the tab rather than swallowed into
+   * a toast: the answer names a program and a place to install it, and that is worth keeping on
+   * screen next to what you tried to run.
+   */
+  async function launchScript(spec: ScriptRunSpec): Promise<void> {
+    const name = spec.file.split(/[\\/]/).pop() ?? spec.file;
+    const id = openTab(spec, spec.label || name, name);
+    patchTab(id, { live: true, startedAt: Date.now() });
+    try {
+      const handle = await ipcRunScript(spec.root, spec.file, {
+        args: spec.args,
+        workingDir: spec.workingDir,
+        env: spec.env,
+      });
+      claimRun(id, handle.run_id, { command: handle.command, workingDir: handle.working_dir });
+    } catch (e) {
+      patchTab(id, { live: false, finished: true });
+      pushTo(id, `Could not start: ${e instanceof Error ? e.message : String(e)}`, 'err');
+    }
+  }
+
+  /**
    * Launch a cargo command, streaming into the Run console.
    *
    * No compile step, and that is the whole difference from {@link launch}: a cargo subcommand *is*
@@ -707,6 +746,31 @@ function createBennuRunStore() {
         env: envRecord(cfg.env),
         label: debug ? `Debug ${cfg.name}` : cfg.name,
         debug,
+      });
+      return;
+    }
+    if (cfg.kind === 'script') {
+      const file = cfg.scriptFile.trim();
+      if (!file) {
+        bennuUiStore.showBottom('run');
+        pushRun(`“${cfg.name}” has no script to run — name one in the configuration.`, 'err');
+        return;
+      }
+      if (debug) {
+        // There is no debugger to attach here: a shell script's "debugger" is `set -x`, and
+        // pretending otherwise by running it plainly under a Debug button would be a lie about
+        // what just happened.
+        bennuUiStore.showBottom('run');
+        pushRun('A script configuration cannot be debugged — running it instead.', 'err');
+      }
+      await launchScript({
+        kind: 'script',
+        root,
+        file,
+        args: splitArgs(cfg.programArgs),
+        workingDir: cfg.workingDir.trim(),
+        env: envRecord(cfg.env),
+        label: cfg.name,
       });
       return;
     }
@@ -879,6 +943,10 @@ function createBennuRunStore() {
       await launchCargo(from.spec);
       return;
     }
+    if (from.spec.kind === 'script') {
+      await launchScript(from.spec);
+      return;
+    }
     await launch(from.spec);
   }
 
@@ -1015,11 +1083,61 @@ function createBennuRunStore() {
      * Ad-hoc on purpose: clicking `check` on a crate should not leave a configuration behind for
      * every crate you have ever checked. The tab still carries the invocation, so ⟳ repeats it.
      */
+    /**
+     * Run one main class, without a saved configuration — what the ▶ in the editor's gutter does.
+     *
+     * Ad-hoc for the same reason `runCargoCommand` is: pressing ▶ beside a `main` means "run
+     * this, now", and leaving a configuration behind for every class anyone has ever glanced at
+     * would turn the configuration list into a history of clicks. A run worth keeping is one you
+     * name, in the dialog that exists for it.
+     *
+     * `runtime` scope and no arguments, which is what an unconfigured run *is*: a class needing
+     * VM flags or a working directory is a class needing a configuration, and the gutter's menu
+     * says so by offering to make one.
+     */
+    async runMainClass(
+      root: string,
+      opts: { mainClass: string; module?: string; label?: string; debug?: boolean },
+    ): Promise<void> {
+      await launch({
+        kind: 'jvm',
+        root,
+        module: opts.module ?? '',
+        mainClass: opts.mainClass,
+        args: [],
+        vmArgs: [],
+        workingDir: '',
+        env: {},
+        label: opts.label ?? opts.mainClass.split('.').pop() ?? opts.mainClass,
+        debug: !!opts.debug,
+        debugSuspend: false,
+        classpathScope: 'runtime',
+      });
+    },
+
+    /**
+     * Run a script file — what ▶ beside a `.sh` / `.cmd` / `.ps1` does.
+     *
+     * Ad-hoc like {@link runMainClass}: no arguments, no environment, the script's own directory.
+     * A script that needs any of those is one you want a configuration for.
+     */
+    async runScript(root: string, file: string, opts: { args?: string[] } = {}): Promise<void> {
+      await launchScript({
+        kind: 'script',
+        root,
+        file,
+        args: opts.args ?? [],
+        workingDir: '',
+        env: {},
+        label: file.split(/[\\/]/).pop() ?? file,
+      });
+    },
+
     async runCargoCommand(
       root: string,
       invocation: CargoInvocation,
       label: string,
-      opts: { workingDir?: string; env?: Record<string, string> } = {},
+      opts: { workingDir?: string; env?: Record<string, string>; debug?: boolean } = {},
     ): Promise<void> {
       await launchCargo({
         kind: 'cargo',
@@ -1028,6 +1146,9 @@ function createBennuRunStore() {
         label,
         workingDir: opts.workingDir ?? '',
         env: opts.env ?? {},
+        // Under the debugger the binary is built first and launched by the adapter — see
+        // `launchCargo`. Set by the ▶'s sibling lens (`rust-analyzer.debugSingle`).
+        debug: opts.debug ?? false,
       });
     },
     runActive,

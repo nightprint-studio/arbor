@@ -58,6 +58,7 @@
   import { springStore } from '$lib/stores/bennu/spring.svelte';
   import { runConfigIcon, runKindIcon } from './run-kinds';
   import BennuCargoRunForm from './BennuCargoRunForm.svelte';
+  import BennuScriptRunForm from './BennuScriptRunForm.svelte';
   import BennuRunEnvField from './BennuRunEnvField.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -383,6 +384,10 @@
     // real command line — and is shown by `BennuCargoRunForm`. Reconstructing it here would be the
     // second assembler this codebase deliberately does not have.
     if (selected.kind === 'cargo') return '';
+    // A script's command line is the interpreter's, and which interpreter is a question about the
+    // machine that runs it — the backend answers it at launch and the console prints what it
+    // actually spawned. A guess here would be a second answer, and the wrong one on Windows.
+    if (selected.kind === 'script') return '';
     if (selected.kind === 'junit') {
       const target = selected.testTarget.trim();
       if (selected.testScope === 'module' && target) return `mvn -pl ${target} test`;
@@ -628,6 +633,10 @@
             <!-- Its own file: a cargo configuration shares almost nothing with a JVM one below the
                  name field, and this modal is already the largest component in Bennu. -->
             <BennuCargoRunForm config={selected} {patch} />
+          {:else if selected.kind === 'script'}
+            <!-- Same bargain as cargo above: a script has no module, no classpath and no VM
+                 arguments, so an inline arm would be a form of fields that never apply. -->
+            <BennuScriptRunForm config={selected} {patch} root={project?.root ?? ''} />
           {:else}
 
           <!-- Above the class, because it narrows what the class picker offers and it is the

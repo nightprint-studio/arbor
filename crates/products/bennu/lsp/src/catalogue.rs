@@ -673,10 +673,11 @@ pub fn background_init_options(id: &str) -> Option<serde_json::Value> {
 ///   the most numerous items in a file: the two that stay on are the ones where the count answers a
 ///   question you were going to ask ("is anything using this type"), at a cost proportional to the
 ///   declarations rather than to the members.
-/// * **run and debug** — off, because Bennu has no runnable runner yet. rust-analyzer defaults them
-///   on, which would put a ▶ Run above every `fn main` and every `#[test]` that did nothing when
-///   pressed, and a control that does nothing teaches that the feature is broken. Turn these on in
-///   the same change that teaches the Run console to launch a `runnable`.
+/// * **run and debug** — on, since the Run console learned to launch a `runnable`. Pressing one
+///   hands rust-analyzer's own `cargoArgs` to the cargo runner verbatim (see `onLensPress` in
+///   `BennuEditor`), so the ▶ above a `fn main` runs the binary the server would have run and the
+///   one above a `#[test]` runs that test and no other. They were off until then, and the reason
+///   is worth keeping: a ▶ that cannot launch is a control that teaches the feature is broken.
 fn lens_options() -> serde_json::Value {
     serde_json::json!({
         "enable": true,
@@ -687,8 +688,8 @@ fn lens_options() -> serde_json::Value {
             "method": { "enable": false },
             "enumVariant": { "enable": false },
         },
-        "run": { "enable": false },
-        "debug": { "enable": false },
+        "run": { "enable": true },
+        "debug": { "enable": true },
     })
 }
 
@@ -849,11 +850,12 @@ mod tests {
         let lens = &opts["lens"];
         assert_eq!(lens["enable"], serde_json::json!(true));
         assert_eq!(lens["implementations"]["enable"], serde_json::json!(true));
-        // The guard that matters: a ▶ Run lens Bennu cannot launch is a control that does nothing,
-        // and rust-analyzer turns both of these on by default. They go on in the same change that
-        // teaches the Run console to launch a runnable — not before.
-        assert_eq!(lens["run"]["enable"], serde_json::json!(false));
-        assert_eq!(lens["debug"]["enable"], serde_json::json!(false));
+        // On since the Run console honours a `runnable`: pressing one hands rust-analyzer's own
+        // `cargoArgs` to the cargo runner. The rule they were held to still stands — a lens goes
+        // on only when pressing it does what it promises — so if the runner ever stops honouring
+        // `rust-analyzer.runSingle`, these two go back to `false` in the same change.
+        assert_eq!(lens["run"]["enable"], serde_json::json!(true));
+        assert_eq!(lens["debug"]["enable"], serde_json::json!(true));
         // Reference counts on declarations, not on members: one query per item, and methods are the
         // most numerous items in a file.
         assert_eq!(lens["references"]["adt"]["enable"], serde_json::json!(true));

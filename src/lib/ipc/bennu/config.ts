@@ -15,6 +15,34 @@ export interface BennuConfig {
   default_encoding: string;
   /** Editor indentation width in spaces. */
   indent_width: number;
+  /** Editor font size in pixels (8..32; `13` by default). */
+  font_size: number;
+  /** Wrap long lines to the viewport instead of scrolling sideways. */
+  word_wrap: boolean;
+  /** Render spaces and tabs as visible glyphs. */
+  show_whitespace: boolean;
+  /** Show the line-number gutter. */
+  show_line_numbers: boolean;
+  /** Tint the line the caret sits on. */
+  highlight_current_line: boolean;
+  /** Install code folding — the gutter arrows and the fold commands. */
+  folding_enabled: boolean;
+  /** Collapse a file's block comments when it opens (needs `folding_enabled`). */
+  fold_block_comments: boolean;
+  /** Open the completion popup on its own while an identifier is being typed. */
+  completion_auto_popup: boolean;
+  /** How long typing must pause before that popup opens, in milliseconds. */
+  completion_delay_ms: number;
+  /** Require a candidate to start with the typed prefix, matching case. */
+  completion_case_sensitive: boolean;
+  /** Directory names the Java indexer never walks into, on top of its own skips. */
+  excluded_dirs: string[];
+  /** Absolute paths of HTML files whose own scripts may run in the editor's preview. */
+  html_scripts_allowed: string[];
+  /** Open `.md` files in the live-preview markdown editor rather than in the code editor. */
+  markdown_live_preview: boolean;
+  /** Show Local History's diff side by side rather than as a unified patch. */
+  history_diff_split: boolean;
   /** Which SQL dialect `.sql` buffers are highlighted as — `'oracle'` / `'postgres'` /
    *  `'portable'` (default). Highlighting only: a `.sql` file in a Java project carries nothing
    *  that says which engine it targets, and the two disagree about string quoting. */

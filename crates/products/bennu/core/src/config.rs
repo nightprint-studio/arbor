@@ -36,6 +36,61 @@ pub struct BennuConfig {
     pub default_encoding: String,
     /// Editor indentation width in spaces (the whitespace normalizer / display).
     pub indent_width: u32,
+    /// Editor font size, in pixels. `13` by default; the editor clamps what it reads to 8..=32
+    /// (the range the settings stepper offers), so a hand-edited `font_size = 2` cannot leave a
+    /// buffer nobody can read behind.
+    pub font_size: u32,
+    /// Wrap long lines to the viewport instead of scrolling sideways. `false` by default: a
+    /// source file has a column budget, and the horizontal scrollbar is how you notice you blew it.
+    pub word_wrap: bool,
+    /// Render spaces and tabs as visible glyphs. `false` by default — a mode you turn on to answer
+    /// a question about indentation, not a way to read code.
+    pub show_whitespace: bool,
+    /// Show the line-number gutter. `true` by default (a buffer is navigated by line).
+    pub show_line_numbers: bool,
+    /// Tint the line the caret sits on, and its gutter number. `true` by default.
+    pub highlight_current_line: bool,
+    /// Install code folding at all — the gutter arrows and the fold commands. `true` by default.
+    pub folding_enabled: bool,
+    /// Collapse a file's block comments when it opens. `false` by default. Needs `folding_enabled`;
+    /// an opening state rather than a rule, so nothing re-folds what the reader unfolds.
+    pub fold_block_comments: bool,
+    /// Open the completion popup on its own while an identifier is being typed. `true` by default;
+    /// off leaves completion to the explicit chord (`Ctrl+Space`, `Cmd+Shift+Space` on a Mac).
+    pub completion_auto_popup: bool,
+    /// How long typing must pause before that popup opens, in milliseconds.
+    pub completion_delay_ms: u32,
+    /// Require a candidate to start with the typed prefix, matching case. `false` by default,
+    /// which is the fuzzy, case-insensitive matching CodeMirror does on its own.
+    pub completion_case_sensitive: bool,
+    /// Absolute paths of the HTML files whose **own scripts** the user has allowed to run in the
+    /// editor's preview, and asked to be remembered.
+    ///
+    /// A list of files rather than a switch, because that is the shape of the decision: "this
+    /// report is mine and I look at it every day" says nothing about the next page that lands in
+    /// the tree. Kept in the profile and never in `<repo>/.arbor/`: a permission file inside a
+    /// repository is a permission file that gets committed, and then granted to everyone who
+    /// clones it.
+    pub html_scripts_allowed: Vec<String>,
+    /// Open a `.md` file in the **live-preview** markdown editor rather than in the code editor.
+    /// `true` by default: a README is read far more often than its markup is edited, and what it
+    /// says is in the rendering. The editor's toolbar toggles it per user, not per file.
+    pub markdown_live_preview: bool,
+    /// Show Local History's diff as the two versions **side by side** rather than as a unified
+    /// patch. `true` by default: the window's whole job is "what did this line used to be", and
+    /// in a unified diff the old and the new form of a rewritten line are rows apart.
+    ///
+    /// Here rather than on a settings page because its control is the toggle in that window —
+    /// a view mode is chosen where it is seen, and remembered so it is chosen once.
+    pub history_diff_split: bool,
+    /// Directory NAMES the Java indexer never walks into, on top of the ones it always skips
+    /// (hidden directories, and `target/` except its generated sources). Names, not paths: the
+    /// list is matched against each directory's own name at every depth.
+    ///
+    /// `target` in the list is redundant rather than harmful — the walker's own rule for it runs
+    /// first, and that rule is the one that must win: it is what lets `target/generated-sources`
+    /// (the only genuine source under `target/`) keep being indexed.
+    pub excluded_dirs: Vec<String>,
     /// Which SQL dialect `.sql` buffers are **highlighted** as: `"oracle"`,
     /// `"postgres"`, or `"portable"` (the default). A setting and not a detection,
     /// because a `.sql` file in a Java project's resources carries nothing that says
@@ -393,6 +448,26 @@ impl Default for BennuConfig {
         Self {
             default_encoding: "UTF-8".to_string(),
             indent_width: 4,
+            font_size: 13,
+            word_wrap: false,
+            show_whitespace: false,
+            show_line_numbers: true,
+            highlight_current_line: true,
+            folding_enabled: true,
+            fold_block_comments: false,
+            completion_auto_popup: true,
+            completion_delay_ms: 150,
+            completion_case_sensitive: false,
+            html_scripts_allowed: Vec::new(),
+            markdown_live_preview: true,
+            history_diff_split: true,
+            // The names the settings page has always shown in this box. `target` and `.idea` are
+            // already skipped by the walker's own rules; `build` (a Gradle output tree) is not,
+            // and is the one that earns the default.
+            excluded_dirs: ["target", ".git", ".idea", "build"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
             sql_dialect: "portable".to_string(),
             preferred_build_type: "mvn".to_string(),
             validate_on_open: true,

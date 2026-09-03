@@ -39,7 +39,7 @@ export interface EnvVar {
  * Kept deliberately small. A category belongs here when Bennu can actually run that thing;
  * inventing empty groups to look like IntelliJ would be a menu of dead ends.
  */
-export type RunConfigKind = 'application' | 'springboot' | 'junit' | 'cargo';
+export type RunConfigKind = 'application' | 'springboot' | 'junit' | 'cargo' | 'script';
 
 /** How much a `junit` configuration runs. */
 export type TestScopeKind = 'all' | 'module' | 'class';
@@ -69,13 +69,19 @@ export const RUN_KINDS: {
   },
   { id: 'junit', label: 'JUnit', newName: 'Tests', capability: 'java' },
   { id: 'cargo', label: 'Cargo', newName: 'Cargo', capability: 'cargo' },
+  // No capability: a `.sh` that builds the front end, a `.ps1` that seeds a database and a
+  // `.cmd` somebody committed in 2011 all live in projects of every kind, and gating this on
+  // what the project *is* would hide it from exactly the mixed repositories that have the most
+  // of them.
+  { id: 'script', label: 'Script', newName: 'Script' },
 ];
 
 /** Whether `s` names a kind this build can run. Anything else came from a newer Bennu: it is
  *  listed but not launchable, because the file is shared and dropping what we don't
  *  understand would silently delete someone's configuration. */
 export function isRunKind(s: string): s is RunConfigKind {
-  return s === 'application' || s === 'springboot' || s === 'junit' || s === 'cargo';
+  return s === 'application' || s === 'springboot' || s === 'junit' || s === 'cargo'
+    || s === 'script';
 }
 
 /** Whether a kind launches a JVM main class (and so wears the class / args / environment
@@ -177,6 +183,11 @@ export interface RunConfig {
    * harness. Conflating the two is how `--nocapture` ends up being handed to cargo.
    */
   cargoArgs: string;
+
+  // ── `script` only ─────────────────────────────────────────────────────────
+  /** Absolute path of the `.sh` / `.bat` / `.cmd` / `.ps1` to run. `programArgs`, `workingDir`
+   *  and `env` are shared with the other kinds; everything else is left empty. */
+  scriptFile: string;
 }
 
 /** The per-project run-config bundle — the ordered list plus which one is active. */
@@ -221,6 +232,7 @@ function toDto(c: RunConfig): RunConfigDto {
     cargo_profile: c.cargoProfile,
     cargo_workspace: c.cargoWorkspace,
     cargo_args: c.cargoArgs,
+    script_file: c.scriptFile,
   };
 }
 
@@ -260,6 +272,7 @@ function fromDto(d: RunConfigDto): RunConfig {
     cargoProfile: d.cargo_profile ?? '',
     cargoWorkspace: d.cargo_workspace ?? false,
     cargoArgs: d.cargo_args ?? '',
+    scriptFile: d.script_file ?? '',
   };
 }
 
@@ -292,6 +305,7 @@ export function emptyConfig(name = 'Unnamed', kind: RunConfigKind = 'application
     cargoProfile: '',
     cargoWorkspace: kind === 'cargo',
     cargoArgs: '',
+    scriptFile: '',
   };
 }
 

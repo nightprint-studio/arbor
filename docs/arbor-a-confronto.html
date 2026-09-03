@@ -1,0 +1,775 @@
+<title>Arbor a confronto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground:#f3f4f6; --surface:#fff; --raised:#eceef1; --line:#dcdfe5; --line-soft:#e7e9ee;
+    --ink:#1b1e23; --ink-2:#4b5058; --ink-3:#797f89; --accent:#2f66d8;
+    --hi:#2f8f3f; --mid:#b07c0c; --lo:#c2413f;
+    --mid-bg:rgba(190,137,20,.13); --lo-bg:rgba(194,65,63,.10);
+    --own-bg:rgba(47,102,216,.07); --own-line:rgba(47,102,216,.30);
+    --f-display:"IBM Plex Sans Condensed","Helvetica Neue",Arial,sans-serif;
+    --f-body:"IBM Plex Sans",-apple-system,"Segoe UI",Roboto,sans-serif;
+    --f-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+    --wrap:1240px; --r:10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#1e1f22; --surface:#26282c; --raised:#2b2d30; --line:#3a3d43; --line-soft:#313439;
+      --ink:#dfe1e5; --ink-2:#a9adb5; --ink-3:#7d828b; --accent:#5b90ff;
+      --hi:#5cc45c; --mid:#ffb52a; --lo:#ea6a6a;
+      --mid-bg:rgba(255,181,42,.12); --lo-bg:rgba(234,106,106,.10);
+      --own-bg:rgba(91,144,255,.09); --own-line:rgba(91,144,255,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#1e1f22; --surface:#26282c; --raised:#2b2d30; --line:#3a3d43; --line-soft:#313439;
+    --ink:#dfe1e5; --ink-2:#a9adb5; --ink-3:#7d828b; --accent:#5b90ff;
+    --hi:#5cc45c; --mid:#ffb52a; --lo:#ea6a6a;
+    --mid-bg:rgba(255,181,42,.12); --lo-bg:rgba(234,106,106,.10);
+    --own-bg:rgba(91,144,255,.09); --own-line:rgba(91,144,255,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:var(--f-body);
+         font-size:15px; line-height:1.6; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:var(--wrap); margin:0 auto; padding:0 24px; }
+
+  .masthead { background:var(--raised); border-bottom:1px solid var(--line); padding:54px 0 32px; }
+  .eyebrow { font-family:var(--f-mono); font-size:11.5px; font-weight:500;
+             letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); }
+  h1 { font-family:var(--f-display); font-weight:700; font-size:clamp(40px,6.5vw,66px);
+       line-height:1.02; letter-spacing:-.018em; margin:14px 0 0; text-wrap:balance; }
+  .standfirst { margin:16px 0 0; max-width:66ch; font-size:17px; color:var(--ink-2); }
+
+  .rail { position:sticky; top:0; z-index:20; background:var(--surface); border-bottom:1px solid var(--line); }
+  .rail-inner { display:flex; gap:2px; overflow-x:auto; }
+  .rail a { flex:0 0 auto; display:flex; align-items:baseline; gap:8px; padding:11px 16px;
+            text-decoration:none; color:var(--ink-2); border-bottom:2px solid transparent;
+            font-family:var(--f-display); font-weight:600; font-size:15px; white-space:nowrap; }
+  .rail a:hover { color:var(--ink); background:var(--raised); }
+  .rail a span { font-family:var(--f-mono); font-size:11px; font-weight:400; color:var(--ink-3); }
+  .rail a:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+
+  section { padding:54px 0 8px; }
+  section + section { border-top:1px solid var(--line-soft); }
+
+  h2 { font-family:var(--f-display); font-weight:700; font-size:34px; letter-spacing:-.012em;
+       margin:0; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  h2 .kicker { font-family:var(--f-mono); font-size:12px; font-weight:500; letter-spacing:.07em;
+               text-transform:uppercase; color:var(--ink-3); }
+  h3 { font-family:var(--f-display); font-weight:600; font-size:14.5px; letter-spacing:.07em;
+       text-transform:uppercase; color:var(--ink-2); margin:40px 0 12px; }
+  p { margin:14px 0; max-width:74ch; }
+  a { color:var(--accent); }
+  code { font-family:var(--f-mono); font-size:.87em; background:var(--raised);
+         border:1px solid var(--line-soft); border-radius:4px; padding:1px 5px; }
+
+  .tw { overflow-x:auto; border:1px solid var(--line); border-radius:var(--r);
+        background:var(--surface); margin-bottom:20px; }
+  table { border-collapse:collapse; width:100%; min-width:720px; }
+  th, td { padding:7px 12px; text-align:left; border-bottom:1px solid var(--line-soft); font-size:14px; }
+  thead th { position:sticky; top:42px; background:var(--raised); font-family:var(--f-display);
+             font-weight:600; font-size:12.5px; color:var(--ink-2);
+             border-bottom:1px solid var(--line); white-space:nowrap; vertical-align:bottom; }
+  tbody tr:last-child td { border-bottom:none; }
+  tbody tr:hover td { background:var(--raised); }
+  td:first-child, th:first-child { min-width:262px; }
+  th.own, td.own { background:var(--own-bg); box-shadow:inset 1px 0 0 var(--own-line), inset -1px 0 0 var(--own-line); }
+  tbody tr:hover td.own { background:var(--own-bg); }
+  tbody tr.grp td { background:var(--raised); font-family:var(--f-mono); font-size:11px;
+                    letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3);
+                    padding:10px 12px 6px; border-bottom:1px solid var(--line); }
+  tbody tr.grp:hover td { background:var(--raised); }
+  td.c { width:78px; text-align:center; font-size:15px; font-weight:600;
+         font-family:var(--f-mono); line-height:1.2; }
+  td.c.y { color:var(--hi); }
+  td.c.p { color:var(--mid); }
+  td.c.n { color:var(--lo); opacity:.62; }
+  td.n2 { width:78px; text-align:center; font-family:var(--f-mono); font-weight:600;
+          font-variant-numeric:tabular-nums; }
+  tr.note td { color:var(--ink-3); font-size:12.5px; font-style:italic; background:var(--lo-bg); }
+  tr.note:hover td { background:var(--lo-bg); }
+
+  .legend { display:flex; gap:20px; flex-wrap:wrap; margin:10px 0 0;
+            font-family:var(--f-mono); font-size:11.5px; color:var(--ink-3); }
+  .legend b { font-size:13px; }
+
+  .facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(178px,1fr)); gap:0;
+           border:1px solid var(--line); border-radius:var(--r); overflow:hidden;
+           background:var(--surface); margin-top:20px; }
+  .facts div { padding:15px 18px; border-right:1px solid var(--line-soft); }
+  .facts div:last-child { border-right:none; }
+  .facts b { display:block; font-family:var(--f-mono); font-size:23px; font-weight:600;
+             font-variant-numeric:tabular-nums; line-height:1.15; }
+  .facts small { display:block; font-size:12px; color:var(--ink-3); margin-top:3px; }
+
+  .callout { margin-top:22px; padding:16px 20px; background:var(--mid-bg);
+             border:1px solid var(--line); border-left:3px solid var(--mid);
+             border-radius:var(--r); font-size:14px; }
+  .callout.blue { background:transparent; border-left-color:var(--accent); }
+  .callout b { font-family:var(--f-display); font-size:15px; }
+  .callout p { margin:6px 0 0; max-width:82ch; }
+  .callout ul { margin:8px 0 0; padding-left:20px; max-width:82ch; }
+  .callout li { margin:6px 0; }
+
+  ol.next { list-style:none; margin:14px 0 0; padding:0; counter-reset:n;
+            display:flex; flex-direction:column; gap:1px; }
+  ol.next li { counter-increment:n; display:grid; grid-template-columns:46px 1fr; gap:14px;
+               padding:13px 18px; background:var(--surface); border:1px solid var(--line); }
+  ol.next li:first-child { border-radius:var(--r) var(--r) 0 0; }
+  ol.next li:last-child { border-radius:0 0 var(--r) var(--r); }
+  ol.next li + li { border-top:none; }
+  ol.next li::before { content:counter(n,decimal-leading-zero); font-family:var(--f-mono);
+                       font-size:13px; font-weight:600; color:var(--accent);
+                       padding-top:2px; font-variant-numeric:tabular-nums; }
+  ol.next b { display:block; font-weight:600; font-family:var(--f-display); font-size:16px; }
+  ol.next span { display:block; font-size:13.5px; color:var(--ink-2); margin-top:2px; }
+
+  footer { padding:42px 0 64px; color:var(--ink-3); font-size:13px; }
+  footer p { max-width:80ch; }
+
+  @media (max-width:720px) { thead th { position:static; } h2 { font-size:27px; } }
+  @media (prefers-reduced-motion:reduce) { * { transition:none !important; animation:none !important; } }
+</style>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="eyebrow">Terza stesura · quattro assi · voti rivisti, alcuni al ribasso</div>
+    <h1>Arbor a confronto</h1>
+    <p class="standfirst">Feature, UI/UX, estensibilità e — l'asse che mancava — se le cose <i>funzionano</i>. Con le correzioni fatte dove l'evidenza le imponeva, in entrambe le direzioni.</p>
+  </div>
+</header>
+
+<nav class="rail" aria-label="Sezioni">
+  <div class="wrap rail-inner">
+    <a href="#metodo">Metodo</a>
+    <a href="#assi">I quattro assi</a>
+    <a href="#peso">Peso e velocità</a>
+    <a href="#bennu">Bennu <span>editor</span></a>
+    <a href="#corvus">Corvus <span>git</span></a>
+    <a href="#picus">Picus <span>sql</span></a>
+    <a href="#sitta">Sitta <span>file</span></a>
+    <a href="#uiux">UI/UX</a>
+    <a href="#funziona">Esiste ≠ funziona</a>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <!-- ===================== METODO ===================== -->
+  <section id="metodo">
+    <h2>Metodo, e dove mi ero sbagliato <span class="kicker">in entrambe le direzioni</span></h2>
+
+    <p>La regola che uso da qui in avanti: <b>un voto si muove solo con un'evidenza nuova, non con un'obiezione</b>. Nella stesura precedente avevo alzato Corvus e Sitta subito dopo che me l'avevi fatto notare — che è esattamente il modo sbagliato di farlo. Ho rifatto il conto, e il risultato non è quello che ti avevo dato: <b>alcune cose sono salite, altre sono scese, e due erano salite senza motivo.</b></p>
+
+    <div class="callout blue">
+      <b>Le correzioni, con la ragione di ciascuna.</b>
+      <ul>
+        <li><b>Corvus come client quotidiano: da 9.0 a 8.0 — giù.</b> Il 9.0 contava le feature una per una. Ma il rebase interattivo si usa ogni settimana e i git notes quasi mai: pesando per <i>frequenza d'uso</i> invece che per conteggio, tre buchi frequenti valgono più di dieci vantaggi rari. Il 9.0 era un errore di aritmetica, non di generosità, ma resta un errore.</li>
+        <li><b>Sitta: il 7.0 «generalista» era un trucco.</b> Mescolava due confronti opposti in un numero solo. Separati: contro Explorer e Finder vale <b>8.0</b>, contro Total Commander e Directory Opus vale <b>4.5</b>. Un voto medio nascondeva entrambe le informazioni utili.</li>
+        <li><b>Bennu sullo stack legacy: da 8.5 a 7.5 — giù.</b> Non per la copertura, che regge un 8.5, ma perché tu stesso stai correggendo «validazioni non segnate, autocomplete non segnati e bug minori». Un 8.5 dice «non ti manca quasi niente»; la tua esperienza diretta dice il contrario, e la tua esperienza diretta è evidenza più forte di una lettura del codice.</li>
+        <li><b>Spring Boot in Bennu: avevo scritto ✗, ed è l'errore più grave di tutta l'analisi.</b> Avevo cercato le stringhe «spring boot» e «springboot» nei sorgenti, ottenuto zero e concluso. I crate <code>bennu-spring</code>, <code>bennu-spel</code> e <code>bennu-jpa</code> erano nell'elenco che avevo sotto gli occhi: endpoint, <code>@ConfigurationProperties</code> con metadata dell'actuator, <code>@Value</code> ↔ yaml nei due sensi, SpEL, conversione a variabile d'ambiente, query derivate di Spring Data. Una sezione intera al posto di una riga sbagliata, e <b>Bennu come IDE Java generalista passa da 5.5 a 7.0</b>.</li>
+        <li><b>Ecosistema plugin: avevo scritto «il marketplace è vuoto». Falso.</b> È vuoto <i>nel binario</i>, per scelta, ma popolato da <code>arbor-extensions</code> con dieci plugin di peso reale — build, run, gestione dei servizi, pipeline locali con editor visuale, bucket GCS. <b>Estensibilità di Corvus resta 9.0 ma per la ragione giusta</b>, e Sitta sale da 1.0 a 2.0 (non ospita il runtime, ma i plugin cross-prodotto la sfiorano).</li>
+        <li><b>UI/UX: i miei numeri erano un 7.5 uniforme, sostituito dai voti del maintainer</b> (Corvus 9, Sitta 8.5, Bennu 7.5, Picus 7.5). Il polish di una superficie lo sa chi la usa, non chi legge il codice — e appiattendo quattro prodotti su un numero solo avevo perso l'informazione più utile, cioè quanto sono diversi fra loro. Dettaglio in fondo alla pagina.</li>
+        <li><b>Corvus «funziona davvero»: da 6.5 a 7.5 — su.</b> Avevo scritto «il meno collaudato» pensando al confronto con GitKraken e Tower, ma dentro la suite è il contrario: è il prodotto più vecchio, quello usato ogni giorno, e l'unico per cui <code>docs/status.md</code> elenca una ventina di aree come stabili. Quel documento l'avevo letto e non l'avevo pesato.</li>
+        <li><b>Debugger Rust: la riga era sbagliata.</b> La votavo su «esiste», e su «esiste» sono pari. Su «funziona su Windows-MSVC» la tua esperienza diretta dice che quello di Bennu funzionava e quelli di RustRover e VS&nbsp;Code no. La riga ora dice questo, con il caveat che nessuno di noi due sa se nel frattempo li abbiano stabilizzati.</li>
+      </ul>
+    </div>
+
+    <p><b>Un limite dichiarato di questa pagina:</b> le matrici non sono esaustive. Sono state costruite leggendo handler RPC e componenti, e alcune funzionalità di Bennu, Corvus e Sitta non hanno ancora una riga — il maintainer lo ha fatto notare. Le righe presenti sono corrette; l'assenza di una riga non è un giudizio, è una lacuna di questa analisi.</p>
+
+    <p>Il resto dei voti nasce da due fonti dichiarate: il codice di questo repository, letto crate per crate, e le metriche qui sotto, che sono comandi ripetibili e non giudizi. Dove il giudizio è mio e non deriva da nessuna delle due, lo dico nella riga.</p>
+
+    <div class="facts">
+      <div><b>4 mesi</b><small>7 mag → 2 set 2026, 400 commit</small></div>
+      <div><b>1</b><small>autore reale (3 identità git)</small></div>
+      <div><b>691/1727</b><small>file Rust con <code>#[cfg(test)]</code></small></div>
+      <div><b>104</b><small>file di test d'integrazione</small></div>
+      <div><b style="color:var(--mid)">0 / 833</b><small>test <i>automatici</i> frontend — la verifica è manuale</small></div>
+      <div><b>0</b><small>utenti esterni, quindi 0 bug report</small></div>
+    </div>
+
+    <p style="margin-top:18px">A queste va aggiunto il dato che manca da ogni confronto commerciale — <b>quattro backend che sommati stanno sotto il mezzo giga e condividono una webview sola</b>: <a href="#peso">sezione dedicata</a>. Queste sei cifre sono invece lo sfondo di ogni voto che segue, e la quinta va letta per quello che dice davvero. <b>La disciplina di test del backend è alta</b> — il 40% dei file Rust ha una suite propria, che molti progetti commerciali non hanno. <b>Il frontend è verificato a mano</b>, dall'autore, ogni giorno, su tutti e quattro i prodotti: per un'interfaccia è la forma di verifica più pertinente che esista, ed è come è stato collaudato tutto il software desktop per trent'anni. Quello che il collaudo manuale <i>non</i> dà è un'altra cosa: la <b>rete sulle regressioni</b>. Un test a mano certifica un momento; un test automatico certifica ogni commit successivo. Con 400 commit in quattro mesi il rischio non è «era giusto?», è «si è rotto tre settimane dopo e nessuno l'ha visto». È questa la distanza che separa Arbor dai prodotti con dieci anni di CI alle spalle — non la cura con cui è stato provato.</p>
+
+    <div class="legend">
+      <span><b style="color:var(--hi)">✓</b>&nbsp; c'è e regge</span>
+      <span><b style="color:var(--mid)">◐</b>&nbsp; c'è a metà, o dietro un plugin, o è fragile</span>
+      <span><b style="color:var(--lo)">✗</b>&nbsp; non c'è</span>
+    </div>
+  </section>
+
+  <!-- ===================== ASSI ===================== -->
+  <section id="assi">
+    <h2>I quattro assi <span class="kicker">feature · UI/UX · estensibilità · funziona davvero</span></h2>
+
+    <p>Un numero solo per prodotto nasconde più di quanto dica, e mescolando gli assi si ottiene sempre un voto medio che non descrive niente. Qui restano separati. <b>Il quarto asse è quello che ti interessa</b>, ed è anche quello dove Arbor perde di più: non per come è fatto, ma perché ha quattro mesi e un utente.</p>
+
+    <div class="tw"><table>
+      <thead><tr><th>Prodotto</th><th class="own">Feature</th><th class="own">UI/UX</th><th class="own">Estensibilità</th><th class="own">Funziona davvero</th><th>Nota</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="6">Editor</td></tr>
+        <tr><td><b>Bennu</b></td><td class="n2 own">7.5</td><td class="n2 own">7.5</td><td class="n2 own">8.0</td><td class="n2 own">5.5</td><td class="note-cell">Legacy <i>e</i> Spring Boot. Restano cinque righe a zero sul refactoring</td></tr>
+        <tr><td>IntelliJ IDEA Ultimate</td><td class="n2">9.5</td><td class="n2">8.0</td><td class="n2">9.0</td><td class="n2">9.5</td><td>25 anni, milioni di ore-utente di debug</td></tr>
+        <tr><td>VS Code + Java (Red Hat)</td><td class="n2">7.5</td><td class="n2">8.5</td><td class="n2">9.5</td><td class="n2">9.0</td><td>L'ecosistema più grande che esista</td></tr>
+        <tr><td>Eclipse</td><td class="n2">8.0</td><td class="n2">6.0</td><td class="n2">8.0</td><td class="n2">9.5</td><td>Refactoring di prim'ordine, UI datata</td></tr>
+        <tr><td>RustRover</td><td class="n2">8.5</td><td class="n2">8.0</td><td class="n2">8.5</td><td class="n2">8.0</td><td>Debugger con storia difficile su Windows-MSVC</td></tr>
+
+        <tr class="grp"><td colspan="6">Client Git</td></tr>
+        <tr><td><b>Corvus</b></td><td class="n2 own">8.5</td><td class="n2 own">9.0</td><td class="n2 own">9.0</td><td class="n2 own">7.5</td><td>Il più completo del gruppo e il più collaudato della suite</td></tr>
+        <tr><td>GitKraken</td><td class="n2">8.0</td><td class="n2">7.0</td><td class="n2">2.5</td><td class="n2">9.0</td><td>Electron, pesante, funzioni cloud a pagamento</td></tr>
+        <tr><td>Fork</td><td class="n2">7.5</td><td class="n2">8.5</td><td class="n2">1.0</td><td class="n2">9.0</td><td>La UI più curata della categoria</td></tr>
+        <tr><td>Sublime Merge</td><td class="n2">6.5</td><td class="n2">9.0</td><td class="n2">1.0</td><td class="n2">9.5</td><td>Meno feature di tutti, e nessuno è più veloce</td></tr>
+        <tr><td>Tower</td><td class="n2">7.5</td><td class="n2">8.0</td><td class="n2">1.5</td><td class="n2">9.5</td><td>Undo di qualunque cosa, 15 anni di rodaggio</td></tr>
+
+        <tr class="grp"><td colspan="6">Database e SQL</td></tr>
+        <tr><td><b>Picus</b></td><td class="n2 own">5.5</td><td class="n2 own">7.5</td><td class="n2 own">3.0</td><td class="n2 own">4.5</td><td>Metà script 9, metà database 3: la media non esiste</td></tr>
+        <tr><td>DataGrip</td><td class="n2">8.5</td><td class="n2">8.0</td><td class="n2">7.0</td><td class="n2">9.5</td><td>Sulla piattaforma IntelliJ, quindi estendibile</td></tr>
+        <tr><td>DBeaver</td><td class="n2">9.0</td><td class="n2">6.0</td><td class="n2">7.5</td><td class="n2">9.0</td><td>Cento driver, UI Eclipse RCP</td></tr>
+        <tr><td>SQL Developer</td><td class="n2">7.0</td><td class="n2">5.0</td><td class="n2">4.0</td><td class="n2">9.0</td><td>Insuperato sul debug PL/SQL</td></tr>
+
+        <tr class="grp"><td colspan="6">File manager</td></tr>
+        <tr><td><b>Sitta</b></td><td class="n2 own">5.5</td><td class="n2 own">8.5</td><td class="n2 own">2.0</td><td class="n2 own">6.0</td><td>8.0 contro Explorer/Finder, 4.5 contro TC/Opus</td></tr>
+        <tr><td>Explorer / Finder</td><td class="n2">5.0</td><td class="n2">7.5</td><td class="n2">3.0</td><td class="n2">10</td><td>Il metro che conta: è quello che usa la gente</td></tr>
+        <tr><td>Total Commander</td><td class="n2">8.5</td><td class="n2">5.0</td><td class="n2">8.5</td><td class="n2">10</td><td>33 anni. UI del secolo scorso, tastiera perfetta</td></tr>
+        <tr><td>Directory Opus</td><td class="n2">9.5</td><td class="n2">7.0</td><td class="n2">9.5</td><td class="n2">9.5</td><td>Configurabile fino all'assurdo</td></tr>
+        <tr><td>Marta</td><td class="n2">6.0</td><td class="n2">8.0</td><td class="n2">4.0</td><td class="n2">8.5</td><td>Il più vicino a Sitta per filosofia</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="callout">
+      <b>Le due cose che questa tabella dice e le altre no.</b>
+      <p><b>Uno:</b> sull'estensibilità Arbor non è avanti di poco, è avanti di una categoria — 9.0 contro l'1.0–2.5 di tutti i client Git esistenti. Un client Git programmabile con hook vetoabili non esiste sul mercato. <b>Due:</b> sull'ultimo asse Arbor perde ovunque, e non c'è scorciatoia: quel voto si alza solo con il tempo e con gli utenti, non scrivendo altro codice. Sono i due lati della stessa moneta — un prodotto giovane fatto bene.</p>
+    </div>
+  </section>
+
+  <!-- ===================== PESO ===================== -->
+  <section id="peso">
+    <h2>Peso e velocità <span class="kicker">il quinto asse, e quello dove non c'è partita</span></h2>
+
+    <p>Questo asse mancava del tutto, ed è un'omissione seria: è l'unico su cui Arbor <b>non ha nulla da recuperare da nessuno</b>. E non è un effetto collaterale fortunato, è la conseguenza diretta dell'architettura — <b>una sola webview per quattro prodotti</b>, con backend headless che parlano JSON su stdio. Ogni prodotto in più non porta con sé un altro runtime grafico: il costo fisso si paga una volta e si divide per quattro.</p>
+
+    <div class="tw"><table>
+      <thead><tr><th>Backend headless</th><th class="own">RAM residente</th><th>Confronto diretto</th><th>Nota</th></tr></thead>
+      <tbody>
+        <tr><td><code>picus-be</code></td><td class="n2 own">~10&nbsp;MB</td><td>DataGrip ~1–2&nbsp;GB, DBeaver ~700&nbsp;MB+</td><td>Due ordini di grandezza</td></tr>
+        <tr><td><code>sitta-be</code></td><td class="n2 own">10–25&nbsp;MB</td><td>Directory Opus ~100&nbsp;MB</td><td>Backend di 619 righe: quasi tutto è <code>arbor-fs</code> condiviso</td></tr>
+        <tr><td><code>corvus-be</code></td><td class="n2 own">~30&nbsp;MB</td><td>GitKraken ~800&nbsp;MB–1.5&nbsp;GB</td><td>Un Electron intero contro 30&nbsp;MB di Rust</td></tr>
+        <tr><td><code>bennu-be</code></td><td class="n2 own">200–400&nbsp;MB</td><td>IntelliJ IDEA ~2–3&nbsp;GB</td><td>Su progetti Java medio-grandi: <b>un quarto</b>, webview inclusa</td></tr>
+        <tr class="note"><td colspan="4">Misure del maintainer sulla propria macchina, non un benchmark strumentato — ma gli ordini di grandezza sono coerenti con l'architettura: zero JVM in-process, indice <code>mmap</code>-ato con decode on-demand, e una webview sola invece di quattro.</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="tw"><table>
+      <thead><tr><th>Confronto</th><th class="own">Arbor</th><th>Il concorrente</th><th>Chi vince, e perché</th></tr></thead>
+      <tbody>
+        <tr><td>Bennu vs IntelliJ IDEA — RAM su progetto Java medio-grande</td><td class="c own">✓</td><td class="c">✗</td><td>Un quarto della memoria, webview compresa</td></tr>
+        <tr><td>Bennu vs IntelliJ IDEA — tempo di avvio</td><td class="c own">✓</td><td class="c">✗</td><td>Nessuna JVM da far partire, nessuna indicizzazione bloccante</td></tr>
+        <tr><td>Corvus vs GitKraken — RAM</td><td class="c own">✓</td><td class="c">◐</td><td>Il vantaggio si assottiglia per via della webview, ma resta</td></tr>
+        <tr><td>Corvus vs GitKraken — reattività generale</td><td class="c own">✓</td><td class="c">✗</td><td>Più veloce, e non di poco</td></tr>
+        <tr><td>Corvus vs GitKraken — <b>scroll del grafo</b></td><td class="c own">◐</td><td class="c">✓</td><td>L'unica cosa in cui GitKraken è avanti: Canvas contro SVG</td></tr>
+        <tr><td>Picus vs DataGrip / DBeaver — peso e reattività</td><td class="c own">✓</td><td class="c">✗</td><td>Nessuna JVM, driver nativo, cursore server-side</td></tr>
+        <tr><td>Sitta vs Directory Opus / Explorer — peso</td><td class="c own">✓</td><td class="c">◐</td><td>Superficie piccola, liste virtualizzate</td></tr>
+        <tr><td>Quattro prodotti aperti insieme</td><td class="c own">✓</td><td class="c">✗</td><td>Una webview sola. Gli altri sono quattro applicazioni separate</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="callout">
+      <b>Sul grafo: Canvas contro SVG è un trade-off, non una sconfitta.</b>
+      <p>GitKraken vince sullo scroll perché disegna il grafo su Canvas, dove il costo è per pixel invece che per nodo del DOM. Corvus usa SVG e paga lì — ma in cambio ha <code>export_graph_svg</code>, che su Canvas non esisterebbe senza riscrivere un serializzatore. Vale la pena dirlo perché è l'unica riga di tutta l'analisi dove Arbor perde <i>per una scelta</i> anziché per una mancanza, e la scelta è difendibile: lo scroll del grafo si fa mille volte al giorno e l'export quasi mai, quindi se un giorno la fluidità desse fastidio, la strada è un layer Canvas per il rendering tenendo l'SVG per l'export — non buttare l'SVG.</p>
+    </div>
+
+    <p>C'è un secondo effetto, meno ovvio, che vale la pena mettere per iscritto: <b>il peso basso è ciò che rende sensata l'idea di quattro prodotti invece di uno</b>. Con quattro applicazioni Electron o quattro JVM, tenere aperti editor, client Git, client SQL ed explorer contemporaneamente è una scelta che si paga in gigabyte, e la gente non la fa. Con quattro backend che sommati stanno sotto i 500&nbsp;MB e condividono la finestra, tenerli aperti è gratis — ed è il presupposto di tutte le integrazioni che rendono la suite più della somma delle parti.</p>
+  </section>
+
+  <!-- ===================== BENNU ===================== -->
+  <section id="bennu">
+    <h2>Bennu <span class="kicker">vs IntelliJ IDEA Ultimate · VS&nbsp;Code + Java · Eclipse · RustRover</span></h2>
+
+    <h3>Navigazione e comprensione del codice</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td>Vai alla dichiarazione, all'implementazione, al tipo</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Trova utilizzi con conteggio nel gutter</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Gerarchia delle chiamate, dei tipi, membri ereditati</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Vai a classe / simbolo / file, struttura del file</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Grafo dei moduli navigabile</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>Sorgenti decompilati e download automatico dei sources</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>Ricerca in tutti i file, Structural Search &amp; Replace</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>Ispettore dell'indice semantico</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Bookmark</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Diagrammi UML e delle dipendenze</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✗</td><td class="c">◐</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Validazione — la parte già matura</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Famiglia di controlli</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td>Sintassi, statement illegali, modificatori, record, enum</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Control-flow: missing return, irraggiungibile, yield, fall-through</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Membri e arità sul tipo inferito, varargs-aware</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Ereditarietà, override di final, covarianza del return</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Eccezioni checked, catch morto, multi-catch, try-with-resources</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Generics: arità dei type-argument, erasure clash</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Generics: bound violati, PECS, overload ambiguo</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Lambda: arità vs SAM, effectively-final, cattura</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Gating per versione del linguaggio, import, visibilità</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Switch a pattern: esaustività e dominance (Java 17–21)</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Dataflow</b>: definite assignment, NPE, condizione sempre vera</td><td class="c own">✗</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>Profilo delle ispezioni per progetto, spellcheck con dizionario</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td><b>Validazione dell'intero progetto in un colpo</b>, non solo del file aperto</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Cache diagnostica dependency-aware, warm-up all'apertura</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td><b>Scan mojibake di progetto, report di encoding dal pom</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Convenzioni di naming con piano di fix rivedibile</b></td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr class="note"><td colspan="5">Le celle verdi qui dicono «la famiglia è coperta», non «non sfugge niente». Tua osservazione diretta: escono ancora validazioni non segnate. È il motivo per cui il voto feature di Bennu è 6.5 e non 8.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Refactoring — il vero divario, cinque righe consecutive</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Refactoring</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td>Rename dall'indice delle referenze dell'intero progetto</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Rename di file e cartelle, sposta in un altro package</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Ottimizza import, genera accessor / override / costruttori</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Genera entità JPA da schema</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td><b>Extract Method</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Introduce Variable / Constant / Field / Parameter</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Inline</b> (variabile, metodo)</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Change Signature</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td><b>Safe Delete</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr><td>Pull Up / Push Down, estrai interfaccia o superclasse</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr><td>Quick-fix disponibili al caret</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr class="note"><td colspan="5">Sei intention in tutto contro ~70 famiglie di controlli. Non è il numero, è il rapporto: quasi ogni squiggle è una diagnosi senza cura.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Stack legacy — dove il confronto si ribalta</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td>Grafo delle action Struts 2 su frammenti multipli</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td><b>Merge dei frammenti per nome di classpath (Entando / jAPS)</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Espansione dei wildcard e delle backref <code>{1}</code></b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Result Tiles risolti fino alla vista</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>OGNL <code>%{…}</code>: hover, target, lint sulle property</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><code>validation.xml</code>: autore, contesto, target, catalogo validator</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>JSP: taglib, TLD, navigazione degli include, action</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>Spring bean XML: id → impl, property, variabili d'ambiente</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>MyBatis: navigazione mapper ↔ interfaccia</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>Discovery del <code>web.xml</code>, config Tomcat, deploy</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Hot-swap delle JSP</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>Studio i18n sui <code>.properties</code>, XSD/DTD da schema</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Spring Boot — la sezione che nella stesura precedente era una riga a zero</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td><b>Pannello degli endpoint Spring, offline</b>, con filtro per nome e parametri</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td><code>@GetMapping</code> su metodo + <code>@RequestMapping</code> su classe risolti nella rotta reale</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td><b>Goto da <code>@Value("${…}")</code> alla property nello yaml</b></td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td><b>Goto inverso dallo yaml al codice, con il numero di utilizzi</b></td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Una chiave dello yaml è morta o viva: chi la legge, in quattro forme diverse</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Conversione di una property in variabile d'ambiente</b> per i sistemisti</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>SpEL nelle annotation: highlight e risoluzione dei placeholder</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><code>@ConfigurationProperties</code>: binding, mappe annidate, metadata dei builtin e actuator</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td>Navigazione dichiarazione del bean ↔ utilizzo dall'editor</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td><b>Spring Data: query derivate dal nome del metodo</b>, validate contro le property</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Generazione di entità JPA in stile JPA&nbsp;Buddy</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr class="note"><td colspan="5">Due righe qui valgono più delle altre. <b>La conversione property → variabile d'ambiente</b> è l'unica implementazione corretta del gruppo: la regola vera di Spring Boot è «punto diventa underscore, <i>il trattino si toglie</i>, poi maiuscolo» — quindi <code>spring.jpa.show-sql</code> è <code>SPRING_JPA_SHOWSQL</code>, e il «quasi giusto» è come <code>SPRING_JPA_SHOW_SQL</code> finisce in un descrittore di deploy e non fa niente in silenzio. <b>Le query derivate</b> intercettano al caret l'errore che Spring Data compila all'avvio: un refuso in <code>findByCustmerName</code> è invisibile al compilatore, invisibile a ogni test che non tocca quel repository, e tira giù il context in deploy. Su IntelliJ la generazione JPA equivalente è JPA&nbsp;Buddy, che è a pagamento anche sulla Ultimate.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Build, run, debug, test — e la riga del debugger, corretta</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>RustRover</th><th>VS&nbsp;Code</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td>Modello Maven (pom, moduli, classpath, encoding)</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Modello Gradle</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Cargo: workspace, run, test, add, toolchain, outdated</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td>Configurazioni di run con variabili d'ambiente</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Debugger Java (JDWP proprio), breakpoint condizionali, watch, eval</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Debugger Rust che parte e regge su Windows-MSVC</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">◐</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td>Filtri di step del debugger (salta package e librerie)</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Pannello di build con i problemi del compilatore separati dalle diagnostiche</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Progetti npm: manifest, script eseguibili dal pannello</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Workspace multi-progetto con switcher</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Hot-swap delle classi Java, stack trace asincroni</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✗</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Runner di test con catalogo e report (JUnit, cargo)</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Espansione delle macro Rust, grafo dei moduli</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td><b>WGSL con render di anteprima dello shader, Bevy/fulcrum</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td><b>Coverage</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td><b>Profiler, memory view, thread dump</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr class="note"><td colspan="6">La riga del debugger Rust è l'unica di tutta l'analisi votata su un'esperienza d'uso invece che sul codice: su Windows-MSVC quello di Bennu ti funzionava, quelli di RustRover e VS&nbsp;Code no. È un dato più forte di una lettura del sorgente — con un caveat che vale per entrambi: nessuno dei due sa se nel frattempo li abbiano stabilizzati, quindi il ◐ va riverificato prima di darlo per buono.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Ergonomia dell'editor</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Bennu</th><th>IntelliJ</th><th>VS&nbsp;Code</th></tr></thead>
+      <tbody>
+        <tr><td>Minimap, sticky scroll, indent guide, rainbow bracket</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Inlay hint, code lens, signature help, ghost text</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Postfix template, Emmet, sposta riga, duplica, toggle commento</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Multi-caret e selezione a colonna</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Live template definibili dall'utente</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Local History con cambi esterni, ripristino di cartelle e cancellati</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Terminale integrato, pannello TODO, viewer docx/font/immagini</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td><b>VCS inline</b>: gutter delle modifiche, annotate, revert di riga</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Diff / merge dentro l'editor</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Plugin di terze parti, superficie MCP nativa</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="callout">
+      <b>Il multi-caret è cablato e spento — verificato nel codice.</b>
+      <p><code>shared/ui/code-editor/extensions.ts:418</code> mappa <code>Alt-j</code> su <code>selectNextOccurrence</code>, ma <code>EditorState.allowMultipleSelections</code> non compare in tutto <code>src/lib</code>. Senza quel flag CodeMirror collassa ogni selezione multipla alla principale: il comando esiste e non può funzionare. È il caso da manuale della differenza fra «c'è» e «funziona», e sta dentro casa.</p>
+    </div>
+
+    <h3>Da integrare, in ordine di ritorno</h3>
+    <ol class="next">
+      <li><b>Abilitare le selezioni multiple</b><span>Due righe in <code>extensions.ts</code>, più <code>rectangularSelection()</code>. Sblocca un tasto che oggi è morto.</span></li>
+      <li><b>Extract Method e Introduce Variable / Constant / Parameter</b><span>Quattro delle cinque righe rosse consecutive. L'indice sa già cosa cattura una selezione.</span></li>
+      <li><b>Quick-fix registrati per <code>CheckId</code></b><span>Già in <code>docs/bennu-vs-intellij.md</code> §2.1. Sei intention contro ~70 famiglie: ogni check che nasce col suo fix vale il doppio.</span></li>
+      <li><b>Change Signature e Safe Delete</b><span>Poggiano sullo stesso indice di referenze del rename, che già funziona bene.</span></li>
+      <li><b>Gutter VCS e annotate in colonna</b><span>Corvus espone già <code>get_file_blame_streaming</code> e <code>get_file_at_commit</code>: è un ponte, non una feature nuova.</span></li>
+      <li><b>Live template definibili e bookmark</b><span>Piccole, visibili ogni giorno, zero dipendenze dal motore semantico.</span></li>
+      <li><b>Modello di progetto Gradle</b><span>Il taglio più netto fra «editor per il legacy» ed «editor Java». Costoso: serve il modello, non il file.</span></li>
+      <li><b>Import dei report di coverage</b><span>Leggere il <code>jacoco.xml</code> che Maven già produce e dipingerlo nel gutter. Non un motore.</span></li>
+    </ol>
+  </section>
+
+  <!-- ===================== CORVUS ===================== -->
+  <section id="corvus">
+    <h2>Corvus <span class="kicker">vs GitKraken · Fork · Sublime Merge · Tower</span></h2>
+
+    <p><b>Feature 8.5 · UI/UX 9.0 · Estensibilità 9.0 · Funziona davvero 7.5.</b> Sul conteggio delle feature Corvus è il più completo dei cinque. Come client quotidiano vale <b>8.0</b>, non il 9.0 che ti avevo scritto: pesando per frequenza d'uso, il rebase interattivo che manca conta più dei git notes che ha. Ma è anche <b>il prodotto più collaudato della suite</b> — il più vecchio, quello usato ogni giorno, e l'unico per cui <code>docs/status.md</code> elenca una ventina di aree sotto «stabile: coverage ampia, considerato affidabile». Il 6.5 che avevo scritto ignorava un documento che avevo letto.</p>
+
+    <div class="callout blue">
+      <b>Il dato più pesante di questa sezione non è in nessuna tabella.</b>
+      <p>Chi ha scritto Corvus <b>veniva da GitKraken</b>, e a GitKraken non è tornato: al netto di LFS, firme e rebase interattivo, preferisce il proprio. È il tipo di verdetto che una matrice di feature non produce mai — la matrice dice che GitKraken ha tre cose in più, l'uso quotidiano dice che le altre cinquanta contano di più. Vale con l'avvertenza ovvia (è l'autore, e chi cambia strumento tende a difendere la scelta), ma resta l'unico confronto <i>diretto</i> e prolungato fra i due prodotti disponibile qui, ed è più informativo di qualunque riga che abbia scritto io.</p>
+    </div>
+
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Corvus</th><th>GitKraken</th><th>Fork</th><th>Sublime&nbsp;Merge</th><th>Tower</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="6">Il lavoro di ogni giorno — dove la frequenza d'uso pesa</td></tr>
+        <tr><td>Stage per file, per hunk, per riga; discard selettivo</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Commit, amend, template di messaggio</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Stash: save, apply, pop, drop, <b>rename</b>, conflitti</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>Branch: crea, checkout sicuro, rinomina, elimina in blocco, pulizia mergiati</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Branch remoti: rinomina, elimina, checkout come locale</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Tag: crea, elimina, distingue locali da pushati</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Tag annotati con messaggio, tag firmati</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Fetch, pull con auto-stash, push, cherry-pick, revert, reset, merge</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Editor di conflitti a tre vie su merge, revert, cherry-pick, stash, MR</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Rebase interattivo visuale</b> (riordina, squash, fixup, edit)</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Rebase continue / skip / abort</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+
+        <tr class="grp"><td colspan="6">Storia e indagine</td></tr>
+        <tr><td>Grafo con lane, virtual scroll, colonne configurabili, ricerca</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Ricerca dei commit per contenuto del diff</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Cronologia di un file come grafo, blame in streaming, confronto branch</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Algoritmo di diff selezionabile (Myers, Patience, Histogram)</td><td class="c own">✓</td><td class="c">✗</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>Diff split e unificato, rilevamento rename, diff delle immagini</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Reflog navigabile</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td><b>Journal di recupero delle operazioni distruttive</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td><b>Bisect con sessioni persistenti, storico, undo dell'ultima marca</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Git notes: scrivi, elimina, push per namespace</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Statistiche del repository, heatmap, export, <b>export SVG del grafo</b></td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+
+        <tr class="grp"><td colspan="6">Multi-repository e worktree</td></tr>
+        <tr><td>Worktree: aggiungi, rimuovi, apri in tab, info</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr><td><b>Linked worktrees: stesso branch sincronizzato su più repository</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Workspace multi-repo con gruppi, snapshot delle tab, import/export</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>Fetch all / Pull all / Tag all, health scan del workspace</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>Progetti mancanti o spostati: rilevamento e rilocazione</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>Submodule: fetch, pull, push, cambio branch, apri in tab</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Sparse checkout / partial clone</td><td class="c own">✗</td><td class="c">◐</td><td class="c">◐</td><td class="c">✗</td><td class="c">◐</td></tr>
+
+        <tr class="grp"><td colspan="6">Provider e integrazioni — il gruppo dove Corvus scappa</td></tr>
+        <tr><td>MR/PR: lista, dettaglio, crea, merge squash/rebase, close, reopen, ready</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr><td>MR: auto-merge, commenti, timeline, CI checks, diff dei file</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td><b>Review inline sui PR</b> (commenti di riga, submit review)</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>CI/CD: run, job, retrigger, dispatch con variabili</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Dashboard di sicurezza (GHAS, Dependabot, secret scan, GitLab vuln)</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Jira e Linear: cerca, crea, assegna, transiziona; ticket dai commit</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td><b>Browser di repository remoti: albero e file senza clonare</b></td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Clone con progresso e credenziali OAuth/SSH dal keyring</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Init con gitignore, licenza, creazione del remoto via API</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>Import di un bundle git, download di un git portable</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td><b>Git LFS</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td><b>Firma dei commit GPG/SSH e badge «verified»</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+
+        <tr class="grp"><td colspan="6">Estensibilità — il salto di categoria</td></tr>
+        <tr><td><b>Runtime di plugin</b> (hook, scheduler, UI, keybinding, sandbox)</td><td class="c own">✓</td><td class="c">✗</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Hook pre-commit vetoabile dal plugin</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Editor di pipeline con run graph</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Sync di workspace e impostazioni su un repo privato dell'utente</b></td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>Theme editor con preset, API di branding, command palette, jobs</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td><b>Activity bar personalizzabile</b> dall'utente</td><td class="c own">✓</td><td class="c">✗</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Dock dei modali «parcheggiati»</b>: metti da parte un dialogo e riprendilo dopo</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Grafico dei contributi, notifiche, pannello docs con export HTML/Markdown</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>GitFlow: init, feature, release, hotfix, support</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✗</td><td class="c">✓</td></tr>
+        <tr><td><b>Superficie MCP nativa per agenti</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr class="note"><td colspan="6">Nella stesura precedente qui c'era scritto «l'ecosistema è vuoto, architettura 9 ecosistema 1». È falso: il marketplace non spedisce plugin <i>nel binario</i>, ma è popolato da <code>arbor-extensions</code>, e quello che c'è dentro è la tabella qui sotto.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Cosa c'è già nel marketplace — e cosa dice sull'architettura</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Plugin</th><th>Cosa fa</th><th>Equivalente altrove</th></tr></thead>
+      <tbody>
+        <tr><td>Build di progetto</td><td>Compila il progetto direttamente da Corvus</td><td class="c">✗</td></tr>
+        <tr><td>Run di progetto</td><td>Lo esegue</td><td class="c">✗</td></tr>
+        <tr><td>Gestione dei servizi</td><td>Governa i processi lanciati da Corvus e ancora in esecuzione</td><td class="c">✗</td></tr>
+        <tr><td>Pipeline locali</td><td>Definisce ed esegue pipeline sulla macchina, senza CI remota</td><td class="c">✗</td></tr>
+        <tr><td>Editor visuale di pipeline</td><td>Le costruisce a nodi invece che a YAML</td><td class="c">✗</td></tr>
+        <tr><td>Ticket sul grafo</td><td>Mostra il ticket del commit sul nodo, e ci si clicca per aprirlo</td><td class="c">◐</td></tr>
+        <tr><td>Navigazione repository remoti</td><td>Sfoglia i repo disponibili per le utenze collegate</td><td class="c">◐</td></tr>
+        <tr><td>Creazione di progetti git</td><td>Scaffolding di un progetto nuovo</td><td class="c">◐</td></tr>
+        <tr><td>Bucket GCS (Corvus e Bennu)</td><td>Download, upload e delete, anche a chunk</td><td class="c">✗</td></tr>
+        <tr><td><i>Possibile e non ancora scritto</i></td><td>Notifiche a MR conclusa, a pipeline finita, o quando le vulnerabilità aumentano</td><td class="c">✗</td></tr>
+        <tr class="note"><td colspan="3">Due cose valgono più dell'elenco. <b>Uno:</b> queste non sono estensioni cosmetiche — compilare, eseguire e governare i servizi di un progetto <i>dal client Git</i> è roba che nessun concorrente permette nemmeno di immaginare, perché nessuno espone un runtime. Il fatto che siano plugin e non codice del prodotto è il punto: l'architettura regge feature di questo peso senza toccare il core. <b>Due:</b> l'API è dichiarata instabile e sono state fatte modifiche di recente, quindi alcuni potrebbero essere rotti in questo momento — che è esattamente il tema «esiste ≠ funziona», applicato all'ecosistema invece che al prodotto.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Da integrare, in ordine di ritorno</h3>
+    <ol class="next">
+      <li><b>Rebase interattivo visuale</b><span>L'unica assenza che i quattro concorrenti coprono <i>tutti</i>, ed è frequente. <code>get_rebase_todo</code> legge già la lista: manca l'editor che la riordina.</span></li>
+      <li><b>Firma dei commit e badge «verified»</b><span>Prima richiesta appena il repository diventa aziendale.</span></li>
+      <li><b>Git LFS</b><span>Almeno lo stato: pattern tracciati, blob mancanti, pull esplicito.</span></li>
+      <li><b>Tag annotati con messaggio</b><span>Unica riga del «lavoro quotidiano» dove Corvus è l'unico a zero.</span></li>
+      <li><b>Crea e applica patch</b><span>Costo quasi nullo: <code>stage_patch</code> esiste già, il formato è lo stesso.</span></li>
+    </ol>
+  </section>
+
+  <!-- ===================== PICUS ===================== -->
+  <section id="picus">
+    <h2>Picus <span class="kicker">vs DataGrip · DBeaver · SQL&nbsp;Developer · Flyway/Liquibase</span></h2>
+
+    <p><b>Feature 5.5 · UI/UX 7.5 · Estensibilità 3.0 · Funziona davvero 4.5.</b> Il 5.5 è una media che non descrive niente, ed è il punto: come manutentore di repository cross-dialetto vale <b>9</b> e non ha concorrenti; come client di database vale <b>3</b> e ha un driver. Il 4.5 sull'ultimo asse è il più basso della suite perché metà prodotto è atterrato a ondate e alcuni handler sono serviti ma non ancora chiamati dal frontend.</p>
+
+    <h3>Metà «client di database» — qui Picus è lo sfidante</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Picus</th><th>DataGrip</th><th>DBeaver</th><th>SQL&nbsp;Developer</th></tr></thead>
+      <tbody>
+        <tr><td>Connessioni multiple, stato live, test senza aprire</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Driver PostgreSQL</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td><b>Driver Oracle</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Altri motori (MySQL, SQL Server, DB2, SQLite…)</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✗</td></tr>
+        <tr><td>UI di connessione guidata dal descrittore del motore</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td>Albero dello schema, dettaglio tabella con vincoli</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Editor SQL: completamento, hover, diagnostica, ghost text, abbreviazioni</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td><b>Emmet per SQL</b>: espansione abbreviata di una struttura in statement</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Bind variable con modale dei valori</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td><b>Cursore server-side a finestre</b> su risultati enormi, cancel a metà query</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>Editing delle celle, piano di esecuzione come grafo</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Monitor delle sessioni, transazioni esplicite con guardia, viewer LOB</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Navigazione per foreign key</b> dalla cella</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Export dei risultati (CSV, INSERT, JSON)</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Confronto dati e schema fra database</td><td class="c own">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Diagrammi ER, trasferimento dati, cronologia della console</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Debug di stored procedure</td><td class="c own">✗</td><td class="c">◐</td><td class="c">✗</td><td class="c">✓</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Metà «repository di script» — qui il confronto è con «a mano»</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Picus</th><th>DataGrip</th><th>DBeaver</th><th>Flyway / Liquibase</th></tr></thead>
+      <tbody>
+        <tr><td><b>Engine come proprietà del file</b>, con la cartella come default ed ereditarietà</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>Quattro stati: supportato, portabile, riconosciuto-non-supportato, ignoto</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Ruolo della cartella, con regole che valgono solo per quel ruolo</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>Alias di cartella applicato per <i>nome</i>, non per path</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Matrice di copertura cross-dialetto</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Quattordici regole di consistenza fra i due rami</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td><b>Generazione di N file, uno per dialetto, da un solo modello</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td>Modello da form, da paste di INSERT, da CSV; destinazioni riusabili</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td>Anteprima esatta dei byte + <b>rifiuto se il file è cambiato</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">◐</td></tr>
+        <tr><td><b>Lineage di colonna</b>: da dove viene un valore, con legenda delle origini</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Albero delle dipendenze fra oggetti, inventario degli usi negli script</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td><b>Find/replace strutturale sull'AST SQL</b> con capture group</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Generazione di migration dal delta di schema, versionamento</td><td class="c own">◐</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Da integrare, in ordine di ritorno</h3>
+    <ol class="next">
+      <li><b>Driver Oracle</b><span>Il prodotto esiste per allineare un ramo Oracle e uno PostgreSQL, e a Oracle non ci si connette. Il trait <code>DbProvider</code> è già lì apposta.</span></li>
+      <li><b>Collegare il generatore al backend</b><span><code>picus_emit</code> e <code>picus_validate_rows</code> sono serviti ma il frontend non li chiama; <code>paste-sql.ts</code> è ancora un lettore a regex.</span></li>
+      <li><b>Export dei risultati</b><span>È quello che si fa cinque minuti dopo aver eseguito una query.</span></li>
+      <li><b>Navigazione per foreign key</b><span>Basso costo, altissima frequenza.</span></li>
+      <li><b>Dallo schema live alla patch di script</b><span>Il ponte che il design dichiara come ragione d'essere del prodotto.</span></li>
+    </ol>
+  </section>
+
+  <!-- ===================== SITTA ===================== -->
+  <section id="sitta">
+    <h2>Sitta <span class="kicker">vs Explorer/Finder · Total Commander · Directory Opus · Marta</span></h2>
+
+    <p><b>Feature 5.5 · UI/UX 8.5 · Estensibilità 2.0 · Funziona davvero 6.0.</b> Il numero delle feature va letto due volte, perché mescola due confronti opposti: <b>contro Explorer e Finder Sitta vale 8.0</b> e vince quasi ovunque; <b>contro Total Commander e Directory Opus vale 4.5</b> e perde su quattro voci nominate. Il metro giusto dipende da cosa stai sostituendo — e il 2.0 di estensibilità resta il voto più basso della suite: mentre Corvus e Bennu hanno un marketplace con dieci plugin veri, Sitta è l'unico prodotto che il runtime non lo ospita affatto.</p>
+
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th class="own">Sitta</th><th>Explorer / Finder</th><th>Total&nbsp;Commander</th><th>Directory&nbsp;Opus</th><th>Marta</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="6">Navigazione</td></tr>
+        <tr><td>Tab multiple, doppio pannello con ciclo da tastiera</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Barra dell'indirizzo con completamento, indietro/avanti/su</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Preferiti pinnabili, recenti, sezioni della sidebar configurabili</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td><b>Memoria della vista per singola cartella</b></td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✓</td><td class="c">✗</td></tr>
+        <tr><td><b>Scorciatoia globale di sistema, rimappabile</b></td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td><td class="c">✗</td></tr>
+        <tr><td>Navigazione completa da tastiera (frecce, Enter, F2, Backspace, Tab)</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+
+        <tr class="grp"><td colspan="6">Vista, colonne, ricerca</td></tr>
+        <tr><td>Dettagli + icone in quattro dimensioni, icone native del sistema</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Colonne scelte, riordinate col drag, resettabili; ordinamento multiplo</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td><b>Dimensione ricorsiva della selezione</b>, overview del disco</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Lista virtualizzata (regge cartelle enormi senza impuntarsi)</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td><b>Ricerca ricorsiva</b> con walk lato backend, debounced</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Filtri per tipo, intervallo di dimensione, intervallo di date</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td><b>Ricerche salvate persistenti</b> con radice e filtri</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">✗</td></tr>
+        <tr><td><b>Ricerca per contenuto del file</b></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Ricerca indicizzata istantanea su tutto il disco</td><td class="c own">✗</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">◐</td></tr>
+
+        <tr class="grp"><td colspan="6">Operazioni sui file</td></tr>
+        <tr><td>Copia/taglia/incolla con conflitti, progresso, annullamento a metà</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Duplica, rinomina inline, nuovo file/cartella, rinomina in blocco</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td><b>Undo e redo delle operazioni</b>, con storico dei move</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✓</td><td class="c">✗</td></tr>
+        <tr><td><b>Cestino gestito</b>: elenco, ripristino, eliminazione definitiva, svuota</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Comprimi in archivio, estrai qui, drag &amp; drop interno ed esterno</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td><b>Confronto e sincronizzazione di due cartelle</b></td><td class="c own">✗</td><td class="c">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✗</td></tr>
+        <tr><td><b>Checksum, split/join, attributi e timestamp in blocco</b></td><td class="c own">✗</td><td class="c">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✗</td></tr>
+
+        <tr class="grp"><td colspan="6">Git e progetti — la colonna che non esiste altrove</td></tr>
+        <tr><td><b>Colonna di stato git per riga</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Checkout di un branch, stage, unstage, discard, aggiungi a .gitignore</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Repository registrati e workspace nella sidebar</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Apri in Arbor, apri nell'editor, copia link di progetto</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td>Apri nel terminale, rivela nel file manager nativo, proprietà di sistema</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+
+        <tr class="grp"><td colspan="6">Anteprima ed estensione</td></tr>
+        <tr><td>Anteprima testuale virtualizzata con <b>tail dal vivo</b></td><td class="c own">✓</td><td class="c">✗</td><td class="c">◐</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td>Anteprima di immagini, audio, video, archivi; pannello ridimensionabile</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Gestione dei link esterni con permessi ricordati</td><td class="c own">✓</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td><td class="c">✗</td></tr>
+        <tr><td><b>Accesso remoto: FTP, SFTP, cloud</b></td><td class="c own">✗</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td><b>Scripting e plugin</b></td><td class="c own">✗</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Tag ed etichette colorate</td><td class="c own">✗</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td><td class="c">◐</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Da integrare, in ordine di ritorno</h3>
+    <ol class="next">
+      <li><b>Confronto e sincronizzazione di due cartelle</b><span>Il doppio pannello c'è già: manca il verbo che lo rende utile. È la feature che sposta Sitta da «explorer piacevole» a «explorer che sostituisce quello che uso».</span></li>
+      <li><b>Ricerca per contenuto</b><span>Bennu ha già <code>bennu_find_in_files</code>: il motore esiste nella suite, va solo raggiunto.</span></li>
+      <li><b>Ospitare i plugin Lua anche in Sitta</b><span>Il 2.0 di estensibilità è il voto più basso della suite, ed è l'unico che si alza riusando qualcosa che esiste già e funziona: Corvus e Bennu hanno dieci plugin nel marketplace, Sitta zero perché non ospita il runtime. Colonne custom e azioni contestuali dai plugin sarebbero quasi gratis.</span></li>
+      <li><b>Checksum e verifica, attributi e timestamp in blocco</b><span>Due lacune intere, entrambe piccole e autonome.</span></li>
+      <li><b>Accesso remoto SFTP</b><span>Il più costoso e il meno urgente.</span></li>
+    </ol>
+
+    <div class="callout">
+      <b>Il tetto è strutturale, non di ambizione.</b>
+      <p>Sitta è <b>~6.000 righe</b> in tutto (5.366 di frontend, 619 di backend) contro le 274.000 di Bennu: l'intero prodotto è il 2% del codice della suite, e <code>FileExplorerModal.svelte</code> ne è 4.232 in un file solo — tredici volte la soglia che il <code>CLAUDE.md</code> si dà. Non è un difetto di qualità: la lista è virtualizzata, l'anteprima anche, l'undo c'è. È che ogni feature di quella lista finisce in quel file, e prima del confronto di cartelle conviene estrarre toolbar, anteprima, cestino e griglia — altrimenti la prossima costa il doppio di questa.</p>
+    </div>
+  </section>
+
+  <!-- ===================== UI/UX ===================== -->
+  <section id="uiux">
+    <h2>UI/UX <span class="kicker">cosa posso giudicare, e cosa no</span></h2>
+
+    <p>Questo è l'asse su cui devo essere più prudente, e conviene dire perché: <b>non posso giudicare se Arbor è bello o se i suoi flussi reggono all'uso</b>, perché non lo uso e non ci sono utenti che segnalino attriti. Quello che posso valutare è ciò che è verificabile nel codice — la <i>governance</i> del design — e vale la pena separarlo dal resto invece di spacciarlo per un giudizio estetico.</p>
+
+    <div class="tw"><table>
+      <thead><tr><th>Cosa è verificabile</th><th class="own">Arbor</th><th>IntelliJ</th><th>VS&nbsp;Code</th><th>Fork / Sublime</th><th>Total&nbsp;Commander</th></tr></thead>
+      <tbody>
+        <tr><td>Design system con tier espliciti e regole di smistamento scritte</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td>Regola «un solo pattern per concetto», applicata come vincolo</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✗</td><td class="c">✓</td><td class="c">◐</td></tr>
+        <tr><td>Divieto dei modali nativi del WebView, un solo picker per tutta la suite</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Keyboard-first dichiarato non negoziabile, con command palette</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">✓</td></tr>
+        <tr><td>Regole di accessibilità scritte e applicate (role, tabindex, focus)</td><td class="c own">✓</td><td class="c">◐</td><td class="c">✓</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td>Vincoli di performance scritti (tutto &gt;50ms async, niente blur sul compositor)</td><td class="c own">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Virtualizzazione nei punti caldi (grafo, griglia, diff, explorer, anteprima)</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Target di layout dichiarato invece che improvvisato</td><td class="c own">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td><td class="c">✗</td></tr>
+        <tr><td>Temi, incluso un editor di temi per l'utente</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr class="note"><td colspan="6">Sotto questa riga comincia ciò che il codice non può dire.</td></tr>
+        <tr><td>Collaudo manuale approfondito e continuo</td><td class="c own">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Test automatici sull'interfaccia (rete sulle regressioni)</td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">◐</td><td class="c">◐</td></tr>
+        <tr><td>Attriti scoperti da utenti <i>diversi dall'autore</i></td><td class="c own">✗</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td><td class="c">✓</td></tr>
+        <tr><td>Nessun componente oltre la soglia che il progetto stesso si dà</td><td class="c own">✗</td><td class="c">—</td><td class="c">—</td><td class="c">—</td><td class="c">—</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>I voti di chi le maschere le ha viste tutte</h3>
+
+    <p>Nella stesura precedente qui c'era un <b>7.5</b> uguale per tutti e quattro, con la motivazione che «non ci sono utenti che segnalino attriti». C'è un utente, ed è l'unico ad aver visto tutte le maschere di tutti e quattro i prodotti. I numeri sotto sono i suoi, e <b>sostituiscono il mio</b>: sul <i>polish</i> — quanto una superficie è stata rifinita — l'autore sa quello che nessuna lettura del codice può dire.</p>
+
+    <div class="tw"><table>
+      <thead><tr><th>Prodotto</th><th class="own">UI/UX</th><th>Prima (mia stima)</th><th>Motivazione dichiarata</th></tr></thead>
+      <tbody>
+        <tr><td><b>Corvus</b></td><td class="n2 own">9.0</td><td class="n2">7.5</td><td>Il prodotto più rifinito della suite</td></tr>
+        <tr><td><b>Sitta</b></td><td class="n2 own">8.5</td><td class="n2">7.5</td><td>8/9 — superficie piccola, quindi rifinita per intero</td></tr>
+        <tr><td><b>Bennu</b></td><td class="n2 own">7.5</td><td class="n2">7.5</td><td>7/8 — in sviluppo continuo, molte cose non sono polish</td></tr>
+        <tr><td><b>Picus</b></td><td class="n2 own">7.5</td><td class="n2">7.0</td><td>7½ — si usano soprattutto le feature base, quindi meno polish</td></tr>
+        <tr class="note"><td colspan="4">Media generale dichiarata: 7/8 per modernità e coerenza con lo stile IntelliJ. Sono voti di autovalutazione, quindi vanno letti sapendo cosa sono — ma non sono voti compiacenti: tre prodotti su quattro sono segnati sotto l'8, e le due motivazioni al ribasso («non è polish», «meno polish perché uso le feature base») sono esattamente il tipo di ammissione che un'autovalutazione gonfiata non fa.</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>Cosa cambia e cosa no. <b>Cambia il polish</b>: la mia stima uniforme era la media di chi non ha visto il prodotto, e la differenziazione fra 9.0 e 7.5 è informazione che avevo perso appiattendola. <b>Non cambia la prova sul campo</b>, che è l'ultimo asse della scorecard e resta dov'era: un design system severo evita la classe di errori che nasce dalla fretta, non quella che nasce dall'uso di gente diversa dall'autore, e quella si scopre solo con qualcuno che si lamenta. Le due cose vanno tenute separate — se il voto di polish assorbisse quello di collaudo, tornerei a produrre il numero medio che non descrive niente.</p>
+
+    <p>Con questi numeri <b>Corvus a 9.0 pareggia Sublime Merge</b> ed è sopra Fork, ma su basi diverse: il 9 di Sublime Merge è reattività e densità limate in dieci anni, quello di Corvus è coerenza e modernità di un design system applicato con disciplina dal primo giorno. Sono due modi diversi di arrivare allo stesso voto, e la differenza si vede tutta nell'ultima colonna della scorecard.</p>
+  </section>
+
+  <!-- ===================== FUNZIONA ===================== -->
+  <section id="funziona">
+    <h2>Esiste ≠ funziona <span class="kicker">l'asse che mancava, e dove fa male</span></h2>
+
+    <p>Ogni matrice qui sopra vota <b>se una feature esiste</b>. La tua osservazione sul debugger dice che non basta: su Windows-MSVC il debugger Rust esiste in tutti e tre i prodotti, ma quello di Bennu ti funzionava e gli altri due no. È la stessa distinzione che il progetto applica già a sé stesso in <code>docs/status.md</code>, dove le feature sono divise in <i>stabili</i>, <i>funzionali con meno chilometraggio</i> e <i>sperimentali</i> — una tassonomia che quasi nessun prodotto commerciale ha l'onestà di pubblicare.</p>
+
+    <h3>Dove i due assi divergono, in entrambe le direzioni</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Caso</th><th>Esiste</th><th>Funziona</th><th>Evidenza</th></tr></thead>
+      <tbody>
+        <tr><td>Debugger Rust su Windows-MSVC — Bennu</td><td class="c">✓</td><td class="c">✓</td><td>Uso diretto: funzionava alla perfezione</td></tr>
+        <tr><td>Debugger Rust su Windows-MSVC — RustRover, VS&nbsp;Code</td><td class="c">✓</td><td class="c">◐</td><td>Uso diretto: problemi ripetuti. Da riverificare: potrebbero averlo sistemato</td></tr>
+        <tr><td>Multi-caret in Bennu</td><td class="c">◐</td><td class="c">✗</td><td>Scorciatoia mappata, flag CodeMirror mai attivato</td></tr>
+        <tr><td>Generatore di Picus</td><td class="c">✓</td><td class="c">✗</td><td>Handler serviti dal backend, frontend che non li chiama</td></tr>
+        <tr><td>Validazione Java di Bennu</td><td class="c">✓</td><td class="c">◐</td><td>Tua segnalazione: escono ancora validazioni e autocomplete non segnati</td></tr>
+        <tr><td>Qualunque componente Svelte, <b>oggi</b></td><td class="c">✓</td><td class="c">✓</td><td>Verificato a mano dall'autore, che usa i quattro prodotti ogni giorno</td></tr>
+        <tr><td>Qualunque componente Svelte, <b>fra tre settimane e cinquanta commit</b></td><td class="c">✓</td><td class="c">◐</td><td>0 test automatici su 833 componenti: nessuno avvisa se si rompe</td></tr>
+        <tr><td>Qualunque crate Rust della suite</td><td class="c">✓</td><td class="c">✓</td><td>691 file su 1727 con test propri, più 104 test d'integrazione</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="callout">
+      <b>La conclusione scomoda, e quella incoraggiante.</b>
+      <p><b>Scomoda:</b> su questo asse Arbor perde contro tutti, ma non per la ragione che avevo scritto. Le feature <i>sono</i> state provate, a mano, dall'autore, ogni giorno, su tutti e quattro i prodotti. Quello che manca non è la verifica: è la <b>seconda persona</b> — qualcuno che usi il prodotto in un modo che l'autore non ha previsto — e la <b>rete sulle regressioni</b>, perché un collaudo manuale non si ripete a ogni commit. Le celle verdi vanno lette come «provata a fondo da una persona sola, su una macchina sola», che è molto più di «implementata» e molto meno di «regge in mano a chiunque» — ed è la ragione per cui i voti dell'ultima colonna stanno fra 4.5 e 7.5. Con una gerarchia interna che conta: <b>Corvus in cima a 7.5</b> perché è il più vecchio, quello usato ogni giorno e l'unico con una ventina di aree dichiarate stabili; <b>Picus in fondo a 4.5</b> perché metà prodotto è appena atterrato.</p>
+      <p><b>Incoraggiante:</b> la metà del problema è già risolta due volte. Il backend ha una disciplina di test automatici che i prodotti commerciali contro cui lo confronti non necessariamente hanno, ed è la metà dove i bug costano di più; il frontend ha il collaudo manuale di chi lo usa tutti i giorni, che è la forma di verifica giusta per un'interfaccia. Quello che resta scoperto è una fascia stretta e nominabile: <b>le regressioni sul frontend fra un collaudo manuale e il successivo</b>. Il debugger che ti funzionava alla perfezione dice che quando una cosa qui è fatta è fatta bene — il rischio non è la qualità di ciò che scrivi, è che nessuno te lo dica quando smette di funzionare.</p>
+    </div>
+
+    <h3>La domanda vera: Bennu è un rimpiazzo di IntelliJ?</h3>
+    <p>No, e le tabelle dicono esattamente perché — non è la validazione, che è quasi tutta verde. Sono <b>cinque righe consecutive</b> in cui Bennu è l'unico a zero (extract, introduce, inline, change signature, safe delete), più il multi-caret che è cablato e spento, più le validazioni non segnate che stai già correggendo. <b>Cinque cose e una riga di codice</b>, non cinquanta. Con quelle dentro, su uno stack Struts/JSP/Spring-XML in Cp1252, la conclusione si ribalta: non «un IntelliJ più povero», ma l'unico editor che vede quel progetto per quello che è — con l'avvertenza che l'ultima colonna della scorecard si alza solo col tempo, e quella non la accorci.</p>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  <p>Fonti: il codice del repository sul ramo <code>feature/bennu</code> (handler RPC dei quattro backend, componenti Svelte, README dei crate, <code>docs/status.md</code>, <code>docs/bennu-vs-intellij.md</code>, <code>docs/picus-design.md</code>); le metriche in testa, ottenute da comandi ripetibili sul repository; e, per le due righe che lo dichiarano, l'esperienza d'uso diretta del maintainer. Per i concorrenti: documentazione pubblica e uso corrente, non un benchmark eseguito — una cella ◐ segna una copertura parziale, dietro plugin di terze parti, o nota per essere fragile.</p>
+</footer>
+
+<script>
+  (function () {
+    const map = { '✓': ['y', 'sì'], '◐': ['p', 'parziale'], '✗': ['n', 'no'], '—': ['', 'non applicabile'] };
+    for (const td of document.querySelectorAll('td.c')) {
+      const g = map[td.textContent.trim()];
+      if (!g) continue;
+      if (g[0]) td.classList.add(g[0]);
+      td.setAttribute('aria-label', g[1]);
+    }
+  })();
+</script>

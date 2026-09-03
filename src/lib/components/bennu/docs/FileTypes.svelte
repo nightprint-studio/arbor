@@ -5,6 +5,33 @@
   and each one is a viewer, not an editor: Bennu shows them, it does not claim to author them.
 </p>
 
+<h2>HTML pages</h2>
+<p>
+  An <code>.html</code> opens as source, with a <strong>Preview</strong> button in the editor's
+  toolbar. Pressing it puts the rendered page <strong>beside</strong> the source, in a pane you
+  can drag wider — a page is edited and looked at in the same breath, and a preview that replaced
+  the buffer would make every fix a round trip through a toggle. <kbd>⤢</kbd> grows it to nearly
+  the whole window and back.
+</p>
+<p>
+  It shows the <em>buffer</em>, not the file on disk, so an edit and <kbd>⟳</kbd> is the loop, and
+  the page's own stylesheets and images load from beside it.
+</p>
+<p>
+  <strong>Rendering asks nothing.</strong> The frame is sandboxed and has <em>no origin of its
+  own</em>: it cannot read Arbor's window, its storage, or anything this application holds,
+  whatever the page contains. A dialog in front of every preview would be one nobody reads.
+</p>
+<p>
+  <strong>Its own scripts are the question</strong>, and the only one — that is what lets a page
+  <em>act</em>: run its code and reach the network. The pill on the preview's bar says which of
+  the two you are in and <em>is</em> the switch: press it to allow, press it again to block. When
+  you allow, Bennu asks whether that is for <strong>this once</strong> or <strong>always for this
+  file</strong> — a report you open every morning should not ask every morning, and a page you
+  are glancing at once should not be remembered forever. The remembered ones are kept per file in
+  your profile, never inside the repository.
+</p>
+
 <h2>Images</h2>
 <p>
   A <code>.png</code>, <code>.jpg</code>, <code>.gif</code>, <code>.bmp</code>, <code>.webp</code>,

@@ -675,9 +675,9 @@ export function createMerulaExtensions(opts: MerulaExtensionsOptions = {}): Exte
     clipRiskLayer.field,
     warnHover,
     lintGutter(),
-    // Editing ergonomics (comments, autoclose, delete-line, soft wrap, folding).
-    // Placed before the base keymap so its `Mod-/` / `Mod-y` win over the
-    // history defaults (`Mod-y` would otherwise redo).
+    // Editing ergonomics (comments, autoclose, the IntelliJ editing keys, soft wrap,
+    // folding). Placed before the base keymap so its `Ctrl-y` / `Cmd-⌫` / `Mod-/` win
+    // over the history and default bindings that claim the same chords.
     merulaEditingExtensions(),
   ];
   // Language intelligence (autocomplete + hover) — only when a catalogue source

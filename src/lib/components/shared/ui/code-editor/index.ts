@@ -54,9 +54,14 @@ export { highlightToHtml } from './mini-highlight';
 export { sqlHighlight, type SqlDialect } from './sql-modes';
 export { dtdLanguage, dtdMode } from './dtd-mode';
 export { ronLanguageExtension, ronMode } from './ron-mode';
+export { mermaidLanguageExtension, mermaidMode } from './mermaid-mode';
 export { wgslLanguageExtension, wgslMode } from './wgsl-mode';
 export { javascriptStream } from './js-mode';
-export { createCodeEditorExtensions, refTextAt, type CodeEditorExtensionsOptions } from './extensions';
+export {
+  createCodeEditorExtensions, refTextAt, preferencesCompartment,
+  type CodeEditorExtensionsOptions, type CodeEditorPreferences, type CompletionPreferences,
+} from './extensions';
+export { intellijEditingKeymap } from './intellij-keymap';
 export { createHighlightPlugin, makeByteToU16, makeU16ToByte, parserReady } from './highlight';
 // Tab stops of an inserted completion — see `snippet-stops.ts` for why this is not CodeMirror's own
 // `snippet()`.

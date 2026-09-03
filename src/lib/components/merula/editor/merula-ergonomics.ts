@@ -10,22 +10,27 @@
  *     (see `OPERATORS` in `merula-lang`), so autoclosing them would fight the user.
  *     With a selection active, typing an opener wraps the selection (open before,
  *     close after) — the standard `closeBrackets` behaviour.
- *   - **Delete-line** (`Ctrl/Cmd+Y`, IntelliJ-style) — note this takes `Mod-y`
- *     from redo; redo stays reachable on `Ctrl/Cmd+Shift+Z`.
+ *   - **The IntelliJ editing keys** — delete-line (`Ctrl+Y`, `Cmd+⌫` on a Mac),
+ *     duplicate, add-next-occurrence, move-line — from the shared
+ *     {@link intellijEditingKeymap}, which also re-binds redo to `Ctrl/Cmd+Shift+Z`
+ *     since delete-line takes the `Ctrl+Y` that was redo on Windows.
  *   - **Soft wrap** — long mini-notation phrases wrap instead of scrolling off.
  *   - **Code folding** — collapse multi-line `( … )` / `[ … ]` / `{ … }` blocks,
  *     driven by a self-contained bracket scanner (no Lezer tree needed; it skips
  *     strings + `//` / `/* *​/` comments).
  *
  * Everything is bundled by {@link merulaEditingExtensions}, dropped into the
- * editor's extension list AHEAD of the base keymap so `Mod-y` / `Mod-/` win.
+ * editor's extension list AHEAD of the base keymap so the IntelliJ keys / `Mod-/`
+ * win over the history and default bindings that claim the same chords.
  */
 
 import { EditorView, keymap } from '@codemirror/view';
 import { EditorState, type Extension } from '@codemirror/state';
-import { toggleComment, deleteLine } from '@codemirror/commands';
+import { toggleComment } from '@codemirror/commands';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { codeFolding, foldGutter, foldKeymap, foldService } from '@codemirror/language';
+
+import { intellijEditingKeymap } from '$lib/components/shared/ui/code-editor/intellij-keymap';
 
 // ── Language data (comment + autoclose config) ─────────────────────────────────
 
@@ -91,9 +96,9 @@ const merulaFold = foldService.of((state, lineStart, lineEnd) => {
 
 // ── Bundle ─────────────────────────────────────────────────────────────────────
 
-/** Editing ergonomics: comments, autoclose, delete-line, soft wrap, folding.
- *  Returned as a single `Extension` so the editor factory can place it ahead of
- *  the base keymap (giving `Mod-y` / `Mod-/` precedence over history/defaults). */
+/** Editing ergonomics: comments, autoclose, the IntelliJ editing keys, soft wrap, folding.
+ *  Returned as a single `Extension` so the editor factory can place it ahead of the base
+ *  keymap (giving `Ctrl-y` / `Cmd-⌫` / `Mod-/` precedence over history/defaults). */
 export function merulaEditingExtensions(): Extension {
   return [
     merulaLanguageData,
@@ -104,7 +109,11 @@ export function merulaEditingExtensions(): Extension {
     merulaFold,
     keymap.of([
       { key: 'Mod-/', run: toggleComment },
-      { key: 'Mod-y', run: deleteLine }, // IntelliJ delete-line (redo → Mod-Shift-z)
+      // Delete-line, duplicate, multi-cursor, move-line, redo — the same list the shared
+      // code editor binds, so a key cannot mean one thing in a `.merula` buffer and another
+      // in a `.java` one. It also brings the redo Windows had lost: delete-line takes
+      // `Ctrl+Y`, which is the only redo `historyKeymap` gives that platform.
+      ...intellijEditingKeymap(),
       ...closeBracketsKeymap,
       ...foldKeymap,
     ]),

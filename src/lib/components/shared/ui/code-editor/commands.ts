@@ -5,9 +5,9 @@
  * Arbor's editors are aimed at people who are IntelliJ-comfortable, so the gap that
  * matters is not "what does CodeMirror bind" but "what does a hand trained on an IDE
  * reach for and find nothing". `defaultKeymap` already covers moving a line
- * (`Alt+↑/↓`), deleting one (`Ctrl+Y`, added by the host) and folding. What it has
- * no command for at all is **duplicating** — which is the single most-used editing
- * verb after copy and paste.
+ * (`Alt+↑/↓`) and folding; delete-line and the rest of the IntelliJ chords are bound
+ * in `./intellij-keymap`. What CodeMirror has no command for at all is **duplicating**
+ * — which is the single most-used editing verb after copy and paste.
  */
 
 import { EditorSelection, type ChangeSpec } from '@codemirror/state';

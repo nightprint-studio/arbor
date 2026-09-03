@@ -89,6 +89,28 @@
   Directories are deliberately not renamable this way: for a Rust project that moves a whole module
   path, and offering it here would mean offering half of it.
 </p>
+
+<h2>Moving a file</h2>
+<p>
+  <strong>Drag it onto a folder</strong> in the tree, or use <strong>Move to folder…</strong> from
+  its right-click menu when the destination is nowhere near the file on screen. A move is the same
+  operation as a rename with a different destination, so it carries the same guarantees: the buffer
+  is saved first, an open tab follows the file, the destination refuses to be overwritten, and a
+  language server's edits (that <code>mod</code> line, those <code>use</code> paths) are applied
+  with it.
+</p>
+<p>
+  <strong>It asks first when the move sets off a refactor</strong>, and only then — dragging an
+  image into <code>assets/</code> just moves it. The confirmation names the files that will be
+  edited, before anything moves.
+</p>
+<p>
+  Moving a <code>.java</code> file into a different <strong>package</strong> is the one case the
+  dialog warns about rather than handles: the file moves, and its <code>package</code> line is left
+  as it was. Bennu then flags the mismatch on that line, and <kbd>Alt</kbd> + <kbd>Enter</kbd> sets
+  it to the new package — but whatever imports the class still names the old one, so a package move
+  is not yet a one-gesture refactor.
+</p>
 <h2>Project tree</h2>
 <p>
   The tree <strong>follows the disk</strong>. A <code>git checkout</code>, a <code>cargo new</code>,

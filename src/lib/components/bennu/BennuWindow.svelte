@@ -145,7 +145,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { watchRoots, TREE_CHANGED, type TreeChanged } from '$lib/ipc/bennu/tree-watch';
   import { workspacesStore } from '$lib/stores/bennu/workspaces.svelte';
-  import { isJavaFile, isJspFile, isLspFile, supportsCodeNav } from './file-kind';
+  import { isJavaFile, isJspFile, isLspFile, isMarkdownFile, supportsCodeNav } from './file-kind';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import BennuI18nPanel from './BennuI18nPanel.svelte';
   import { isI18nBundle } from './i18n/bundle-path';
@@ -1438,6 +1438,14 @@
         action: () => run(() => bennuSettingsStore.setTabSize(4)), when: bennuSettingsStore.tabSize !== 4 },
       { id: 'tabwidth-8', title: 'Tab width: 8', icon: 'indent',
         action: () => run(() => bennuSettingsStore.setTabSize(8)), when: bennuSettingsStore.tabSize !== 8 },
+      // Markdown: rendered or raw. Offered only on a `.md`, and phrased as the thing it would
+      // switch TO — a palette entry is read as a verb, not as a status.
+      { id: 'md-source', title: 'Markdown: edit the source', icon: 'file',
+        action: () => run(() => bennuSettingsStore.setMarkdownLivePreview(false)),
+        when: isMarkdownFile(path) && bennuSettingsStore.markdownLivePreview },
+      { id: 'md-preview', title: 'Markdown: live preview', icon: 'Eye',
+        action: () => run(() => bennuSettingsStore.setMarkdownLivePreview(true)),
+        when: isMarkdownFile(path) && !bennuSettingsStore.markdownLivePreview },
     ];
     const viewItems = [
       { id: 'project',   title: 'Toggle Project',   icon: 'folder-tree', shortcut: 'Alt+1', action: () => run(() => bennuUiStore.toggleLeft('project')), when: true },

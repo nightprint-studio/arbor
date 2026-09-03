@@ -66,17 +66,21 @@
 
 <h2>Callouts</h2>
 <p>
-  A quote whose first line names a kind renders as a box with its own icon and colour,
-  and folds:
+  A quote whose first line names a kind renders as a box with its own icon and colour:
 </p>
 <pre><code>&gt; [!warning] Do not do this on a worker thread
 &gt; The reason, at whatever length it takes.</code></pre>
 <p>
-  <code>note</code>, <code>tip</code>, <code>info</code>, <code>warning</code>,
-  <code>danger</code>, <code>question</code>, <code>example</code> and
-  <code>quote</code> are recognised. A <code>-</code> after the kind
-  (<code>&gt; [!warning]-</code>) starts it folded — useful for the long explanation
-  that should be available but not in the way.
+  <code>note</code>, <code>tip</code>, <code>important</code>, <code>warning</code>,
+  <code>caution</code>, <code>question</code>, <code>example</code> and <code>quote</code> are
+  recognised, in any case — and so are the words that mean the same things elsewhere
+  (<code>info</code>, <code>hint</code>, <code>success</code>, <code>attention</code>,
+  <code>danger</code>), because the same file is read here and on GitHub. Anything written after
+  the marker becomes the callout's title; with nothing there, the kind names itself.
+</p>
+<p>
+  The same boxes render wherever Arbor shows markdown — a <code>.md</code> opened in the code
+  editor, or the markdown window — because it is one editor.
 </p>
 
 <h2>Tasks</h2>
@@ -90,7 +94,9 @@
 
 <h2>Code, and the rest of the suite</h2>
 <p>
-  Fenced code is highlighted by language. Because Garrulus runs in the same application
+  Fenced code is highlighted by language — <code>dig</code>, <code>merula</code>,
+  <code>wgsl</code> and <code>ron</code> included, which no markdown renderer outside this
+  application knows. Because Garrulus runs in the same application
   as the rest of Arbor, a fence can also be acted on: a <code>sql</code> block offers to
   open in Picus, and a file-and-line reference in a repository Arbor knows opens there —
   pinned to the revision it was written against, so a link in a note from six months ago

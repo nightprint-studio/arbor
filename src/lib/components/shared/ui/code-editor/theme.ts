@@ -66,7 +66,9 @@ export const codeEditorTheme = EditorView.theme(
       backgroundColor: 'var(--bg-base)',
       color: 'var(--text-primary)',
       fontFamily: 'var(--font-code)',
-      fontSize: 'var(--font-size-sm)',
+      // `--cm-font-size` is set on the mount host by the `fontSize` prop (a user setting);
+      // an editor that never sets one keeps the app's code size.
+      fontSize: 'var(--cm-font-size, var(--font-size-sm))',
     },
     '&.cm-focused': { outline: 'none' },
     // `position: relative` makes the scroller the containing block for the ruler guide
@@ -82,6 +84,12 @@ export const codeEditorTheme = EditorView.theme(
       pointerEvents: 'none',
     },
     '.cm-content': { padding: '6px 0', caretColor: 'var(--text-primary)' },
+    // Whitespace glyphs (the `showWhitespace` preference). CodeMirror's own dot is a hardcoded
+    // grey that reads as dirt on a dark theme; the tab arrow it draws is an SVG data URI and
+    // stays as it is — a neutral grey works for a line, not for a field of dots.
+    '.cm-highlightSpace': {
+      backgroundImage: 'radial-gradient(circle at 50% 55%, var(--text-disabled) 20%, transparent 5%)',
+    },
     '.cm-line': { padding: '0 12px' },
     '.cm-gutters': {
       backgroundColor: 'var(--bg-base)',

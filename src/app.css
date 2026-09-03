@@ -889,6 +889,17 @@ input[type="radio"]:disabled {
 /* XSD built-in type references inside attribute values (`type="xs:string"`). */
 .token.tag .token.attr-value .token.builtin     { color: var(--syntax-type,    #4d78cc); font-weight: 500; }
 .token.namespace                    { color: var(--syntax-keyword,  #cc7832); }
+/* A name the LANGUAGE brings rather than one the file does — python's `len`, bash's `echo`,
+   dig's `harvest`, WGSL's `f32`. Emitted by a dozen Prism grammars and styled by none of them
+   until now, so every one of those read as plain text. Between a call's orange and ordinary
+   text on purpose: it IS a call, and it is not one you wrote. Same token as the editor's own
+   `cm-tok-builtin`. */
+.token.builtin                      { color: var(--syntax-builtin, #8888c6); }
+/* `$splice` in merula, `$VAR` in a shell fence, `@name` in others. */
+.token.variable                     { color: var(--syntax-field,   #9876aa); }
+/* A note name in a merula fence (`c3`, `eb2`, `~`) — the same warm colour the DAW's own
+   editor gives it, so a phrase pasted into a README reads as the phrase it is. */
+.token.symbol                       { color: var(--grv-syntax-note, #e5c07b); }
 .token.entity                       { color: var(--syntax-number,   #9876aa); }
 
 /* ---- Inline markdown images ----
