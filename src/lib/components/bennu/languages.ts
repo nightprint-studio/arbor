@@ -13,7 +13,7 @@
  *    grammar wasm the Merula window parses with).
  * 2. **Lezer languages** — HTML (`@codemirror/lang-html`, with embedded JS/CSS and tag
  *    folding), JSON, Markdown.
- * 3. **language-server backed** — **Rust**, **C**, **C++** and **Python**
+ * 3. **language-server backed** — **Rust**, **C**, **C++**, **Python**, **Lua** and **Go**
  *    ({@link lspLanguage}), plus **TypeScript**, **JavaScript**, **Svelte** and **HTML**
  *    ({@link lspLanguageFrom}): a base highlighter for
  *    the instant local colour — a legacy stream mode for Rust, a real Lezer grammar for the
@@ -22,8 +22,15 @@
  *    rename ride the shared handlers, so they need nothing here. HTML is in this tier for
  *    **Angular**, whose server serves a project's templates; where no server serves the file
  *    the two hooks answer nothing and the tier costs nothing — which is also what makes C,
- *    C++ and Python worth putting here rather than in tier 4: with clangd or pyright installed
- *    they gain completion, hover and semantic colour, and with neither they are still coloured.
+ *    C++, Python, Lua and Go worth putting here rather than in tier 4: with clangd, pyright,
+ *    lua-language-server or gopls installed they gain completion, hover and semantic colour, and
+ *    with none of them they are still coloured.
+ *
+ *    ⚠️ **An extension in the LSP catalogue that has no `case` below is not coloured at all.**
+ *    Lua and Go had a server registered and no descriptor here: the file opened grey while
+ *    completion and hover worked, and the symptom ("the server is running but there is no
+ *    highlight") names neither file. A server added to `catalogue.rs` needs its `case` here in
+ *    the same turn.
  * 4. **legacy stream modes** — XML, YAML, `.properties`, CSS/SCSS/LESS, shell and
  *    **TOML**, plus SQL through the shared per-dialect modes. Colour only — except a
  *    `Cargo.toml`, which gets the manifest schema's completion and diagnostics on top
@@ -51,6 +58,8 @@ import { toml } from '@codemirror/legacy-modes/mode/toml';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
 import { c, cpp } from '@codemirror/legacy-modes/mode/clike';
 import { python } from '@codemirror/legacy-modes/mode/python';
+import { lua } from '@codemirror/legacy-modes/mode/lua';
+import { go } from '@codemirror/legacy-modes/mode/go';
 import { json as jsonLang } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { html } from '@codemirror/lang-html';
@@ -205,6 +214,14 @@ const shellLang = streamLang('shell', shell);
 const cLang = lspLanguage('c', c, { line: '//', block: { open: '/*', close: '*/' } });
 const cppLang = lspLanguage('cpp', cpp, { line: '//', block: { open: '/*', close: '*/' } });
 const pythonLang = lspLanguage('python', python, { line: '#' });
+// Lua — the language Arbor's own plugins are written in, so a `main.lua` is opened here more
+// often than most. `lua-language-server` is in the catalogue; with it installed the file gains
+// completion, hover and semantic colour, and without it the stream mode still colours it.
+const luaLang = lspLanguage('lua', lua, {
+  line: '--',
+  block: { open: '--[[', close: ']]' },
+});
+const goLang = lspLanguage('go', go, { line: '//', block: { open: '/*', close: '*/' } });
 // Rust: the legacy mode for the instant local colour, plus everything a language server adds.
 // Built once — the identity has to be stable or the editor remounts on every keystroke.
 const rustLang = lspLanguage('rust', rust, {
@@ -367,6 +384,8 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'cpp': case 'cc': case 'cxx': case 'c++':
     case 'hpp': case 'hh': case 'hxx': case 'h': return cppLang;
     case 'py': case 'pyi': case 'pyw': return pythonLang;
+    case 'lua': return luaLang;
+    case 'go': return goLang;
     default: return plainLang;
   }
 }

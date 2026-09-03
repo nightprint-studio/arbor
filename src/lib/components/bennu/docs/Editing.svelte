@@ -17,10 +17,11 @@
     index-backed completion; <code>.dig</code> completes from its own vocabulary (below).</li>
   <li><strong>HTML</strong> and <strong>JSON</strong> highlight and fold.</li>
   <li><strong>Markdown</strong> is a case of its own — see below.</li>
-  <li><strong>Rust</strong>, <strong>C</strong>, <strong>C++</strong> and <strong>Python</strong>
-    are coloured from a mode of their own, so a <code>.py</code> build script or a
-    <code>.cpp</code> beside a JNI library reads as code with no server installed at all — and
-    gains completion, hover and semantic colour the moment clangd or pyright is.</li>
+  <li><strong>Rust</strong>, <strong>C</strong>, <strong>C++</strong>, <strong>Python</strong>,
+    <strong>Lua</strong> and <strong>Go</strong> are coloured from a mode of their own, so a
+    <code>.py</code> build script, a plugin's <code>main.lua</code> or a <code>.cpp</code> beside
+    a JNI library reads as code with no server installed at all — and gains completion, hover and
+    semantic colour the moment clangd, pyright, lua-language-server or gopls is.</li>
   <li><strong>TOML</strong>, <strong>RON</strong>, XML, YAML,
     <code>.properties</code>, CSS/SCSS/LESS, JavaScript/TypeScript, shell and SQL highlight.
     Colour only: navigation and completion want a language server, and until one is wired those
@@ -191,6 +192,15 @@
   <strong>language server</strong> is formatted by it (Rust by <code>rustfmt</code>); <strong>Java</strong>
   is formatted by Bennu, which re-indents every line to its nesting, strips trailing whitespace and
   collapses runs of blank lines — using the indentation the footer shows.
+</p>
+<p>
+  <strong>Its style is Settings → Java Style → Formatter</strong>: how many consecutive blank lines
+  survive between members (0 removes them all), and whether the statements under a <code>case</code>
+  label are indented in from it. The indentation itself comes from Editor → Indentation, so the
+  formatter and the editor cannot disagree — and both persist, so a file formats the same way
+  tomorrow. Nothing there reaches a language with a server: that one reads the project's own
+  <code>rustfmt.toml</code> or <code>.prettierrc</code>, which is where the rest of the team and
+  the CI already read it from.
 </p>
 <p>
   It deliberately stops there: it never rewraps a long line, reorders anything, adds or removes

@@ -17,6 +17,9 @@ export interface BennuConfig {
   indent_width: number;
   /** Editor font size in pixels (8..32; `13` by default). */
   font_size: number;
+  /** Indent with hard tab characters rather than spaces. Paired with `indent_width`, which
+   *  stays the display width of one level either way. */
+  indent_with_tabs: boolean;
   /** Wrap long lines to the viewport instead of scrolling sideways. */
   word_wrap: boolean;
   /** Render spaces and tabs as visible glyphs. */
@@ -76,6 +79,10 @@ export interface BennuConfig {
   /** Auto-import on accepting a type-name completion whose simple name resolves to a SINGLE class.
    *  `true` by default; off inserts just the name (import later with Alt+Enter). */
   auto_import: boolean;
+  /** Java formatter: the most consecutive blank lines kept between members. `0` removes them all. */
+  java_max_blank_lines: number;
+  /** Java formatter: indent the statements under a `case` label one level in from it. */
+  java_indent_case_body: boolean;
   /** Max worker threads the whole-project validation sweep may use. `0` = auto (leaves ~half the
    *  cores free for the UI / go-to); set a small number (e.g. `1`) so a big project's validation
    *  can't peg every core and freeze the editor. Doesn't affect the initial index build. */

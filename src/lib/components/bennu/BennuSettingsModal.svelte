@@ -839,6 +839,23 @@ initialization_options = ""`}</pre>
           </FormRow>
         </div>
         <div class="card">
+          <div class="card-section-title"><Wand2 size={12} /> Formatter</div>
+          <p class="bs-hint">
+            What <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> does to a <code>.java</code> file.
+            Indentation comes from Editor → Indentation, so the formatter and the editor never
+            disagree. A language with a language server is formatted by it instead, reading the
+            project's own <code>rustfmt.toml</code> or <code>.prettierrc</code> — nothing here
+            applies to those.
+          </p>
+          <FormRow label="Blank lines between members" description="The most consecutive blank lines the formatter keeps. 0 removes them all.">
+            <NumberStepper value={s.javaBlankLines} min={0} max={5} narrow
+                           onchange={(v) => s.setJavaBlankLines(v)} ariaLabel="Blank lines between members" />
+          </FormRow>
+          <FormRow label="Indent case bodies" description="Indent the statements under a case label one level in from it — the Sun/Oracle convention, and IntelliJ's.">
+            <Toggle checked={s.javaIndentCaseBody} onchange={(v) => s.setJavaIndentCaseBody(v)} ariaLabel="Indent case bodies" />
+          </FormRow>
+        </div>
+        <div class="card">
           <div class="card-section-title"><Wand2 size={12} /> Preview</div>
           <pre class="bs-snippet" aria-label="Java style preview">{styleSnippet}</pre>
         </div>

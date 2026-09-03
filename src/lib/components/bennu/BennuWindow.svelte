@@ -1910,16 +1910,22 @@
       if (e.key === 'ArrowRight') { e.preventDefault(); editor?.navForward(); return; }
     }
 
-    // Format with the language's own formatter (rustfmt for Rust). Alt+Shift+F rather than
-    // IntelliJ's Ctrl+Alt+L: Chromium drops Ctrl+Alt+<letter> on IT/DE/FR/ES layouts to preserve
-    // AltGr, so that binding would never fire on this machine.
+    // Format with whichever engine knows the file: its language server (rustfmt for Rust), or
+    // Bennu's own formatter for Java. Alt+Shift+F rather than IntelliJ's Ctrl+Alt+L: Chromium
+    // drops Ctrl+Alt+<letter> on IT/DE/FR/ES layouts to preserve AltGr, so that binding would
+    // never fire on this machine.
+    //
+    // ⚠️ The Java half of the guard is load-bearing: `isLspFile` is false for a `.java` — Bennu
+    // *is* that engine and runs no server for it — so gating on it alone left the one language
+    // the product exists for reachable only from the palette.
     //
     // Every letter and digit below is matched with `isKey` rather than against `e.key`, and that is
     // load-bearing for exactly these Alt chords: macOS composes Option+<key> into another character
     // (Option+Shift+F is `Ï`, Option+Shift+M is `Â`, Option+1 is `¡`), so comparing the character
     // silently unbinds the whole Alt family on a Mac.
     if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, 'f')) {
-      if (!isLspFile(projectStore.activeFilePath)) return;
+      const path = projectStore.activeFilePath;
+      if (!isLspFile(path) && !isJavaFile(path)) return;
       e.preventDefault(); void editor?.formatDocument(); return;
     }
 

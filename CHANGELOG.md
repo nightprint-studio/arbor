@@ -15,6 +15,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **The Java formatter has a style, and it is settable.** Settings → Java Style → Formatter carries the two decisions people disagree about — how many blank lines survive between members, and whether `case` bodies are indented — and the formatter honours them instead of its own hard-coded defaults. A language with a language server is unaffected: it keeps reading the project's own `rustfmt.toml` or `.prettierrc`.
+
+- **Lua and Go files are coloured.** Both had a language server in the catalogue and no highlighter behind it, so a plugin's `main.lua` or a `.go` opened as grey text even with the server running — completion and hover worked, colour never arrived. They now paint from their own mode, server or not.
+
 - **C, C++ and Python files are coloured without a language server.** They mapped to no highlighter at all, so a `.py` build script or a `.cpp` beside a JNI library opened as plain text even though clangd and pyright were already in the catalogue. They now paint instantly from their own mode, and gain completion, hover and semantic colour when a server is installed.
 
 - **Markdown tables are edited as tables.** Putting the caret in one no longer turns the whole grid back into pipes: cells are edited in place (only the focused cell shows its own markdown), rows and columns are added, removed and aligned from a strip under the table, `Tab`/`Enter` walk it, and the toolbar's ⊞ inserts a new table from a size grid. Editing normalises that table's markdown.
@@ -58,6 +62,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Local History compares side by side.** Its diff pane now opens with the picked revision left and the file on disk right, each changed line opposite the one that replaced it; the header button (or `Alt+D`) switches back to the unified patch, and the choice is remembered. The window itself is larger, so the two columns have room.
 
 ### Fixed
+
+- **Tab size and tabs-vs-spaces are remembered.** Both were kept in memory only, so every restart went back to four spaces — and the Java formatter, which indents by them, followed.
+
+- **<kbd>Alt+Shift+F</kbd> formats a Java file.** The shortcut asked only whether a language server serves the file, and none serves `.java` — Bennu is that engine itself — so the key did nothing on the one language the product exists for, while the same command in the palette worked.
 
 - **A bare `<https://…>` no longer vanishes from a rendered markdown document.** The angle brackets were hidden as markup and the address with them, leaving an empty line where the link had been written.
 

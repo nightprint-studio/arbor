@@ -10,6 +10,11 @@
 //! Adding a server is one entry here. Adding one *without* touching this file is what the
 //! user's own `[[lsp.servers]]` config is for — same fields, read at runtime — so a
 //! language nobody anticipated needs no release.
+//!
+//! ⚠️ An entry here buys completion, hover and navigation — **not colour**. Highlighting is
+//! decided independently, by the editor's own language registry (`languages.ts`), and an
+//! extension listed here that is missing there opens as grey text with a working server behind
+//! it. Lua and Go shipped that way. Adding a server means adding its `case` there too.
 
 use std::path::{Path, PathBuf};
 

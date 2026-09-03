@@ -34,8 +34,14 @@ pub struct BennuConfig {
     /// override applies. `"UTF-8"` by default (the declared pom encoding always wins
     /// over this — see `bennu-project`'s encoding detection).
     pub default_encoding: String,
-    /// Editor indentation width in spaces (the whitespace normalizer / display).
+    /// Editor indentation width in spaces (the whitespace normalizer / display), and the width
+    /// the Java formatter indents by.
     pub indent_width: u32,
+    /// Indent with hard tab characters rather than spaces. `false` by default.
+    ///
+    /// Paired with `indent_width`, which stays the *display* width of one level either way — a
+    /// tab is still shown four columns wide when that is what the file is written in.
+    pub indent_with_tabs: bool,
     /// Editor font size, in pixels. `13` by default; the editor clamps what it reads to 8..=32
     /// (the range the settings stepper offers), so a hand-edited `font_size = 2` cannot leave a
     /// buffer nobody can read behind.
@@ -161,6 +167,16 @@ pub struct BennuConfig {
     /// to a SINGLE class, add its `import` line automatically. `true` by default; off inserts just the
     /// name (import it later with Alt+Enter).
     pub auto_import: bool,
+    /// **Java formatter — blank lines**: the most consecutive blank lines the formatter keeps
+    /// between members. `1` by default; `0` removes them all.
+    ///
+    /// A setting because it is the one formatter decision people genuinely disagree about, and
+    /// the one that shows up in a diff: a codebase written with two blank lines between methods
+    /// gets its whole file rewritten by a formatter that keeps one.
+    pub java_max_blank_lines: usize,
+    /// **Java formatter — `case` bodies**: indent the statements under a `case` label one level
+    /// in from it. `true` by default, which is the Sun/Oracle convention and IntelliJ's.
+    pub java_indent_case_body: bool,
     /// **Validation CPU budget**: the maximum worker threads the whole-project validation sweep
     /// (the background warm-up + the explicit "Validate — no compile") may use. `0` = auto (leave
     /// roughly half the cores free for the UI / go-to / completion); set a small number (e.g. `1` for
@@ -448,6 +464,7 @@ impl Default for BennuConfig {
         Self {
             default_encoding: "UTF-8".to_string(),
             indent_width: 4,
+            indent_with_tabs: false,
             font_size: 13,
             word_wrap: false,
             show_whitespace: false,
@@ -486,6 +503,10 @@ impl Default for BennuConfig {
             local_history_max_file_mb: 4,
             search_dependencies: false,
             auto_import: true,
+            // The formatter's own defaults, so a config file that predates these keys formats
+            // exactly as it did before they existed.
+            java_max_blank_lines: 1,
+            java_indent_case_body: true,
             validation_threads: 0,
             index_threads: 1,
             jdk_paths: Vec::new(),
@@ -817,8 +838,15 @@ scroll = 42
         let cfg: BennuConfig = toml::from_str(old).expect("parse");
         assert!(cfg.autosave, "autosave defaults on");
         assert!(cfg.auto_import, "auto_import defaults on");
+        // The Java formatter's style is the same story: a config written before these keys must
+        // format exactly as it did, which means the formatter's own defaults and not `0`/`false`.
+        assert_eq!(cfg.java_max_blank_lines, 1, "one blank line survives, as before");
+        assert!(cfg.java_indent_case_body, "case bodies stay indented");
+        assert!(!cfg.indent_with_tabs, "spaces, as before");
         // And round-trips.
         let back: BennuConfig = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
         assert!(back.autosave && back.auto_import);
+        assert_eq!(back.java_max_blank_lines, 1);
+        assert!(back.java_indent_case_body);
     }
 }

@@ -100,6 +100,10 @@ export interface BennuSettingsSnapshot {
   foldingEnabled: boolean;
   foldBlockComments: boolean;
   // Java Style (drives the Generate flow's output formatting)
+  /** Java formatter: most consecutive blank lines kept between members. */
+  javaBlankLines: number;
+  /** Java formatter: indent the statements under a `case` label one level in from it. */
+  javaIndentCaseBody: boolean;
   finalParams: boolean;
   useLombokVal: boolean;
   switchWithReturn: boolean;
@@ -143,6 +147,8 @@ const DEFAULTS: BennuSettingsSnapshot = {
   autoImport: true,
   foldingEnabled: true,
   foldBlockComments: false,
+  javaBlankLines: 1,
+  javaIndentCaseBody: true,
   finalParams: false,
   useLombokVal: false,
   switchWithReturn: true,
@@ -184,6 +190,8 @@ function createSettingsStore() {
   let foldingEnabled = $state(DEFAULTS.foldingEnabled);
   let foldBlockComments = $state(DEFAULTS.foldBlockComments);
   // Java Style
+  let javaBlankLines = $state(DEFAULTS.javaBlankLines);
+  let javaIndentCaseBody = $state(DEFAULTS.javaIndentCaseBody);
   let finalParams = $state(DEFAULTS.finalParams);
   let useLombokVal = $state(DEFAULTS.useLombokVal);
   let switchWithReturn = $state(DEFAULTS.switchWithReturn);
@@ -215,6 +223,7 @@ function createSettingsStore() {
       localHistory, localHistoryDays, localHistoryMaxMb, localHistoryMaxFileMb,
       autoPopup, popupDelayMs, caseSensitive, autoImport,
       foldingEnabled, foldBlockComments,
+      javaBlankLines, javaIndentCaseBody,
       finalParams, useLombokVal, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
       defaultEncoding, rebuildIndexOnOpen, excludedDirs,
     };
@@ -257,6 +266,13 @@ function createSettingsStore() {
         history_diff_split: historyDiffSplit,
         autosave,
         auto_import: autoImport,
+        // ⚠️ The indentation pair persists HERE and not through `persist()`: it is what the Java
+        // formatter indents by, so a value that lived only in memory meant reformatting a file
+        // with four spaces on Monday and with whatever the default was on Tuesday.
+        indent_width: tabSize,
+        indent_with_tabs: indentStyle === 'tabs',
+        java_max_blank_lines: javaBlankLines,
+        java_indent_case_body: javaIndentCaseBody,
         sql_dialect: sqlDialect,
         collapse_library_frames: collapseLibraryFrames,
         search_dependencies: searchDependencies,
@@ -282,9 +298,9 @@ function createSettingsStore() {
     get fontSize() { return fontSize; },
     setFontSize(v: number) { fontSize = clampFontSize(v); void persistConfigBacked(); },
     get tabSize() { return tabSize; },
-    setTabSize(v: number) { tabSize = v; persist(); },
+    setTabSize(v: number) { tabSize = v; void persistConfigBacked(); },
     get indentStyle() { return indentStyle; },
-    setIndentStyle(v: IndentStyle) { indentStyle = v; persist(); },
+    setIndentStyle(v: IndentStyle) { indentStyle = v; void persistConfigBacked(); },
     get wordWrap() { return wordWrap; },
     setWordWrap(v: boolean) { wordWrap = v; void persistConfigBacked(); },
     get showWhitespace() { return showWhitespace; },
@@ -345,6 +361,13 @@ function createSettingsStore() {
     setFoldBlockComments(v: boolean) { foldBlockComments = v; void persistConfigBacked(); },
 
     // ── Java Style (Generate output formatting) ────────────────────────────
+    get javaBlankLines() { return javaBlankLines; },
+    setJavaBlankLines(v: number) {
+      javaBlankLines = Math.max(0, Math.min(5, Math.round(v) || 0));
+      void persistConfigBacked();
+    },
+    get javaIndentCaseBody() { return javaIndentCaseBody; },
+    setJavaIndentCaseBody(v: boolean) { javaIndentCaseBody = v; void persistConfigBacked(); },
     get finalParams() { return finalParams; },
     setFinalParams(v: boolean) { finalParams = v; persist(); },
     get useLombokVal() { return useLombokVal; },
@@ -426,6 +449,10 @@ function createSettingsStore() {
         collapseLibraryFrames = cfg.collapse_library_frames ?? DEFAULTS.collapseLibraryFrames;
         searchDependencies = cfg.search_dependencies ?? DEFAULTS.searchDependencies;
         autoImport = cfg.auto_import;
+        tabSize = cfg.indent_width || DEFAULTS.tabSize;
+        indentStyle = (cfg.indent_with_tabs ?? false) ? 'tabs' : 'spaces';
+        javaBlankLines = cfg.java_max_blank_lines ?? DEFAULTS.javaBlankLines;
+        javaIndentCaseBody = cfg.java_indent_case_body ?? DEFAULTS.javaIndentCaseBody;
         // An unknown / empty label from a hand-edited config falls back to the default rather
         // than reaching the editor as an undefined dialect.
         sqlDialect = (SQL_DIALECTS as readonly string[]).includes(cfg.sql_dialect)
@@ -465,6 +492,8 @@ function createSettingsStore() {
       autoImport = DEFAULTS.autoImport;
       foldingEnabled = DEFAULTS.foldingEnabled;
       foldBlockComments = DEFAULTS.foldBlockComments;
+      javaBlankLines = DEFAULTS.javaBlankLines;
+      javaIndentCaseBody = DEFAULTS.javaIndentCaseBody;
       finalParams = DEFAULTS.finalParams;
       useLombokVal = DEFAULTS.useLombokVal;
       switchWithReturn = DEFAULTS.switchWithReturn;

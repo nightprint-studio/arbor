@@ -2,9 +2,15 @@
 //!
 //! One handler over both engines, because "format this file" is one question. A language with a
 //! server is formatted by its server (`rustfmt` for Rust); Java is formatted by Bennu's own
-//! formatter, since Bennu *is* the Java engine and there is no server to ask. The editor calls this
-//! and never has to know which of the two answered — which is what stopped Ctrl+Alt+L saying "no
-//! formatter for this file type" on the one language the product exists for.
+//! formatter, since Bennu *is* the Java engine and there is no server to ask.
+//!
+//! The **style** splits the same way. A server reads the project's own file — `rustfmt.toml`,
+//! `.clang-format`, `.prettierrc` — and all it is told from here is the indentation, because that
+//! is what the editor is showing; duplicating the rest in Bennu's settings would create a second
+//! truth that the CI does not read. Java has no such file, so its style *is* Bennu's settings.
+//!
+//! The editor calls this and never has to know which of the two answered — which is what stopped
+//! Ctrl+Alt+L saying "no formatter for this file type" on the one language the product exists for.
 //!
 //! Edits rather than formatted text, in both directions: the editor applies them through CodeMirror
 //! so the format lands in the undo history as one step and the caret keeps its place.
@@ -31,13 +37,17 @@ pub struct FormatArgs {
 fn bennu_format(_ctx: &BennuState, args: FormatArgs) -> Result<Vec<SourceEdit>, String> {
     let cfg = bennu_core::config::load();
     let tab_size = args.tab_size.unwrap_or(cfg.indent_width).max(1) as usize;
-    let spaces = args.insert_spaces.unwrap_or(true);
+    let spaces = args.insert_spaces.unwrap_or(!cfg.indent_with_tabs);
 
     if crate::intel::is_java_file(&args.file) {
+        // The whole style comes from the profile. The two the caller may override are the two the
+        // editor knows better than the config does — it is the surface the user is typing in, and
+        // its indentation is what the formatter has to agree with.
         let style = bennu_intentions::prelude::FormatStyle {
             indent_width: tab_size,
             use_tabs: !spaces,
-            ..bennu_intentions::prelude::FormatStyle::default()
+            max_blank_lines: cfg.java_max_blank_lines,
+            indent_case_body: cfg.java_indent_case_body,
         };
         return Ok(bennu_intentions::prelude::format_edits(&args.source, style)
             .into_iter()

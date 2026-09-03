@@ -290,6 +290,37 @@ mod tests {
         assert_eq!(fmt("class C {   \n}\n"), "class C {\n}\n");
     }
 
+    // ── The two the settings expose ──────────────────────────────────────────────────────────
+    // Both are read from the profile by `bennu_format`, so a change here changes what
+    // Alt+Shift+F does to every Java file — which is exactly why they are pinned.
+
+    #[test]
+    fn the_blank_line_limit_is_configurable() {
+        let src = "class C {\n\n\n\n    void m() {}\n}\n";
+        let keep_two = FormatStyle { max_blank_lines: 2, ..FormatStyle::default() };
+        assert_eq!(format_source(src, keep_two), "class C {\n\n\n    void m() {}\n}\n");
+    }
+
+    #[test]
+    fn zero_blank_lines_removes_them_all() {
+        let src = "class C {\n\n    void m() {}\n\n}\n";
+        let none = FormatStyle { max_blank_lines: 0, ..FormatStyle::default() };
+        assert_eq!(format_source(src, none), "class C {\n    void m() {}\n}\n");
+    }
+
+    #[test]
+    fn a_case_label_sits_one_level_out_from_its_body() {
+        let src = "switch (x) {\ncase 1:\nf();\nbreak;\n}\n";
+        assert_eq!(fmt(src), "switch (x) {\ncase 1:\n    f();\n    break;\n}\n");
+    }
+
+    #[test]
+    fn without_case_indent_the_label_sits_with_its_body() {
+        let src = "switch (x) {\ncase 1:\nf();\n}\n";
+        let flat = FormatStyle { indent_case_body: false, ..FormatStyle::default() };
+        assert_eq!(format_source(src, flat), "switch (x) {\n    case 1:\n    f();\n}\n");
+    }
+
     #[test]
     fn a_run_of_blank_lines_is_collapsed_to_the_limit() {
         let src = "class C {\n\n\n\n    void m() {}\n}\n";
