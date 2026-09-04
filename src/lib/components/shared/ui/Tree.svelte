@@ -297,7 +297,7 @@
           if (isControlled()) onExpandToggle?.(id, next, node);
           else { patch[id] = next; seeded.add(id); }
         }
-        walk(kids);
+        walk(kids ?? undefined);
       }
     };
     walk(nodes);

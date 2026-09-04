@@ -161,15 +161,39 @@ pub struct TypeSlot {
     /// What is written there until the caller replaces it, so a plan applied without a resolver
     /// still produces something (and something that compiles from Java 10 on).
     pub placeholder: String,
-    /// Whether the placeholder is NOT an acceptable answer.
-    ///
-    /// `var` stands in fine for `var rows = load();` — it compiles, it is what javac would infer,
-    /// and a project on Java 10+ would have written it anyway. It does not stand in at all where
-    /// the expression may have no value: naming a whole statement, `obj.setName(x);`, gives
-    /// `var setName = obj.setName(x);` and `void` has nothing to infer from. There the caller
-    /// either names the type or must not apply the plan.
+    /// What the caller must do when it cannot name the type.
     #[serde(default)]
-    pub required: bool,
+    pub need: TypeNeed,
+}
+
+/// How much the plan needs the type actually written.
+///
+/// Three answers, because "could not name the type" covers two situations the caller has to tell
+/// apart. Either **nothing was inferred** — and then `var` is exactly what javac would put there
+/// anyway — or **something was inferred that must not be written**: `void`, a type variable the
+/// target class never declared, a captured wildcard flattened to `Object`. Only the second is
+/// evidence of anything.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TypeNeed {
+    /// `var` will do. It compiles from Java 10 on and is what javac would infer.
+    #[default]
+    Optional,
+    /// `var` will not do, whatever the reason. A field is never `var` in any Java version, and
+    /// naming a whole statement gives `var setName = obj.setName(x);` where the call may be `void`
+    /// and there is nothing to infer from. Not naming the type means not applying the plan.
+    Required,
+    /// `var` will do **only while nothing was inferred**.
+    ///
+    /// The target-typed positions — an argument, a `return`, the right of an assignment, an arm of a
+    /// conditional — where the expression's type comes from what is expected of it.
+    /// `stream.collect(Collectors.toList())` gives the inner call its type arguments; standing alone
+    /// as `var c = Collectors.toList();` it re-infers to a collector over `Object` and the line it
+    /// fed stops compiling. That re-inference is precisely what an unwritable answer looks like, so
+    /// it is the signal to decline. An engine that inferred *nothing* has not seen that signal, and
+    /// there `var` compiled 96% of the time — refusing on it too cost 22 good extractions for every
+    /// broken one it prevented, measured on commons-lang3.
+    RequiredOnceInferred,
 }
 
 impl Plan {
@@ -229,6 +253,70 @@ impl Plan {
             return;
         }
         edit.text.replace_range(slot.at..slot.at + slot.placeholder.len(), clause);
+    }
+}
+
+/// The `throws` clause to write: the resolver's answer when it is complete, the plan's own guess
+/// when it is not.
+///
+/// **Replace or keep — never add.** The guess is the enclosing method's clause plus what the `try`s
+/// around the selection catch, and it is a sound UPPER bound for a reason that is easy to miss: the
+/// code compiled before the refactoring, so nothing the body raises could have escaped past those.
+/// Adding to it therefore cannot be right, and is actively wrong — it hands the caller an exception
+/// that can never reach it, and the call site stops compiling. Measured: `throws E, Exception` on a
+/// method extracted from one that declares only `throws E`.
+///
+/// Narrowing is the useful direction — dropping what the body does not actually raise — and it is
+/// safe only against a complete answer. An incomplete one is missing exceptions, and a clause that
+/// lost one is an extracted method that does not compile. Hence the flag rather than a merge.
+///
+/// Matching is by SIMPLE name because the two halves are spelled differently: the guess carries the
+/// source's own words, the analysis JVM binary names.
+///
+/// Here rather than in the backend because two callers need it — the backend, and the measurement
+/// harness, which has to do exactly what the backend does or it is measuring something else.
+pub fn merge_throws(guessed: &str, proven: &[String], complete: bool, source: &str) -> String {
+    if !complete {
+        return guessed.to_string();
+    }
+    if proven.is_empty() {
+        return String::new();
+    }
+    // Complete: the answer IS the clause. Names already in the guess keep the source's spelling —
+    // the file wrote them that way and the signature should read like its neighbours.
+    let guessed_names: Vec<String> = guessed
+        .trim()
+        .trim_start_matches("throws")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    let simple = |n: &str| n.rsplit(['.', '/', '$']).next().unwrap_or(n).to_string();
+    let names: Vec<String> = proven
+        .iter()
+        .map(|binary| {
+            guessed_names
+                .iter()
+                .find(|n| simple(n) == simple(binary))
+                .cloned()
+                .unwrap_or_else(|| written_name(binary, source))
+        })
+        .collect();
+    format!(" throws {}", names.join(", "))
+}
+
+/// How a binary name should be written in this file: short when the file already imports it (or it
+/// is `java.lang`), dotted otherwise — a `throws` clause is not a reason to add an import.
+pub fn written_name(binary: &str, source: &str) -> String {
+    let dotted = binary.replace('/', ".").replace('$', ".");
+    let simple = dotted.rsplit('.').next().unwrap_or(&dotted).to_string();
+    let imported = source.contains(&format!("import {dotted};"))
+        || (binary.starts_with("java/lang/") && binary.matches('/').count() == 2);
+    if imported {
+        simple
+    } else {
+        dotted
     }
 }
 
@@ -307,7 +395,7 @@ mod tests {
                 edit_index: 0,
                 at: 0,
                 placeholder: "var".to_string(),
-                            required: false,
+                            need: TypeNeed::Optional,
             });
         plan.fill_type("List<String>");
         assert_eq!(plan.edits[0].text, "List<String> name = x;");

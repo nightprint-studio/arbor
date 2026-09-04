@@ -68,8 +68,13 @@ export function parseSidebarSection(c: PluginContribution): PluginSidebarSection
 }
 
 /** The `plugin:<name>:<id>` key a panel is addressed by — rail button id, active-panel
- *  state, and the pair `arbor.ui.open_panel` arrives as. */
-export function sidebarKey(s: { plugin_name: string; id: string }): string {
+ *  state, and the pair `arbor.ui.open_panel` arrives as.
+ *
+ *  Typed as the template literal it actually builds, not as `string`: every panel union
+ *  (`LeftPanel`, `RightPanel`, `BottomPanel`) admits a `plugin:${string}` member, so a plain
+ *  `string` here made each of the six calls that dock a plugin panel a type error at the call
+ *  site — for a value that was always in the union. */
+export function sidebarKey(s: { plugin_name: string; id: string }): `plugin:${string}` {
   return `plugin:${s.plugin_name}:${s.id}`;
 }
 

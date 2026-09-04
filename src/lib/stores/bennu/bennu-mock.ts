@@ -528,6 +528,10 @@ export const DEMO_PROJECT: ProjectInfo = {
   // Legacy target stack: pom-declared Cp1252 source encoding.
   source_encoding: 'Cp1252',
   capabilities: {
+    // A demo of a legacy Struts/Spring stack — neither of these is part of that picture, but
+    // `CapabilitySet` is exhaustive and a mock that omits a member stops standing for a real answer.
+    fulcrum_i18n: false,
+    bevy: false,
     struts_xml_config: true,
     struts_convention: true,
     jsp_taglib_tld: true,
@@ -645,26 +649,30 @@ export const DEMO_TREE: TreeNode = dir('GestionaleAtti', DEMO_ROOT, [
 /** MOCK per-path source + encoding, mirroring `bennu_read_file`.
  *  Legacy `.java` sources are Cp1252 (the declared project encoding); the newer XML,
  *  JSP and POM files are UTF-8 — so the encoding pill shows a realistic mix. */
+/** The demo files never change under us, so one stamp stands for all of them: a save in the mock
+ *  has nothing to conflict with. */
+const MOCK_STAMP = 'mock';
+
 const DEMO_SOURCES: Record<string, ReadFileResult> = {
   // core
-  [P_MODEL]: { text: BANDO_MODEL_JAVA, encoding: 'Cp1252' },
-  [P_SERVICE]: { text: BANDO_SERVICE_JAVA, encoding: 'Cp1252' },
-  [P_DAO]: { text: BANDO_DAO_JAVA, encoding: 'Cp1252' },
-  [P_HIBERNATE_CFG]: { text: HIBERNATE_CFG_XML, encoding: 'UTF-8' },
-  [P_CORE_POM]: { text: CORE_POM_XML, encoding: 'UTF-8' },
+  [P_MODEL]: { text: BANDO_MODEL_JAVA, encoding: 'Cp1252', stamp: MOCK_STAMP },
+  [P_SERVICE]: { text: BANDO_SERVICE_JAVA, encoding: 'Cp1252', stamp: MOCK_STAMP },
+  [P_DAO]: { text: BANDO_DAO_JAVA, encoding: 'Cp1252', stamp: MOCK_STAMP },
+  [P_HIBERNATE_CFG]: { text: HIBERNATE_CFG_XML, encoding: 'UTF-8', stamp: MOCK_STAMP },
+  [P_CORE_POM]: { text: CORE_POM_XML, encoding: 'UTF-8', stamp: MOCK_STAMP },
   // web
-  [P_ACTION]: { text: BANDO_ACTION_JAVA, encoding: 'Cp1252' },
-  [P_APP_CTX]: { text: APPLICATION_CONTEXT_XML, encoding: 'UTF-8' },
-  [P_STRUTS]: { text: STRUTS_XML, encoding: 'UTF-8' },
-  [P_TILES]: { text: TILES_XML, encoding: 'UTF-8' },
-  [P_JSP]: { text: BANDO_JSP, encoding: 'UTF-8' },
-  [P_LAYOUT_JSP]: { text: LAYOUT_JSP, encoding: 'UTF-8' },
-  [P_WEB_POM]: { text: WEB_POM_XML, encoding: 'UTF-8' },
+  [P_ACTION]: { text: BANDO_ACTION_JAVA, encoding: 'Cp1252', stamp: MOCK_STAMP },
+  [P_APP_CTX]: { text: APPLICATION_CONTEXT_XML, encoding: 'UTF-8', stamp: MOCK_STAMP },
+  [P_STRUTS]: { text: STRUTS_XML, encoding: 'UTF-8', stamp: MOCK_STAMP },
+  [P_TILES]: { text: TILES_XML, encoding: 'UTF-8', stamp: MOCK_STAMP },
+  [P_JSP]: { text: BANDO_JSP, encoding: 'UTF-8', stamp: MOCK_STAMP },
+  [P_LAYOUT_JSP]: { text: LAYOUT_JSP, encoding: 'UTF-8', stamp: MOCK_STAMP },
+  [P_WEB_POM]: { text: WEB_POM_XML, encoding: 'UTF-8', stamp: MOCK_STAMP },
   // batch
-  [P_IMPORT_JOB]: { text: IMPORT_JOB_JAVA, encoding: 'Cp1252' },
-  [P_BATCH_POM]: { text: BATCH_POM_XML, encoding: 'UTF-8' },
+  [P_IMPORT_JOB]: { text: IMPORT_JOB_JAVA, encoding: 'Cp1252', stamp: MOCK_STAMP },
+  [P_BATCH_POM]: { text: BATCH_POM_XML, encoding: 'UTF-8', stamp: MOCK_STAMP },
   // parent reactor
-  [P_POM]: { text: PARENT_POM_XML, encoding: 'UTF-8' },
+  [P_POM]: { text: PARENT_POM_XML, encoding: 'UTF-8', stamp: MOCK_STAMP },
 };
 
 /** Is this a demo (sentinel) path? Used by the store to serve mock sources. */

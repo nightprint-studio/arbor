@@ -330,7 +330,7 @@ mod tests {
     fn cm(superc: Option<&str>, methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: superc.map(str::to_string),
+            superclass: superc.map(TypeRef::simple),
             interfaces: Vec::new(),
             methods,
             fields: Vec::new(),

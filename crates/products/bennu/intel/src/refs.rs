@@ -21,7 +21,8 @@
 use std::collections::{HashMap, HashSet};
 
 use bennu_java::prelude::{
-    extract_symbols_from_root, infer_receiver_type_at, FileSymbols, TypeResolver,
+    extract_symbols_from_root, infer_receiver_type_at, FileSymbols, TypeRef as JTypeRef,
+    TypeResolver,
 };
 use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
@@ -1212,23 +1213,12 @@ impl<'a> FileWalker<'a> {
     /// answer would be a key that matches nothing, which is the failure mode this whole arm exists
     /// to fix.
     fn collect_field_owners(&self, start: &str, out: &mut HashMap<String, String>) {
-        let mut visited = std::collections::HashSet::new();
-        let mut stack = vec![start.to_string()];
-        while let Some(bn) = stack.pop() {
-            if !visited.insert(bn.clone()) {
-                continue;
+        bennu_java::prelude::walk_up::<()>(self.resolver, &JTypeRef::simple(start), |a| {
+            for f in &a.members.fields {
+                out.entry(f.name.clone()).or_insert_with(|| a.ty.binary_name.clone());
             }
-            let Some(cm) = self.resolver.members_of(&bn) else {
-                continue;
-            };
-            for f in &cm.fields {
-                out.entry(f.name.clone()).or_insert_with(|| bn.clone());
-            }
-            if let Some(sc) = cm.superclass.clone() {
-                stack.push(sc);
-            }
-            stack.extend(cm.interfaces.iter().cloned());
-        }
+            None
+        });
     }
 
     fn on_type_identifier(&mut self, node: &Node) {
@@ -1499,28 +1489,13 @@ impl<'a> FileWalker<'a> {
         member: &str,
         sort: MemberSort,
     ) -> Option<String> {
-        let mut visited = std::collections::HashSet::new();
-        let mut stack = vec![start_binary.to_string()];
-        while let Some(bn) = stack.pop() {
-            if !visited.insert(bn.clone()) {
-                continue;
+        bennu_java::prelude::declaring(self.resolver, &JTypeRef::simple(start_binary), |m| {
+            match sort {
+                MemberSort::Method => m.methods.iter().any(|x| x.name == member),
+                MemberSort::Field => m.fields.iter().any(|x| x.name == member),
             }
-            if let Some(cm) = self.resolver.members_of(&bn) {
-                let found = match sort {
-                    MemberSort::Method => cm.methods.iter().any(|m| m.name == member),
-                    MemberSort::Field => cm.fields.iter().any(|f| f.name == member),
-                };
-                if found {
-                    return Some(bn);
-                }
-                // `cm` is a shared `Arc` — clone the (small) supertype links, don't move.
-                if let Some(sc) = cm.superclass.clone() {
-                    stack.push(sc);
-                }
-                stack.extend(cm.interfaces.iter().cloned());
-            }
-        }
-        None
+        })
+        .map(|t| t.binary_name)
     }
 
     /// The binary name of the type `node` sits in.
@@ -1953,29 +1928,15 @@ fn declaring_owner(
     member: &str,
     is_method: bool,
 ) -> Option<String> {
-    let mut visited = std::collections::HashSet::new();
-    let mut stack = vec![start.to_string()];
-    while let Some(bn) = stack.pop() {
-        if !visited.insert(bn.clone()) {
-            continue;
+    bennu_java::prelude::declaring(resolver, &JTypeRef::simple(start), |cm| {
+        if is_method {
+            cm.methods.iter().any(|m| m.name == member)
+        } else {
+            cm.fields.iter().any(|f| f.name == member)
         }
-        if let Some(cm) = resolver.members_of(&bn) {
-            let found = if is_method {
-                cm.methods.iter().any(|m| m.name == member)
-            } else {
-                cm.fields.iter().any(|f| f.name == member)
-            };
-            if found {
-                return Some(bn);
-            }
-            // `cm` is a shared `Arc` — clone the (small) supertype links, don't move.
-            if let Some(sc) = cm.superclass.clone() {
-                stack.push(sc);
-            }
-            stack.extend(cm.interfaces.iter().cloned());
-        }
-    }
-    Some(start.to_string())
+    })
+    .map(|t| t.binary_name)
+    .or_else(|| Some(start.to_string()))
 }
 
 fn enclosing_type_binary(
@@ -2617,6 +2578,7 @@ mod tests {
                             return_type: TypeRef {
                                 binary_name: String::new(),
                                 type_args: vec![],
+                                dims: 0,
                             },
                             params: vec![],
                             is_static: m.is_static,
@@ -2647,6 +2609,7 @@ mod tests {
                                     .cloned()
                                     .unwrap_or_else(|| f.type_text.replace('.', "/")),
                                 type_args: vec![],
+                                dims: 0,
                             },
                             params: vec![],
                             is_static: f.is_static,

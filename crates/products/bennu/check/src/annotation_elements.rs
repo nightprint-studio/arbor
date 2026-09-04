@@ -273,7 +273,7 @@ mod tests {
             "com/acme/Holder".into(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".into()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: vec![
@@ -289,7 +289,7 @@ mod tests {
             "com/acme/NotAnAnnotation".into(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".into()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![element("whatever")],
                 fields: Vec::new(),

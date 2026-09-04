@@ -79,76 +79,36 @@ pub fn inherited_members(
     let Some(binary) = resolve_target_binary(java_files, file, type_name, decl_line) else {
         return Vec::new();
     };
-    // The target's own members are EXCLUDED — start the walk from its supertypes.
-    let Some(cm) = resolver.members_of(&binary) else {
-        return Vec::new();
-    };
-
     let mut out = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    let mut visited: HashSet<String> = HashSet::new();
-    visited.insert(binary);
-
-    if let Some(sc) = &cm.superclass {
-        collect_supertype(resolver, java_files, sc, &mut out, &mut seen, &mut visited);
-    }
-    for iface in &cm.interfaces {
-        collect_supertype(
-            resolver,
-            java_files,
-            iface,
-            &mut out,
-            &mut seen,
-            &mut visited,
-        );
-    }
+    // The target's own members are EXCLUDED — its depth is 0, everything above it is not.
+    bennu_java::prelude::walk_up::<()>(resolver, &TypeRef::simple(&binary), |a| {
+        if a.depth == 0 {
+            return None;
+        }
+        let binary = &a.ty.binary_name;
+        let declaring_type = binary.replace('/', ".");
+        // Resolve the declaring type's project source ONCE per type (shared by its members).
+        let source = project_source_of(java_files, binary);
+        for m in a.members.methods.iter().chain(a.members.fields.iter()) {
+            let key = format!("{}/{}", kind_tag(m.kind), m.name);
+            if !seen.insert(key) {
+                continue; // an override lower in the hierarchy already claimed this name+kind
+            }
+            out.push(InheritedMember {
+                kind: kind_tag(m.kind).to_string(),
+                name: m.name.clone(),
+                detail: render_detail(m),
+                visibility: visibility_tag(m.visibility).to_string(),
+                declaring_type: declaring_type.clone(),
+                source: source.clone(),
+            });
+        }
+        None
+    });
     // Deterministic order: fields then methods, alphabetical within (matches completion).
     out.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.name.cmp(&b.name)));
     out
-}
-
-/// Collect the members of the supertype `binary` (and, recursively, ITS supertypes), tagging each
-/// with its declaring FQCN + visibility + project source. Dedups by name+kind across the whole walk
-/// so an override higher up shadows the declaration it hides.
-fn collect_supertype(
-    resolver: &dyn TypeResolver,
-    java_files: &[PlanFile],
-    binary: &str,
-    out: &mut Vec<InheritedMember>,
-    seen: &mut HashSet<String>,
-    visited: &mut HashSet<String>,
-) {
-    if !visited.insert(binary.to_string()) {
-        return;
-    }
-    let Some(cm) = resolver.members_of(binary) else {
-        return;
-    };
-    let declaring_type = binary.replace('/', ".");
-    // Resolve the declaring type's project source ONCE per type (shared by its members).
-    let source = project_source_of(java_files, binary);
-
-    for m in cm.methods.iter().chain(cm.fields.iter()) {
-        let key = format!("{}/{}", kind_tag(m.kind), m.name);
-        if !seen.insert(key) {
-            continue; // an override lower in the hierarchy already claimed this name+kind
-        }
-        out.push(InheritedMember {
-            kind: kind_tag(m.kind).to_string(),
-            name: m.name.clone(),
-            detail: render_detail(m),
-            visibility: visibility_tag(m.visibility).to_string(),
-            declaring_type: declaring_type.clone(),
-            source: source.clone(),
-        });
-    }
-
-    if let Some(sc) = &cm.superclass {
-        collect_supertype(resolver, java_files, sc, out, seen, visited);
-    }
-    for iface in &cm.interfaces {
-        collect_supertype(resolver, java_files, iface, out, seen, visited);
-    }
 }
 
 /// Resolve the target type's JVM binary name by locating the declaration named `type_name` on
@@ -297,7 +257,7 @@ mod tests {
             "com/acme/Base".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![method("greet", "java/lang/String", Visibility::Public)],
                 fields: Vec::new(),
@@ -308,7 +268,7 @@ mod tests {
             "com/acme/Sub".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("com/acme/Base".to_string()),
+                superclass: Some(TypeRef::simple("com/acme/Base")),
                 interfaces: Vec::new(),
                 methods: vec![method("own", "int", Visibility::Public)],
                 fields: Vec::new(),
@@ -347,7 +307,7 @@ mod tests {
             "com/acme/Sub".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/util/AbstractList".to_string()),
+                superclass: Some(TypeRef::simple("java/util/AbstractList")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: Vec::new(),
@@ -394,7 +354,7 @@ mod tests {
             "com/acme/Sub".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("com/acme/Mid".to_string()),
+                superclass: Some(TypeRef::simple("com/acme/Mid")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: Vec::new(),
@@ -405,7 +365,7 @@ mod tests {
             "com/acme/Mid".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("com/acme/Base".to_string()),
+                superclass: Some(TypeRef::simple("com/acme/Base")),
                 interfaces: Vec::new(),
                 methods: vec![method("run", "void", Visibility::Protected)],
                 fields: Vec::new(),
@@ -460,7 +420,7 @@ mod tests {
             "com/acme/Sub".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("com/acme/Base".to_string()),
+                superclass: Some(TypeRef::simple("com/acme/Base")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: Vec::new(),

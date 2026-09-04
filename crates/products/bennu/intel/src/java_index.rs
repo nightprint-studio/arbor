@@ -600,14 +600,19 @@ fn file_records(
 fn build_class_members(td: &TypeDecl, names: &crate::typemap::FileNames) -> ClassMembers {
     // Every simple type name written INSIDE this type resolves against this type's scope first.
     let owner = td.fqn.replace('.', "/");
+    // Through `type_text_to_ref` and not `resolve_binary`, so `extends Range<Double>` keeps its
+    // `Double`. The arguments on this clause are the ONLY record of how this type binds its
+    // supertype's variables: with the bare name, a walk arrives at `Range` knowing it declares a
+    // `T` and never learning what `T` is, and every inherited generic member comes back unresolved.
+    // Same function the members use, so a supertype and a field of that type are read one way.
     let superclass = td
         .extends
         .as_ref()
-        .map(|s| resolve_binary(names, &owner, s));
+        .map(|s| type_text_to_ref(names, &owner, s));
     let interfaces = td
         .implements
         .iter()
-        .map(|i| resolve_binary(names, &owner, i))
+        .map(|i| type_text_to_ref(names, &owner, i))
         .collect();
 
     let mut methods: Vec<Member> = td
@@ -1039,7 +1044,7 @@ mod tests {
         let etd = ex.types.iter().find(|t| t.name == "Boom").unwrap();
         let ecm = build_class_members(etd, &names_of(&ex));
         assert_eq!(
-            ecm.superclass.as_deref(),
+            ecm.superclass.as_ref().map(|c| c.binary_name.as_str()),
             Some("java/lang/RuntimeException")
         );
 
@@ -1049,7 +1054,7 @@ mod tests {
         let rtd = rn.types.iter().find(|t| t.name == "Job").unwrap();
         let rcm = build_class_members(rtd, &names_of(&rn));
         assert!(
-            rcm.interfaces.iter().any(|i| i == "java/lang/Runnable"),
+            rcm.interfaces.iter().any(|i| i.binary_name == "java/lang/Runnable"),
             "{:?}",
             rcm.interfaces
         );

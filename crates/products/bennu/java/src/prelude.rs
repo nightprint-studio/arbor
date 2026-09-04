@@ -61,3 +61,9 @@ pub use crate::scaffold::{
 
 // Declaration-site name-span + binary-name CST scans (go-to-declaration / rename / inherited).
 pub use crate::spans::{binary_of_type_at, call_arity_at, enclosing_type_binary, find_type_name_span};
+
+// The shared supertype walk — see `crate::hierarchy` for why there is only one.
+pub use crate::hierarchy::{
+    declaring, declaring_field, declaring_method, seen_as, substitute, supertype_names, walk,
+    walk_up, Ancestor, Walk, MAX_HIER_NODES,
+};

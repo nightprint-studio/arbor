@@ -2518,6 +2518,27 @@ impl IndexService {
         provider.infer_type_source(source, start, end)
     }
 
+    /// [`Self::infer_type_source`], keeping "nothing inferred" apart from "inferred and unwritable".
+    ///
+    /// A file no project owns is [`Declarable::Unknown`] for the same reason a provider without a
+    /// resolver is: no opinion, rather than an opinion that cannot be written.
+    pub fn infer_type_detail(
+        &self,
+        file: &str,
+        source: &str,
+        start: usize,
+        end: usize,
+    ) -> bennu_intel::prelude::Declarable {
+        let Some(slot) = self.slot_for_file(file) else {
+            return bennu_intel::prelude::Declarable::Unknown;
+        };
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.infer_type_detail(source, start, end)
+    }
+
     /// Importable FQNs (dotted, sorted) for a simple type `name`, from the owning project's class-name
     /// index (JDK + dependency + project types). Empty when no project owns `file` or its index isn't
     /// built. Powers the "Import class" intention's candidate list.
@@ -3466,8 +3487,8 @@ fn declaring_supertype(
                 return Some(binary);
             }
             for s in cm.superclass.iter().chain(cm.interfaces.iter()) {
-                if seen.insert(s.clone()) {
-                    next.push(s.clone());
+                if seen.insert(s.binary_name.clone()) {
+                    next.push(s.binary_name.clone());
                 }
             }
         }

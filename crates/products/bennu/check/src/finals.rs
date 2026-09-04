@@ -524,7 +524,7 @@ mod tests {
     fn resolver() -> MapResolver {
         let base = ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Object".to_string()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods: vec![
                 method("run", &[], true),

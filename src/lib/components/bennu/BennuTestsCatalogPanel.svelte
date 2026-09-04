@@ -57,6 +57,7 @@
    *  a picker you have to open to read. */
   const sortItems = $derived<DropdownItem[]>(
     (Object.keys(SORT_LABELS) as Sort[]).map((id) => ({
+      kind: 'item' as const,
       id,
       label: SORT_LABELS[id],
       icon: id === sort ? Check : undefined,

@@ -356,7 +356,7 @@ mod tests {
             "com/acme/C".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![
                     method("instance_helper", "void"),      // non-static
@@ -382,7 +382,7 @@ mod tests {
         let mut r = resolver();
         // Re-point C at a missing base.
         if let Some(cm) = r.members.get_mut("com/acme/C") {
-            cm.superclass = Some("com/acme/Base".to_string());
+            cm.superclass = Some(TypeRef::simple("com/acme/Base"));
         }
         r
     }

@@ -105,42 +105,46 @@ pub(crate) fn bennu_refactor_plan(
     let mut imports: Vec<String> = Vec::new();
 
     if let Some(slot) = plan.type_slot.clone() {
-        let typed = crate::index_service::IndexService::global().infer_type_source(
+        use bennu_intel::prelude::Declarable;
+        use bennu_refactor::prelude::TypeNeed;
+        match crate::index_service::IndexService::global().infer_type_detail(
             &args.file,
             &args.source,
             slot.start,
             slot.end,
-        );
-        match typed {
-            Some((written, needed)) => {
+        ) {
+            Declarable::Writable(written, needed) => {
                 plan.fill_type(&written);
                 imports = needed;
             }
-            // Nothing could type it. Where the placeholder is an acceptable answer the plan stands
-            // and the caller is told — an editor that writes `var` into a Java 8 project without
-            // saying so is worse than one that declines, but `var` is still correct from Java 10
-            // on, so that is a note and not an error.
-            //
-            // Where it is NOT acceptable, it is an error: naming a whole statement whose call
-            // returns `void` produces `var setName = obj.setName(x);`, which does not compile and
-            // which no amount of `var` fixes. Refusing says why; applying leaves a broken line.
-            None if slot.required => {
-                return Err(format!(
-                    "the type of `{}` could not be resolved, and this refactoring needs it — the call may return nothing to name",
-                    args.source.get(slot.start..slot.end).unwrap_or_default().trim()
-                ))
+            // A type WAS inferred and is not one a declaration may carry — `void`, a type variable,
+            // a captured wildcard flattened to `Object`. Both kinds of requirement refuse here: for
+            // a field or a whole statement because the placeholder never compiles, and in a
+            // target-typed position because this answer is exactly the poly expression re-inferring
+            // itself against nothing.
+            Declarable::Unwritable
+                if matches!(slot.need, TypeNeed::Required | TypeNeed::RequiredOnceInferred) =>
+            {
+                return Err(unnameable(&args.source, &slot))
             }
-            None => plan.type_slot = None,
+            // Nothing was inferred, so there is no signal to act on. Only a slot that cannot take
+            // the placeholder AT ALL refuses; everywhere else `var` stands, which is what javac
+            // would have inferred anyway.
+            Declarable::Unknown if matches!(slot.need, TypeNeed::Required) => {
+                return Err(unnameable(&args.source, &slot))
+            }
+            // The plan stands and carries `var`; the caller is told, because an editor that writes
+            // `var` into a Java 8 project without saying so is worse than one that declines.
+            _ => plan.type_slot = None,
         }
     }
 
     // The `throws` the plan could only guess at, answered exactly. The refactoring crate reads the
     // tree and can see the enclosing method's clause and the catches around the selection; what it
     // cannot see is which of those a call actually raises, nor a checked exception that reaches the
-    // moved body through a `try` the selection itself contains. What the resolver proves is ADDED to
-    // the guess and never substituted for it: the analysis is a lower bound (a call it cannot read
-    // contributes nothing), and narrowing a `throws` clause on an incomplete set is a call site that
-    // stops compiling.
+    // moved body through a `try` the selection itself contains. The resolver's answer REPLACES the
+    // guess when it is complete and is dropped when it is not — never added to it. See
+    // `merge_throws`: the guess is already a sound upper bound, because the code compiled before.
     if let Some(slot) = plan.throws_slot.clone() {
         if let Some(resolver) =
             crate::index_service::IndexService::global().caret_resolver_for(&args.file)
@@ -151,7 +155,12 @@ pub(crate) fn bennu_refactor_plan(
                 slot.end,
                 &*resolver,
             );
-            plan.fill_throws(&merge_throws(&slot.placeholder, &proven, &args.source));
+            plan.fill_throws(&bennu_refactor::prelude::merge_throws(
+                &slot.placeholder,
+                &proven.kinds,
+                proven.complete,
+                &args.source,
+            ));
         }
     }
 
@@ -166,6 +175,17 @@ pub(crate) fn bennu_refactor_plan(
     plan.reorder();
 
     Ok(RefactorPlanDto::of(plan))
+}
+
+/// Why a refactoring that needs a written type could not be applied.
+///
+/// Its wording is the whole of what the user is told, so it names both ways of getting here rather
+/// than the one that happened to be measured first.
+fn unnameable(source: &str, slot: &bennu_refactor::prelude::TypeSlot) -> String {
+    format!(
+        "the type of `{}` could not be resolved, and this refactoring needs it written out — the call may return nothing to name, or its type may be decided by the context it sits in",
+        source.get(slot.start..slot.end).unwrap_or_default().trim()
+    )
 }
 
 /// A planned refactoring, on the wire.
@@ -275,65 +295,14 @@ fn package_of(source: &str) -> Option<String> {
     })
 }
 
-/// The plan's guessed clause with everything the resolver proved added to it.
-///
-/// Added, never replaced. The analysis is a lower bound — a call it cannot read contributes nothing
-/// — so treating its answer as the whole truth would drop exceptions the guess had right. Matching
-/// is by SIMPLE name because the two halves are spelled differently: the guess carries the source's
-/// own words, the analysis JVM binary names.
-fn merge_throws(guessed: &str, proven: &[String], source: &str) -> String {
-    let mut names: Vec<String> = guessed
-        .trim()
-        .trim_start_matches("throws")
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect();
-    let simple = |n: &str| n.rsplit(['.', '/', '$']).next().unwrap_or(n).to_string();
-    for binary in proven {
-        if names.iter().any(|n| simple(n) == simple(binary)) {
-            continue;
-        }
-        names.push(written_name(binary, source));
-    }
-    if names.is_empty() {
-        return String::new();
-    }
-    format!(" throws {}", names.join(", "))
-}
-
-/// How a binary name should be written in this file: short when the file already imports it (or it
-/// is `java.lang`), dotted otherwise — a `throws` clause is not a reason to add an import.
-fn written_name(binary: &str, source: &str) -> String {
-    let dotted = binary.replace('/', ".").replace('$', ".");
-    let simple = dotted.rsplit('.').next().unwrap_or(&dotted).to_string();
-    let imported = source.contains(&format!("import {dotted};"))
-        || (binary.starts_with("java/lang/") && binary.matches('/').count() == 2);
-    if imported {
-        simple
-    } else {
-        dotted
-    }
-}
-
-/// ` throws IOException, SQLException` — or nothing at all, written the way the file writes names.
-///
-/// The simple name when the file already imports that exact type (or it is `java.lang`), and the
-/// dotted name otherwise. Not "simple name plus a new import": a `throws` clause is not a reason to
-/// change the file's imports, and a fully-qualified name in a signature always compiles.
-fn throws_clause(kinds: &[String], source: &str) -> String {
-    merge_throws("", kinds, source)
-}
-
 #[cfg(test)]
 mod throws_tests {
-    use super::{merge_throws, throws_clause};
+    use bennu_refactor::prelude::merge_throws;
 
     /// The analysis is a lower bound, so what the plan already had survives.
     #[test]
     fn what_the_plan_guessed_is_kept() {
-        assert_eq!(merge_throws(" throws IOException", &[], "class A {}"), " throws IOException");
+        assert_eq!(merge_throws(" throws IOException", &[], false, "class A {}"), " throws IOException");
     }
 
     /// …and what the resolver proved is added to it.
@@ -341,7 +310,7 @@ mod throws_tests {
     fn what_the_resolver_proved_is_added() {
         let source = "import java.sql.SQLException;\nclass A {}";
         assert_eq!(
-            merge_throws(" throws IOException", &["java/sql/SQLException".to_string()], source),
+            merge_throws(" throws IOException", &["java/io/IOException".to_string(), "java/sql/SQLException".to_string()], true, source),
             " throws IOException, SQLException"
         );
     }
@@ -350,26 +319,26 @@ mod throws_tests {
     #[test]
     fn the_same_exception_spelled_two_ways_is_listed_once() {
         assert_eq!(
-            merge_throws(" throws IOException", &["java/io/IOException".to_string()], "class A {}"),
+            merge_throws(" throws IOException", &["java/io/IOException".to_string()], true, "class A {}"),
             " throws IOException"
         );
     }
 
     #[test]
     fn a_body_that_throws_nothing_and_a_plan_that_guessed_nothing_is_no_clause() {
-        assert_eq!(merge_throws("", &[], "class A {}"), "");
+        assert_eq!(merge_throws("", &[], true, "class A {}"), "");
     }
 
     #[test]
     fn nothing_thrown_is_no_clause_at_all() {
-        assert_eq!(throws_clause(&[], "class A {}"), "");
+        assert_eq!(merge_throws("", &[], true, "class A {}"), "");
     }
 
     #[test]
     fn a_type_the_file_imports_is_written_the_way_the_file_writes_it() {
         let source = "import java.io.IOException;\nclass A {}";
         assert_eq!(
-            throws_clause(&["java/io/IOException".to_string()], source),
+            merge_throws("", &["java/io/IOException".to_string()], true, source),
             " throws IOException"
         );
     }
@@ -379,7 +348,7 @@ mod throws_tests {
     #[test]
     fn a_type_the_file_does_not_import_keeps_its_package() {
         assert_eq!(
-            throws_clause(&["java/io/IOException".to_string()], "class A {}"),
+            merge_throws("", &["java/io/IOException".to_string()], true, "class A {}"),
             " throws java.io.IOException"
         );
     }
@@ -387,7 +356,7 @@ mod throws_tests {
     #[test]
     fn java_lang_needs_no_import_to_be_written_short() {
         assert_eq!(
-            throws_clause(&["java/lang/Exception".to_string()], "class A {}"),
+            merge_throws("", &["java/lang/Exception".to_string()], true, "class A {}"),
             " throws Exception"
         );
     }
@@ -396,8 +365,10 @@ mod throws_tests {
     fn several_are_listed_in_order() {
         let source = "import java.io.IOException;\nimport java.sql.SQLException;\nclass A {}";
         assert_eq!(
-            throws_clause(
+            merge_throws(
+                "",
                 &["java/io/IOException".to_string(), "java/sql/SQLException".to_string()],
+                true,
                 source
             ),
             " throws IOException, SQLException"

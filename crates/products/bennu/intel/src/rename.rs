@@ -792,38 +792,20 @@ fn member_signature(
     is_method: bool,
     argc: Option<usize>,
 ) -> Option<(String, String)> {
-    let mut visited = std::collections::HashSet::new();
-    let mut stack = vec![owner.to_string()];
-    while let Some(bn) = stack.pop() {
-        if !visited.insert(bn.clone()) {
-            continue;
+    // The shared walk ends a branch on a supertype it cannot resolve rather than the whole search —
+    // an un-indexed base class must not hide a member the subclass declares itself.
+    bennu_java::prelude::walk_up(resolver, &bennu_java::prelude::TypeRef::simple(owner), |a| {
+        let pool = if is_method { &a.members.methods } else { &a.members.fields };
+        let m = pick_member(pool, name, argc)?;
+        let bn = a.ty.binary_name.clone();
+        if !m.raw_signature.is_empty() {
+            return Some((m.raw_signature.clone(), bn));
         }
-        // A supertype we can't resolve ends THAT branch of the walk, not the whole search —
-        // an un-indexed base class must not hide a member the subclass declares itself.
-        let Some(cm) = resolver.members_of(&bn) else {
-            continue;
-        };
-        let pool = if is_method { &cm.methods } else { &cm.fields };
-        if let Some(m) = pick_member(pool, name, argc) {
-            if !m.raw_signature.is_empty() {
-                return Some((m.raw_signature.clone(), bn.clone()));
-            }
-            // No recorded signature: synthesize a minimal one from the name (+ empty
-            // param list for a method) so the hover still shows something meaningful.
-            let sig = if is_method {
-                format!("{name}()")
-            } else {
-                name.to_string()
-            };
-            return Some((sig, bn.clone()));
-        }
-        // `cm` is a shared `Arc` — clone the (small) supertype links, don't move.
-        if let Some(sc) = cm.superclass.clone() {
-            stack.push(sc);
-        }
-        stack.extend(cm.interfaces.iter().cloned());
-    }
-    None
+        // No recorded signature: synthesize a minimal one from the name (+ empty param list for a
+        // method) so the hover still shows something meaningful.
+        let sig = if is_method { format!("{name}()") } else { name.to_string() };
+        Some((sig, bn))
+    })
 }
 
 /// The member of `pool` named `name` that a call passing `argc` arguments would bind to.
@@ -1670,7 +1652,15 @@ impl SubtypeMap {
         self.withdraw_type(binary);
         let Some(cm) = resolver.members_of(binary) else { return };
         let mut filed: Vec<String> = Vec::new();
-        for parent in cm.superclass.iter().chain(cm.interfaces.iter()) {
+        // The subtype map is keyed by NAME: `implements Comparator<Order>` and
+        // `implements Comparator<Item>` are two implementors of one interface, and an override
+        // family descends through both.
+        for parent in cm
+            .superclass
+            .iter()
+            .chain(cm.interfaces.iter())
+            .map(|t| t.binary_name.clone())
+        {
             let list = self.children.entry(parent.clone()).or_default();
             // Inserted in place rather than pushed-and-sorted: the list stays ordered (so an
             // override family descends deterministically) and stays deduplicated, without a sort
@@ -1679,8 +1669,8 @@ impl SubtypeMap {
             if let Err(at) = list.binary_search_by(|c| c.as_str().cmp(binary)) {
                 list.insert(at, binary.to_string());
             }
-            if !filed.iter().any(|p| p == parent) {
-                filed.push(parent.clone());
+            if !filed.contains(&parent) {
+                filed.push(parent);
             }
         }
         if !filed.is_empty() {
@@ -1763,11 +1753,15 @@ fn ancestors(resolver: &dyn TypeResolver, binary: &str, project_only: bool) -> V
         let Some(cm) = resolver.members_of(&next) else {
             continue;
         };
+        // Deliberately NOT `bennu_java::prelude::walk_up`: `project_only` prunes the TRAVERSAL and
+        // not just the result, so the walk stops at the first library type instead of climbing the
+        // whole JDK hierarchy on every rename. Names only — an override family descends by name,
+        // and `implements Comparator<Order>` and `implements Comparator<Item>` are both in it.
         let supers = cm
             .superclass
             .iter()
-            .cloned()
-            .chain(cm.interfaces.iter().cloned());
+            .chain(cm.interfaces.iter())
+            .map(|t| t.binary_name.clone());
         for s in supers {
             if (project_only && !resolver.is_project_type(&s)) || !seen.insert(s.clone()) {
                 continue;
@@ -2036,6 +2030,7 @@ mod tests {
                         return_type: TypeRef {
                             binary_name: String::new(),
                             type_args: vec![],
+                            dims: 0,
                         },
                         params: vec![],
                         is_static: m.is_static,
@@ -2529,7 +2524,7 @@ mod tests {
 #[cfg(test)]
 mod subtype_map_tests {
     use super::*;
-    use bennu_java::prelude::{ClassMembers, Import};
+    use bennu_java::prelude::{ClassMembers, Import, TypeRef as JTypeRef};
     use std::cell::RefCell;
     use std::sync::Arc;
 
@@ -2557,10 +2552,11 @@ mod subtype_map_tests {
 
     impl TypeResolver for MutableResolver {
         fn members_of(&self, binary: &str) -> Option<Arc<ClassMembers>> {
-            let (superclass, interfaces) = self.types.borrow().get(binary).cloned()?;
+            let (superclass, interfaces): (Option<String>, Vec<String>) =
+                self.types.borrow().get(binary).cloned()?;
             Some(Arc::new(ClassMembers {
-                superclass,
-                interfaces,
+                superclass: superclass.map(JTypeRef::simple),
+                interfaces: interfaces.into_iter().map(JTypeRef::simple).collect(),
                 methods: Vec::new(),
                 fields: Vec::new(),
                 flags: Default::default(),

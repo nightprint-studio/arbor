@@ -15,21 +15,79 @@ use serde::{Deserialize, Serialize};
 /// A resolved type reference carrying its generic arguments (seam caveat C2:
 /// generics carry-through). `binary_name` is a slash-separated JVM binary name, e.g.
 /// `java/util/ArrayList`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypeRef {
-    /// The JVM binary name (`java/util/ArrayList`).
+    /// The JVM binary name of the ELEMENT type (`java/util/ArrayList`) — never with brackets; see
+    /// [`TypeRef::dims`].
     pub binary_name: String,
     /// Actual generic arguments, in declaration order (empty when raw / non-generic).
     pub type_args: Vec<TypeRef>,
+    /// Array depth: `0` for `String`, `1` for `String[]`, `2` for `String[][]`.
+    ///
+    /// Beside the name rather than in it, and that is the whole design. Every member lookup in the
+    /// engine asks `members_of(binary_name)`, and an array has none of its own — so the element
+    /// type is what those questions need, and keeping it there means none of them had to change.
+    /// What the brackets are needed for is the other direction: WRITING a type back into source, at
+    /// a declaration or an import, where `String[]` and `String` are different programs.
+    ///
+    /// Dropping them was worth about forty broken files per run on one library: an extracted
+    /// `String[]` came out `String`, and an array's import came out `import java.net.URL[];`, which
+    /// does not parse.
+    ///
+    /// `#[serde(default)]` so an index persisted before this field still loads.
+    #[serde(default)]
+    pub dims: u8,
+}
+
+/// A bare binary name IS a type reference — a raw supertype, a non-generic class.
+///
+/// So `"java/lang/Object".into()` reads as what it means wherever a `TypeRef` is wanted, which is
+/// most of the places one is written by hand.
+impl From<&str> for TypeRef {
+    fn from(binary_name: &str) -> Self {
+        TypeRef::simple(binary_name)
+    }
+}
+
+impl From<String> for TypeRef {
+    fn from(binary_name: String) -> Self {
+        TypeRef::simple(binary_name)
+    }
 }
 
 impl TypeRef {
-    /// A type reference with no generic arguments.
+    /// A type reference with no generic arguments and no array depth.
     pub fn simple(binary_name: impl Into<String>) -> Self {
         Self {
             binary_name: binary_name.into(),
             type_args: Vec::new(),
+            dims: 0,
         }
+    }
+
+    /// The same type, `dims` levels of array deep.
+    pub fn arrayed(mut self, dims: u8) -> Self {
+        self.dims = dims;
+        self
+    }
+
+    /// Whether this refers to an array.
+    ///
+    /// One predicate, because a dozen checks used to ask it each in its own words — `ends_with("[]")`
+    /// — and they did not agree once the answer moved out of the name. Moving it without them cost
+    /// twenty-four false "no constructor takes 3 arguments" on varargs calls, measured on
+    /// commons-lang3.
+    ///
+    /// The `[]` fallback is for an index PERSISTED before `dims` existed: `#[serde(default)]` gives
+    /// those records `dims: 0` while their names still carry the brackets, and a stale cache must
+    /// not turn every varargs call into an arity error.
+    pub fn is_array(&self) -> bool {
+        self.dims > 0 || self.binary_name.ends_with("[]")
+    }
+
+    /// The type as Java writes it, given the element name already rendered: the brackets back on.
+    pub fn with_brackets(&self, rendered: &str) -> String {
+        format!("{rendered}{}", "[]".repeat(self.dims as usize))
     }
 }
 
@@ -193,10 +251,17 @@ pub struct ClassFlags {
 /// inherited members.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClassMembers {
-    /// Binary name of the superclass, if any (`java/lang/Object` for most).
-    pub superclass: Option<String>,
-    /// Binary names of directly-implemented interfaces.
-    pub interfaces: Vec<String>,
+    /// The superclass **as written**, if any (`java/lang/Object` for most).
+    ///
+    /// A `TypeRef` and not a name, because the type ARGUMENTS on the extends clause are the only
+    /// record of how a subtype binds its supertype's variables. `NumberRange<N> extends Range<N>`
+    /// stored as `"…/Range"` loses the one fact that lets `Range<T>.fit` answer `Double` for a
+    /// `DoubleRange`: with the name alone the walk arrives at `Range` knowing it has a `T` and not
+    /// knowing what `T` is, so every inherited generic member comes back unresolved.
+    pub superclass: Option<TypeRef>,
+    /// The directly-implemented interfaces, as written — `implements Comparator<Order>` keeps its
+    /// `Order` for the same reason the superclass keeps its arguments.
+    pub interfaces: Vec<TypeRef>,
     pub methods: Vec<Member>,
     pub fields: Vec<Member>,
     /// Class-level access flags. `#[serde(default)]` so a pre-existing persisted index still loads.

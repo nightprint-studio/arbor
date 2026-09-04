@@ -55,7 +55,11 @@ function sameOpts(a: NormalizedTooltipOptions, b: NormalizedTooltipOptions): boo
  *  - Closes on mousedown (so tooltips don't linger over the click target), mouseleave, blur, Escape.
  *  - Stays in sync if the props change while it's open.
  */
-export function tooltip(node: HTMLElement, input: TooltipArg) {
+/** Both element families and not just `HTMLElement`: a tooltip belongs on an SVG node too — the
+ *  module graph hangs one off every box it draws. Named as the union rather than widened to
+ *  `Element`, which drops the typed event map and turns every `addEventListener` here into an
+ *  unresolved overload. */
+export function tooltip(node: HTMLElement | SVGElement, input: TooltipArg) {
   let opts = normalizeOptions(input);
   let openTimer: number | null = null;
 
@@ -113,11 +117,15 @@ export function tooltip(node: HTMLElement, input: TooltipArg) {
     hide();
   }
 
-  node.addEventListener('mouseenter', onMouseEnter);
-  node.addEventListener('mouseleave', onMouseLeave);
-  node.addEventListener('mousedown', onMouseDown);
-  node.addEventListener('focus', onFocus, true);
-  node.addEventListener('blur', onBlur, true);
+  // Both families carry every listener used here, but TypeScript resolves `addEventListener` on the
+  // UNION down to `EventTarget`'s untyped overload, which loses the event types. One narrowing, at
+  // the only place it matters, rather than untyping five handlers.
+  const listens = node as HTMLElement;
+  listens.addEventListener('mouseenter', onMouseEnter);
+  listens.addEventListener('mouseleave', onMouseLeave);
+  listens.addEventListener('mousedown', onMouseDown);
+  listens.addEventListener('focus', onFocus, true);
+  listens.addEventListener('blur', onBlur, true);
 
   return {
     update(next: TooltipArg) {
@@ -146,11 +154,11 @@ export function tooltip(node: HTMLElement, input: TooltipArg) {
       // trigger owns the tooltip, so the deferral is safe even if the node is
       // already detached by the time the microtask runs.
       queueMicrotask(() => tooltipState.hide(node));
-      node.removeEventListener('mouseenter', onMouseEnter);
-      node.removeEventListener('mouseleave', onMouseLeave);
-      node.removeEventListener('mousedown', onMouseDown);
-      node.removeEventListener('focus', onFocus, true);
-      node.removeEventListener('blur', onBlur, true);
+      listens.removeEventListener('mouseenter', onMouseEnter);
+      listens.removeEventListener('mouseleave', onMouseLeave);
+      listens.removeEventListener('mousedown', onMouseDown);
+      listens.removeEventListener('focus', onFocus, true);
+      listens.removeEventListener('blur', onBlur, true);
     },
   };
 }

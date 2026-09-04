@@ -9,7 +9,29 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
-- **An extracted method declares the checked exceptions its body can actually raise.** The clause used to be copied from the enclosing method, which is short wherever a call raises something that method neither declares nor catches — and a short `throws` is a call site that stops compiling.
+- **"Add" in the JPA generator wrote nothing.** The insertion carried its text under a field name the editor's byte-splice does not read, so the method was generated, reported as added, and never appeared in the repository.
+
+- **The JPA generator's preview pane was blank.** It asked the shared code viewer for a tabbed, titled pane the viewer had stopped offering; the Java/DDL tabs, the destination caption and the error and empty states are back, built from the widgets that do exist.
+
+- **A member inherited from a generic type now resolves to what the subclass bound it to.** The index recorded a supertype by name alone, so `DoubleRange extends NumberRange<Double>` arrived at `Range<T>` knowing there was a `T` and never what it was: every inherited generic member came back unresolved, and `super.fit(e)` picked up the subclass's own unrelated `fit(double)` instead — enough to make `super.fit(e).doubleValue()` unreadable. Supertypes are now recorded as written, and a method's type is read against the class that declares it. **The type index rebuilds itself once on first open.**
+
+- **An extracted variable no longer takes over a field's name.** A field is in scope inside a method without being declared there, so `MutableByte.equals` — which reads `value` against a field of that name — got `value == (value).byteValue()` from extracting the cast beside it. The new name now steps aside from any field the code reads on its own, and leaves alone the ones it always writes as `this.value`.
+
+- **Where the surrounding code decides an expression's type, a type the engine works out but cannot write is now a refusal rather than `var`.** `Collectors.toList()` takes its type arguments from the `collect` it feeds; standing alone it infers a collector over `Object` and the line it fed stops compiling. In an argument, a `return` or an arm of a conditional the refactoring declines and says so — but only on that signal, since an expression it could not type at all is one where `var` is what javac would infer anyway.
+
+- **`super.m(…)` no longer resolves to an overload the calling class declares itself.** A method inherited from another file in the project was invisible to the lookup, which then took the same name from the nearest place it could find one: `DoubleRange`, which extends `NumberRange<Double>` and adds its own `fit(double)`, typed `super.fit(e)` as `double` and made `super.fit(e).doubleValue()` unreadable. The lookup now walks the project's own `extends` chain, carrying the type arguments with it.
+
+- **An extracted method's `throws` is replaced by the resolver's answer only when that answer is complete, and never added to.** Adding hands the caller an exception that can never reach it, and the call site stops compiling — measured as `throws E, Exception` on a method extracted from one declaring only `throws E`.
+
+- **A checked exception a `try` inside the selection already handles is no longer declared on the extracted method** — the caller would have had to handle one that can never reach it. And a bare `foo()` call is now read for what it throws, like `arity` and `arguments` already read it: a method that called its own `throws IOException` helper used to look exception-free.
+
+- **A type in the file's own package is no longer imported when a refactoring writes it.** It never needed to be, and for a `private` nested class the import does not compile.
+
+- **An array keeps its brackets.** An extracted `String[]` came out `String`, and an array's import came out `import java.net.URL[];`, which does not parse — the engine had no way to say how deep an array was, and the two halves of it disagreed about where to put the information.
+
+- **A refactoring no longer writes a type it could not work out.** A call that returns nothing produced `void x = f();`, a captured wildcard `Class<Object>` where the code had `Class<?>`, a type variable a name the class never declared, and an array an import that did not parse. Where the type cannot be named confidently a local now keeps `var` — which is what javac infers anyway — and a constant is not offered.
+
+- **An extracted method declares the checked exceptions its body can actually raise.** The clause used to be copied from the enclosing method, which is short wherever a call raises something that method neither declares nor catches — and a short `throws` is a call site that stops compiling. Only what every candidate signature declares: `StringBuilder.append` overrides `Appendable.append`, and declaring its `IOException` would have broken the caller instead.
 
 - **Type-name completion no longer jumps camel humps for an all-lowercase prefix.** `springapp` offered `SpringBootApplication` beside `SpringApplication`; hump-jumping now needs a capital to jump from, which is what `SBA` and `SprBoot` are.
 

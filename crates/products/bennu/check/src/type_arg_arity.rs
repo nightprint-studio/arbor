@@ -113,7 +113,7 @@ mod tests {
     fn cm(params: &[&str]) -> ClassMembers {
         ClassMembers {
             type_params: params.iter().map(|s| s.to_string()).collect(),
-            superclass: Some("java/lang/Object".to_string()),
+            superclass: Some(bennu_java::prelude::TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods: Vec::new(),
             fields: Vec::new(),

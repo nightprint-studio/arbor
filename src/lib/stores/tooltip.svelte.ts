@@ -77,7 +77,7 @@ export function normalizeOptions(input: TooltipInput | null | undefined): Normal
 
 export interface ActiveTooltip {
   /** The trigger element — used by the action to update on prop change and by the host to track scroll. */
-  trigger: HTMLElement;
+  trigger: HTMLElement | SVGElement;
   opts: NormalizedTooltipOptions;
   /** Monotonic counter so the host can react even when trigger/opts identity is unchanged. */
   seq: number;
@@ -110,13 +110,13 @@ class TooltipState {
     return performance.now() < this.focusSuppressedUntil;
   }
 
-  show(trigger: HTMLElement, opts: NormalizedTooltipOptions) {
+  show(trigger: HTMLElement | SVGElement, opts: NormalizedTooltipOptions) {
     this.seq += 1;
     this.active = { trigger, opts, seq: this.seq };
   }
 
   /** Update content while a tooltip is already open for this trigger. */
-  update(trigger: HTMLElement, opts: NormalizedTooltipOptions) {
+  update(trigger: HTMLElement | SVGElement, opts: NormalizedTooltipOptions) {
     if (this.active?.trigger === trigger) {
       this.seq += 1;
       this.active = { trigger, opts, seq: this.seq };
@@ -124,7 +124,7 @@ class TooltipState {
   }
 
   /** Hide unconditionally, or only if the active tooltip belongs to `trigger`. */
-  hide(trigger?: HTMLElement) {
+  hide(trigger?: HTMLElement | SVGElement) {
     if (trigger && this.active?.trigger !== trigger) return;
     if (this.active) {
       this.active = null;

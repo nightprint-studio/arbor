@@ -285,7 +285,7 @@
       <!-- The dialect matters here as much as in a query tab: it decides what ends a
            statement, and a file with no engine is parsed as the portable intersection
            rather than as whichever one comes first. -->
-      <DocumentBridge {editor} text={edited ?? buffer ?? ''} {dialect} />
+      <DocumentBridge {editor} text={edited ?? buffer ?? ''} dialect={dialect ?? undefined} />
     </div>
   </div>
 {/if}

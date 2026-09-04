@@ -664,6 +664,10 @@
     optimizeImportsInBuffer: () => Promise<void>;
     navBack: () => void;
     navForward: () => void;
+    caretContext: () => { source: string; offset: number } | null;
+    applyGeneratedEdits: (
+      edits: readonly { start: number; end: number; replacement: string }[],
+    ) => void;
   } | null>(null);
 
   /**

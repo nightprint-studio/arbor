@@ -184,7 +184,7 @@ fn call_candidates(
         }
     };
     let mut out: Vec<Member> = Vec::new();
-    collect_named(resolver, &owner.binary_name, name, &mut out, &mut Vec::new());
+    collect_named(resolver, &owner.binary_name, name, &mut out);
     non_empty(out)
 }
 
@@ -193,30 +193,20 @@ fn non_empty(v: Vec<Member>) -> Option<Vec<Member>> {
 }
 
 /// Gather every method called `name` on `binary` and its supertypes, most-derived first.
-fn collect_named(
-    resolver: &dyn TypeResolver,
-    binary: &str,
-    name: &str,
-    out: &mut Vec<Member>,
-    visited: &mut Vec<String>,
-) {
-    if visited.iter().any(|v| v == binary) {
-        return;
-    }
-    visited.push(binary.to_string());
-    let Some(cm) = resolver.members_of(binary) else { return };
-    for m in &cm.methods {
-        if m.kind == MemberKind::Method && m.name == name {
-            // An override arrives again from every level it is declared at; the first (most
-            // derived) is the one the call binds to.
-            if !out.iter().any(|k| k.params == m.params) {
-                out.push(m.clone());
+fn collect_named(resolver: &dyn TypeResolver, binary: &str, name: &str, out: &mut Vec<Member>) {
+    bennu_java::prelude::walk_up::<()>(resolver, &bennu_java::prelude::TypeRef::simple(binary), |a| {
+        for m in &a.members.methods {
+            if m.kind == MemberKind::Method && m.name == name {
+                // An override arrives again from every level it is declared at; the first (most
+                // derived) is the one the call binds to, and the shared walk is breadth-first, so
+                // that is the one that gets here first.
+                if !out.iter().any(|k| k.params == m.params) {
+                    out.push(m.clone());
+                }
             }
         }
-    }
-    for next in cm.superclass.iter().chain(cm.interfaces.iter()) {
-        collect_named(resolver, next, name, out, visited);
-    }
+        None
+    });
 }
 
 /// Whether `m` could take a call of `argc` arguments (a trailing array parameter is varargs).
@@ -225,7 +215,8 @@ fn arity_admits(m: &Member, argc: usize) -> bool {
     if n == argc {
         return true;
     }
-    let variadic = m.params.last().is_some_and(|p| p.binary_name.ends_with("[]"));
+    // A varargs parameter is an ARRAY, which is now `dims` and no longer a suffix on the name.
+    let variadic = m.params.last().is_some_and(|p| p.dims > 0);
     variadic && argc + 1 >= n
 }
 

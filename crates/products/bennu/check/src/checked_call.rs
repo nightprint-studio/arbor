@@ -35,7 +35,7 @@
 //! enclosing callable's `throws` → one diagnostic per unhandled checked type, anchored on the call's
 //! method name (or the `new` type node for a constructor).
 
-use bennu_java::prelude::{FileSymbols, InferCache, TypeResolver};
+use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
@@ -77,68 +77,124 @@ pub struct UnhandledCall {
 /// because a `try` INSIDE the selection handled it, or because the enclosing method is
 /// `@SneakyThrows`.
 ///
-/// A **lower bound**, and it has to be used as one: what this can prove, to be added to whatever the
-/// caller already had. It is not a complete set and cannot be — a call it cannot resolve (a bare
-/// call to a method of the same class is the ordinary case) simply contributes nothing, and there is
-/// no honest way to tell "this throws nothing" from "I could not read this" per call without
-/// throwing away the calls it *can* read.
+/// What the code between `start` and `end` can raise, **and whether that set is complete**.
 ///
-/// Which settles the direction. Removing an exception from a `throws` clause on the strength of an
-/// incomplete set breaks the call site; adding one that cannot actually be raised is legal and
-/// costs nothing. So this only ever adds.
+/// The flag is the whole contract. A caller may only REPLACE a `throws` clause with this when it is
+/// complete; otherwise it must keep whatever it had. Both directions are dangerous and they fail
+/// differently:
 ///
-/// Both bounds of each call are included for the same reason: `possibly` is still a reason to
-/// declare.
+/// * declare too FEW and the extracted method does not compile — it raises what it does not declare;
+/// * declare too MANY and the CALL SITE does not compile — the caller must now handle something that
+///   can never reach it. That one is easy to talk yourself into ("declaring more is harmless") and it
+///   is false: `StringBuilder.append` overrides `Appendable.append`, which throws `IOException`, and
+///   putting that on a method that builds a string broke two hundred and thirty files.
+///
+/// So: only what every candidate declares (`definitely`), never what one of them might; and an
+/// answer is offered as authoritative only when every call in the range was readable.
+///
+/// An exception a `try` INSIDE the range catches is not raised BY the range and is left out — the
+/// body handles it itself, and declaring it would put it on the caller for nothing.
 pub fn checked_exceptions_in(
     source: &str,
     start: usize,
     end: usize,
     resolver: &dyn TypeResolver,
-) -> Vec<String> {
-    let Some(tree) = bennu_java::prelude::parse_java(source) else { return Vec::new() };
+) -> CheckedExceptions {
+    let incomplete = CheckedExceptions { kinds: Vec::new(), complete: false };
+    let Some(tree) = bennu_java::prelude::parse_java(source) else { return incomplete };
     let root = tree.root_node();
     let bytes = source.as_bytes();
     let symbols = bennu_java::prelude::extract_symbols(source);
     let cache = InferCache::new();
+    // Built once for the file: it is what lets a BARE `foo()` be read at all. `None` means some
+    // whole-file guard declined, and bare calls then contribute nothing — as they did before.
+    let bare = crate::bare_call::bare_call_scope(root, source, &symbols, resolver);
     let mut out: Vec<String> = Vec::new();
+    let mut complete = true;
 
+    // The smallest node the range covers: the boundary a `try` has to be inside of to count as
+    // handling something on the moved body's behalf.
+    let range_root = root.descendant_for_byte_range(start, end).unwrap_or(root);
     for n in crate::prelude::collect_nodes(root) {
         if n.start_byte() < start || n.end_byte() > end {
             continue;
         }
         let raised: Vec<String> = match n.kind() {
             "method_invocation" | "object_creation_expression" => {
-                match thrown_by(n, &root, source, bytes, &symbols, resolver, &cache) {
-                    Thrown::Known(_, throws) => {
-                        throws.definitely.iter().chain(throws.possibly.iter()).cloned().collect()
+                match thrown_by(n, &root, source, bytes, &symbols, resolver, &cache, bare.as_ref()) {
+                    Thrown::Known(_, throws) => throws.definitely.clone(),
+                    // A call we cannot read costs the whole set its authority — but not its
+                    // contents: what the other calls proved is still true, and a caller that only
+                    // wants to know "does this range raise IOException" can still use it.
+                    Thrown::Unknown => {
+                        complete = false;
+                        Vec::new()
                     }
-                    // A call we cannot read contributes nothing. It does NOT make the answer
-                    // useless, because the answer is only ever added to.
-                    Thrown::Unknown => Vec::new(),
                 }
             }
-            // `throw new IOException()` raises it whatever any signature says.
-            "throw_statement" => n
-                .named_child(0)
-                .filter(|e| e.kind() == "object_creation_expression")
-                .and_then(|e| e.child_by_field_name("type"))
-                .and_then(|t| t.utf8_text(bytes).ok())
-                .and_then(|name| crate::resolve::type_binary(name, &symbols, resolver))
-                .into_iter()
-                .collect(),
+            // A `throw` raises it whatever any signature says — and the thrown thing is as often a
+            // VARIABLE as a `new`. `throw cause;` was invisible here, so a body whose only checked
+            // exception was re-thrown came out with an empty clause and called itself complete.
+            "throw_statement" => {
+                let Some(thrown) = n.named_child(0) else { continue };
+                let binary = match thrown.kind() {
+                    "object_creation_expression" => thrown
+                        .child_by_field_name("type")
+                        .and_then(|t| t.utf8_text(bytes).ok())
+                        .and_then(|name| crate::resolve::type_binary(name, &symbols, resolver)),
+                    _ => infer_node_type_cached(&root, source, &symbols, &thrown, resolver, &cache)
+                        .map(|t| t.binary_name)
+                        .filter(|b| !b.is_empty()),
+                };
+                match binary {
+                    Some(binary) => vec![binary],
+                    // Something is thrown and we cannot say what: the set is no longer authoritative.
+                    None => {
+                        complete = false;
+                        Vec::new()
+                    }
+                }
+            }
             _ => continue,
         };
         for binary in raised {
             if out.contains(&binary) {
                 continue;
             }
-            if hierarchy_fully_known(resolver, &binary) && is_checked(resolver, &binary) {
-                out.push(binary);
+            // A type we cannot place in the hierarchy — a type-variable `throws E`, a class the
+            // index does not carry — is one we cannot judge, and dropping it silently while still
+            // calling the answer complete is how `throws E` got replaced by a clause without it.
+            // Not knowing costs the set its authority; it does not get to cost the clause a name.
+            if !hierarchy_fully_known(resolver, &binary) {
+                complete = false;
+                continue;
             }
+            // Unchecked needs no declaring, so leaving it out takes nothing away.
+            if !is_checked(resolver, &binary) {
+                continue;
+            }
+            // A `try` INSIDE the range handles it on the body's own behalf, so the body does not
+            // need to declare it — and declaring it anyway is not harmless: the caller would then
+            // have to handle an exception that can never reach it. Bounded at `range_root` because
+            // a `try` OUTSIDE the range catches the CALL, not the body, and the body still has to
+            // declare what it throws to reach it.
+            if caught_by_enclosing_try(n, range_root, bytes, &symbols, resolver, &binary) {
+                continue;
+            }
+            out.push(binary);
         }
     }
     out.sort();
-    out
+    CheckedExceptions { kinds: out, complete }
+}
+
+/// What a range raises, and whether the answer is the whole of it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CheckedExceptions {
+    /// JVM binary names, sorted and deduplicated.
+    pub kinds: Vec<String>,
+    /// `true` when every call in the range was readable, so nothing else can be raised.
+    pub complete: bool,
 }
 
 /// Parse `source` and flag calls that can throw an unhandled checked exception.
@@ -190,6 +246,9 @@ pub fn unhandled_calls_in(
     cache: &InferCache,
 ) -> Vec<UnhandledCall> {
     let bytes = source.as_bytes();
+    // The bare-call scope, built once — the same one `arity` and `arguments` use. Without it a
+    // method that calls its own `throws IOException` helper reported nothing at all.
+    let bare = crate::bare_call::bare_call_scope(root, source, symbols, resolver);
     let mut out = Vec::new();
     for &n in nodes {
         match n.kind() {
@@ -197,7 +256,7 @@ pub fn unhandled_calls_in(
             // `throws` clause; what differs is only what we do with the answer.
             "method_invocation" | "object_creation_expression" => {
                 if let Thrown::Known(anchor, thrown) =
-                    thrown_by(n, &root, source, bytes, symbols, resolver, cache)
+                    thrown_by(n, &root, source, bytes, symbols, resolver, cache, bare.as_ref())
                 {
                     flag_unhandled(n, anchor, &thrown.definitely, bytes, symbols, resolver, &mut out);
                 }
@@ -348,7 +407,7 @@ mod tests {
     fn cm(superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: superclass.map(str::to_string),
+            superclass: superclass.map(TypeRef::simple),
             interfaces: Vec::new(),
             methods,
             fields: Vec::new(),

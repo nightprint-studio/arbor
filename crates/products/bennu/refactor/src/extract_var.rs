@@ -25,7 +25,7 @@
 
 use tree_sitter::Node;
 
-use crate::plan::{Outcome, Plan, RefactorEdit, Refusal, TypeSlot};
+use crate::plan::{Outcome, Plan, RefactorEdit, Refusal, TypeNeed, TypeSlot};
 use crate::selection::{
     enclosing, enclosing_type, expression_for, identifiers, indent_at, is_statement, newline, text,
     TYPE_DECLS,
@@ -111,7 +111,7 @@ pub fn extract_variable(root: Node<'_>, source: &str, start: usize, end: usize) 
         )));
     }
 
-    let name = unique_name(&suggest_name(&expr, source), scope_of(&expr), source);
+    let name = unique_name(&suggest_name(&expr, source), &names_in_scope_at(&expr, source));
     let indent = indent_at(source, statement.start_byte());
     let nl = newline(source);
 
@@ -137,7 +137,7 @@ pub fn extract_variable(root: Node<'_>, source: &str, start: usize, end: usize) 
             at: 0,
             placeholder: TYPE_PLACEHOLDER.to_string(),
             // `obj.setName(x);` may be `void`, and `var` cannot stand in for that.
-            required: true,
+            need: TypeNeed::Required,
         })));
     }
 
@@ -164,8 +164,47 @@ pub fn extract_variable(root: Node<'_>, source: &str, start: usize, end: usize) 
         edit_index: slot_index,
         at: 0,
         placeholder: TYPE_PLACEHOLDER.to_string(),
-        required: false,
+        // Where the type is decided by what is EXPECTED of the value, `var` is not a safe fallback
+        // for a type the resolver INFERRED AND MUST NOT WRITE — see `in_a_target_typed_position`
+        // and `TypeNeed::RequiredOnceInferred`.
+        need: match in_a_target_typed_position(&expr) {
+            true => TypeNeed::RequiredOnceInferred,
+            false => TypeNeed::Optional,
+        },
     })))
+}
+
+/// Whether the expression's type here is decided by what is **expected** of it.
+///
+/// This is the one place `var` is not a safe answer. Everywhere else, a type the resolver declines
+/// to write falls back to `var` and javac infers the same thing it always would. In a *target-typed*
+/// position it does not: `stream.collect(Collectors.toList())` gives the call its type arguments
+/// from the collect it feeds, and `var c = Collectors.toList();` — with nothing to feed — infers
+/// `Collector<Object, Object, List<Object>>` and the line stops compiling. Same for an operand of a
+/// conditional, whose two arms are typed against each other, and for a `return`, typed against the
+/// method's declared type.
+///
+/// So here an expression the engine typed and **must not write** is a refusal rather than a `var` —
+/// see [`TypeNeed::RequiredOnceInferred`] for why it is only that half. Refusing on the other half
+/// too, where nothing was inferred at all, was measured on commons-lang3: it turned 1225 offers into
+/// refusals to prevent 54 broken ones, because `var` in a target-typed position compiles far more
+/// often than not. The signal is the unwritable answer, not the absent one.
+fn in_a_target_typed_position(expr: &Node<'_>) -> bool {
+    let Some(parent) = expr.parent() else {
+        return false;
+    };
+    match parent.kind() {
+        "argument_list" | "return_statement" => true,
+        // The value assigned is typed against the variable; the variable itself is not.
+        "assignment_expression" => {
+            parent.child_by_field_name("right").map(|r| r.id()) == Some(expr.id())
+        }
+        // The condition is a boolean and decides nothing; the two arms decide each other.
+        "ternary_expression" => {
+            parent.child_by_field_name("condition").map(|c| c.id()) != Some(expr.id())
+        }
+        _ => false,
+    }
 }
 
 /// Plan an *extract constant*: the same expression, lifted to a `private static final` field.
@@ -211,7 +250,9 @@ pub fn extract_constant(root: Node<'_>, source: &str, start: usize, end: usize) 
         None => insertion_point_in_body(&body, source)?,
     };
 
-    let name = unique_name(&screaming(&suggest_name(&expr, source)), type_decl, source);
+    let mut taken = declared_names(type_decl, source);
+    taken.extend(enclosing_field_names(expr, source));
+    let name = unique_name(&screaming(&suggest_name(&expr, source)), &taken);
     let indent = member_indent(source, &body);
     let nl = newline(source);
     // A field of an interface or an annotation type is ALREADY public static final, and saying
@@ -244,7 +285,7 @@ pub fn extract_constant(root: Node<'_>, source: &str, start: usize, end: usize) 
         placeholder: TYPE_PLACEHOLDER.to_string(),
         // A FIELD is never `var`: the placeholder does not compile here in any Java
         // version, so a caller that cannot name the type must not apply this plan at all.
-        required: true,
+        need: TypeNeed::Required,
     })))
 }
 
@@ -517,10 +558,96 @@ fn declared_names(scope: Node<'_>, source: &str) -> Vec<String> {
             push(&node);
         }
     }
-    // A field the method never mentions is safe to shadow; one it does mention is already covered
-    // by the declarators above. What is NOT covered is the enclosing type's fields when the new
-    // name is a field itself — extract constant — so the caller passes the type as the scope there.
     out
+}
+
+/// Every variable name a declaration introduced at `at` would collide with.
+///
+/// The declarations inside the enclosing method, **plus the fields of every type around it**. The
+/// fields are the half that is easy to miss and the half that breaks silently: a field is visible
+/// inside a method as a bare identifier without being declared there, so scanning the method alone
+/// reports it as free. `MutableByte.equals` reads `value == ((MutableByte) obj).byteValue()` against
+/// a field `value`; extracting the cast as `value` compiled to `value == (value).byteValue()`, which
+/// is not a mistake the reader can see — the name they asked for is right there.
+///
+/// Only the fields of the surrounding types, not their locals: a local of a *sibling* method is not
+/// in scope here, and counting it would push perfectly good names to `value2` for no reason.
+fn names_in_scope_at(at: &Node<'_>, source: &str) -> Vec<String> {
+    let scope = scope_of(at);
+    let mut out = declared_names(scope, source);
+    // A field only matters if this scope names it BARE. `this.items` and `other.items` still say
+    // which object they mean after a local called `items` appears, so bumping them to `items2`
+    // would be a worse name for no reason; `value` on its own would silently start meaning the
+    // local. Only the second is a collision, and only the second is worth a digit.
+    let mentioned = bare_mentions(scope, source);
+    out.extend(
+        enclosing_field_names(*at, source).into_iter().filter(|f| mentioned.contains(f)),
+    );
+    out
+}
+
+/// The identifiers `scope` uses **on their own** — not as `x.name`, and not as the name of a
+/// declaration or of a call.
+fn bare_mentions(scope: Node<'_>, source: &str) -> Vec<String> {
+    identifiers(scope)
+        .into_iter()
+        .filter(|id| {
+            let Some(parent) = id.parent() else { return true };
+            // `this.items` — `items` is the parent's `field`; `f()` and `int x` — the parent's
+            // `name`. In none of those does the bare identifier stand for the field.
+            !matches!(parent.child_by_field_name("field").map(|n| n.id()), Some(x) if x == id.id())
+                && !matches!(parent.child_by_field_name("name").map(|n| n.id()), Some(x) if x == id.id())
+        })
+        .map(|id| text(&id, source).to_string())
+        .collect()
+}
+
+/// The field names of every type enclosing `node`, innermost outwards.
+///
+/// Outwards and not just the innermost: inside a non-static nested class the outer class's fields
+/// are reachable unqualified too, so a name that shadows one there fails in exactly the same way.
+fn enclosing_field_names(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = enclosing_type(node);
+    while let Some(type_decl) = cur {
+        if let Some(body) = type_decl.child_by_field_name("body") {
+            push_field_names(body, source, &mut out);
+        }
+        cur = type_decl.parent().and_then(enclosing_type);
+    }
+    out
+}
+
+/// The names a type body declares as fields, into `out`.
+///
+/// Only this body's own members — a nested type's fields are not in scope out here, and counting
+/// them would push good names to `value2` for nothing. The one place it descends is an enum's
+/// `enum_body_declarations`, which is where an enum keeps everything that is not a constant.
+fn push_field_names(body: Node<'_>, source: &str, out: &mut Vec<String>) {
+    let mut cursor = body.walk();
+    for member in body.named_children(&mut cursor) {
+        match member.kind() {
+            // `private byte value;` — one declaration, possibly several names.
+            "field_declaration" | "constant_declaration" => {
+                let mut inner = member.walk();
+                for d in member.named_children(&mut inner) {
+                    if d.kind() == "variable_declarator" {
+                        if let Some(name) = d.child_by_field_name("name") {
+                            out.push(text(&name, source).to_string());
+                        }
+                    }
+                }
+            }
+            // An enum's constants ARE fields of it.
+            "enum_constant" => {
+                if let Some(name) = member.child_by_field_name("name") {
+                    out.push(text(&name, source).to_string());
+                }
+            }
+            "enum_body_declarations" => push_field_names(member, source, out),
+            _ => {}
+        }
+    }
 }
 
 /// `base`, or `base2`, `base3`… — the first spelling nothing in `scope` already answers to.
@@ -528,8 +655,7 @@ fn declared_names(scope: Node<'_>, source: &str) -> Vec<String> {
 /// Introducing a name that is already taken does not fail to compile in the interesting case: it
 /// **shadows**, and every line after it that meant the old binding quietly means the new one. Seen
 /// on real code as `var params = this.params;` inside a method whose own parameter was `params`.
-fn unique_name(base: &str, scope: Node<'_>, source: &str) -> String {
-    let taken = declared_names(scope, source);
+fn unique_name(base: &str, taken: &[String]) -> String {
     if !taken.iter().any(|t| t == base) {
         return base.to_string();
     }
@@ -732,6 +858,79 @@ mod tests {
         let applied = plan.apply(source);
         assert!(applied.contains("var items = this.items;"), "{applied}");
         assert!(applied.contains("items.add(param);"), "{applied}");
+    }
+
+    /// A FIELD the method reads bare is the half that is easy to miss: it is in scope without being
+    /// declared here, so scanning the method alone reports the name as free.
+    ///
+    /// Straight from `commons-lang3`'s `MutableByte.equals`, which reads `value` against a field of
+    /// that name. Naming the cast `value` produced `value == (value).byteValue()` — code that says
+    /// what the user asked for and means something else.
+    #[test]
+    fn a_field_the_method_reads_bare_is_not_shadowed() {
+        let source = "class A {\n    private byte value;\n    public boolean equals(Object obj) {\n        return value == ((A) obj).byteValue();\n    }\n    byte byteValue() { return value; }\n}";
+        let tree = parse_java(source).unwrap();
+        let at = source.find("((A) obj)").unwrap() + 1;
+        let Some(Ok(plan)) = extract_variable(tree.root_node(), source, at, at) else {
+            panic!("expected a plan")
+        };
+        let applied = plan.apply(source);
+        assert!(!applied.contains("var value ="), "shadowed the field: {applied}");
+        assert!(applied.contains("value == (value2)"), "{applied}");
+    }
+
+    /// A field of an ENCLOSING class is reachable unqualified from a nested one too.
+    #[test]
+    fn a_field_of_the_outer_class_is_not_shadowed_either() {
+        let source = "class Outer {\n    private int total;\n    class Inner {\n        int f(int[] xs) {\n            return total + xs[0];\n        }\n    }\n}";
+        let tree = parse_java(source).unwrap();
+        let at = source.find("xs[0]").unwrap();
+        let Some(Ok(plan)) = extract_variable(tree.root_node(), source, at, at + 5) else {
+            panic!("expected a plan")
+        };
+        // The suggested name here is not `total`; what matters is that the outer field is counted.
+        let names = names_in_scope_at(
+            &expression_for(tree.root_node(), source, at, at + 5).unwrap(),
+            source,
+        );
+        assert!(names.contains(&"total".to_string()), "{names:?}");
+        assert!(!plan.apply(source).contains("var total ="));
+    }
+
+    /// In a target-typed position, `var` re-infers the expression with nothing to infer from.
+    ///
+    /// `stream.collect(Collectors.toList())` gives the inner call its type arguments from the outer
+    /// one. Standing alone as `var c = Collectors.toList();` it becomes a `Collector` over `Object`
+    /// and the line it fed stops compiling — so an untypable expression there is a refusal, not a
+    /// `var`. Everywhere else `var` is exactly what javac would have inferred, and stays.
+    #[test]
+    fn an_untypable_expression_in_a_target_typed_position_is_not_left_as_var() {
+        let source = "class A {\n    java.util.List<String> f(java.util.stream.Stream<String> s) {\n        return s.collect(java.util.stream.Collectors.toList());\n    }\n}";
+        let tree = parse_java(source).unwrap();
+        let call = "java.util.stream.Collectors.toList()";
+        let at = source.find(call).unwrap();
+        let Some(Ok(plan)) = extract_variable(tree.root_node(), source, at, at + call.len()) else {
+            panic!("expected a plan")
+        };
+        assert!(
+            plan.type_slot.as_ref().map(|s| s.need) == Some(TypeNeed::RequiredOnceInferred),
+            "{:?}",
+            plan.type_slot
+        );
+    }
+
+    /// …and NOT everywhere: an operand of a binary expression is typed on its own, so a type the
+    /// resolver declines to write still falls back to `var` there. The rule has to stay narrow —
+    /// widening it turns hundreds of good extractions into refusals.
+    #[test]
+    fn an_operand_of_a_binary_expression_still_falls_back_to_var() {
+        let source = "class A {\n    void f() {\n        take(30_000 + 1);\n    }\n    void take(int x) {}\n}";
+        let tree = parse_java(source).unwrap();
+        let at = source.find("30_000").unwrap();
+        let Some(Ok(plan)) = extract_variable(tree.root_node(), source, at, at + 6) else {
+            panic!("expected a plan")
+        };
+        assert_eq!(plan.type_slot.as_ref().map(|s| s.need), Some(TypeNeed::Optional), "{:?}", plan.type_slot);
     }
 
     /// Shadowing does not fail to compile — it quietly re-points every later mention of the name.
@@ -1038,17 +1237,20 @@ mod tests {
     /// unlike a local, where `var` is exactly what javac would have inferred.
     #[test]
     fn a_constants_type_is_not_optional() {
-        let source = "class A {\n    void f() {\n        take(30_000);\n    }\n    void take(int x) {}\n}";
+        // In a BINARY expression, whose operands are typed on their own — an ARGUMENT is
+        // target-typed, and there `var` is not a safe fallback either. See
+        // `an_untypable_expression_in_a_target_typed_position_is_not_left_as_var`.
+        let source = "class A {\n    void f() {\n        take(30_000 + 1);\n    }\n    void take(int x) {}\n}";
         let tree = parse_java(source).unwrap();
         let start = source.find("30_000").unwrap();
         let Some(Ok(constant)) = extract_constant(tree.root_node(), source, start, start + 6) else {
             panic!("expected a plan")
         };
-        assert!(constant.type_slot.as_ref().is_some_and(|s| s.required), "{:?}", constant.type_slot);
+        assert_eq!(constant.type_slot.as_ref().map(|s| s.need), Some(TypeNeed::Required), "{:?}", constant.type_slot);
         let Some(Ok(local)) = extract_variable(tree.root_node(), source, start, start + 6) else {
             panic!("expected a plan")
         };
-        assert!(local.type_slot.as_ref().is_some_and(|s| !s.required), "{:?}", local.type_slot);
+        assert_eq!(local.type_slot.as_ref().map(|s| s.need), Some(TypeNeed::Optional), "{:?}", local.type_slot);
     }
 
     #[test]

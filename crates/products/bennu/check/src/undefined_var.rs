@@ -316,7 +316,7 @@ mod tests {
             "com/acme/Base".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: vec![field("base", "int")],
@@ -327,7 +327,7 @@ mod tests {
             "com/acme/C".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("com/acme/Base".to_string()),
+                superclass: Some(TypeRef::simple("com/acme/Base")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: vec![field("count", "int")],
@@ -338,7 +338,7 @@ mod tests {
             "com/acme/Helper".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: vec![field("CONST", "int")],
@@ -351,7 +351,7 @@ mod tests {
             "java/lang/Math".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![Member::method(
                     "sqrt",
@@ -580,7 +580,7 @@ mod tests {
             "com/acme/Color".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: Vec::new(),

@@ -38,16 +38,39 @@ use crate::sig::{ClassType, TypeArg, TypeSig};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypeRef {
     /// Binary name with slashes (`java/util/List`), a type-variable name (`E`), or a
-    /// primitive/void/array token.
+    /// primitive/void token — the ELEMENT type, never carrying brackets. See [`TypeRef::dims`].
     pub binary_name: String,
     /// Applied type arguments, in order. Empty when raw or non-generic.
     pub type_args: Vec<TypeRef>,
+    /// Array depth: `0` for `String`, `1` for `String[]`.
+    ///
+    /// The descriptor always knew this and it used to be spelled into `binary_name`, which made the
+    /// name unusable as a lookup key and produced `import java.net.URL[];` wherever a type was
+    /// written back into source. `#[serde(default)]` so an index written before this still loads.
+    #[serde(default)]
+    pub dims: u8,
 }
 
 impl TypeRef {
-    /// A plain (non-generic) reference to `binary_name`.
+    /// A plain (non-generic, non-array) reference to `binary_name`.
     pub fn plain(binary_name: impl Into<String>) -> Self {
-        Self { binary_name: binary_name.into(), type_args: Vec::new() }
+        Self { binary_name: binary_name.into(), type_args: Vec::new(), dims: 0 }
+    }
+
+    /// The same reference, `dims` levels of array deep.
+    pub fn arrayed(mut self, dims: u8) -> Self {
+        self.dims = dims;
+        self
+    }
+
+    /// Whether this refers to an array.
+    ///
+    /// One predicate, because a dozen checks used to ask it each in its own words and they did not
+    /// agree once the answer moved. The `[]` fallback is for an index PERSISTED before `dims`
+    /// existed: `#[serde(default)]` gives those records `dims: 0` while their names still carry the
+    /// brackets, and a stale cache must not silently turn every varargs call into an arity error.
+    pub fn is_array(&self) -> bool {
+        self.dims > 0 || self.binary_name.ends_with("[]")
     }
 }
 
@@ -128,11 +151,19 @@ pub struct ClassFlags {
 /// its declared members.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClassMembers {
-    /// Superclass binary name with slashes (`java/lang/Object`), or `None` for
-    /// `java/lang/Object` / interfaces without an explicit superclass in the file.
-    pub superclass: Option<String>,
-    /// Directly-implemented interface binary names (slashes).
-    pub interfaces: Vec<String>,
+    /// The superclass **as declared**, or `None` for `java/lang/Object` / an interface without an
+    /// explicit superclass in the file.
+    ///
+    /// A [`TypeRef`] rather than a name so `AbstractList<E> extends AbstractCollection<E>` keeps its
+    /// `E`: the arguments on the extends clause are the only record of how a subtype binds its
+    /// supertype's variables, and without them a member inherited from a generic base comes back as
+    /// an unresolved variable. Decoded from the class `Signature` attribute where there is one; a
+    /// class compiled without it falls back to the erased constant-pool entry, which is a raw
+    /// supertype and honest about being one.
+    pub superclass: Option<TypeRef>,
+    /// Directly-implemented interfaces, as declared — `implements Comparator<Order>` keeps its
+    /// `Order`, for the same reason the superclass keeps its arguments.
+    pub interfaces: Vec<TypeRef>,
     pub methods: Vec<Member>,
     pub fields: Vec<Member>,
     /// Class-level access flags (interface / abstract / final / record / sealed / …). `#[serde(default)]`
@@ -220,11 +251,6 @@ pub fn parse_class_members(bytes: &[u8]) -> Result<ClassMembers, String> {
     let parsed: ClassFile =
         parse_class(bytes).map_err(|e| format!("cafebabe parse failed: {e}"))?;
 
-    // `java/lang/Object` (and interfaces, whose super is implicitly Object) may have
-    // no super_class entry; carry `None` so the inherited-walk terminates.
-    let superclass = parsed.super_class.as_ref().map(|c| c.to_string());
-    let interfaces = parsed.interfaces.iter().map(|i| i.to_string()).collect();
-
     let flags = decode_class_flags(&parsed);
     let methods = parsed
         .methods
@@ -232,12 +258,32 @@ pub fn parse_class_members(bytes: &[u8]) -> Result<ClassMembers, String> {
         .map(|m| decode_method(m, flags.is_interface))
         .collect();
     let fields = parsed.fields.iter().map(decode_field).collect();
-    // The class-level generic signature carries the declared type-parameter names (`<K,V>`); decode
-    // them so a consumer can map a method's type-variable return to the receiver's Nth type argument.
-    let type_params = signature_attr(&parsed.attributes)
-        .and_then(|raw| crate::sig::parse_class(raw).ok())
-        .map(|cs| cs.type_params.into_iter().map(|tp| tp.name).collect())
+    // The class-level generic signature carries the declared type-parameter names (`<K,V>`) AND the
+    // supertypes with their arguments (`extends AbstractList<E>`). Both come from the same decode:
+    // reading the parameters here and the supertypes from the erased constant pool would record a
+    // class that declares an `E` and inherits from something that has forgotten it.
+    let sig = signature_attr(&parsed.attributes).and_then(|raw| crate::sig::parse_class(raw).ok());
+    let type_params = sig
+        .as_ref()
+        .map(|cs| cs.type_params.iter().map(|tp| tp.name.clone()).collect())
         .unwrap_or_default();
+    // `java/lang/Object` (and an interface, whose super is implicitly Object) may have no
+    // super_class entry; carry `None` so the inherited-walk terminates.
+    //
+    // The signature's `superclass` is `Object` for an interface too, so the constant-pool entry
+    // stays the authority on WHETHER there is one — the signature only says what it looks like.
+    let (superclass, interfaces) = match &sig {
+        Some(cs) => (
+            parsed.super_class.as_ref().map(|_| type_ref_from_sig(&cs.superclass)),
+            cs.interfaces.iter().map(type_ref_from_sig).collect(),
+        ),
+        // Compiled without a generic signature: the erased names are all there is, and a raw
+        // supertype is the truthful reading of them.
+        None => (
+            parsed.super_class.as_ref().map(|c| TypeRef::plain(c.to_string())),
+            parsed.interfaces.iter().map(|i| TypeRef::plain(i.to_string())).collect(),
+        ),
+    };
 
     Ok(ClassMembers { superclass, interfaces, methods, fields, flags, type_params })
 }
@@ -451,8 +497,9 @@ fn decode_field(f: &FieldInfo) -> Member {
 ///   bound (`X`) or to `java/lang/Object` when unbounded — Phase-1 completion needs
 ///   a concrete class to look members up on, not variance.
 /// - Type variables become a bare-name [`TypeRef`] (`E`) for later substitution.
-/// - Arrays render `elem[]` as a terminal token (arrays expose only `length` +
-///   `Object` methods; Phase 1 does not walk into them).
+/// - Arrays keep the ELEMENT type and record their depth in [`TypeRef::dims`] (arrays expose only
+///   `length` + `Object` methods; Phase 1 does not walk into them, and the element name is what a
+///   member lookup and an import both need).
 /// - Primitives/void become readable terminal tokens.
 fn type_ref_from_sig(t: &TypeSig) -> TypeRef {
     match t {
@@ -460,7 +507,9 @@ fn type_ref_from_sig(t: &TypeSig) -> TypeRef {
         TypeSig::Void => TypeRef::plain("void"),
         TypeSig::TypeVar(name) => TypeRef::plain(name.clone()),
         TypeSig::Array(inner) => {
-            TypeRef::plain(format!("{}[]", type_ref_from_sig(inner).binary_name))
+            let element = type_ref_from_sig(inner);
+            let depth = element.dims.saturating_add(1);
+            element.arrayed(depth)
         }
         TypeSig::Class(ct) => class_type_to_ref(ct),
     }
@@ -479,7 +528,7 @@ fn class_type_to_ref(ct: &ClassType) -> TypeRef {
     // Phase-1 targets; if present we still surface the outer args, which is what the
     // element-type carry-through uses.
     let type_args = ct.args.iter().map(type_arg_to_ref).collect();
-    TypeRef { binary_name, type_args }
+    TypeRef { binary_name, type_args, dims: 0 }
 }
 
 fn type_arg_to_ref(a: &TypeArg) -> TypeRef {
@@ -495,16 +544,9 @@ fn type_arg_to_ref(a: &TypeArg) -> TypeRef {
 // ── FieldDescriptor (erased) → TypeRef ───────────────────────────────────────
 
 fn type_ref_from_descriptor(d: &FieldDescriptor) -> TypeRef {
-    let base = field_type_name(&d.field_type);
-    if d.dimensions == 0 {
-        TypeRef::plain(base)
-    } else {
-        let mut s = base;
-        for _ in 0..d.dimensions {
-            s.push_str("[]");
-        }
-        TypeRef::plain(s)
-    }
+    // The depth goes in `dims`, never into the name. Everything that asks "is this an array" asks
+    // `TypeRef::is_array`, which is the only place that knows.
+    TypeRef::plain(field_type_name(&d.field_type)).arrayed(d.dimensions)
 }
 
 fn field_type_name(t: &FieldType) -> String {
@@ -581,13 +623,28 @@ mod tests {
         assert_eq!(r.type_args[0].binary_name, "java/lang/Object");
     }
 
+    /// `[TT;` is `T[]`: the ELEMENT in the name, the depth beside it.
+    ///
+    /// The name used to read `T[]`, which made it useless as a lookup key and, once written back
+    /// into source, produced imports that did not parse. The split is the contract now.
+    /// `[TT;` is `T[]`: the ELEMENT in the name, the depth beside it, and `TypeRef::is_array` the
+    /// only thing that reads it.
     #[test]
-    fn array_typevar_is_terminal_token() {
-        // `[TT;` → T[].
+    fn an_array_keeps_its_element_name_and_records_its_depth() {
         let sig = crate::sig::parse_field("[TT;").unwrap();
         let r = type_ref_from_sig(&sig);
-        assert_eq!(r.binary_name, "T[]");
+        assert_eq!(r.binary_name, "T");
+        assert_eq!(r.dims, 1);
         assert!(r.type_args.is_empty());
+    }
+
+    /// …and it nests: `[[Ljava/lang/String;` is `String[][]`.
+    #[test]
+    fn a_two_dimensional_array_counts_both() {
+        let sig = crate::sig::parse_field("[[Ljava/lang/String;").unwrap();
+        let r = type_ref_from_sig(&sig);
+        assert_eq!(r.binary_name, "java/lang/String");
+        assert_eq!(r.dims, 2);
     }
 
     // ── JDK-backed integration (skip when the level isn't installed) ─────────
@@ -610,8 +667,23 @@ mod tests {
         // java/util/ArrayList: superclass populated for inherited-member walking.
         let al =
             idx.members_of("java/util/ArrayList").unwrap_or_else(|| panic!("{label}: ArrayList"));
-        assert_eq!(al.superclass.as_deref(), Some("java/util/AbstractList"), "{label}: AL super");
-        assert!(al.interfaces.iter().any(|i| i == "java/util/List"), "{label}: AL impl List");
+        let al_super = al.superclass.as_ref().unwrap_or_else(|| panic!("{label}: AL super"));
+        assert_eq!(al_super.binary_name, "java/util/AbstractList", "{label}: AL super");
+        // And the ARGUMENT it passes up. `ArrayList<E> extends AbstractList<E>` is where every
+        // inherited generic member gets its binding from: recorded as the bare name, the walk
+        // arrives at `AbstractList` knowing it declares an `E` and not knowing what `E` is, and
+        // `list.get(0)` comes back as an unresolved variable instead of the element type.
+        assert_eq!(
+            al_super.type_args.iter().map(|a| a.binary_name.as_str()).collect::<Vec<_>>(),
+            vec!["E"],
+            "{label}: AL passes its E up to AbstractList"
+        );
+        let al_list = al
+            .interfaces
+            .iter()
+            .find(|i| i.binary_name == "java/util/List")
+            .unwrap_or_else(|| panic!("{label}: AL impl List"));
+        assert_eq!(al_list.type_args.len(), 1, "{label}: AL implements List<E>, not raw List");
 
         // java/util/Map: get(Object) -> V, declared as Map<K,V>.
         let map = idx.members_of("java/util/Map").unwrap_or_else(|| panic!("{label}: Map"));
@@ -632,9 +704,13 @@ mod tests {
 
         // java/lang/String: erased-primitive path + supertypes.
         let s = idx.members_of("java/lang/String").unwrap_or_else(|| panic!("{label}: String"));
-        assert_eq!(s.superclass.as_deref(), Some("java/lang/Object"), "{label}: String super");
+        assert_eq!(
+            s.superclass.as_ref().map(|c| c.binary_name.as_str()),
+            Some("java/lang/Object"),
+            "{label}: String super"
+        );
         assert!(
-            s.interfaces.iter().any(|i| i == "java/lang/CharSequence"),
+            s.interfaces.iter().any(|i| i.binary_name == "java/lang/CharSequence"),
             "{label}: String impl CharSequence"
         );
         assert_eq!(

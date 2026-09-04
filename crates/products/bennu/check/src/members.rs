@@ -201,7 +201,7 @@ mod tests {
             "java/lang/String".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![
                     method("length", "int"),
@@ -305,12 +305,12 @@ mod tests {
         // (which lacks it) → a false "cannot resolve method". `R` now stays unresolved → the call is
         // skipped conservatively.
         fn gen(bn: &str, args: Vec<TypeRef>) -> TypeRef {
-            TypeRef { binary_name: bn.to_string(), type_args: args }
+            TypeRef { binary_name: bn.to_string(), dims: 0, type_args: args }
         }
         fn ty(type_params: Vec<&str>, superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {
             ClassMembers {
                 type_params: type_params.into_iter().map(str::to_string).collect(),
-                superclass: superclass.map(str::to_string),
+                superclass: superclass.map(TypeRef::simple),
                 interfaces: Vec::new(),
                 methods,
                 fields: Vec::new(),
@@ -367,12 +367,12 @@ mod tests {
         // class's same-named `String result` field. Before the fix the field won and `result.getName()`
         // was falsely flagged (String has no getName).
         fn gen(bn: &str, args: Vec<TypeRef>) -> TypeRef {
-            TypeRef { binary_name: bn.to_string(), type_args: args }
+            TypeRef { binary_name: bn.to_string(), dims: 0, type_args: args }
         }
         fn ty(type_params: Vec<&str>, superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {
             ClassMembers {
                 type_params: type_params.into_iter().map(str::to_string).collect(),
-                superclass: superclass.map(str::to_string),
+                superclass: superclass.map(TypeRef::simple),
                 interfaces: Vec::new(),
                 methods,
                 fields: Vec::new(),

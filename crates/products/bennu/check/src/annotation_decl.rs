@@ -112,7 +112,7 @@ mod tests {
     fn class_of(flags: ClassFlags) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Object".into()),
+            superclass: Some(bennu_java::prelude::TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods: Vec::new(),
             fields: Vec::new(),

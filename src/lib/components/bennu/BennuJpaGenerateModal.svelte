@@ -54,7 +54,8 @@
   import ChipBar from '$lib/components/shared/ui/ChipBar.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Kbd from '$lib/components/shared/internal/Kbd.svelte';
-  import CodePreview, { type CodeTab } from '$lib/components/shared/ui/CodePreview.svelte';
+  import CodePreview from '$lib/components/shared/ui/CodePreview.svelte';
+  import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import { languageForPath } from './languages';
   import {
     jpaFormModel, jpaGenerate, JPA_CASCADE_TYPES, JPA_RETURN_SHAPES, JPA_VALIDATIONS,
@@ -402,9 +403,24 @@
         ? `into ${result.insertion.file.split(/[\\/]/).pop()}`
         : '',
   );
+  /** One pane of the preview: the generated text, how to colour it, and what it is for.
+   *
+   *  Local to this modal on purpose. `CodePreview` is the shared **excerpt viewer** — a slice of a
+   *  file with a banded line — and three other consumers use it exactly that way. What this modal
+   *  wants is a *generated-output* pane with tabs and a caption, which is a different widget, so it
+   *  is composed here out of `Tabs` + `CodePreview` rather than by widening the shared one until it
+   *  serves both. */
+  interface PreviewPane {
+    id: string;
+    label: string;
+    code: string;
+    language: ReturnType<typeof languageForPath>;
+    detail?: string;
+  }
+
   /** The pane's tabs. One view unless there is genuinely a second — the column a field implies is
    *  a different question from the field, and reading them side by side is the point. */
-  const previewTabs = $derived.by((): CodeTab[] | undefined => {
+  const previewTabs = $derived.by((): PreviewPane[] | undefined => {
     if (!result?.ddl) return undefined;
     return [
       { id: 'java', label: 'Java', code: result.preview, language: javaLang, detail: destination },
@@ -417,6 +433,13 @@
       },
     ];
   });
+
+  /** Which pane is showing. Reset whenever the panes change, so a DDL tab does not survive a
+   *  regeneration that no longer produces one. */
+  let previewTab = $state('java');
+  const shownPane = $derived(
+    previewTabs?.find((t) => t.id === previewTab) ?? previewTabs?.[0],
+  );
 
   async function apply(): Promise<boolean> {
     const r = result;
@@ -434,7 +457,7 @@
         await projectStore.openFile(r.insertion.file);
         const current = projectStore.sourceOf(r.insertion.file);
         const next = applyByteEdits(current, [
-          { start: r.insertion.offset, end: r.insertion.offset, text: r.insertion.text },
+          { start: r.insertion.offset, end: r.insertion.offset, new_text: r.insertion.text },
         ]);
         await projectStore.saveText(r.insertion.file, next);
         await projectStore.openFile(r.insertion.file);
@@ -587,12 +610,12 @@
   <div class="jg" onkeydown={onKeydown}>
     {#if !spec}
       <EmptyState
-        title="Unknown action"
+        message="Unknown action"
         description="This build of the UI does not know what to open for it."
       />
     {:else if model && selectableEntities.length === 0}
       <EmptyState
-        title="No entities in this project"
+        message="No entities in this project"
         description="Nothing here can be generated without an @Entity class to generate it for."
       />
     {:else}
@@ -1106,16 +1129,35 @@
                parses, and it built itself out of the conditions rather than being typed. -->
           <div class="jg-name" use:tooltip={'The method name Spring Data will parse'}>{methodName}</div>
         {/if}
-        <CodePreview
-          code={result?.preview ?? ''}
-          language={javaLang}
-          tabs={previewTabs}
-          title="Preview"
-          detail={previewTabs ? undefined : destination}
-          error={error || null}
-          fill
-          empty="Fill the form and the generated code appears here."
-        />
+        <div class="jg-preview-head">
+          {#if previewTabs}
+            <Tabs
+              items={previewTabs.map((t) => ({ id: t.id, label: t.label }))}
+              value={shownPane?.id ?? 'java'}
+              size="sm"
+              onSelect={(id) => (previewTab = id)}
+            />
+          {:else}
+            <span class="jg-preview-title">Preview</span>
+          {/if}
+          {#if shownPane?.detail ?? (previewTabs ? undefined : destination)}
+            <span class="jg-preview-detail">
+              {shownPane?.detail ?? destination}
+            </span>
+          {/if}
+        </div>
+        {#if error}
+          <Alert variant="error">{error}</Alert>
+        {:else if (shownPane?.code ?? result?.preview ?? '') === ''}
+          <EmptyState message="Fill the form and the generated code appears here." />
+        {:else}
+          <div class="jg-preview-code">
+            <CodePreview
+              text={shownPane?.code ?? result?.preview ?? ''}
+              language={shownPane?.language ?? javaLang}
+            />
+          </div>
+        {/if}
       </div>
       </div>
     {/if}
@@ -1136,7 +1178,7 @@
       <Button
         variant="primary"
         disabled={!result || busy}
-        shortcut="Ctrl+Enter"
+        tooltip={{ content: writesFile ? 'Create the file' : 'Add to the repository', shortcut: 'Ctrl+Enter' }}
         onclick={() => void generate()}
       >
         {writesFile ? 'Create file' : 'Add'}
@@ -1191,7 +1233,25 @@
   .jg-form :global(.fr-control .input) { width: 100%; }
 
   .jg-preview { min-height: 0; display: flex; flex-direction: column; gap: 8px; }
-  .jg-preview > :global(.cp) { flex: 1; min-height: 0; }
+  /* The code pane takes what the head leaves, so the preview grows with the modal instead of
+     scrolling the whole column. */
+  .jg-preview-code { flex: 1; min-height: 0; display: flex; }
+  .jg-preview-code > :global(.cp) { flex: 1; min-height: 0; }
+  .jg-preview-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 22px;
+  }
+  .jg-preview-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+  .jg-preview-detail {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   /* The derived method name, above the code it heads. */
   .jg-name {

@@ -191,7 +191,7 @@ mod tests {
     fn ty(is_interface: bool, methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: (!is_interface).then(|| "java/lang/Object".to_string()),
+            superclass: (!is_interface).then(|| TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods,
             fields: Vec::new(),

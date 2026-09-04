@@ -8,7 +8,10 @@
 pub use crate::offers::{plan_for, plans_at, refactorings_at};
 
 // What comes back.
-pub use crate::plan::{Outcome, Plan, RefactorEdit, Refusal, ThrowsSlot, TypeSlot};
+pub use crate::plan::{
+    merge_throws, written_name, Outcome, Plan, RefactorEdit, Refusal, ThrowsSlot, TypeNeed,
+    TypeSlot,
+};
 
 // The individual transforms, for a caller that wants one rather than the list.
 pub use crate::create::{create_method, missing_type_at, new_type_source, MissingType};

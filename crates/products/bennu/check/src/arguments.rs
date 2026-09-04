@@ -201,7 +201,7 @@ fn judge_args(
         // set: committing to a lone fixed-arity overload (`debug(Marker, String, Object, Object)`) while
         // a varargs overload could also bind is exactly what produced a false "wrong argument type".
         let admits = m.params.len() == argc
-            || (m.params.last().is_some_and(|p| p.binary_name.ends_with("[]"))
+            || (m.params.last().is_some_and(|p| p.is_array())
                 && argc + 1 >= m.params.len());
         if admits && !sigs.iter().any(|p| **p == m.params) {
             sigs.push(&m.params);
@@ -236,7 +236,7 @@ fn judge_args(
 /// A parameter list we can type-check: none is a type variable (generic) or an array (possible
 /// varargs / element inference we don't model).
 fn params_checkable(params: &[TypeRef]) -> bool {
-    params.iter().all(|p| !is_type_var(&p.binary_name) && !p.binary_name.ends_with("[]"))
+    params.iter().all(|p| !is_type_var(&p.binary_name) && !p.is_array())
 }
 
 /// A definite argument/parameter mismatch, or `None` when compatible / uncertain.
@@ -317,7 +317,7 @@ mod tests {
     fn cls(methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Object".to_string()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods,
             fields: Vec::new(),
@@ -333,7 +333,7 @@ mod tests {
         members.insert("java/lang/String".to_string(), cls(vec![]));
         members.insert("com/acme/Animal".to_string(), cls(vec![]));
         let mut dog = cls(vec![]);
-        dog.superclass = Some("com/acme/Animal".to_string());
+        dog.superclass = Some(TypeRef::simple("com/acme/Animal"));
         members.insert("com/acme/Dog".to_string(), dog);
         members.insert("com/acme/Widget".to_string(), cls(vec![]));
         // A DIFFERENT type sharing the simple name `Widget` (another package) — for the same-name skip.

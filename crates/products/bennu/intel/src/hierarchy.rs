@@ -355,8 +355,8 @@ fn supertypes(ctx: &HierarchyCtx, binary: &str) -> Vec<HierarchyItem> {
         .iter()
         .chain(members.interfaces.iter())
         // Everything extends it, and a parent that is always the same node says nothing.
-        .filter(|s| s.as_str() != "java/lang/Object")
-        .filter_map(|s| type_item(ctx, s))
+        .filter(|s| s.binary_name != "java/lang/Object")
+        .filter_map(|s| type_item(ctx, &s.binary_name))
         .collect()
 }
 

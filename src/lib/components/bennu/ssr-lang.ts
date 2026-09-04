@@ -39,6 +39,7 @@ import type { CompletionContext, CompletionResult } from '@codemirror/autocomple
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
 import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
+import type { SsrDialect } from '$lib/ipc/bennu/ssr';
 
 /** The words that begin a clause. Nothing in Java begins with one, which is what lets a line
  *  starting with them be read as a clause rather than as code. */
@@ -128,9 +129,12 @@ const JSP_NODE_KINDS = [
  * search is open at a time. It changes only what is *offered* — the field never restricts what
  * you type.
  */
-let queryDialect: 'java' | 'jsp' = 'java';
+let queryDialect: SsrDialect = 'java';
 
-export function setQueryDialect(dialect: 'java' | 'jsp'): void {
+/** The whole dialect, including `jsp-java` — which offers the JAVA vocabulary, because that is
+ *  what it is: the Java embedded in a JSP. Narrowing the parameter to `'java' | 'jsp'` made the one
+ *  caller a type error for a value the store legitimately holds. */
+export function setQueryDialect(dialect: SsrDialect): void {
   queryDialect = dialect;
 }
 
@@ -350,6 +354,9 @@ export const ssrQueryLanguage: LanguageDescriptor = {
   // Never called: `cmExtension` takes precedence, and this language has no tree-sitter grammar.
   createParser: () => Promise.reject(new Error('the query language is a stream mode')),
   cmExtension: StreamLanguage.define(parser),
+  // Highlighting comes from `cmExtension`, so there is no tree-sitter leaf to classify — the same
+  // answer `cmLang` gives for every CM-only language.
+  classify: () => null,
   intel: { completion: complete },
 };
 
@@ -364,6 +371,7 @@ export const ssrReplacementLanguage: LanguageDescriptor = {
   id: 'bennu-ssr-replacement',
   createParser: () => Promise.reject(new Error('the query language is a stream mode')),
   cmExtension: StreamLanguage.define(parser),
+  classify: () => null,
   intel: {
     completion: (context: CompletionContext) => {
       const line = context.state.doc.lineAt(context.pos);

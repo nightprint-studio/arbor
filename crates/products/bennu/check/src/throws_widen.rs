@@ -281,7 +281,7 @@ mod tests {
     fn exc(superclass: Option<&str>) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: superclass.map(str::to_string),
+            superclass: superclass.map(TypeRef::simple),
             interfaces: Vec::new(),
             methods: Vec::new(),
             fields: Vec::new(),
@@ -334,7 +334,7 @@ mod tests {
     fn resolver() -> MapResolver {
         let base = ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Object".to_string()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods: vec![run_throwing(&["java/io/IOException"])],
             fields: Vec::new(),
@@ -397,7 +397,7 @@ mod tests {
         // Super declares `throws Exception`; SQLException <: Exception → permitted, not flagged.
         let base = ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Object".to_string()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods: vec![run_throwing(&["java/lang/Exception"])],
             fields: Vec::new(),
@@ -431,7 +431,7 @@ mod tests {
         // → SKIP.
         let base = ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Object".to_string()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods: vec![run_throwing(&["java/io/IOException"])],
             fields: Vec::new(),
@@ -483,7 +483,7 @@ mod tests {
         // resolvability guard must SKIP instead (never a false positive).
         let base = ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Object".to_string()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             // Unresolved throws entry: `"Exception"` is NOT a key in the mock resolver's members.
             methods: vec![run_throwing(&["Exception"])],
@@ -503,7 +503,7 @@ mod tests {
         // SQLException) → ambiguous permitted set → SKIP (can't say which governs).
         let base = ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("com/acme/Mixin".to_string()),
+            superclass: Some(TypeRef::simple("com/acme/Mixin")),
             interfaces: Vec::new(),
             methods: vec![run_throwing(&["java/io/IOException"])],
             fields: Vec::new(),
@@ -514,7 +514,7 @@ mod tests {
             "com/acme/Mixin".into(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![run_throwing(&["java/sql/SQLException"])],
                 fields: Vec::new(),

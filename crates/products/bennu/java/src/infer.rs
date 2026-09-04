@@ -18,7 +18,7 @@
 //! element inference, static member access on bare type names, wildcard/bound modelling.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use tree_sitter::Node;
@@ -137,44 +137,22 @@ pub struct MethodResolution {
     pub complete: bool,
 }
 
-/// A real class hierarchy is shallow; exceeding this many visited nodes means we bail CONSERVATIVELY
-/// (`complete = false`) rather than loop on a pathological / cyclic graph.
-const MAX_HIER_NODES: usize = 256;
-
 /// Collect every `Member` (kind Method) named `name` across `binary` + its supertypes in one walk,
 /// tracking whether the whole hierarchy resolved. Shared by [`InferCache::resolve_methods`].
+///
+/// The walk itself lives in [`crate::hierarchy`] — one copy, one cycle guard, one node budget, and
+/// one answer to "what does this type inherit" for every consumer that asks.
 fn walk_methods(resolver: &dyn TypeResolver, binary: &str, name: &str) -> MethodResolution {
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut stack = vec![binary.to_string()];
     let mut candidates: Vec<Member> = Vec::new();
-    let mut complete = true;
-    while let Some(bn) = stack.pop() {
-        if visited.len() > MAX_HIER_NODES {
-            complete = false;
-            break;
-        }
-        if !visited.insert(bn.clone()) {
-            continue;
-        }
-        match resolver.members_of(&bn) {
-            None => complete = false, // unknown class → hierarchy incomplete (conservative)
-            Some(cm) => {
-                for m in &cm.methods {
-                    if m.name == name && m.kind == MemberKind::Method {
-                        candidates.push(m.clone());
-                    }
-                }
-                if let Some(sc) = &cm.superclass {
-                    stack.push(sc.clone());
-                }
-                stack.extend(cm.interfaces.iter().cloned());
+    let walked = crate::hierarchy::walk::<()>(resolver, &TypeRef::simple(binary), |a| {
+        for m in &a.members.methods {
+            if m.name == name && m.kind == MemberKind::Method {
+                candidates.push(m.clone());
             }
         }
-    }
-    MethodResolution {
-        candidates,
-        complete,
-    }
+        None
+    });
+    MethodResolution { candidates, complete: walked.complete }
 }
 
 /// Infer the static type of the expression immediately LEFT of the `.` at
@@ -422,6 +400,11 @@ pub fn infer_receiver_type_cached(
 /// anything off the classpath. 128 is far past hand-written code (a long fluent
 /// chain is tens of levels) and far short of what troubles a stack, counting the
 /// several frames each level actually costs.
+/// How far up an `extends` chain a source-type method lookup will walk.
+///
+/// Deep enough for any real hierarchy, finite because a file may declare a cycle.
+const MAX_SUPER_WALK: usize = 16;
+
 const MAX_INFER_DEPTH: usize = 128;
 
 /// Shared inference context. `root` is the file's parse tree root (to re-descend for `var`
@@ -822,60 +805,40 @@ impl Ctx<'_> {
         // substituting them against the RECEIVER's list (`List<E>`) matches nothing, leaves `T`
         // standing, and the lambda parameter ends up untyped. Which is why `list.replaceAll(x -> …)`
         // typed `x` and `list.forEach(x -> …)`, the commoner of the two by far, did not.
-        let mut types: Vec<(String, TypeRef)> = Vec::new();
-        let mut visited = HashSet::new();
-        let mut stack = vec![recv.binary_name.clone()];
-        while let Some(bn) = stack.pop() {
-            if !visited.insert(bn.clone()) {
-                continue;
-            }
-            // An unknown class in the hierarchy could hide a differing overload → give up (unknown,
-            // not a guess).
-            let cm = self.resolver.members_of(&bn)?;
-            for m in &cm.methods {
+        // Each hit records the parameter type AND the declaring type carrying the arguments that
+        // actually reach it, which is what the substitution below needs and what a name alone
+        // could never supply.
+        let mut types: Vec<(TypeRef, TypeRef)> = Vec::new();
+        let walked = crate::hierarchy::walk::<()>(self.resolver, recv, |a| {
+            for m in &a.members.methods {
                 if m.kind == MemberKind::Method && m.name == name {
-                    types.push((bn.clone(), m.params.get(idx)?.clone()));
+                    if let Some(p) = m.params.get(idx) {
+                        types.push((a.ty.clone(), p.clone()));
+                    }
                 }
             }
-            if let Some(sc) = cm.superclass.clone() {
-                stack.push(sc);
-            }
-            stack.extend(cm.interfaces.iter().cloned());
+            None
+        });
+        // An unknown class in the hierarchy could hide a differing overload → give up (unknown,
+        // not a guess).
+        if !walked.complete {
+            return None;
         }
         // Require a single distinct parameter type across all overloads.
-        let mut uniq: Vec<(String, TypeRef)> = Vec::new();
+        let mut uniq: Vec<(TypeRef, TypeRef)> = Vec::new();
         for t in &types {
             if !uniq.iter().any(|(_, ty)| ty == &t.1) {
                 uniq.push(t.clone());
             }
         }
-        let [(declaring, fi)] = uniq.as_slice() else { return None };
-        Some(self.substitute_generics(fi, &self.as_declared_by(declaring, recv)))
+        let [(declared_on, fi)] = uniq.as_slice() else { return None };
+        Some(crate::hierarchy::substitute(
+            fi,
+            &self.resolver.members_of(&declared_on.binary_name)?.type_params,
+            &declared_on.type_args,
+        ))
     }
 
-    /// The receiver seen AS the class that declares the method: that class's binary name carrying
-    /// the receiver's own type arguments.
-    ///
-    /// Sound only while the subtype passes its parameters to the supertype in order — `List<E>
-    /// extends Collection<E> extends Iterable<E>`, which is every JDK collection — because the index
-    /// records supertypes by binary name and drops their type arguments, so the real mapping is not
-    /// available to read. Guarded on the arities matching, and it falls back to the receiver
-    /// untouched when they do not, which is the previous behaviour rather than a worse guess.
-    fn as_declared_by(&self, declaring: &str, recv: &TypeRef) -> TypeRef {
-        if declaring == recv.binary_name || recv.type_args.is_empty() {
-            return recv.clone();
-        }
-        let same_arity = self
-            .resolver
-            .members_of(declaring)
-            .is_some_and(|cm| cm.type_params.len() == recv.type_args.len());
-        if !same_arity {
-            return recv.clone();
-        }
-        let mut seen = recv.clone();
-        seen.binary_name = declaring.to_string();
-        seen
-    }
 
     /// The type of parameter `idx` of a functional interface's SINGLE abstract method (its SAM),
     /// with the interface's generics substituted (`Consumer<Foo>` → its `accept(T)` param → `Foo`).
@@ -883,14 +846,8 @@ impl Ctx<'_> {
     /// abstract instance method (so we never mistype against a non-functional interface).
     fn sam_param_type(&self, fi: &TypeRef, idx: usize) -> Option<TypeRef> {
         let mut abstracts: Vec<Member> = Vec::new();
-        let mut visited = HashSet::new();
-        let mut stack = vec![fi.binary_name.clone()];
-        while let Some(bn) = stack.pop() {
-            if !visited.insert(bn.clone()) {
-                continue;
-            }
-            let cm = self.resolver.members_of(&bn)?; // incomplete hierarchy → give up
-            for m in &cm.methods {
+        let walked = crate::hierarchy::walk::<()>(self.resolver, fi, |a| {
+            for m in &a.members.methods {
                 if m.kind == MemberKind::Method
                     && m.is_abstract
                     && !m.is_default
@@ -900,10 +857,10 @@ impl Ctx<'_> {
                     abstracts.push(m.clone());
                 }
             }
-            if let Some(sc) = cm.superclass.clone() {
-                stack.push(sc);
-            }
-            stack.extend(cm.interfaces.iter().cloned());
+            None
+        });
+        if !walked.complete {
+            return None; // incomplete hierarchy → give up
         }
         // Dedup an override that appears at multiple hierarchy levels, then require EXACTLY one
         // abstract method — the SAM. (A precise Object-method carve-out isn't modelled; more than one
@@ -1074,18 +1031,26 @@ impl Ctx<'_> {
         args: &[Node],
         enclosing: Option<&str>,
     ) -> Option<TypeRef> {
+        // The receiver seen AS the type that DECLARES the method, carrying the arguments that
+        // actually reach it. A method inherited from `Range<T>` and called on a `DoubleRange` must
+        // be read against `Range<Double>`: substituting its `T` against the receiver's own list
+        // matches nothing — `DoubleRange` has no list — so the variable used to escape unresolved
+        // into whatever wrote it down. Falls back to the receiver when the method is not found in
+        // the hierarchy at all, which is the previous behaviour rather than a worse guess.
+        let declared_on = crate::hierarchy::declaring_method(self.resolver, recv, method_name)
+            .unwrap_or_else(|| recv.clone());
         if let Some(tr) =
             self.method_return_of_source_type(&from_binary(&recv.binary_name), method_name, args)
         {
-            return Some(tr);
+            return Some(self.substitute_generics(&tr, &declared_on));
         }
         let res = self
             .cache
             .resolve_methods(self.resolver, &recv.binary_name, method_name);
         let (ret, picked) = self.select_overload(&res.candidates, args, enclosing)?;
-        // Receiver-bound variables first (`List<Foo>.get` → `Foo`), then the ones the receiver can't
+        // Declaring-type variables first (`List<Foo>.get` → `Foo`), then the ones no receiver can
         // answer for because the METHOD declares them.
-        let ret = self.substitute_generics(&ret, recv);
+        let ret = self.substitute_generics(&ret, &declared_on);
         Some(match picked {
             Some(m) => self.bind_method_type_vars(&ret, m, args, enclosing),
             None => ret,
@@ -1229,25 +1194,7 @@ impl Ctx<'_> {
         binary_name: &str,
         f: impl Fn(&crate::seam::ClassMembers) -> Option<T>,
     ) -> Option<T> {
-        let mut visited = std::collections::HashSet::new();
-        let mut stack = vec![binary_name.to_string()];
-        while let Some(bn) = stack.pop() {
-            if !visited.insert(bn.clone()) {
-                continue;
-            }
-            if let Some(cm) = self.resolver.members_of(&bn) {
-                if let Some(hit) = f(&cm) {
-                    return Some(hit);
-                }
-                // `cm` is a shared `Arc` — clone the (small) supertype links rather than
-                // moving them out.
-                if let Some(sc) = cm.superclass.clone() {
-                    stack.push(sc);
-                }
-                stack.extend(cm.interfaces.iter().cloned());
-            }
-        }
-        None
+        crate::hierarchy::walk_up(self.resolver, &TypeRef::simple(binary_name), |a| f(&a.members))
     }
 
     /// Substitute type variables in `member_ret` with the receiver's actual type arguments: a
@@ -1317,6 +1264,8 @@ impl Ctx<'_> {
         }
         TypeRef {
             binary_name: bn.clone(),
+            // Substituting a type ARGUMENT never changes how deep the array is.
+            dims: member_ret.dims,
             type_args: member_ret
                 .type_args
                 .iter()
@@ -1401,6 +1350,30 @@ impl Ctx<'_> {
         method_name: &str,
         args: &[Node],
     ) -> Option<TypeRef> {
+        self.method_return_of_source_type_from(fqn, method_name, args, 0)
+    }
+
+    /// [`Self::method_return_of_source_type`], plus the walk up this file's own `extends` chain.
+    ///
+    /// A project type that does not declare the method may still **inherit** it from another type in
+    /// the file — and stopping at the first one leaves the answer to the classpath resolver, which
+    /// answers about the same name from a different place. `DoubleRange extends NumberRange<Double>
+    /// extends Range<T>` declares `T fit(T)` two levels up and adds an unrelated `double fit(double)`
+    /// of its own; abstaining here let `super.fit(e)` come back as the class's OWN overload, so
+    /// `super.fit(e).doubleValue()` dereferenced a primitive.
+    ///
+    /// Each step substitutes through the `extends` clause, so `T` becomes `N` becomes `Double`.
+    /// Bounded, because `class A extends B` / `class B extends A` is a thing a file can say.
+    fn method_return_of_source_type_from(
+        &self,
+        fqn: &str,
+        method_name: &str,
+        args: &[Node],
+        depth: usize,
+    ) -> Option<TypeRef> {
+        if depth > MAX_SUPER_WALK {
+            return None;
+        }
         let td = self
             .symbols
             .types
@@ -1411,6 +1384,18 @@ impl Ctx<'_> {
             .iter()
             .filter(|m| m.name == method_name)
             .collect();
+        // Declared nowhere on this type — ask the one it extends, and translate the answer back
+        // through the type arguments written in the `extends` clause.
+        if same_named.is_empty() {
+            let parent = self.resolve_type_text(td.extends.as_ref()?)?;
+            let ret = self.method_return_of_source_type_from(
+                &from_binary(&parent.binary_name),
+                method_name,
+                args,
+                depth + 1,
+            )?;
+            return Some(self.substitute_generics(&ret, &parent));
+        }
         // A single method of this name isn't an overload → trust it (behavior identical to before).
         if let [only] = same_named.as_slice() {
             return self.resolve_type_text(&only.return_type_text);
@@ -1846,6 +1831,7 @@ impl Ctx<'_> {
         TypeRef {
             binary_name: self.simple_to_binary(&t.name),
             type_args: t.args.iter().map(|a| self.to_binary_ref(a)).collect(),
+            dims: t.dims,
         }
     }
 
@@ -2148,7 +2134,7 @@ pub fn method_admits_argc(m: &Member, argc: usize) -> bool {
 fn last_is_array(m: &Member) -> bool {
     m.params
         .last()
-        .is_some_and(|p| p.binary_name.ends_with("[]"))
+        .is_some_and(|p| p.is_array())
 }
 
 /// The single return type shared by every member in `members`, or `None` when the set is empty or its
@@ -2172,6 +2158,7 @@ fn apply_bindings(ty: &TypeRef, bindings: &[(String, TypeRef)]) -> TypeRef {
     TypeRef {
         binary_name: ty.binary_name.clone(),
         type_args: ty.type_args.iter().map(|a| apply_bindings(a, bindings)).collect(),
+        dims: ty.dims,
     }
 }
 
@@ -2359,7 +2346,7 @@ mod test_support {
     /// A class with `methods`, extending `Object` — enough for the nominal walk.
     pub(super) fn cm(methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
-            superclass: Some("java/lang/Object".into()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: vec![],
             methods,
             fields: vec![],
@@ -2385,6 +2372,69 @@ mod test_support {
             "`{expr}` must occur once in the fixture"
         );
         infer_expression_type(src, start, start + expr.len(), r).map(|t| t.binary_name)
+    }
+}
+
+#[cfg(test)]
+mod super_call_tests {
+    use super::test_support::*;
+    use super::*;
+    use std::collections::HashMap;
+
+    fn no_resolver() -> MapResolver {
+        MapResolver { members: HashMap::new(), simple: HashMap::new() }
+    }
+
+    /// `super.m(…)` must be looked up on the SUPERCLASS, even when this class declares an overload
+    /// of the same name.
+    ///
+    /// From `commons-lang3`'s `DoubleRange`, which extends `NumberRange<Double>` and adds
+    /// `double fit(double)` beside the inherited `T fit(T)`. They are overloads, not an override —
+    /// the parameter types differ — so `super.fit(e)` means the inherited one and its type is
+    /// `Double`. Answering `double` made `super.fit(e).doubleValue()` unreadable: a primitive
+    /// cannot be dereferenced, and every reader of that expression, from an inlay hint to an
+    /// extracted variable, inherited the wrong type.
+    #[test]
+    fn a_super_call_skips_this_class_s_own_overload() {
+        let src = "class Parent { Double fit(Double e) { return e; } }\n\
+                   class Child extends Parent {\n\
+                       double fit(double e) { return super.fit(e).doubleValue(); }\n\
+                   }";
+        assert_eq!(
+            infer_call(src, "super.fit(e)", &no_resolver()).as_deref(),
+            Some("java/lang/Double"),
+            "the superclass's `fit`, not this class's `fit(double)`"
+        );
+    }
+
+    /// The shape `DoubleRange` actually has: the inherited method is declared TWO levels up, on a
+    /// generic base, and the class in between binds the variable.
+    #[test]
+    fn a_super_call_reaches_a_generic_grandparent() {
+        let src = "class Range<T> { T fit(T e) { return e; } }\n\
+                   class NumberRange<N extends Number> extends Range<N> {}\n\
+                   class DoubleRange extends NumberRange<Double> {\n\
+                       double fit(double e) { return super.fit(e).doubleValue(); }\n\
+                   }";
+        assert_eq!(
+            infer_call(src, "super.fit(e)", &no_resolver()).as_deref(),
+            Some("java/lang/Double"),
+        );
+    }
+
+    /// The bare call in the same file still means THIS class's method — the fix must not turn every
+    /// unqualified call into a superclass lookup.
+    #[test]
+    fn a_bare_call_still_means_this_class() {
+        let src = "class Parent { Double fit(Double e) { return e; } }\n\
+                   class Child extends Parent {\n\
+                       String fit(String e) { return e; }\n\
+                       void m() { var x = fit(\"a\"); }\n\
+                   }";
+        assert_eq!(
+            infer_call(src, "fit(\"a\")", &no_resolver()).as_deref(),
+            Some("java/lang/String")
+        );
     }
 }
 
@@ -2600,6 +2650,7 @@ mod shadowing_tests {
                     TypeRef {
                         binary_name: "java/util/List".into(),
                         type_args: vec![TypeRef::simple("acme/Impresa")],
+                        dims: 0,
                     },
                     vec![],
                 ),
@@ -2801,6 +2852,7 @@ mod shadowing_tests {
                 TypeRef {
                     binary_name: "acme/Spec".into(),
                     type_args: vec![TypeRef::simple("java/lang/Object")],
+                    dims: 0,
                 },
                 vec![],
             )])
@@ -2914,12 +2966,12 @@ mod method_type_var_tests {
         members.insert("java/lang/String".into(), cm(vec![]));
         members.insert("acme/Kind".into(), cm(vec![]));
         let opt = ClassMembers {
-            superclass: Some("java/lang/Object".into()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: vec![],
             methods: vec![
                 Member::method(
                     "ofNullable",
-                    TypeRef { binary_name: "acme/Opt".into(), type_args: vec![TypeRef::simple("T")] },
+                    TypeRef { binary_name: "acme/Opt".into(), dims: 0, type_args: vec![TypeRef::simple("T")] },
                     vec![TypeRef::simple("T")],
                 )
                 .stat(),

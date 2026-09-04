@@ -149,6 +149,28 @@
       : null,
   );
 
+  /**
+   * Trace the statement the caret is in — **not** the tab's whole buffer.
+   *
+   * From `lastRun` — the statement that actually **produced these rows** — and not
+   * from the caret. The distinction is the whole point: a lineage is a question
+   * about the result on screen, and the caret has been free to move since the run.
+   * Reading it from the caret asks the *buffer* a question that belongs to the
+   * *result*, which is the same trap `lastRun` was created for when storing an
+   * edited cell came back showing the first statement in the tab.
+   * Passing the buffer was a real bug with a memorable symptom: the parser took the
+   * first `SELECT` in the file, which on a scratchpad holding several queries was
+   * some older one — a nine-way join whose `*` expanded to four hundred columns for
+   * a view that has thirty-eight.
+   */
+  const ranSql = $derived.by(() => {
+    const targets = tabState?.lastRun?.targets ?? [];
+    // Exactly one. A run of several statements leaves one result on screen and no
+    // way to say which of them these rows came from, so there is nothing honest to
+    // trace.
+    return targets.length === 1 ? targets[0].sql : '';
+  });
+
   /** Nothing to trace without an open session and a statement that produced rows. */
   const canTrace = $derived(!!tab && isSessionOpen(conn) && !!result && !!ranSql);
   const traceReason = $derived(
@@ -174,27 +196,6 @@
   );
   const traced = $derived(freshLineage ? tracedOrigins : null);
 
-  /**
-   * Trace the statement the caret is in — **not** the tab's whole buffer.
-   *
-   * From `lastRun` — the statement that actually **produced these rows** — and not
-   * from the caret. The distinction is the whole point: a lineage is a question
-   * about the result on screen, and the caret has been free to move since the run.
-   * Reading it from the caret asks the *buffer* a question that belongs to the
-   * *result*, which is the same trap `lastRun` was created for when storing an
-   * edited cell came back showing the first statement in the tab.
-   * Passing the buffer was a real bug with a memorable symptom: the parser took the
-   * first `SELECT` in the file, which on a scratchpad holding several queries was
-   * some older one — a nine-way join whose `*` expanded to four hundred columns for
-   * a view that has thirty-eight.
-   */
-  const ranSql = $derived.by(() => {
-    const targets = tabState?.lastRun?.targets ?? [];
-    // Exactly one. A run of several statements leaves one result on screen and no
-    // way to say which of them these rows came from, so there is nothing honest to
-    // trace.
-    return targets.length === 1 ? targets[0].sql : '';
-  });
 
   function trace() {
     if (!tab || !conn || !ranSql) return;

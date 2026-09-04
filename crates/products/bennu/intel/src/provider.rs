@@ -344,6 +344,17 @@ fn render_stub(binary: &str, cm: &bennu_java::prelude::ClassMembers) -> String {
         Visibility::Package => "",
     };
     let type_name = |b: &str| b.rsplit(['/', '$']).next().unwrap_or(b).to_string();
+    // A supertype now carries its arguments, and the decompiled view is where a reader sees them:
+    // `extends AbstractList<E>` says which variable this class binds, `extends AbstractList` used to
+    // say only that a binding existed somewhere.
+    fn supertype_name(t: &bennu_java::prelude::TypeRef) -> String {
+        let simple = t.binary_name.rsplit(['/', '$']).next().unwrap_or(&t.binary_name);
+        if t.type_args.is_empty() {
+            return simple.to_string();
+        }
+        let args: Vec<String> = t.type_args.iter().map(supertype_name).collect();
+        format!("{simple}<{}>", args.join(", "))
+    }
 
     let mut s = String::new();
     s.push_str(
@@ -363,12 +374,10 @@ fn render_stub(binary: &str, cm: &bennu_java::prelude::ClassMembers) -> String {
         s.push_str(&format!("<{}>", cm.type_params.join(", ")));
     }
     if !cm.flags.is_interface {
-        if let Some(sc) = cm
-            .superclass
-            .as_deref()
-            .filter(|sc| *sc != "java/lang/Object")
+        if let Some(sc) =
+            cm.superclass.as_ref().filter(|sc| sc.binary_name != "java/lang/Object")
         {
-            s.push_str(&format!(" extends {}", type_name(sc)));
+            s.push_str(&format!(" extends {}", supertype_name(sc)));
         }
     }
     if !cm.interfaces.is_empty() {
@@ -377,7 +386,7 @@ fn render_stub(binary: &str, cm: &bennu_java::prelude::ClassMembers) -> String {
         } else {
             "implements"
         };
-        let list: Vec<String> = cm.interfaces.iter().map(|i| type_name(i)).collect();
+        let list: Vec<String> = cm.interfaces.iter().map(supertype_name).collect();
         s.push_str(&format!(" {word} {}", list.join(", ")));
     }
     s.push_str(" {\n");
@@ -956,11 +965,19 @@ impl NativeJavaProvider {
         start: usize,
         end: usize,
     ) -> Option<(String, Vec<String>)> {
-        let resolver = self.resolver.as_deref()?;
-        let tr = bennu_java::prelude::infer_expression_type(source, start, end, resolver)?;
-        let mut imports = Vec::new();
-        let written = render_type_for_source(&tr, &mut imports);
-        (!written.is_empty()).then_some((written, imports))
+        declarable_type_at(source, start, end, self.resolver.as_deref()?)
+    }
+
+    /// [`Self::infer_type_source`] keeping the two ways of failing apart — see [`Declarable`].
+    ///
+    /// No resolver at all is [`Declarable::Unknown`]: a provider that has not finished indexing has
+    /// no opinion about this expression, which is a different thing from having one it must not
+    /// write down.
+    pub fn infer_type_detail(&self, source: &str, start: usize, end: usize) -> Declarable {
+        match self.resolver.as_deref() {
+            Some(r) => declarable_type_detail(source, start, end, r),
+            None => Declarable::Unknown,
+        }
     }
 
     /// The **AST** of `source`, typed against this provider's resolver.
@@ -1042,11 +1059,8 @@ impl NativeJavaProvider {
             let Some(cm) = resolver.members_of(&binary) else {
                 continue;
             };
-            if let Some(sup) = &cm.superclass {
-                queue.push((sup.clone(), depth + 1));
-            }
-            for iface in &cm.interfaces {
-                queue.push((iface.clone(), depth + 1));
+            for sup in cm.superclass.iter().chain(cm.interfaces.iter()) {
+                queue.push((sup.binary_name.clone(), depth + 1));
             }
         }
         false
@@ -1325,6 +1339,9 @@ impl NativeJavaProvider {
         Some(TypeRef {
             binary_name: binary,
             type_args: Vec::new(),
+            // The brackets were trimmed off `base` two lines up; the depth they carried is the
+            // difference between `Foo` and `Foo[]` and belongs on the reference.
+            dims: written.matches("[]").count().min(u8::MAX as usize) as u8,
         })
     }
 
@@ -1828,7 +1845,117 @@ mod local_hover_tests {
 ///     as `java.util.Map`;
 ///   * a **generic** carries its arguments, because a declaration written without them is a raw
 ///     type and a warning where the original was neither.
-fn render_type_for_source(tr: &bennu_java::prelude::TypeRef, imports: &mut Vec<String>) -> String {
+/// The type to WRITE at a declaration for the expression in `[start, end)`, with the imports it
+/// needs — or `None` when there is no type a declaration could carry.
+///
+/// The `None` cases are the point. A call that returns nothing infers as `void`, and `void x = f();`
+/// is not a declaration with a bad type, it is a syntax error — measured as 685 of them on one
+/// library before this existed. Every caller that writes a type into source goes through here, so
+/// there is one answer to "may this be declared" rather than one per call site.
+pub fn declarable_type_at(
+    source: &str,
+    start: usize,
+    end: usize,
+    resolver: &dyn bennu_java::prelude::TypeResolver,
+) -> Option<(String, Vec<String>)> {
+    match declarable_type_detail(source, start, end, resolver) {
+        Declarable::Writable(written, imports) => Some((written, imports)),
+        _ => None,
+    }
+}
+
+/// What [`declarable_type_at`] found, with the two ways of failing kept apart.
+///
+/// They are not the same fact and a caller may need to act differently on them. Nothing inferred
+/// means the engine has no opinion, and `var` — which is what javac infers anyway — is a perfectly
+/// good stand-in. A type inferred and rejected means the engine DOES have an opinion and it is one
+/// no declaration may carry: `void`, a type variable the class never declared, a captured wildcard
+/// substituted down to `Object`. Where the surrounding code is what decides the type, that second
+/// answer is the fingerprint of a poly expression re-inferred with nothing to infer from, and the
+/// only one of the two worth refusing on.
+pub enum Declarable {
+    /// A type to write, with the imports it needs.
+    Writable(String, Vec<String>),
+    /// A type was inferred, and it is not one a declaration may carry.
+    Unwritable,
+    /// Nothing was inferred.
+    Unknown,
+}
+
+pub fn declarable_type_detail(
+    source: &str,
+    start: usize,
+    end: usize,
+    resolver: &dyn bennu_java::prelude::TypeResolver,
+) -> Declarable {
+    let Some(tr) = bennu_java::prelude::infer_expression_type(source, start, end, resolver) else {
+        return Declarable::Unknown;
+    };
+    let mut imports: Vec<String> = Vec::new();
+    let written = render_type_for_source(&tr, &mut imports);
+    if written.is_empty() || written == "void" {
+        return Declarable::Unwritable;
+    }
+    // A BINARY name with no package is a TYPE VARIABLE — `T`, `E` — and writing it into a
+    // declaration puts a name there the surrounding class has never heard of. Judged on the binary
+    // name and not the rendered one: `java/lang/String` renders as plain `String`, which the first
+    // version of this rule threw away along with two thirds of the constants it should have named.
+    // Recursive: a type variable hides in the ARGUMENTS as readily as at the top — `List<T>` has a
+    // perfectly good binary name and a `T` inside it that the target class never declared.
+    if names_a_type_variable(&tr) {
+        return Declarable::Unwritable;
+    }
+    // A type ARGUMENT that came out as `Object` is nearly always a captured wildcard the engine
+    // substituted away: `cl.getClass()` is `Class<?>`, and `Class<Object> c = cl.getClass()` does
+    // not compile. The two are indistinguishable once substituted, so this declines rather than
+    // guesses — and declining is a good outcome for a local, which then keeps `var`, exactly what
+    // javac itself would have inferred.
+    if written.contains("<Object>") || written.contains("<Object,") || written.contains(", Object>")
+    {
+        return Declarable::Unwritable;
+    }
+    // A type in the file's OWN package needs no import, and asking for one is not merely redundant:
+    // the nested types of a class in this package are written `Outer.Inner`, and an import of one
+    // that happens to be `private` does not compile — `Range.ComparableComparator has private
+    // access`, inside `Range.java` itself. Same package, no import, question closed.
+    let own = package_of(source);
+    let imports = imports
+        .into_iter()
+        .filter(|fqn| !own.as_ref().is_some_and(|p| fqn.starts_with(&format!("{p}."))))
+        .collect();
+    Declarable::Writable(written, imports)
+}
+
+/// The package a Java source declares, if it declares one.
+fn package_of(source: &str) -> Option<String> {
+    source.lines().find_map(|line| {
+        let line = line.trim();
+        line.strip_prefix("package ")
+            .map(|rest| rest.trim_end_matches(';').trim().to_string())
+            .filter(|p| !p.is_empty())
+    })
+}
+
+/// Whether this type, anywhere in it, is a bare type variable.
+fn names_a_type_variable(tr: &bennu_java::prelude::TypeRef) -> bool {
+    let binary = tr.binary_name.trim().trim_end_matches("[]");
+    if !binary.contains('/') && !is_primitive(binary) {
+        return true;
+    }
+    tr.type_args.iter().any(names_a_type_variable)
+}
+
+fn is_primitive(written: &str) -> bool {
+    matches!(
+        written,
+        "int" | "long" | "short" | "byte" | "char" | "boolean" | "float" | "double"
+    )
+}
+
+pub fn render_type_for_source(
+    tr: &bennu_java::prelude::TypeRef,
+    imports: &mut Vec<String>,
+) -> String {
     let binary = tr.binary_name.trim();
     if binary.is_empty() {
         return String::new();
@@ -1839,9 +1966,12 @@ fn render_type_for_source(tr: &bennu_java::prelude::TypeRef, imports: &mut Vec<S
             Some((outer, rest)) => (outer.to_string(), rest.replace('$', ".")),
             None => (dotted.clone(), String::new()),
         };
-        // `java.lang` is implicit; importing it is noise the compiler already has.
-        if !outer.starts_with("java.lang.") || outer.matches('.').count() > 2 {
-            imports.push(outer.clone());
+        // `java.lang` is implicit; importing it is noise the compiler already has. The name is the
+        // ELEMENT type — the depth lives in `dims` — so it is already the thing to import; the trim
+        // stays for an index persisted before that was true.
+        let importable = outer.trim_end_matches("[]").to_string();
+        if !importable.starts_with("java.lang.") || importable.matches('.').count() > 2 {
+            imports.push(importable);
         }
         let simple = outer.rsplit('.').next().unwrap_or(&outer).to_string();
         match nested.is_empty() {
@@ -1852,11 +1982,11 @@ fn render_type_for_source(tr: &bennu_java::prelude::TypeRef, imports: &mut Vec<S
         binary.to_string()
     };
     if tr.type_args.is_empty() {
-        return written;
+        return tr.with_brackets(&written);
     }
     let args: Vec<String> =
         tr.type_args.iter().map(|a| render_type_for_source(a, imports)).collect();
-    format!("{written}<{}>", args.join(", "))
+    tr.with_brackets(&format!("{written}<{}>", args.join(", ")))
 }
 
 #[cfg(test)]
@@ -1893,6 +2023,30 @@ mod tests {
     }
 
     /// The three shapes a naive rendering gets wrong, and the imports each one needs.
+    /// The depth is the difference between two programs, so it survives the round trip — and the
+    /// import is of the element, because `import java.net.URL[];` does not parse.
+    #[test]
+    fn an_array_keeps_its_brackets_and_imports_its_element() {
+        let mut imports = Vec::new();
+        let urls = TypeRef::simple("java/net/URL").arrayed(1);
+        assert_eq!(render_type_for_source(&urls, &mut imports), "URL[]");
+        assert_eq!(imports, ["java.net.URL"]);
+
+        let grid = TypeRef::simple("java/lang/String").arrayed(2);
+        assert_eq!(render_type_for_source(&grid, &mut Vec::new()), "String[][]");
+    }
+
+    /// A generic array puts the brackets outside the arguments, where Java puts them.
+    #[test]
+    fn a_generic_array_brackets_the_whole_type() {
+        let mut list_of_string = TypeRef::simple("java/util/List");
+        list_of_string.type_args.push(TypeRef::simple("java/lang/String"));
+        assert_eq!(
+            render_type_for_source(&list_of_string.arrayed(1), &mut Vec::new()),
+            "List<String>[]"
+        );
+    }
+
     #[test]
     fn a_type_is_rendered_the_way_source_writes_it() {
         use bennu_java::prelude::TypeRef;
@@ -1905,6 +2059,7 @@ mod tests {
         let list = TypeRef {
             binary_name: "java/util/List".into(),
             type_args: vec![TypeRef::simple("java/lang/String")],
+            dims: 0,
         };
         assert_eq!(render_type_for_source(&list, &mut imports), "List<String>");
         // `java.lang` is implicit; `java.util` is not.
@@ -1921,8 +2076,8 @@ mod tests {
     fn stub_renders_package_decl_fields_and_methods() {
         let cm = ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Object".to_string()),
-            interfaces: vec!["java/lang/Iterable".to_string()],
+            superclass: Some(TypeRef::simple("java/lang/Object")),
+            interfaces: vec![TypeRef::simple("java/lang/Iterable")],
             methods: vec![
                 Member::method(
                     "get",
@@ -1964,7 +2119,7 @@ mod tests {
         // simple name). Regression for decompiled stubs losing the throwables.
         let cm = ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Object".to_string()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods: vec![Member::method("read", TypeRef::simple("int"), Vec::new())
                 .vis(Visibility::Public)
@@ -1988,7 +2143,7 @@ mod tests {
         // the generic `Signature` wins.)
         let cm = ClassMembers {
             type_params: vec!["T".to_string()],
-            superclass: Some("java/lang/Object".to_string()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods: vec![Member::method(
                 "orElseThrow",
@@ -2016,7 +2171,7 @@ mod tests {
     fn interface_methods_are_bodyless() {
         let cm = ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Object".to_string()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods: vec![
                 Member::method("run", TypeRef::simple("void"), Vec::new()).vis(Visibility::Public)

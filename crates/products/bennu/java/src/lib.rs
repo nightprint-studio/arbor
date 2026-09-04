@@ -22,6 +22,7 @@
 
 pub mod ast;
 pub mod grammar;
+pub mod hierarchy;
 pub mod import_hint;
 pub mod infer;
 pub mod prelude;
@@ -53,7 +54,7 @@ mod tests {
                 "java/lang/String".into(),
                 ClassMembers {
                     type_params: Vec::new(),
-                    superclass: Some("java/lang/Object".into()),
+                    superclass: Some(crate::seam::TypeRef::simple("java/lang/Object")),
                     interfaces: vec![],
                     methods: vec![
                         m("length", tr("int")),
@@ -72,7 +73,7 @@ mod tests {
                 ClassMembers {
                     type_params: vec!["E".into()],
                     superclass: None,
-                    interfaces: vec!["java/util/Collection".into()],
+                    interfaces: vec![crate::seam::TypeRef::simple("java/util/Collection")],
                     methods: vec![
                         m("get", TypeRef::simple("E")),
                         m(
@@ -119,7 +120,7 @@ mod tests {
                 "com/acme/Pair".into(),
                 ClassMembers {
                     type_params: vec!["X".into(), "Y".into()],
-                    superclass: Some("java/lang/Object".into()),
+                    superclass: Some(crate::seam::TypeRef::simple("java/lang/Object")),
                     interfaces: vec![],
                     methods: vec![
                         m("left", TypeRef::simple("X")),
@@ -135,7 +136,7 @@ mod tests {
                 "com/acme/Customer".into(),
                 ClassMembers {
                     type_params: Vec::new(),
-                    superclass: Some("java/lang/Object".into()),
+                    superclass: Some(crate::seam::TypeRef::simple("java/lang/Object")),
                     interfaces: vec![],
                     methods: vec![m("getName", tr("java/lang/String"))],
                     fields: vec![],
@@ -177,6 +178,7 @@ mod tests {
         TypeRef {
             binary_name: bn.into(),
             type_args: args,
+            dims: 0,
         }
     }
     fn m(name: &str, ret: TypeRef) -> Member {

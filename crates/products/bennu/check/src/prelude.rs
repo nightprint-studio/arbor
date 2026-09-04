@@ -58,7 +58,9 @@ pub use bennu_proto::prelude::Diagnostic;
 // The unhandled-checked-exception analysis's structured answer, for the quick-fix that repairs it:
 // which exception, where a `throws` clause goes, and what a `try` would wrap. The diagnostic form
 // is the same analysis with a sentence on it — see `checked_call::UnhandledCall`.
-pub use crate::checked_call::{checked_exceptions_in, unhandled_calls_in, UnhandledCall};
+pub use crate::checked_call::{
+    checked_exceptions_in, unhandled_calls_in, CheckedExceptions, UnhandledCall,
+};
 
 // The constants of an enum, as the switch checks identify them — the input to the quick-fix that
 // fills in a non-exhaustive switch.

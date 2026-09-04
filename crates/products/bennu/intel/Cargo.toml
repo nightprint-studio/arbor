@@ -49,3 +49,11 @@ tree-sitter-java = "0.23"
 # Pure-Rust Hunspell (helix-editor/spellbook) — the spell-check engine loads en_US / it_IT
 # `.aff`/`.dic` and checks declaration-name / comment sub-words. Memory-light, no C deps.
 spellbook        = "0.4"
+
+[dev-dependencies]
+# The refactoring transforms, for the `refactor_case` measurement harness ONLY. A dev-dependency
+# because nothing in the library uses them: the harness lives here for the resolver, which is what
+# makes it measure the product rather than a resolver-free approximation of it.
+bennu-refactor = { path = "../refactor" }
+# The import inserter, so the harness adds the same edit the backend does.
+bennu-intentions = { path = "../intentions" }

@@ -40,7 +40,12 @@ pub const MAGIC: &[u8; 8] = b"BNNUIDX0";
 /// `StrutsValidation`) and their edges (`InterceptorRefToDef` / `InterceptorToClass`).
 /// v5: added the MyBatis mapper config source (`MyBatisMapper`) and its edge
 /// (`MethodToStatement`).
-pub const FORMAT_VERSION: u64 = 5;
+/// v6: `members_json` now records a type's supertypes as written — `Range<Double>` rather
+/// than `Range` — so an inherited generic member can be resolved against the arguments the
+/// subtype actually passes up. An index written before this carries names only, which
+/// deserializes into the new shape as a raw type: silently wrong rather than absent, so
+/// the version has to reject it.
+pub const FORMAT_VERSION: u64 = 6;
 /// The header is exactly 16 bytes (8 magic + 8 version), so the first record starts
 /// 16-byte-aligned.
 pub const HEADER_LEN: usize = 16;

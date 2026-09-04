@@ -322,31 +322,14 @@ pub fn inherited_member_type_of(
     owner: &str,
     simple: &str,
 ) -> Option<String> {
-    /// A hierarchy deeper than this is a cycle in a malformed index, not a real one.
-    const MAX: usize = 64;
-    let mut seen: Vec<String> = Vec::new();
-    let mut queue: Vec<String> = vec![owner.to_string()];
-    while let Some(cur) = queue.pop() {
-        if seen.len() > MAX || seen.contains(&cur) {
-            continue;
-        }
-        seen.push(cur.clone());
-        let Some(cm) = resolver.members_of(&cur) else {
-            continue;
-        };
+    crate::hierarchy::walk_up(resolver, &crate::seam::TypeRef::simple(owner), |a| {
         // The source spelling (`p/Outer/Inner`) and the JVM one (`p/Outer$Inner`) both occur: a
         // project type comes from source, a JDK/library one from bytecode.
-        for candidate in [format!("{cur}/{simple}"), format!("{cur}${simple}")] {
-            if resolver.members_of(&candidate).is_some() {
-                return Some(candidate);
-            }
-        }
-        if let Some(sc) = cm.superclass.clone() {
-            queue.push(sc);
-        }
-        queue.extend(cm.interfaces.iter().cloned());
-    }
-    None
+        let cur = &a.ty.binary_name;
+        [format!("{cur}/{simple}"), format!("{cur}${simple}")]
+            .into_iter()
+            .find(|candidate| resolver.members_of(candidate).is_some())
+    })
 }
 
 /// The type THIS FILE declares that `simple` denotes when written in `owner`'s scope.
@@ -640,8 +623,8 @@ mod inherited_tests {
     fn cm(superclass: Option<&str>, interfaces: &[&str]) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: superclass.map(str::to_string),
-            interfaces: interfaces.iter().map(|s| s.to_string()).collect(),
+            superclass: superclass.map(crate::seam::TypeRef::simple),
+            interfaces: interfaces.iter().map(|s| crate::seam::TypeRef::simple(*s)).collect(),
             methods: Vec::new(),
             fields: Vec::new(),
             flags: Default::default(),

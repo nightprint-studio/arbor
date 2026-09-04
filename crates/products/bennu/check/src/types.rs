@@ -252,12 +252,12 @@ mod tests {
             self.known.contains(binary).then(|| {
                 Arc::new(ClassMembers {
                     type_params: Vec::new(),
-                    superclass: Some(
+                    superclass: Some(bennu_java::prelude::TypeRef::simple(
                         self.supers
                             .get(binary)
                             .cloned()
                             .unwrap_or_else(|| "java/lang/Object".to_string()),
-                    ),
+                    )),
                     interfaces: Vec::new(),
                     methods: Vec::new(),
                     fields: Vec::new(),

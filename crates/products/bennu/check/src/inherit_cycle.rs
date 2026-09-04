@@ -34,10 +34,6 @@ use crate::nodes::simple_name;
 use crate::resolve::type_binary;
 use crate::walk::hierarchy_fully_known;
 
-/// Depth guard against a pathological hierarchy (cycles are also caught by the visited-set). Mirrors
-/// `walk::MAX_DEPTH`.
-const MAX_DEPTH: usize = 40;
-
 /// Parse `source` and flag cyclic inheritance + `@Override`-overrides-nothing.
 pub fn inherit_cycle_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
     let symbols = bennu_java::prelude::extract_symbols(source);
@@ -89,22 +85,28 @@ fn check_cycle(
     let Some(simple) = name_node.utf8_text(bytes).ok() else { return };
     let Some(self_bin) = type_binary(simple, symbols, resolver) else { return };
 
-    // Resolve the declared type's members so we start the walk from its ACTUAL supertypes. If the
-    // type isn't resolvable, we can't know its supertypes → skip (never guess a cycle).
-    let Some(cm) = resolver.members_of(&self_bin) else { return };
-
-    // Direct supertypes (superclass + interfaces) as the walk's seeds.
-    let mut seeds: Vec<String> = Vec::new();
-    if let Some(sc) = &cm.superclass {
-        seeds.push(sc.clone());
+    // If the type isn't resolvable we can't know its supertypes → skip (never guess a cycle).
+    if resolver.members_of(&self_bin).is_none() {
+        return;
     }
-    seeds.extend(cm.interfaces.iter().cloned());
 
-    // From any seed, can we reach `self_bin` again (through only-resolvable links)? If so, the loop
-    // closes → cycle. `reaches_self` returns `false` on any unknown link, so a cycle can never be
-    // inferred through an unresolvable type.
-    let mut visited: HashSet<String> = HashSet::new();
-    let closes = seeds.iter().any(|s| reaches_self(resolver, s, &self_bin, &mut visited, 1));
+    // Does anything reachable from this type LINK BACK to it? Asked of the edges rather than the
+    // nodes, and that is deliberate: the shared walk visits each type once, so a cycle's second
+    // arrival at the starting type is deduped away and never reaches the visitor. An edge is
+    // visible the first time.
+    //
+    // Conservative inversion of `walk::reaches`: a positive verdict is drawn only from links we
+    // actually read, so an unresolvable supertype is a dead end and a cycle is never inferred
+    // through one. `class A extends A` is caught at depth 0 by its own edge.
+    let closes = bennu_java::prelude::walk_up(resolver, &bennu_java::prelude::TypeRef::simple(&self_bin), |a| {
+        a.members
+            .superclass
+            .iter()
+            .chain(a.members.interfaces.iter())
+            .any(|link| link.binary_name == self_bin)
+            .then_some(())
+    })
+    .is_some();
     if closes {
         out.push(CheckId::CyclicInheritance.at(
             name_node,
@@ -113,33 +115,6 @@ fn check_cycle(
     }
 }
 
-/// Whether the supertype walk starting at `from` returns to `target` (the type whose cycle we're
-/// testing), traversing ONLY resolvable links. Conservative inversion of `walk::reaches`: an unknown
-/// class is a DEAD END (`false`), never a match — a cycle must be proven through fully-known links.
-/// `visited` guards against non-target cycles among the seeds; the depth cap bounds pathological input.
-fn reaches_self(
-    resolver: &dyn TypeResolver,
-    from: &str,
-    target: &str,
-    visited: &mut HashSet<String>,
-    depth: usize,
-) -> bool {
-    if from == target {
-        return true; // closed the loop back to the starting type
-    }
-    if depth > MAX_DEPTH || !visited.insert(from.to_string()) {
-        return false;
-    }
-    let Some(cm) = resolver.members_of(from) else {
-        return false; // unknown link → cannot close a cycle through it
-    };
-    if let Some(sc) = &cm.superclass {
-        if reaches_self(resolver, sc, target, visited, depth + 1) {
-            return true;
-        }
-    }
-    cm.interfaces.iter().any(|i| reaches_self(resolver, i, target, visited, depth + 1))
-}
 
 // ── check 2: @Override overrides nothing ─────────────────────────────────────
 
@@ -319,8 +294,8 @@ mod tests {
     ) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: superclass.map(str::to_string),
-            interfaces: ifaces.iter().map(|s| s.to_string()).collect(),
+            superclass: superclass.map(TypeRef::simple),
+            interfaces: ifaces.iter().map(|s| TypeRef::simple(*s)).collect(),
             methods,
             fields: Vec::new(),
             flags,

@@ -38,7 +38,7 @@ impl ResolveAll {
             "getSessionId", "getEmail", "name", "build", "getSha256", "size", "get", "put",
         ];
         // A class with `filler` filler methods + the real names, given `superclass` + `interfaces`.
-        let make = |tag: &str, filler: usize, superclass: Option<&str>, interfaces: Vec<String>| {
+        let make = |tag: &str, filler: usize, superclass: Option<&str>, interfaces: Vec<TypeRef>| {
             let mut methods: Vec<Member> = (0..filler)
                 .map(|i| Member::method(format!("{tag}_m{i}"), TypeRef::simple("p/S0"), vec![TypeRef::simple("java/lang/Object")]))
                 .collect();
@@ -47,7 +47,7 @@ impl ResolveAll {
             }
             Arc::new(ClassMembers {
                 type_params: Vec::new(),
-                superclass: superclass.map(str::to_string),
+                superclass: superclass.map(TypeRef::simple),
                 interfaces,
                 methods,
                 fields: vec![Member::field("value", TypeRef::simple("int"))],

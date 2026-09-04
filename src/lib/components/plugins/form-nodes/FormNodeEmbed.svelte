@@ -63,7 +63,7 @@
    *  above it is tall, and an invisible viewport reads as a broken one. */
   const minH   = $derived(typeof n.min_height === 'number' ? n.min_height : 320);
   /** Messages to post into the frame. Replacing the array is what sends. */
-  const send   = $derived(Array.isArray(n.send) ? n.send : []);
+  const send   = $derived<unknown[]>(Array.isArray(n.send) ? n.send : []);
   /** Scoped slot fired with whatever the page posts back. */
   const onMessage = $derived(n.on_message);
 

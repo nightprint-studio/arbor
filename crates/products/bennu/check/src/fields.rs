@@ -141,7 +141,7 @@ mod tests {
             "com/acme/Point".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("com/acme/Base".to_string()),
+                superclass: Some(TypeRef::simple("com/acme/Base")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: vec![field("x", "int"), field("y", "int")],

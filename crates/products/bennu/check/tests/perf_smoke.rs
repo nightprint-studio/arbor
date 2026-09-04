@@ -18,7 +18,7 @@ impl FooResolver {
         Self {
             foo: Arc::new(ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![Member::method("doThing", TypeRef::simple("void"), Vec::new())],
                 fields: vec![Member::field("value", TypeRef::simple("int"))],

@@ -32,7 +32,7 @@ struct AccumResolver {
 }
 impl AccumResolver {
     fn new() -> Self {
-        let obj = Some("java/lang/Object".to_string());
+        let obj = Some(TypeRef::simple("java/lang/Object"));
         Self {
             cache: RwLock::new(HashMap::new()),
             p: Arc::new(ClassMembers {

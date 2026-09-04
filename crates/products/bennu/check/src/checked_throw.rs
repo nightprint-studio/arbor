@@ -438,8 +438,8 @@ mod tests {
         let flags = ClassFlags { is_interface, ..ClassFlags::default() };
         ClassMembers {
             type_params: Vec::new(),
-            superclass: superclass.map(str::to_string),
-            interfaces: ifaces.iter().map(|s| s.to_string()).collect(),
+            superclass: superclass.map(bennu_java::prelude::TypeRef::simple),
+            interfaces: ifaces.iter().map(|s| bennu_java::prelude::TypeRef::simple(*s)).collect(),
             methods: Vec::new(),
             fields: Vec::new(),
             flags,

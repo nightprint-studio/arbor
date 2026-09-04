@@ -169,17 +169,21 @@
     <Button
       variant="ghost"
       size="sm"
-      icon={ArrowUp}
       disabled={readonly || index <= 0}
       onclick={() => move(-1)}
-    >Up</Button>
+    >
+      {#snippet iconStart()}<ArrowUp size={14} />{/snippet}
+      Up
+    </Button>
     <Button
       variant="ghost"
       size="sm"
-      icon={ArrowDown}
       disabled={readonly || index < 0 || index >= order.length - 1}
       onclick={() => move(1)}
-    >Down</Button>
+    >
+      {#snippet iconStart()}<ArrowDown size={14} />{/snippet}
+      Down
+    </Button>
     <span class="rl-hint">Alt+↑ / Alt+↓ to move the row</span>
   </div>
 </div>

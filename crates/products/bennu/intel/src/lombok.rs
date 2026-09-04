@@ -1367,7 +1367,7 @@ pub fn synthesize_nested_types(
         out.push(SynthesizedType {
             name,
             members: bennu_java::prelude::ClassMembers {
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 // `static final String <field> = "<field>";` per field. The TYPE is always String
@@ -1436,7 +1436,7 @@ pub fn synthesize_nested_types(
         out.push(SynthesizedType {
             name,
             members: bennu_java::prelude::ClassMembers {
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods,
                 fields: Vec::new(),

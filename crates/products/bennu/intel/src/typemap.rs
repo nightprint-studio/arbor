@@ -66,13 +66,16 @@ pub fn type_text_to_ref(names: &FileNames, owner: &str, text: &str) -> TypeRef {
 }
 
 fn to_binary_ref(names: &FileNames, owner: &str, p: &Parsed) -> TypeRef {
+    // The element name is what resolves; the brackets, if the parse left any on, are the depth.
+    let element = p.name.trim_end_matches("[]");
     TypeRef {
-        binary_name: simple_to_binary(names, owner, &p.name),
+        binary_name: simple_to_binary(names, owner, element),
         type_args: p
             .args
             .iter()
             .map(|a| to_binary_ref(names, owner, a))
             .collect(),
+        dims: p.name.matches("[]").count().min(u8::MAX as usize) as u8,
     }
 }
 

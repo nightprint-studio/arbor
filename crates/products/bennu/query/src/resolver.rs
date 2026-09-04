@@ -297,16 +297,13 @@ impl<M: CpMemberIndex> IndexResolver<M> {
                         // class, an interface, AND an annotation is `java/lang/Object`; an enum's is
                         // `java/lang/Enum`, a record's is `java/lang/Record`. (An interface reference
                         // can legally call Object's public methods — JLS §9.2.)
-                        cm.superclass = Some(
-                            if cm.flags.is_enum {
-                                "java/lang/Enum"
-                            } else if cm.flags.is_record {
-                                "java/lang/Record"
-                            } else {
-                                "java/lang/Object"
-                            }
-                            .to_string(),
-                        );
+                        cm.superclass = Some(JTypeRef::simple(if cm.flags.is_enum {
+                            "java/lang/Enum"
+                        } else if cm.flags.is_record {
+                            "java/lang/Record"
+                        } else {
+                            "java/lang/Object"
+                        }));
                     }
                     return Some(cm);
                 }
@@ -540,8 +537,8 @@ impl<M: CpMemberIndex> ProjectView for IndexResolver<M> {
 /// `ClassMembers`. Field-by-field over identical shapes across the crate boundary.
 pub fn convert_members(cp: &bennu_classpath::prelude::ClassMembers) -> JClassMembers {
     JClassMembers {
-        superclass: cp.superclass.clone(),
-        interfaces: cp.interfaces.clone(),
+        superclass: cp.superclass.as_ref().map(convert_typeref),
+        interfaces: cp.interfaces.iter().map(convert_typeref).collect(),
         methods: cp.methods.iter().map(convert_member).collect(),
         fields: cp.fields.iter().map(convert_member).collect(),
         flags: convert_flags(&cp.flags),
@@ -618,6 +615,9 @@ fn convert_typeref(t: &bennu_classpath::prelude::TypeRef) -> JTypeRef {
     JTypeRef {
         binary_name: t.binary_name.clone(),
         type_args: t.type_args.iter().map(convert_typeref).collect(),
+        // The bridge between the two type models: the depth has to cross it, or a `String[]` read
+        // out of bytecode arrives on the other side as a `String`.
+        dims: t.dims,
     }
 }
 
@@ -798,6 +798,7 @@ mod tests {
                 return_type: JTypeRef {
                     binary_name: "int".into(),
                     type_args: Vec::new(),
+                    dims: 0,
                 },
                 params: Vec::new(),
                 is_static: false,

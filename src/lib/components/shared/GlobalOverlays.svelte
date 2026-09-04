@@ -42,10 +42,10 @@
   let Credentials = $state<Component | null>(null);
   let requested = false;
 
-  let McpTools = $state<Component | null>(null);
+  let McpTools = $state<Component<{ onClose: () => void }> | null>(null);
   let toolsOpen = $state(false);
 
-  let McpActivity = $state<Component | null>(null);
+  let McpActivity = $state<Component<{ onClose: () => void }> | null>(null);
   let activityOpen = $state(false);
 
   $effect(() => {

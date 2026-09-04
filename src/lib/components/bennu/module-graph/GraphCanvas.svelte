@@ -4,7 +4,13 @@
    *
    * Split from the modal because the two have nothing to say to each other beyond a layout and a
    * selection — the modal owns the data, the filters and the keyboard, and this owns pixels. It also
-   * keeps the `<style>` of a fairly involved SVG away from the shell's own.
+   * keeps the CSS of a fairly involved SVG away from the shell's own.
+   *
+   * (Written without the angle brackets on purpose: a literal style/script tag inside a comment in
+   * this block makes `svelte2tsx` — and so `svelte-check` — believe a second block opened here,
+   * swallow the closing script tag, and report "`<script>` was left open" at the end of the file.
+   * The compiler itself parses it fine, so the build is green and only the check fails, in a
+   * component that then reads to every importer as having no default export.)
    *
    * ## Panning is the browser's job
    *

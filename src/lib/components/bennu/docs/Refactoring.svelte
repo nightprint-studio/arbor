@@ -61,7 +61,14 @@
       The expression gets a name — a local above the statement it was in, or a
       <code>private static final</code> beside the class's other fields when it is constant to read.
       The type is resolved against the project, so the declaration says <code>List&lt;String&gt;</code>
-      and not <code>var</code>, and the import it needs comes with it.
+      and not <code>var</code>, and the import it needs comes with it. The name steps aside from
+      anything already in scope — a field the method reads on its own gets the name it has, and the
+      new local becomes <code>value2</code> rather than quietly taking over every later mention of
+      it. Where the surrounding code is what decides the expression's type, in an argument, a
+      <code>return</code> or an arm of a conditional, a type the engine works out but cannot write
+      is a refusal instead: <code>var</code> there would infer the expression again with nothing to
+      infer from. An expression it cannot type at all still gets <code>var</code>, which is what
+      javac would infer anyway.
     </div>
   </div>
   <div class="fc-item">

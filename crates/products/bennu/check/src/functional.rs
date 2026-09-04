@@ -385,7 +385,7 @@ mod default_override_tests {
         let mut pred = ClassMembers {
             type_params: vec!["T".to_string()],
             superclass: None,
-            interfaces: vec!["java/util/function/Predicate".to_string()],
+            interfaces: vec![TypeRef::simple("java/util/function/Predicate")],
             methods: vec![
                 Member::method("evaluate", TypeRef::simple("boolean"), vec![TypeRef::simple("T")])
                     .abstract_(),

@@ -20,28 +20,15 @@ use bennu_java::prelude::TypeResolver;
 
 use crate::refs::DeclKey;
 
-/// A hierarchy deeper than this is a cycle in a malformed index, not a real one.
-const MAX_DEPTH: usize = 64;
-
 /// Every type in `start`'s hierarchy, itself included.
+///
+/// The shared walk — see [`bennu_java::prelude::supertype_names`]. A rename's conflict search and
+/// the inference that decides what a name MEANS have to agree about what is in a hierarchy, and
+/// two walks that could drift apart is how they would stop agreeing.
 fn hierarchy(resolver: &dyn TypeResolver, start: &str) -> Vec<String> {
-    let mut seen: Vec<String> = Vec::new();
-    let mut stack = vec![start.to_string()];
-    while let Some(cur) = stack.pop() {
-        if seen.len() >= MAX_DEPTH || seen.contains(&cur) {
-            continue;
-        }
-        seen.push(cur.clone());
-        let Some(cm) = resolver.members_of(&cur) else {
-            continue;
-        };
-        if let Some(sc) = cm.superclass.clone() {
-            stack.push(sc);
-        }
-        stack.extend(cm.interfaces.iter().cloned());
-    }
-    seen
+    bennu_java::prelude::supertype_names(resolver, start)
 }
+
 
 /// Why renaming `key` to `new_name` must not be applied, or `None` when the name is free.
 ///
@@ -244,7 +231,7 @@ mod tests {
     fn cm(superclass: Option<&str>, methods: Vec<Member>, fields: Vec<Member>) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: superclass.map(str::to_string),
+            superclass: superclass.map(TypeRef::simple),
             interfaces: Vec::new(),
             methods,
             fields,

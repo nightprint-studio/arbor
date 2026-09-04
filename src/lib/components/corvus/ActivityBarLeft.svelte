@@ -97,7 +97,11 @@
   function _leftResolveOrdered(position: 'top' | 'bottom') {
     const sections = enabledSidebarSections()
       .filter(s => s.side === 'left' && s.position === position);
-    const byKey = new Map(sections.map(s => [sidebarKey(s), s]));
+    // Keyed by plain `string`: the merged order carries every activity-bar id, product panels
+    // included, and only the plugin ones are in here — the lookup misses on purpose.
+    const byKey = new Map<string, (typeof sections)[number]>(
+      sections.map(s => [sidebarKey(s), s]),
+    );
     const pluginIds = sections.map(sidebarKey);
     const merged = position === 'top'
       ? activityBarConfigStore.mergeTop(pluginIds)

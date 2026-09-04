@@ -108,7 +108,11 @@ pub fn overridable_at(
 
 /// The superclass + interfaces of `cm`, in the order the walk should take them.
 fn supertypes(cm: &ClassMembers) -> Vec<String> {
-    cm.superclass.iter().chain(cm.interfaces.iter()).cloned().collect()
+    cm.superclass
+        .iter()
+        .chain(cm.interfaces.iter())
+        .map(|t| t.binary_name.clone())
+        .collect()
 }
 
 fn collect(
@@ -194,6 +198,8 @@ fn signature_key(m: &Member) -> String {
 /// an unresolved name (no `/`) is not a type anything can import, so it is left out.
 fn collect_types(t: &TypeRef, out: &mut Vec<String>) {
     if t.binary_name.contains('/') {
+        // `binary_name` is the element type now; the trim is kept for an index persisted before
+        // that was true, which still carries the brackets inside the name.
         let bare = t.binary_name.trim_end_matches("[]").to_string();
         if !out.contains(&bare) {
             out.push(bare);

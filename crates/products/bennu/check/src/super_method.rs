@@ -296,7 +296,7 @@ mod tests {
             "com/acme/Base".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![method("greet", "void")],
                 fields: Vec::new(),
@@ -348,7 +348,7 @@ mod tests {
             "com/acme/Leaky".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("com/acme/Gap".to_string()), // Gap is never seeded → unknown link
+                superclass: Some(TypeRef::simple("com/acme/Gap")), // Gap is never seeded → unknown link
                 interfaces: Vec::new(),
                 methods: vec![method("here", "void")],
                 fields: Vec::new(),

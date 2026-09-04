@@ -56,8 +56,15 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use bennu_java::prelude::parse_java;
-use bennu_refactor::prelude::{refactorings_at, Plan};
+use bennu_check::prelude::checked_exceptions_in;
+use bennu_classpath::prelude::resolve_jdk_classpath;
+use bennu_index::prelude::PersistedIndex;
+use bennu_intel::prelude::{build_project_index_from_sources, declarable_type_detail, Declarable};
+use bennu_java::prelude::{parse_java, TypeResolver};
+use bennu_query::prelude::{IndexResolver, JdkMemberIndex};
+use bennu_intentions::prelude::insert_import_edit;
+use bennu_refactor::prelude::{merge_throws, refactorings_at, Plan, RefactorEdit, TypeNeed};
+use std::sync::Arc;
 use tree_sitter::{Node, Tree};
 
 fn main() {
@@ -112,6 +119,26 @@ fn main() {
         .take(files_limit)
         .collect();
     eprintln!("source roots     : {}", source_roots(&mirrors[0].1).len());
+    // The resolver the product uses, built once and shared: the project's own index plus the JDK's
+    // members. Without it this harness measures a refactoring nobody ships — see `fill`.
+    let index_dir = work.join("_index");
+    fs::create_dir_all(&index_dir).ok();
+    let indexed: Vec<(PathBuf, String)> = javas
+        .iter()
+        .filter_map(|p| fs::read_to_string(p).ok().map(|t| (p.clone(), t)))
+        .collect();
+    let built = build_project_index_from_sources(&indexed, &index_dir);
+    built.builder.persist().expect("persist the index");
+    let jdk = resolve_jdk_classpath("21").expect("a JDK to resolve against");
+    let persisted = PersistedIndex::open(built.builder.blob_path(), built.builder.fst_path())
+        .expect("open the index");
+    let mut index_resolver = IndexResolver::new(persisted, JdkMemberIndex::new(Box::new(jdk)));
+    for (simple, binary) in built.type_map.iter() {
+        index_resolver.add_simple_hint(simple, binary);
+    }
+    let resolver: Arc<dyn TypeResolver + Send + Sync> = Arc::new(index_resolver);
+    eprintln!("resolver         : project index + JDK");
+
     let helper = build_compile_server(&work);
     eprintln!(
         "workers          : {workers} ({})",
@@ -126,6 +153,7 @@ fn main() {
         for (dir, files) in &mirrors {
             let (shared, next, done) = (&shared, &next, &done);
             let (relative, only, classpath, helper) = (&relative, &only, &classpath, &helper);
+            let resolver = Arc::clone(&resolver);
             scope.spawn(move || {
                 let classes = dir.join("_classes");
                 fs::create_dir_all(&classes).ok();
@@ -146,6 +174,7 @@ fn main() {
                         stride,
                         only.as_deref(),
                         show,
+                        resolver.as_ref(),
                         &mut local,
                     );
                     shared.lock().expect("aggregate").absorb(local);
@@ -256,6 +285,7 @@ fn sweep_file(
     stride: usize,
     only: Option<&str>,
     show: bool,
+    resolver: &dyn TypeResolver,
     out: &mut Aggregate,
 ) {
     let Ok(source) = fs::read_to_string(file) else {
@@ -287,7 +317,7 @@ fn sweep_file(
             if only.is_some_and(|id| id != plan.id) {
                 continue;
             }
-            if !fill(&mut plan, &tree, &source) {
+            if !fill(&mut plan, &source, resolver) {
                 out.stats.entry(plan.id.clone()).or_default().untypable += 1;
                 continue;
             }
@@ -363,8 +393,13 @@ struct Tally {
     applied: usize,
     clean: usize,
     broken: usize,
-    /// Planned, but the harness could not name the type the plan asked for, so applying it would
-    /// have measured the harness. Not a defect of the refactoring.
+    /// Planned, but no type could be named for the slot the plan asked for.
+    ///
+    /// Two different things land here and both are correct outcomes. Where the slot is optional the
+    /// plan kept `var` and was applied — these are the ones the harness could not type, and they
+    /// measure the harness rather than the refactoring. Where it is REQUIRED the product itself
+    /// declined, because `var` would have re-inferred the expression against nothing; a refusal is
+    /// the answer there, so counting it as a failure would punish the fix for the failure.
     untypable: usize,
 }
 
@@ -626,108 +661,51 @@ fn is_statement(kind: &str) -> bool {
 
 /// Fill the plan's type slot, or say the harness cannot — see the module docs on why the two cases
 /// are filled differently.
-fn fill(plan: &mut Plan, tree: &Tree, source: &str) -> bool {
-    let Some(slot) = plan.type_slot.clone() else {
-        return true;
-    };
-    if plan.id == "extract-variable" {
-        plan.fill_type("var");
-        return true;
-    }
-    let Some(node) = node_spanning(tree.root_node(), slot.start, slot.end) else {
-        return false;
-    };
-    let Some(ty) = constant_type(&node, source) else {
-        return false;
-    };
-    plan.fill_type(&ty);
-    true
-}
-
-fn node_spanning<'t>(node: Node<'t>, start: usize, end: usize) -> Option<Node<'t>> {
-    if node.start_byte() == start && node.end_byte() == end {
-        return Some(node);
-    }
-    let mut c = node.walk();
-    for child in node.named_children(&mut c) {
-        if child.start_byte() <= start && end <= child.end_byte() {
-            if let Some(hit) = node_spanning(child, start, end) {
-                return Some(hit);
-            }
-        }
-    }
-    None
-}
-
-/// The type of a compile-time constant expression, read off its own text.
+/// Fill the slots a plan left for its caller — **exactly the way the backend does**.
 ///
-/// Only as much of JLS 5.6 as *extract constant* can produce: it fires on literals and operations
-/// over them, so the promotion rules needed are the ones between those.
-fn constant_type(node: &Node<'_>, source: &str) -> Option<String> {
-    let text = |n: &Node<'_>| source[n.start_byte()..n.end_byte()].to_string();
-    let ty = match node.kind() {
-        "string_literal" => "String",
-        "character_literal" => "char",
-        "true" | "false" => "boolean",
-        "decimal_integer_literal"
-        | "hex_integer_literal"
-        | "octal_integer_literal"
-        | "binary_integer_literal" => {
-            if text(node).ends_with(['l', 'L']) {
-                "long"
-            } else {
-                "int"
+/// This is the whole reason the harness lives in this crate. Without a resolver it filled a local's
+/// type with `var` and a constant's by reading the literal, which measured neither the product nor
+/// anything else: 706 of the failures on one library were `var` written where the backend would
+/// have written a type or declined. With one, a run says what a user would see.
+///
+/// `false` means the plan would not be applied at all — which is a real answer, not a skipped case:
+/// a slot the resolver cannot fill acceptably is a refusal in the product too. The three-way answer
+/// below has to match `bennu-be`'s exactly, or the run measures a product that does not exist.
+fn fill(plan: &mut Plan, source: &str, resolver: &dyn TypeResolver) -> bool {
+    if let Some(slot) = plan.type_slot.clone() {
+        match declarable_type_detail(source, slot.start, slot.end, resolver) {
+            Declarable::Writable(written, needed) => {
+                plan.fill_type(&written);
+                // The backend adds the import as one more edit, so the measurement must too — a
+                // type written without its import is a file that does not compile for a reason the
+                // refactoring did not have.
+                for fqn in needed {
+                    if let Some(edit) = insert_import_edit(source, &fqn) {
+                        plan.edits.push(RefactorEdit::new(
+                            edit.start,
+                            edit.end,
+                            edit.replacement,
+                            "import",
+                        ));
+                    }
+                }
+                plan.reorder();
             }
-        }
-        "decimal_floating_point_literal" | "hex_floating_point_literal" => {
-            if text(node).ends_with(['f', 'F']) {
-                "float"
-            } else {
-                "double"
+            // The backend keeps `var` where it is acceptable and refuses where it is not.
+            Declarable::Unwritable
+                if matches!(slot.need, TypeNeed::Required | TypeNeed::RequiredOnceInferred) =>
+            {
+                return false
             }
-        }
-        "parenthesized_expression" => return constant_type(&node.named_child(0)?, source),
-        "unary_expression" => {
-            let inner = node.child_by_field_name("operand")?;
-            let op = node.child(0).map(|c| text(&c)).unwrap_or_default();
-            if op == "!" {
-                "boolean"
-            } else {
-                return constant_type(&inner, source);
-            }
-        }
-        "binary_expression" => {
-            let op = node
-                .child_by_field_name("operator")
-                .map(|c| text(&c))
-                .unwrap_or_default();
-            if matches!(
-                op.as_str(),
-                "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||"
-            ) {
-                "boolean"
-            } else {
-                let l = constant_type(&node.child_by_field_name("left")?, source)?;
-                let r = constant_type(&node.child_by_field_name("right")?, source)?;
-                return Some(wider(&l, &r));
-            }
-        }
-        _ => return None,
-    };
-    Some(ty.to_string())
-}
-
-/// Binary numeric promotion, plus the one rule that is not numeric: `String + anything` is a String.
-fn wider(a: &str, b: &str) -> String {
-    if a == "String" || b == "String" {
-        return "String".to_string();
-    }
-    for rank in ["double", "float", "long"] {
-        if a == rank || b == rank {
-            return rank.to_string();
+            Declarable::Unknown if matches!(slot.need, TypeNeed::Required) => return false,
+            _ => plan.type_slot = None,
         }
     }
-    "int".to_string()
+    if let Some(slot) = plan.throws_slot.clone() {
+        let proven = checked_exceptions_in(source, slot.start, slot.end, resolver);
+        plan.fill_throws(&merge_throws(&slot.placeholder, &proven.kinds, proven.complete, source));
+    }
+    true
 }
 
 /// The source roots of a set of files, read off each file's own `package` line — so `javac` can

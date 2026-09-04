@@ -409,6 +409,7 @@ fn applied(binary: &str, args: &[&str]) -> CpTypeRef {
     CpTypeRef {
         binary_name: binary.to_string(),
         type_args: args.iter().map(|a| CpTypeRef::plain(*a)).collect(),
+        dims: 0,
     }
 }
 
@@ -446,7 +447,7 @@ impl CpMemberIndex for StreamJdk {
             // Every enum implicitly extends this, and `name()` / `ordinal()` are declared nowhere in
             // the project — so a project enum's `e.name()` resolves only if the walk can see it.
             "java/lang/Enum" => CpClassMembers {
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(bennu_classpath::prelude::TypeRef::plain("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![
                     method("name", vec![], CpTypeRef::plain("java/lang/String")),
@@ -479,7 +480,7 @@ impl CpMemberIndex for StreamJdk {
                 type_params: Vec::new(),
             },
             "java/lang/String" | "java/lang/Record" => CpClassMembers {
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(bennu_classpath::prelude::TypeRef::plain("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: Vec::new(),

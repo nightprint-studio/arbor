@@ -132,7 +132,10 @@
 </script>
 
 <Modal width="640px" height="560px" {onClose}>
-  <ModalHeader title="Implement / override methods" icon={Wand2} {onClose} />
+  <ModalHeader {onClose}>
+    <Wand2 size={14} />
+    <span class="modal-title">Implement / override methods</span>
+  </ModalHeader>
 
   <div class="ov-body" onkeydown={onKeydown} role="presentation">
     <Input
@@ -146,11 +149,11 @@
       <div class="ov-state"><Spinner size={16} /> <span>Reading the hierarchy…</span></div>
     {:else if members.length === 0}
       <EmptyState
-        title="Nothing to override"
+        message="Nothing to override"
         description="This class inherits no method it is allowed to override — or its index is still building."
       />
     {:else if visible.length === 0}
-      <EmptyState title="No match" description="No inherited method matches that filter." />
+      <EmptyState message="No match" description="No inherited method matches that filter." />
     {:else}
       <div class="ov-list">
         {#each groups as g (g.type)}

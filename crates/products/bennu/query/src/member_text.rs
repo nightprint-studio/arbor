@@ -181,6 +181,7 @@ mod tests {
                 TypeRef::simple("java/lang/String"),
                 TypeRef::simple("com/acme/Order"),
             ],
+            dims: 0,
         };
         assert_eq!(render_type(&t), "Map<String, Order>");
     }

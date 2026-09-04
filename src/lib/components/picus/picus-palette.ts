@@ -247,7 +247,7 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
     // for rather than restating the title.
     // Reveals the dock as well as the pane: an entry that switched a pane inside a
     // panel nobody has open does nothing visible, and reads as broken.
-    { id: 'lineage', title: 'Trace where these columns come from', subtitle: 'Follows each column of the result through the views to the table it is read from', icon: 'git-branch', when: tab?.kind === 'query', action: () => a.run(() => { queryStore.setPane(tab.id, 'lineage'); picusUiStore.showBottom('results'); }) },
+    { id: 'lineage', title: 'Trace where these columns come from', subtitle: 'Follows each column of the result through the views to the table it is read from', icon: 'git-branch', when: tab?.kind === 'query', action: () => a.run(() => { if (!tab) return; queryStore.setPane(tab.id, 'lineage'); picusUiStore.showBottom('results'); }) },
     { id: 'newconn', title: 'Add a connection…', icon: 'plus', shortcut: 'Ctrl+Shift+N', when: true, action: () => a.run(() => picusUiStore.openConnectionEditor(null)) },
     { id: 'cycleconn', title: 'Switch to the next connection', icon: 'database', shortcut: 'Ctrl+Shift+D', when: connectionsStore.connections.length > 1, action: () => a.run(() => connectionsStore.cycle(1)) },
     { id: 'editconn', title: 'Edit the active connection…', icon: 'pencil', shortcut: 'F4', when: !!connectionsStore.active, action: () => a.run(() => picusUiStore.openConnectionEditor(activeConnectionId)) },

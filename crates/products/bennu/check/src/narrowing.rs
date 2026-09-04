@@ -398,7 +398,7 @@ mod tests {
     fn cls(superclass: Option<&str>, methods: Vec<Member>, fields: Vec<Member>) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: superclass.map(str::to_string),
+            superclass: superclass.map(TypeRef::simple),
             interfaces: Vec::new(),
             methods,
             fields,

@@ -149,17 +149,7 @@ pub fn completion_in<M: CpMemberIndex>(
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     let ctx = rank::Context::new(source, receiver_is_type);
-    collect_members(
-        resolver,
-        &recv,
-        &prefix,
-        site.as_deref(),
-        0,
-        &ctx,
-        &mut out,
-        &mut seen,
-        &mut HashSet::new(),
-    );
+    collect_members(resolver, &recv, &prefix, site.as_deref(), &ctx, &mut out, &mut seen);
     // A nested type is a member of its outer, named `Outer.Inner` with no import — so `Outer.`
     // offers it alongside the statics. Only when the receiver IS a type: `instance.Inner` is not
     // Java. The resolver answers for PROJECT types (the index keys them by binary name); a library
@@ -374,59 +364,30 @@ fn split_prefix(source: &str, caret: usize) -> (usize, String) {
 /// overloads distinct, so every signature survives the walk. They are folded into one row later, by
 /// [`collapse_overloads`]; keeping them apart HERE is what lets that row count them.
 ///
-/// `depth` is how far up the hierarchy this level is (`0` = the receiver's own type). It is carried
-/// rather than recomputed because the walk is the only thing that knows it, and it is the term that
-/// puts a class's own methods above the ones it inherited.
+/// The rank's depth term — how far up the hierarchy a member was declared, `0` for the receiver's
+/// own type — comes from the walk, which is the only thing that knows it. It is what puts a class's
+/// own methods above the ones it inherited.
 #[allow(clippy::too_many_arguments)]
 fn collect_members<M: CpMemberIndex>(
     resolver: &IndexResolver<M>,
     recv: &TypeRef,
     prefix: &str,
     site: Option<&str>,
-    depth: usize,
     ctx: &rank::Context,
     out: &mut Vec<Ranked>,
     seen: &mut HashSet<String>,
-    visited: &mut HashSet<String>,
 ) {
-    let bn = &recv.binary_name;
-    if !visited.insert(bn.clone()) {
-        return;
-    }
-    let Some(cm) = resolver.members_of(bn) else {
-        return;
-    };
-    // `private` members of this level are offered only when the caret's class is the same top-level
-    // class (a private is never inherited, so a supertype level's privates are simply never shown).
-    let allow_private = same_top_level(bn, site);
-    add_matching(&cm, bn, prefix, allow_private, site, depth, ctx, out, seen);
-
-    if let Some(sc) = &cm.superclass {
-        collect_members(
-            resolver,
-            &TypeRef::simple(sc.clone()),
-            prefix,
-            site,
-            depth + 1,
-            ctx,
-            out,
-            seen,
-            visited,
-        );
-    }
-    for iface in &cm.interfaces {
-        collect_members(
-            resolver,
-            &TypeRef::simple(iface.clone()),
-            prefix,
-            site,
-            depth + 1,
-            ctx,
-            out,
-            seen,
-            visited,
-        );
-    }
+    // The shared supertype walk — breadth-first, so a member declared nearer the receiver reaches
+    // `seen` before the one it hides, which is what the depth-based rank means to say.
+    bennu_java::prelude::walk_up::<()>(resolver, recv, |a| {
+        let bn = &a.ty.binary_name;
+        // `private` members of this level are offered only when the caret's class is the same
+        // top-level class (a private is never inherited, so a supertype level's privates are simply
+        // never shown).
+        let allow_private = same_top_level(bn, site);
+        add_matching(&a.members, bn, prefix, allow_private, site, a.depth, ctx, out, seen);
+        None
+    });
 }
 
 #[allow(clippy::too_many_arguments)]

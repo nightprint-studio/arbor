@@ -66,6 +66,7 @@ pub(crate) enum Thrown<'t> {
 }
 
 /// What `n` throws, for the two node kinds that can throw by calling something.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn thrown_by<'t>(
     n: Node<'t>,
     root: &Node,
@@ -74,14 +75,18 @@ pub(crate) fn thrown_by<'t>(
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
     cache: &InferCache,
+    bare: Option<&crate::bare_call::BareCalls>,
 ) -> Thrown<'t> {
     match n.kind() {
-        "method_invocation" => thrown_by_invocation(n, root, source, bytes, symbols, resolver, cache),
+        "method_invocation" => {
+            thrown_by_invocation(n, root, source, bytes, symbols, resolver, cache, bare)
+        }
         "object_creation_expression" => thrown_by_creation(n, bytes, symbols, resolver),
         _ => Thrown::Known(n, Throws::none()),
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
 fn thrown_by_invocation<'t>(
     n: Node<'t>,
@@ -91,6 +96,7 @@ fn thrown_by_invocation<'t>(
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
     cache: &InferCache,
+    bare: Option<&crate::bare_call::BareCalls>,
 ) -> Thrown<'t> {
     let Some(name) = n.child_by_field_name("name") else { return Thrown::Unknown };
     if name.has_error() {
@@ -98,22 +104,30 @@ fn thrown_by_invocation<'t>(
     }
     let Ok(method) = name.utf8_text(bytes) else { return Thrown::Unknown };
 
-    // SKIP: only an explicit-receiver call `obj.method(...)`. A bare `foo()` / implicit-`this` call
-    // resolves against the enclosing type, whose source form we may not carry `throws` for reliably;
-    // inferring it risks a false positive, so we stay silent (aligns with members/arity, which also
-    // require an `object` field).
-    let Some(obj) = n.child_by_field_name("object") else { return Thrown::Unknown };
-    // SKIP: receiver type not inferable, or inferred to the empty/unknown type → we can't gather a
-    // trustworthy candidate set (an un-indexed type might declare/overload the method differently).
-    let Some(ty) = infer_node_type_cached(root, source, symbols, &obj, resolver, cache) else {
-        return Thrown::Unknown;
+    // A BARE `foo()` resolves against the type that contains it — the same reading `arity` and
+    // `arguments` take, through the same guards. This used to give up here, "aligned with
+    // members/arity" as they were at the time; they moved on and this did not, so a method that
+    // called its own `throws IOException` helper looked exception-free to everything downstream.
+    let receiver = match n.child_by_field_name("object") {
+        Some(obj) => {
+            // SKIP: receiver type not inferable, or the empty/unknown type → we can't gather a
+            // trustworthy candidate set (an un-indexed type might overload the method differently).
+            let ty = infer_node_type_cached(root, source, symbols, &obj, resolver, cache);
+            match ty {
+                Some(ty) if !ty.binary_name.is_empty() => ty.binary_name,
+                _ => return Thrown::Unknown,
+            }
+        }
+        None => match bare.filter(|b| b.judgeable(n, bytes).is_some()) {
+            Some(b) => b.top_binary.clone(),
+            // Not judgeable — a nested type, a static import, a name the guards decline — so the
+            // honest answer is still "unknown", exactly as before.
+            None => return Thrown::Unknown,
+        },
     };
-    if ty.binary_name.is_empty() {
-        return Thrown::Unknown;
-    }
     // The overload set for this name across the receiver's hierarchy (memoized walk shared with the
     // member/arity/argument checks). `complete` is the hierarchy-fully-known gate.
-    let res = cache.resolve_methods(resolver, &ty.binary_name, method);
+    let res = cache.resolve_methods(resolver, &receiver, method);
     // SKIP: an unknown supertype might carry an overload with a DIFFERENT (smaller) `throws` list,
     // which would shrink the true intersection — so a hidden overload could make our intersection an
     // over-estimate → a false positive. Only a fully-known hierarchy makes the intersection sound.

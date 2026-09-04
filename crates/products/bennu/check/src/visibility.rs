@@ -451,7 +451,7 @@ mod tests {
             "com/acme/other/OtherPackageClass".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![
                     method("private_method", Visibility::Private),
@@ -475,7 +475,7 @@ mod tests {
             "com/dep/LibClass".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: vec![field("lib_secret", "int", Visibility::Package)],
@@ -489,7 +489,7 @@ mod tests {
             "com/acme/access/Outer/Inner".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: vec![
@@ -509,7 +509,7 @@ mod tests {
             "com/acme/other/SomeService".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![method("serve", Visibility::Package)],
                 fields: Vec::new(),
@@ -521,7 +521,7 @@ mod tests {
             "java/lang/String".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: Vec::new(),
                 fields: vec![field("hash", "int", Visibility::Private)],

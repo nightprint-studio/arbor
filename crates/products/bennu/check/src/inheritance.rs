@@ -302,8 +302,8 @@ mod tests {
     fn cm(flags: ClassFlags, superclass: Option<&str>, ifaces: &[&str], methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: superclass.map(str::to_string),
-            interfaces: ifaces.iter().map(|s| s.to_string()).collect(),
+            superclass: superclass.map(TypeRef::simple),
+            interfaces: ifaces.iter().map(|s| TypeRef::simple(*s)).collect(),
             methods,
             fields: Vec::new(),
             flags,

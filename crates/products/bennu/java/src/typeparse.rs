@@ -8,8 +8,13 @@
 /// A parsed type reference in *simple* (unresolved) name form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleTypeRef {
+    /// The ELEMENT name, without brackets — what a member lookup has to ask about.
     pub name: String,
     pub args: Vec<SimpleTypeRef>,
+    /// How many `[]` followed it. Kept beside the name rather than in it: every consumer that
+    /// resolves members wants the element, and only a consumer that WRITES the type back into
+    /// source wants the brackets. Losing them here is how an extracted `String[]` became `String`.
+    pub dims: u8,
 }
 
 /// Parse a Java type text into a [`SimpleTypeRef`]. Returns `None` for empty /
@@ -19,9 +24,11 @@ pub fn parse_type_text(text: &str) -> Option<SimpleTypeRef> {
     if text.is_empty() {
         return None;
     }
-    // Strip trailing array brackets — element member-access isn't Phase-1 (except
-    // generics), so we complete against the raw type's members when possible.
+    // Strip trailing array brackets from the NAME — element member-access isn't Phase-1 (except
+    // generics), so we complete against the raw type's members when possible — but count them, so
+    // a caller writing the type back into source can put them on again.
     let base = text.split('[').next().unwrap_or(text).trim();
+    let dims = text.matches('[').count().min(u8::MAX as usize) as u8;
 
     let (name_part, args_part) = split_generics(base);
     let name = name_part.trim();
@@ -45,6 +52,7 @@ pub fn parse_type_text(text: &str) -> Option<SimpleTypeRef> {
     Some(SimpleTypeRef {
         name: name.to_string(),
         args,
+        dims,
     })
 }
 
@@ -103,6 +111,7 @@ fn parse_arg(s: &str) -> Option<SimpleTypeRef> {
         return Some(SimpleTypeRef {
             name: "Object".to_string(),
             args: Vec::new(),
+            dims: 0,
         });
     }
     parse_type_text(s)

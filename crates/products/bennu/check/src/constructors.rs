@@ -113,7 +113,7 @@ fn check_class(
 /// `...` is gone. JVMS descriptors write an array as a leading `[`; the index's own rendering
 /// uses a trailing `[]`, so both spellings are accepted rather than assuming one.
 fn is_array(t: &TypeRef) -> bool {
-    t.binary_name.starts_with('[') || t.binary_name.ends_with("[]")
+    t.binary_name.starts_with('[') || t.is_array()
 }
 
 fn constructors<'t>(class: Node<'t>) -> Vec<Node<'t>> {
@@ -186,7 +186,7 @@ mod tests {
     fn cls(ctors: Vec<Member>) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Object".to_string()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods: ctors,
             fields: Vec::new(),

@@ -281,7 +281,7 @@ mod tests {
     fn enum_cls(binary: &str, constants: &[&str]) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Enum".to_string()),
+            superclass: Some(TypeRef::simple("java/lang/Enum")),
             interfaces: Vec::new(),
             methods: Vec::new(),
             fields: constants.iter().map(|c| constant(c, binary)).collect(),
@@ -292,7 +292,7 @@ mod tests {
     fn plain_cls() -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: Some("java/lang/Object".to_string()),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
             interfaces: Vec::new(),
             methods: Vec::new(),
             fields: Vec::new(),

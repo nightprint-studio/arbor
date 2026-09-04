@@ -223,7 +223,7 @@ fn check_new(
 fn sig_of(m: &bennu_java::prelude::Member) -> Sig {
     Sig {
         params: m.params.len(),
-        last_is_array: m.params.last().is_some_and(|p| p.binary_name.ends_with("[]")),
+        last_is_array: m.params.last().is_some_and(|p| p.is_array()),
     }
 }
 
@@ -278,7 +278,7 @@ mod tests {
             "com/acme/Svc".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![
                     method("<init>", &["int"]),
@@ -309,7 +309,7 @@ mod tests {
             "C".to_string(),
             ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
                 interfaces: Vec::new(),
                 methods: vec![method("helper", &["int"])],
                 fields: Vec::new(),

@@ -1997,7 +1997,7 @@
           { id: 'condition', label: conditional ? 'Edit condition…' : 'Add condition…' },
           { id: 'toggle', label: existing.enabled ? 'Disable breakpoint' : 'Enable breakpoint' },
           { id: 'remove', label: 'Remove breakpoint' },
-          { id: 'sep', separator: true },
+          { id: 'sep', label: '', separator: true },
           { id: 'clear', label: 'Remove all breakpoints in this project' },
         ]
       : [{ id: 'add', label: 'Set breakpoint' }];

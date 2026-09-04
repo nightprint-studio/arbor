@@ -123,6 +123,7 @@ fn thrown_in(
     cache: &InferCache,
 ) -> Option<Vec<String>> {
     let mut found: Vec<String> = Vec::new();
+    let bare = crate::bare_call::bare_call_scope(*root, source, symbols, resolver);
     let mut stack = vec![body];
     while let Some(n) = stack.pop() {
         match n.kind() {
@@ -145,7 +146,7 @@ fn thrown_in(
                 found.push(binary);
             }
             "method_invocation" | "object_creation_expression" => {
-                match thrown_by(n, root, source, bytes, symbols, resolver, cache) {
+                match thrown_by(n, root, source, bytes, symbols, resolver, cache, bare.as_ref()) {
                     // The UPPER bound: concluding something never arrives is only sound over
                     // everything that could. See `throws_of::Throws`.
                     Thrown::Known(_, t) => found.extend(t.possibly),
@@ -237,7 +238,7 @@ mod tests {
     fn ty(superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {
         ClassMembers {
             type_params: Vec::new(),
-            superclass: superclass.map(str::to_string),
+            superclass: superclass.map(TypeRef::simple),
             interfaces: Vec::new(),
             methods,
             fields: Vec::new(),

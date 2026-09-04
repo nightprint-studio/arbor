@@ -243,7 +243,7 @@ mod tests {
             "com/acme/Foo".to_string(),
             Some(ClassMembers {
                 type_params: Vec::new(),
-                superclass: Some("java/lang/Object".to_string()),
+                superclass: Some(TypeRef::plain("java/lang/Object")),
                 interfaces: vec![],
                 methods: vec![Member {
                     name: "bar".to_string(),
@@ -275,7 +275,10 @@ mod tests {
             .as_ref()
             .expect("Foo present");
         assert_eq!(foo.methods[0].name, "bar");
-        assert_eq!(foo.superclass.as_deref(), Some("java/lang/Object"));
+        assert_eq!(
+            foo.superclass.as_ref().map(|c| c.binary_name.as_str()),
+            Some("java/lang/Object")
+        );
 
         let _ = std::fs::remove_file(&path);
     }
