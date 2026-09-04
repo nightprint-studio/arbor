@@ -238,8 +238,9 @@
 <p>
   <strong>Inlay hints</strong> (Settings → Editor) draw what the code doesn't say:
   the parameter name in front of each argument that doesn't already carry it —
-  <code>transfer(source: from, target: to, amount: 500)</code> — and the type a <code>var</code> was
-  inferred as. They are not part of the file: the caret can't land in one, they aren't copied with a
+  <code>transfer(source: from, target: to, amount: 500)</code>, the type a <code>var</code> or a Lombok
+  <code>val</code> was inferred as, and the type of a lambda parameter written without one —
+  <code>rows.forEach(row: String -&gt; …)</code>. They are not part of the file: the caret can't land in one, they aren't copied with a
   selection, and no offset shifts. An argument that already says the name, a lambda, or a long
   expression is left alone.
 </p>

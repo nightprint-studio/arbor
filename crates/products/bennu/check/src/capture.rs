@@ -23,7 +23,7 @@
 //! Every other shape (no initializer, no capture, an array/field element target `v[i] = …` / `v.f =
 //! …` that doesn't rebind `v`, a name declared twice) is left alone.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
@@ -131,8 +131,12 @@ fn check_scope(scope: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
         return;
     }
 
-    // Pass 2 — the set of names captured (referenced free) by any top-level closure in this scope.
-    let mut captured: HashSet<String> = HashSet::new();
+    // Pass 2 — the names captured (referenced free) by any top-level closure in this scope, each with
+    // the FIRST place the closure reads it. That node is where the diagnostic goes: javac and every
+    // IDE point at the reference inside the closure, because that is where the effective-finality
+    // requirement comes from. Pointing at the reassignment instead put the squiggle on a line javac
+    // says nothing about, and left the line it DOES complain about unmarked.
+    let mut captured: HashMap<String, Node> = HashMap::new();
     for &closure in &closures {
         collect_free_names(closure, bytes, &mut captured);
     }
@@ -140,26 +144,33 @@ fn check_scope(scope: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
         return;
     }
 
-    // Flag each reassignment of an initialized, singly-declared, captured local.
-    for (name, node) in reassigns {
+    // Flag each reassignment of an initialized, singly-declared, captured local — anchored on the
+    // capture, not on the reassignment (see pass 2).
+    // One diagnostic per captured local, however many times it is reassigned: they all say the same
+    // thing about the same capture, and the anchor is now that capture rather than each assignment.
+    let mut reported: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (name, _reassign_site) in reassigns {
         let Some(&decl_end) = inited.get(&name) else { continue };
         if decl_count.get(&name).copied().unwrap_or(0) != 1 {
             continue; // shadowed → can't attribute the assignment safely
         }
-        if node.start_byte() <= decl_end {
+        if _reassign_site.start_byte() <= decl_end {
             continue; // the initializer itself / a forward reference (different binding)
         }
-        if !captured.contains(&name) {
+        let Some(site) = captured.get(&name) else {
             continue; // reassigned but never captured → effectively-final concern doesn't arise
+        };
+        if !reported.insert(name.clone()) {
+            continue;
         }
         out.push(Diagnostic {
             message: format!(
-                "Local variable `{name}` is captured by a lambda or inner class and cannot be reassigned; captured variables must be final or effectively final"
+                "Local variable `{name}` is reassigned after being captured here; a variable used in a lambda or inner class must be final or effectively final"
             ),
             severity: crate::check_id::CheckId::CapturedVariableNotFinal.severity().to_string(),
             code: crate::check_id::CheckId::CapturedVariableNotFinal.code().to_string(),
-            start: node.start_byte(),
-            end: node.end_byte(),
+            start: site.start_byte(),
+            end: site.end_byte(),
         });
     }
 }
@@ -169,9 +180,11 @@ fn check_scope(scope: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
 /// name (`process(v)` → `process`) is excluded so only real value references count. The result
 /// over-approximates captures, but subtracting the closure's own declarations means a shadowing
 /// parameter/local of the SAME name is never counted as a capture — which is what keeps this sound.
-fn collect_free_names(closure: Node, bytes: &[u8], into: &mut HashSet<String>) {
-    let mut declared: HashSet<String> = HashSet::new();
-    let mut used: HashSet<String> = HashSet::new();
+fn collect_free_names<'t>(closure: Node<'t>, bytes: &[u8], into: &mut HashMap<String, Node<'t>>) {
+    let mut declared: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Name → the EARLIEST reference to it in this closure, so the diagnostic lands on the first
+    // place the closure reads the variable rather than wherever the walk happened to see it.
+    let mut used: HashMap<String, Node<'t>> = HashMap::new();
 
     let mut stack = vec![closure];
     while let Some(n) = stack.pop() {
@@ -201,7 +214,13 @@ fn collect_free_names(closure: Node, bytes: &[u8], into: &mut HashSet<String>) {
             "identifier" => {
                 if is_value_reference(n) {
                     if let Some(t) = text(n, bytes) {
-                        used.insert(t);
+                        used.entry(t)
+                            .and_modify(|e| {
+                                if n.start_byte() < e.start_byte() {
+                                    *e = n;
+                                }
+                            })
+                            .or_insert(n);
                     }
                 }
             }
@@ -224,10 +243,17 @@ fn collect_free_names(closure: Node, bytes: &[u8], into: &mut HashSet<String>) {
         }
     }
 
-    for name in used {
-        if !declared.contains(&name) {
-            into.insert(name);
+    for (name, site) in used {
+        if declared.contains(&name) {
+            continue;
         }
+        into.entry(name)
+            .and_modify(|e| {
+                if site.start_byte() < e.start_byte() {
+                    *e = site;
+                }
+            })
+            .or_insert(site);
     }
 }
 
@@ -331,7 +357,37 @@ mod tests {
         capture_errors_nodes(&nodes, &src).into_iter().map(|d| d.message).collect()
     }
 
+    /// The (start, end) spans, for asserting WHERE a finding lands.
+    fn spans(members: &str) -> Vec<(usize, usize, String)> {
+        let src = format!("import java.util.function.Supplier; class C {{ {members} }}");
+        let tree = parse(&src);
+        let nodes = crate::check::collect_nodes(tree.root_node());
+        capture_errors_nodes(&nodes, &src)
+            .into_iter()
+            .map(|d| (d.start, d.end, src[d.start..d.end].to_string()))
+            .collect()
+    }
+
     // ── positives ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn the_finding_lands_on_the_capture_not_the_reassignment() {
+        // javac reports at the reference inside the closure, and so does every IDE: that is where
+        // the effective-finality requirement comes from. Anchoring on the reassignment put a mark on
+        // a line javac says nothing about while leaving the one it complains about bare.
+        let s = spans("void m() { int c = 0; Supplier<Integer> s = () -> c; c = 5; }");
+        assert_eq!(s.len(), 1, "{s:?}");
+        assert_eq!(s[0].2, "c", "{s:?}");
+        let src = "import java.util.function.Supplier; class C { void m() { int c = 0; Supplier<Integer> s = () -> c; c = 5; } }";
+        let lambda_c = src.find("-> c").unwrap() + 3;
+        assert_eq!(s[0].0, lambda_c, "should point at the `c` inside the lambda: {s:?}");
+    }
+
+    #[test]
+    fn two_reassignments_of_one_captured_local_report_once() {
+        let e = errs("void m() { int c = 0; Supplier<Integer> s = () -> c; c = 5; c = 6; }");
+        assert_eq!(e.len(), 1, "{e:?}");
+    }
 
     #[test]
     fn captured_local_reassigned_after_lambda_is_flagged() {

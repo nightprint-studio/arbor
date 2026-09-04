@@ -292,6 +292,14 @@ mod dep_classpath;
 // out of the poms — inheritance, `${properties}`, `<dependencyManagement>` — matched against the jars
 // `dep_classpath` already resolved. Reads files only; never runs Maven.
 mod dependencies;
+// The local repository itself (`bennu_maven_*`): where it is, what is in it, which of this project's
+// coordinates it does NOT have — and the one verb that changes that. The reporting half runs no
+// process; the download is a job, because it is the only thing here that needs the network.
+mod maven;
+// The Java refactorings — extract method / variable / constant, inline variable / method. The
+// transforms are the pure `bennu-refactor` crate; this is the two things it cannot do on its own:
+// name a type with the project's resolver, and refuse when nothing can.
+mod refactor;
 // The Spring beans an **allowlisted** dependency declares (`bennu_library_beans`): its jar's classes
 // decoded for their annotations, grouped by artifact. Display only — a bean declared in a jar is a
 // declaration Spring may or may not act on, so nothing here feeds resolution or a diagnostic.

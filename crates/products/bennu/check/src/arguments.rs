@@ -2,9 +2,15 @@
 //! parameter (`foo("a", "b", "c")` called `foo(1, …)`). The type counterpart of [`crate::arity`]
 //! (which only counts arguments).
 //!
+//! Three call shapes are read: `recv.method(args)`, a **bare** `method(args)` (receiver = the
+//! implicit `this` — see [`crate::bare_call`]), and `new Foo(args)`. Only the first was read for a
+//! long time, which left a class passing the wrong thing to its own method, or to a constructor,
+//! entirely unjudged.
+//!
 //! Overload resolution is hard, so this is deliberately narrow and conservative (never a false
 //! positive):
-//!   * only `recv.method(args)` with an inferred receiver whose whole hierarchy is resolvable;
+//!   * only a call whose candidate set is complete: an inferred receiver whose whole hierarchy is
+//!     resolvable, the enclosing type for a bare call, or a resolvable type for a `new`;
 //!   * only when there is **exactly one** candidate overload (same name + arity) after dedup, and it
 //!     is neither varargs nor generic (a type-variable parameter) — otherwise we can't be sure which
 //!     signature binds, so we skip;
@@ -12,7 +18,9 @@
 //!     two unrelated concrete classes (the argument isn't a subtype of the parameter). Boxing,
 //!     widening, interfaces, generics and `null` are all treated as OK.
 
-use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, TypeRef, TypeResolver};
+use bennu_java::prelude::{
+    infer_node_type_cached, FileSymbols, InferCache, Member, MemberKind, TypeRef, TypeResolver,
+};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
@@ -42,12 +50,89 @@ pub fn argument_type_errors_in(
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
+    let bare = crate::bare_call::bare_call_scope(root, source, symbols, resolver);
     for &n in nodes {
-        if n.kind() == "method_invocation" {
-            check_call(n, &root, source, bytes, symbols, resolver, cache, &mut out);
+        match n.kind() {
+            "method_invocation" => {
+                check_call(n, &root, source, bytes, symbols, resolver, cache, &mut out);
+                if let Some(bare) = &bare {
+                    check_bare_call(n, bare, &root, source, bytes, symbols, resolver, cache, &mut out);
+                }
+            }
+            "object_creation_expression" => {
+                check_new(n, &root, source, bytes, symbols, resolver, cache, &mut out)
+            }
+            _ => {}
         }
     }
     out
+}
+
+/// A bare `method(a, b)`: the candidate set is the enclosing type's, and it counts as complete only
+/// when the index has already seen every signature the FILE declares under that name. A method typed
+/// a moment ago and not yet indexed would otherwise leave a stale overload set standing alone — the
+/// one shape in which "exactly one candidate" is a lie rather than a fact.
+#[allow(clippy::too_many_arguments)]
+fn check_bare_call(
+    n: Node,
+    bare: &crate::bare_call::BareCalls,
+    root: &Node,
+    source: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+    out: &mut Vec<Diagnostic>,
+) {
+    let Some(method) = bare.judgeable(n, bytes) else { return };
+    let Some(arg_list) = n.child_by_field_name("arguments") else { return };
+    let res = cache.resolve_methods(resolver, &bare.top_binary, method);
+    if !res.complete {
+        return;
+    }
+    if !bare.index_covers_file_sigs(method, &res.candidates, symbols, resolver) {
+        return; // the buffer declares an overload the index has not got → judge nothing
+    }
+    judge_args(&res.candidates, &arg_list, method, root, source, symbols, resolver, cache, out);
+}
+
+/// `new Foo(a, b)` — the candidates are `Foo`'s own constructors (never inherited). Anonymous-class
+/// creations are skipped: their arguments bind to the SUPERTYPE's constructor.
+#[allow(clippy::too_many_arguments)]
+fn check_new(
+    n: Node,
+    root: &Node,
+    source: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+    out: &mut Vec<Diagnostic>,
+) {
+    let Some(ty_node) = n.child_by_field_name("type") else { return };
+    let Some(arg_list) = n.child_by_field_name("arguments") else { return };
+    if arg_list.has_error() {
+        return;
+    }
+    let mut cw = n.walk();
+    for c in n.named_children(&mut cw) {
+        if c.kind() == "class_body" {
+            return;
+        }
+    }
+    let Ok(type_text) = ty_node.utf8_text(bytes) else { return };
+    let Some(binary) = crate::resolve::type_binary(type_text, symbols, resolver) else { return };
+    let Some(cm) = resolver.members_of(&binary) else { return };
+    let ctors: Vec<Member> = cm
+        .methods
+        .iter()
+        .filter(|m| m.name == "<init>" && m.kind == MemberKind::Method)
+        .cloned()
+        .collect();
+    if ctors.is_empty() {
+        return; // an index that omits constructors can assert nothing
+    }
+    judge_args(&ctors, &arg_list, simple_name(&binary), root, source, symbols, resolver, cache, out);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -81,7 +166,24 @@ fn check_call(
     if !res.complete {
         return;
     }
-    let args: Vec<Node> = named_args(arg_list);
+    judge_args(&res.candidates, &arg_list, method, root, source, symbols, resolver, cache, out);
+}
+
+/// The shared decision: bind `arg_list` to the ONE candidate that can take it, and flag every
+/// argument whose type definitely cannot be passed. `owner_label` names the callee in the message.
+#[allow(clippy::too_many_arguments)]
+fn judge_args(
+    candidates: &[Member],
+    arg_list: &Node,
+    method: &str,
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+    out: &mut Vec<Diagnostic>,
+) {
+    let args: Vec<Node> = named_args(*arg_list);
     let argc = args.len();
 
     // Every overload of matching ARITY, deduped by parameter list — INCLUDING the ones we can't
@@ -92,7 +194,7 @@ fn check_call(
     // candidates → ambiguous → skip. (Before, the array overload was dropped as non-checkable, leaving
     // the `String` one as the lone signature → false positive.)
     let mut sigs: Vec<&Vec<TypeRef>> = Vec::new();
-    for m in &res.candidates {
+    for m in candidates {
         // A candidate can bind this call if its arity matches exactly, OR it is varargs (a trailing
         // array parameter) and the call supplies at least its fixed prefix — SLF4J's `debug(String,
         // Object...)` binds a 4-argument `debug(fmt, a, b, c)`. Both shapes MUST enter the ambiguity
@@ -272,7 +374,13 @@ mod tests {
                 m
             });
         }
+        // The class the test sources are written in, so a BARE call has a fully-known `this`, plus a
+        // constructor to judge `new Ctor("x")` against.
+        members.insert("C".to_string(), cls(vec![method("own", &["int"])]));
+        members.insert("com/acme/Ctor".to_string(), cls(vec![method("<init>", &["int"])]));
         let simple = [
+            ("C", "C"),
+            ("Ctor", "com/acme/Ctor"),
             ("Svc", "com/acme/Svc"),
             ("Animal", "com/acme/Animal"),
             ("Dog", "com/acme/Dog"),
@@ -289,6 +397,43 @@ mod tests {
     fn diags(body: &str) -> Vec<String> {
         let src = format!("class C {{ Svc s; void m() {{ {body} }} }}");
         argument_type_errors(&src, &resolver()).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn bare_call_with_a_bad_argument_is_flagged() {
+        let d = diags("own(\"x\");");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("own"), "{d:?}");
+    }
+
+    #[test]
+    fn bare_call_with_a_good_argument_is_ok() {
+        assert!(diags("own(1);").is_empty());
+    }
+
+    #[test]
+    fn bare_call_the_buffer_overloads_is_not_judged() {
+        // The source adds `own(String)`, which the index has not seen. The stale overload set would
+        // otherwise stand alone and call a perfectly legal call wrong.
+        let src = "class C { void own(String t) {} void m() { own(\"x\"); } }";
+        assert!(argument_type_errors(src, &resolver()).is_empty());
+    }
+
+    #[test]
+    fn constructor_with_a_bad_argument_is_flagged() {
+        let d = diags("Ctor c = new Ctor(\"x\");");
+        assert_eq!(d.len(), 1, "{d:?}");
+    }
+
+    #[test]
+    fn constructor_with_a_good_argument_is_ok() {
+        assert!(diags("Ctor c = new Ctor(1);").is_empty());
+    }
+
+    #[test]
+    fn anonymous_class_creation_is_not_judged() {
+        // The arguments bind to the SUPERTYPE's constructor, not to the anonymous body's.
+        assert!(diags("Ctor c = new Ctor(\"x\") { };").is_empty());
     }
 
     #[test]

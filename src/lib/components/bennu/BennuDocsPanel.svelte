@@ -30,6 +30,7 @@
   import ProjectTree       from './docs/ProjectTree.svelte';
   import Jdk               from './docs/Jdk.svelte';
   import Dependencies      from './docs/Dependencies.svelte';
+  import PomEditing        from './docs/PomEditing.svelte';
   import ModuleGraph       from './docs/ModuleGraph.svelte';
   import Encodings         from './docs/Encodings.svelte';
   // Editor
@@ -90,6 +91,7 @@
       { id: 'project-tree', label: 'The project tree', icon: ListTree   },
       { id: 'jdk',          label: 'The JDK',          icon: Coffee     },
       { id: 'dependencies', label: 'Dependencies',     icon: Package    },
+      { id: 'pom',          label: 'Editing a pom.xml', icon: FileCode2 },
       { id: 'module-graph', label: 'The module graph', icon: Network    },
       { id: 'encodings',    label: 'Encodings',        icon: FileType2  },
     ] },
@@ -148,6 +150,7 @@
     'project-tree':      ProjectTree,
     'jdk':               Jdk,
     'dependencies':      Dependencies,
+    'pom':               PomEditing,
     'module-graph':      ModuleGraph,
     'encodings':         Encodings,
     'editing':           Editing,

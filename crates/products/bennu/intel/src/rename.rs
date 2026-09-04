@@ -201,7 +201,17 @@ pub fn rename_plan(
                     // `FastDateFormat extends java.text.Format implements DateParser` declares
                     // `parseObject` on both sides. Checking only the starting type let the rename
                     // through and the class stopped overriding `Format.parseObject`.
-                    blocked = family.iter().find_map(|o| {
+                    //
+                    // And of every subtype that INHERITS it without redeclaring it, because that is
+                    // the other way a library contract is reached: Commons Collections' `HashIterator`
+                    // declares `hasMoreElements()`, and its subclass `KeyIterator extends HashIterator
+                    // implements Enumeration<K>` is what makes that method an implementation of
+                    // `java.util.Enumeration`. `KeyIterator` declares nothing, so it is not IN the
+                    // family — it is only walked through — and asking the family alone let the rename
+                    // through: the method moved, and two inner classes stopped implementing
+                    // `Enumeration`.
+                    let heirs = inheriting_subtypes(subtypes, &family);
+                    blocked = family.iter().chain(heirs.iter()).find_map(|o| {
                         library_override(policy, o, name).map(|lib| {
                             format!(
                                 "`{name}` overrides {} — a library type, which cannot be renamed \
@@ -1542,6 +1552,27 @@ pub fn plan_types(
 ///
 /// Only project types: library source can't be edited, and a family rooted at a JDK type
 /// (everything "declares" `toString`) would drag in every unrelated class in the project.
+/// Every subtype below `family`, transitively, that is NOT itself in it.
+///
+/// These are the types that inherit the method without redeclaring it — invisible to the family
+/// (which collects declarations) and decisive for the refusal (which asks what contract a type is
+/// bound by). A subtype implements a library interface with a method it inherited just as surely as
+/// with one it wrote.
+fn inheriting_subtypes(subtypes: &SubtypeMap, family: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = family.iter().cloned().collect();
+    let mut queue: Vec<String> = family.to_vec();
+    while let Some(cur) = queue.pop() {
+        for sub in subtypes.children(&cur) {
+            if seen.insert(sub.clone()) {
+                out.push(sub.clone());
+                queue.push(sub.clone());
+            }
+        }
+    }
+    out
+}
+
 pub(crate) fn override_family(
     resolver: &dyn TypeResolver,
     subtypes: &SubtypeMap,

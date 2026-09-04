@@ -68,15 +68,52 @@ fn check_field_dups(body: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Flag a local variable whose name repeats one already declared in the same block.
+/// Flag a local variable whose name repeats one already declared in the same block — or one of the
+/// **parameters** of the method / constructor / lambda the block belongs to.
+///
+/// The parameters matter as much as the siblings and were the half that was missing: `void m(int a)
+/// { int a = 1; }` is javac's `already.defined` just as much as two `int a` in a row, and it is the
+/// shape that actually reaches a file, because the parameter is out of sight at the top of the
+/// method while the local is being written. Fields are NOT collected — a local may legally shadow
+/// one — which is why the climb stops at a type boundary.
 fn check_local_dups(block: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut seen: HashSet<String> = enclosing_param_names(block, bytes);
     let mut c = block.walk();
     for s in block.named_children(&mut c) {
         if s.kind() == "local_variable_declaration" {
             flag_declarator_dups(s, bytes, &mut seen, "variable", out);
         }
     }
+}
+
+/// The parameter names in scope inside `block`: those of every enclosing executable scope, up to
+/// (and including) the method or constructor, stopping at any type body.
+fn enclosing_param_names(block: Node, bytes: &[u8]) -> HashSet<String> {
+    let mut names: HashSet<String> = HashSet::new();
+    let mut cur = block.parent();
+    while let Some(n) = cur {
+        match n.kind() {
+            "class_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "record_declaration"
+            | "annotation_type_declaration" => break,
+            "method_declaration" | "constructor_declaration" => {
+                if let Some(p) = n.child_by_field_name("parameters") {
+                    collect_names_under(p, bytes, &mut names);
+                }
+                break; // the outermost executable scope
+            }
+            "lambda_expression" => {
+                let mut v = Vec::new();
+                collect_lambda_params(n, bytes, &mut v);
+                names.extend(v.into_iter().map(|(name, _)| name));
+            }
+            _ => {}
+        }
+        cur = n.parent();
+    }
+    names
 }
 
 /// Collect each `variable_declarator` name of a declaration; a name already in `seen` is a
@@ -347,6 +384,27 @@ mod tests {
 
     fn errs(src: &str) -> Vec<String> {
         redeclaration_errors(src).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn local_shadowing_a_parameter_is_flagged() {
+        let d = errs("class C { void m(int a) { int a = 1; } }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("variable `a`"), "{d:?}");
+    }
+
+    #[test]
+    fn local_shadowing_a_parameter_from_a_nested_block_is_flagged() {
+        assert_eq!(errs("class C { void m(int a) { if (true) { int a = 1; } } }").len(), 1);
+    }
+
+    #[test]
+    fn a_local_in_a_nested_type_may_reuse_an_outer_parameter_name() {
+        // The anonymous class body is a new type scope: `a` there is not the outer method's `a`.
+        assert!(errs(
+            "class C { void m(int a) { Runnable r = new Runnable() { public void run() { int a = 1; } }; } }"
+        )
+        .is_empty());
     }
 
     #[test]

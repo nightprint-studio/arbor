@@ -7,6 +7,7 @@
   <li><kbd>Alt</kbd> + <kbd>1</kbd> — toggle <strong>Project</strong> (files)</li>
   <li><kbd>Alt</kbd> + <kbd>2</kbd> — toggle <strong>Structure</strong> (symbols)</li>
   <li><kbd>Alt</kbd> + <kbd>N</kbd> — toggle <strong>Dependencies</strong> (by module, or by crate on a Cargo project)</li>
+  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>U</kbd> — <strong>download dependencies</strong> — fetch whatever this project's poms need and is not in your local repository, then rebuild the index. A background job; Maven projects only</li>
   <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd> — the <strong>module graph</strong> — who depends on whom inside the project, in a window. Inside it, <kbd>Alt</kbd> + <kbd>S</kbd> isolates the selected module's world. <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd> would have been the obvious key for the window itself and is <em>Switch window</em>, bound in every window</li>
   <li><kbd>Alt</kbd> + <kbd>0</kbd> — toggle <strong>Build</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>R</kbd> — toggle <strong>Run</strong> — the launched program's console, and the debugger when it is one (bottom dock)</li>

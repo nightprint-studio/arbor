@@ -33,6 +33,56 @@ pub(crate) fn resolver_fixes(
     }
 }
 
+/// The fixes that need only the **tree** — no resolver, because the resolver has already spoken.
+///
+/// *Create method* is the case: whether `handle()` exists is a question about the whole classpath,
+/// and nothing here could answer it. The diagnostic already did, by existing. So this renders the
+/// repair for the span it points at and asks no questions of its own — which is also why it is
+/// offered on a cold index, when `resolver_fixes` cannot run at all.
+pub(crate) fn tree_fixes(code: &str, source: &str, start: usize, end: usize) -> Vec<OfferWire> {
+    // `unresolved-call` is the one that matters most: it is the BARE call — `report()` in the class
+    // you are writing — which is where a method gets written before it exists. `unknown-member`
+    // covers `this.report()` and the qualified calls, which mostly end in a refusal about another
+    // file, and `unresolved-symbol` the bare identifier.
+    if !matches!(
+        code,
+        "unresolved-call" | "unknown-member" | "unresolved-symbol" | "unresolved-type"
+    ) {
+        return Vec::new();
+    }
+    let Some(tree) = bennu_java::prelude::parse_java(source) else { return Vec::new() };
+    if code == "unresolved-type" {
+        // Creating a file is not an edit, so the offer carries an ACTION and the name as its
+        // payload — the same shape the rename offers use.
+        return bennu_refactor::prelude::missing_type_at(tree.root_node(), source, start, end)
+            .map(|missing| OfferWire {
+                id: "create-class".to_string(),
+                label: format!("Create {} '{}'", missing.keyword.trim_start_matches('@'), missing.name),
+                start,
+                end,
+                replacement: missing.name,
+                action: Some("create-class".to_string()),
+            })
+            .into_iter()
+            .collect();
+    }
+    let Some(Ok(plan)) = bennu_refactor::prelude::create_method(tree.root_node(), source, start, end)
+    else {
+        return Vec::new(); // a refusal here is about another file; the menu says nothing
+    };
+    plan.edits
+        .iter()
+        .map(|edit| OfferWire {
+            id: plan.id.clone(),
+            label: plan.label.clone(),
+            start: edit.start,
+            end: edit.end,
+            replacement: edit.text.clone(),
+            action: None,
+        })
+        .collect()
+}
+
 /// "Add `throws IOException`" and "Surround with try/catch", for the call the diagnostic underlines.
 fn unhandled_exception_fixes(
     source: &str,

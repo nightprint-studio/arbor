@@ -311,6 +311,9 @@ fn walk_hints(
         "local_variable_declaration" => {
             var_type_hint(&node, root, source, symbols, resolver, cache, out);
         }
+        "lambda_expression" => {
+            lambda_param_hints(&node, root, source, symbols, resolver, cache, out);
+        }
         _ => {}
     }
     let mut c = node.walk();
@@ -405,7 +408,9 @@ fn var_type_hint(
 ) {
     let bytes = source.as_bytes();
     let Some(ty) = decl.child_by_field_name("type") else { return };
-    if ty.utf8_text(bytes) != Ok("var") {
+    // `val` too: it is Lombok's, the inference engine already resolves it, and a hint that knew
+    // only `var` left every Lombok local without the type it had already worked out.
+    if !ty.utf8_text(bytes).is_ok_and(bennu_java::prelude::is_inferred_type) {
         return; // a written type needs no hint — it is right there
     }
     let mut c = decl.walk();
@@ -431,6 +436,80 @@ fn var_type_hint(
             before: false,
         });
     }
+}
+
+/// `rows.forEach(row: String -> …)` — the type of a lambda parameter that was written without one.
+///
+/// ## Why this one matters more than the others
+///
+/// A `var` at least names the expression it was inferred from, two words to the right. An implicit
+/// lambda parameter names nothing: `row` is typed by the functional interface the lambda is being
+/// passed to, which is in another file, and reading the code tells you only that somebody called it
+/// `row`. The engine already resolves it — target-typing a lambda parameter is what
+/// `bennu_java`'s `lambda_param` does — so the type was there all along and only the hint was
+/// missing.
+///
+/// A lambda whose parameters ARE written gets nothing: the type is right there.
+fn lambda_param_hints(
+    lambda: &Node,
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+    out: &mut Vec<InlayHint>,
+) {
+    let Some(params) = lambda.child_by_field_name("parameters") else { return };
+    let names: Vec<Node> = match params.kind() {
+        // `row -> …`
+        "identifier" => vec![params],
+        // `(row, index) -> …`
+        "inferred_parameters" => {
+            let mut c = params.walk();
+            params.named_children(&mut c).filter(|n| n.kind() == "identifier").collect()
+        }
+        // `(String row) -> …` — written, so there is nothing to say.
+        _ => return,
+    };
+    let Some(body) = lambda.child_by_field_name("body") else { return };
+    for name in names {
+        let text = &source[name.start_byte()..name.end_byte()];
+        // Asked of a USE inside the body, not of the parameter's own identifier: the engine types a
+        // name by classifying it against the scopes around it, and a declaration is not one of the
+        // things it classifies. A parameter the body never reads has nothing to hint anyway.
+        let Some(use_node) = first_use(&body, source, text) else { continue };
+        let Some(inferred) =
+            infer_node_type_cached(root, source, symbols, &use_node, resolver, cache)
+        else {
+            continue;
+        };
+        if inferred.binary_name.is_empty() || !inferred.binary_name.contains('/') {
+            continue; // unresolved, or a primitive with nothing to add
+        }
+        out.push(InlayHint {
+            offset: name.end_byte(),
+            label: format!(": {}", render_type(&inferred)),
+            before: false,
+        });
+    }
+}
+
+/// The first identifier inside `body` that reads `name`.
+fn first_use<'t>(body: &Node<'t>, source: &str, name: &str) -> Option<Node<'t>> {
+    let mut stack = vec![*body];
+    let mut best: Option<Node<'t>> = None;
+    while let Some(n) = stack.pop() {
+        if n.kind() == "identifier" && &source[n.start_byte()..n.end_byte()] == name {
+            if best.is_none_or(|b| n.start_byte() < b.start_byte()) {
+                best = Some(n);
+            }
+        }
+        let mut c = n.walk();
+        for child in n.named_children(&mut c) {
+            stack.push(child);
+        }
+    }
+    best
 }
 
 #[cfg(test)]

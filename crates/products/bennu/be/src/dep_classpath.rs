@@ -87,9 +87,26 @@ pub enum DepOutcome {
     Failed(String),
 }
 
-/// Resolve the project's dependency jars (from the on-disk list cache when fresh, else via Maven) and
-/// build the dependency tier. See [`DepOutcome`] — the caller builds a JDK-only provider for anything
-/// other than [`DepOutcome::Resolved`], and surfaces the reason when it's a failure.
+/// Resolve the project's dependency jars and build the dependency tier. See [`DepOutcome`] — the
+/// caller builds a JDK-only provider for anything other than [`DepOutcome::Resolved`], and surfaces
+/// the reason when it's a failure.
+///
+/// ## Three resolvers, in the order that costs least
+///
+/// 1. **The cached jar list**, when it is still true. See [`load_entry`]: the cache records what was
+///    *missing* as well as what was found, so a partial resolve can be cached safely and is
+///    invalidated the moment one of the absent artifacts arrives.
+/// 2. **The poms and `~/.m2`, read directly** (`bennu-maven`). Milliseconds, no JVM, no network, and
+///    it names the coordinates it could not find. When it resolves everything, that is the answer —
+///    running Maven to confirm it would cost seconds per project open to learn nothing.
+/// 3. **`mvn dependency:build-classpath`**, when the direct read came up short. Maven is the ground
+///    truth about a build; it is asked precisely when the cheap answer admits it is incomplete.
+///
+/// The two are **unioned** rather than one replacing the other: a Maven run that fails halfway
+/// still wrote the entries it resolved, and the direct read may have found artifacts the failing
+/// reactor never got to. Whatever is left missing after both is what the user is told about, by
+/// coordinate — which is the whole difference between "0 jars resolved" and
+/// `com.acme:legacy-core:2.4.0 is not in your local repository`.
 pub fn resolve_dep_classpath(root: &Path, jdk_version: &str) -> DepOutcome {
     if !root.join("pom.xml").is_file() {
         return DepOutcome::NotApplicable;
@@ -98,21 +115,12 @@ pub fn resolve_dep_classpath(root: &Path, jdk_version: &str) -> DepOutcome {
         return DepOutcome::Failed("the project's pom.xml could not be read".to_string());
     };
 
-    // Fresh cached jar list → skip Maven entirely; else resolve once and persist the list.
-    //
-    // Only a COMPLETE resolve is persisted. A partial one is keyed by the pom's mtime like any
-    // other, and a pom does not change when the missing artifact finally lands in `~/.m2` — so
-    // caching it pinned the project to a half-classpath until someone edited a pom or deleted the
-    // cache file by hand. Re-running Maven on the next open is a few seconds; being wrong about
-    // the classpath costs every library type in the project.
-    let (jars, partial) = match load_list(root, pom_mtime) {
-        Some(jars) => (jars, None),
-        None => match resolve_via_maven(root, jdk_version) {
-            Ok((jars, partial)) => {
-                if partial.is_none() {
-                    save_list(root, pom_mtime, &jars);
-                }
-                (jars, partial)
+    let (jars, partial) = match load_entry(root, pom_mtime) {
+        Some(entry) => (entry.jars, entry.partial),
+        None => match resolve_fresh(root, jdk_version) {
+            Ok(fresh) => {
+                save_entry(root, pom_mtime, &fresh);
+                (fresh.jars, fresh.partial)
             }
             Err(reason) => return DepOutcome::Failed(reason),
         },
@@ -127,6 +135,140 @@ pub fn resolve_dep_classpath(root: &Path, jdk_version: &str) -> DepOutcome {
     DepOutcome::Resolved(DepClasspath { source, memo_path, jars, partial })
 }
 
+/// One resolve's result, as it is cached and as it is handed back.
+#[derive(Default)]
+pub(crate) struct ResolvedList {
+    pub jars: Vec<String>,
+    /// Set when something is still missing — the sentence the user sees.
+    pub partial: Option<String>,
+    /// Where each missing artifact was looked for, so the next open can ask "has it arrived yet"
+    /// with one `stat` each instead of re-running Maven.
+    pub missing_paths: Vec<String>,
+    /// Which resolver answered: `offline`, `maven`, or `union`. Reported, not acted on — but a
+    /// classpath that came from the direct read is worth being able to say out loud when something
+    /// looks wrong with it.
+    pub source: &'static str,
+}
+
+/// Resolve from scratch: the direct read first, Maven only if it is not enough.
+fn resolve_fresh(root: &Path, jdk_version: &str) -> Result<ResolvedList, String> {
+    let repo = bennu_maven::prelude::LocalRepo::discover();
+    let offline = bennu_maven::prelude::resolve_offline(root, &repo);
+    let offline_jars = offline.jar_strings();
+
+    if offline.is_complete() && !offline_jars.is_empty() {
+        eprintln!(
+            "bennu-be: dependency classpath read straight from {} for {} ({} jars, no Maven run)",
+            repo.root().display(),
+            root.display(),
+            offline_jars.len()
+        );
+        return Ok(ResolvedList { jars: offline_jars, source: "offline", ..ResolvedList::default() });
+    }
+
+    // Not everything is there. Maven knows things this cannot — an active profile, a mirror, a
+    // packaging plugin that rewrites a coordinate — so it gets the second word.
+    let maven = resolve_via_maven(root, jdk_version);
+    let mut jars = offline_jars;
+    let mut source = "offline";
+    if let Ok((maven_jars, _)) = &maven {
+        source = if jars.is_empty() { "maven" } else { "union" };
+        for jar in maven_jars {
+            if !jars.contains(jar) {
+                jars.push(jar.clone());
+            }
+        }
+    }
+
+    // What is *still* missing, re-checked after Maven ran rather than taken from the direct read:
+    // Maven installs what it downloads into the same local repository, so an artifact it fetched
+    // from a mirror is now sitting exactly where the direct read looked for it and is no longer
+    // missing at all. Reporting the pre-Maven list would warn about the artifacts Maven just fixed.
+    let (missing_paths, missing_coords) = still_missing(&offline, &repo);
+
+    if jars.is_empty() {
+        // Nothing from either resolver. Maven's own words when it ran, ours when it could not.
+        return Err(match maven {
+            Err(reason) => reason,
+            Ok(_) => shortfall_message(&missing_coords, &offline)
+                .unwrap_or_else(|| "no dependency jars resolved".to_string()),
+        });
+    }
+
+    let mut partial = shortfall_message(&missing_coords, &offline);
+    if partial.is_none() {
+        if let Err(reason) = &maven {
+            partial = Some(format!(
+                "Maven could not be run ({reason}), so the classpath was read straight from the local \
+                 repository. It may be missing artifacts only a build would resolve."
+            ));
+        }
+    }
+    if let Some(reason) = &partial {
+        eprintln!("bennu-be: partial dependency classpath for {}: {reason}", root.display());
+    }
+    Ok(ResolvedList { jars, partial, missing_paths, source })
+}
+
+/// The artifacts that are still absent from the repository, as `(path, coordinate)` — the direct
+/// read's list, minus whatever has arrived since (see [`resolve_fresh`]).
+fn still_missing(
+    offline: &bennu_maven::prelude::Resolution,
+    repo: &bennu_maven::prelude::LocalRepo,
+) -> (Vec<String>, Vec<String>) {
+    let mut paths = Vec::new();
+    let mut coords = Vec::new();
+    // Parallel by construction: both are derived from `Resolution::missing`, in its order.
+    for (path, coord) in offline.missing_paths(repo).into_iter().zip(offline.missing.iter()) {
+        if Path::new(&path).is_file() {
+            continue;
+        }
+        paths.push(path);
+        coords.push(coord.gav());
+    }
+    (paths, coords)
+}
+
+/// The user-facing sentence for what could not be resolved, or `None` when nothing is left.
+fn shortfall_message(
+    missing: &[String],
+    offline: &bennu_maven::prelude::Resolution,
+) -> Option<String> {
+    /// Enough to recognise the problem; the full list is in the Dependencies panel.
+    const SHOW: usize = 3;
+    if missing.is_empty() && offline.unversioned.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if !missing.is_empty() {
+        parts.push(format!("{} not in the local repository ({})", missing.len(), sample(missing, SHOW)));
+    }
+    if !offline.unversioned.is_empty() {
+        let names: Vec<String> = offline.unversioned.iter().map(|c| c.gav()).collect();
+        parts.push(format!(
+            "{} with no resolvable version ({})",
+            names.len(),
+            sample(&names, SHOW)
+        ));
+    }
+    Some(format!(
+        "{} of this project's dependencies could not be resolved: {}. Types from them will read as \
+         unresolved until the project is built once (nothing here downloads).",
+        missing.len() + offline.unversioned.len(),
+        parts.join("; ")
+    ))
+}
+
+/// The first few of a list, then a count — a message, not a dump.
+fn sample(items: &[String], show: usize) -> String {
+    let head = items.iter().take(show).cloned().collect::<Vec<_>>().join(", ");
+    if items.len() > show {
+        format!("{head}, +{} more", items.len() - show)
+    } else {
+        head
+    }
+}
+
 /// The dependency jars **already resolved** for `root`, without running Maven.
 ///
 /// For consumers that want to read something out of the jars but have no business triggering a
@@ -136,7 +278,8 @@ pub fn resolve_dep_classpath(root: &Path, jdk_version: &str) -> DepOutcome {
 /// extension falls back to what it knows on its own).
 pub(crate) fn cached_dep_jars(root: &Path) -> Vec<PathBuf> {
     poms_mtime(root)
-        .and_then(|mtime| load_list(root, mtime))
+        .and_then(|mtime| load_entry(root, mtime))
+        .map(|entry| entry.jars)
         .unwrap_or_default()
         .into_iter()
         .map(PathBuf::from)
@@ -334,36 +477,66 @@ fn list_cache_path(root: &Path) -> PathBuf {
         .join(format!("{}.json", fnv(root.to_string_lossy().as_bytes())))
 }
 
-/// The cached jar list for `root`, but only when its recorded pom mtime matches `pom_mtime` (else the
-/// deps may have changed → re-resolve). `None` on a missing / stale / unreadable cache.
-fn load_list(root: &Path, pom_mtime: u64) -> Option<Vec<String>> {
-    load_list_from(&list_cache_path(root), pom_mtime)
+/// A cached resolve, read back.
+pub(crate) struct CachedList {
+    pub jars: Vec<String>,
+    /// The sentence the resolve produced, when it was a partial one — kept so a cached open says
+    /// the same thing the resolve did instead of going quiet about a half classpath.
+    pub partial: Option<String>,
 }
 
-/// Persist the resolved jar list for `root` with its pom mtime (best-effort — a write failure just
-/// means the next session re-runs Maven).
-fn save_list(root: &Path, pom_mtime: u64, jars: &[String]) {
-    save_list_to(&list_cache_path(root), pom_mtime, jars);
+/// The cached jar list for `root`, when it is still true.
+///
+/// Two conditions, and the second is the one that was missing. The pom mtime says the
+/// *declarations* have not changed. The recorded missing paths say the *repository* has not: a pom
+/// does not move when the artifact it names finally lands in `~/.m2`, so keying on the mtime alone
+/// pinned a project to its half-resolved classpath until somebody edited a pom or found the cache
+/// directory by hand. One `stat` per missing artifact answers it, and a resolve that was complete
+/// records none — so the common case costs nothing.
+fn load_entry(root: &Path, pom_mtime: u64) -> Option<CachedList> {
+    load_entry_from(&list_cache_path(root), pom_mtime)
 }
 
-/// The pure read of a jar-list cache FILE (path-injectable, so the mtime-gating is unit-testable
-/// without the profile-scoped `bennu_data_dir`).
-fn load_list_from(path: &Path, pom_mtime: u64) -> Option<Vec<String>> {
+/// Persist a resolve for `root` with its pom mtime (best-effort — a write failure just means the
+/// next session resolves again).
+fn save_entry(root: &Path, pom_mtime: u64, list: &ResolvedList) {
+    save_entry_to(&list_cache_path(root), pom_mtime, list);
+}
+
+/// The pure read of a cache FILE (path-injectable, so the gating is unit-testable without the
+/// profile-scoped `bennu_data_dir`).
+fn load_entry_from(path: &Path, pom_mtime: u64) -> Option<CachedList> {
     let bytes = std::fs::read(path).ok()?;
     let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     if v.get("pom_mtime").and_then(|m| m.as_u64()) != Some(pom_mtime) {
         return None;
     }
+    // Anything recorded as missing that has since arrived invalidates the whole list: the resolve
+    // that produced it would now find more.
+    if let Some(missing) = v.get("missing_paths").and_then(|m| m.as_array()) {
+        if missing.iter().filter_map(|p| p.as_str()).any(|p| Path::new(p).is_file()) {
+            return None;
+        }
+    }
     let jars = v.get("jars")?.as_array()?;
-    Some(jars.iter().filter_map(|j| j.as_str().map(str::to_string)).collect())
+    Some(CachedList {
+        jars: jars.iter().filter_map(|j| j.as_str().map(str::to_string)).collect(),
+        partial: v.get("partial").and_then(|p| p.as_str()).map(str::to_string),
+    })
 }
 
-/// The pure write of a jar-list cache FILE (path-injectable, best-effort).
-fn save_list_to(path: &Path, pom_mtime: u64, jars: &[String]) {
+/// The pure write of a cache FILE (path-injectable, best-effort).
+fn save_entry_to(path: &Path, pom_mtime: u64, list: &ResolvedList) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let value = serde_json::json!({ "pom_mtime": pom_mtime, "jars": jars });
+    let value = serde_json::json!({
+        "pom_mtime": pom_mtime,
+        "jars": list.jars,
+        "missing_paths": list.missing_paths,
+        "partial": list.partial,
+        "source": list.source,
+    });
     if let Ok(bytes) = serde_json::to_vec(&value) {
         let _ = std::fs::write(path, bytes);
     }
@@ -494,16 +667,45 @@ mod tests {
     }
 
     #[test]
-    fn list_cache_roundtrips_and_respects_mtime() {
+    fn the_cache_respects_the_pom_mtime() {
         let dir = std::env::temp_dir().join(format!("bennu-deps-list-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("list.json");
-        let jars = vec!["a.jar".to_string(), "b.jar".to_string()];
-        save_list_to(&path, 42, &jars);
-        assert_eq!(load_list_from(&path, 42), Some(jars));
+        let list = ResolvedList {
+            jars: vec!["a.jar".to_string(), "b.jar".to_string()],
+            source: "offline",
+            ..ResolvedList::default()
+        };
+        save_entry_to(&path, 42, &list);
+        assert_eq!(load_entry_from(&path, 42).unwrap().jars, list.jars);
         // A different pom mtime invalidates the cache.
-        assert_eq!(load_list_from(&path, 43), None);
+        assert!(load_entry_from(&path, 43).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The half of the freshness key that an mtime cannot express: the artifact arrived. Without
+    /// this, a project that was missing one jar served its half-classpath until a pom was edited.
+    #[test]
+    fn a_missing_artifact_that_arrives_invalidates_the_cache() {
+        let dir = std::env::temp_dir().join(format!("bennu-deps-missing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("list.json");
+        let absent = dir.join("not-yet.jar");
+        let list = ResolvedList {
+            jars: vec!["a.jar".to_string()],
+            partial: Some("one missing".to_string()),
+            missing_paths: vec![absent.display().to_string()],
+            source: "offline",
+        };
+        save_entry_to(&path, 7, &list);
+        // Still missing → the cache is still true, and the sentence survives with it.
+        let hit = load_entry_from(&path, 7).unwrap();
+        assert_eq!(hit.partial.as_deref(), Some("one missing"));
+        // It arrives → the list is stale, whatever the poms say.
+        std::fs::write(&absent, b"x").unwrap();
+        assert!(load_entry_from(&path, 7).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

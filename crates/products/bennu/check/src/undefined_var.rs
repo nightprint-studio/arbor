@@ -400,6 +400,17 @@ mod tests {
     // ── POSITIVES (must flag) ────────────────────────────────────────────────────────────────────
 
     #[test]
+    fn a_branch_label_is_not_a_variable() {
+        // `outer` names a LABEL, which lives in its own namespace (JLS §6.5.1). Judging it as a bare
+        // value made every labelled loop in a project light up with "cannot resolve symbol" —
+        // twelve of them in Guava alone. Whether the label exists is `branches.rs`'s question.
+        assert!(diags(
+            "outer: for (int i = 0; i < 3; i++) { for (int j = 0; j < 3; j++) { if (j == 1) continue outer; if (i == 2) break outer; } }"
+        )
+        .is_empty());
+    }
+
+    #[test]
     fn undefined_bare_identifier_is_flagged() {
         // `name` local exists, but `nam` is nothing → flagged.
         let d = diags("String name = \"x\"; System.out.println(nam);");

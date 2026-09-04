@@ -1,0 +1,23 @@
+[package]
+name         = "bennu-maven"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The local Maven repository as a first-class source of answers: where it is, what is in it, what a project's poms resolve to against it without running Maven, and the editor answers over a pom.xml that follow — coordinate completion from the repository itself, and a dependency the repository does not have marked where it is written."
+
+[dependencies]
+# The pom reader: one `pom.xml` parsed structurally, with the byte spans every editor answer
+# needs. Reading a pom a second time here was the alternative.
+bennu-deps     = { path = "../deps" }
+# The tolerant XML scan — a buffer being typed is malformed most of the time.
+bennu-xml      = { path = "../xml" }
+# The extension seam this crate implements.
+bennu-ext      = { path = "../ext" }
+# The wire types a contribution is made of (Diagnostic / CompletionItem / CapabilitySet).
+bennu-proto    = { path = "../proto" }
+# `user_home()` (where `~/.m2` is) and `bennu_data_dir()` (where the catalog is cached).
+arbor-core     = { path = "../../../foundation/core" }
+serde          = { workspace = true }
+serde_json     = { workspace = true }

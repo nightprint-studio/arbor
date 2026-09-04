@@ -10,8 +10,9 @@
 //!   * a switch's labels are collected from its DIRECT body arms only — a nested `switch` is a
 //!     separate `switch_expression` node with its own body, so its labels never leak into the outer
 //!     switch's set (and vice-versa). Each switch is checked against itself alone.
-//!   * `default` is skipped (it is not a constant label; duplicate `default` is a different error we
-//!     don't touch).
+//!   * `default` carries no constant, so it is out of the text comparison — but a `switch` with TWO
+//!     `default` arms is its own javac error (`compiler.err.duplicate.default.label`) and is counted
+//!     separately in the same walk;
 //!   * a **pattern** label is skipped entirely — see below.
 //!   * two labels are a duplicate only when their trimmed text is byte-for-byte equal. Distinct texts
 //!     are never flagged — so `case A` vs `case B`, or `Foo.A` vs `Bar.A`, stay silent.
@@ -64,14 +65,17 @@ pub fn switch_dup_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> 
     out
 }
 
-/// Collect the constant labels of ONE switch (its direct arms' `switch_label`s, `default` excluded)
-/// and flag the second occurrence of any label whose trimmed text repeats.
+/// Collect the constant labels of ONE switch (its direct arms' `switch_label`s) and flag the second
+/// occurrence of any label whose trimmed text repeats — plus a second `default` arm, which is the
+/// same rule stated about the one label that has no text to compare.
 fn check_switch<'t>(switch: Node<'t>, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     let Some(body) = switch.child_by_field_name("body") else { return };
 
     // Every constant label text seen so far in THIS switch. A label constant repeated → the later one
     // is the duplicate. We keep the trimmed text; comparison is exact-string.
     let mut seen: Vec<String> = Vec::new();
+    // A `default` has no constant to compare, so it is counted rather than collected.
+    let mut default_seen = false;
 
     // body → arm (`switch_rule` | `switch_block_statement_group`) → `switch_label` → constant(s).
     // We descend exactly one level into the body, so a nested switch (which lives INSIDE an arm's
@@ -90,6 +94,16 @@ fn check_switch<'t>(switch: Node<'t>, bytes: &[u8], out: &mut Vec<Diagnostic>) {
             // `default` is not a constant label — skip it (a `default` carries no named constant
             // child, but skip explicitly for clarity and to never treat it as a value).
             if label_is_default(label, bytes) {
+                if default_seen {
+                    out.push(Diagnostic {
+                        message: "Duplicate `default` label".to_string(),
+                        severity: crate::check_id::CheckId::DuplicateCaseLabel.severity().to_string(),
+                        code: crate::check_id::CheckId::DuplicateCaseLabel.code().to_string(),
+                        start: label.start_byte(),
+                        end: label.end_byte(),
+                    });
+                }
+                default_seen = true;
                 continue;
             }
             // A **pattern** label (`case Foo f`, `case Foo f when …`, `case Point(int x, int y)`)
@@ -141,6 +155,23 @@ mod tests {
     }
 
     // ── positives ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn duplicate_default_label_is_flagged() {
+        let d = dups("switch (i) { default: break; default: break; }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("default"), "{d:?}");
+    }
+
+    #[test]
+    fn a_single_default_is_ok() {
+        assert!(dups("switch (i) { case 1: break; default: break; }").is_empty());
+    }
+
+    #[test]
+    fn one_default_per_nested_switch_is_ok() {
+        assert!(dups("switch (i) { default: switch (i) { default: break; } }").is_empty());
+    }
 
     #[test]
     fn arrow_form_duplicate_enum_constant_is_flagged() {

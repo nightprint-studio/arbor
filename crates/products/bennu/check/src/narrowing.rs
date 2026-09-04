@@ -261,15 +261,6 @@ fn literal_fits_or_uncertain(val: &Node, bytes: &[u8], target: Rank) -> bool {
     // source narrows into it), and float/double have no exact integer-literal fit rule → be safe: if the
     // target isn't an integral we can range-check, DON'T treat the literal as definitely-overflowing →
     // return `true` (skip) unless it's a plain integral target below.
-    let (min, max): (i64, i64) = match target {
-        Rank::Num(0) => (i8::MIN as i64, i8::MAX as i64),       // byte
-        Rank::Num(1) => (i16::MIN as i64, i16::MAX as i64),     // short
-        Rank::Num(2) => (i32::MIN as i64, i32::MAX as i64),     // int
-        Rank::Char => (0, u16::MAX as i64),                     // char: 0..=65535
-        // long/float/double target: no integer-literal fit rule we apply → treat as "uncertain" → skip.
-        _ => return true,
-    };
-
     // Peel a single leading unary minus (`byte b = -1;`). A `unary_expression` with `-` over an integer
     // literal is still a compile-time constant.
     let (node, negate) = match unwrap_unary_minus(val, bytes) {
@@ -277,10 +268,12 @@ fn literal_fits_or_uncertain(val: &Node, bytes: &[u8], target: Rank) -> bool {
         None => (*val, false),
     };
 
-    // Only a DECIMAL/HEX/OCTAL/BINARY integer literal is range-checkable here. A `long` literal (`5L`)
-    // is not an `int`-constant for the narrowing exception → NON-constant for our purposes → `false`
-    // (safe to flag; and indeed `byte b = 5L;` is a real error). A float literal, char literal,
-    // identifier, or call → NON-constant → `false` (let the lossy verdict stand — it's a true error).
+    // Is there a constant to reason about AT ALL? This test has to come before the target's range is
+    // looked up, and used not to: a `float`/`long`/`double` target fell straight out of that lookup
+    // as "uncertain → skip", which silently swallowed every narrowing INTO one — `float f = aDouble;`
+    // and `long l = aDouble;` were never reported, whatever the source was. The constant exception
+    // (JLS §5.2) is about a literal; with no literal there is no exception, and the `lossy` verdict
+    // above already stands.
     let is_int_literal = matches!(
         node.kind(),
         "decimal_integer_literal" | "hex_integer_literal" | "octal_integer_literal" | "binary_integer_literal"
@@ -288,6 +281,17 @@ fn literal_fits_or_uncertain(val: &Node, bytes: &[u8], target: Rank) -> bool {
     if !is_int_literal {
         return false;
     }
+
+    let (min, max): (i64, i64) = match target {
+        Rank::Num(0) => (i8::MIN as i64, i8::MAX as i64),       // byte
+        Rank::Num(1) => (i16::MIN as i64, i16::MAX as i64),     // short
+        Rank::Num(2) => (i32::MIN as i64, i32::MAX as i64),     // int
+        Rank::Char => (0, u16::MAX as i64),                     // char: 0..=65535
+        // An int literal never NARROWS into long/float/double (that is a widening), so this arm is
+        // unreachable from `narrowing_check` — skip rather than invent a range.
+        _ => return true,
+    };
+
     let Ok(text) = node.utf8_text(bytes) else {
         // Can't read the text → can't prove overflow → SKIP (sound).
         return true;
@@ -450,6 +454,54 @@ mod tests {
     }
 
     // ── Positives ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn long_local_to_int_is_flagged() {
+        // The source is a primitive LOCAL, not a call. Its declared type used to infer to nothing —
+        // `parse_type_text` answers `None` for a primitive because it has no members — so the whole
+        // check was blind on the shape Java is mostly written in.
+        let d = diags("long l = 5L; int x = l;");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`long`") && d[0].contains("`int`"), "{d:?}");
+    }
+
+    #[test]
+    fn long_parameter_to_int_is_flagged() {
+        let d = run("class C { void m(long l) { int x = l; } }");
+        assert_eq!(d.len(), 1, "{d:?}");
+    }
+
+    #[test]
+    fn double_to_float_is_flagged() {
+        // A `float` target used to fall out of the constant-fit guard as "uncertain → skip" before
+        // anything asked whether there was a constant at all, which swallowed every narrowing INTO
+        // a float or a long.
+        let d = run("class C { void m(double d) { float f = d; } }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`double`") && d[0].contains("`float`"), "{d:?}");
+    }
+
+    #[test]
+    fn double_to_long_is_flagged() {
+        assert_eq!(run("class C { void m(double d) { long l = d; } }").len(), 1);
+    }
+
+    #[test]
+    fn int_local_to_long_is_ok() {
+        assert!(diags("int i = 5; long l = i;").is_empty());
+    }
+
+    #[test]
+    fn float_literal_to_float_is_ok() {
+        assert!(run("class C { void m() { float f = 1.0f; } }").is_empty());
+    }
+
+    #[test]
+    fn long_to_float_is_ok() {
+        // `long` → `float` is a widening primitive conversion (JLS §5.1.2), lossy in precision but
+        // legal without a cast — the rank table must not report it.
+        assert!(run("class C { void m(long l) { float f = l; } }").is_empty());
+    }
 
     #[test]
     fn long_to_int_declarator_is_flagged() {

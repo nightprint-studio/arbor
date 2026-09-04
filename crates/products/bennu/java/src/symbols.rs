@@ -506,6 +506,17 @@ fn collect_type(
                         annotations: collect_annotations(&m, bytes),
                     });
                 }
+                // A constant with a BODY is also an anonymous subclass of the enum, and this branch
+                // used to stop at the field: the body's methods were extracted nowhere, so the type
+                // that declares them did not exist. Everything that asks what a member overrides
+                // then had nothing to answer with — a rename started from one of those overrides
+                // moved it alone and the constant stopped implementing the enum's abstract method.
+                let mut cw = m.walk();
+                for ch in m.named_children(&mut cw) {
+                    if ch.kind() == "class_body" {
+                        collect_anonymous_type(&ch, bytes, package, &fqn, out);
+                    }
+                }
             } else {
                 collect_body_member(
                     &m,
@@ -785,13 +796,23 @@ fn collect_anonymous_type(
     // answer, and the member walk follows both links — so it goes in `implements`, where being
     // wrong costs nothing. Putting it in `extends` would instead feed the "extends a final class"
     // and "must implement abstract" checks a supertype relationship they'd judge on its own terms.
-    let implements = body
-        .parent()
-        .filter(|p| p.kind() == "object_creation_expression")
-        .and_then(|p| p.child_by_field_name("type"))
-        .and_then(|t| node_text(&t, bytes))
-        .map(|t| vec![t])
-        .unwrap_or_default();
+    let implements = match body.parent() {
+        Some(p) if p.kind() == "object_creation_expression" => p
+            .child_by_field_name("type")
+            .and_then(|t| node_text(&t, bytes))
+            .map(|t| vec![t])
+            .unwrap_or_default(),
+        // An enum CONSTANT with a body is an anonymous subclass of its own enum, and there is no
+        // `new` to read a type from — the supertype is the enclosing `enum`, written nowhere. Left
+        // out, the body is a type with no supertype at all, and a rename started from one of its
+        // overrides moved that override alone: the enum's abstract declaration and the sibling
+        // constants stayed behind, and the constant stopped implementing what the enum declares.
+        // [`anonymous_supertype_name`] is the one reading of this, shared with the reference walk.
+        Some(p) if p.kind() == "enum_constant" => {
+            anonymous_supertype_name(body, bytes).map(|n| vec![n]).unwrap_or_default()
+        }
+        _ => Vec::new(),
+    };
 
     let mut methods = Vec::new();
     let mut fields = Vec::new();
@@ -1638,11 +1659,13 @@ mod tests {
         assert_eq!(f.annotations[0].value_str(), Some("db"));
     }
 
+    /// The one type `src` DECLARES. Anonymous bodies are skipped: an enum constant with a body is
+    /// a second type in the list, and it is not the one a test about the enum means.
     fn one_type(src: &str) -> TypeDecl {
         extract_symbols(src)
             .types
             .into_iter()
-            .next()
+            .find(|t| !t.is_anonymous)
             .expect("one type")
     }
 
@@ -2161,6 +2184,22 @@ mod tests {
     /// The constants themselves are members too — `public static final E NAME`, as the compiler
     /// emits them. Without them a project enum reads as having no constants at all: `import static
     /// E.*` supplies no name, `E.` completes to nothing, and switch exhaustiveness gives up.
+    #[test]
+    fn an_enum_constant_body_is_an_anonymous_subclass_of_its_enum() {
+        // There is no `new` to read a supertype from, so the link is the enclosing `enum`. Without
+        // it the body is a type with no supertype, and a rename started from one of its overrides
+        // moves that override alone — the constant then implements nothing.
+        let src = "class A { enum State { RUNNING { boolean go() { return true; } }; abstract boolean go(); } }";
+        let fs = extract_symbols(src);
+        let anon = fs
+            .types
+            .iter()
+            .find(|t| t.is_anonymous)
+            .unwrap_or_else(|| panic!("no anonymous type in {:?}", fs.types.iter().map(|t| &t.fqn).collect::<Vec<_>>()));
+        assert_eq!(anon.fqn, "A.State.1", "{:?}", anon.fqn);
+        assert_eq!(anon.implements, vec!["State".to_string()], "{:?}", anon.implements);
+    }
+
     #[test]
     fn enum_constants_are_indexed_as_static_fields_of_the_enum() {
         let t = one_type("enum Color { RED, GREEN(\"g\"), BLUE { void x() {} }; }");

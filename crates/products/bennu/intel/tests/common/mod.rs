@@ -456,6 +456,16 @@ impl CpMemberIndex for StreamJdk {
                 flags: CpClassFlags::default(),
                 type_params: Vec::new(),
             },
+            // `interface Enumeration<E> { boolean hasMoreElements(); E nextElement(); }` — a library
+            // contract a project class can satisfy with a method it INHERITS rather than declares,
+            // which is what the rename refusal has to notice.
+            "java/util/Enumeration" => iface(
+                &["E"],
+                vec![
+                    abstract_(method("hasMoreElements", vec![], CpTypeRef::plain("boolean"))),
+                    abstract_(method("nextElement", vec![], CpTypeRef::plain("E"))),
+                ],
+            ),
             "java/lang/Object" => CpClassMembers {
                 superclass: None,
                 interfaces: Vec::new(),

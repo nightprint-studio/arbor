@@ -6,6 +6,7 @@
 
 // The type-inference entry points: the one-off caret query (parses + extracts) and the
 // reuse-an-existing-tree variant for the hot reference-walk path.
+pub use crate::infer::is_inferred_type;
 pub use crate::infer::{
     enclosing_type_fqn, infer_expression_type, infer_expression_type_at,
     infer_expression_type_cached, infer_node_type_cached, infer_receiver_type,

@@ -12,15 +12,22 @@
  * Where the token being completed **starts** — CodeMirror needs a `from` to replace, and
  * that is a question about the buffer rather than about the vocabulary. The rule is
  * deliberately shallow and mirrors the backend's: a run of name characters, and what
- * precedes it says which of the three kinds of name it is. Get it wrong and a completion
+ * precedes it says which of the four kinds of name it is. Get it wrong and a completion
  * lands at a slightly wrong offset; it can never cause the wrong candidates to be
  * offered, because it does not choose them.
+ *
+ * ## …except when the backend already decided
+ *
+ * A candidate may carry its own replacement range, and where it does, that wins. It is not a
+ * refinement of the guess above but a different kind of answer: a coordinate completed inside a
+ * pom's `<artifactId>` fills the empty `<groupId>` above it in the same edit, so the range spans
+ * two elements and no rule about "the token under the caret" could ever produce it.
  */
 
-import { makeU16ToByte } from '$lib/components/shared/ui/code-editor';
+import { makeByteToU16, makeU16ToByte } from '$lib/components/shared/ui/code-editor';
 import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 import type { EditorView } from '@codemirror/view';
-import { extCompletion, extHover, extInlineHint } from '$lib/ipc/bennu/ext';
+import { extCompletion, extHover, extInlineHint, type ExtCompletionItem } from '$lib/ipc/bennu/ext';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
 import type { HoverInfo } from '$lib/ipc/bennu/nav';
 
@@ -28,6 +35,11 @@ import type { HoverInfo } from '$lib/ipc/bennu/nav';
  *  `s:iterator` are each ONE token, and splitting them would replace half of a name the
  *  user is in the middle of writing. */
 const NAME = /[A-Za-z0-9_.:-]/;
+
+/** The characters an element's **text** can be completed from. Wider than a name: a Maven
+ *  coordinate carries `/` in a path and `${…}` in a version, and stopping the token at the `{`
+ *  would replace half of a placeholder the user is in the middle of writing. */
+const VALUE = /[A-Za-z0-9_.:${}\/-]/;
 
 /** Where the token under the caret begins. `null` where nothing completes. */
 export function markupTokenStart(ctx: CompletionContext): number | null {
@@ -47,6 +59,16 @@ export function markupTokenStart(ctx: CompletionContext): number | null {
   // where the backend answers nothing anyway.
   const open = before.lastIndexOf('<');
   if (open >= 0 && !before.slice(open).includes('>')) return ctx.pos - (text.length - i);
+
+  // An element's TEXT — `<groupId>org.spring|</groupId>`. Returning null here is why a pom's
+  // values could not be completed at all: every rule above is about a name, and a coordinate, a
+  // version, a scope and a module are all content. The token runs over value characters rather
+  // than name ones, and the backend decides whether there is anything to say.
+  if (open >= 0 && before.slice(open).includes('>')) {
+    let j = text.length;
+    while (j > 0 && VALUE.test(text[j - 1])) j--;
+    return ctx.pos - (text.length - j);
+  }
   return null;
 }
 
@@ -72,6 +94,7 @@ export const markupCompletionSource = async (
   const src = ctx.state.doc.toString();
   const items = await extCompletion(path, src, makeU16ToByte(src)(ctx.pos)).catch(() => []);
   if (items.length === 0) return null;
+  const b2u = makeByteToU16(src);
 
   return {
     from,
@@ -79,6 +102,9 @@ export const markupCompletionSource = async (
       label: it.label,
       type: optionType(it.kind),
       detail: it.detail ?? undefined,
+      // The provider's order, when it has one — see `ExtCompletionItem.sort_text`.
+      boost: it.sort_text ? -Number(it.sort_text) : undefined,
+      apply: applyOf(it, b2u),
     })),
     // The backend already filtered by what was typed; letting CodeMirror re-filter against a
     // prefixed label would drop `context:component-scan` — or `s:iterator` — the moment the
@@ -86,6 +112,30 @@ export const markupCompletionSource = async (
     filter: false,
   };
 };
+
+/** How a candidate is inserted.
+ *
+ *  `undefined` for the ordinary one — CodeMirror replaces `[from, caret)` with the label, which is
+ *  what every name completion wants. A candidate that carries its own range gets an explicit edit
+ *  instead, because the range is the answer: it may start before `from` (filling in an empty
+ *  `<groupId>` above the `<artifactId>` being typed) or end after the caret (replacing the rest of
+ *  a value that was already there). */
+function applyOf(
+  it: ExtCompletionItem,
+  b2u: (byte: number) => number,
+): ((view: EditorView, completion: unknown, from: number, to: number) => void) | undefined {
+  if (it.replace_start == null || it.replace_end == null) return undefined;
+  const from = b2u(it.replace_start);
+  const to = b2u(it.replace_end);
+  const insert = it.insert_text ?? it.label;
+  return (view) => {
+    view.dispatch({
+      changes: { from, to: Math.max(from, to), insert },
+      selection: { anchor: from + insert.length },
+      userEvent: 'input.complete',
+    });
+  };
+}
 
 /** The ghost-text source: what certainly follows, or nothing. */
 export const markupInlineHintSource = async (

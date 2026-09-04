@@ -1,0 +1,21 @@
+[package]
+name         = "bennu-refactor"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Java refactorings as pure source transforms over a tree-sitter parse: extract method, extract variable and constant, inline variable, inline method. Each one plans before it edits and refuses with a reason rather than producing code that does not compile."
+
+[dependencies]
+# The Java grammar (one pin for the workspace) and the declaration model the plans are read
+# against. Parsing here with a second tree-sitter would not be a different choice, it would be a
+# build failure — see `bennu-java`'s `grammar` module.
+bennu-java = { path = "../java" }
+# The tree-sitter runtime, pinned to the workspace-shared 0.25 like every other crate that walks a
+# CST. Native `links` library: exactly one version can be linked, so a crate picking its own is not
+# a different choice, it is a build failure.
+tree-sitter = "0.25"
+serde      = { workspace = true }
+
+[dev-dependencies]

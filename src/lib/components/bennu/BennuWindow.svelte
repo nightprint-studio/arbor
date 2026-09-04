@@ -177,6 +177,7 @@
   import { springStore } from '$lib/stores/bennu/spring.svelte';
   import { availableCatalogs } from './framework-catalogs';
   import { hotswapJsp } from '$lib/ipc/bennu/tomcat';
+  import { mavenDownload } from '$lib/ipc/bennu/deps';
   import { discoverTests } from '$lib/ipc/bennu/tests';
   import { discoverCargoTests } from '$lib/ipc/bennu/cargo-tests';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -1639,6 +1640,16 @@
       { id: 'reindex', title: 'Rebuild index', icon: 'refresh-cw',
         action: () => run(() => { const r = projectStore.project?.root; if (r) void bennuIndexStore.rebuild(r); }),
         when: !!projectStore.project && javaTools && !bennuIndexStore.indexing },
+      // The one action in the dependency story that uses the network. Reachable by name because
+      // the state it fixes — a jar that was never downloaded — announces itself as unresolvable
+      // types in files that are fine, which is the least searchable symptom there is.
+      { id: 'mavendownload', title: 'Download dependencies', icon: 'download',
+        shortcut: 'Alt+Shift+U',
+        action: () => run(async () => {
+          const r = projectStore.project?.root;
+          if (r) await mavenDownload(r).catch(() => undefined);
+        }),
+        when: !!projectStore.project && javaTools },
       { id: 'docs', title: 'Documentation', icon: 'command', shortcut: 'F1', action: () => run(() => bennuUiStore.toggleDocs()), when: true },
       { id: 'tour', title: 'Welcome tour', icon: 'book',
         action: () => run(() => bennuOnboardingStore.show()), when: true },
@@ -1944,6 +1955,16 @@
     if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, 'i')) {
       if (!isI18nBundle(projectStore.activeFilePath)) return;
       e.preventDefault(); bennuUiStore.toggleRight('i18n'); return;
+    }
+
+    // Download whatever this project's dependencies need. Alt+Shift+U ("update"), in the same safe
+    // family as the chords above — and NOT the mnemonic Alt+Shift+M, which is the macro expansion
+    // below. Maven only: on a Cargo project there is nothing for it to do, and a chord that
+    // silently does nothing is worse than one that is not bound.
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, 'u')) {
+      const r = projectStore.project?.root;
+      if (!r || !javaTools) return;
+      e.preventDefault(); void mavenDownload(r).catch(() => undefined); return;
     }
 
     // Expand the macro at the caret. Alt+Shift+M, in the same safe family as the format binding

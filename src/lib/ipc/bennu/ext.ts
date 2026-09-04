@@ -139,9 +139,29 @@ export function extHover(file: string, source: string, offset: number): Promise<
   return bennu('bennu_ext_hover', { args: { file, source, offset } });
 }
 
+/** One framework completion candidate.
+ *
+ *  `replaceStart` / `replaceEnd` are **byte** offsets into the buffer that was sent, and when the
+ *  backend sets them they are not advisory: a value completion inside `<groupId>` replaces the
+ *  element's whole text, and a coordinate completion may deliberately span *two* elements to fill
+ *  the groupId in alongside the artifactId. A consumer that computes its own `from` from the token
+ *  under the caret gets both of those wrong. */
+export interface ExtCompletionItem {
+  label: string;
+  kind: string;
+  detail: string | null;
+  /** What to insert, when it differs from the label. */
+  insert_text?: string | null;
+  replace_start?: number | null;
+  replace_end?: number | null;
+  /** The provider's own ordering, honoured rather than re-sorted — it is what keeps a coordinate
+   *  that is actually in `~/.m2` above one that only a built-in table knows. */
+  sort_text?: string | null;
+}
+
 /** Framework completion candidates at a caret. Wire: `bennu_ext_completion`. */
 export function extCompletion(file: string, source: string, offset: number) {
-  return bennu<{ label: string; kind: string; detail: string | null }[]>('bennu_ext_completion', {
+  return bennu<ExtCompletionItem[]>('bennu_ext_completion', {
     args: { file, source, offset },
   });
 }

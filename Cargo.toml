@@ -110,6 +110,8 @@ members = [
     "crates/products/bennu/xsd",
     "crates/products/bennu/xml",
     "crates/products/bennu/deps",
+    "crates/products/bennu/maven",
+    "crates/products/bennu/refactor",
     # What a Cargo workspace IS, read off its manifests: the crate graph, the manifest
     # schema behind Cargo.toml validation + completion, and the cargo command catalogue.
     "crates/products/bennu/cargo",

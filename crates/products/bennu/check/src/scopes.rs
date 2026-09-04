@@ -293,6 +293,12 @@ pub(crate) fn is_value_position(ident: Node) -> bool {
         // A `switch`/`case` label constant: `case FOO:` — an enum-constant / constant-name context we
         // don't judge (it resolves against the selector's enum type, not the local scope).
         "switch_label" | "constant" => return false,
+        // The TARGET LABEL of `break outer;` / `continue outer;`. A label lives in its own namespace
+        // (JLS §6.5.1) — it is not a variable, and nothing declares it as one, so judging it as a
+        // bare value made ordinary labelled-loop code light up with "cannot resolve symbol". The
+        // question that IS worth asking about it — does any enclosing statement carry that label —
+        // is `branches.rs`'s, and it already answers it as `unknown-label`.
+        "break_statement" | "continue_statement" => return false,
         _ => {}
         }
     }

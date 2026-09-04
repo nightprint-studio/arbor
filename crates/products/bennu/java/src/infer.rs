@@ -79,6 +79,18 @@ pub struct InferCache {
     type_text: RefCell<HashMap<String, Option<TypeRef>>>,
 }
 
+
+/// Whether a declaration's written type is one the compiler infers rather than one the source
+/// states: `var` (Java 10+) and Lombok's `val`, which is a `final var` an annotation processor
+/// writes.
+///
+/// One predicate rather than a `matches!` at each site, because the sites do not agree by accident:
+/// an inlay hint that knew only `var` left every Lombok `val` without the type the inference had
+/// already worked out, and nothing said so.
+pub fn is_inferred_type(type_text: &str) -> bool {
+    matches!(type_text.trim(), "var" | "val")
+}
+
 impl InferCache {
     /// A fresh, empty cache for one file.
     pub fn new() -> Self {
@@ -286,6 +298,16 @@ pub fn infer_expression_type_cached(
 /// [`crate::typename::is_resolved_binary`], which is the same question every consumer asks.
 fn is_resolved(t: &TypeRef, resolver: &dyn TypeResolver) -> bool {
     crate::typename::is_resolved_binary(&t.binary_name, resolver)
+}
+
+/// The primitive `text` names, when it is exactly one — no array dimensions, no type arguments.
+/// `void` is excluded on purpose: an expression of type `void` has no value to reason about, and
+/// handing one out as a type would let checks compare against it.
+fn primitive_type_text(text: &str) -> Option<&'static str> {
+    const PRIMITIVES: &[&str] =
+        &["boolean", "byte", "char", "short", "int", "long", "float", "double"];
+    let text = text.trim();
+    PRIMITIVES.iter().copied().find(|p| *p == text)
 }
 
 /// Infer the type of an **already-located** node — the caller found it during its own tree walk, so
@@ -795,7 +817,12 @@ impl Ctx<'_> {
     /// yields `None`, never a guess). The receiver's generics are then substituted, so
     /// `List<Foo>.forEach(Consumer<? super E>)` yields `Consumer<Foo>`.
     fn param_at(&self, recv: &TypeRef, name: &str, idx: usize) -> Option<TypeRef> {
-        let mut types: Vec<TypeRef> = Vec::new();
+        // The DECLARING class travels with each candidate. A method inherited from a supertype is
+        // written in that supertype's type variables — `Iterable.forEach(Consumer<? super T>)` — and
+        // substituting them against the RECEIVER's list (`List<E>`) matches nothing, leaves `T`
+        // standing, and the lambda parameter ends up untyped. Which is why `list.replaceAll(x -> …)`
+        // typed `x` and `list.forEach(x -> …)`, the commoner of the two by far, did not.
+        let mut types: Vec<(String, TypeRef)> = Vec::new();
         let mut visited = HashSet::new();
         let mut stack = vec![recv.binary_name.clone()];
         while let Some(bn) = stack.pop() {
@@ -807,7 +834,7 @@ impl Ctx<'_> {
             let cm = self.resolver.members_of(&bn)?;
             for m in &cm.methods {
                 if m.kind == MemberKind::Method && m.name == name {
-                    types.push(m.params.get(idx)?.clone());
+                    types.push((bn.clone(), m.params.get(idx)?.clone()));
                 }
             }
             if let Some(sc) = cm.superclass.clone() {
@@ -816,14 +843,38 @@ impl Ctx<'_> {
             stack.extend(cm.interfaces.iter().cloned());
         }
         // Require a single distinct parameter type across all overloads.
-        let mut uniq: Vec<TypeRef> = Vec::new();
+        let mut uniq: Vec<(String, TypeRef)> = Vec::new();
         for t in &types {
-            if !uniq.contains(t) {
+            if !uniq.iter().any(|(_, ty)| ty == &t.1) {
                 uniq.push(t.clone());
             }
         }
-        let [fi] = uniq.as_slice() else { return None };
-        Some(self.substitute_generics(fi, recv))
+        let [(declaring, fi)] = uniq.as_slice() else { return None };
+        Some(self.substitute_generics(fi, &self.as_declared_by(declaring, recv)))
+    }
+
+    /// The receiver seen AS the class that declares the method: that class's binary name carrying
+    /// the receiver's own type arguments.
+    ///
+    /// Sound only while the subtype passes its parameters to the supertype in order — `List<E>
+    /// extends Collection<E> extends Iterable<E>`, which is every JDK collection — because the index
+    /// records supertypes by binary name and drops their type arguments, so the real mapping is not
+    /// available to read. Guarded on the arities matching, and it falls back to the receiver
+    /// untouched when they do not, which is the previous behaviour rather than a worse guess.
+    fn as_declared_by(&self, declaring: &str, recv: &TypeRef) -> TypeRef {
+        if declaring == recv.binary_name || recv.type_args.is_empty() {
+            return recv.clone();
+        }
+        let same_arity = self
+            .resolver
+            .members_of(declaring)
+            .is_some_and(|cm| cm.type_params.len() == recv.type_args.len());
+        if !same_arity {
+            return recv.clone();
+        }
+        let mut seen = recv.clone();
+        seen.binary_name = declaring.to_string();
+        seen
     }
 
     /// The type of parameter `idx` of a functional interface's SINGLE abstract method (its SAM),
@@ -1567,7 +1618,7 @@ impl Ctx<'_> {
         let value = loop_node.child_by_field_name("value");
         let start = value.map_or_else(|| loop_node.start_byte(), |v| v.end_byte());
         let ty = match type_text.as_deref() {
-            Some("var") | Some("val") => {
+            Some(t) if is_inferred_type(t) => {
                 value.map(|v| LocalTy::IterElem(v.start_byte(), v.end_byte()))
             }
             Some(t) => Some(LocalTy::Declared(t.to_string())),
@@ -1724,7 +1775,7 @@ impl Ctx<'_> {
     /// falsely flagged). A written type is taken as-is; a missing type/initializer yields `None` (skip).
     fn local_ty_of(&self, type_text: Option<&str>, value: Option<Node>) -> Option<LocalTy> {
         match type_text {
-            Some("var") | Some("val") => {
+            Some(t) if is_inferred_type(t) => {
                 value.map(|init| LocalTy::VarInit(init.start_byte(), init.end_byte()))
             }
             Some(t) => Some(LocalTy::Declared(t.to_string())),
@@ -1761,13 +1812,28 @@ impl Ctx<'_> {
 
     // ---- type text -> TypeRef ----
 
-    /// Resolve a written type text (`Map<String,Object>`, `HttpServletRequest`) to a
+    /// Resolve a written type text (`Map<String,Object>`, `HttpServletRequest`, `long`) to a
     /// `TypeRef` with binary names, using imports + the resolver.
+    ///
+    /// [`parse_type_text`] answers a MEMBER-model question and so returns `None` for a primitive —
+    /// there is nothing to look a member up on. Inference asks a different one: `long` is the whole
+    /// answer for `long l`, and returning nothing here left every primitive **local and parameter**
+    /// untyped. Fields were spared (their type comes back off the index, which does carry `long`),
+    /// which is what made the hole so hard to see from a test: the same check fired on `int i = f;`
+    /// and stayed silent on `int i = l;`. Everything downstream that needs the static type of a
+    /// primitive — the lossy-narrowing check, the condition-type check, argument types — was blind
+    /// on the single commonest shape in Java.
     fn resolve_type_text(&self, text: &str) -> Option<TypeRef> {
         if let Some(hit) = self.cache.type_text.borrow().get(text) {
             return hit.clone();
         }
-        let result = parse_type_text(text).map(|parsed| self.to_binary_ref(&parsed));
+        let result = match parse_type_text(text) {
+            Some(parsed) => Some(self.to_binary_ref(&parsed)),
+            // A bare primitive, and only a bare one: `int[]` keeps answering `None` because the rest
+            // of the walk does not model arrays (`array_access` already infers nothing), and typing
+            // the declaration without typing its uses would be a half-truth in the cache.
+            None => primitive_type_text(text).map(TypeRef::simple),
+        };
         self.cache
             .type_text
             .borrow_mut()

@@ -13,57 +13,40 @@ use std::process::Command;
 
 use arbor_process_ext::prelude::NoWindowExt;
 use bennu_classpath::prelude::{ClassSource, JarSource, JavaSourceZip};
+use bennu_deps::prelude::{coord_of, Coord};
 
-/// Maven coordinates parsed from a jar's `~/.m2` path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Gav {
-    pub group: String,
-    pub artifact: String,
-    pub version: String,
-}
-
-impl Gav {
-    /// The `mvn dependency:get -Dartifact=…` coordinate for the SOURCES classifier.
-    pub fn sources_artifact(&self) -> String {
-        format!("{}:{}:{}:jar:sources", self.group, self.artifact, self.version)
-    }
-
-    /// A compact `artifact:version` label for the job / banner.
-    pub fn label(&self) -> String {
-        format!("{}:{}", self.artifact, self.version)
-    }
-}
-
-/// Parse the Maven coordinates from a dependency jar living under a local `~/.m2/repository`.
+/// The `mvn dependency:get -Dartifact=…` coordinate for an artifact's **sources**.
 ///
-/// Layout: `…/repository/<group/with/slashes>/<artifactId>/<version>/<artifactId>-<version>.jar`.
-/// The version is the jar's parent dir, the artifactId its grandparent, and the group is the path
-/// between the `repository` marker and the artifactId dir. `None` when the path isn't shaped like a
-/// local-repo artifact (no `repository` segment, or too shallow) — the caller then reports that the
-/// coordinates couldn't be determined instead of guessing.
-pub fn gav_from_m2_jar(jar: &Path) -> Option<Gav> {
-    let comps: Vec<String> =
-        jar.iter().map(|c| c.to_string_lossy().into_owned()).collect();
-    if comps.len() < 4 {
-        return None;
-    }
-    // `repository` anchors the group path. Fall back to the last-resort layout parse when a custom
-    // local-repo dir isn't literally named "repository" is intentionally NOT attempted — without the
-    // marker the group boundary is ambiguous.
-    let repo_idx = comps.iter().rposition(|c| c == "repository")?;
-    let last = comps.len() - 1; // filename
-    let version_idx = last.checked_sub(1)?;
-    let artifact_idx = last.checked_sub(2)?;
-    if artifact_idx <= repo_idx {
-        return None;
-    }
-    let group = comps[repo_idx + 1..artifact_idx].join(".");
-    let artifact = comps[artifact_idx].clone();
-    let version = comps[version_idx].clone();
-    if group.is_empty() || artifact.is_empty() || version.is_empty() {
-        return None;
-    }
-    Some(Gav { group, artifact, version })
+/// The one Maven-CLI-shaped string in this module: five colon-separated fields, `jar:sources` at
+/// the end. Kept here rather than on [`Coord`] because it is a command-line spelling and not a
+/// property of the coordinate.
+pub fn sources_artifact(coord: &Coord) -> String {
+    format!("{}:{}:{}:jar:sources", coord.group_id, coord.artifact_id, coord.version)
+}
+
+/// A compact `artifact:version` label for the job / banner.
+pub fn artifact_label(coord: &Coord) -> String {
+    format!("{}:{}", coord.artifact_id, coord.version)
+}
+
+/// The Maven coordinates of a dependency jar living in the local repository.
+///
+/// **The repository is asked where it is first.** This was its own parse, with its own rule: it
+/// insisted on a literal `repository` path segment and gave up without one, so on a machine with a
+/// relocated local repository (`-Dmaven.repo.local`, or a `<localRepository>` in `settings.xml`)
+/// every "Download sources" reported *couldn't determine the coordinates* — for a jar the index had
+/// loaded perfectly well. Resolving the root and reading the path under it makes the group exact
+/// wherever the repository lives; [`coord_of`]'s marker trick stays as the fallback for a jar that
+/// is somehow outside it.
+///
+/// `None` for a path that is not laid out like a repository artifact (`target/classes`, or a jar a
+/// `system`-scoped dependency points straight at), and `None` when the group could not be
+/// determined either way — `dependency:get` needs a whole coordinate, and half of one would fetch
+/// nothing while looking like it tried.
+pub fn gav_from_m2_jar(jar: &Path) -> Option<Coord> {
+    let repo = bennu_maven::prelude::LocalRepo::discover();
+    let coord = repo.coord_at(jar).or_else(|| coord_of(jar))?;
+    coord.is_complete().then_some(coord)
 }
 
 /// The `-sources.jar` sibling of a dependency jar (`foo-1.2.3.jar` → `foo-1.2.3-sources.jar`),
@@ -124,14 +107,14 @@ pub fn run_mvn_get_sources(
     root: &Path,
     mvn_path: &str,
     java_home: Option<&Path>,
-    gav: &Gav,
+    gav: &Coord,
 ) -> Result<(bool, String), String> {
     let mut cmd = Command::new(mvn_path);
     cmd.current_dir(root)
         .arg("-q")
         .arg("--batch-mode")
         .arg("dependency:get")
-        .arg(format!("-Dartifact={}", gav.sources_artifact()));
+        .arg(format!("-Dartifact={}", sources_artifact(gav)));
     if let Some(jh) = java_home {
         cmd.env("JAVA_HOME", jh);
     }
@@ -158,16 +141,18 @@ mod tests {
             "C:/Users/u/.m2/repository/org/springframework/spring-core/5.3.20/spring-core-5.3.20.jar",
         );
         let gav = gav_from_m2_jar(jar).expect("parse");
-        assert_eq!(gav.group, "org.springframework");
-        assert_eq!(gav.artifact, "spring-core");
+        assert_eq!(gav.ga(), "org.springframework:spring-core");
         assert_eq!(gav.version, "5.3.20");
-        assert_eq!(gav.sources_artifact(), "org.springframework:spring-core:5.3.20:jar:sources");
-        assert_eq!(gav.label(), "spring-core:5.3.20");
+        assert_eq!(sources_artifact(&gav), "org.springframework:spring-core:5.3.20:jar:sources");
+        assert_eq!(artifact_label(&gav), "spring-core:5.3.20");
     }
 
+    /// A jar that is not laid out like a repository artifact has no coordinate to fetch sources
+    /// for, and half a coordinate would fetch nothing while looking like it tried.
     #[test]
-    fn gav_none_without_repository_marker() {
+    fn gav_none_for_a_path_that_is_not_repository_shaped() {
         assert!(gav_from_m2_jar(Path::new("C:/tmp/spring-core-5.3.20.jar")).is_none());
+        assert!(gav_from_m2_jar(Path::new("C:/proj/module/target/classes")).is_none());
     }
 
     #[test]

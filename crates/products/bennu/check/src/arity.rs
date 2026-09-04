@@ -3,6 +3,11 @@
 //! that's a separate, harder check), which makes it safe: boxing, generics and widening never change
 //! how many arguments a call has.
 //!
+//! Two shapes are read: `recv.method(…)`, whose receiver gives the type to ask, and a **bare**
+//! `method(…)`, whose receiver is the implicit `this` — see [`crate::bare_call`] for the guards that
+//! make naming `this` safe. The bare one is the shape a class calling its own methods is made of,
+//! and it went unjudged for as long as the check only looked for a receiver.
+//!
 //! Conservative to the bone (docs: never a false "cannot resolve"):
 //!   * only checked when the receiver type is inferred AND its whole hierarchy is resolvable — an
 //!     un-indexed supertype could hide the matching overload, so we bail;
@@ -60,14 +65,60 @@ pub fn arity_errors_in(
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
+    // Built once per file, not per call: it walks the static-import owners' hierarchies and gathers
+    // every signature the file declares. `None` means some whole-file guard failed → no bare call in
+    // this file is judgeable, and the receiver-ful ones carry on unaffected.
+    let bare = crate::bare_call::bare_call_scope(root, source, symbols, resolver);
     for &n in nodes {
         match n.kind() {
-            "method_invocation" => check_call(n, &root, source, bytes, symbols, resolver, cache, &mut out),
+            "method_invocation" => {
+                check_call(n, &root, source, bytes, symbols, resolver, cache, &mut out);
+                if let Some(bare) = &bare {
+                    check_bare_call(n, bare, bytes, resolver, cache, &mut out);
+                }
+            }
             "object_creation_expression" => check_new(n, source, bytes, symbols, resolver, &mut out),
             _ => {}
         }
     }
     out
+}
+
+/// A bare `method(a, b)` — the receiver is `this`, so the overload set is the top type's, plus every
+/// signature the file itself declares (which the index may not have seen yet).
+fn check_bare_call(
+    n: Node,
+    bare: &crate::bare_call::BareCalls,
+    bytes: &[u8],
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+    out: &mut Vec<Diagnostic>,
+) {
+    let Some(method) = bare.judgeable(n, bytes) else { return };
+    let Some(name) = n.child_by_field_name("name") else { return };
+    let Some(args) = n.child_by_field_name("arguments") else { return };
+
+    let res = cache.resolve_methods(resolver, &bare.top_binary, method);
+    if !res.complete {
+        return;
+    }
+    let mut sigs: Vec<Sig> = res.candidates.iter().map(sig_of).collect();
+    // The buffer's own declarations, ahead of the index. A `T...` parameter reaches us as written,
+    // so varargs is read off the text rather than from a resolved array binary name.
+    for fs in bare.file_sigs(method) {
+        sigs.push(Sig { params: fs.param_texts.len(), last_is_array: fs.varargs });
+    }
+    if sigs.is_empty() {
+        return; // no such method at all → `unresolved_call`'s finding, not a wrong arity
+    }
+    let argc = arg_count(args);
+    if !sigs.iter().any(|s| s.accepts(argc)) {
+        out.push(crate::check_id::CheckId::WrongArgumentCount.span(
+            name.start_byte(),
+            args.end_byte(),
+            format!("No overload of `{method}` takes {argc} argument{}", plural(argc)),
+        ));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -251,7 +302,21 @@ mod tests {
                 flags: Default::default(),
             },
         );
-        let simple = [("Svc", "com/acme/Svc")]
+        // The class the test sources are written in, so a BARE call has a fully-known `this` to bind
+        // against. `helper(int)` is the indexed overload; a test that declares another in the source
+        // exercises the buffer-ahead-of-index path.
+        members.insert(
+            "C".to_string(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: Some("java/lang/Object".to_string()),
+                interfaces: Vec::new(),
+                methods: vec![method("helper", &["int"])],
+                fields: Vec::new(),
+                flags: Default::default(),
+            },
+        );
+        let simple = [("Svc", "com/acme/Svc"), ("C", "C")]
             .into_iter()
             .map(|(s, b)| (s.to_string(), b.to_string()))
             .collect();
@@ -304,5 +369,40 @@ mod tests {
     #[test]
     fn unknown_receiver_is_not_flagged() {
         assert!(diags("Unknown u = null; u.whatever(1, 2, 3);").is_empty());
+    }
+
+    // ── bare calls (receiver = the implicit `this`) ─────────────────────────────
+
+    #[test]
+    fn bare_call_with_the_right_arity_is_ok() {
+        assert!(diags("helper(1);").is_empty());
+    }
+
+    #[test]
+    fn bare_call_with_the_wrong_arity_is_flagged() {
+        let d = diags("helper(1, 2);");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("helper") && d[0].contains("2 arguments"), "{d:?}");
+    }
+
+    #[test]
+    fn bare_call_to_a_method_only_the_buffer_declares_is_not_flagged() {
+        // `fresh` is in the source but not in the resolver — the index has not caught up. Its arity
+        // comes off the CST, so the call is judged against the truth rather than reported missing.
+        let src = "class C { void fresh(int a, int b) {} void m() { fresh(1, 2); } }";
+        assert!(arity_errors(src, &resolver()).is_empty());
+    }
+
+    #[test]
+    fn bare_call_of_an_unknown_name_is_not_arity_flagged() {
+        // No candidate at all → `unresolved_call` reports it; arity must not double-report.
+        assert!(diags("nothingLikeThis(1, 2, 3);").is_empty());
+    }
+
+    #[test]
+    fn bare_call_inside_a_nested_type_is_not_flagged() {
+        // A nested class can declare its own `helper` that the top type's hierarchy knows nothing of.
+        let src = "class C { void m() {} class Inner { void go() { helper(1, 2, 3); } } }";
+        assert!(arity_errors(src, &resolver()).is_empty());
     }
 }

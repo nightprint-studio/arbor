@@ -7,7 +7,10 @@
 //!   * illegal modifier combinations (two visibility modifiers, `abstract` + `private`/`static`/
 //!     `final`/`native`, a class that's `abstract` *and* `final`, `final` + `volatile` field);
 //!   * a `record` can't be `abstract` and can't declare instance fields;
-//!   * an `enum` constant with arguments needs a constructor.
+//!   * an `enum` constant with arguments needs a constructor;
+//!   * a `native` method carries no body;
+//!   * an interface member is never `protected`, and a bodyless interface method is never `private`;
+//!   * an `enum` constructor takes no access modifier (it is implicitly private).
 
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
@@ -38,6 +41,7 @@ pub fn declaration_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
             "record_declaration" => check_record(n, bytes, &mut out),
             "enum_declaration" => check_enum(n, bytes, &mut out),
             "field_declaration" => check_field(n, bytes, &mut out),
+            "constructor_declaration" => check_constructor(n, bytes, &mut out),
             _ => {}
         }
     }
@@ -106,6 +110,38 @@ fn check_method(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
         let in_interface = enclosing_type(n).map(|t| t.kind() == "interface_declaration").unwrap_or(false);
         if !in_interface {
             out.push(err(anchor, "Default methods are only allowed in interfaces"));
+        }
+    }
+    // `native` says the body lives in another language; writing one here is a contradiction, and
+    // javac says so (`compiler.err.native.meth.cant.have.body`).
+    if has("native") && has_body {
+        out.push(err(anchor, "Native method cannot have a body"));
+    }
+    // Interface members. `protected` is not a modifier an interface member can carry at all, in any
+    // Java version. `private` IS legal since Java 9 — but only for a method with a body, because a
+    // private abstract method could never be implemented.
+    if enclosing_type(n).is_some_and(|t| t.kind() == "interface_declaration") {
+        if has("protected") {
+            out.push(err(anchor, "Modifier `protected` is not allowed on an interface member"));
+        } else if has("private") && !has_body {
+            out.push(err(anchor, "A `private` interface method must have a body"));
+        }
+    }
+}
+
+/// An `enum` constructor is implicitly private, and JLS §8.9.2 forbids writing an access modifier on
+/// it — `public E() {}` inside an enum is `compiler.err.mod.not.allowed.here`.
+fn check_constructor(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+    if !enclosing_type(n).is_some_and(|t| t.kind() == "enum_declaration") {
+        return;
+    }
+    let mods = modifier_keywords(n, bytes);
+    for bad in ["public", "protected"] {
+        if mods.contains(&bad) {
+            out.push(err(
+                name_span(n),
+                format!("Modifier `{bad}` is not allowed on an enum constructor"),
+            ));
         }
     }
 }
@@ -253,6 +289,51 @@ mod tests {
     fn errs(src: &str) -> Vec<String> {
         let tree = parse(src);
         declaration_errors(tree.root_node(), src).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn native_method_with_a_body_is_flagged() {
+        let e = errs("class C { native void m() { } }");
+        assert!(e.iter().any(|m| m.contains("Native method")), "{e:?}");
+    }
+
+    #[test]
+    fn native_method_without_a_body_is_ok() {
+        assert!(errs("class C { native void m(); }").is_empty());
+    }
+
+    #[test]
+    fn protected_interface_member_is_flagged() {
+        let e = errs("interface I { protected void m(); }");
+        assert!(e.iter().any(|m| m.contains("protected")), "{e:?}");
+    }
+
+    #[test]
+    fn private_interface_method_without_a_body_is_flagged() {
+        let e = errs("interface I { private void m(); }");
+        assert!(e.iter().any(|m| m.contains("must have a body")), "{e:?}");
+    }
+
+    #[test]
+    fn private_interface_method_with_a_body_is_ok() {
+        // Legal since Java 9 — a private helper an interface's default methods can share.
+        assert!(errs("interface I { private void m() { } }").is_empty());
+    }
+
+    #[test]
+    fn public_enum_constructor_is_flagged() {
+        let e = errs("enum E { X; public E() {} }");
+        assert!(e.iter().any(|m| m.contains("enum constructor")), "{e:?}");
+    }
+
+    #[test]
+    fn package_private_enum_constructor_is_ok() {
+        assert!(errs("enum E { X; E() {} }").is_empty());
+    }
+
+    #[test]
+    fn class_constructor_may_be_public() {
+        assert!(errs("class C { public C() {} }").is_empty());
     }
 
     #[test]

@@ -219,3 +219,97 @@ export function moduleWord(ecosystem: string, plural = false): string {
 export function moduleGraph(root: string): Promise<ModuleGraph> {
   return bennu('bennu_module_graph', { args: { root } });
 }
+
+// ── The local repository ─────────────────────────────────────────────────────
+//
+// A different question from the report above, and deliberately in the same file: the report says
+// what the project *asks for*, and this says what the machine *has*. The two are only ever read
+// together — "declared and not resolved" is the intersection, and it is the state that makes every
+// type in a library unresolvable at once.
+
+/** One artifact the project needs and the local repository does not have. */
+export interface MissingArtifact {
+  /** `groupId:artifactId:version`, as a person reads it. */
+  coord: string;
+  group_id: string;
+  artifact_id: string;
+  version: string;
+  /** Where it was looked for — the path a download would create. */
+  path: string;
+  /** Versions of the same artifact that ARE installed, which is what separates a mistyped version
+   *  from a coordinate nobody has ever fetched. */
+  other_versions: string[];
+}
+
+/** What the dependency tier is actually standing on. */
+export interface MavenStatus {
+  /** The local repository in use — resolved from `settings.xml` / `-Dmaven.repo.local`, not
+   *  assumed. The first thing to check when nothing resolves on a machine that builds fine. */
+  repository: string;
+  repository_exists: boolean;
+  /** Distinct `groupId:artifactId` in it. Zero means the catalogue has not been scanned yet, not
+   *  that the repository is empty. */
+  artifacts: number;
+  versions: number;
+  /** The Maven launcher that was found, or the bare `mvn` when none was. */
+  maven: string;
+  /** Jars the direct read produced — what the index gets with no Maven run at all. */
+  resolved_jars: number;
+  /** The project's own modules, built from source and never looked for in a repository. */
+  modules: string[];
+  missing: MissingArtifact[];
+  /** Declared dependencies whose version nothing on disk answers — an undefined `${property}`, a
+   *  range, a BOM that is itself missing. A download will not fix these. */
+  unversioned: string[];
+  /** One line summarising the shortfall; empty when everything resolved. */
+  shortfall: string;
+}
+
+/** One coordinate a search turned up. */
+export interface MavenHit {
+  group_id: string;
+  artifact_id: string;
+  /** Installed versions, newest first. Empty for a coordinate only the built-in table knows. */
+  versions: string[];
+  description: string;
+  installed: boolean;
+}
+
+/** Where this project's dependencies come from, and which of them are not there. Runs no build
+ *  tool and touches no network. Wire: `bennu_maven_status`. */
+export function mavenStatus(root: string): Promise<MavenStatus> {
+  return bennu('bennu_maven_status', { args: { root } });
+}
+
+/** Search for a dependency coordinate — the local repository first, then the built-in table. The
+ *  same two sources the pom's completion popup answers from. Wire: `bennu_maven_search`. */
+export function mavenSearch(query: string, plugins = false): Promise<MavenHit[]> {
+  return bennu('bennu_maven_search', { args: { query, plugins } });
+}
+
+/** Re-walk the local repository, for the minute after a build downloaded forty jars. Returns how
+ *  many artifacts it now holds. Wire: `bennu_maven_refresh`. */
+export function mavenRefresh(): Promise<number> {
+  return bennu('bennu_maven_refresh', { args: {} });
+}
+
+/** Download whatever this project's dependencies need (`dependency:go-offline`), then rebuild the
+ *  index. The only call here that uses the network; it returns as soon as the job is started, and
+ *  reports through the Jobs panel. Wire: `bennu_maven_download`. */
+export function mavenDownload(root: string): Promise<string> {
+  return bennu('bennu_maven_download', { args: { root } });
+}
+
+/** Re-resolve the project's dependencies from scratch and rebuild the index behind them — the two
+ *  halves of "make the editor agree with what is on disk", which are always wanted together.
+ *  Returns as soon as the work is started. Wire: `bennu_maven_reload`. */
+export function mavenReload(root: string): Promise<string> {
+  return bennu('bennu_maven_reload', { args: { root } });
+}
+
+/** Download the `-sources.jar` of every dependency, so Ctrl+B into a library lands on real source
+ *  instead of a decompiled stub. A background job; artifacts that publish no sources are skipped
+ *  rather than reported as failures. Wire: `bennu_maven_download_sources`. */
+export function mavenDownloadSources(root: string): Promise<string> {
+  return bennu('bennu_maven_download_sources', { args: { root } });
+}

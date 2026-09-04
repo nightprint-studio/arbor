@@ -149,13 +149,13 @@ fn scan(jars: &[String], allow: &LibraryBeanAllowlist) -> Vec<LibraryBeanGroupDt
 /// One jar's beans — a single group, or nothing when it declares none. A `Vec` rather than
 /// an `Option` because that is what the memo round-trips, and "no beans" has to be a
 /// storable answer and not an absent one.
-fn scan_jar(jar: &str, coord: &bennu_deps::prelude::JarCoord) -> Vec<LibraryBeanGroupDto> {
+fn scan_jar(jar: &str, coord: &bennu_deps::prelude::Coord) -> Vec<LibraryBeanGroupDto> {
     let beans = beans_of_classes(annotated_classes(jar).iter());
     if beans.is_empty() {
         return Vec::new();
     }
     vec![LibraryBeanGroupDto {
-        coordinate: coord.coord(),
+        coordinate: coord.ga(),
         group_id: coord.group_id.clone(),
         artifact_id: coord.artifact_id.clone(),
         version: coord.version.clone(),

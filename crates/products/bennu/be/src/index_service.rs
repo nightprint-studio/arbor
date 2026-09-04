@@ -2402,8 +2402,9 @@ impl IndexService {
     }
 
     /// Drop the cached dependency-sources pool for `root`, so the next go-to rebuilds it and picks up
-    /// a freshly-downloaded `-sources.jar`. Called after a successful "Download sources" fetch.
-    fn refresh_dep_sources(&self, root: &str) {
+    /// a freshly-downloaded `-sources.jar`. Called after a successful "Download sources" fetch —
+    /// both the per-class one below and the project-wide one in the `maven` domain.
+    pub(crate) fn refresh_dep_sources(&self, root: &str) {
         self.dep_sources.lock().unwrap_or_else(|p| p.into_inner()).remove(root);
     }
 
@@ -2457,8 +2458,8 @@ impl IndexService {
             let job = register_bennu_job(
                 &host,
                 &sink,
-                &format!("Download sources: {}", gav.label()),
-                &gav.sources_artifact(),
+                &format!("Download sources: {}", crate::sources_download::artifact_label(&gav)),
+                &crate::sources_download::sources_artifact(&gav),
                 "Download",
                 true,
             );
@@ -2472,7 +2473,12 @@ impl IndexService {
                     let _ = svc.decompiled_stub(&file, &source, &name);
                     sink.emit(EVT_SOURCES_READY, json!({ "path": &view_path, "ok": true }));
                     finish_bennu_job(&sink, job, true, None);
-                    notify(&sink, "Sources downloaded", &format!("{} sources attached", gav.label()), "success");
+                    notify(
+                        &sink,
+                        "Sources downloaded",
+                        &format!("{} sources attached", crate::sources_download::artifact_label(&gav)),
+                        "success",
+                    );
                 }
                 Ok((false, log)) => {
                     let msg = sources_failure_reason(&log);
@@ -2488,6 +2494,28 @@ impl IndexService {
             }
         });
         Ok(String::new())
+    }
+
+    /// The static type of an expression in `file`, **written the way source writes it**, plus the
+    /// imports it needs.
+    ///
+    /// What a refactoring asks before it writes a declaration: `var` is not an answer on a Java 8
+    /// project, and a raw `List` where the code said `List<String>` is a warning the user did not
+    /// have before. `None` when no project owns the file, the index is not built, or the expression
+    /// cannot be typed — and each of those is a refusal at the call site rather than a guess.
+    pub fn infer_type_source(
+        &self,
+        file: &str,
+        source: &str,
+        start: usize,
+        end: usize,
+    ) -> Option<(String, Vec<String>)> {
+        let slot = self.slot_for_file(file)?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.infer_type_source(source, start, end)
     }
 
     /// Importable FQNs (dotted, sorted) for a simple type `name`, from the owning project's class-name
@@ -3074,7 +3102,7 @@ fn validate_files_parallel(
 /// successful completion (matching `is_system`, which purges the registry entry) — an ephemeral pass
 /// visible only while it runs; any other category lingers as completed. `non_cancellable` because no
 /// FE cancel is wired to these yet.
-fn register_bennu_job(
+pub(crate) fn register_bennu_job(
     host: &Arc<dyn HostCaller>,
     sink: &Arc<dyn EventSink>,
     name: &str,
@@ -3112,7 +3140,7 @@ fn register_bennu_job(
 
 /// Mark a bennu job done: set its terminal status in the registry and emit `arbor://job-done`. A
 /// no-op when the job was never registered (no reverse channel).
-fn finish_bennu_job(
+pub(crate) fn finish_bennu_job(
     sink: &Arc<dyn EventSink>,
     job: Option<JobHandle>,
     success: bool,
@@ -3140,7 +3168,7 @@ fn finish_bennu_job(
 /// Emit a toast notification to the bennu window (`plugin:notification`, re-emitted by the shell).
 /// `target:"bennu"` is REQUIRED: the feedback router (`makeAccepts`) drops untagged notifications
 /// for a non-main host, so without it the bennu window shows nothing at all.
-fn notify(sink: &Arc<dyn EventSink>, title: &str, message: &str, level: &str) {
+pub(crate) fn notify(sink: &Arc<dyn EventSink>, title: &str, message: &str, level: &str) {
     sink.emit(
         "plugin:notification",
         json!({ "plugin": "bennu", "target": "bennu", "title": title, "message": message, "level": level }),

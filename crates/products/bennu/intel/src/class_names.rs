@@ -259,7 +259,13 @@ fn match_tier(name: &str, typed: &str) -> Option<u8> {
     {
         return Some(1);
     }
-    camel_humps_match(name.as_bytes(), typed.as_bytes()).then_some(2)
+    // Hump-jumping only when the typed text SIGNALS humps — an uppercase letter after the first.
+    // `SBA` and `SprBoot` are somebody spelling out the capitals of a name they know; `springapp`
+    // is somebody typing a prefix in lower case, and letting that jump humps matches half the
+    // classpath (`springapp` reaches `SpringBootApplication`, and `strb` would reach anything).
+    // The first letter does not count: it is capitalised in every class name and says nothing.
+    let signals_humps = typed.bytes().skip(1).any(|c| c.is_ascii_uppercase());
+    (signals_humps && camel_humps_match(name.as_bytes(), typed.as_bytes())).then_some(2)
 }
 
 /// Whether the typed letters walk `name`'s camel humps: after the first character, each one either

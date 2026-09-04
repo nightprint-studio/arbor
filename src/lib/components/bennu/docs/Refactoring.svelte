@@ -37,6 +37,84 @@
   <code>list.size() == 0</code> → <code>list.isEmpty()</code>, <code>flag == true</code> →
   <code>flag</code>, <code>!(a == b)</code> → <code>a != b</code>.
 </p>
+<h2>Extract and inline</h2>
+<p>
+  Five refactorings on the same <kbd>Alt</kbd> + <kbd>Enter</kbd> list, offered from what you have
+  selected: a run of statements means <em>extract method</em>, a caret in an expression means
+  <em>extract variable</em>, a caret on a name means one of the inlines. All of them arrive as a
+  single undo.
+</p>
+<div class="fc-list">
+  <div class="fc-item">
+    <div class="fc-title">Extract method</div>
+    <div class="fc-desc">
+      The selected statements become a method and a call. The locals it reads become parameters,
+      typed as they were declared; a local it produces that the code afterwards reads becomes the
+      return value. A <code>static</code> method extracts a <code>static</code> one, a generic one
+      carries its type parameters with their bounds, the checked exceptions the moved body can raise
+      are declared on it, and the moved body is re-indented rather than pasted.
+    </div>
+  </div>
+  <div class="fc-item">
+    <div class="fc-title">Extract variable · Extract constant</div>
+    <div class="fc-desc">
+      The expression gets a name — a local above the statement it was in, or a
+      <code>private static final</code> beside the class's other fields when it is constant to read.
+      The type is resolved against the project, so the declaration says <code>List&lt;String&gt;</code>
+      and not <code>var</code>, and the import it needs comes with it.
+    </div>
+  </div>
+  <div class="fc-item">
+    <div class="fc-title">Inline variable · Inline method</div>
+    <div class="fc-desc">
+      The value goes back where the name was, parenthesised wherever the surrounding expression
+      binds tighter. A one-expression method goes back into its call the same way, with its
+      arguments substituted where the parameters are read — structurally, so a local that happens to
+      share a parameter's name is untouched.
+    </div>
+  </div>
+</div>
+<div class="fc-list">
+  <div class="fc-item">
+    <div class="fc-title">Create method</div>
+    <div class="fc-desc">
+      On a call to a method that does not exist, <kbd>Alt</kbd> + <kbd>Enter</kbd> writes it, just
+      below the method that calls it. The call site is the specification: the arguments' declared
+      types and names become the signature, what the result is used as becomes the return type
+      (nothing at all means <code>void</code>, a condition means <code>boolean</code>), and a call
+      from a <code>static</code> method reaches a <code>static</code> one. The body throws, so it
+      compiles whatever it returns and fails loudly rather than returning a plausible
+      <code>null</code>. A call on another object says so instead: that method belongs in that
+      object's file.
+    </div>
+  </div>
+  <div class="fc-item">
+    <div class="fc-title">Create class</div>
+    <div class="fc-desc">
+      On a type that does not resolve, the file is created beside the one that named it — the same
+      folder, which is what "the same package" means — and opened. How the name is used decides what
+      it is: a name in an <code>implements</code> clause becomes an <code>interface</code>, a name
+      after <code>@</code> an annotation type, everything else a class. The file is empty apart from
+      its package line, and a name that already has a file is refused rather than overwritten.
+    </div>
+  </div>
+</div>
+<p>
+  <strong>A refactoring that cannot be done safely says why, and stays in the list greyed.</strong>
+  That is the point of the feature as much as the edits are: <em>"the selection produces
+  <code>total</code> and <code>count</code>, and a method can only return one"</em> tells you what to
+  change. The others read the same way — a <code>return</code> that would leave the selection, a
+  variable assigned again later, a value with a side effect read twice, an overloaded method whose
+  call cannot be resolved from its arguments alone, a local declared with <code>var</code> whose type
+  cannot be written into a signature.
+</p>
+<p>
+  On a file served by a <strong>language server</strong> — Rust, TypeScript, Python — the same list
+  carries that server's own refactorings, computed with its full type knowledge, and its disabled
+  ones with their reasons. The gesture is the same; which engine answered is not something you have
+  to know.
+</p>
+
 <h2>Quick-fixes</h2>
 <p>
   With the caret on a <strong>diagnostic</strong>, <kbd>Alt</kbd> + <kbd>Enter</kbd> offers its

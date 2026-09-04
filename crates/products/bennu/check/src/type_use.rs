@@ -110,9 +110,9 @@ fn check_instanceof(
 
 // ── 2. instantiating an abstract class / interface ───────────────────────────
 
-/// `new T(...)` where `T` resolves to an abstract class or an interface → "cannot instantiate". SKIPs
-/// the one legal case: an ANONYMOUS subclass `new T(...) { … }` (a `class_body` child), which
-/// instantiates a fresh concrete subclass, not `T` itself.
+/// `new T(...)` where `T` resolves to an abstract class, an interface or an **enum** → "cannot
+/// instantiate". SKIPs the one legal case: an ANONYMOUS subclass `new T(...) { … }` (a `class_body`
+/// child), which instantiates a fresh concrete subclass, not `T` itself.
 fn check_new_abstract(
     n: Node,
     bytes: &[u8],
@@ -145,6 +145,10 @@ fn check_new_abstract(
     let name = simple_name(&binary);
     if cm.flags.is_interface {
         out.push(CheckId::InstantiateAbstract.at(ty_node, format!("Cannot instantiate the interface `{name}`")));
+    } else if cm.flags.is_enum {
+        // An enum's constructor is private and its instances are its constants; `new E()` is
+        // `compiler.err.enum.cant.be.instantiated`, no matter that the class itself is concrete.
+        out.push(CheckId::InstantiateAbstract.at(ty_node, format!("Cannot instantiate the enum `{name}` — its instances are its constants")));
     } else if cm.flags.is_abstract {
         out.push(CheckId::InstantiateAbstract.at(ty_node, format!("Cannot instantiate the abstract type `{name}`")));
     }
@@ -247,6 +251,10 @@ mod tests {
             cls(flags(|f| f.is_interface = true), None, vec![]),
         );
         members.insert(
+            "com/acme/Colour".to_string(),
+            cls(flags(|f| f.is_enum = true), Some("java/lang/Enum"), vec![]),
+        );
+        members.insert(
             "com/acme/Provider".to_string(),
             cls(
                 ClassFlags::default(),
@@ -265,6 +273,7 @@ mod tests {
             ("Shape", "com/acme/Shape"),
             ("Circle", "com/acme/Circle"),
             ("Runnable", "java/lang/Runnable"),
+            ("Colour", "com/acme/Colour"),
             ("Provider", "com/acme/Provider"),
         ]
         .into_iter()
@@ -289,6 +298,20 @@ mod tests {
     /// Wrap a method body in a class whose field `p` is a `Provider`.
     fn body(b: &str) -> Vec<String> {
         run(&format!("class C {{ Provider p; void m() {{ {b} }} }}"))
+    }
+
+    #[test]
+    fn instantiating_an_enum_is_flagged() {
+        // An enum's class is concrete, so the `is_abstract` arm never saw it — but its constructor
+        // is private and its instances are its constants.
+        let d = body("Colour c = new Colour();");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("enum") && d[0].contains("Colour"), "{d:?}");
+    }
+
+    #[test]
+    fn instantiating_a_concrete_class_is_ok() {
+        assert!(body("Thread t = new Thread();").is_empty());
     }
 
     // ── check 1: incompatible instanceof ───────────────────────────────────────

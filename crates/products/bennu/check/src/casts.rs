@@ -186,6 +186,15 @@ fn assign_check(
     if passes_a_function(&val) {
         return;
     }
+    // `null` has no type to infer — it is assignable to every REFERENCE and to no primitive, which
+    // is the one thing about it worth checking and the one thing an inference-first check cannot
+    // see: `int x = null;` reached the inference, got `None`, and returned in silence.
+    if val.kind() == "null_literal" {
+        if let Some(p) = primitive_keyword(target_text) {
+            out.push(err(format!("Incompatible types: `null` cannot be {verb} `{p}`"), val));
+        }
+        return;
+    }
     let Some(value_ty) = infer_node_type_cached(root, source, symbols, &val, resolver, cache)
     else {
         return;
@@ -467,6 +476,27 @@ mod tests {
     fn diags(body: &str) -> Vec<String> {
         let src = format!("class C {{ Provider p; void m() {{ {body} }} }}");
         type_compat_errors(&src, &resolver()).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn null_assigned_to_a_primitive_is_flagged() {
+        let d = diags("int x = null;");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`null`") && d[0].contains("`int`"), "{d:?}");
+    }
+
+    #[test]
+    fn null_assigned_to_a_reference_is_ok() {
+        assert!(diags("String s = null;").is_empty());
+    }
+
+    #[test]
+    fn null_returned_from_a_primitive_method_is_flagged() {
+        let d = type_compat_errors("class C { int m() { return null; } }", &resolver())
+            .into_iter()
+            .map(|d| d.message)
+            .collect::<Vec<_>>();
+        assert_eq!(d.len(), 1, "{d:?}");
     }
 
     #[test]

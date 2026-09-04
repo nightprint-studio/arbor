@@ -68,6 +68,79 @@ pub struct UnhandledCall {
     pub statement: (usize, usize),
 }
 
+/// The checked exceptions the code between `start` and `end` can raise, as JVM binary names.
+///
+/// The question *extract method* has and cannot answer for itself: what the moved body needs on its
+/// `throws` clause. The refactoring crate reads the tree and nothing else, so its own answer is the
+/// enclosing method's clause plus whatever the surrounding `try` catches — sound where those cover
+/// it, and wrong wherever a call raises something the enclosing method neither declares nor catches
+/// because a `try` INSIDE the selection handled it, or because the enclosing method is
+/// `@SneakyThrows`.
+///
+/// A **lower bound**, and it has to be used as one: what this can prove, to be added to whatever the
+/// caller already had. It is not a complete set and cannot be — a call it cannot resolve (a bare
+/// call to a method of the same class is the ordinary case) simply contributes nothing, and there is
+/// no honest way to tell "this throws nothing" from "I could not read this" per call without
+/// throwing away the calls it *can* read.
+///
+/// Which settles the direction. Removing an exception from a `throws` clause on the strength of an
+/// incomplete set breaks the call site; adding one that cannot actually be raised is legal and
+/// costs nothing. So this only ever adds.
+///
+/// Both bounds of each call are included for the same reason: `possibly` is still a reason to
+/// declare.
+pub fn checked_exceptions_in(
+    source: &str,
+    start: usize,
+    end: usize,
+    resolver: &dyn TypeResolver,
+) -> Vec<String> {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else { return Vec::new() };
+    let root = tree.root_node();
+    let bytes = source.as_bytes();
+    let symbols = bennu_java::prelude::extract_symbols(source);
+    let cache = InferCache::new();
+    let mut out: Vec<String> = Vec::new();
+
+    for n in crate::prelude::collect_nodes(root) {
+        if n.start_byte() < start || n.end_byte() > end {
+            continue;
+        }
+        let raised: Vec<String> = match n.kind() {
+            "method_invocation" | "object_creation_expression" => {
+                match thrown_by(n, &root, source, bytes, &symbols, resolver, &cache) {
+                    Thrown::Known(_, throws) => {
+                        throws.definitely.iter().chain(throws.possibly.iter()).cloned().collect()
+                    }
+                    // A call we cannot read contributes nothing. It does NOT make the answer
+                    // useless, because the answer is only ever added to.
+                    Thrown::Unknown => Vec::new(),
+                }
+            }
+            // `throw new IOException()` raises it whatever any signature says.
+            "throw_statement" => n
+                .named_child(0)
+                .filter(|e| e.kind() == "object_creation_expression")
+                .and_then(|e| e.child_by_field_name("type"))
+                .and_then(|t| t.utf8_text(bytes).ok())
+                .and_then(|name| crate::resolve::type_binary(name, &symbols, resolver))
+                .into_iter()
+                .collect(),
+            _ => continue,
+        };
+        for binary in raised {
+            if out.contains(&binary) {
+                continue;
+            }
+            if hierarchy_fully_known(resolver, &binary) && is_checked(resolver, &binary) {
+                out.push(binary);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 /// Parse `source` and flag calls that can throw an unhandled checked exception.
 pub fn checked_call_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
     let Some(tree) = bennu_java::prelude::parse_java(source) else {

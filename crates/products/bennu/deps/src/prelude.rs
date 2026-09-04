@@ -17,5 +17,6 @@ pub use crate::module_graph::{module_graph, GraphEdge, GraphNode, ModuleGraph};
 // One pom, for a consumer that has the text and wants the declarations.
 pub use crate::pom::{parse as parse_pom, ParentRef, Pom, RawDependency};
 
-// A repository jar path, read back as a coordinate.
-pub use crate::repo::{coord_of, JarCoord};
+// The coordinate, and the local-repository layout that is one written down — read in both
+// directions. The single home of both, after three implementations of half of it.
+pub use crate::repo::{coord_of, coord_under, Coord};

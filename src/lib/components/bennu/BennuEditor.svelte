@@ -128,6 +128,7 @@
   import {
     intentionsAt as ipcIntentionsAt, type IntentionOffer, type DiagRef,
   } from '$lib/ipc/bennu/intentions';
+  import { createClass, refactorings, refactorPlan, type RefactorPlan } from '$lib/ipc/bennu/refactor';
   import { validationTarget as ipcValidationTarget } from '$lib/ipc/bennu/validation';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
   import type {
@@ -2340,6 +2341,7 @@
    */
   async function runIntentionAction(o: IntentionOffer, path: string) {
     if (o.action === 'move-to-package') { await moveFileToPackage(path); return; }
+    if (o.action === 'create-class') { await createMissingClass(path, o); return; }
     if (o.action === 'override-methods') { onOverride?.(); return; }
     if (o.action !== 'rename-symbol' && o.action !== 'rename-symbol-preview') return;
     if (!editorComp) return;
@@ -2371,6 +2373,25 @@
 
   /** Move the file into the folder matching its declared package (the `move-to-package` intention).
    *  Delegates to the store (save → move → re-point tab → refresh tree) and reports the outcome. */
+  /**
+   * Create the file for a type that does not resolve, then open it.
+   *
+   * Opening it is half the gesture: the file is empty on purpose, so the only reason to make it is
+   * to start writing in it, and leaving the user to go and find it in the tree is the difference
+   * between a repair and a chore.
+   */
+  async function createMissingClass(path: string, offer: IntentionOffer) {
+    if (!editorComp) return;
+    const source = editorComp.getValue();
+    try {
+      const created = await createClass(path, source, offer.start, offer.end);
+      await projectStore.openFile(created);
+      toastStore.show(`Created ${created.split('/').pop() ?? created}`, 'success');
+    } catch (e) {
+      toastStore.show(`Couldn't create the class: ${e}`, 'error');
+    }
+  }
+
   async function moveFileToPackage(path: string) {
     try {
       const newPath = await projectStore.moveFileToPackage(path);
@@ -2484,6 +2505,29 @@
         }
       }
     }
+    // The Java refactorings — extract method / variable / constant, inline variable / method. In the
+    // same list as everything else for the same reason the server's assists are: the gesture is
+    // "what can you do here", and which engine answers is not the user's problem.
+    //
+    // Asked with the SELECTION and not the caret, because that is what half of them are about: a
+    // run of statements is an extract-method and the same caret with nothing selected is not.
+    if (isJavaFileOf(path)) {
+      const src = editorComp.getValue();
+      const sel = editorComp.selectionByteRange();
+      const offers = await refactorings(path, src, sel.start, sel.end).catch(() => []);
+      if (projectStore.activeFilePath === path) {
+        for (const offer of offers) {
+          // A refusal is a row, greyed, carrying its reason — see `bennu/refactor.ts`.
+          dynamic.push({
+            id: `refactor:${offer.id}`,
+            label: offer.reason ? `${offer.label} — ${offer.reason}` : offer.label,
+            icon: Wand2,
+            run: offer.reason ? () => {} : () => void runRefactoring(path, offer.id),
+          });
+        }
+      }
+    }
+
     // The editor's own two entries — the Generate flows — and Java-only, because that is what they
     // write. Offering them on a `.rs` put "Generate constructor…" and "Generate getters and setters…"
     // above a Rust function, which is not a thing that exists: everything a Rust buffer can be
@@ -2504,6 +2548,45 @@
       return;
     }
     bennuIntentionsStore.openWith(items, anchor);
+  }
+
+  /**
+   * Apply a chosen refactoring.
+   *
+   * The plan is asked for **again** here rather than carried from the menu: opening the list and
+   * picking a row are two moments, and a keystroke between them would leave the edits describing
+   * text that no longer exists. The backend recomputes against the buffer sent with this call, so
+   * the offsets always belong to the document they land in.
+   *
+   * Everything arrives as one `replaceByteRanges`, so the whole refactoring — the call, the moved
+   * body, the import — is one undo.
+   */
+  async function runRefactoring(path: string, id: string) {
+    const src = editorComp?.getValue() ?? '';
+    const sel = editorComp?.selectionByteRange() ?? { start: 0, end: 0, empty: true };
+    let plan: RefactorPlan;
+    try {
+      plan = await refactorPlan(path, src, sel.start, sel.end, id);
+    } catch (e) {
+      toastStore.show(String(e), 'error');
+      return;
+    }
+    if (projectStore.activeFilePath !== path) return;
+    editorComp?.replaceByteRanges(
+      plan.edits.map((e) => ({ startByte: e.start, endByte: e.end, text: e.text })),
+    );
+    // The introduced name is the one thing worth typing over, so the caret goes there. Nothing is
+    // pre-selected: a rename is a separate, undoable gesture, and doing it for the user is how a
+    // refactoring becomes something you have to undo twice.
+    if (plan.caret !== null) editorComp?.selectByteRange(plan.caret, plan.caret + plan.name.length);
+    if (plan.unresolved_type) {
+      toastStore.show(
+        `Declared with \`var\` — the type could not be resolved${
+          bennuIndexStore.indexing ? ' while the index is still building' : ''
+        }.`,
+        'warning',
+      );
+    }
   }
 
   /**

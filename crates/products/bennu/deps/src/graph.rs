@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use crate::model::{Dependency, Module, Origin, Report, Site, Transitive};
 use crate::pom::{self, Pom, RawDependency};
-use crate::repo::{coord_of, JarCoord};
+use crate::repo::{coord_of, Coord};
 
 /// How deep a reactor is followed, and how long a parent chain may be. Both are far past anything
 /// real; they exist so a cycle (a module that lists itself, a pom that is its own parent) costs a
@@ -401,7 +401,7 @@ impl Poms {
 // ── The resolved classpath ───────────────────────────────────────────────────
 
 struct Jar {
-    coord: JarCoord,
+    coord: Coord,
     path: String,
 }
 

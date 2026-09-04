@@ -45,6 +45,13 @@ pub struct RawDependency {
     pub packaging: String,
     pub classifier: String,
     pub optional: bool,
+    /// `<exclusions>` as `(groupId, artifactId)` pairs — what this dependency refuses to drag in.
+    ///
+    /// Part of the declaration rather than a detail of it: an exclusion is the difference between
+    /// the classpath a build produces and the one a naive walk of the poms would, and a resolver
+    /// that ignores them puts back exactly the jar the project went out of its way to remove. A
+    /// wildcard (`*`) is kept as written — Maven reads it as "everything under this dependency".
+    pub exclusions: Vec<(String, String)>,
     /// The `<profile>` id this sits under, empty for a plain `<project><dependencies>` entry.
     pub profile: String,
     /// Byte offset of the `<dependency>` tag, and its 1-based line.
@@ -291,10 +298,22 @@ impl<'a> Doc<'a> {
             packaging: self.child_text(i, "type"),
             classifier: self.child_text(i, "classifier"),
             optional: self.child_text(i, "optional") == "true",
+            exclusions: self.exclusions_of(i),
             profile: profile.to_string(),
             offset: tag.start,
             line: line_at(self.source, tag.start),
         }
+    }
+
+    /// The `<exclusions>` of the dependency opened at `i`.
+    fn exclusions_of(&self, i: usize) -> Vec<(String, String)> {
+        let Some(list) = self.child(i, "exclusions") else { return Vec::new() };
+        self.children(list)
+            .into_iter()
+            .filter(|c| self.name(*c) == "exclusion")
+            .map(|c| (self.child_text(c, "groupId"), self.child_text(c, "artifactId")))
+            .filter(|(_, a)| !a.is_empty())
+            .collect()
     }
 }
 

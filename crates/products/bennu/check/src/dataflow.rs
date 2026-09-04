@@ -21,6 +21,9 @@
 //! Order order = null;
 //! …
 //! order.getId();          // null-dereference
+//!
+//! int total;
+//! int average = total / n;  // read before it is assigned — javac rejects it
 //! ```
 //!
 //! ## What is tracked, and what is never
@@ -31,7 +34,7 @@
 //! reassigned at all. That is what makes a straight-line read of a block sound without any of the
 //! machinery a real solver needs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
@@ -78,16 +81,24 @@ pub fn dataflow_errors_in(root: Node, source: &str) -> Vec<Diagnostic> {
 fn analyze_block(block: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     let mut facts: HashMap<String, Fact> = HashMap::new();
     let mut pending: HashMap<String, PendingStore> = HashMap::new();
+    // Locals declared here with NO initializer and not yet written. A read of one is javac's
+    // `var.might.not.have.been.initialized`, and it is decidable in exactly the straight line this
+    // model already follows — the moment a branch appears, the set is dropped with everything else,
+    // because a local assigned in one arm of an `if` is legally read after it.
+    let mut unassigned: HashSet<String> = HashSet::new();
 
     let mut c = block.walk();
     for stmt in block.named_children(&mut c) {
         match stmt.kind() {
             "local_variable_declaration" => {
                 read_pass(stmt, bytes, &facts, &mut pending, out);
+                scan_statement(stmt, bytes, &mut unassigned, out);
                 declare(stmt, bytes, &mut facts, &mut pending, out);
+                note_unassigned(stmt, bytes, &mut unassigned);
             }
             "expression_statement" | "return_statement" | "throw_statement" => {
                 read_pass(stmt, bytes, &facts, &mut pending, out);
+                scan_statement(stmt, bytes, &mut unassigned, out);
                 assign(stmt, bytes, &mut facts, &mut pending, out);
             }
             // The condition is evaluated in the state we have; the branches are not, so everything
@@ -97,10 +108,12 @@ fn analyze_block(block: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
                 if let Some(cond) = stmt.child_by_field_name("condition") {
                     constant_condition(cond, bytes, &facts, out);
                     read_pass(cond, bytes, &facts, &mut pending, out);
+                    scan_statement(cond, bytes, &mut unassigned, out);
                 }
                 descend(stmt, bytes, out);
                 facts.clear();
                 pending.clear();
+                unassigned.clear();
             }
             // Anything else: look inside it for findings of its own, then forget. A loop body runs an
             // unknown number of times, a `try` can jump out of the middle, a `switch` picks a path —
@@ -109,6 +122,7 @@ fn analyze_block(block: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
                 descend(stmt, bytes, out);
                 facts.clear();
                 pending.clear();
+                unassigned.clear();
             }
         }
     }
@@ -184,6 +198,122 @@ fn read_pass(
 }
 
 /// `Type x = <value>;` — record what is known of `x`, and open a pending store.
+/// Record each declarator of `stmt` that binds NOTHING (`int x;`) as not-yet-assigned.
+fn note_unassigned(stmt: Node, bytes: &[u8], unassigned: &mut HashSet<String>) {
+    let mut c = stmt.walk();
+    for d in stmt.named_children(&mut c) {
+        if d.kind() != "variable_declarator" || d.child_by_field_name("value").is_some() {
+            continue;
+        }
+        if let Some(name) = d.child_by_field_name("name").and_then(|n| n.utf8_text(bytes).ok()) {
+            unassigned.insert(name.to_string());
+        }
+    }
+}
+
+/// Walk `node` in SOURCE ORDER, flagging every read of a local that has not been written yet and
+/// dropping each one the statement writes.
+///
+/// Order within one statement is the whole difference between a check and a false positive. Commons
+/// Collections writes `final V v; return (v = map.get(key)) != null ? v : dflt;` — the assignment and
+/// the read live in the same expression, and a pass that flagged all reads before applying any write
+/// called that legal line an error. So reads and writes are collected as one event list, sorted by
+/// offset, and replayed: a write earlier in the statement makes every later read fine.
+fn scan_statement(
+    node: Node,
+    bytes: &[u8],
+    unassigned: &mut HashSet<String>,
+    out: &mut Vec<Diagnostic>,
+) {
+    if unassigned.is_empty() {
+        return;
+    }
+    enum Event<'t> {
+        Read(Node<'t>, String),
+        Write(String),
+    }
+    let mut events: Vec<(usize, Event)> = Vec::new();
+    let mut stack = vec![node];
+    while let Some(n) = stack.pop() {
+        // A closure body runs later, and "later" is not something a straight line can place: a local
+        // assigned after the lambda is written is still assigned before the lambda runs.
+        if matches!(n.kind(), "lambda_expression" | "class_body" | "method_declaration") {
+            continue;
+        }
+        let mut c = n.walk();
+        for ch in n.named_children(&mut c) {
+            stack.push(ch);
+        }
+        match n.kind() {
+            "assignment_expression" if is_plain_assignment(n, bytes) => {
+                let Some(left) = n.child_by_field_name("left") else { continue };
+                if left.kind() != "identifier" {
+                    continue;
+                }
+                if let Ok(name) = left.utf8_text(bytes) {
+                    // The write lands at the END of the assignment: `(v = f()) != null ? v : …`
+                    // assigns only once `f()` has been evaluated, and `v` inside `f()`'s arguments
+                    // would still be reading an unassigned local.
+                    events.push((n.end_byte(), Event::Write(name.to_string())));
+                }
+            }
+            "identifier" if crate::scopes::is_value_position(n) && !is_assignment_target(n, bytes) => {
+                if let Ok(name) = n.utf8_text(bytes) {
+                    if unassigned.contains(name) {
+                        events.push((n.start_byte(), Event::Read(n, name.to_string())));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    events.sort_by_key(|(at, _)| *at);
+    for (_, e) in events {
+        match e {
+            Event::Write(name) => {
+                unassigned.remove(&name);
+            }
+            // Reported once per local: the first read is the error, the rest restate it.
+            Event::Read(n, name) => {
+                if unassigned.remove(&name) {
+                    out.push(CheckId::DefiniteAssignment.at(
+                        n,
+                        format!("Variable `{name}` might not have been initialized"),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+/// Whether `id` is the left-hand side of a plain `=` — a WRITE, not a read. `is_value_position` says
+/// nothing about it: an assignment's left side is a value slot in every other sense, and the one
+/// place the difference matters is here.
+fn is_assignment_target(id: Node, bytes: &[u8]) -> bool {
+    let Some(parent) = id.parent() else { return false };
+    parent.kind() == "assignment_expression"
+        && parent.child_by_field_name("left").map(|l| l.id()) == Some(id.id())
+        && is_plain_assignment(parent, bytes)
+}
+
+/// Whether `e` is a plain `=` rather than a compound `+=` / `>>=` (which READS the target first).
+fn is_plain_assignment(e: Node, bytes: &[u8]) -> bool {
+    let (Some(left), Some(right)) = (e.child_by_field_name("left"), e.child_by_field_name("right"))
+    else {
+        return false;
+    };
+    e.child_by_field_name("operator")
+        .and_then(|o| o.utf8_text(bytes).ok())
+        .map(|op| op == "=")
+        .unwrap_or_else(|| {
+            bytes
+                .get(left.end_byte()..right.start_byte())
+                .and_then(|s| std::str::from_utf8(s).ok())
+                .map(|s| s.trim() == "=")
+                .unwrap_or(false)
+        })
+}
+
 fn declare(
     stmt: Node,
     bytes: &[u8],
@@ -365,6 +495,49 @@ mod tests {
             .into_iter()
             .map(|d| format!("{}: {}", d.code, d.message))
             .collect()
+    }
+
+    // ── definite assignment ────────────────────────────────────────────────────
+
+    #[test]
+    fn reading_an_uninitialized_local_is_flagged() {
+        let d = diags("        int x;\n        int y = x + 1;");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].starts_with("definite-assignment") && d[0].contains("`x`"), "{d:?}");
+    }
+
+    #[test]
+    fn a_local_assigned_before_the_read_is_ok() {
+        assert!(diags("        int x;\n        x = 1;\n        int y = x + 1;").is_empty());
+    }
+
+    #[test]
+    fn an_assignment_inside_the_reading_expression_is_ok() {
+        // Commons Collections' `DefaultedMap.get`: the write and the read live in ONE statement, and
+        // the read only runs because the write already happened. Order within the statement decides.
+        let d = diags("        String v;\n        String r = (v = f()) != null ? v : \"\";");
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn a_local_assigned_in_a_branch_is_not_flagged_afterwards() {
+        // Assigning across `if`/`else` is a legal definite-assignment pattern this model does not
+        // follow — so it forgets, rather than guesses.
+        assert!(diags(
+            "        int x;\n        if (c) { x = 1; } else { x = 2; }\n        int y = x;"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn a_declaration_with_an_initializer_is_never_flagged() {
+        assert!(diags("        int x = 0;\n        int y = x + 1;").is_empty());
+    }
+
+    #[test]
+    fn one_report_per_local_however_many_reads() {
+        let d = diags("        int x;\n        int y = x;\n        int z = x;");
+        assert_eq!(d.len(), 1, "{d:?}");
     }
 
     #[test]

@@ -138,6 +138,9 @@ fn quick_fix_offers(args: &IntentionsArgs) -> Vec<OfferWire> {
                     action: None,
                 }),
         );
+        // Tree-only fixes for a diagnostic the resolver raised: offered whether or not an index is
+        // built, because the question they would need it for has already been answered.
+        out.extend(crate::quick_fix::tree_fixes(&d.code, &args.source, d.start, d.end));
     }
     if let Some(resolver) = IndexService::global().caret_resolver_for(&args.file) {
         for d in &under {

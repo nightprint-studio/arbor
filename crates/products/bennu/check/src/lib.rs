@@ -28,6 +28,7 @@ pub mod annotation_elements;
 pub mod annotations;
 pub mod arguments;
 pub mod arity;
+pub mod bare_call;
 pub mod branches;
 pub mod capture;
 pub mod casts;

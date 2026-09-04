@@ -138,6 +138,14 @@ bennu-dap = { path = "../dap" }
 # index service already resolved. Not an extension — it answers about the build, not about a
 # buffer — so it hangs off its own domain rather than the registry.
 bennu-deps = { path = "../deps" }
+# The local Maven repository as a source of answers: where it is, what is in it, what the project
+# resolves to against it without running Maven — the dependency tier's fallback and its diagnosis —
+# and the pom.xml editor answers that follow from the same reading.
+bennu-maven = { path = "../maven" }
+# The refactorings that are pure source transforms — extract method / variable / constant, inline
+# variable / method. Its own crate for the reason `bennu-intentions` is: there is no test runner in
+# front of the editor, so a transform that cannot be unit-tested cannot be trusted.
+bennu-refactor = { path = "../refactor" }
 # The Cargo side: the manifest schema behind Cargo.toml validation + completion, the crate
 # graph the Rust tool window shows, and the cargo command catalogue.
 # The Project tree's filesystem watcher. Already in the workspace (garrulus-be and the shell

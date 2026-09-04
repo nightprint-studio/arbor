@@ -8,16 +8,59 @@
 <h2>Dependencies</h2>
 <p>
   For a Maven project Bennu resolves the dependency jars from your local repository so completion,
-  navigation and validation see library types, not just the JDK and your own sources. The resolve is
-  <strong>offline</strong>: a dependency that has never been downloaded can't be resolved, so build
-  the project once. Every module of a multi-module project contributes its own dependencies.
+  navigation and validation see library types, not just the JDK and your own sources. Every module
+  of a multi-module project contributes its own dependencies. The resolve is
+  <strong>offline</strong> — nothing is downloaded — so a dependency that has never been fetched
+  cannot be resolved, and Bennu names it rather than reporting a number.
 </p>
 <p>
-  The result is cached against your poms' timestamps — editing a <code>pom.xml</code> re-resolves,
-  and <strong>Rebuild index</strong> re-resolves unconditionally. When the resolve can't happen at
-  all, Bennu says so with the reason rather than leaving you with unresolvable library types: Maven
-  is looked for on <code>PATH</code>, then in the usual install directories, then as the project's
-  own <code>mvnw</code> wrapper.
+  It is read straight from the poms and your local repository: the parent chains, the imported BOMs,
+  the transitive closure and the exclusions, in milliseconds and with no build tool involved. Maven
+  is only run when that reading comes up short — and then the two are combined, because a
+  <code>mvn</code> run that fails halfway still wrote the entries it did resolve. A project whose
+  Maven is missing, mis-configured or simply broken still gets a classpath.
+</p>
+<p>
+  The result is cached against your poms' timestamps <em>and</em> against what was missing: the
+  moment one of the absent artifacts lands in your repository the cache is stale, so installing a
+  dependency is picked up on the next open instead of being shadowed until a pom is edited.
+  <strong>Rebuild index</strong> re-resolves unconditionally. Maven, when it is needed, is looked
+  for on <code>PATH</code>, then in the usual install directories, then as the project's own
+  <code>mvnw</code> wrapper.
+</p>
+<p>
+  The panel's header carries the three things that change what is <em>on disk</em>, as opposed to
+  the refresh beside them which only re-reads it. All three are background jobs and report in the
+  Jobs panel.
+</p>
+<div class="fc-list">
+  <div class="fc-item">
+    <div class="fc-title">Re-resolve dependencies &amp; rebuild index</div>
+    <div class="fc-desc">
+      Drops the cached classpath, re-reads the local repository, and reindexes. The two halves of
+      "make the editor agree with what is on disk" — doing either alone leaves you with the other's
+      stale answer.
+    </div>
+  </div>
+  <div class="fc-item">
+    <div class="fc-title">Download missing dependencies <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>U</kbd></div>
+    <div class="fc-desc">
+      The one action here that uses the network: <code>dependency:go-offline</code> for the project,
+      then a rebuild. The fix for the state where the pom is right and the machine just does not
+      have the jar yet.
+    </div>
+  </div>
+  <div class="fc-item">
+    <div class="fc-title">Download sources</div>
+    <div class="fc-desc">
+      Fetches the <code>-sources.jar</code> of every dependency, so <kbd>Ctrl</kbd> + <kbd>B</kbd>
+      into a library lands on real source instead of a decompiled stub. Artifacts that publish no
+      sources are skipped rather than reported as failures.
+    </div>
+  </div>
+</div>
+<p>
+  See <strong>Editing a pom.xml</strong> for what the same reading does inside the editor.
 </p>
 <p>
   <strong>The Dependencies tool window</strong> (<kbd>Alt</kbd> + <kbd>N</kbd>) shows that as a list,

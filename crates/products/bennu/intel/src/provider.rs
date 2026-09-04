@@ -85,21 +85,16 @@ pub struct TextEdit {
     pub new_text: String,
 }
 
-/// Render a [`bennu_java::prelude::TypeRef`] to a readable type string — the simple (last-segment)
-/// name plus its generic arguments (`java/util/List<com/acme/Foo>` → `List<Foo>`). For the hover
-/// card, which wants the written-Java shape, not the binary name.
+/// Render a [`bennu_java::prelude::TypeRef`] to a readable type string — the written-Java shape
+/// rather than the binary name (`java/util/List<com/acme/Foo>` → `List<Foo>`). For the hover card
+/// and the member signatures, which read it rather than write it.
+///
+/// The same rule as [`render_type_for_source`] with the import list thrown away, and deliberately
+/// not a second spelling of it: a hover that said `Entry` where a declaration would say
+/// `Map.Entry` is two answers about one type, and the one you are looking at is never the one you
+/// are about to write.
 fn render_type_ref(t: &bennu_java::prelude::TypeRef) -> String {
-    let simple = t
-        .binary_name
-        .rsplit(['/', '$'])
-        .next()
-        .unwrap_or(&t.binary_name);
-    if t.type_args.is_empty() {
-        simple.to_string()
-    } else {
-        let args: Vec<String> = t.type_args.iter().map(render_type_ref).collect();
-        format!("{simple}<{}>", args.join(", "))
-    }
+    render_type_for_source(t, &mut Vec::new())
 }
 
 /// The hover card for a local whose type could NOT be resolved.
@@ -941,6 +936,31 @@ impl NativeJavaProvider {
         let resolver = self.resolver.as_deref()?;
         let tr = bennu_java::prelude::infer_expression_type(source, start, end, resolver)?;
         Some(tr.binary_name)
+    }
+
+    /// The static type of the expression spanning `[start, end)`, **written the way source writes
+    /// it** — `List<String>`, not `java/util/List` — plus the fully-qualified names an import is
+    /// needed for.
+    ///
+    /// The other half of [`infer_type_binary`](Self::infer_type_binary), and a different question:
+    /// that one answers *which class is this* for a lookup, this one answers *what do I type* for a
+    /// declaration a refactoring is about to write. Generic arguments are rendered because dropping
+    /// them turns a correct refactoring into a raw-type warning, and a nested class comes out as
+    /// `Map.Entry` with `java.util.Map` imported, which is how a person would write it.
+    ///
+    /// `None` when the expression cannot be typed — the caller then refuses rather than guessing,
+    /// which is the whole reason this returns an `Option` instead of a `var`.
+    pub fn infer_type_source(
+        &self,
+        source: &str,
+        start: usize,
+        end: usize,
+    ) -> Option<(String, Vec<String>)> {
+        let resolver = self.resolver.as_deref()?;
+        let tr = bennu_java::prelude::infer_expression_type(source, start, end, resolver)?;
+        let mut imports = Vec::new();
+        let written = render_type_for_source(&tr, &mut imports);
+        (!written.is_empty()).then_some((written, imports))
     }
 
     /// The **AST** of `source`, typed against this provider's resolver.
@@ -1799,9 +1819,49 @@ mod local_hover_tests {
     }
 }
 
+/// Render a resolved type as source would spell it, collecting the imports it needs.
+///
+/// Three shapes, and each of them is a way a naive rendering goes wrong:
+///   * a **primitive** (`int`) has no slashes and is written as it is — importing it would be
+///     nonsense;
+///   * a **nested class** is `java/util/Map$Entry`, which a person writes `Map.Entry` and imports
+///     as `java.util.Map`;
+///   * a **generic** carries its arguments, because a declaration written without them is a raw
+///     type and a warning where the original was neither.
+fn render_type_for_source(tr: &bennu_java::prelude::TypeRef, imports: &mut Vec<String>) -> String {
+    let binary = tr.binary_name.trim();
+    if binary.is_empty() {
+        return String::new();
+    }
+    let written = if binary.contains('/') {
+        let dotted = binary.replace('/', ".");
+        let (outer, nested) = match dotted.split_once('$') {
+            Some((outer, rest)) => (outer.to_string(), rest.replace('$', ".")),
+            None => (dotted.clone(), String::new()),
+        };
+        // `java.lang` is implicit; importing it is noise the compiler already has.
+        if !outer.starts_with("java.lang.") || outer.matches('.').count() > 2 {
+            imports.push(outer.clone());
+        }
+        let simple = outer.rsplit('.').next().unwrap_or(&outer).to_string();
+        match nested.is_empty() {
+            true => simple,
+            false => format!("{simple}.{nested}"),
+        }
+    } else {
+        binary.to_string()
+    };
+    if tr.type_args.is_empty() {
+        return written;
+    }
+    let args: Vec<String> =
+        tr.type_args.iter().map(|a| render_type_for_source(a, imports)).collect();
+    format!("{written}<{}>", args.join(", "))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{reads_as_type_name, render_stub};
+    use super::{reads_as_type_name, render_stub, render_type_for_source};
     use bennu_java::prelude::{ClassFlags, ClassMembers, Member, TypeRef, Visibility};
 
     /// The guard exists so an arbitrary matched fragment never reaches the resolver as a
@@ -1830,6 +1890,31 @@ mod tests {
         ] {
             assert!(!reads_as_type_name(no), "{no}");
         }
+    }
+
+    /// The three shapes a naive rendering gets wrong, and the imports each one needs.
+    #[test]
+    fn a_type_is_rendered_the_way_source_writes_it() {
+        use bennu_java::prelude::TypeRef;
+        let mut imports = Vec::new();
+        // A primitive is written as it is, and importing it would be nonsense.
+        assert_eq!(render_type_for_source(&TypeRef::simple("int"), &mut imports), "int");
+        assert!(imports.is_empty());
+
+        // A generic carries its arguments — dropping them is a raw type where the original was not.
+        let list = TypeRef {
+            binary_name: "java/util/List".into(),
+            type_args: vec![TypeRef::simple("java/lang/String")],
+        };
+        assert_eq!(render_type_for_source(&list, &mut imports), "List<String>");
+        // `java.lang` is implicit; `java.util` is not.
+        assert_eq!(imports, ["java.util.List"]);
+
+        // A nested class is written `Map.Entry` and imported as its outer.
+        imports.clear();
+        let entry = TypeRef::simple("java/util/Map$Entry");
+        assert_eq!(render_type_for_source(&entry, &mut imports), "Map.Entry");
+        assert_eq!(imports, ["java.util.Map"]);
     }
 
     #[test]
@@ -2018,3 +2103,4 @@ mod tests {
         assert_eq!(super::type_detail(&[]), None);
     }
 }
+

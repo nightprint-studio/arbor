@@ -43,6 +43,7 @@ use bennu_i18n::prelude::MessagesExtension;
 use bennu_jpa::prelude::JpaExtension;
 use bennu_jsp::prelude::JspExtension;
 use bennu_spring::prelude::SpringExtension;
+use bennu_maven::prelude::MavenExtension;
 use bennu_xml::prelude::XmlExtension;
 use serde::{Deserialize, Serialize};
 
@@ -277,6 +278,10 @@ impl FrameworkService {
                 Arc::clone(&spring) as Arc<dyn FrameworkExtension>,
                 Arc::clone(&jpa) as Arc<dyn FrameworkExtension>,
                 Arc::new(XmlExtension::new()) as Arc<dyn FrameworkExtension>,
+                // Beside the XML one, and answering the other half of a pom: the grammar says
+                // which elements are legal, this says whether `org.acme:widget:1.4` exists on
+                // this machine — which no schema can know.
+                Arc::new(MavenExtension::new()) as Arc<dyn FrameworkExtension>,
                 Arc::clone(&jsp) as Arc<dyn FrameworkExtension>,
                 Arc::new(MessagesExtension::new()) as Arc<dyn FrameworkExtension>,
                 // The fifth framework, and the first that is not Java's: a Cargo root with an
@@ -298,7 +303,7 @@ impl FrameworkService {
         // read when it is the *only* active extension is what keeps a plain Maven project from
         // paying a Spring-sized scan to get `pom.xml` completion.
         let wants_java =
-            registry.ids().iter().any(|id| !matches!(*id, "xml" | "jsp" | "fulcrum.i18n" | "bevy"));
+            registry.ids().iter().any(|id| !matches!(*id, "xml" | "maven" | "jsp" | "fulcrum.i18n" | "bevy"));
         let java: Vec<ScannedFile> = if wants_java {
             let encoding = crate::index_service::encoding_plan(root);
             bennu_intel::prelude::read_java_sources(path, &encoding)

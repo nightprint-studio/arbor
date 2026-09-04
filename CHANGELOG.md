@@ -7,6 +7,26 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An extracted method declares the checked exceptions its body can actually raise.** The clause used to be copied from the enclosing method, which is short wherever a call raises something that method neither declares nor catches — and a short `throws` is a call site that stops compiling.
+
+- **Type-name completion no longer jumps camel humps for an all-lowercase prefix.** `springapp` offered `SpringBootApplication` beside `SpringApplication`; hump-jumping now needs a capital to jump from, which is what `SBA` and `SprBoot` are.
+
+- **A lambda passed to an inherited method now types its parameter.** `list.forEach(x -> …)` left `x` with no type — the method is declared on `Iterable`, and its type variable was matched against `List`'s. Everything read off such a parameter was invisible to find-usages and to rename, which is the half of this that is not about hints.
+
+- **A lambda parameter shows the type it was inferred as** — `rows.forEach(row: String -> …)`. It is the one name in Java that says nothing about itself: its type comes from the interface the lambda is passed to, which is in another file.
+
+- **A Lombok `val` local now gets its inferred type shown, like a `var` one.** The engine had always resolved it; only the inlay hint did not know the keyword.
+
+- **An extract that touched the start of its own statement corrupted the line.** `this.list.add(x)` produced a declaration the replacement then overwrote. Extracting an expression that is the whole statement now names it in place instead of leaving a bare name behind, and the same extract inside a constructor, an enum, an interface or a varargs method works rather than being refused or written where it does not compile.
+
+### Changed
+
+- **A refactoring refuses more, and each refusal names the code.** Extracting the target of an assignment, a lambda or a diamond, a `case` label, a loop's header, a selection that ends by throwing, that assigns a `final` field, that carries a `this(…)` call or a labelled jump out of its loop: all now say what is in the way. A name a refactoring introduces no longer shadows one already in scope, and *inline method* no longer reaches into a neighbouring class in the same file.
+
+- **A jar's coordinate is read in one place.** Three copies of "what artifact is this `~/.m2` path" disagreed about the interesting cases; the surviving one resolves the repository root properly, so *Download sources* works on a machine with a relocated local repository instead of reporting that it couldn't determine the coordinates.
+
 ### Removed
 
 - **Object storage left Arbor.** The cloud is the `cloud-storage` plugin and its provider packages, and the app no longer carries buckets, transfers, a Google sign-in or a chunk-order dialog of its own. The panel, its connections and its keychain secrets are unaffected — everything it used from the host stayed, as capabilities that name no bucket.
@@ -14,6 +34,40 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **`arbor.cloud` is gone.** A plugin reaches storage through a provider extension (`arbor.ext.call` / `call_to_file`) instead. Progress is `arbor.job` and `arbor.ui.operation`, sign-in is `arbor.oauth`, and a merge order is asked for with the `reorder_list` form node.
 
 ### Added
+
+- **Extract and inline, for Java.** <kbd>Alt</kbd>+<kbd>Enter</kbd> now offers *extract method* over selected statements — with its parameters, its one return value and the enclosing method's `static` — plus *extract variable*, *extract constant*, *inline variable* and *inline method*. The type of an introduced local is resolved against the project (so it reads `List<String>`, not `var`) and its import comes with it, all as one undo.
+
+- **Create method.** On a call to a method that does not exist, <kbd>Alt</kbd>+<kbd>Enter</kbd> writes it below the method that calls it, with the arguments' declared types and names as its signature and the return type read from what the result is used as.
+
+- **Create class.** On a type that does not resolve, <kbd>Alt</kbd>+<kbd>Enter</kbd> creates its file in the same package and opens it, as a `class`, an `interface` or an annotation type depending on how the name is used.
+
+- **A refactoring that cannot be done safely says why.** It stays in the list, greyed, carrying the reason: a `return` that would leave the selection, two values a method cannot both return, a variable assigned again later, a value with a side effect read twice, an overloaded method a call cannot be resolved to.
+
+- **A Maven project resolves its dependencies without Maven.** Bennu reads the poms and your local repository directly — parent chains, imported BOMs, the transitive closure, exclusions — in milliseconds, and only runs `mvn` when that comes up short. A project whose Maven is missing, broken or slow still gets a classpath instead of every library type reading as unresolvable.
+
+- **A dependency that was never downloaded is named.** Instead of "0 jars resolved", Bennu says `com.acme:legacy-core:2.4.0 is not in your local repository` — and marks it in the pom, where it is written. **Download dependencies** (Command Palette) fetches the missing ones and rebuilds the index.
+
+- **`pom.xml` completes coordinates.** `<groupId>`, `<artifactId>` and `<version>` complete from the artifacts you actually have (with their installed versions), backed by a built-in table of common libraries for the ones you do not; completing an artifactId fills the empty groupId above it. Scopes, packagings, plugin phases, `<module>` directories and `${properties}` complete too.
+
+- **The pom is checked against your repository.** An artifact that is not installed, a version that is not (with the ones that are, listed), an undefined `${property}`, a dependency declared twice, a version already managed by a parent, a `<module>` with no pom, a misspelled scope. Ctrl+B on a coordinate goes to the module, the `<dependencyManagement>` entry that pins its version, or the artifact's own pom.
+
+- **The Dependencies panel acts on the repository, not just on the report.** Its header now carries *re-resolve & rebuild index*, *download missing dependencies* (also `Alt+Shift+U`) and *download sources* — the last so Ctrl+B into a library lands on real source instead of a decompiled stub.
+
+- **`${properties}` complete and are checked across the whole pom**, not only inside coordinates: each candidate shows what it expands to and which pom decided it, and one nothing defines is reported — an error in a coordinate, a warning elsewhere, and silent inside a `<configuration>` where a plugin may supply it.
+
+- **The classpath cache notices an artifact arriving.** It was keyed on pom timestamps alone, and a pom does not change when the missing jar finally lands in `~/.m2` — so a project stayed pinned to its half-resolved classpath until someone edited a pom.
+
+- **Bennu judges a call to your own method.** The argument-count and argument-type checks only ever read `recv.method(…)`, so a class calling its own methods — most of what a Java file is — went unchecked; the same is now asked of a bare `method(…)` and of `new Foo(…)`, whose constructor arguments were never read at all.
+
+- **A primitive local or parameter has a type again.** `long l; int i = l;` drew nothing while the same assignment from a field was flagged, because a primitive declaration inferred to no type at all. Every check that reads the static type of one — lossy narrowing, non-boolean conditions, argument types — now sees it.
+
+- **Narrowing into `float` and `long` is reported.** `float f = aDouble;` and `long l = aDouble;` are compile errors and were being skipped wholesale.
+
+- **More declaration errors are caught before a build:** a `native` method with a body, a `protected` member or a bodyless `private` method in an interface, an access modifier on an `enum` constructor, a second `default` label in one `switch`, and a local variable that reuses the name of a parameter.
+
+- **A local read before it is assigned is flagged.** `int total; int avg = total / n;` — javac's "might not have been initialized", now caught while typing. Assigning across the arms of an `if` stays legal and unflagged.
+
+- **`int x = null;` and `new SomeEnum()` are flagged** — `null` cannot become a primitive, and an enum's instances are its constants.
 
 - **The Java formatter has a style, and it is settable.** Settings → Java Style → Formatter carries the two decisions people disagree about — how many blank lines survive between members, and whether `case` bodies are indented — and the formatter honours them instead of its own hard-coded defaults. A language with a language server is unaffected: it keeps reading the project's own `rustfmt.toml` or `.prettierrc`.
 
@@ -62,6 +116,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Local History compares side by side.** Its diff pane now opens with the picked revision left and the file on disk right, each changed line opposite the one that replaced it; the header button (or `Alt+D`) switches back to the unified patch, and the choice is remembered. The window itself is larger, so the two columns have room.
 
 ### Fixed
+
+- **`break outer;` is no longer “cannot resolve symbol `outer`”.** A branch label was being judged as if it were a variable, so ordinary labelled loops lit up red — twelve of them in Guava alone. Whether the label exists is still checked.
+
+- **Renaming a method from inside an `enum` constant body moves the whole enum with it.** It used to move that one override and leave the enum's abstract declaration and the sibling constants behind — so the constant stopped implementing what the enum declares, and the file no longer compiled. Starting the same rename from the abstract declaration always worked, which is why it looked present.
+
+- **A rename is refused when a subclass binds the method to a library interface without redeclaring it.** `class Keys extends Base implements Enumeration` makes `Base`'s inherited method an implementation of `Enumeration`; the refusal only looked at types that declare the method, so the rename went through and the subclass stopped implementing the interface.
+
+- **A captured variable is flagged where it is captured.** The “must be final or effectively final” error sat on the reassignment; it now sits on the reference inside the lambda or inner class, where javac and every IDE put it, and is reported once however many times the variable is reassigned.
 
 - **Tab size and tabs-vs-spaces are remembered.** Both were kept in memory only, so every restart went back to four spaces — and the Java formatter, which indents by them, followed.
 

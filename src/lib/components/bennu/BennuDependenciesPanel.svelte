@@ -32,7 +32,8 @@
    * resolved. Nothing here runs Maven or Cargo, so refreshing is cheap and the panel opens
    * instantly.
    */
-  import { Library, Package, GitFork, Layers, LocateFixed, Network, RefreshCw, CircleSlash } from 'lucide-svelte';
+  import { Library, Package, GitFork, Layers, LocateFixed, Network, RefreshCw, CircleSlash,
+    HardDriveDownload, FileCode2, RotateCw, Download } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
@@ -40,6 +41,8 @@
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
+  import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
+  import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
@@ -48,7 +51,8 @@
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { dependenciesStore } from '$lib/stores/bennu/dependencies.svelte';
   import {
-    coordOf, scopeLabel, type Dependency, type DependencyModule,
+    coordOf, scopeLabel, mavenReload, mavenDownload, mavenDownloadSources,
+    type Dependency, type DependencyModule,
   } from '$lib/ipc/bennu/deps';
 
   let filter = $state('');
@@ -149,6 +153,40 @@
     void projectStore.openFile(m.manifest);
   }
 
+  /**
+   * What Maven can be asked to do to the machine, from here.
+   *
+   * All three are backend jobs that report through the Jobs panel and return immediately — none of
+   * them blocks the panel, and none of them is undone by closing it.
+   */
+  const mavenActions = $derived<DropdownItem[]>([
+    {
+      kind: 'item',
+      id: 'reload',
+      label: 'Re-resolve dependencies & rebuild index',
+      subtitle: 'Drops the cached classpath, re-reads the repository, reindexes',
+      icon: RotateCw,
+      onclick: () => root && void mavenReload(root).catch(() => undefined),
+    },
+    {
+      kind: 'item',
+      id: 'download',
+      label: 'Download missing dependencies',
+      subtitle: 'mvn dependency:go-offline — the only thing here that uses the network',
+      icon: Download,
+      shortcut: 'Alt+Shift+U',
+      onclick: () => root && void mavenDownload(root).catch(() => undefined),
+    },
+    {
+      kind: 'item',
+      id: 'sources',
+      label: 'Download sources',
+      subtitle: 'So Ctrl+B into a library lands on real source, not a decompiled stub',
+      icon: FileCode2,
+      onclick: () => root && void mavenDownloadSources(root).catch(() => undefined),
+    },
+  ]);
+
   /** What the origin tag says, in the fewest words that are still true. */
   function originLabel(d: Dependency): string {
     switch (d.origin.kind) {
@@ -207,6 +245,19 @@
         >
           <RefreshCw size={12} />
         </IconButton>
+        <!-- The three things that change what is ON DISK, as opposed to the refresh above which
+             only re-reads it. Behind one trigger because they are the same errand — "the editor and
+             my repository disagree" — and three more icons in a panel header is a toolbar nobody
+             reads. Maven only: none of them has a Cargo counterpart worth pretending about. -->
+        {#if !isCargo}
+          <Dropdown items={mavenActions} position="fixed" direction="down" width="300px">
+            {#snippet trigger({ toggle })}
+              <IconButton tooltip="Maven actions" size={22} onclick={toggle}>
+                <HardDriveDownload size={12} />
+              </IconButton>
+            {/snippet}
+          </Dropdown>
+        {/if}
       </div>
     {/if}
   {/snippet}
