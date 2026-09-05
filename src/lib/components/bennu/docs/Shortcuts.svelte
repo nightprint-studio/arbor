@@ -66,6 +66,7 @@
     and put the caret on it, wherever in the line you were. Not intentions — that is the key above,
     and on a Mac the two are one modifier apart</li>
   <li><kbd>Shift</kbd> + <kbd>F6</kbd> — <strong>rename</strong> the symbol under the caret (with a per-file preview)</li>
+  <li><kbd>Alt</kbd> + <kbd>Delete</kbd> — <strong>safe delete</strong> the member under the caret: it goes only when nothing in the project uses it, and otherwise the dialog lists every use so you can go and fix them</li>
   <li><kbd>Alt</kbd> + <kbd>Insert</kbd> — <strong>generate</strong> constructor, getters or setters</li>
   <li><kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>I</kbd> — <strong>implement / override methods</strong>: everything the class inherits and may override, grouped by the type that declares it, with the abstract ones already ticked</li>
   <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> — <strong>format</strong> the file. A language with a <strong>language server</strong> is formatted by it (<code>rustfmt</code> for Rust, honouring the project's configuration); <strong>Java</strong> is re-indented and tidied by Bennu's own formatter</li>

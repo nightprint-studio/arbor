@@ -19,6 +19,7 @@
  */
 
 import { bennu } from '../rpc';
+import type { UsageHit } from './nav';
 
 /** One row of the refactoring list. */
 export interface RefactorOffer {
@@ -88,4 +89,43 @@ export function createClass(
   end: number,
 ): Promise<string> {
   return bennu('bennu_create_class', { args: { file, source, start, end } });
+}
+
+// ── safe delete ───────────────────────────────────────────────────────────────
+
+/**
+ * What a safe delete would do — or who still needs the member.
+ *
+ * `safe` is the only field a caller has to read. When it is `false` the deletion must not be
+ * applied, and either `blocked` says why it can never be, or `usages` lists what has to go first.
+ * The list is the answer: "it is used" is not one, and the next question is always where.
+ */
+export interface SafeDeletePlan {
+  /** `method Order.total()` — what is about to go. */
+  label: string;
+  /** The file the declaration is in, which need not be the one the caret is in. */
+  file: string;
+  /** The byte range to remove. Only meaningful when `safe`. */
+  start: number;
+  end: number;
+  /** Whether it may be applied. */
+  safe: boolean;
+  /** Why it may not be, whatever the usages say — an override of a jar's method, an annotated
+   *  member a framework may reach by name, a constructor. `null` when nothing bars it. */
+  blocked: string | null;
+  /** The uses that have to go first — the same shape find-usages returns, so the editor renders
+   *  both lists with one widget. */
+  usages: UsageHit[];
+  /** The file to delete along with the declaration: a top-level type is its file. */
+  file_delete: string | null;
+}
+
+/** Plan a safe delete at `offset`. Resolves to `null` when the caret is on nothing this project
+ *  declares, or the index is still building. Wire: `bennu_safe_delete`. */
+export function safeDelete(
+  file: string,
+  source: string,
+  offset: number,
+): Promise<SafeDeletePlan | null> {
+  return bennu('bennu_safe_delete', { args: { file, source, offset } });
 }

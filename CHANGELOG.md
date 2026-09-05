@@ -7,7 +7,25 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- **A dependency whose jar is missing is now downloaded rather than reported.** The resolve already ran Maven; it ran it offline, so a project whose dependency tree had been walked but never built showed nineteen unresolvable jars and a suggestion to go and build it. On by default, and **Settings → Java → Download missing dependencies** turns it off for a metered connection or a slow corporate repository.
+
+- **Safe delete.** Remove a member, or be told exactly who still needs it — with the file, line and text of every use. It declines on a method that overrides something from a jar (deleting hands the call to the inherited one rather than removing the behaviour), on one declared at several levels of a hierarchy or implemented anywhere in the project, and on anything annotated, where a framework may reach it by name at run time. Verified by deleting every member it calls safe across Apache Commons Lang 3 and recompiling: 27 of 27 clean.
+
+- **Six refactorings that fit in one file**: invert `if`, merge nested `if`, split and join a declaration, and swap an explicit type with `var` in either direction. The negation is written the way a person would — a comparison flips its operator, a `!` comes off, `&&` becomes `||` over negated halves — and a shape with no exact opposite is wrapped rather than guessed at.
+
+- **A private member or a local that nothing reads is now reported.** Private and local only: those are the scopes one file can see all of. Annotated members, `serialVersionUID` and friends, and private constructors are left alone, because "no source mentions it" is not the same as "nothing uses it".
+
+### Changed
+
+- **The type of a `var` is now shown for primitives and arithmetic too** — `int`, `char`, `long[]` — where before the hint simply did not appear. The engine learned the shapes it used to skip: arithmetic and comparison, `!`/`-`/`++`, indexing an array, `new int[n]`, `a.length`, `instanceof`, a conditional whose two arms agree, and picking the exactly-matching overload of `Math.max` and friends. Measured on Apache Commons Lang 3 against the type each author wrote: **70% → 93%** of locals typed, with no new false positives on code that compiles.
+
 ### Fixed
+
+- **A project pinned by a BOM no longer reports dependencies it does not use as missing.** The version a transitive dependency writes in its own pom was taken as final, where Maven lets the project's `<dependencyManagement>` override it — so a Spring Boot project warned about nineteen artifacts, every one of them the right library at a version nothing on the classpath asks for. Nothing would ever download them, so the warning could not clear itself. Dependency lists resolved before this are re-resolved once.
+
+- **A dependency resolve whose Maven run failed now says so.** It reported the jars that were absent and stayed quiet about the run that would have fetched them, which read as the download being broken; and it cached that half-answer, so the same warning came back on every open.
 
 - **"Add" in the JPA generator wrote nothing.** The insertion carried its text under a field name the editor's byte-splice does not read, so the method was generated, reported as added, and never appeared in the repository.
 

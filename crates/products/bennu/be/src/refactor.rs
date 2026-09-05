@@ -20,6 +20,7 @@
 //! [`TypeSlot`]: bennu_refactor::prelude::TypeSlot
 
 use bennu_core::prelude::BennuState;
+use bennu_proto::prelude::UsageHit;
 use bennu_refactor::prelude::{
     missing_type_at, new_type_source, plan_for, refactorings_at, Plan, RefactorEdit,
     TYPE_PLACEHOLDER,
@@ -374,6 +375,80 @@ mod throws_tests {
             " throws IOException, SQLException"
         );
     }
+}
+
+/// Where the caret is, for a safe delete.
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(crate) struct SafeDeleteArgs {
+    /// Absolute path of the file the caret is in.
+    pub file: String,
+    /// The buffer's current text — the editor's, not the disk's.
+    pub source: String,
+    /// Byte offset of the caret.
+    pub offset: usize,
+}
+
+/// What a safe delete would do, on the wire.
+#[derive(Serialize)]
+pub struct SafeDeleteDto {
+    /// `method Order.total()` — what is about to go.
+    pub label: String,
+    /// The file the declaration is in, which need not be the caret's.
+    pub file: String,
+    /// The byte range to remove. Only meaningful when `safe`.
+    pub start: usize,
+    pub end: usize,
+    /// Whether it may be applied. **The one field a caller has to read.**
+    pub safe: bool,
+    /// Why it may not be, whatever the usages say.
+    pub blocked: Option<String>,
+    /// The uses that have to go first. The list IS the answer — "it is used" is not one.
+    ///
+    /// The same [`UsageHit`] find-usages returns, so the editor renders both lists with one widget
+    /// and a row means the same thing in each.
+    pub usages: Vec<UsageHit>,
+    /// The file to delete along with the declaration: a top-level type is its file.
+    pub file_delete: Option<String>,
+}
+
+/// Plan a **safe delete** at the caret: what would be removed, or who still needs it.
+///
+/// Never deletes anything itself. The caller reads `safe`, and on `false` shows `blocked` or the
+/// `usages` list instead — which is the whole feature: a delete that silently broke four call sites
+/// in files nobody opened would be worse than not offering one.
+#[arbor_rpc::handler(mcp(
+    title = "Plan a safe delete",
+    safety = read,
+    description = "What deleting the member at the caret would remove, or every use that still \
+needs it. Plans only — nothing is written. Read `safe` first: when it is false, either `blocked` \
+says why the member can never be removed, or `usages` lists every site that has to go first.",
+))]
+pub(crate) fn bennu_safe_delete(
+    _ctx: &BennuState,
+    args: SafeDeleteArgs,
+) -> Result<Option<SafeDeleteDto>, String> {
+    if !is_java(&args.file) {
+        return Ok(None);
+    }
+    let Some(plan) =
+        crate::index_service::IndexService::global().plan_safe_delete(&args.file, &args.source, args.offset)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(SafeDeleteDto {
+        safe: plan.is_safe(),
+        label: plan.label,
+        file: plan.file,
+        start: plan.start,
+        end: plan.end,
+        blocked: plan.blocked,
+        usages: plan
+            .usages
+            .into_iter()
+            .map(|u| crate::references::usage_hit(u, None))
+            .collect(),
+        file_delete: plan.file_delete,
+    }))
 }
 
 #[cfg(test)]

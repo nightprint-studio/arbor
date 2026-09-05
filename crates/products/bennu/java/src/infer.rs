@@ -278,6 +278,63 @@ fn is_resolved(t: &TypeRef, resolver: &dyn TypeResolver) -> bool {
     crate::typename::is_resolved_binary(&t.binary_name, resolver)
 }
 
+/// A primitive type as written, arrays included — `int` → `int`, `short[]` → `short` at depth 1.
+/// `None` for anything that is not one, which is every class: those are `parse_type_text`'s.
+fn primitive_ref_text(text: &str) -> Option<TypeRef> {
+    let mut base = text.trim();
+    let mut dims: u8 = 0;
+    while let Some(head) = base.strip_suffix(']') {
+        base = head.trim_end().strip_suffix('[')?.trim_end();
+        dims = dims.checked_add(1)?;
+    }
+    let p = primitive_type_text(base)?;
+    Some(TypeRef { binary_name: p.to_string(), dims, ..TypeRef::default() })
+}
+
+/// The primitive a binary name unboxes to, or the primitive itself. `None` for anything else —
+/// which is what keeps the arithmetic rules below from answering about types they do not describe.
+fn unbox(binary: &str) -> Option<&'static str> {
+    match binary {
+        "boolean" | "java/lang/Boolean" => Some("boolean"),
+        "byte" | "java/lang/Byte" => Some("byte"),
+        "short" | "java/lang/Short" => Some("short"),
+        "char" | "java/lang/Character" => Some("char"),
+        "int" | "java/lang/Integer" => Some("int"),
+        "long" | "java/lang/Long" => Some("long"),
+        "float" | "java/lang/Float" => Some("float"),
+        "double" | "java/lang/Double" => Some("double"),
+        _ => None,
+    }
+}
+
+/// **Unary** numeric promotion (JLS 5.6.1): everything narrower than `int` becomes `int`, and
+/// `long` / `float` / `double` stay as they are. It is why `-b` on a `byte` is an `int`, and why
+/// `byte c = -b;` does not compile.
+fn unary_promote(binary: &str) -> Option<&'static str> {
+    match unbox(binary)? {
+        "byte" | "short" | "char" | "int" => Some("int"),
+        "long" => Some("long"),
+        "float" => Some("float"),
+        "double" => Some("double"),
+        _ => None, // `boolean` is not numeric — `-flag` is not a program
+    }
+}
+
+/// **Binary** numeric promotion (JLS 5.6.2): the widest of the two, with everything below `int`
+/// promoted to `int` first. `int / int` is `int` — integer division, not `double`, which is the
+/// single most common thing people are wrong about and exactly what a hint is for.
+fn binary_promote(left: &str, right: &str) -> Option<&'static str> {
+    let (l, r) = (unary_promote(left)?, unary_promote(right)?);
+    let rank = |p: &str| match p {
+        "int" => 0,
+        "long" => 1,
+        "float" => 2,
+        "double" => 3,
+        _ => -1,
+    };
+    Some(if rank(l) >= rank(r) { l } else { r })
+}
+
 /// The primitive `text` names, when it is exactly one — no array dimensions, no type arguments.
 /// `void` is excluded on purpose: an expression of type `void` has no value to reason about, and
 /// handing one out as a type would let checks compare against it.
@@ -501,9 +558,14 @@ impl Ctx<'_> {
                 let text = node_text(&ty, self.bytes)?;
                 self.resolve_type_text(&text)
             }
-            // Raw-array element access is out of Phase-1 scope (only generics
-            // carry-through, handled at method-invocation).
-            "array_access" => None,
+            // `a[i]` — one dimension off `a`.
+            "array_access" => self.infer_array_access(node, enclosing),
+            // `new int[n]` / `new String[]{…}`
+            "array_creation_expression" => self.infer_array_creation(node),
+            // `x instanceof Foo` is a `boolean`, whatever either side is.
+            "instanceof_expression" => Some(TypeRef::simple("boolean")),
+            // `!x`, `-x`, `~x`, `i++`
+            "unary_expression" | "update_expression" => self.infer_unary(node, enclosing),
             // Literals — typed just enough for the assignment / argument checks to catch a
             // `String` ↔ primitive mismatch (`int x = "1";`, `foo(1)` where `foo` wants a String).
             "string_literal" | "text_block" => Some(TypeRef::simple("java/lang/String")),
@@ -528,6 +590,8 @@ impl Ctx<'_> {
             // Only string concatenation needs typing (`"x" + n` → String); arithmetic stays untyped
             // (the checks skip primitives, so we avoid any widening/promotion guesswork).
             "binary_expression" => self.infer_binary(node, enclosing),
+            // `c ? a : b`
+            "ternary_expression" => self.infer_ternary(node, enclosing),
             _ => None,
         }
     }
@@ -537,16 +601,125 @@ impl Ctx<'_> {
     fn infer_binary(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
         let op = node
             .child_by_field_name("operator")
-            .and_then(|o| node_text(&o, self.bytes));
-        if op.as_deref() != Some("+") {
+            .and_then(|o| node_text(&o, self.bytes))?;
+        // A comparison is a `boolean` whatever it compares, and it never needs the operands typed.
+        if matches!(op.as_str(), "<" | ">" | "<=" | ">=" | "==" | "!=" | "&&" | "||") {
+            return Some(TypeRef::simple("boolean"));
+        }
+        let left = node.child_by_field_name("left").and_then(|n| self.infer_expr(&n, enclosing));
+        let right = node.child_by_field_name("right").and_then(|n| self.infer_expr(&n, enclosing));
+        if op == "+"
+            && [&left, &right]
+                .iter()
+                .any(|t| t.as_ref().is_some_and(|t| t.binary_name == "java/lang/String"))
+        {
+            return Some(TypeRef::simple("java/lang/String"));
+        }
+        // A shift promotes its LEFT operand alone — `1L << n` is a `long` however `n` is typed, and
+        // pairing the two would answer `long` for `n << 1L`, which is an `int`.
+        if matches!(op.as_str(), "<<" | ">>" | ">>>") {
+            let l = left?;
+            return (l.dims == 0).then(|| unary_promote(&l.binary_name)).flatten().map(TypeRef::simple);
+        }
+        // `& | ^` are the logical operators on booleans and the bitwise ones on integers.
+        let (l, r) = (left?, right?);
+        // An array has no arithmetic — and `a + b` on two arrays is not a program, so answering
+        // about it would be inventing one.
+        if l.dims != 0 || r.dims != 0 {
             return None;
         }
-        let is_string = |field: &str| {
-            node.child_by_field_name(field)
-                .and_then(|n| self.infer_expr(&n, enclosing))
-                .is_some_and(|t| t.binary_name == "java/lang/String")
-        };
-        (is_string("left") || is_string("right")).then(|| TypeRef::simple("java/lang/String"))
+        if matches!(op.as_str(), "&" | "|" | "^")
+            && unbox(&l.binary_name) == Some("boolean")
+            && unbox(&r.binary_name) == Some("boolean")
+        {
+            return Some(TypeRef::simple("boolean"));
+        }
+        if !matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^") {
+            return None;
+        }
+        binary_promote(&l.binary_name, &r.binary_name).map(TypeRef::simple)
+    }
+
+    /// `!x` is a `boolean`; `-x` / `~x` are their operand promoted; `++x` and `x--` keep the
+    /// operand's own type.
+    ///
+    /// Tree-sitter puts prefix and postfix under two kinds but the question is the same one, so the
+    /// operand is found by position rather than by field name (`update_expression` has none).
+    fn infer_unary(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
+        let op = node
+            .child_by_field_name("operator")
+            .and_then(|o| node_text(&o, self.bytes))
+            .or_else(|| node_text(node, self.bytes).map(|t| t.trim().chars().take(1).collect()))?;
+        if op == "!" {
+            return Some(TypeRef::simple("boolean"));
+        }
+        let operand = node.child_by_field_name("operand").or_else(|| node.named_child(0))?;
+        let ty = self.infer_expr(&operand, enclosing)?;
+        // `++` / `--` do not promote: `byte b; b++` is still a `byte`.
+        if matches!(op.as_str(), "+" | "-" | "~") {
+            return (ty.dims == 0)
+                .then(|| unary_promote(&ty.binary_name))
+                .flatten()
+                .map(TypeRef::simple);
+        }
+        Some(ty)
+    }
+
+    /// `a[i]` — one array dimension off the operand's type. Nothing when the operand is not an
+    /// array we know the shape of, which is the same silence as before rather than a guess about
+    /// what indexing a non-array might mean.
+    fn infer_array_access(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
+        let array = node.child_by_field_name("array")?;
+        let mut ty = self.infer_expr(&array, enclosing)?;
+        if ty.dims == 0 {
+            return None;
+        }
+        ty.dims -= 1;
+        Some(ty)
+    }
+
+    /// `new int[n]` / `new String[]{…}` — the written element type, at the depth written.
+    fn infer_array_creation(&self, node: &Node) -> Option<TypeRef> {
+        let ty = node.child_by_field_name("type")?;
+        let text = node_text(&ty, self.bytes)?;
+        let mut out = self.resolve_type_text(&text).or_else(|| {
+            // `new int[8]`: a primitive element type has no members, so `resolve_type_text` — which
+            // exists to find a class — answers nothing for it. The array is still perfectly typed.
+            primitive_type_text(&text).map(TypeRef::simple)
+        })?;
+        // One dimension per `[` on the `new`, which is where the depth is written: the `type` field
+        // carries only the element.
+        let dims = node_text(node, self.bytes)?.matches('[').count();
+        out.dims = out.dims.saturating_add(dims as u8);
+        Some(out)
+    }
+
+    /// A conditional expression, typed **only where its two arms agree** — and `null` on one side
+    /// counts as agreeing with whatever is on the other.
+    ///
+    /// Java's own rule is one of the least pleasant paragraphs in the specification: numeric
+    /// promotion across the arms, boxing and unboxing, and for two unrelated reference types the
+    /// *least upper bound* of their supertypes — a type that is often unwriteable and, for the
+    /// questions asked here, never the one anybody wanted. Deliberately not implemented: an arm of
+    /// `int` and an arm of `long` yields nothing, and so does `String` against `Integer`.
+    ///
+    /// What is left is the shape that is actually written — `next < 0 ? "/" : path.substring(next)`,
+    /// both arms `String` — which until now typed as nothing at all, so the local it initialised
+    /// had no type, no hint, and no completion behind its dot.
+    fn infer_ternary(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
+        let then = node.child_by_field_name("consequence")?;
+        let alt = node.child_by_field_name("alternative")?;
+        // `x ? a : null` is `a`'s type: `null` is assignable to every reference type, and it is the
+        // one arm that never disagrees with anything.
+        if alt.kind() == "null_literal" {
+            return self.infer_expr(&then, enclosing);
+        }
+        if then.kind() == "null_literal" {
+            return self.infer_expr(&alt, enclosing);
+        }
+        let a = self.infer_expr(&then, enclosing)?;
+        let b = self.infer_expr(&alt, enclosing)?;
+        (a == b).then_some(a)
     }
 
     /// A bare identifier: resolve as local var / parameter first (walking up scopes), then as an
@@ -906,6 +1079,11 @@ impl Ctx<'_> {
             // reached through one was missing from the index.
             None => self.type_receiver(&obj)?,
         };
+        // `a.length` — an array's one pseudo-field. It is not declared anywhere, so no member
+        // lookup can ever find it, and it is how half the loops in a Java codebase start.
+        if field_name == "length" && obj_type.dims > 0 {
+            return Some(TypeRef::simple("int"));
+        }
         if let Some(t) = self.field_type_on(&obj_type, &field_name) {
             return Some(t);
         }
@@ -1185,7 +1363,18 @@ impl Ctx<'_> {
             .into_iter()
             .filter(|m| args_admissible(&m.params, &arg_types))
             .collect();
-        unique_return(&applicable).map(|ret| (ret, sole(&applicable)))
+        if let Some(ret) = unique_return(&applicable) {
+            return Some((ret, sole(&applicable)));
+        }
+        // Java picks the **most specific** applicable method, and for primitives that is the one
+        // needing no widening at all. `Math.max(int, int)` is applicable, and so are the `long`,
+        // `float` and `double` overloads, because an `int` widens to each of them — so a call to
+        // any numeric `max` / `min` / `abs`, which is as common as static calls get, came out
+        // "ambiguous" and therefore untyped. An exact signature is most-specific by definition,
+        // which is the whole rule this needs and none of the parts that are hard.
+        let exact: Vec<&Member> =
+            applicable.into_iter().filter(|m| args_exact(&m.params, &arg_types)).collect();
+        unique_return(&exact).map(|ret| (ret, sole(&exact)))
     }
 
     /// Walk the class + its superclass/interfaces, returning the first `f` hit.
@@ -1814,10 +2003,15 @@ impl Ctx<'_> {
         }
         let result = match parse_type_text(text) {
             Some(parsed) => Some(self.to_binary_ref(&parsed)),
-            // A bare primitive, and only a bare one: `int[]` keeps answering `None` because the rest
-            // of the walk does not model arrays (`array_access` already infers nothing), and typing
-            // the declaration without typing its uses would be a half-truth in the cache.
-            None => primitive_type_text(text).map(TypeRef::simple),
+            // A primitive, arrays included. `parse_type_text` answers `None` for all of them — it
+            // exists to find a class, and `long` is not one — so a local declared `int`, and every
+            // expression built out of it, used to have no type at all. That is most of what a reader
+            // of a `var` cannot work out for themselves.
+            //
+            // `int[]` was excluded on top of that, for a reason that has since stopped being true:
+            // the walk did not model arrays, so typing the declaration without typing `array[i]`
+            // would have been a half-truth. `array_access` and `a.length` now answer, so it is not.
+            None => primitive_ref_text(text),
         };
         self.cache
             .type_text
@@ -2195,6 +2389,18 @@ fn args_admissible(params: &[TypeRef], arg_types: &[Option<TypeRef>]) -> bool {
     true
 }
 
+/// Whether every argument's type is **exactly** the parameter's — no widening, no boxing, no
+/// unknown. The tie-break for an overload set several of whose members are applicable: an exact
+/// signature is the most specific one, so there is nothing to weigh. An unknown argument makes the
+/// answer `false`, which is the difference between this and [`args_admissible`]: that one keeps a
+/// candidate when it cannot tell, and this one only ever picks a winner it is sure of.
+fn args_exact(params: &[TypeRef], arg_types: &[Option<TypeRef>]) -> bool {
+    params.len() == arg_types.len()
+        && params.iter().zip(arg_types).all(|(p, a)| {
+            a.as_ref().is_some_and(|a| a.binary_name == p.binary_name && a.dims == p.dims)
+        })
+}
+
 /// Whether a parameter and argument sit on OPPOSITE sides of the primitive/reference divide with no
 /// autoboxing bridge — a definite non-match (`int` param vs `String` arg; `String` param vs `int`
 /// arg). A primitive paired with its own wrapper (`int`/`Integer`) is NOT a clash. Two primitives or
@@ -2557,13 +2763,30 @@ mod overload_tests {
         );
     }
 
+    /// `amb(Object)->A` and `amb(String)->B` are both 1-arg references, so the primitive/reference
+    /// check breaks nothing — but an argument *declared* `Object` matches one of them **exactly**,
+    /// and javac calls that one. This used to answer `None` on the grounds that "an `Object`
+    /// argument rules out neither", which is not so: an `Object` is not applicable to a `String`
+    /// parameter at all.
+    ///
+    /// The thing that must not happen is picking the FIRST-declared overload, and it still does not:
+    /// the choice is made by exact signature, never by order — see the test below, where nothing
+    /// matches exactly and the answer stays `None`.
     #[test]
-    fn ambiguous_same_arity_is_unresolved_not_guessed() {
-        // `amb(Object)->A` and `amb(String)->B` are both 1-arg references; an `Object` argument rules
-        // out neither → the return type isn't unique → None (never the first-declared overload's A).
+    fn an_exactly_matching_overload_is_the_one_that_is_called() {
         let r = resolver();
         let src = "class C { void m(acme.Ov v, Object x) { Object o = v.amb(x); } }";
-        assert_eq!(infer_call(src, "v.amb(x)", &r), None);
+        assert_eq!(infer_call(src, "v.amb(x)", &r).as_deref(), Some("acme/A"));
+    }
+
+    /// No exact match, so no most-specific answer this can be sure of: an argument the engine
+    /// cannot type leaves both overloads standing, and the call stays untyped rather than taking
+    /// whichever was declared first.
+    #[test]
+    fn ambiguous_same_arity_is_unresolved_not_guessed() {
+        let r = resolver();
+        let src = "class C { void m(acme.Ov v) { Object o = v.amb(mystery()); } }";
+        assert_eq!(infer_call(src, "v.amb(mystery())", &r), None);
     }
 
     #[test]
@@ -3034,5 +3257,72 @@ mod method_type_var_tests {
             got.is_none() || got.as_deref() == Some("T"),
             "expected unresolved, got {got:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod ternary_tests {
+    use super::test_support::*;
+    use super::*;
+    use std::collections::HashMap;
+
+    fn no_resolver() -> MapResolver {
+        MapResolver { members: HashMap::new(), simple: HashMap::new() }
+    }
+
+    fn wrap(expr: &str) -> String {
+        format!("class C {{ void m(int n) {{ var x = {expr}; }} }}")
+    }
+
+    /// The shape people write: both arms the same type. It used to type as nothing at all, so the
+    /// local it initialised had no type either — no hint, no completion behind its dot.
+    #[test]
+    fn two_arms_of_one_type_give_that_type() {
+        let src = wrap("n < 0 ? \"/\" : \"x\"");
+        assert_eq!(
+            infer_call(&src, "n < 0 ? \"/\" : \"x\"", &no_resolver()).as_deref(),
+            Some("java/lang/String")
+        );
+    }
+
+    /// Primitives too — and this is the one a reader cannot work out from the line.
+    #[test]
+    fn two_int_arms_give_int() {
+        let src = wrap("n < 0 ? 1 : 2");
+        assert_eq!(infer_call(&src, "n < 0 ? 1 : 2", &no_resolver()).as_deref(), Some("int"));
+    }
+
+    /// `null` agrees with anything: it is assignable to every reference type.
+    #[test]
+    fn a_null_arm_takes_the_other_arms_type() {
+        let src = wrap("n < 0 ? \"/\" : null");
+        assert_eq!(
+            infer_call(&src, "n < 0 ? \"/\" : null", &no_resolver()).as_deref(),
+            Some("java/lang/String")
+        );
+        let src = wrap("n < 0 ? null : \"/\"");
+        assert_eq!(
+            infer_call(&src, "n < 0 ? null : \"/\"", &no_resolver()).as_deref(),
+            Some("java/lang/String")
+        );
+    }
+
+    /// Arms that disagree yield nothing rather than a guess. Java's answer here is numeric
+    /// promotion or a least upper bound; asserting one of those wrongly is worse than abstaining,
+    /// because every check downstream would believe it.
+    #[test]
+    fn arms_that_disagree_are_left_untyped() {
+        let src = wrap("n < 0 ? \"/\" : 1");
+        assert_eq!(infer_call(&src, "n < 0 ? \"/\" : 1", &no_resolver()), None);
+        let src = wrap("n < 0 ? 1 : 2L");
+        assert_eq!(infer_call(&src, "n < 0 ? 1 : 2L", &no_resolver()), None);
+    }
+
+    /// An arm this engine cannot type makes the whole conditional untyped — an unknown half is not
+    /// evidence about the other half.
+    #[test]
+    fn an_untypable_arm_makes_the_whole_thing_untyped() {
+        let src = wrap("n < 0 ? \"/\" : unknown.thing()");
+        assert_eq!(infer_call(&src, "n < 0 ? \"/\" : unknown.thing()", &no_resolver()), None);
     }
 }

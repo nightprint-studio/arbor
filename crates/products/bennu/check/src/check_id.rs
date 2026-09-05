@@ -68,6 +68,8 @@ pub enum CheckId {
     ConstantCondition,
     /// A value assigned to a local and overwritten before anything reads it.
     DeadStore,
+    /// A private member or a local that nothing reads.
+    UnusedMember,
 
     // ── inheritance & overrides ──────────────────────────────────────────────────
     /// An illegal `extends`/`implements` — extending a `final`/record/enum/interface, or
@@ -279,6 +281,7 @@ impl CheckId {
             NullDereference => "null-dereference",
             ConstantCondition => "constant-condition",
             DeadStore => "dead-store",
+            UnusedMember => "unused-member",
             IllegalInheritance => "illegal-inheritance",
             MissingAbstractMethod => "missing-abstract-method",
             CyclicInheritance => "cyclic-inheritance",
@@ -361,7 +364,7 @@ impl CheckId {
             // Style / hygiene lints — not compile errors.
             RedundantImport | DuplicateImport | UnusedImport | MethodNamedLikeConstructor
             | SwitchFallthrough | FinallyAbrupt | SelfAssignment | DivisionByZero | EmptyStatement
-            | StringReferenceEquality | ConstantCondition | DeadStore | EmptyIfBody | StaticViaInstance => "warning",
+            | StringReferenceEquality | ConstantCondition | DeadStore | UnusedMember | EmptyIfBody | StaticViaInstance => "warning",
             // Everything else is a compile-level error.
             _ => "error",
         }
@@ -417,6 +420,7 @@ impl CheckId {
             NullDereference,
             ConstantCondition,
             DeadStore,
+            UnusedMember,
             IllegalInheritance,
             MissingAbstractMethod,
             CyclicInheritance,

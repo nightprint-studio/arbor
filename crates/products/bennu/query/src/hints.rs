@@ -418,8 +418,19 @@ fn var_type_hint(
         else {
             continue;
         };
-        if inferred.binary_name.is_empty() || !inferred.binary_name.contains('/') {
-            continue; // a primitive or an unresolved variable — nothing to claim
+        // A binary name without a slash is one of two very different things, and treating them as
+        // one left half the locals in a method unlabelled. A **primitive** is a known type, and the
+        // one the reader most often cannot work out: `var n = path.indexOf('/')` is `int`, not
+        // `Integer` and not `long`, and nothing on the line says so. An **unresolved** name is a
+        // simple name we failed to resolve, and that one still has to stay quiet — a hint is drawn
+        // as if the compiler had said it.
+        if inferred.binary_name.is_empty() {
+            continue;
+        }
+        if !inferred.binary_name.contains('/')
+            && !bennu_java::prelude::is_primitive(&inferred.binary_name)
+        {
+            continue;
         }
         out.push(InlayHint {
             offset: name.end_byte(),

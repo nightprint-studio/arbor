@@ -305,11 +305,25 @@ fn check_exists(env: &PomEnv<'_>, block: &Block, out: &mut Vec<Diagnostic>) {
         _ => severity::WARNING,
     };
     let installed = env.repo.versions(&coord.group_id, &coord.artifact_id);
+    // Three states, not two, and the third is the commonest one on a project that has never been
+    // built. Telling them apart is the whole value of this diagnostic: they have three different
+    // causes and three different cures, and only one of them is "you wrote the wrong version".
     let message = if installed.is_empty() {
         let hint = nearest_artifact(env, &coord)
             .map(|near| format!(" Did you mean `{near}`?"))
             .unwrap_or_default();
         format!("`{}` is not in the local repository — nothing has ever downloaded it.{hint}", coord.gav())
+    } else if installed.iter().any(|v| v == &coord.version) {
+        // The version IS here — as a POM, without its jar. Maven fetches a pom to walk the
+        // dependency graph and the jar only when something compiles against it, so a resolved-but
+        // -never-built project has the folder and none of the code. Saying "not in the local
+        // repository" here sent a reader to check a folder that was right there.
+        format!(
+            "`{}` is in the local repository as a pom, but its jar was never downloaded. Maven \
+             fetches a pom to read the dependency graph and the jar only when something compiles \
+             against it — build once, or turn on Download missing dependencies.",
+            coord.gav()
+        )
     } else {
         format!(
             "version `{}` of `{}` is not in the local repository. Installed: {}",

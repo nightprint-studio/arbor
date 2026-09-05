@@ -244,6 +244,14 @@
   selection, and no offset shifts. An argument that already says the name, a lambda, or a long
   expression is left alone.
 </p>
+<p>
+  The type hint includes the <strong>primitives</strong>, which are the ones hardest to work out from
+  the line: <code>var n = path.indexOf('/')</code> is an <code>int</code>, <code>var half = a / 2</code>
+  is an <code>int</code> and not a <code>double</code>, and <code>var c = chars[i]</code> is a
+  <code>char</code>. A type the engine cannot work out is left without a hint rather than guessed at —
+  a hint reads as if the compiler had said it, and there is nothing to click through to find out it
+  hadn't.
+</p>
 <h2>Emmet</h2>
 <p>
   In JSP and HTML files, type an <strong>Emmet abbreviation</strong> and press <kbd>Tab</kbd> to

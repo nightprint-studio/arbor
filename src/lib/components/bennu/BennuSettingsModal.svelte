@@ -871,6 +871,12 @@ initialization_options = ""`}</pre>
             <Select value={s.defaultEncoding} options={encodingOptions}
                     onchange={(v) => s.setDefaultEncoding(v as SourceEncoding)} />
           </FormRow>
+          <FormRow
+            label="Download missing dependencies"
+            description="Let the dependency resolve reach the network when a jar is not in ~/.m2 yet. On by default: types from a jar that was never downloaded read as unresolved, and the only other way out is to leave the editor and run a build. Off resolves from ~/.m2 alone — worth it on a metered connection, or behind a VPN that makes the corporate repository slow."
+          >
+            <Toggle checked={s.mavenAutoDownload} onchange={(v) => s.setMavenAutoDownload(v)} ariaLabel="Download missing dependencies" />
+          </FormRow>
           <FormRow label="Rebuild index on open" description="Re-scan symbols each time a project opens (slower open, fresher completion).">
             <Toggle checked={s.rebuildIndexOnOpen} onchange={(v) => s.setRebuildIndexOnOpen(v)} ariaLabel="Rebuild index on open" />
           </FormRow>

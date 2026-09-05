@@ -1709,7 +1709,7 @@ impl SubtypeMap {
 /// name a library supertype whose same-named method takes different parameters and is therefore
 /// not really overridden — refusing there costs a rename that would have been safe, which is the
 /// cheaper of the two mistakes.
-fn library_override(resolver: &dyn TypeResolver, owner: &str, name: &str) -> Option<String> {
+pub(crate) fn library_override(resolver: &dyn TypeResolver, owner: &str, name: &str) -> Option<String> {
     all_ancestors(resolver, owner)
         .into_iter()
         .find(|a| !resolver.is_project_type(a) && declares_method(resolver, a, name))

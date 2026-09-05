@@ -43,6 +43,8 @@ export interface BennuConfig {
   /** Absolute paths of HTML files whose own scripts may run in the editor's preview. */
   html_scripts_allowed: string[];
   /** Open `.md` files in the live-preview markdown editor rather than in the code editor. */
+  /** Let the dependency resolve reach the network when `~/.m2` is short. `true` by default. */
+  maven_auto_download: boolean;
   markdown_live_preview: boolean;
   /** Show Local History's diff side by side rather than as a unified patch. */
   history_diff_split: boolean;

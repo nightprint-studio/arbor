@@ -47,7 +47,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use crate::jdk::MultiSource;
 use crate::source::{ClassSource, JarSource};
@@ -77,11 +77,22 @@ pub struct MavenResolveOpts {
     /// test-scoped library then fires in the IDE and not in production, which is the kind of
     /// divergence that costs an afternoon to find.
     pub scope: Option<String>,
+    /// How long the `mvn` child may take before it is killed — see [`run_bounded`] for why there
+    /// has to be a limit at all. Generous on purpose: a first resolve that really is downloading a
+    /// large reactor is doing the work it was asked to do, and cutting that short would report a
+    /// shortfall that is only "not finished yet".
+    pub timeout: Duration,
 }
 
 impl Default for MavenResolveOpts {
     fn default() -> Self {
-        Self { mvn_path: "mvn".to_string(), java_home: None, offline: true, scope: None }
+        Self {
+            mvn_path: "mvn".to_string(),
+            java_home: None,
+            offline: true,
+            scope: None,
+            timeout: Duration::from_secs(300),
+        }
     }
 }
 
@@ -169,6 +180,68 @@ impl MavenClasspath {
 /// purpose — see [`resolve_maven_classpath`].
 const OUTPUT_FILE_NAME: &str = "bennu-classpath.txt";
 
+/// Run a child to completion, or kill it after `timeout`.
+///
+/// `Command::output()` waits for as long as the child feels like taking, and a `mvn` that is
+/// waiting on a repository it cannot reach feels like taking forever. That is not one slow call:
+/// the project's whole index build runs on one thread, in phases, and this is one of them — so a
+/// hung resolve takes go-to-declaration, find-usages and rename down with it for the rest of the
+/// session, while the class list, built in an earlier phase, keeps working. The symptom is
+/// "navigation stopped working" and nothing anywhere names a Maven process as the reason.
+///
+/// stdout and stderr are drained by their own threads rather than read after the wait, because a
+/// child that fills a pipe nobody is reading blocks in `write` — and a build log fills 64 KB long
+/// before a reactor finishes.
+fn run_bounded(mut cmd: Command, timeout: Duration) -> std::io::Result<std::process::Output> {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let drain = |mut pipe: Option<std::process::ChildStdout>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(p) = pipe.as_mut() {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let out_thread = drain(child.stdout.take());
+    let err_pipe = child.stderr.take();
+    let err_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut p) = err_pipe {
+            let _ = p.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let started = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait()? {
+            Some(status) => break status,
+            None if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let status = child.wait()?;
+                eprintln!(
+                    "bennu-classpath: mvn exceeded {}s and was stopped — the dependency classpath \
+                     is whatever it had written by then",
+                    timeout.as_secs()
+                );
+                break status;
+            }
+            // Long enough not to spin a core on a resolve that takes minutes, short enough that a
+            // fast one is not noticeably delayed by the poll itself.
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    };
+    Ok(std::process::Output {
+        status,
+        stdout: out_thread.join().unwrap_or_default(),
+        stderr: err_thread.join().unwrap_or_default(),
+    })
+}
+
 /// Run `mvn dependency:build-classpath` for the project rooted at `project_dir`
 /// (must contain a `pom.xml`) and collect the resolved dependency classpath.
 ///
@@ -235,8 +308,7 @@ pub fn resolve_maven_classpath(
         cmd.env("JAVA_HOME", jh);
     }
 
-    let output = cmd
-        .output()
+    let output = run_bounded(cmd, opts.timeout)
         .map_err(|e| format!("spawn mvn ({}): {e}", opts.mvn_path))?;
     let mvn_ok = output.status.success();
 

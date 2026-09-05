@@ -33,6 +33,7 @@ pub mod branches;
 pub mod capture;
 pub mod casts;
 pub mod check;
+pub mod unused_member;
 pub mod check_id;
 pub mod checked_call;
 pub mod checked_throw;

@@ -241,3 +241,17 @@ codegen-units = 1
 strip         = "debuginfo"
 panic         = "unwind"
 debug         = 1
+
+# Test binaries carry line tables and nothing more.
+#
+# `tests/` gives every file its own crate, so `bennu-intel` alone links **51 separate binaries**,
+# each one statically pulling in the whole Bennu stack. Touch a file near the bottom of the graph —
+# `infer.rs`, say — and all of them relink. Measured on this workspace: about 26 minutes of `ld`
+# for 5.2 seconds of tests.
+#
+# Full debuginfo across 62 binaries is the bulk of that, and none of it is used: what a failing test
+# needs is the file and line in its panic, which is exactly what line tables carry. A debugger
+# stepping through a test wants more — set `debug = 2` here for that session — but paying for it on
+# every run of every suite is paying for it constantly and using it almost never.
+[profile.test]
+debug = "line-tables-only"

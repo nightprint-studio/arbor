@@ -119,7 +119,9 @@ pub fn resolve_dep_classpath(root: &Path, jdk_version: &str) -> DepOutcome {
         Some(entry) => (entry.jars, entry.partial),
         None => match resolve_fresh(root, jdk_version) {
             Ok(fresh) => {
-                save_entry(root, pom_mtime, &fresh);
+                if fresh.cacheable {
+                    save_entry(root, pom_mtime, &fresh);
+                }
                 (fresh.jars, fresh.partial)
             }
             Err(reason) => return DepOutcome::Failed(reason),
@@ -148,6 +150,16 @@ pub(crate) struct ResolvedList {
     /// classpath that came from the direct read is worth being able to say out loud when something
     /// looks wrong with it.
     pub source: &'static str,
+    /// Whether this is worth writing to the disk cache.
+    ///
+    /// `false` for a shortfall reported by a resolve whose **Maven leg failed**, and the reason is
+    /// that such an entry can never expire. The cache re-runs when a recorded missing artifact
+    /// arrives — but nothing is going to fetch it, precisely because the run that would have failed.
+    /// So the half-resolve gets served, and re-served, and the same warning is shown on every open
+    /// of a project that a single working run would have fixed. A failure is not a result: it is
+    /// re-tried next time, which costs one spawn on a machine with no Maven and heals a transient
+    /// one for free.
+    pub cacheable: bool,
 }
 
 /// Resolve from scratch: the direct read first, Maven only if it is not enough.
@@ -163,7 +175,12 @@ fn resolve_fresh(root: &Path, jdk_version: &str) -> Result<ResolvedList, String>
             root.display(),
             offline_jars.len()
         );
-        return Ok(ResolvedList { jars: offline_jars, source: "offline", ..ResolvedList::default() });
+        return Ok(ResolvedList {
+            jars: offline_jars,
+            source: "offline",
+            cacheable: true,
+            ..ResolvedList::default()
+        });
     }
 
     // Not everything is there. Maven knows things this cannot — an active profile, a mirror, a
@@ -195,19 +212,36 @@ fn resolve_fresh(root: &Path, jdk_version: &str) -> Result<ResolvedList, String>
         });
     }
 
-    let mut partial = shortfall_message(&missing_coords, &offline);
-    if partial.is_none() {
-        if let Err(reason) = &maven {
-            partial = Some(format!(
-                "Maven could not be run ({reason}), so the classpath was read straight from the local \
-                 repository. It may be missing artifacts only a build would resolve."
-            ));
-        }
-    }
+    // When Maven failed, that is the FIRST thing to say, shortfall or no shortfall. It used to be
+    // said only when nothing else was wrong — so the commonest case, "Maven did not run AND some
+    // jars are absent", reported the absent jars and stayed silent about the one thing that would
+    // have fetched them. The list then looks like the whole problem while the cause is missing from
+    // it, and the natural conclusion is that the download simply does not work.
+    let partial = match (&maven, shortfall_message(&missing_coords, &offline)) {
+        (Err(reason), Some(short)) => Some(format!(
+            "{short} Maven did not run to fetch them ({reason}), so the classpath is what the local \
+             repository already held."
+        )),
+        (Err(reason), None) => Some(format!(
+            "Maven could not be run ({reason}), so the classpath was read straight from the local \
+             repository. It may be missing artifacts only a build would resolve."
+        )),
+        (Ok(_), short) => short,
+    };
     if let Some(reason) = &partial {
         eprintln!("bennu-be: partial dependency classpath for {}: {reason}", root.display());
     }
-    Ok(ResolvedList { jars, partial, missing_paths, source })
+    // A resolve whose Maven leg failed is not a result, it is an interruption — see `cacheable`.
+    let cacheable = maven.is_ok() || partial.is_none();
+    Ok(ResolvedList { jars, partial, missing_paths, source, cacheable })
+}
+
+/// Whether the dependency resolve may reach the network — `BennuConfig::maven_auto_download`.
+///
+/// Read at each resolve rather than cached: a resolve is rare and slow, and the one thing worse
+/// than asking the config again is a switch that only takes effect after a restart.
+fn auto_download() -> bool {
+    bennu_core::prelude::load_config().maven_auto_download
 }
 
 /// The artifacts that are still absent from the repository, as `(path, coordinate)` — the direct
@@ -241,7 +275,11 @@ fn shortfall_message(
     }
     let mut parts = Vec::new();
     if !missing.is_empty() {
-        parts.push(format!("{} not in the local repository ({})", missing.len(), sample(missing, SHOW)));
+        // "not in the local repository" is true of the JAR and false of the coordinate: Maven
+        // downloads a POM to walk the dependency graph and the jar only when something compiles
+        // against it, so the folder is usually right there with just the pom in it. Saying "jar"
+        // is what stops the next twenty minutes being spent proving the folder exists.
+        parts.push(format!("{} whose jar is not in the local repository ({})", missing.len(), sample(missing, SHOW)));
     }
     if !offline.unversioned.is_empty() {
         let names: Vec<String> = offline.unversioned.iter().map(|c| c.gav()).collect();
@@ -253,9 +291,14 @@ fn shortfall_message(
     }
     Some(format!(
         "{} of this project's dependencies could not be resolved: {}. Types from them will read as \
-         unresolved until the project is built once (nothing here downloads).",
+         unresolved until they are.{}",
         missing.len() + offline.unversioned.len(),
-        parts.join("; ")
+        parts.join("; "),
+        if auto_download() {
+            ""
+        } else {
+            " Automatic download is off, so nothing was fetched."
+        }
     ))
 }
 
@@ -290,7 +333,10 @@ pub(crate) fn cached_dep_jars(root: &Path) -> Vec<PathBuf> {
 /// resolved jar paths as strings. `Err` carries a short user-facing reason — a "0 jars" state has to be
 /// diagnosable from the UI, not only from the process's stderr.
 fn resolve_via_maven(root: &Path, jdk_version: &str) -> Result<(Vec<String>, Option<String>), String> {
-    let mut opts = MavenResolveOpts::default(); // offline
+    let mut opts = MavenResolveOpts::default();
+    // The one line that decides whether a missing jar is a warning or a download. The goal is the
+    // same either way — only `-o` changes — so turning this off costs nothing but the network.
+    opts.offline = !auto_download();
     // Resolve the REAL launcher: on Windows Maven ships `mvn.cmd`, and a bare `Command::new("mvn")`
     // only finds `mvn.exe` — so `"mvn"` silently fails to spawn (this is why deps showed 0 jars).
     opts.mvn_path = find_mvn_launcher(root);
@@ -306,9 +352,13 @@ fn resolve_via_maven(root: &Path, jdk_version: &str) -> Result<(Vec<String>, Opt
             let partial = (!cp.mvn_ok || missing > 0).then(|| {
                 format!(
                     "Maven resolved {} of this project's dependency jars but could not resolve {missing} \
-                     more (the resolve runs offline). Types from those jars will read as unresolved \
-                     until the project is built once.",
-                    cp.jars.len()
+                     more{}. Types from those jars will read as unresolved until they are.",
+                    cp.jars.len(),
+                    if auto_download() {
+                        " even with the download allowed — they may not exist at those coordinates"
+                    } else {
+                        ", and automatic download is off, so nothing was fetched"
+                    }
                 )
             });
             if let Some(reason) = &partial {
@@ -324,9 +374,15 @@ fn resolve_via_maven(root: &Path, jdk_version: &str) -> Result<(Vec<String>, Opt
                 cp.unresolved.len()
             );
             Err(format!(
-                "Maven resolved no dependency jars ({} entries missing from ~/.m2). Build the \
-                 project once so its dependencies are downloaded — the resolve runs offline.",
-                cp.unresolved.len()
+                "Maven resolved no dependency jars ({} entries missing from ~/.m2).{}",
+                cp.unresolved.len(),
+                if auto_download() {
+                    " The download was allowed and still came up empty — check that the \
+                     repositories the pom names can be reached."
+                } else {
+                    " Automatic download is off; turn it on in the settings, or build the project \
+                     once so its dependencies land in ~/.m2."
+                }
             ))
         }
         Err(e) => {
@@ -423,6 +479,19 @@ pub(crate) fn clear_list_cache(root: &Path) {
 
 // ── on-disk jar-list cache (keyed by pom mtime) ─────────────────────────────────
 
+/// Bumped when the resolver would now give a **different answer for the same poms**.
+///
+/// The cache's own freshness rules cannot express that. They ask whether the declarations changed
+/// (pom mtime) and whether a recorded missing artifact has arrived — both about the project, neither
+/// about us. So a fix to the resolver reaches nobody who already has an entry: the wrong list is
+/// still "true" by every test the cache knows how to run, and on a project whose phantom artifacts
+/// nothing will ever download it is true forever.
+///
+/// 2: the project's `<dependencyManagement>` now decides the version of transitive dependencies
+/// (`bennu_maven::resolve::project_management`). Every list resolved before it can name artifacts
+/// at versions the build does not use.
+const RESOLVER_EPOCH: u64 = 2;
+
 /// The freshness stamp for the whole project's poms: the **newest** `pom.xml` mtime under `root`.
 ///
 /// Not just the root pom, and that is the fix: in a multi-module project the dependencies live in the
@@ -508,6 +577,9 @@ fn save_entry(root: &Path, pom_mtime: u64, list: &ResolvedList) {
 fn load_entry_from(path: &Path, pom_mtime: u64) -> Option<CachedList> {
     let bytes = std::fs::read(path).ok()?;
     let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    if v.get("resolver").and_then(|m| m.as_u64()) != Some(RESOLVER_EPOCH) {
+        return None;
+    }
     if v.get("pom_mtime").and_then(|m| m.as_u64()) != Some(pom_mtime) {
         return None;
     }
@@ -531,6 +603,7 @@ fn save_entry_to(path: &Path, pom_mtime: u64, list: &ResolvedList) {
         let _ = std::fs::create_dir_all(dir);
     }
     let value = serde_json::json!({
+        "resolver": RESOLVER_EPOCH,
         "pom_mtime": pom_mtime,
         "jars": list.jars,
         "missing_paths": list.missing_paths,
@@ -684,6 +757,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A list written by an older resolver is not read back, however fresh the poms are. Without
+    /// this, a resolver fix reaches only projects whose poms happen to be edited afterwards.
+    #[test]
+    fn a_list_from_an_older_resolver_is_not_served() {
+        let dir = std::env::temp_dir().join(format!("bennu-deps-epoch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("list.json");
+        std::fs::write(
+            &path,
+            br#"{"pom_mtime":9,"jars":["a.jar"],"missing_paths":[],"partial":null,"source":"offline"}"#,
+        )
+        .unwrap();
+        assert!(load_entry_from(&path, 9).is_none(), "no `resolver` stamp — pre-epoch");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The half of the freshness key that an mtime cannot express: the artifact arrived. Without
     /// this, a project that was missing one jar served its half-classpath until a pom was edited.
     #[test]
@@ -698,6 +788,7 @@ mod tests {
             partial: Some("one missing".to_string()),
             missing_paths: vec![absent.display().to_string()],
             source: "offline",
+            cacheable: true,
         };
         save_entry_to(&path, 7, &list);
         // Still missing → the cache is still true, and the sentence survives with it.

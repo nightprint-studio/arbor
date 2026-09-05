@@ -811,65 +811,65 @@ impl IndexService {
                 return;
             }
 
-            // Resolve the project's dependency jars (Maven `~/.m2`, cached across sessions by pom
-            // mtime) so validation + completion resolve LIBRARY types (Spring, servlet, Hibernate,
-            // Struts, …), not just the JDK + project. Non-fatal and lazy: a dep-less project, a
-            // missing `mvn`, or a resolve failure yields `None` and the provider degrades to JDK +
-            // project. The decoded members are memoized to a per-project file; the jar list itself is
-            // disk-cached, so `mvn dependency:build-classpath` runs at most once per pom.
-            emit_progress(&sink, &root_str, "dependencies", "start");
-            let deps = match crate::dep_classpath::resolve_dep_classpath(&root_path, &jdk_version) {
-                crate::dep_classpath::DepOutcome::Resolved(d) => {
-                    eprintln!(
-                        "bennu-be: dependency classpath resolved for {} ({} jars)",
-                        root_path.display(),
-                        d.jars.len()
-                    );
-                    // A PARTIAL tier is told about too, and for the same reason a missing one is:
-                    // the visible symptom is identical — every type from an unresolved jar reads
-                    // as "cannot resolve" — and a warning that only fires on the all-or-nothing
-                    // case leaves the commoner half of the problem looking like a Bennu bug.
-                    if let Some(reason) = &d.partial {
-                        notify(&sink, "Some dependencies not resolved", reason, "warning");
-                    }
-                    // Record the resolved jars on the slot so the index inspector's Jars count reflects
-                    // what the resolver loaded — independent of whether `mvn` re-ran (the jar list is
-                    // disk-cached, so a cached open skips mvn but still indexes the same jars).
-                    *slot.dep_jars.write().unwrap_or_else(|p| p.into_inner()) = d.jars;
-                    Some((d.source, d.memo_path))
-                }
-                // A Maven project with no dependency tier is NOT a benign degradation: every library
-                // type in it reads as "cannot resolve", which looks like thousands of unrelated errors.
-                // Say so once, where the user is looking — the stderr line alone left them guessing.
-                crate::dep_classpath::DepOutcome::Failed(reason) => {
-                    notify(
-                        &sink,
-                        "Dependencies not resolved",
-                        &format!("{reason} Library types won't resolve until this is fixed."),
-                        "warning",
-                    );
-                    None
-                }
-                crate::dep_classpath::DepOutcome::NotApplicable => None,
-            };
-            emit_progress(&sink, &root_str, "dependencies", "end");
-
-            // Build the index-backed provider and swap it in. The JDK member index is persistent
-            // (shared across projects/sessions, keyed by the resolved JDK), so JDK classes are
-            // parsed from bytecode at most once ever; the dependency tier (when present) is memoized
-            // per-project.
-            match NativeJavaProvider::for_project(&index_dir, &jdk_version, &pairs, jdk_index_path(&jdk_version), deps) {
+            // ── stage 1 of the provider: JDK + project, with NO dependency tier.
+            //
+            // Everything below this point used to queue behind the Maven resolve, because the
+            // provider was built once, from its result. That put go-to-declaration, hover and
+            // find-usages — none of which need a dependency jar — behind a child process that can
+            // take minutes on a first resolve and used to be able to hang for ever. The symptom was
+            // navigation silently not working while the class list kept answering, because the class
+            // list is filled in the phase ABOVE this one.
+            //
+            // So the cheap half goes in now, and the dependency tier is resolved on its own thread
+            // and swapped in when it lands (stage 2). The cost of building the provider twice is one
+            // extra enumeration of the JDK class names; what it buys is navigation in seconds
+            // instead of navigation when Maven feels like finishing.
+            match NativeJavaProvider::for_project(
+                &index_dir,
+                &jdk_version,
+                &pairs,
+                jdk_index_path(&jdk_version),
+                None,
+            ) {
                 Ok(p) => {
                     slot.type_names.store(p.class_name_count(), Ordering::Relaxed);
                     *slot.provider.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(p);
-                    // NB: completion is live here, but the index is NOT fully built yet — the
-                    // O(N) reference walk still runs below. `slot.ready` (→ `index_stats.ready`,
-                    // which the FE poll finishes the "Indexing" card on) is set only at the very
-                    // end, so the References-index step stays visibly active through the walk.
-                    eprintln!("bennu-be: completion live for {}", root_path.display());
+                    eprintln!(
+                        "bennu-be: provider live (JDK + project) for {} — dependency tier resolving",
+                        root_path.display()
+                    );
                 }
-                Err(e) => eprintln!("bennu-be: provider build failed ({}): {e}", root_path.display()),
+                Err(e) => eprintln!(
+                    "bennu-be: JDK-only provider build failed ({}): {e}",
+                    root_path.display()
+                ),
             }
+
+            // ── stage 2, on its own thread: resolve the dependency jars and rebuild the provider
+            // with them. Everything the main thread does from here on (the config graph, the O(N)
+            // reference walk, the semantic engine) uses the JDK-only view, which is what it asked
+            // for anyway — see `build_rename_engine`, which deliberately drops the dependency tier
+            // from the walk.
+            let dep_handle = {
+                let root_path = root_path.clone();
+                let index_dir = index_dir.clone();
+                let jdk_version = jdk_version.clone();
+                let pairs = pairs.clone();
+                let slot = slot.clone();
+                let sink = sink.clone();
+                let root_str = root_str.clone();
+                std::thread::spawn(move || {
+                    build_dependency_tier(
+                        &slot,
+                        &root_path,
+                        &index_dir,
+                        &jdk_version,
+                        &pairs,
+                        &sink,
+                        &root_str,
+                    );
+                })
+            };
 
             // The config-graph phase is independent of the semantic engine, so overlap them:
             // config on its own thread while the semantic engine's O(N) reference walk runs
@@ -898,6 +898,14 @@ impl IndexService {
             emit_progress(&sink, &root_str, "references", "end");
 
             let _ = config_handle.join();
+            // The dependency tier is the last thing outstanding. Joining here (rather than not at
+            // all) keeps `ready` meaning what it says — completion over library types is part of
+            // being ready — while everything a reader touches has been live since the walk landed.
+            let _ = dep_handle.join();
+            // Whichever of the two threads finished second installs the full-classpath policy on the
+            // engine: the walk may have landed before the jars did, in which case the engine is
+            // holding a provisional policy and rename / safe delete are refusing until now.
+            install_full_policy(&slot);
 
             // Everything for this gen is now swapped in (provider + rename + config all
             // point at `index_dir`). Best-effort GC of older gens: the previous gen's
@@ -1751,6 +1759,21 @@ impl IndexService {
         // It usually isn't. `codevento.name()` on a project enum is `java.lang.Enum.name()`: real,
         // resolvable, and simply not ours to rename. Say that instead of shrugging.
         self.foreign_member_refusal(&slot, source, offset, new_name)
+    }
+
+    /// What a safe delete at `file`:`offset` would do, or why it will not.
+    ///
+    /// Through the slot's engine like the rename above, so the two ask the reference index the same
+    /// question with the same resolvers. `None` while the index is still building, or when the
+    /// caret is on nothing this project declares.
+    pub fn plan_safe_delete(
+        &self,
+        file: &str,
+        source: &str,
+        offset: usize,
+    ) -> Option<bennu_intel::prelude::SafeDelete> {
+        let slot = self.slot_for_file(file)?;
+        slot.semantics()?.safe_delete(file, source, offset)
     }
 
     /// A refusal naming the LIBRARY type that declares the member at the caret, for a member the
@@ -3302,6 +3325,106 @@ fn warm_up_validation_cache(
 /// Build + swap in the semantic engine for `slot`: reuse the already-read `.java` `sources`
 /// (shared with the symbol-index build — no second disk pass) and read the Spring `.xml`
 /// fragments (the only XML that can carry `<bean class=>`), then build the whole-project
+/// Resolve the project's dependency jars and rebuild the provider with them — **stage 2** of the
+/// two-stage provider (stage 1, JDK + project, went live before this thread started).
+///
+/// Runs on its own thread for one reason: it shells out to Maven, which is the slowest thing in an
+/// open by an order of magnitude and the only one that can stall on a network. Nothing the reader
+/// touches waits for it any more — go-to, hover and find-usages are answered by the walk resolver,
+/// which is JDK-only by design. What does wait is completion over library types, and rename /
+/// safe delete, which refuse until the full classpath is here rather than answer from half of one.
+///
+/// Non-fatal throughout: a project with no `pom.xml`, a missing `mvn` or a failed resolve simply
+/// leaves stage 1's provider in place, which is exactly the JDK + project degradation that was
+/// already the fallback.
+fn build_dependency_tier(
+    slot: &Arc<ProjectSlot>,
+    root_path: &Path,
+    index_dir: &Path,
+    jdk_version: &str,
+    pairs: &[(String, String)],
+    sink: &Arc<dyn EventSink>,
+    root_str: &str,
+) {
+    emit_progress(sink, root_str, "dependencies", "start");
+    let deps = match crate::dep_classpath::resolve_dep_classpath(root_path, jdk_version) {
+        crate::dep_classpath::DepOutcome::Resolved(d) => {
+            eprintln!(
+                "bennu-be: dependency classpath resolved for {} ({} jars)",
+                root_path.display(),
+                d.jars.len()
+            );
+            // A PARTIAL tier is told about too, and for the same reason a missing one is: the
+            // visible symptom is identical — every type from an unresolved jar reads as "cannot
+            // resolve" — and a warning that only fires on the all-or-nothing case leaves the
+            // commoner half of the problem looking like a Bennu bug.
+            if let Some(reason) = &d.partial {
+                notify(sink, "Some dependencies not resolved", reason, "warning");
+            }
+            // Record the resolved jars on the slot so the index inspector's Jars count reflects what
+            // the resolver loaded — independent of whether `mvn` re-ran.
+            *slot.dep_jars.write().unwrap_or_else(|p| p.into_inner()) = d.jars;
+            Some((d.source, d.memo_path))
+        }
+        // A Maven project with no dependency tier is NOT a benign degradation: every library type in
+        // it reads as "cannot resolve", which looks like thousands of unrelated errors. Say so once,
+        // where the user is looking — the stderr line alone left them guessing.
+        crate::dep_classpath::DepOutcome::Failed(reason) => {
+            notify(
+                sink,
+                "Dependencies not resolved",
+                &format!("{reason} Library types won't resolve until this is fixed."),
+                "warning",
+            );
+            None
+        }
+        crate::dep_classpath::DepOutcome::NotApplicable => None,
+    };
+    emit_progress(sink, root_str, "dependencies", "end");
+
+    // A project with no dependency tier keeps stage 1's provider: rebuilding an identical one would
+    // cost a second JDK enumeration to arrive at the same object.
+    if deps.is_some() {
+        match NativeJavaProvider::for_project(
+            index_dir,
+            jdk_version,
+            pairs,
+            jdk_index_path(jdk_version),
+            deps,
+        ) {
+            Ok(p) => {
+                slot.type_names.store(p.class_name_count(), Ordering::Relaxed);
+                *slot.provider.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(p);
+                eprintln!("bennu-be: dependency tier live for {}", root_path.display());
+            }
+            Err(e) => {
+                eprintln!("bennu-be: dependency provider build failed ({}): {e}", root_path.display())
+            }
+        }
+    }
+    // The engine may already be live (the walk is quick on a small project) and holding a
+    // provisional policy — hand it the full classpath now. When the walk has not landed yet this is
+    // a no-op and the build's own call after the join does it.
+    install_full_policy(slot);
+}
+
+/// Hand the live semantic engine the **full-classpath** policy resolver, if both exist yet.
+///
+/// Called from both sides of the race — the dependency thread when it finishes, and the build
+/// thread after the reference walk — because either can be the last to arrive. Idempotent, and
+/// monotonic: the policy only ever goes from provisional to complete.
+fn install_full_policy(slot: &Arc<ProjectSlot>) {
+    let Some(engine) = slot.semantics() else { return };
+    let provider = { Arc::clone(&slot.provider.read().unwrap_or_else(|p| p.into_inner())) };
+    match provider.shared_resolver() {
+        Some(full) => engine.upgrade_policy(full),
+        // Nothing fuller to lend — the provider build failed. The engine's own view is then the only
+        // one there is, and refusing rename for the rest of the session would be worse than the
+        // behaviour this replaced.
+        None => engine.upgrade_policy_to_own(),
+    }
+}
+
 /// reference index + resolver. Non-fatal on failure (rename then just returns "still
 /// building"). Runs on the index background thread.
 #[allow(clippy::too_many_arguments)]
@@ -3364,15 +3487,26 @@ fn build_rename_engine(
     // interface a rename would break lives precisely in the tier the walk drops — measured on a real
     // project, THIRTEEN of thirteen methods implementing a dependency interface (jakarta
     // `ConstraintValidator`, Spring `Condition`, …) planned clean and would have stopped compiling.
+    //
+    // It is lent as PROVISIONAL, because at this point the dependency tier is very likely still
+    // resolving on its own thread: whatever the provider holds now may be the JDK-only stage. The
+    // engine goes live regardless — go-to, hover and find-usages do not consult the policy at all —
+    // and `install_full_policy` upgrades it from whichever thread arrives last. Rename and safe
+    // delete refuse in between, which is the same answer they gave a second earlier when there was
+    // no engine at all, and the only honest one: half a classpath answers "overrides nothing in a
+    // jar" with a confident and wrong no.
     let policy = provider.shared_resolver();
     match SemanticEngine::for_project(index_dir, jdk_version, simple_names, java, xml, shared, &on_progress) {
         Ok(engine) => {
             let engine = match policy {
-                Some(full) => engine.with_policy_resolver(full),
+                Some(view) => engine.with_provisional_policy(view),
                 None => engine,
             };
             *slot.semantics.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(engine));
-            eprintln!("bennu-be: semantic engine live for {}", root.display());
+            eprintln!(
+                "bennu-be: semantic engine live for {} — navigation is up",
+                root.display()
+            );
         }
         Err(e) => eprintln!("bennu-be: semantic engine build failed ({}): {e}", root.display()),
     }

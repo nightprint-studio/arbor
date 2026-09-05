@@ -76,7 +76,18 @@ pub struct Resolved {
     pub optional: bool,
     /// `groupId:artifactId` pairs this dependency excludes from its own subtree.
     pub exclusions: Vec<String>,
-    /// Empty when the dependency writes its own version; otherwise what supplied it.
+    /// Empty when the dependency writes its own version; otherwise the pom where that version is
+    /// **written** — which for an imported BOM is the BOM, not the pom that imports it.
+    ///
+    /// The distinction is worth spelling out because both readings are defensible and the wrong one
+    /// is not visibly wrong. It names the same pom as [`Managed::from_path`], and that is what
+    /// settles it: they are a label and its jump target, so a label reading `com.acme:parent` over
+    /// a jump that opens `platform-bom-1.0.pom` would be a link that lies. `from_path` is documented
+    /// to reach a BOM's own `.pom` in the local repository, so this follows it there.
+    ///
+    /// What it therefore does *not* answer is "which pom of mine decided this" — for a version from
+    /// an imported BOM that is the importing pom, and nothing records it. Worth adding the day
+    /// something asks; today nothing does.
     pub managed_by: String,
     /// The profile it was declared under, empty for the ordinary case.
     pub profile: String,
@@ -496,7 +507,11 @@ mod tests {
         let eff = reader.effective(&Coord::new("com.acme", "starter", "1.0")).unwrap();
         let dep = &eff.dependencies[0];
         assert_eq!(dep.coord.version, "2.15.2");
-        assert_eq!(dep.managed_by, "com.acme:parent");
+        // The BOM, not the pom that imports it: `managed_by` names where the version is *written*,
+        // and it has to agree with `from_path`, which is documented to reach a BOM's own `.pom` in
+        // the local repository. This assertion read `com.acme:parent` from the day it was written
+        // and had never passed — the label and the jump would have named two different poms.
+        assert_eq!(dep.managed_by, "com.acme:platform-bom");
         assert_eq!(dep.scope, "compile", "Maven's default, applied");
     }
 

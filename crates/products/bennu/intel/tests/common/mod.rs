@@ -74,6 +74,9 @@ impl Drop for TempDir {
 /// 1224 otherwise).
 pub struct Project {
     engine: SemanticEngine,
+    /// The resolver the engine borrowed, kept so a test can hand it over as the full-classpath
+    /// policy later — see [`Project::with_provisional_policy`].
+    shared: Option<Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>>,
     /// A second resolver over the SAME persisted index, kept for member-access completion.
     /// The engine's own resolver is `project_only` + private; completion wants an
     /// `IndexResolver` it can pass to `completion(...)`, so we open one here. It mmaps the
@@ -92,7 +95,7 @@ impl Project {
     /// Build a project pinned to a specific Java language level (`"8"`, `"17"`, …) — for the
     /// version-gated constructs (records / pattern variables / inferred lambda params).
     pub fn with_jdk(files: &[(&str, &str)], jdk: &str) -> Self {
-        Self::build(files, jdk, false)
+        Self::build(files, jdk, false, false)
     }
 
     /// Like [`Project::new`], but the semantic engine also resolves the faked JDK stream types
@@ -100,10 +103,27 @@ impl Project {
     /// in production, instead of a project-only one. Use for anything that types a receiver
     /// THROUGH a library generic.
     pub fn with_stream_jdk(files: &[(&str, &str)]) -> Self {
-        Self::build(files, "21", true)
+        Self::build(files, "21", true, false)
     }
 
-    fn build(files: &[(&str, &str)], jdk: &str, stream_jdk: bool) -> Self {
+    /// The engine as it is in the window between the reference walk landing and the **dependency
+    /// tier** arriving: the policy resolver it holds is not the full classpath yet.
+    ///
+    /// That window exists on purpose — the dependency resolve shells out to Maven on its own thread
+    /// and navigation never needed it — and what must hold in it is a line, not a state: everything
+    /// that reads answers, and the two operations that would write against a half-known hierarchy
+    /// refuse. [`grant_full_policy`](Self::grant_full_policy) closes the window.
+    pub fn with_provisional_policy(files: &[(&str, &str)]) -> Self {
+        Self::build(files, "21", true, true)
+    }
+
+    /// Hand the engine the full-classpath policy, as the dependency thread does when it lands.
+    pub fn grant_full_policy(&self) {
+        let full = self.shared.clone().expect("this project was built with a shared resolver");
+        self.engine.upgrade_policy(full);
+    }
+
+    fn build(files: &[(&str, &str)], jdk: &str, stream_jdk: bool, provisional: bool) -> Self {
         let temp = TempDir::new();
         // A `gN` gen subdir so the engine's reference cache lands at `temp/…` (unique per
         // project), never a shared path across tests.
@@ -148,10 +168,14 @@ impl Project {
             &pairs,
             java_sources,
             vec![],
-            shared,
+            shared.clone(),
             &|_, _| {},
         )
         .expect("build semantic engine");
+        let engine = match (provisional, shared.clone()) {
+            (true, Some(view)) => engine.with_provisional_policy(view),
+            _ => engine,
+        };
 
         // A completion resolver over the same on-disk index, WITH the faked JDK.
         //
@@ -178,6 +202,7 @@ impl Project {
             .collect();
         Self {
             engine,
+            shared,
             completion_resolver,
             sources,
             _temp: temp,

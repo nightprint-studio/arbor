@@ -34,6 +34,12 @@ pub fn refactorings_at(source: &str, start: usize, end: usize) -> Vec<Result<Pla
         crate::extract_var::extract_constant(root, source, start, end),
         crate::inline_var::inline_variable(root, source, start),
         crate::inline_method::inline_method(root, source, start),
+        crate::if_statement::invert_if(root, source, start, end),
+        crate::if_statement::merge_nested_if(root, source, start, end),
+        crate::declaration::split_declaration(root, source, start, end),
+        crate::declaration::join_declaration(root, source, start, end),
+        crate::declaration::to_var(root, source, start, end),
+        crate::declaration::from_var(root, source, start, end),
     ]
     .into_iter()
     .flatten()

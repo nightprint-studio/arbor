@@ -109,10 +109,12 @@
   import { notifyActiveFile, resetActiveFileNotifier } from '$lib/contributions/bennu-file-hook';
   import BennuGenerateModal from './BennuGenerateModal.svelte';
   import BennuOverrideModal from './BennuOverrideModal.svelte';
+  import BennuSafeDeleteModal from './BennuSafeDeleteModal.svelte';
   import {
     overridableMembers as ipcOverridable, generateOverrides as ipcGenerateOverrides,
     type OverridableMember,
   } from '$lib/ipc/bennu/overrides';
+  import { safeDelete as ipcSafeDelete, type SafeDeletePlan } from '$lib/ipc/bennu/refactor';
   import BennuJpaGenerateModal from './BennuJpaGenerateModal.svelte';
   import { JPA_PALETTE_ACTIONS } from './jpa-actions';
   import BennuValidationModal from './BennuValidationModal.svelte';
@@ -710,6 +712,54 @@
   // The picker is hosted here because it is a window-level dialog, and the caret it was opened
   // AT is remembered: the user may click around the list for a while, and the methods have to be
   // written where the class was, not where the caret ended up.
+  // ── safe delete ─────────────────────────────────────────────────────────────
+  // The same shape as the override pair below: the window owns the dialog, the editor owns the
+  // caret. One pattern for "a caret action that opens a modal", not two.
+  let safeDeleteOpen = $state(false);
+  let safeDeleteLoading = $state(false);
+  let safeDeletePlan = $state<SafeDeletePlan | null>(null);
+
+  async function openSafeDelete() {
+    const path = projectStore.activeFilePath;
+    const ctx = editor?.caretContext();
+    if (!path || !ctx) { toastStore.show('Open a Java file first', 'info'); return; }
+    safeDeletePlan = null;
+    safeDeleteLoading = true;
+    safeDeleteOpen = true;
+    try {
+      safeDeletePlan = await ipcSafeDelete(path, ctx.source, ctx.offset);
+    } catch (e) {
+      toastStore.show(`Couldn't work out what uses it: ${e}`, 'error');
+      safeDeleteOpen = false;
+    } finally {
+      safeDeleteLoading = false;
+    }
+  }
+
+  /** Apply the removal. Only ever called from the modal's confirm, which only exists when safe. */
+  async function applySafeDelete() {
+    const plan = safeDeletePlan;
+    safeDeleteOpen = false;
+    if (!plan?.safe) return;
+    try {
+      // The declaration need not be in the open file — you can delete a method from one of its
+      // call sites — so the file it lives in is opened before its bytes are touched.
+      if (plan.file !== projectStore.activeFilePath) {
+        await projectStore.openFile(plan.file);
+      }
+      editor?.applyGeneratedEdits([{ start: plan.start, end: plan.end, replacement: '' }]);
+      editor?.focusEditor();
+      toastStore.show(`Deleted ${plan.label}`, 'success');
+      if (plan.file_delete) {
+        // The type was the file's reason to exist. Saying so rather than deleting it: removing a
+        // file is the one step here that no undo in the editor can take back.
+        toastStore.show('The file now declares nothing — delete it from the project tree', 'info');
+      }
+    } catch (e) {
+      toastStore.show(`Delete failed: ${e}`, 'error');
+    }
+  }
+
   let overrideOpen = $state(false);
   let overrideLoading = $state(false);
   let overrideMembers = $state<OverridableMember[]>([]);
@@ -1356,6 +1406,8 @@
         action: () => run(() => editor?.showTypeHierarchy()), when: isJava || isLspFile(path) },
       { id: 'rename', title: 'Rename…', icon: 'target', shortcut: 'Shift+F6',
         action: () => run(() => editor?.openRename()), when: canNav },
+      { id: 'safedelete', title: 'Safe delete…', icon: 'trash', shortcut: 'Alt+Delete',
+        action: () => run(() => void openSafeDelete()), when: isJava },
       // The bulk half of the naming check. Two entries and not one: "this file" is the answer to a
       // screen full of squiggles, "the project" is a deliberate sweep, and they cost very
       // different amounts. Both open the same review before anything is written.
@@ -1769,6 +1821,12 @@
     if (e.shiftKey && !mod && !e.altKey && e.key === 'F6') {
       if (!supportsCodeNav(projectStore.activeFilePath)) return;
       e.preventDefault(); editor?.openRename(); return;
+    }
+    // Safe delete (Alt+Delete) — IntelliJ's own. Never deletes on the keystroke: it opens the
+    // dialog, which either confirms or shows what is in the way.
+    if (e.altKey && !mod && !e.shiftKey && e.key === 'Delete') {
+      if (!isJavaFile(projectStore.activeFilePath)) return;
+      e.preventDefault(); void openSafeDelete(); return;
     }
 
     // Build (Ctrl+F9) / Run (Shift+F10) — IntelliJ. Project-scoped; no-op while busy.
@@ -2341,6 +2399,18 @@
   />
 {/if}
 
+{#if safeDeleteOpen}
+  <BennuSafeDeleteModal
+    plan={safeDeletePlan}
+    loading={safeDeleteLoading}
+    onConfirm={() => void applySafeDelete()}
+    onClose={() => { safeDeleteOpen = false; editor?.focusEditor(); }}
+    onOpenUsage={(hit) => {
+      safeDeleteOpen = false;
+      void projectStore.openFile(hit.file).then(() => bennuUiStore.requestGoto(hit.line));
+    }}
+  />
+{/if}
 {#if overrideOpen}
   <BennuOverrideModal
     members={overrideMembers}

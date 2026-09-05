@@ -72,6 +72,28 @@
     </div>
   </div>
   <div class="fc-item">
+    <div class="fc-title">Invert if · Merge nested if</div>
+    <div class="fc-desc">
+      <code>if (a) X else Y</code> becomes <code>if (!a) Y else X</code>, with the condition negated
+      the way a person would write it: a comparison flips its operator, a <code>!</code> comes off
+      rather than doubling, and <code>&amp;&amp;</code> becomes <code>||</code> over negated halves.
+      A condition of a shape that has no exact opposite is wrapped instead of guessed at. Two
+      <code>if</code>s with nothing between them join into one — refused when either carries an
+      <code>else</code>, which would have to run in a case the merged test no longer distinguishes.
+    </div>
+  </div>
+  <div class="fc-item">
+    <div class="fc-title">Split · Join · <code>var</code></div>
+    <div class="fc-desc">
+      A declaration separates from its assignment and joins back again, and an explicit type swaps
+      with <code>var</code> in either direction — going back to a written type asks the project what
+      the initialiser's type is, and declines rather than leaving <code>var</code> where it was.
+      Splitting a <code>final</code> local is refused: Java allows that shape only where it can prove
+      the variable is still unset. The four things <code>var</code> cannot read — a lambda, a method
+      reference, a bare <code>&#123;…&#125;</code> and <code>null</code> — each say so by name.
+    </div>
+  </div>
+  <div class="fc-item">
     <div class="fc-title">Inline variable · Inline method</div>
     <div class="fc-desc">
       The value goes back where the name was, parenthesised wherever the surrounding expression
@@ -93,6 +115,20 @@
       compiles whatever it returns and fails loudly rather than returning a plausible
       <code>null</code>. A call on another object says so instead: that method belongs in that
       object's file.
+    </div>
+  </div>
+  <div class="fc-item">
+    <div class="fc-title">Safe delete</div>
+    <div class="fc-desc">
+      Removes a member and its documentation comment — or refuses, and lists every use that has to
+      go first with the file, line and the line's text. The list is the point: "it is used" is not an
+      answer, and the next question is always where. It declines outright on a method that overrides
+      something from a jar, where deleting does not remove the behaviour but hands the call to the
+      inherited version; on a method declared at several levels of one hierarchy, which is one method
+      to every caller; on a method something in the project <em>implements</em>, where removing the
+      declaration would leave an <code>@Override</code> with nothing to override; and on anything
+      carrying an annotation, where a framework may reach it by name at run time — a use no index
+      can see.
     </div>
   </div>
   <div class="fc-item">

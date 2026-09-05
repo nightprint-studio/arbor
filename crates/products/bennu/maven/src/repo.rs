@@ -124,7 +124,17 @@ impl LocalRepo {
     }
 }
 
-/// Whether a version directory holds a real artifact rather than the residue of a failed download.
+/// Whether a version directory holds **anything Maven published** rather than the residue of a
+/// failed download (a lone `.lastUpdated`).
+///
+/// Deliberately *not* "is this usable as a jar". A pom counts, because for a BOM the pom **is** the
+/// artifact — and because [`LocalRepo::versions`] feeds version completion and the dependency
+/// panel, which should offer a version that exists rather than only one already compiled against.
+///
+/// The distinction matters and has been got wrong here: `resolve` asks the narrower question — is
+/// the *jar* on disk — so a version can be listed by `versions` and refused by `resolve` at the
+/// same time. That is not a contradiction, it is two questions; the message that reports it has to
+/// say which one it asked (see `check::unresolved`, whose third state exists for exactly this).
 fn has_artifact_file(dir: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(dir) else { return false };
     entries.flatten().any(|e| {

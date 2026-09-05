@@ -39,6 +39,8 @@ pub mod extract_method;
 // An expression gets a name.
 pub mod extract_var;
 // A one-expression method goes back into its call.
+pub mod declaration;
+pub mod if_statement;
 pub mod inline_method;
 // A local goes back into its uses.
 pub mod inline_var;

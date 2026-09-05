@@ -114,10 +114,32 @@ pub fn resolve_jdk_classpath(version: &str) -> Result<Box<dyn ClassSource>, Stri
 /// The newest installed JDK (highest language level) plus its major version, or `None` when
 /// no JDK is installed. The fallback when no JDK matches the project's exact level.
 fn best_available_jdk() -> Option<(PathBuf, u32)> {
-    candidate_jdks()
-        .into_iter()
-        .filter_map(|home| jdk_major(&home).map(|m| (home, m)))
-        .max_by_key(|&(_, m)| m)
+    let candidates = candidate_jdks();
+    let best = candidates
+        .iter()
+        .filter_map(|home| jdk_major(home).map(|m| (home.clone(), m)))
+        .max_by_key(|&(_, m)| m);
+    // "No JDK found" on a machine with three of them installed is a sentence with nowhere to go:
+    // the user can see their JDKs and we cannot, and nothing on either side says which directories
+    // were actually looked in. One line, only on the failing path, and the next occurrence answers
+    // itself.
+    if best.is_none() {
+        eprintln!(
+            "bennu-classpath: no JDK found. Probed {} candidate home(s): {}. Roots searched: {}",
+            candidates.len(),
+            if candidates.is_empty() {
+                "none".to_string()
+            } else {
+                candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+            },
+            jdk_install_roots()
+                .iter()
+                .map(|r| r.dir.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    best
 }
 
 /// A snapshot of how [`resolve_jdk_classpath`] would resolve `version` — what the FE turns

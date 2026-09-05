@@ -98,3 +98,5 @@ pub use crate::rename::{generated_aliases, FieldAlias};
 pub use crate::hierarchy::{
     HierarchyCallSite, HierarchyDirection, HierarchyHandle, HierarchyItem,
 };
+
+pub use crate::safe_delete::{safe_delete_plan, SafeDelete};

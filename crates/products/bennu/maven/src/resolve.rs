@@ -131,6 +131,7 @@ pub fn resolve(root: &Path, repo: &LocalRepo) -> Resolution {
     // how a multi-module project reports half of itself as a missing dependency — and installing
     // them would not make it right either, because the jar in `~/.m2` is last week's build.
     let reactor: HashSet<String> = effectives.iter().map(|e| e.coord.ga()).collect();
+    let pinned = project_management(&effectives);
 
     let mut out = Resolution { reactor: reactor.iter().cloned().collect(), ..Resolution::default() };
     out.reactor.sort();
@@ -206,9 +207,15 @@ pub fn resolve(root: &Path, repo: &LocalRepo) -> Resolution {
         }
         let Some(eff) = reader.effective(&node.coord) else { continue };
         let children: Vec<Resolved> = eff.dependencies.clone();
-        for child in children {
+        for mut child in children {
             if !transitively_relevant(&node.scope, &child) {
                 continue;
+            }
+            // The project's own `<dependencyManagement>` decides, whatever this pom wrote. See
+            // [`project_management`] — this single line is the difference between the classpath the
+            // build has and one nobody has ever compiled against.
+            if let Some(version) = pinned.get(&child.coord.key()) {
+                child.coord.version = version.clone();
             }
             if node.excluded.contains(&child.coord.ga()) || excluded_by_wildcard(&node.excluded, &child.coord) {
                 continue;
@@ -256,6 +263,45 @@ fn push_once(out: &mut Vec<Coord>, seen: &mut HashSet<String>, coord: Coord, tag
     if seen.insert(format!("{tag}{}", coord.gav())) {
         out.push(coord);
     }
+}
+
+/// The versions the **project** pins, by [`Coord::key`] — applied to the whole graph, not only to
+/// what the project declares.
+///
+/// Maven's `<dependencyManagement>` overrides the version a *transitive* dependency writes in its
+/// own pom, and that is the entire point of importing a BOM: `spring-boot-dependencies` decides
+/// which Jackson the graph gets, whoever asked for it and whichever version they asked for. Reading
+/// each transitive at the version its own pom happens to declare produces a classpath no build has.
+///
+/// It is not a near miss either. On a Spring Boot 4.1 project it reported **nineteen artifacts
+/// missing, and not one of them is on the classpath Maven builds** — jackson 2.21.1 where the BOM
+/// says 2.21.4, `spring-boot-*` 4.0.5 and 4.0.7 where the project is on 4.1.0, junit-platform 6.1.0
+/// where it is 6.0.3. Every one of them is a real artifact at a version nothing needs, so nothing
+/// ever downloads it: the warning names artifacts that will still be absent tomorrow, and the
+/// classpath quietly lacks the versions that *are* used.
+///
+/// Only the reactor's management is collected, and the first module to pin a key wins. This builds
+/// **one** classpath for the whole project — the index serves a project, not a module at a time —
+/// so there is one answer to give, and where two modules disagree the root's is the one the person
+/// reading the editor is looking at.
+///
+/// A version that is a range or still carries a `${…}` is skipped rather than pinned: overriding a
+/// version we can resolve with one we cannot would turn a working entry into a missing one.
+fn project_management(effectives: &[Effective]) -> HashMap<String, String> {
+    let mut out: HashMap<String, String> = HashMap::new();
+    for eff in effectives {
+        for (key, managed) in &eff.managed {
+            if managed.version.is_empty()
+                || managed.version.contains("${")
+                || managed.version.starts_with('[')
+                || managed.version.starts_with('(')
+            {
+                continue;
+            }
+            out.entry(key.clone()).or_insert_with(|| managed.version.clone());
+        }
+    }
+    out
 }
 
 /// Whether a version is one this can look for. A range or a surviving `${…}` is not — see the
@@ -544,6 +590,77 @@ mod tests {
         let r = f.resolve();
         assert!(r.jars.iter().any(|j| j.ends_with("slf4j-api-2.0.9.jar")));
         assert!(!r.jars.iter().any(|j| j.ends_with("slf4j-api-1.7.36.jar")));
+    }
+
+    /// The project's `<dependencyManagement>` decides the version of a **transitive**, not just of
+    /// what the project declares. Nearest-wins would leave the dependency's own choice standing.
+    #[test]
+    fn the_projects_management_overrides_a_transitives_own_version() {
+        let f = Fixture::new("managed-transitive");
+        f.install("org.slf4j", "slf4j-api", "2.0.9", &lib("org.slf4j", "slf4j-api", "2.0.9", ""));
+        f.install(
+            "com.acme",
+            "core",
+            "1.0",
+            &lib("com.acme", "core", "1.0", &dep("org.slf4j", "slf4j-api", "1.7.36")),
+        );
+        f.write_pom(
+            "",
+            &format!(
+                "<project><groupId>p</groupId><artifactId>app</artifactId><version>1</version>
+                 <dependencyManagement><dependencies>{}</dependencies></dependencyManagement>
+                 <dependencies>{}</dependencies></project>",
+                dep("org.slf4j", "slf4j-api", "2.0.9"),
+                dep("com.acme", "core", "1.0")
+            ),
+        );
+        let r = f.resolve();
+        assert!(r.is_complete(), "1.7.36 is not needed and must not be reported: {:?}", r.missing);
+        assert!(r.jars.iter().any(|j| j.ends_with("slf4j-api-2.0.9.jar")), "{:?}", r.jars);
+    }
+
+    /// The same thing through an **imported BOM**, which is how every Spring Boot project pins its
+    /// graph — and the shape that reported nineteen phantom artifacts on a project that builds.
+    #[test]
+    fn an_imported_bom_pins_a_transitive_that_asks_for_another_version() {
+        let f = Fixture::new("bom-transitive");
+        f.install("org.slf4j", "slf4j-api", "2.0.9", &lib("org.slf4j", "slf4j-api", "2.0.9", ""));
+        f.install(
+            "com.acme",
+            "platform-bom",
+            "1.0",
+            &format!(
+                "<project><groupId>com.acme</groupId><artifactId>platform-bom</artifactId>
+                 <version>1.0</version><packaging>pom</packaging>
+                 <dependencyManagement><dependencies>{}</dependencies></dependencyManagement></project>",
+                dep("org.slf4j", "slf4j-api", "2.0.9")
+            ),
+        );
+        f.install(
+            "com.acme",
+            "core",
+            "1.0",
+            &lib("com.acme", "core", "1.0", &dep("org.slf4j", "slf4j-api", "1.7.36")),
+        );
+        f.write_pom(
+            "",
+            &format!(
+                "<project><groupId>p</groupId><artifactId>app</artifactId><version>1</version>
+                 <dependencyManagement><dependencies>
+                   <dependency><groupId>com.acme</groupId><artifactId>platform-bom</artifactId>
+                     <version>1.0</version><type>pom</type><scope>import</scope></dependency>
+                 </dependencies></dependencyManagement>
+                 <dependencies>{}</dependencies></project>",
+                dep("com.acme", "core", "1.0")
+            ),
+        );
+        let r = f.resolve();
+        assert!(
+            r.missing.is_empty(),
+            "the BOM's version is the one the build uses; 1.7.36 is a phantom: {:?}",
+            r.missing
+        );
+        assert!(r.jars.iter().any(|j| j.ends_with("slf4j-api-2.0.9.jar")), "{:?}", r.jars);
     }
 
     /// A `${property}` nothing defines cannot be looked for — and saying so is different from

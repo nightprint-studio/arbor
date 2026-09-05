@@ -74,7 +74,16 @@
   is shown and labelled rather than guessed at.
 </p>
 <p>
-  A declared dependency with no jar in your local repository is called out, because that is exactly
+  When a dependency's jar is not in the local repository yet, the resolve fetches it. A Maven
+  repository often holds a dependency's <code>.pom</code> without its <code>.jar</code> — the pom is
+  what Maven reads to walk the dependency graph, and the jar arrives only when something compiles
+  against it — so a project whose tree has been resolved but never built has the folders and none of
+  the code. <strong>Download missing dependencies</strong>, under Settings → Java, is on by default
+  and is what closes that gap; turning it off resolves from the local repository alone, which is
+  worth doing on a metered connection or behind a slow corporate repository.
+</p>
+<p>
+  A declared dependency whose jar is still missing after that is called out, because that is exactly
   what "cannot find symbol" looks like in a file that is fine. Until the classpath has been resolved
   the panel says the column is unknown instead of marking everything missing. The last group,
   <strong>Pulled in transitively</strong>, is every jar on the classpath that no module asked for —

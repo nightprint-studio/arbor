@@ -73,7 +73,7 @@ fn usages_result_of(result: ReferencesResult) -> UsagesResult {
 }
 
 /// Map an intel [`UsageLocation`] onto the wire [`UsageHit`].
-fn usage_hit(u: UsageLocation, via: Option<String>) -> UsageHit {
+pub(crate) fn usage_hit(u: UsageLocation, via: Option<String>) -> UsageHit {
     UsageHit {
         file: u.file,
         start: u.start,

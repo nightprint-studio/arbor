@@ -67,6 +67,7 @@ export interface BennuSettingsSnapshot {
   htmlScriptsAllowed: string[];
   /** Open `.md` files in the live-preview markdown editor rather than in the code editor.
    *  Config-backed; its control is the toggle in the editor's toolbar. */
+  mavenAutoDownload: boolean;
   markdownLivePreview: boolean;
   /** Show Local History's diff as two columns rather than as a unified patch. Config-backed;
    *  its control is the toggle in that window, not a settings row. */
@@ -132,6 +133,7 @@ const DEFAULTS: BennuSettingsSnapshot = {
   rightMargin: 120,
   sqlDialect: 'portable',
   htmlScriptsAllowed: [],
+  mavenAutoDownload: true,
   markdownLivePreview: true,
   historyDiffSplit: true,
   autosave: true,
@@ -203,6 +205,7 @@ function createSettingsStore() {
   let excludedDirs = $state(DEFAULTS.excludedDirs);
   // Markdown + Local History
   let htmlScriptsAllowed = $state<string[]>([...DEFAULTS.htmlScriptsAllowed]);
+  let mavenAutoDownload = $state(DEFAULTS.mavenAutoDownload);
   let markdownLivePreview = $state(DEFAULTS.markdownLivePreview);
   let historyDiffSplit = $state(DEFAULTS.historyDiffSplit);
 
@@ -218,7 +221,7 @@ function createSettingsStore() {
     return {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
       highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, inlayHints, rightMargin,
-      sqlDialect, htmlScriptsAllowed, markdownLivePreview, historyDiffSplit, autosave,
+      sqlDialect, htmlScriptsAllowed, mavenAutoDownload, markdownLivePreview, historyDiffSplit, autosave,
       collapseLibraryFrames, searchDependencies,
       localHistory, localHistoryDays, localHistoryMaxMb, localHistoryMaxFileMb,
       autoPopup, popupDelayMs, caseSensitive, autoImport,
@@ -262,6 +265,7 @@ function createSettingsStore() {
         default_encoding: defaultEncoding,
         excluded_dirs: excludedDirList(),
         html_scripts_allowed: htmlScriptsAllowed,
+        maven_auto_download: mavenAutoDownload,
         markdown_live_preview: markdownLivePreview,
         history_diff_split: historyDiffSplit,
         autosave,
@@ -406,6 +410,8 @@ function createSettingsStore() {
         : htmlScriptsAllowed.filter((p) => p !== path);
       void persistConfigBacked();
     },
+    get mavenAutoDownload() { return mavenAutoDownload; },
+    setMavenAutoDownload(v: boolean) { mavenAutoDownload = v; void persistConfigBacked(); },
     get markdownLivePreview() { return markdownLivePreview; },
     setMarkdownLivePreview(v: boolean) { markdownLivePreview = v; void persistConfigBacked(); },
     get historyDiffSplit() { return historyDiffSplit; },
@@ -439,6 +445,7 @@ function createSettingsStore() {
         // The box holds the list as the user typed it; the config holds it parsed.
         excludedDirs = (cfg.excluded_dirs ?? []).join(', ');
         htmlScriptsAllowed = cfg.html_scripts_allowed ?? [];
+        mavenAutoDownload = cfg.maven_auto_download ?? DEFAULTS.mavenAutoDownload;
         markdownLivePreview = cfg.markdown_live_preview ?? DEFAULTS.markdownLivePreview;
         historyDiffSplit = cfg.history_diff_split ?? DEFAULTS.historyDiffSplit;
         autosave = cfg.autosave;

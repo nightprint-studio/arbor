@@ -38,6 +38,23 @@ impl Fixture {
         .unwrap();
     }
 
+    /// A dependency whose **pom** is in the repository and whose jar is not — the state Maven
+    /// leaves behind when it walks a dependency graph without ever compiling against it. The
+    /// commonest shape of "unresolved" on a project that has never been built, and the one that
+    /// used to be reported as though the version were wrong.
+    fn install_pom_only(&self, group: &str, artifact: &str, version: &str) {
+        let d = self.dir.join("m2").join(group.replace('.', "/")).join(artifact).join(version);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join(format!("{artifact}-{version}.pom")),
+            format!(
+                "<project><groupId>{group}</groupId><artifactId>{artifact}</artifactId>\
+                 <version>{version}</version></project>"
+            ),
+        )
+        .unwrap();
+    }
+
     fn repo(&self) -> LocalRepo {
         LocalRepo::at(self.dir.join("m2"))
     }
@@ -109,6 +126,39 @@ fn a_dependency_that_is_not_installed_is_marked_at_its_artifact_id() {
     });
     assert!(message.contains("com.acme:legacy-core:2.4.0"), "{message}");
     assert_eq!(marked, "legacy-core", "underlined where it is written");
+}
+
+/// The third state, and the one a reader is most likely to meet: the version IS in the repository,
+/// as a pom, and its jar never arrived.
+///
+/// It used to be reported with the wrong-version message, which listed the very version it called
+/// missing — *"version `2.21.1` … is not in the local repository. Installed: …, 2.21.1, …"*. That
+/// contradiction sent a reader to check a folder that was right there and to conclude the tool was
+/// broken. `versions` and `resolve` ask two different questions — does this version exist, and is
+/// its jar on disk — and the message has to say which one it asked.
+#[test]
+fn a_version_present_as_a_pom_without_its_jar_says_so() {
+    let f = Fixture::new("pom-only");
+    f.install_pom_only("com.fasterxml.jackson.core", "jackson-databind", "2.21.1");
+    let source = project(&format!(
+        "<dependencies>{}</dependencies>",
+        dependency("com.fasterxml.jackson.core", "jackson-databind", "2.21.1")
+    ));
+    let message = with_env(&f, &source, |env, doc| {
+        pom_diagnostics(env, doc)
+            .iter()
+            .find(|d| d.code == "maven-unresolved-dependency")
+            .expect("still reported — the jar really is missing")
+            .message
+            .clone()
+    });
+    assert!(message.contains("as a pom"), "names the state it is in: {message}");
+    assert!(message.contains("jar was never downloaded"), "{message}");
+    // The contradiction that made the old message useless.
+    assert!(
+        !message.contains("Installed:"),
+        "must not list the version it is reporting as missing: {message}"
+    );
 }
 
 /// The one that resolves must not be marked, and neither must the project's own module — the two

@@ -210,6 +210,13 @@ pub fn check_file_resolved(
         }
         return out;
     }
+    // Declarations nothing reads. Private members and locals only — the scope this file can see all
+    // of; the wider question needs the reference index and belongs with safe delete.
+    //
+    // BELOW the gate and not with the other pure-AST checks, because "no identifier in this tree
+    // names it" is a claim about the tree, and a half-parsed one is not the program: a file being
+    // typed would report every name in it as unread.
+    out.extend(crate::unused_member::unused_member_errors(root, source));
     if jdk_available {
         // ONE symbol extraction + ONE shared inference cache for every resolver-backed check. The
         // cache memoizes each site's inferred type (so the unknown-member / arity / argument / cast

@@ -26,6 +26,7 @@ use bennu_query::prelude::{
 };
 
 use crate::hierarchy::{HierarchyCtx, HierarchyDirection, HierarchyHandle, HierarchyItem};
+use crate::safe_delete::SafeDelete;
 use crate::refs::{
     build_reference_index_incremental, build_reference_index_with_progress, classify_caret,
     classify_target, references, AliasUsages, DeclKey, LangLevel, ReferenceIndex, ReferencesResult,
@@ -49,11 +50,36 @@ pub struct SemanticEngine {
     resolver: Arc<dyn TypeResolver + Send + Sync>,
     /// The resolver POLICY questions are asked of — see [`SemanticEngine::with_policy_resolver`].
     /// Defaults to `resolver`, so an engine built without one behaves exactly as before.
-    policy: Arc<dyn TypeResolver + Send + Sync>,
+    ///
+    /// Behind a lock because it can arrive **after** the engine does. The reference walk needs only
+    /// the cheap JDK view, so the engine is built as soon as the walk lands; the full classpath is
+    /// still resolving on another thread and is lent in when it gets here
+    /// ([`upgrade_policy`](Self::upgrade_policy)).
+    policy: RwLock<Policy>,
     xml_files: Vec<PlanFile>,
     /// The project's Java language level — gates recognition of version-specific binding forms
     /// (records, pattern variables, lambda inferred params) during caret classification.
     lang_level: LangLevel,
+}
+
+/// The policy resolver, and whether it is the full classpath yet.
+///
+/// The flag is not a detail: an incomplete policy answers "does this override something in a jar?"
+/// with a confident no, which is precisely the answer that makes a rename or a delete go ahead
+/// when it must not. So the two operations that ask refuse while it is provisional, rather than
+/// being told a cheaper truth.
+struct Policy {
+    resolver: Arc<dyn TypeResolver + Send + Sync>,
+    complete: bool,
+}
+
+impl Policy {
+    fn complete(resolver: Arc<dyn TypeResolver + Send + Sync>) -> Self {
+        Self { resolver, complete: true }
+    }
+    fn provisional(resolver: Arc<dyn TypeResolver + Send + Sync>) -> Self {
+        Self { resolver, complete: false }
+    }
 }
 
 /// The two halves of the engine an edit invalidates, behind **one** lock.
@@ -138,7 +164,7 @@ impl SemanticEngine {
             .collect();
         // No project version here (the test/plain constructor) → unknown level enables all
         // binding forms.
-        let policy = Arc::clone(&resolver);
+        let policy = RwLock::new(Policy::complete(Arc::clone(&resolver)));
         let subtypes = SubtypeMap::build(&index, &*resolver);
         Self {
             live: RwLock::new(Live { index, java_files, project_types, subtypes }),
@@ -160,9 +186,52 @@ impl SemanticEngine {
     /// `jakarta.validation.ConstraintValidator` renamed clean and stopped compiling: the ancestor
     /// was named in the project's own record, but nothing could read its members to see the
     /// method declared there.
-    pub fn with_policy_resolver(mut self, policy: Arc<dyn TypeResolver + Send + Sync>) -> Self {
-        self.policy = policy;
+    pub fn with_policy_resolver(self, policy: Arc<dyn TypeResolver + Send + Sync>) -> Self {
+        *self.policy.write().unwrap_or_else(|p| p.into_inner()) = Policy::complete(policy);
         self
+    }
+
+    /// Lend a policy resolver that is **not the full classpath yet** — the dependency tier is still
+    /// being resolved on another thread.
+    ///
+    /// Everything the engine does apart from rename and safe-delete is answered by the walk
+    /// resolver and is correct without this, which is the point: go-to-declaration, hover and
+    /// find-usages come up as soon as the walk lands instead of queueing behind a Maven run that
+    /// they never needed. The two that DO need it refuse until [`upgrade_policy`](Self::upgrade_policy)
+    /// arrives, because a rename planned against a partial classpath is the trap that plans clean
+    /// and stops compiling — measured at 20 broken builds out of 134.
+    pub fn with_provisional_policy(self, policy: Arc<dyn TypeResolver + Send + Sync>) -> Self {
+        *self.policy.write().unwrap_or_else(|p| p.into_inner()) = Policy::provisional(policy);
+        self
+    }
+
+    /// Install the full-classpath policy resolver on a live engine. Monotonic by construction: this
+    /// is the only way a policy becomes complete, and nothing ever takes it back.
+    pub fn upgrade_policy(&self, policy: Arc<dyn TypeResolver + Send + Sync>) {
+        *self.policy.write().unwrap_or_else(|p| p.into_inner()) = Policy::complete(policy);
+    }
+
+    /// Mark the engine's OWN resolver as the policy, complete.
+    ///
+    /// For the case where there is no fuller view to lend — the provider build failed outright — and
+    /// the choice is between the engine's own view and refusing rename for the rest of the session.
+    /// The first is what the engine did before a policy resolver existed at all.
+    pub fn upgrade_policy_to_own(&self) {
+        let own = Arc::clone(&self.resolver);
+        *self.policy.write().unwrap_or_else(|p| p.into_inner()) = Policy::complete(own);
+    }
+
+    /// Whether the policy resolver is the full classpath — i.e. whether rename and safe delete can
+    /// answer at all. `false` only in the window between the reference walk landing and the
+    /// dependency tier arriving.
+    pub fn policy_ready(&self) -> bool {
+        self.policy.read().unwrap_or_else(|p| p.into_inner()).complete
+    }
+
+    /// The policy resolver, or `None` while it is still provisional.
+    fn full_policy(&self) -> Option<Arc<dyn TypeResolver + Send + Sync>> {
+        let g = self.policy.read().unwrap_or_else(|p| p.into_inner());
+        g.complete.then(|| Arc::clone(&g.resolver))
     }
 
     /// Build the engine over the given source sets, resolving types with `shared_resolver` when
@@ -251,7 +320,7 @@ impl SemanticEngine {
             .map(|(path, source)| PlanFile { path, source })
             .collect();
         // Same view for both until the caller lends a fuller one (`with_policy_resolver`).
-        let policy = Arc::clone(&resolver);
+        let policy = RwLock::new(Policy::complete(Arc::clone(&resolver)));
         let subtypes = SubtypeMap::build(&index, &*resolver);
         Ok(Self {
             live: RwLock::new(Live { index, java_files, project_types, subtypes }),
@@ -363,6 +432,8 @@ impl SemanticEngine {
         offset: usize,
         new_name: &str,
     ) -> Option<RenamePlan> {
+        // No full classpath yet → no verdict. See `with_provisional_policy`.
+        let policy = self.full_policy()?;
         let live = self.live();
         rename_plan(
             &live.index,
@@ -371,11 +442,35 @@ impl SemanticEngine {
             offset,
             new_name,
             &*self.resolver,
-            &*self.policy,
+            &*policy,
             &live.project_types,
             &live.subtypes,
             &live.java_files,
             &self.xml_files,
+            self.lang_level,
+        )
+    }
+
+    /// What a **safe delete** at `file`:`offset` would do, or why it will not.
+    ///
+    /// The same wiring as [`Self::plan`], and deliberately so: both resolvers, in both roles. The
+    /// `policy` one carries the full classpath and answers the question that makes a delete refuse
+    /// — "does this override something in a jar" — so passing the project-only resolver here would
+    /// report every override of a JDK method as safely deletable. It is the same trap rename
+    /// documents, and it has the same shape.
+    pub fn safe_delete(&self, file: &str, source: &str, offset: usize) -> Option<SafeDelete> {
+        let policy = self.full_policy()?;
+        let live = self.live();
+        crate::safe_delete::safe_delete_plan(
+            &live.index,
+            file,
+            source,
+            offset,
+            &*self.resolver,
+            &*policy,
+            &live.project_types,
+            &live.subtypes,
+            &live.java_files,
             self.lang_level,
         )
     }

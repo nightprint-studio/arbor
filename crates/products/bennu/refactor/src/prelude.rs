@@ -17,5 +17,7 @@ pub use crate::plan::{
 pub use crate::create::{create_method, missing_type_at, new_type_source, MissingType};
 pub use crate::extract_method::extract_method;
 pub use crate::extract_var::{extract_constant, extract_variable, TYPE_PLACEHOLDER};
+pub use crate::declaration::{from_var, join_declaration, split_declaration, to_var};
+pub use crate::if_statement::{invert_if, merge_nested_if};
 pub use crate::inline_method::inline_method;
 pub use crate::inline_var::inline_variable;

@@ -78,6 +78,19 @@ pub struct BennuConfig {
     /// repository is a permission file that gets committed, and then granted to everyone who
     /// clones it.
     pub html_scripts_allowed: Vec<String>,
+    /// Let the dependency resolve reach the network when the local repository is short.
+    ///
+    /// `true` by default, and the default is the point: an editor whose whole job is to resolve
+    /// types is not much use reporting nineteen of them as unresolvable and leaving you to go and
+    /// run a command. IntelliJ, Eclipse and the VS Code Java pack all download here; being the one
+    /// that does not was a principle applied past where it helped anyone.
+    ///
+    /// Off makes the resolve run `-o` — only what `~/.m2` already holds. Worth turning off on a
+    /// metered connection, behind a VPN that makes the corporate repository slow, or anywhere the
+    /// first resolve of a large project would stall on the network. Nothing else changes: the same
+    /// Maven goal runs either way, and the shortfall is reported the same way when it is still
+    /// short afterwards.
+    pub maven_auto_download: bool,
     /// Open a `.md` file in the **live-preview** markdown editor rather than in the code editor.
     /// `true` by default: a README is read far more often than its markup is edited, and what it
     /// says is in the rendering. The editor's toolbar toggles it per user, not per file.
@@ -476,6 +489,7 @@ impl Default for BennuConfig {
             completion_delay_ms: 150,
             completion_case_sensitive: false,
             html_scripts_allowed: Vec::new(),
+            maven_auto_download: true,
             markdown_live_preview: true,
             history_diff_split: true,
             // The names the settings page has always shown in this box. `target` and `.idea` are

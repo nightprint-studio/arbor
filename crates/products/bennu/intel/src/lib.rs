@@ -36,6 +36,7 @@ pub mod provider;
 pub mod refcache;
 pub mod refs;
 pub mod rename;
+pub mod safe_delete;
 pub mod spell;
 // Spring stereotype-bean policy: reads bennu-java's generic annotations and derives the
 // annotation-declared beans (`@Service`/`@Component`/…) the config resolver consults as a
