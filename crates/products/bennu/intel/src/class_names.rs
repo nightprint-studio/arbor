@@ -20,7 +20,11 @@
 use std::collections::{HashMap, HashSet};
 
 /// Simple name (`List`) → sorted, de-duplicated dotted FQNs (`["java.awt.List", "java.util.List"]`).
-#[derive(Default, Debug)]
+/// `Clone` so a provider built over the same JDK can start from another's enumeration instead of
+/// walking the JVM image again — see `NativeJavaProvider::with_dependency_tier`. Re-running
+/// [`finalize`](ClassNameIndex::finalize) after adding to a clone is correct: it rebuilds both
+/// sorted axes from `by_simple` rather than appending to them.
+#[derive(Default, Debug, Clone)]
 pub struct ClassNameIndex {
     by_simple: HashMap<String, Vec<String>>,
     /// Outer binary name (`java/util/Map`) → the types nested DIRECTLY inside it, as binary names

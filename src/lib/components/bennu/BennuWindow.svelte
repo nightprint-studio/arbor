@@ -460,7 +460,23 @@
   let lastIndexedRoot: string | null = null;
   $effect(() => {
     const root = projectStore.project?.root ?? null;
-    if (!root || projectStore.isDemo || projectStore.isCargo) return;
+    if (!root || projectStore.isDemo || projectStore.isCargo) {
+      // Switching to a Cargo or demo project — or to none — has to END the previous project's
+      // indexing card, and this used to just return. Nothing else ever stopped it: the card is
+      // finished by a `ready` event or by the poll seeing `index_stats.ready`, and the poll's only
+      // give-up is for a backend that emitted NOTHING at all (a live event stream is how it knows a
+      // long reference walk is still working, so it cannot also read silence as a timeout). So the
+      // poll kept asking a root nobody was building any more, for ever, and the footer kept saying
+      // "Indexing" over a project that has no Java index by definition.
+      //
+      // Clearing `lastIndexedRoot` matters as much: without it, coming BACK to the same Java
+      // project compared equal and never re-armed, so its real build ran with no card at all.
+      if (lastIndexedRoot !== null) {
+        lastIndexedRoot = null;
+        untrack(() => bennuIndexStore.reset());
+      }
+      return;
+    }
     if (root !== lastIndexedRoot) {
       lastIndexedRoot = root;
       bennuIndexStore.onProjectOpen(root);

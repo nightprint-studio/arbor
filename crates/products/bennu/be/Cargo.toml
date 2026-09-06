@@ -192,3 +192,9 @@ tokio      = { workspace = true }
 # the shared `arbor_core::prelude::client()` defaults; the workspace `reqwest` is here only
 # for the `reqwest::Client` type in the download helper signature. No new external crate.
 reqwest    = { workspace = true }
+
+# `setrlimit(RLIMIT_NOFILE)` at start-up — see `fd_limit.rs`. macOS hands a GUI app a soft limit
+# of 256 open files, and a project with 150 dependency jars holds every one of them open for the
+# session. Not a new external crate: `libc` is already pinned by `arbor-feedback` and `src-tauri`.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

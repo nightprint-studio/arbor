@@ -21,7 +21,19 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **The type of a `var` is now shown for primitives and arithmetic too** — `int`, `char`, `long[]` — where before the hint simply did not appear. The engine learned the shapes it used to skip: arithmetic and comparison, `!`/`-`/`++`, indexing an array, `new int[n]`, `a.length`, `instanceof`, a conditional whose two arms agree, and picking the exactly-matching overload of `Math.max` and friends. Measured on Apache Commons Lang 3 against the type each author wrote: **70% → 93%** of locals typed, with no new false positives on code that compiles.
 
+### Changed
+
+- **The file-structure list ranks by match quality once you type in it.** With the box empty it is still the file's own order, because that is what an outline is for; with a query it answers the question actually being asked. Typing `uri` in a 66-member class used to put a constant where `u`, `r` and `i` are scattered across thirty-one characters five rows above the method called `uri`. The shared matcher also learned that a capital starts a word inside a name, and to spot the query sitting whole somewhere rather than only tracking its letters left to right — so `Uri` inside `requestHeaderToRequestUri` now counts for what it is. Go-to-file and the command palette rank better for the same reason.
+
 ### Fixed
+
+- **Go-to works on a static import.** Neither half of `import static …HandlerFunctions.http;` resolved: the type is bound by no ordinary import and the member is not a type at all, so clicking either did nothing. The type now opens itself, and the member opens the type that declares it.
+
+- **A project with many dependency jars no longer runs out of file descriptors.** Each jar is held open for the session, and macOS hands a bundled app a limit of 256 — so past about that many, the dependency index failed to build, every library import went red, go-to found nothing in the JDK, and a file opened afterwards came back empty. Three symptoms, one number, and none of them said "too many open files". The backend now raises its own limit at start-up.
+
+- **An "Indexing project" card can no longer run for ever.** Switching to a Cargo or demo project left the previous project's card polling a build nobody was running any more, and coming back to that project then never re-armed it. On the backend, the card's end used to be the last line of the build thread, so a superseded rebuild or a panic left it spinning; it is now closed however the build ends.
+
+- **Go-to-declaration, hover and find-usages no longer wait for the dependency resolve.** They never needed a dependency jar — the reference walk uses the JDK-only view by design — but they were queued behind a Maven run that can take minutes, so navigation silently did nothing while the class list kept answering. The dependency tier is now resolved alongside them and swapped in when it lands. Rename and safe delete still wait for it, and say so, because a partial classpath is what makes them break a build. Maven also has a five-minute cap now, so a repository it cannot reach delays the library types rather than the whole index.
 
 - **A project pinned by a BOM no longer reports dependencies it does not use as missing.** The version a transitive dependency writes in its own pom was taken as final, where Maven lets the project's `<dependencyManagement>` override it — so a Spring Boot project warned about nineteen artifacts, every one of them the right library at a version nothing on the classpath asks for. Nothing would ever download them, so the warning could not clear itself. Dependency lists resolved before this are re-resolved once.
 

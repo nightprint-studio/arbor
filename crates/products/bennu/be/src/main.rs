@@ -22,6 +22,7 @@ use std::sync::Arc;
 use bennu_core::prelude::BennuState;
 
 // Self-test handlers (be_ping / be_echo) prove the framed-stdio handshake.
+mod fd_limit;
 mod selftest;
 
 // `JobHandle`: register the background analysis warm-up as a tracked job in the shell registry
@@ -380,6 +381,12 @@ fn main() {
     // `default` profile instead of the one the launcher spawned us on, so a dev
     // launcher would read config/data from the wrong (or empty) profile.
     arbor_core::prelude::init_active_profile();
+
+    // Before anything opens a file. A dependency jar is held open for the whole session, so a
+    // project with 150 of them needs more descriptors than the 256 macOS hands a GUI app — and
+    // running out does not announce itself as "too many open files" anywhere the user looks. See
+    // `fd_limit`.
+    fd_limit::raise_open_file_limit();
 
     // Seed the classpath's extra JDK search directories from the settings (`jdk_paths`), so a
     // JDK installed somewhere non-standard is found. Re-seeded on config save (`config_cmds`).

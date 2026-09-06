@@ -875,6 +875,112 @@ impl NativeJavaProvider {
         })
     }
 
+    /// The same provider **plus a dependency tier**, sharing this one's decoded JDK.
+    ///
+    /// The project's dependency jars are resolved on their own thread, so the provider is built
+    /// twice: once with the JDK and the project alone, so navigation comes up immediately, and again
+    /// when the jars land. Building the second one through [`for_project`](Self::for_project) would
+    /// redo the expensive half of the first: re-open the JVM image, re-enumerate every class name in
+    /// it, and start a **second** `JdkMemberIndex` that decodes and memoises the very classes the
+    /// first already holds — the duplication `ClasspathIndex` documents as the reason its JDK tier
+    /// is an `Arc`.
+    ///
+    /// It is not only wasted work. Every dependency jar is held **open** for the session, so while
+    /// the second provider is being built the process holds both sets at once, and macOS hands a
+    /// bundled app 256 descriptors: on a project with 150 jars the second build failed with `Too
+    /// many open files`, which surfaced as every library import going red.
+    ///
+    /// `None` when this provider has no resolver yet (the empty, pre-index one): there is nothing to
+    /// share, and the caller falls back to a full build.
+    pub fn with_dependency_tier(
+        &self,
+        index_dir: &Path,
+        jdk_version: &str,
+        project_simple_names: &[(String, String)],
+        dep_source: Box<dyn ClassSource>,
+        dep_memo_path: PathBuf,
+    ) -> Option<Result<Self, String>> {
+        use bennu_index::prelude::PersistedIndex;
+
+        let jdk = self.resolver.as_deref()?.jdk_index().jdk_tier();
+        Some((|| {
+            let blob = index_dir.join("symbols.blob");
+            let fst = index_dir.join("names.fst");
+            let project = PersistedIndex::open(&blob, &fst).map_err(|e| e.to_string())?;
+
+            // The JDK and project names are already in there; only the dependency ones are new.
+            // `finalize` rebuilds the sorted axes from scratch, so re-running it is correct.
+            let mut class_names = self.class_names.clone();
+            class_names.add_binaries(dep_source.class_names());
+            class_names.finalize();
+
+            let mut resolver = IndexResolver::new(
+                project,
+                ClasspathIndex::with_deps(Arc::clone(&jdk), dep_source, dep_memo_path),
+            );
+            for (simple, binary) in project_simple_names {
+                resolver.add_simple_hint(simple, binary);
+            }
+            // The walk's JDK-only view, over the same shared tier — see `for_project`.
+            let walk = PersistedIndex::open(&blob, &fst).ok().map(|index| {
+                let mut r = IndexResolver::new(index, ClasspathIndex::jdk_only(Arc::clone(&jdk)));
+                for (simple, binary) in project_simple_names {
+                    r.add_simple_hint(simple, binary);
+                }
+                Arc::new(r)
+            });
+
+            Ok(Self {
+                resolver: Some(Arc::new(resolver)),
+                walk_resolver: walk,
+                class_names,
+                // One small archive, re-opened rather than shared: `JavaSourceZip` is not behind an
+                // `Arc`, and one file is not what the descriptor budget is spent on.
+                jdk_sources: bennu_classpath::prelude::resolve_jdk_sources(jdk_version),
+            })
+        })())
+    }
+
+    /// Whether this provider's resolver can see the project's **libraries**, not just the JDK.
+    ///
+    /// The honest answer to "is the classpath complete", which decides whether an unresolvable
+    /// `org.…` import is a real error or a gap in what we indexed. Inferring it from the resolved
+    /// jar LIST instead is what marked every library import in a project red: the list is written
+    /// when Maven answers, and the tier exists only once the provider that holds it has been built.
+    pub fn has_dependency_tier(&self) -> bool {
+        self.resolver.as_deref().is_some_and(|r| r.jdk_index().has_dependency_tier())
+    }
+
+/// The binary name of the type a **static import** names, for a `name` written inside one.
+///
+/// Two carets, one answer: on the type (`…handler.HandlerFunctions.http`, caret on
+/// `HandlerFunctions`) it is that type, and on the member (caret on `http`) it is the type that
+/// declares it — which is the only thing there is to open, since a member has no file of its own.
+/// A star import (`import static a.b.C.*;`) binds no member name, so only its type matches.
+///
+/// Nested types are why the match is on the last SEGMENT rather than on the whole owner:
+/// `import static a.b.Outer.Inner.of;` has owner `a/b/Outer/Inner`, and the caret can be on either
+/// half of it.
+fn static_import_type(imports: &[bennu_java::prelude::Import], name: &str) -> Option<String> {
+    let targets = bennu_java::prelude::static_import_targets(imports);
+    // The type first: a caret on a segment of the owner means that type, not the member's owner.
+    for t in &targets {
+        if let Some(at) = t.owner_binary.rfind(&format!("/{name}")) {
+            // Everything up to and including the matched segment — `a/b/Outer` for a caret on
+            // `Outer` in `a/b/Outer/Inner`.
+            let end = at + 1 + name.len();
+            if t.owner_binary[end..].is_empty() || t.owner_binary[end..].starts_with('/') {
+                return Some(t.owner_binary[..end].to_string());
+            }
+        }
+    }
+    // Then the member: open the type that declares it.
+    targets
+        .iter()
+        .find(|t| t.member.as_deref() == Some(name))
+        .map(|t| t.owner_binary.clone())
+}
+
     /// Persist the classpath member index's memos now (best-effort; no-op for the empty provider or
     /// an in-memory index). Flushes BOTH tiers — the shared JDK memo and, when present, the
     /// per-project dependency memo — so a session's warmed JDK **and** library classes survive.
@@ -896,7 +1002,14 @@ impl NativeJavaProvider {
             name.replace('.', "/")
         } else {
             let imports = bennu_java::prelude::extract_symbols(source).imports;
-            resolver.resolve_simple_name(name, &imports)?
+            match resolver.resolve_simple_name(name, &imports) {
+                Some(b) => b,
+                // A name written only inside a **static** import resolves through no ordinary
+                // import entry: `import static a.b.C.http;` binds `http`, not `C`, so neither the
+                // type nor the member is a simple name the resolver can look up — and go-to on
+                // either did nothing at all. The import itself says what they are.
+                None => Self::static_import_type(&imports, name)?,
+            }
         };
         if resolver.is_project_type(&binary) {
             return None;
@@ -2259,3 +2372,77 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod static_import_tests {
+    use super::*;
+
+    fn imports_of(source: &str) -> Vec<bennu_java::prelude::Import> {
+        bennu_java::prelude::extract_symbols(source).imports
+    }
+
+    const SRC: &str = r#"
+import static org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions.http;
+import static java.lang.String.format;
+import static com.acme.Outer.Inner.of;
+import static com.acme.Constants.*;
+class C {}
+"#;
+
+    /// A caret on the TYPE half of a static import. Go-to did nothing here: the name is bound by no
+    /// ordinary import, so `resolve_simple_name` — which reads the file's imports for a type — had
+    /// nothing to answer with.
+    #[test]
+    fn the_type_of_a_static_import_resolves() {
+        let imports = imports_of(SRC);
+        assert_eq!(
+            NativeJavaProvider::static_import_type(&imports, "HandlerFunctions").as_deref(),
+            Some("org/springframework/cloud/gateway/server/mvc/handler/HandlerFunctions")
+        );
+        assert_eq!(
+            NativeJavaProvider::static_import_type(&imports, "String").as_deref(),
+            Some("java/lang/String")
+        );
+    }
+
+    /// A caret on the MEMBER half opens the type that declares it — a method has no file of its own,
+    /// so its owner is the only honest destination.
+    #[test]
+    fn the_member_of_a_static_import_resolves_to_its_owner() {
+        let imports = imports_of(SRC);
+        assert_eq!(
+            NativeJavaProvider::static_import_type(&imports, "http").as_deref(),
+            Some("org/springframework/cloud/gateway/server/mvc/handler/HandlerFunctions")
+        );
+        assert_eq!(
+            NativeJavaProvider::static_import_type(&imports, "format").as_deref(),
+            Some("java/lang/String")
+        );
+    }
+
+    /// `import static com.acme.Outer.Inner.of;` — the caret can be on either half of a nested owner,
+    /// and each names a different type. Matching the whole owner would answer only for `Inner`.
+    #[test]
+    fn either_half_of_a_nested_owner_resolves_to_that_half() {
+        let imports = imports_of(SRC);
+        assert_eq!(
+            NativeJavaProvider::static_import_type(&imports, "Inner").as_deref(),
+            Some("com/acme/Outer/Inner")
+        );
+        assert_eq!(
+            NativeJavaProvider::static_import_type(&imports, "Outer").as_deref(),
+            Some("com/acme/Outer")
+        );
+    }
+
+    /// A star static import binds no member name, so only its type is a caret target.
+    #[test]
+    fn a_star_static_import_offers_its_type_and_nothing_else() {
+        let imports = imports_of(SRC);
+        assert_eq!(
+            NativeJavaProvider::static_import_type(&imports, "Constants").as_deref(),
+            Some("com/acme/Constants")
+        );
+        assert_eq!(NativeJavaProvider::static_import_type(&imports, "nothing"), None);
+    }
+}

@@ -153,32 +153,48 @@
     ranges: MatchRange[];
   }
 
+  /** How far a signature-only match falls behind a name match of the same shape. Large enough that
+   *  any name hit outranks any signature hit: you type a name to find a name, and a match hiding in
+   *  a parameter type is the answer only when nothing is called that. */
+  const SIGNATURE_PENALTY = 1000;
+
   /**
    * The visible rows.
    *
    * Matching is a **subsequence**, the same rule the Go-to navigator uses — `fst` finds
-   * `from_state` — and the characters that matched are lit in the row, which is what keeps a
-   * loose match legible rather than mysterious.
+   * `from_state` — and the characters that matched are lit in the row, which is what keeps a loose
+   * match legible rather than mysterious.
    *
-   * **Declaration order is preserved**, deliberately: this is an outline, and its order is the
-   * file's. Sorting by score would answer "which matches best" when the question being asked is
-   * "where is it" — and a list that reshuffles as you type loses the one thing an outline has.
+   * **Two orders, because there are two questions.** With the box empty this is an outline and its
+   * order is the file's — that is the whole value of an outline, and reshuffling it would destroy
+   * it. The moment you type, you are no longer reading an outline, you are searching: the answer
+   * wanted is the best match, and declaration order buries it. Typing `uri` in a 66-member class
+   * put `REQUEST_HEADER_SIZE_ERROR_PREFIX` — where `u`, `r`, `i` are scattered across thirty-one
+   * characters — five rows above the method actually called `uri`.
+   *
+   * So: file order until there is a query, then score order, with the declaration index breaking
+   * ties. The scorer is the shared one, which already knows what makes a match good — a run of
+   * consecutive characters, a hit at a word start, few skipped characters, a short name.
    */
   const rows = $derived.by<Row[]>(() => {
     const q = query.trim();
     if (!q) return items.map((it) => ({ it, ranges: [] }));
-    const out: Row[] = [];
-    for (const it of items) {
+    const scored: { row: Row; score: number; at: number }[] = [];
+    items.forEach((it, at) => {
       const hit = fuzzyMatch(it.label, q);
       if (hit) {
-        out.push({ it, ranges: hit.ranges });
-        continue;
+        scored.push({ row: { it, ranges: hit.ranges }, score: hit.score, at });
+        return;
       }
-      // The signature counts too — `&self` or a parameter's type is a fair thing to look for —
-      // but it does not light the label, so no ranges.
-      if (it.detail && fuzzyMatch(it.detail, q)) out.push({ it, ranges: [] });
-    }
-    return out;
+      // The signature counts too — a parameter's type is a fair thing to look for — but it does not
+      // light the label, so no ranges, and it ranks below every name match.
+      const sig = it.detail ? fuzzyMatch(it.detail, q) : null;
+      if (sig) scored.push({ row: { it, ranges: [] }, score: sig.score - SIGNATURE_PENALTY, at });
+    });
+    // Ties keep the file's order, so two members that match equally well still read top-to-bottom
+    // as they are written.
+    scored.sort((a, b) => b.score - a.score || a.at - b.at);
+    return scored.map((s) => s.row);
   });
 
   // ── Virtualized list (same windowing as BennuGotoModal) ──────────────────────

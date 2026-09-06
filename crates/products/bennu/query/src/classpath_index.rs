@@ -46,6 +46,23 @@ impl ClasspathIndex {
         Self { jdk, deps: None }
     }
 
+    /// The decoded JDK tier, to hand to a second classpath view.
+    ///
+    /// Sharing is the whole reason this field is an `Arc` — see its doc. A second
+    /// [`JdkMemberIndex`] re-opens the JVM image, re-enumerates it and re-decodes every class the
+    /// first already holds, and on a Mac it costs the file descriptors to match: the image, plus
+    /// every dependency jar held open beside the first view's.
+    pub fn jdk_tier(&self) -> Arc<JdkMemberIndex> {
+        Arc::clone(&self.jdk)
+    }
+
+    /// Whether this view carries a dependency tier at all — "can this resolver see the project's
+    /// libraries, or only the JDK". The honest source for anything that would otherwise infer it
+    /// from a jar list that is written at a different moment.
+    pub fn has_dependency_tier(&self) -> bool {
+        self.deps.is_some()
+    }
+
     /// A JDK tier plus a dependency tier built from the given dep-jars `source`.
     ///
     /// The dependency tier is **in-memory only** (its referenced classes are decoded lazily and

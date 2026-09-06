@@ -78,6 +78,50 @@ fn emit_progress(sink: &Arc<dyn EventSink>, root: &str, phase: &str, state: &str
     sink.emit(EVT_INDEX_PROGRESS, json!({ "root": root, "phase": phase, "state": state }));
 }
 
+/// Guarantees the indexing card is closed however the build thread leaves.
+///
+/// The terminal `ready` event used to be the build's last line, so every other way out left the
+/// frontend spinning **for ever**: the three `superseded` bails, and any panic on the way. And there
+/// is no timeout on the other side to rescue it — the poll gives up only for a backend that emitted
+/// nothing at all, deliberately, because a live event stream is exactly how it knows a reference
+/// walk that takes minutes is still working. A card whose end is owned by the happy path hangs on
+/// every unhappy one.
+///
+/// Silent when a **newer generation** owns the project: a rebuild has already re-armed the card and
+/// will emit its own terminal event, so speaking here would finish a card that belongs to somebody
+/// else's build. That is the one case where saying nothing is right, and it is why this cannot be a
+/// plain "always emit on drop".
+struct BuildCard {
+    svc: &'static IndexService,
+    sink: Arc<dyn EventSink>,
+    root: PathBuf,
+    root_str: String,
+    my_gen: u64,
+    /// Set once the build has emitted the terminal event itself, on its own happy path.
+    closed: bool,
+}
+
+impl BuildCard {
+    /// The build reached the end and said `ready` itself — nothing left for the guard to do.
+    fn closed(&mut self) {
+        self.closed = true;
+    }
+}
+
+impl Drop for BuildCard {
+    fn drop(&mut self) {
+        if self.closed || self.svc.superseded(&self.root, self.my_gen) {
+            return;
+        }
+        eprintln!(
+            "bennu-be: build gen {} for {} ended without reaching ready — closing its card",
+            self.my_gen,
+            self.root.display()
+        );
+        emit_progress(&self.sink, &self.root_str, "ready", "end");
+    }
+}
+
 /// The stable per-root **base** directory: `bennu_data_dir()/index/<hash-of-root>/`. The
 /// actual index files live in a per-build **generation** subdir under this (see
 /// [`gen_dir`]) so a rebuild never overwrites a file the live provider still has mmapped
@@ -380,6 +424,14 @@ struct ProjectSlot {
     /// failed resolve). Read by the index inspector's Jars stat/list so the count reflects what
     /// completion/validation resolve against, independent of whether `mvn` re-ran this session.
     dep_jars: RwLock<Vec<String>>,
+    /// Bumped every time the project's **provider** is swapped — the JDK+project stage, then the
+    /// dependency tier when it lands.
+    ///
+    /// It is part of the diagnostic cache's key. Without it that key is the build generation, which
+    /// does not move when a provider is replaced *within* a build — so a file validated against the
+    /// JDK-only stage kept its "Cannot resolve import `org.springframework…`" for every library type
+    /// in it, and kept it for good: the cache had no reason to think anything had changed.
+    resolver_epoch: AtomicU64,
     /// Cached project-symbol counts from the last full build (0 until the build lands),
     /// surfaced by `bennu_index_stats` without re-walking the project.
     types: AtomicUsize,
@@ -711,6 +763,7 @@ impl IndexService {
             config: RwLock::new(None),
             semantics: RwLock::new(None),
             dep_jars: RwLock::new(Vec::new()),
+            resolver_epoch: AtomicU64::new(0),
             types: AtomicUsize::new(0),
             members: AtomicUsize::new(0),
             type_names: AtomicUsize::new(0),
@@ -738,6 +791,16 @@ impl IndexService {
         // The reverse channel for the analysis warm-up's tracked job (registered inside the thread).
         let host = self.host();
         std::thread::spawn(move || {
+            // Armed before anything can fail: from here on, every way out of this thread closes the
+            // indexing card — the early `return` two lines down included. See [`BuildCard`].
+            let mut card = BuildCard {
+                svc,
+                sink: Arc::clone(&sink),
+                root: root_path.clone(),
+                root_str: root_str.clone(),
+                my_gen,
+                closed: false,
+            };
             // The CPU budget for every background sweep this build sets off — the parse, and the
             // reference walk that follows it — and the directories the walk refuses to enter. Both
             // read here rather than once at startup so a change in Settings applies to the next
@@ -834,6 +897,7 @@ impl IndexService {
                 Ok(p) => {
                     slot.type_names.store(p.class_name_count(), Ordering::Relaxed);
                     *slot.provider.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(p);
+                    slot.resolver_epoch.fetch_add(1, Ordering::Relaxed);
                     eprintln!(
                         "bennu-be: provider live (JDK + project) for {} — dependency tier resolving",
                         root_path.display()
@@ -932,6 +996,7 @@ impl IndexService {
             // diagnostics on open are served from (or lazily fill) the same cache regardless.
             slot.ready.store(true, Ordering::Relaxed);
             emit_progress(&sink, &root_str, "ready", "end");
+            card.closed();
 
             // Whole-project VALIDATION warm-up (opt-in `validate_on_open`, default on) — now a pure
             // BACKGROUND pass AFTER `ready`, on this same build thread. It pre-fills the persisted
@@ -1199,9 +1264,15 @@ impl IndexService {
             file_stem,
             expected_package,
             java_major: status.requested_major,
-            // The dependency classpath is known-complete only when Maven resolved its jars (recorded
-            // on the slot). Absent → the unresolved-import check adjudicates only `java.*`.
-            classpath_complete: !slot.dep_jars.read().unwrap_or_else(|p| p.into_inner()).is_empty(),
+            // Asked of the RESOLVER, not of the resolved-jar list. The two disagree for as long as
+            // it takes to build the dependency tier — and for good when that build fails — and in
+            // that window "complete" makes the unresolved-import check adjudicate every
+            // `org.springframework.…` import against a resolver that cannot see one, so the whole
+            // import block goes red on a project that compiles.
+            classpath_complete: {
+                let provider = { Arc::clone(&slot.provider.read().unwrap_or_else(|p| p.into_inner())) };
+                provider.has_dependency_tier()
+            },
         };
         // Fast tier: only the pure-AST checks — no provider / resolver / inference. This is the cheap
         // pass the FE fires on a short debounce for instant syntax squiggles on a big file.
@@ -1262,7 +1333,17 @@ impl IndexService {
             let g = self.patch_counts.lock().unwrap_or_else(|p| p.into_inner());
             g.total.wrapping_sub(g.per_file.get(file).copied().unwrap_or(0))
         };
-        build.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(cross)
+        // The provider can be replaced WITHIN a build generation — the dependency tier lands after
+        // the JDK+project stage — and a body validated against the earlier one must not be replayed
+        // against the later. See `ProjectSlot::resolver_epoch`.
+        let epoch = {
+            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            slots.get(root).map(|s| s.resolver_epoch.load(Ordering::Relaxed)).unwrap_or(0)
+        };
+        build
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add(cross)
+            .wrapping_add(epoch.wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
     }
 
     /// Validate every file in `files` (`(path, source)`) for a WHOLE-PROJECT run, in PARALLEL,
@@ -1297,8 +1378,10 @@ impl IndexService {
                     let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
                     Arc::clone(&g)
                 };
-                // Deps known-complete only when Maven resolved jars (recorded on the slot).
-                let complete = !slot.dep_jars.read().unwrap_or_else(|p| p.into_inner()).is_empty();
+                // Asked of the provider that is about to do the validating, for the reason the
+                // single-file path documents: the jar list and the resolver's tier are written at
+                // different moments, and believing the list marks every library import red.
+                let complete = provider.has_dependency_tier();
                 (provider, status.any_installed, complete, status.requested_major)
             }
             // No project owns this root — validate pure-AST over an empty provider, no caching.
@@ -3361,10 +3444,10 @@ fn build_dependency_tier(
             if let Some(reason) = &d.partial {
                 notify(sink, "Some dependencies not resolved", reason, "warning");
             }
-            // Record the resolved jars on the slot so the index inspector's Jars count reflects what
-            // the resolver loaded — independent of whether `mvn` re-ran.
-            *slot.dep_jars.write().unwrap_or_else(|p| p.into_inner()) = d.jars;
-            Some((d.source, d.memo_path))
+            // NOT recorded on the slot yet — see the swap below. The jar list is what
+            // `classpath_complete` is derived from, and publishing it here would say "we can see the
+            // whole classpath" while the resolver still cannot see any of it.
+            Some((d.jars, d.source, d.memo_path))
         }
         // A Maven project with no dependency tier is NOT a benign degradation: every library type in
         // it reads as "cannot resolve", which looks like thousands of unrelated errors. Say so once,
@@ -3384,21 +3467,55 @@ fn build_dependency_tier(
 
     // A project with no dependency tier keeps stage 1's provider: rebuilding an identical one would
     // cost a second JDK enumeration to arrive at the same object.
-    if deps.is_some() {
-        match NativeJavaProvider::for_project(
-            index_dir,
-            jdk_version,
-            pairs,
-            jdk_index_path(jdk_version),
-            deps,
-        ) {
+    if let Some((jars, source, memo_path)) = deps {
+        // Derived from stage 1 wherever stage 1 exists: same decoded JDK, same enumeration, one
+        // more tier. A full rebuild would open the JVM image and all 150 jars a second time while
+        // the first set is still held — which is how this ran the process out of file descriptors.
+        // The `for_project` fallback is for the case where stage 1 itself failed to build.
+        let stage1 = { Arc::clone(&slot.provider.read().unwrap_or_else(|p| p.into_inner())) };
+        let built = stage1
+            .with_dependency_tier(index_dir, jdk_version, pairs, source, memo_path)
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "bennu-be: no JDK tier to share for {} — building the dependency provider from \
+                     scratch",
+                    root_path.display()
+                );
+                NativeJavaProvider::for_project(
+                    index_dir,
+                    jdk_version,
+                    pairs,
+                    jdk_index_path(jdk_version),
+                    None,
+                )
+            });
+        match built {
             Ok(p) => {
                 slot.type_names.store(p.class_name_count(), Ordering::Relaxed);
                 *slot.provider.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(p);
+                // Only NOW are the jars the project's, because only now can anything read them.
+                // `classpath_complete` is this list being non-empty, and it is what lets the
+                // unresolved-import check adjudicate a `org.springframework.…` import at all — so
+                // publishing it a moment early marks every library import in the project red, and
+                // the diagnostic cache then keeps those marks (see `resolver_epoch`).
+                *slot.dep_jars.write().unwrap_or_else(|p| p.into_inner()) = jars;
+                slot.resolver_epoch.fetch_add(1, Ordering::Relaxed);
                 eprintln!("bennu-be: dependency tier live for {}", root_path.display());
             }
             Err(e) => {
-                eprintln!("bennu-be: dependency provider build failed ({}): {e}", root_path.display())
+                // Not an eprintln alone: the jars resolved, so from the outside everything looks
+                // fine, and the only visible consequence is every library type reading as
+                // unresolved — which reads as "Bennu is broken", not as "this step failed".
+                eprintln!("bennu-be: dependency provider build failed ({}): {e}", root_path.display());
+                notify(
+                    sink,
+                    "Dependency index not built",
+                    &format!(
+                        "The dependency jars resolved, but their index could not be built ({e}). \
+                         Library types will read as unresolved until the project is re-indexed."
+                    ),
+                    "warning",
+                );
             }
         }
     }

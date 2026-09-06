@@ -37,6 +37,23 @@ export interface FuzzyMatch {
 /** Characters after which the next one counts as starting a word. */
 const BOUNDARY = /[\s/\\._\-:>]/;
 
+/**
+ * Whether the character at `i` starts a word — a separator before it, or a **camelCase hump**.
+ *
+ * The hump half was missing, and this matcher spends most of its life on Java identifiers: without
+ * it, `Uri` in `requestHeaderToRequestUri` scored no better than three letters scattered through
+ * `REQUEST_HEADER_SIZE_ERROR_PREFIX`, and the outline ranked them that way.
+ */
+function startsWord(haystack: string, i: number): boolean {
+  if (i === 0) return true;
+  const before = haystack[i - 1];
+  if (BOUNDARY.test(before)) return true;
+  const here = haystack[i];
+  // `requestUri` → the `U`. A run of capitals is one word, so `URI` in `parseURIPath` starts at the
+  // `U` and not at every letter of it.
+  return here >= 'A' && here <= 'Z' && !(before >= 'A' && before <= 'Z');
+}
+
 const SCORE = {
   /** Every matched character is worth having. */
   base: 1,
@@ -66,6 +83,14 @@ const SCORE = {
 function scoreTerm(haystack: string, lowerHaystack: string, term: string): FuzzyMatch | null {
   if (!term) return { score: 0, ranges: [] };
 
+  // The whole term, together, wherever it sits. Greedy cannot find this: it takes the first `u` of
+  // `req[u]estHeaderToRequestUri` and then has to skip forward for `r` and `i`, so the one name in
+  // the list that literally contains `Uri` scored WORSE than the ones where the letters are merely
+  // present. Cheap — one `indexOf` — and only ever an improvement, because the best of the two is
+  // the one returned.
+  const together = lowerHaystack.indexOf(term);
+  const contiguous = together === -1 ? null : contiguousAt(haystack, term, together);
+
   const ranges: MatchRange[] = [];
   let score = 0;
   let at = 0;
@@ -78,7 +103,7 @@ function scoreTerm(haystack: string, lowerHaystack: string, term: string): Fuzzy
     let points: number = SCORE.base;
     if (found === previous + 1) points += SCORE.consecutive;
     if (found === 0) points += SCORE.head;
-    else if (BOUNDARY.test(haystack[found - 1])) points += SCORE.wordStart;
+    else if (startsWord(haystack, found)) points += SCORE.wordStart;
     if (haystack[found] === term[i]) points += SCORE.exactCase;
 
     const skipped = found - (previous + 1);
@@ -94,7 +119,23 @@ function scoreTerm(haystack: string, lowerHaystack: string, term: string): Fuzzy
     at = found + 1;
   }
 
-  return { score, ranges };
+  const greedy: FuzzyMatch = { score, ranges };
+  return contiguous && contiguous.score > greedy.score ? contiguous : greedy;
+}
+
+/** Score the term placed **whole** at `start` — every character consecutive, one range. */
+function contiguousAt(haystack: string, term: string, start: number): FuzzyMatch {
+  let score = start > 0 ? start * SCORE.leadingGap : 0;
+  for (let i = 0; i < term.length; i++) {
+    const at = start + i;
+    let points: number = SCORE.base;
+    if (i > 0) points += SCORE.consecutive;
+    if (at === 0) points += SCORE.head;
+    else if (i === 0 && startsWord(haystack, at)) points += SCORE.wordStart;
+    if (haystack[at] === term[i]) points += SCORE.exactCase;
+    score += points;
+  }
+  return { score, ranges: [{ from: start, to: start + term.length }] };
 }
 
 /**
