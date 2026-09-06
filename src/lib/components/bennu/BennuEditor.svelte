@@ -1420,11 +1420,16 @@
     const path = activePath;
     const revision = docRevision;
     const on = bennuSettingsStore.inlayHints;
+    // A library's parameter names come from its source, which can arrive mid-session: a
+    // "Download sources" that lands makes names knowable in every file that calls that artifact,
+    // and without this dependency they would appear only after the next keystroke in each one.
+    const sources = decompiledStore.sourcesRevision;
     if (!path || !on || !isJavaFileOf(path)) {
       editorComp?.setInlayHints([]);
       return;
     }
     void revision;
+    void sources;
     const src = editorComp?.getValue() ?? '';
     let cancelled = false;
     const t = setTimeout(() => {

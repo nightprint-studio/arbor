@@ -58,6 +58,27 @@ pub struct InlayHint {
     pub before: bool,
 }
 
+/// Where a **library** method's parameter names come from, when they can be known at all.
+///
+/// A class file does not carry them: `-parameters` is off by default and almost no published jar
+/// turns it on, so the member model has types and nothing else — which is why a call into a library
+/// gets no name hints while a call into the project gets them from its own source.
+///
+/// The library's **source** does carry them, and Bennu already fetches it: the `-sources.jar` behind
+/// "Download sources", and the JDK's own `src.zip`. So the rule is exactly that — **names appear
+/// when the source is there, and never otherwise.** A decompiled stub is not an answer: its
+/// `arg0`, `arg1` are placeholders, and drawing one as if it were the parameter's name would be the
+/// one thing a hint must never do, which is state something the code does not say.
+///
+/// Implemented in the `be` layer, which owns the source archives; `None` from any of it means "no
+/// hint", never "guess".
+pub trait LibraryParamNames {
+    /// The names `method` declares, in order, for the overload taking `arity` parameters. `None`
+    /// when the type has no downloaded source, the method is not found in it, or the overload is
+    /// ambiguous.
+    fn names_for(&self, owner_binary: &str, method: &str, arity: usize) -> Option<Vec<String>>;
+}
+
 // ── Signature help ───────────────────────────────────────────────────────────────────────────
 
 /// The signature of the call whose argument list contains `offset`, or `None`.
@@ -77,7 +98,7 @@ pub fn signature_at(
 
     let call = enclosing_call(root, offset)?;
     let args = call.child_by_field_name("arguments")?;
-    let candidates = call_candidates(&call, &root, source, &symbols, resolver, &cache)?;
+    let (_owner, candidates) = call_candidates(&call, &root, source, &symbols, resolver, &cache)?;
 
     let argc = argument_count(args);
     let active = active_argument(args, source, offset);
@@ -161,16 +182,15 @@ fn call_candidates(
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
     cache: &InferCache,
-) -> Option<Vec<Member>> {
+) -> Option<(String, Vec<Member>)> {
     let bytes = source.as_bytes();
     // `new Foo(…)` binds to a constructor, which the member model keeps under `<init>`.
     if call.kind() == "object_creation_expression" {
         let ty = call.child_by_field_name("type")?;
         let resolved = infer_node_type_cached(root, source, symbols, &ty, resolver, cache)?;
         let cm = resolver.members_of(&resolved.binary_name)?;
-        return non_empty(
-            cm.methods.iter().filter(|m| m.name == "<init>").cloned().collect(),
-        );
+        let ctors = non_empty(cm.methods.iter().filter(|m| m.name == "<init>").cloned().collect())?;
+        return Some((resolved.binary_name, ctors));
     }
     let name_node = call.child_by_field_name("name")?;
     let name = name_node.utf8_text(bytes).ok()?;
@@ -185,7 +205,12 @@ fn call_candidates(
     };
     let mut out: Vec<Member> = Vec::new();
     collect_named(resolver, &owner.binary_name, name, &mut out);
-    non_empty(out)
+    // The DECLARING type, not the receiver: an inherited method's parameter names are written in
+    // the file that declares it, and asking the subclass's source for them finds nothing.
+    let declared_on = bennu_java::prelude::declaring_method(resolver, &owner, name)
+        .map(|t| t.binary_name)
+        .unwrap_or(owner.binary_name);
+    non_empty(out).map(|ms| (declared_on, ms))
 }
 
 fn non_empty(v: Vec<Member>) -> Option<Vec<Member>> {
@@ -276,16 +301,29 @@ fn is_trivia(n: Node) -> bool {
 /// pass over it — the same one validation makes — and slicing that by scroll position would mean
 /// redoing it on every scroll for no saving.
 pub fn inlay_hints(source: &str, resolver: &dyn TypeResolver) -> Vec<InlayHint> {
+    inlay_hints_with(source, resolver, None)
+}
+
+/// [`inlay_hints`], plus a source of **library** parameter names — see [`LibraryParamNames`].
+///
+/// Separate entry point rather than a changed signature: every test and harness in the workspace
+/// asks the plain question, and only the `be` layer is in a position to answer the other one.
+pub fn inlay_hints_with(
+    source: &str,
+    resolver: &dyn TypeResolver,
+    lib: Option<&dyn LibraryParamNames>,
+) -> Vec<InlayHint> {
     let Some(tree) = parse_java(source) else { return Vec::new() };
     let root = tree.root_node();
     let symbols = extract_symbols(source);
     let cache = InferCache::new();
     let mut out = Vec::new();
-    walk_hints(root, &root, source, &symbols, resolver, &cache, &mut out);
+    walk_hints(root, &root, source, &symbols, resolver, &cache, lib, &mut out);
     out.sort_by_key(|h| h.offset);
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_hints(
     node: Node,
     root: &Node,
@@ -293,11 +331,12 @@ fn walk_hints(
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
     cache: &InferCache,
+    lib: Option<&dyn LibraryParamNames>,
     out: &mut Vec<InlayHint>,
 ) {
     match node.kind() {
         "method_invocation" | "object_creation_expression" => {
-            parameter_name_hints(&node, root, source, symbols, resolver, cache, out);
+            parameter_name_hints(&node, root, source, symbols, resolver, cache, lib, out);
         }
         "local_variable_declaration" => {
             var_type_hint(&node, root, source, symbols, resolver, cache, out);
@@ -309,12 +348,13 @@ fn walk_hints(
     }
     let mut c = node.walk();
     for child in node.named_children(&mut c) {
-        walk_hints(child, root, source, symbols, resolver, cache, out);
+        walk_hints(child, root, source, symbols, resolver, cache, lib, out);
     }
 }
 
 /// `transfer(source: from, target: to, amount: 500)` — a name in front of each argument that does
 /// not already say what it is.
+#[allow(clippy::too_many_arguments)]
 fn parameter_name_hints(
     call: &Node,
     root: &Node,
@@ -322,6 +362,7 @@ fn parameter_name_hints(
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
     cache: &InferCache,
+    lib: Option<&dyn LibraryParamNames>,
     out: &mut Vec<InlayHint>,
 ) {
     let Some(args) = call.child_by_field_name("arguments") else { return };
@@ -331,7 +372,8 @@ fn parameter_name_hints(
     if arg_nodes.is_empty() {
         return;
     }
-    let Some(candidates) = call_candidates(call, root, source, symbols, resolver, cache) else {
+    let Some((owner, candidates)) = call_candidates(call, root, source, symbols, resolver, cache)
+    else {
         return;
     };
     // Only an unambiguous binding earns a hint. With two overloads admitting the same call, the
@@ -343,11 +385,28 @@ fn parameter_name_hints(
     if params.len() != arg_nodes.len() {
         return; // a varargs call, whose tail has no one name
     }
-    for (arg, (_, name)) in arg_nodes.iter().zip(params.iter()) {
-        // No name, no hint. A class file carries no parameter names unless it was compiled with
-        // `-parameters`, and the placeholder the override generator uses — `arg0` — would read here
+    // A class file carries no parameter names unless it was compiled with `-parameters`, so a call
+    // into a library has none — but its **source** does, when it has been downloaded. Asked only
+    // when the member model has nothing, and only ever answered from real source: see
+    // [`LibraryParamNames`].
+    let from_source = params
+        .iter()
+        .all(|(_, n)| n.is_none())
+        .then(|| lib?.names_for(&owner, &picked.name, arg_nodes.len()))
+        .flatten()
+        .filter(|names| names.len() == arg_nodes.len());
+    for (i, (arg, (_, name))) in arg_nodes.iter().zip(params.iter()).enumerate() {
+        // No name, no hint. The placeholder the override generator uses — `arg0` — would read here
         // as a claim that the parameter is *called* that. Saying nothing is the true answer.
-        let Some(name) = name else { continue };
+        let owned;
+        let name = match (name, &from_source) {
+            (Some(n), _) => n,
+            (None, Some(names)) => {
+                owned = names[i].clone();
+                &owned
+            }
+            (None, None) => continue,
+        };
         let Ok(text) = arg.utf8_text(bytes) else { continue };
         if !worth_naming(text, name) {
             continue;

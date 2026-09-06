@@ -191,6 +191,120 @@ fn write_view(file_binary: &str, text: &str) -> Option<String> {
 /// member access), else the type declaration's name, else the top of the file. `file_binary` names
 /// the owning type. Member-precise landing is best-effort — an inherited member not declared in
 /// `text` (declared in a supertype) falls back to the type declaration.
+/// A library type's parameter names, by `(method name, parameter count)`.
+type ParamNameMap = HashMap<(String, usize), Vec<String>>;
+
+/// [`bennu_query::prelude::LibraryParamNames`] over a project's source archives.
+///
+/// The rule is one line and it is the whole feature: **only real source counts.** A decompiled stub
+/// names its parameters `arg0`, `arg1` — placeholders invented by the decompiler — and drawing one
+/// as an inlay hint would state something the code does not say, which is the one thing a hint must
+/// never do. So a stub answers `None`, and no hint is drawn.
+struct SourceParamNames<'a> {
+    svc: &'a IndexService,
+    root: String,
+    provider: Arc<NativeJavaProvider>,
+}
+
+impl bennu_query::prelude::LibraryParamNames for SourceParamNames<'_> {
+    fn names_for(&self, owner_binary: &str, method: &str, arity: usize) -> Option<Vec<String>> {
+        let key = (self.root.clone(), owner_binary.to_string());
+        // Memo first, including the negative: most types in most projects have no source, and that
+        // answer must not cost an archive read on every keystroke.
+        if let Some(hit) = {
+            let g = self.svc.library_param_names.lock().unwrap_or_else(|p| p.into_inner());
+            g.get(&key).cloned()
+        } {
+            return hit?.get(&(method.to_string(), arity)).cloned();
+        }
+        let parsed = self
+            .svc
+            .serve_source_view(&self.provider, &self.root, owner_binary)
+            .filter(|(_, _, is_stub)| !is_stub)
+            .map(|(text, _, _)| Arc::new(param_names_in(&text)));
+        self.svc
+            .library_param_names
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(key, parsed.clone());
+        parsed?.get(&(method.to_string(), arity)).cloned()
+    }
+}
+
+/// Every method declaration in a Java source, as `(name, parameter count) -> parameter names`.
+///
+/// Overloads that agree on arity are **dropped**, not merged: with `of(String)` and `of(int)` both
+/// present there is no way to tell from here which one the call bound to, and a name from the wrong
+/// overload is a wrong hint. The arity is part of the key precisely so the common case — overloads
+/// that differ in how many arguments they take — still answers.
+fn param_names_in(text: &str) -> ParamNameMap {
+    let mut out: ParamNameMap = HashMap::new();
+    let mut ambiguous: HashSet<(String, usize)> = HashSet::new();
+    let Some(tree) = bennu_java::prelude::parse_java(text) else { return out };
+    let bytes = text.as_bytes();
+    let mut stack = vec![tree.root_node()];
+    while let Some(n) = stack.pop() {
+        let mut c = n.walk();
+        for ch in n.named_children(&mut c) {
+            stack.push(ch);
+        }
+        if !matches!(n.kind(), "method_declaration" | "constructor_declaration") {
+            continue;
+        }
+        let name = match n.kind() {
+            // A constructor is `<init>` in the member model, whatever the class is called.
+            "constructor_declaration" => "<init>".to_string(),
+            _ => match n.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok()) {
+                Some(t) => t.to_string(),
+                None => continue,
+            },
+        };
+        let Some(params) = n.child_by_field_name("parameters") else { continue };
+        let mut pc = params.walk();
+        let names: Vec<String> = params
+            .named_children(&mut pc)
+            .filter(|p| matches!(p.kind(), "formal_parameter" | "spread_parameter"))
+            .filter_map(|p| {
+                let mut named = p.child_by_field_name("name");
+                if named.is_none() {
+                    // `Object... args` — a `spread_parameter` carries no `name` field: the grammar
+                    // puts its name inside a `variable_declarator`, the same shape a field uses.
+                    let mut c = p.walk();
+                    for ch in p.named_children(&mut c) {
+                        if ch.kind() == "variable_declarator" {
+                            named = ch.child_by_field_name("name");
+                            break;
+                        }
+                    }
+                }
+                named.and_then(|x| x.utf8_text(bytes).ok()).map(str::to_string)
+            })
+            .collect();
+        let key = (name, names.len());
+        if ambiguous.contains(&key) {
+            continue;
+        }
+        if out.insert(key.clone(), names).is_some() {
+            // Two overloads of the same arity — neither can be told from the other here.
+            out.remove(&key);
+            ambiguous.insert(key);
+        }
+    }
+    out
+}
+
+/// Whether the word the caret was on names a MEMBER of the type it resolved to, rather than the
+/// type itself.
+///
+/// The only signal available at this point is the word, and it is enough: a go-to that resolved
+/// `HandlerFunctions` from the word `HandlerFunctions` was asking for the type, and one that
+/// resolved the same type from the word `http` was asking for `http`.
+fn args_name_is_member(binary: &str, word: &str) -> bool {
+    let simple = binary.rsplit(['/', '$']).next().unwrap_or(binary);
+    let last = word.rsplit('.').next().unwrap_or(word);
+    !last.is_empty() && last != simple
+}
+
 fn member_jump_offset(
     text: &str,
     file_binary: &str,
@@ -198,13 +312,17 @@ fn member_jump_offset(
 ) -> usize {
     use bennu_intel::prelude::{find_member_name_span, find_type_name_span, DeclKey};
     if let Some(m) = member {
-        let key = if m.is_field {
-            DeclKey::Field { owner: file_binary.to_string(), name: m.name.clone() }
-        } else {
-            DeclKey::Method { owner: file_binary.to_string(), name: m.name.clone() }
-        };
-        if let Some((start, _)) = find_member_name_span(text, &key) {
-            return start;
+        // Both kinds, preferred kind first. A caller that knows says so, but one that only has a
+        // word under a caret — `http` in a static import — cannot know whether it names a method or
+        // a constant, and guessing wrong should not cost the jump.
+        let owner = file_binary.to_string();
+        let method = DeclKey::Method { owner: owner.clone(), name: m.name.clone() };
+        let field = DeclKey::Field { owner, name: m.name.clone() };
+        let (first, second) = if m.is_field { (field, method) } else { (method, field) };
+        for key in [first, second] {
+            if let Some((start, _)) = find_member_name_span(text, &key) {
+                return start;
+            }
         }
     }
     let simple = file_binary.rsplit(['/', '$']).next().unwrap_or(file_binary);
@@ -509,6 +627,13 @@ struct ConfigRebuild {
 /// The process-wide index service (one per `bennu-be`).
 pub struct IndexService {
     slots: Mutex<HashMap<PathBuf, Arc<ProjectSlot>>>,
+    /// Parameter names read out of a **library's source**, per `(project root, type)`.
+    ///
+    /// Inlay hints run over the whole buffer on every validation, and every call into a library
+    /// would otherwise re-open the archive, re-read the entry and re-parse it. `None` is memoised
+    /// as firmly as a hit: "this type has no downloaded source" is the answer for most types in
+    /// most projects, and it is the one that must not cost an archive read each time.
+    library_param_names: Mutex<HashMap<(String, String), Option<Arc<ParamNameMap>>>>,
     /// Per-project include-graph cache (keyed by forward-slashed root) for the form analysis —
     /// avoids re-parsing every JSP on each tab switch. Loaded from disk on first use, refreshed
     /// incrementally, persisted back. Behind an inner `Mutex` so a build holds the lock without
@@ -607,6 +732,7 @@ impl IndexService {
     pub fn global() -> &'static IndexService {
         SERVICE.get_or_init(|| IndexService {
             slots: Mutex::new(HashMap::new()),
+            library_param_names: Mutex::new(HashMap::new()),
             include_caches: Mutex::new(HashMap::new()),
             include_synced: Mutex::new(HashSet::new()),
             build_gen: Mutex::new(HashMap::new()),
@@ -1225,7 +1351,28 @@ impl IndexService {
         let Some(resolver) = self.caret_resolver_for(file) else {
             return Vec::new();
         };
-        bennu_query::prelude::inlay_hints(source, &*resolver)
+        // Library parameter names, from the library's own source when it is on disk — the
+        // `-sources.jar` behind "Download sources", or the JDK's `src.zip`. Absent, the hints are
+        // exactly what they were: the project's own names and nothing else.
+        let names = self.slot_for_file(file).map(|slot| SourceParamNames {
+            svc: self,
+            root: norm_path(&slot.root),
+            provider: { Arc::clone(&slot.provider.read().unwrap_or_else(|p| p.into_inner())) },
+        });
+        bennu_query::prelude::inlay_hints_with(
+            source,
+            &*resolver,
+            names.as_ref().map(|n| n as &dyn bennu_query::prelude::LibraryParamNames),
+        )
+    }
+
+    /// Drop the parsed library-source parameter names for `root`.
+    ///
+    /// Called when a `-sources.jar` lands: until then every type in that artifact answered "no
+    /// source", and the memo would keep saying so for the rest of the session.
+    pub fn forget_library_param_names(&self, root: &str) {
+        let mut g = self.library_param_names.lock().unwrap_or_else(|p| p.into_inner());
+        g.retain(|(r, _), _| r != root);
     }
 
     /// Validate a Java `file` over its owning project's provider (AST checks + the resolver-backed
@@ -2113,9 +2260,21 @@ impl IndexService {
         let binary = binary?;
         let (text, file_binary, is_stub) = self.serve_source_view(&provider, &root, &binary)?;
         let path = write_view(&file_binary, &text)?;
+        // Land on what was asked for. This used to be a flat `0`: every go-to into a library — a
+        // type, and a member reached through a static import — opened at the top of the file, which
+        // on a decompiled stub is a banner and on a real source is the licence header. The type's
+        // own declaration is the honest landing for a type; a member's name is better still, and
+        // `member_jump_offset` falls back to the type when the word is not one.
+        //
+        // The word is a member when it is not the type's own simple name — which is exactly the
+        // static-import shape (`…HandlerFunctions.http`, caret on `http`).
+        let member = args_name_is_member(&binary, name).then(|| bennu_intel::prelude::LibraryMember {
+            name: name.rsplit('.').next().unwrap_or(name).to_string(),
+            is_field: false,
+        });
         Some(DecompiledView {
             file: path,
-            offset: 0,
+            offset: member_jump_offset(&text, &file_binary, member.as_ref()),
             can_download: self.can_download_sources(&slot, &binary, is_stub),
         })
     }
@@ -2576,6 +2735,10 @@ impl IndexService {
                 Ok((true, _log)) => {
                     // Pick up the freshly-downloaded jar and rewrite the tab file as real source.
                     svc.refresh_dep_sources(&root);
+                    // Until this moment every type in that artifact answered "no source", and the
+                    // memo holds negatives as firmly as hits — so without this the parameter names
+                    // that just became knowable stay unknown for the rest of the session.
+                    svc.forget_library_param_names(&root);
                     let _ = svc.decompiled_stub(&file, &source, &name);
                     sink.emit(EVT_SOURCES_READY, json!({ "path": &view_path, "ok": true }));
                     finish_bennu_job(&sink, job, true, None);
@@ -4374,6 +4537,47 @@ mod tests {
     }
 
     #[test]
+    /// The names come out of real source, in declaration order, keyed by arity.
+    #[test]
+    fn parameter_names_are_read_from_a_librarys_source() {
+        let map = param_names_in(
+            "package a; public class C {\n  public C(String id) {}\n  public void put(String key, int value) {}\n  public void one(long only) {}\n}",
+        );
+        assert_eq!(
+            map.get(&("put".to_string(), 2)),
+            Some(&vec!["key".to_string(), "value".to_string()])
+        );
+        assert_eq!(map.get(&("one".to_string(), 1)), Some(&vec!["only".to_string()]));
+        // A constructor is `<init>` in the member model, whatever the class is called.
+        assert_eq!(map.get(&("<init>".to_string(), 1)), Some(&vec!["id".to_string()]));
+    }
+
+    /// Two overloads of the SAME arity cannot be told apart from the source alone, and a name from
+    /// the wrong one is a wrong hint — so neither is offered. Overloads that differ in arity are
+    /// not affected, which is the common case and the reason arity is part of the key.
+    #[test]
+    fn same_arity_overloads_are_dropped_rather_than_guessed() {
+        let map = param_names_in(
+            "class C {\n  void of(String text) {}\n  void of(int number) {}\n  void of(int a, int b) {}\n}",
+        );
+        assert_eq!(map.get(&("of".to_string(), 1)), None, "ambiguous — no answer");
+        assert_eq!(
+            map.get(&("of".to_string(), 2)),
+            Some(&vec!["a".to_string(), "b".to_string()]),
+            "a different arity is not ambiguous"
+        );
+    }
+
+    /// A varargs parameter is one parameter and carries a name like any other.
+    #[test]
+    fn a_varargs_parameter_keeps_its_name() {
+        let map = param_names_in("class C {\n  void log(String message, Object... args) {}\n}");
+        assert_eq!(
+            map.get(&("log".to_string(), 2)),
+            Some(&vec!["message".to_string(), "args".to_string()])
+        );
+    }
+
     fn decompiled_stub_paths_are_recognised() {
         // A path under the decompiled cache dir is a stub (skip validation); a project path is not.
         let stub = decompiled_cache_path("javax/crypto/Cipher");

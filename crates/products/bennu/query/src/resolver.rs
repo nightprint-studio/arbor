@@ -424,9 +424,14 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
     }
 
     fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String> {
-        // Imports win (a `java.util.List` import binds `List`).
+        // Imports win (a `java.util.List` import binds `List`) — but only the ones that bind a
+        // TYPE. A static import binds a **member**: `import static java.lang.String.format;` makes
+        // `format` a method, and reading its last segment as a type name answered
+        // `java/lang/String/format` — a binary that is not a class and never was. Nothing downstream
+        // could tell that apart from a real answer, so go-to on a statically imported name opened
+        // nothing and the caller's own fallback never ran, because this had already said `Some`.
         for imp in imports {
-            if imp.simple_name() == Some(name) {
+            if !imp.static_ && imp.simple_name() == Some(name) {
                 return Some(imp.path.replace('.', "/"));
             }
         }
@@ -499,6 +504,17 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         for imp in imports {
             if imp.star && !imp.static_ {
                 let candidate = format!("{}/{name}", imp.path.replace('.', "/"));
+                if self.jdk.members_of(&candidate).is_some() {
+                    return Some(candidate);
+                }
+            }
+        }
+        // `import static a.b.Outer.Inner;` DOES bind a type — the one static form that does. It is
+        // last and it has to prove itself: the path is accepted only if it really is a class, which
+        // is exactly what tells the nested type apart from the `String.format` shape above.
+        for imp in imports {
+            if imp.static_ && !imp.star && imp.simple_name() == Some(name) {
+                let candidate = imp.path.replace('.', "/");
                 if self.jdk.members_of(&candidate).is_some() {
                     return Some(candidate);
                 }

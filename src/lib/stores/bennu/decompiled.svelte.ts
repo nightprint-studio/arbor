@@ -18,6 +18,7 @@ interface DecompiledCtx {
 function createDecompiledStore() {
   const tabs = new SvelteMap<string, DecompiledCtx>();
   const downloading = new SvelteSet<string>();
+  let sourcesRevision = $state(0);
   let attached = false;
   let unlisten: UnlistenFn | null = null;
 
@@ -38,6 +39,9 @@ function createDecompiledStore() {
     markDownloading(path: string) {
       downloading.add(path);
     },
+    /** Bumped whenever a `-sources.jar` lands. Anything computed FROM library source — today the
+     *  parameter-name hints — reads this so it recomputes when the source appears. */
+    get sourcesRevision() { return sourcesRevision; },
     /** Clear the in-flight flag for `path` (on an immediate request failure). */
     clearDownloading(path: string) {
       downloading.delete(path);
@@ -56,6 +60,11 @@ function createDecompiledStore() {
           const ctx = tabs.get(path);
           if (ctx) tabs.set(path, { ...ctx, canDownload: false }); // banner gone
           void projectStore.reload(path); // stub → real source
+          // Not only this tab. A library's parameter names are read from its source, so until this
+          // moment every call into that artifact — in files all over the project — had no names to
+          // show. Bumping this is what makes the open editor ask again instead of waiting for the
+          // next keystroke to notice.
+          sourcesRevision += 1;
         },
       );
       return () => {

@@ -34,7 +34,9 @@ pub use crate::access::{package_of, same_package, same_top_level};
 
 // What the editor draws around a call: the signature of the one the caret is inside, and the
 // parameter names / inferred `var` types drawn between the code.
-pub use crate::hints::{inlay_hints, signature_at, InlayHint, SignatureHelp};
+pub use crate::hints::{
+    inlay_hints, inlay_hints_with, signature_at, InlayHint, LibraryParamNames, SignatureHelp,
+};
 
 // Turning a resolved member back into the text a person reads — shared so two features cannot
 // disagree about what a method's parameters are called.

@@ -21,6 +21,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **The type of a `var` is now shown for primitives and arithmetic too** — `int`, `char`, `long[]` — where before the hint simply did not appear. The engine learned the shapes it used to skip: arithmetic and comparison, `!`/`-`/`++`, indexing an array, `new int[n]`, `a.length`, `instanceof`, a conditional whose two arms agree, and picking the exactly-matching overload of `Math.max` and friends. Measured on Apache Commons Lang 3 against the type each author wrote: **70% → 93%** of locals typed, with no new false positives on code that compiles.
 
+### Added
+
+- **Parameter-name hints for library methods, from the library's own sources.** They appear for any dependency whose sources are on disk — the JDK's, and anything fetched with "Download sources" — and for nothing else: a class file carries no parameter names unless it was compiled with `-parameters`, and a decompiled stub's `arg0` is a placeholder, not a name. Sources that arrive while you are working take effect immediately, in every file that calls that library.
+
 ### Changed
 
 - **The file-structure list ranks by match quality once you type in it.** With the box empty it is still the file's own order, because that is what an outline is for; with a query it answers the question actually being asked. Typing `uri` in a 66-member class used to put a constant where `u`, `r` and `i` are scattered across thirty-one characters five rows above the method called `uri`. The shared matcher also learned that a capital starts a word inside a name, and to spot the query sitting whole somewhere rather than only tracking its letters left to right — so `Uri` inside `requestHeaderToRequestUri` now counts for what it is. Go-to-file and the command palette rank better for the same reason.

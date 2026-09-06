@@ -245,6 +245,15 @@
   expression is left alone.
 </p>
 <p>
+  <strong>Parameter names for a library's methods</strong> appear once that library's
+  <strong>sources</strong> are on disk — the JDK's own, and any dependency whose sources you have
+  fetched from the decompiled view's "Download sources". A class file does not carry parameter names
+  unless it was compiled with <code>-parameters</code>, which almost no published jar is, so the only
+  honest source for them is the source: a decompiled stub's <code>arg0</code> is the decompiler's
+  placeholder, not what the parameter is called. Sources fetched while you work take effect at once —
+  the hints in every file that calls that library reappear without an edit.
+</p>
+<p>
   The type hint includes the <strong>primitives</strong>, which are the ones hardest to work out from
   the line: <code>var n = path.indexOf('/')</code> is an <code>int</code>, <code>var half = a / 2</code>
   is an <code>int</code> and not a <code>double</code>, and <code>var c = chars[i]</code> is a
