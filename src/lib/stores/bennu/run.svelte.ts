@@ -41,6 +41,8 @@
  */
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { coalesceBatch, coalesceLatest } from '$lib/utils/coalesce';
+import { appendLogLines } from './log-buffer';
 import {
   build as ipcBuild, validateProject as ipcValidateProject, run as ipcRun,
   cancelRun as ipcCancelRun, cancelValidation as ipcCancelValidation,
@@ -98,16 +100,11 @@ interface LogAnnotation {
   pieces?: LogPiece[];
 }
 
-/**
- * Cap the retained log so a chatty build/run can't grow the buffer unbounded.
- *
- * It used to be 3000, which was really a cap on the DOM: every retained line was a rendered
- * row, and a Tomcat or Spring Boot startup reached it in seconds — so the beginning of the
- * run, which is where the interesting failures are, had already scrolled out of existence by
- * the time you looked. The console renders only what is on screen now
- * ({@link BennuConsole}), so what this bounds is memory, and memory affords a great deal more.
- */
-const MAX_LINES = 10_000;
+/** One streamed output event, as the coalesced flush replays it. `exit` rides the same queue as
+ *  the lines so a "Process finished" can never overtake the last thing the program printed. */
+type RunEvent =
+  | { kind: 'out'; runId: string; line: RunLogLine }
+  | { kind: 'exit'; runId: string; code: number | null };
 
 /** Render a millisecond duration compactly (`340ms` / `1.2s` / `1m 05s`). */
 export function formatMs(ms: number): string {
@@ -268,9 +265,23 @@ function createBennuRunStore() {
   /** Append to the BUILD log (mvn/javac/validation). `log` is the backend's interpretation
    *  of the line, absent on the status lines this store writes itself. */
   function push(text: string, stream: RunLogLine['stream'] = 'out', log?: LogAnnotation) {
-    const next = lines.length >= MAX_LINES ? lines.slice(lines.length - MAX_LINES + 1) : lines.slice();
-    next.push({ text, stream, ...log });
-    lines = next;
+    // Anything the stream already produced goes in first. A status line written straight to the
+    // array while output sits in the coalescer would print above the lines it is commenting on.
+    flushBuildOutput.flush();
+    pushMany([{ text, stream, ...log }]);
+  }
+
+  /** Append a whole batch to the BUILD log in one array rebuild — what the coalesced
+   *  `build-output` flush uses. Does NOT flush: it is what the flush calls. */
+  function pushMany(entries: RunLogLine[]) {
+    lines = appendLogLines(lines, entries);
+  }
+
+  /** Empty the BUILD log, dropping whatever the previous run still had queued — so the
+   *  tail of the last build cannot bleed into the top of this one. */
+  function clearLog() {
+    flushBuildOutput.flush();
+    lines = [];
   }
 
   /**
@@ -295,12 +306,20 @@ function createBennuRunStore() {
     stream: RunLogLine['stream'] = 'out',
     log?: LogAnnotation,
   ) {
+    // Same reason as {@link push}: the program's own output goes in before our narration of it.
+    // Re-entrant-safe — the flush empties its queue before delivering, so the `exited()` call it
+    // makes finds nothing left to flush.
+    flushRunEvents.flush();
+    pushToMany(id, [{ text, stream, ...log }]);
+  }
+
+  /** Append a whole batch to a tab's transcript in one array rebuild — what the coalesced
+   *  `run-output` flush uses. Does NOT flush: it is what the flush calls. */
+  function pushToMany(id: string, entries: RunLogLine[]) {
+    if (entries.length === 0) return;
     const i = tabs.findIndex((t) => t.id === id);
     if (i === -1) return;
-    const prev = tabs[i].lines;
-    const kept = prev.length >= MAX_LINES ? prev.slice(prev.length - MAX_LINES + 1) : prev.slice();
-    kept.push({ text, stream, ...log });
-    patchTab(id, { lines: kept });
+    patchTab(id, { lines: appendLogLines(tabs[i].lines, entries) });
   }
 
   /** Append to the ACTIVE tab — what the launch narration and the errors use. */
@@ -379,6 +398,62 @@ function createBennuRunStore() {
     );
   }
 
+  // ── Coalesced output ──────────────────────────────────────────────────────────────────────────
+  //
+  // A build or a running program emits one event per line — a Spring Boot startup is thousands in a
+  // few seconds — and every one of them used to rebuild the line array and re-run the console's
+  // reactivity. That is merely wasteful while you are watching; it is the freeze you feel when you
+  // come BACK to a window that was in the background, because the webview is power-throttled while
+  // unfocused and the backend that feeds it is not, so the whole backlog is delivered at once.
+  //
+  // Batched, not latest-wins: every line of a log matters. One flush per animation frame, one array
+  // rebuild per flush.
+
+  /** The build log (mvn / javac / validation). */
+  const flushBuildOutput = coalesceBatch<RunLogLine>((batch) => pushMany(batch));
+
+  /**
+   * A program's stdout/stderr **and** its exit, on one queue.
+   *
+   * They share the queue on purpose. Coalescing the output while letting the exit through
+   * immediately would let "Process finished with exit code 0" print above the last thing the
+   * program said — the ordering bug that buffering introduces if you only buffer half the stream.
+   *
+   * Consecutive lines for the same run collapse into one append; a run whose tab does not exist yet
+   * still goes to {@link stash}, because a program can print before `bennu_run` has returned its id.
+   */
+  const flushRunEvents = coalesceBatch<RunEvent>((batch) => {
+    let i = 0;
+    while (i < batch.length) {
+      const head = batch[i];
+      if (head.kind === 'exit') {
+        const tab = tabForRun(head.runId);
+        const code = head.code;
+        if (tab) exited(tab.id, code);
+        else stash(head.runId, (tabId) => exited(tabId, code));
+        i += 1;
+        continue;
+      }
+      const runId = head.runId;
+      const batched: RunLogLine[] = [];
+      while (i < batch.length) {
+        const e = batch[i];
+        if (e.kind !== 'out' || e.runId !== runId) break;
+        batched.push(e.line);
+        i += 1;
+      }
+      const tab = tabForRun(runId);
+      if (tab) pushToMany(tab.id, batched);
+      else stash(runId, (tabId) => pushToMany(tabId, batched));
+    }
+  });
+
+  /** Whole-project validation progress — a counter, so only the last one of a frame is worth
+   *  applying. */
+  const flushValidateProgress = coalesceLatest<{ done: number; total: number }>((p) => {
+    validateProgress = p;
+  });
+
   /** Attach the build/run event listeners. Called once from BennuWindow.onMount;
    *  returns a detach fn for cleanup. Idempotent. */
   async function attach(): Promise<UnlistenFn> {
@@ -395,35 +470,39 @@ function createBennuRunStore() {
     const add = (f: UnlistenFn) => unlisteners.push(f);
     add(
       await listen<{ text: string } & LogAnnotation>('arbor://bennu/build-output', (e) =>
-        push(e.payload.text, 'out', { level: e.payload.level, pieces: e.payload.pieces }),
+        flushBuildOutput({
+          text: e.payload.text,
+          stream: 'out',
+          level: e.payload.level,
+          pieces: e.payload.pieces,
+        }),
       ),
     );
     add(
       await listen<{ done: number; total: number }>('arbor://bennu/validate-progress', (e) => {
-        validateProgress = { done: e.payload.done, total: e.payload.total };
+        flushValidateProgress({ done: e.payload.done, total: e.payload.total });
       }),
     );
     add(
       await listen<{ run_id: string; stream: string; text: string } & LogAnnotation>(
         'arbor://bennu/run-output',
-        (e) => {
-          const write = (tabId: string) =>
-            pushTo(tabId, e.payload.text, e.payload.stream === 'stderr' ? 'err' : 'out', {
+        (e) =>
+          flushRunEvents({
+            kind: 'out',
+            runId: e.payload.run_id,
+            line: {
+              text: e.payload.text,
+              stream: e.payload.stream === 'stderr' ? 'err' : 'out',
               level: e.payload.level,
               pieces: e.payload.pieces,
-            });
-          const tab = tabForRun(e.payload.run_id);
-          if (tab) write(tab.id);
-          else stash(e.payload.run_id, write);
-        },
+            },
+          }),
       ),
     );
     add(
-      await listen<{ run_id: string; code: number | null }>('arbor://bennu/run-exit', (e) => {
-        const tab = tabForRun(e.payload.run_id);
-        if (tab) exited(tab.id, e.payload.code);
-        else stash(e.payload.run_id, (tabId) => exited(tabId, e.payload.code));
-      }),
+      await listen<{ run_id: string; code: number | null }>('arbor://bennu/run-exit', (e) =>
+        flushRunEvents({ kind: 'exit', runId: e.payload.run_id, code: e.payload.code }),
+      ),
     );
     add(
       // A breakpoint firing in a program you were not reading pulls the console to it, the way it
@@ -453,7 +532,7 @@ function createBennuRunStore() {
     ok = null;
     tool = '';
     diagnostics = [];
-    lines = [];
+    clearLog();
     if (focus) bennuUiStore.showBottom('build');
     push(module ? `Compiling ${module}…` : `Compiling ${root}…`, 'meta');
     try {
@@ -487,7 +566,7 @@ function createBennuRunStore() {
     validatingRoot = root;
     validationResult = null;
     validateProgress = { done: 0, total: 0 };
-    lines = [];
+    clearLog();
     bennuDiagnosticsStore.clearProjectDiagnostics();
     bennuUiStore.showBottom('build');
     push(`Validating ${root} (no compile)…`, 'meta');
@@ -1162,7 +1241,7 @@ function createBennuRunStore() {
     },
     /** Clear the BUILD log + last result (the Build panel's "clear" action). */
     clear() {
-      lines = [];
+      clearLog();
       diagnostics = [];
       ok = null;
       tool = '';

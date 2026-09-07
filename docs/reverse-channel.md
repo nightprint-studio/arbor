@@ -154,7 +154,7 @@ serve_stdio(out, methods, host, dispatch)?;            // reader + worker pool +
 
 ### Concurrency note (intentional, consistent)
 
-Dispatching each `Request` on its own worker thread makes backend handlers run
+Dispatching each `Request` off the reader thread makes backend handlers run
 **concurrently**, where the old loop ran them **sequentially**. This is not a
 regression — it matches the in-process model (the `LoopbackBroker` is already
 called concurrently from Tauri's `spawn_blocking` pool), and the corvus handlers
@@ -162,6 +162,18 @@ are already thread-safe (state is `Mutex`-guarded). Sequential-only was an
 artifact of the single-thread loop, not a guarantee. **Flag for confirmation:**
 if any backend handler relies on serialization, it must guard it explicitly
 (none do today).
+
+The dispatch runs on a **pool** (`DispatchPool` in `transport.rs`): an idle thread is
+reused, a new one is spawned when there is none, and the count stops at 64 — past that,
+requests queue and are served in order. The cap is not a throughput limit (a handler can
+legitimately take minutes, and one blocked on the reverse channel waiting for a credential
+holds its slot for as long as the person takes to answer); it is the bound that keeps a
+**burst** from becoming an OS thread per request. Bursts are real: the frontend's webview is
+power-throttled by the OS while its window is in the background and the backend feeding it
+is not, so events pile up and are delivered all at once on the way back. Thread-per-request
+turned that into thousands of threads contending for the same state mutex, and a backend in
+that state answers *nothing* — which reads, from every other side, as unrelated domains
+timing out.
 
 ## Shell side
 

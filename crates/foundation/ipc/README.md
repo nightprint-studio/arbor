@@ -27,6 +27,11 @@ Reach the surface through `arbor_ipc::prelude::...`:
 - **`transport`** — `ChildClient` (shell side: spawns the backend, reads its
   `Hello`, demuxes responses / events / host-calls over framed JSON on the
   child's stdio) + `serve_stdio` (backend side of the same frame protocol).
+  `serve_stdio` runs handlers on a **bounded pool**: off the reader thread (a
+  handler blocked on the reverse channel must not stall the reply it is waiting
+  for), concurrent (a minutes-long build must not hold up the next request), and
+  capped at 64 threads so a burst of thousands of calls queues instead of
+  becoming thousands of threads contending for one state mutex.
 - **`credential`** — `SessionProvider`, the async keyring-free credential
   contract a backend depends on (`session` / `refresh`, yielding an
   `AuthSession { base_url, auth_header }`), so the coupled domains (issue

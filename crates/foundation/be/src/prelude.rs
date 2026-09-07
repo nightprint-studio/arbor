@@ -6,4 +6,5 @@
 pub use crate::app::App;
 pub use crate::app_ctx::BackendAppCtx;
 pub use crate::dispatch::{Dispatcher, TOOLS_METHOD};
+pub use crate::focus::{app_focused, set_app_focused, FOCUS_METHOD};
 pub use crate::io::BackendIo;

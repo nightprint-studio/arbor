@@ -30,7 +30,17 @@ here.
   context branching. `inventory(program)` adds the `#[handler]`s (dispatched with
   the primary `&S`); `group(map, make)` adds a bundle whose handlers downcast to
   their own adapter, built fresh per call. It carries both the advertised names
-  and the dispatch fn into `App::run`.
+  and the dispatch fn into `App::run`. Two reserved methods are registered for
+  every backend, so none can forget them: `__tools` (the AI-tool
+  self-description) and `__app_focus` (see below).
+- **`focus`** — `app_focused()`: whether any of the app's windows currently has
+  the OS focus, pushed down by the shell over the reserved `__app_focus` method.
+  A backend is deliberately **not** power-throttled with the shell (a build must
+  not be demoted because you alt-tabbed away), so without being told it goes on
+  emitting into a webview that the OS has put on idle priority — and the whole
+  backlog lands at once when the window comes back. Use it to skip emitting
+  **progress**, which the next event supersedes. Never to drop a log line, a
+  verdict or any other record of something that happened.
 
 ## What stays in the product binary
 

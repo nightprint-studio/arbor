@@ -4,11 +4,38 @@
 //!  - the **merula** window closing tears down its audio session;
 //!  - **close-to-tray** for the `main` window in release (auxiliary windows
 //!    close for real);
-//!  - **efficiency mode** (OS power-throttle) driven by focus + minimize.
+//!  - **app focus** — the OS power-throttle, the focus-gated plugin schedulers and every
+//!    backend's idea of whether anyone is watching, driven by focus + minimize + destroy.
+//!    Per-window events in, one app-wide answer out (see [`super::focus`]).
 
 use tauri::{Manager, WindowEvent};
 
 use crate::AppState;
+
+/// The app as a whole gained or lost the OS focus. Called only on a real transition (see
+/// [`super::focus`]), from the native window-event callback — so everything here must be cheap or
+/// deferred.
+///
+/// Three consumers, all process-wide:
+///
+///  1. `AppState::app_focused`, which focus-gated plugin schedulers read.
+///  2. The OS power throttle (EcoQoS on Windows, nice/sched elsewhere). Driven from the native
+///     event rather than a frontend IPC call so minimize / Alt-Tab / window-switch are all caught
+///     reliably via Win32 `WM_SETFOCUS` / `WM_KILLFOCUS`. The expensive process scan it implies
+///     runs off-thread in the efficiency worker.
+///  3. Every attached backend. They are deliberately NOT throttled with the shell — a build must
+///     not be demoted because you alt-tabbed away — so without being told they go on emitting
+///     progress at full speed into a webview that is running at idle priority, and the whole
+///     backlog lands at once when you come back. Telling them is what lets the emitter skip what
+///     nobody can see; see `arbor_be::focus`. Fire-and-forget, on its own threads.
+pub(crate) fn apply_app_focus(app: &tauri::AppHandle, focused: bool) {
+    app.state::<AppState>()
+        .app_focused
+        .store(focused, std::sync::atomic::Ordering::Relaxed);
+    crate::efficiency::request(!focused);
+    let params = serde_json::to_vec(&serde_json::json!({ "focused": focused })).unwrap_or_default();
+    crate::ipc::split_broker::broadcast(arbor_be::prelude::FOCUS_METHOD, params);
+}
 
 /// Route a native window event. Wired via `Builder::on_window_event` in
 /// `setup::build_builder`.
@@ -64,6 +91,12 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
         }
         WindowEvent::Destroyed => {
             let label = window.label();
+            // Out of the focus set before anything else: a window closed while focused would
+            // otherwise keep the app "focused" for the rest of the session, and it would never
+            // throttle again. A no-op after the ordinary blur-then-destroy sequence.
+            if let Some(app_focused) = super::focus::forget_window(label) {
+                apply_app_focus(window.app_handle(), app_focused);
+            }
             // The window directory shrank: refresh every open switcher and
             // Window menu. Broadcast for ALL windows, not just product ones —
             // the launcher and the explorer list there too.
@@ -133,16 +166,13 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
         }
         WindowEvent::Focused(focused) => {
             let focused = *focused;
-            // Update the app-focused flag so focus-gated schedulers work correctly.
-            let state = window.app_handle().state::<AppState>();
-            state.app_focused.store(focused, std::sync::atomic::Ordering::Relaxed);
-            // Signal the desired OS power-throttle state (EcoQoS on Windows,
-            // nice/sched on Linux/macOS). Handled here in the native
-            // window-event callback rather than via a frontend IPC call so
-            // minimize / Alt-Tab / window-switch are all caught reliably via
-            // Win32 WM_SETFOCUS / WM_KILLFOCUS messages. The actual (expensive)
-            // process scan runs off-thread in the efficiency worker.
-            crate::efficiency::request(!focused);
+            // Per window in, per APP out — see `window::focus`. Everything below is process-wide
+            // (one flag, one process's EcoQoS, one set of backends), so moving between two Arbor
+            // windows must not read as the app losing focus. `None` = the app-wide answer did not
+            // change, which is exactly what a window switch is.
+            if let Some(app_focused) = super::focus::set_window_focused(window.label(), focused) {
+                apply_app_focus(window.app_handle(), app_focused);
+            }
 
             // JetBrains-Toolbox-style auto-hide: when the launcher loses focus
             // it slips back to the tray. Launching a product, an Alt-Tab, or a
@@ -167,11 +197,13 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
             // Windows reports minimize as a Resized event with width=0, height=0.
             // Focused(false) alone doesn't always fire on minimize (depending on
             // desktop/window-manager behavior), so we trigger efficiency mode
-            // from here too as a belt-and-braces catch.
+            // from here too as a belt-and-braces catch. Through the same set as
+            // everything else: minimizing one of three windows is not the app
+            // going away.
             if size.width == 0 && size.height == 0 {
-                let state = window.app_handle().state::<AppState>();
-                state.app_focused.store(false, std::sync::atomic::Ordering::Relaxed);
-                crate::efficiency::request(true);
+                if let Some(app_focused) = super::focus::set_window_focused(window.label(), false) {
+                    apply_app_focus(window.app_handle(), app_focused);
+                }
             }
         }
         _ => {}

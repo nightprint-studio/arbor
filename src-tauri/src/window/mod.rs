@@ -53,6 +53,8 @@ pub mod bennu;
 pub mod corvus;
 pub mod events;
 pub mod explorer;
+/// App-wide focus, aggregated from the per-window `Focused` events.
+pub mod focus;
 pub mod garrulus;
 pub mod hud;
 pub mod launcher;

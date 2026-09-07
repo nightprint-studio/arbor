@@ -513,18 +513,29 @@
   });
 
   // Project-level diagnostics (JDK status + wrong-encoding files) for the titlebar badge +
-  // the Problems panel. Re-fetch when the project changes or the index (re)builds — the
-  // encoding report lands after the project phase, `buildRevision` catches each phase.
-  // Java-only for the same reason: a Cargo project has no JDK to report on, and its encoding
+  // the Problems panel. Java-only: a Cargo project has no JDK to report on, and its encoding
   // is UTF-8 by language definition.
+  //
+  // Re-read when the index **stops**, exactly like the framework overview below — and for the
+  // same reason, which this effect learned the hard way. It used to depend on `buildRevision`,
+  // which ticks on EVERY index-progress event including the reference walk's per-file ones, and
+  // `refresh()` fires two requests (JDK status + encoding report): thousands of round-trips on a
+  // real project, each on its own backend thread. Worse in the case this was found in — a window
+  // left in the background has its webview throttled while the backend keeps emitting at full
+  // speed, so the whole backlog drains into this effect the moment focus returns.
+  //
+  // `indexing` going false is the "there is a new answer" signal; the encoding report is produced
+  // by the project phase and is therefore in place well before it.
   $effect(() => {
     const root = projectStore.project?.root ?? null;
-    void bennuIndexStore.buildRevision; // re-run as the (re)build progresses
-    if (root && !projectStore.isDemo && !projectStore.isCargo) {
-      void bennuDiagnosticsStore.refresh(root);
-    } else {
+    const busyIndexing = bennuIndexStore.indexing;
+    if (!root || projectStore.isDemo || projectStore.isCargo) {
       bennuDiagnosticsStore.reset();
+      return;
     }
+    // Mid-build: keep what is on screen rather than asking again. The next settle re-reads.
+    if (busyIndexing) return;
+    void bennuDiagnosticsStore.refresh(root);
   });
 
   // ── Build / Run triggers (mirror the titlebar; shared by keybindings + palette) ─

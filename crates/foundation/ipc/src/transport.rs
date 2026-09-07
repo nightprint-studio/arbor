@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -231,14 +231,123 @@ impl HostCaller for FrameHostCaller {
     }
 }
 
+/// The most handlers a backend runs at once. Past this, requests queue and are served in order.
+///
+/// High enough that it is not a throughput limit — a handler can legitimately take minutes (a Maven
+/// build, an index rebuild, a query) and must not hold up the rest, and one blocked on the reverse
+/// channel waiting for a credential holds a slot for as long as the person takes to answer. Low
+/// enough to bound a stampede: see [`DispatchPool`].
+const MAX_WORKERS: usize = 64;
+
+/// How long a worker waits for something to do before giving its thread back. Long enough that a
+/// working session reuses the same threads, short enough that an idle backend costs nothing.
+const WORKER_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+type Job = Box<dyn FnOnce() + Send + 'static>;
+
+/// The pool the serve loop runs handlers on: reuse an idle thread, spawn one when there is none,
+/// stop at [`MAX_WORKERS`].
+///
+/// Dispatch has to stay **off** the reader thread (a handler that calls back to the shell blocks
+/// until the reader delivers its `HostResponse`) and it has to stay **concurrent** (a slow handler
+/// must not hold up the next one). Both were true of the thread-per-request it replaces. What that
+/// could not do is refuse to scale with the size of a burst.
+///
+/// And bursts are real. The frontend's webview is power-throttled by the OS while its window is in
+/// the background while the backend feeding it is not, so a backlog of events builds up and is
+/// delivered all at once the moment the window regains focus — thousands of handlers in a few
+/// milliseconds, each of them an OS thread, all contending for the same state mutex. The backend
+/// then answers *nothing*, which from every other side looks like unrelated domains timing out and
+/// is miserable to attribute. The frontend no longer produces that burst (its event streams are
+/// coalesced), but a backend that falls over when someone does is a backend with a loaded gun in
+/// it; this is the safety catch, not the fix.
+struct DispatchPool {
+    tx: mpsc::Sender<Job>,
+    /// Shared by every worker: whoever holds the lock is the one waiting for the next job.
+    rx: Arc<Mutex<mpsc::Receiver<Job>>>,
+    /// Workers waiting for work (including those queued behind `rx`'s lock). Non-zero means the
+    /// next job will be picked up without spawning anything.
+    idle: Arc<AtomicUsize>,
+    /// Workers that exist. Bounded by [`MAX_WORKERS`].
+    alive: Arc<AtomicUsize>,
+}
+
+/// Keeps `alive` honest however a worker leaves — including a panic that escaped
+/// [`dispatch_caught`], which would otherwise leak a slot out of the cap for the process's life.
+struct WorkerSlot(Arc<AtomicUsize>);
+
+impl Drop for WorkerSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+impl DispatchPool {
+    fn new() -> Self {
+        let (tx, rx) = mpsc::channel::<Job>();
+        Self {
+            tx,
+            rx: Arc::new(Mutex::new(rx)),
+            idle: Arc::new(AtomicUsize::new(0)),
+            alive: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    fn execute(&self, job: Job) {
+        // Grow only when nobody is already waiting to take this. The check races with a worker
+        // going idle, and benignly: the worst outcome is one more thread than strictly needed,
+        // which the idle timeout reclaims.
+        if self.idle.load(Ordering::Acquire) == 0 && self.alive.load(Ordering::Acquire) < MAX_WORKERS
+        {
+            self.spawn_worker();
+        }
+        // The receiver lives in `self`, so this cannot fail while the pool does. If it somehow
+        // does, run the job here rather than drop it: a dropped request is a caller blocked on a
+        // reply that will never come, which is the one outcome this whole file exists to prevent.
+        if let Err(returned) = self.tx.send(job) {
+            (returned.0)();
+        }
+    }
+
+    fn spawn_worker(&self) {
+        let rx = Arc::clone(&self.rx);
+        let idle = Arc::clone(&self.idle);
+        let alive = Arc::clone(&self.alive);
+        alive.fetch_add(1, Ordering::AcqRel);
+        let spawned = thread::Builder::new()
+            .name("arbor-ipc-dispatch".to_string())
+            .spawn(move || {
+                let _slot = WorkerSlot(alive);
+                loop {
+                    idle.fetch_add(1, Ordering::AcqRel);
+                    let job = {
+                        let guard = rx.lock().unwrap_or_else(|e| e.into_inner());
+                        guard.recv_timeout(WORKER_IDLE_TIMEOUT)
+                    };
+                    idle.fetch_sub(1, Ordering::AcqRel);
+                    match job {
+                        Ok(job) => job(),
+                        // Idle for long enough to be worth giving the thread back — or the serve
+                        // loop is gone and the sender with it.
+                        Err(_) => break,
+                    }
+                }
+            });
+        if spawned.is_err() {
+            // Nothing was spawned, so nothing will drop the slot.
+            self.alive.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+}
+
 /// Run the backend serve loop: announce `methods` via `Hello`, run `on_ready`
 /// (post-Hello startup work — see below), then read frames
-/// from `input` (the backend's stdin). Each `Request` is dispatched on its **own
-/// worker thread** (so the reader stays free to receive `HostResponse`s while a
-/// handler is mid-`HostRequest` — the reverse-channel reentrancy requirement);
-/// the worker writes its `Response` on `out` when done. `HostResponse`s are
-/// routed back to the matching blocked [`FrameHostCaller::call`] via `host`'s
-/// shared pending map.
+/// from `input` (the backend's stdin). Each `Request` is dispatched on a
+/// [`DispatchPool`] **worker thread** (so the reader stays free to receive
+/// `HostResponse`s while a handler is mid-`HostRequest` — the reverse-channel
+/// reentrancy requirement); the worker writes its `Response` on `out` when done.
+/// `HostResponse`s are routed back to the matching blocked
+/// [`FrameHostCaller::call`] via `host`'s shared pending map.
 ///
 /// `dispatch` must be `Send + Sync + 'static` because it runs on worker threads;
 /// handlers therefore run **concurrently** (the single-threaded loop's implicit
@@ -284,6 +393,7 @@ where
 
     let dispatch = Arc::new(dispatch);
     let pending = host.pending();
+    let pool = DispatchPool::new();
     let mut reader = input;
     while let Some(frame) = read_frame(&mut reader)? {
         match frame {
@@ -293,12 +403,12 @@ where
                 // deliver its `HostResponse`.
                 let out = Arc::clone(&out);
                 let dispatch = Arc::clone(&dispatch);
-                thread::spawn(move || {
+                pool.execute(Box::new(move || {
                     let result = dispatch_caught(&*dispatch, &method, params);
                     if let Ok(mut w) = out.lock() {
                         let _ = write_frame(&mut *w, &Frame::Response { id, result });
                     }
-                });
+                }));
             }
             Frame::HostResponse { id, result } => {
                 if let Some(tx) = pending.lock().expect("host pending poisoned").remove(&id) {
@@ -847,6 +957,113 @@ mod tests {
                 assert_eq!(result, Ok(json!("still here")));
             }
             other => panic!("expected Response, got {other:?}"),
+        }
+
+        sh2be.close();
+        serve.join().unwrap();
+    }
+
+    /// A burst larger than the worker cap is still answered in full.
+    ///
+    /// The pool is what stops a stampede from becoming one OS thread per request; this is the
+    /// proof that bounding it costs nothing a caller can observe. 200 requests against a cap of
+    /// 64 means most of them wait for a worker, and every one of them must still come back —
+    /// with its own answer, exactly once.
+    #[test]
+    fn a_burst_beyond_the_worker_cap_is_answered_in_full() {
+        let be2sh = Pipe::new();
+        let sh2be = Pipe::new();
+
+        let out: SharedWriter = Arc::new(Mutex::new(be2sh.clone()));
+        let host = FrameHostCaller::new(Arc::clone(&out));
+
+        let dispatch = |_method: &str, params: Value| -> Result<Value, String> { Ok(params) };
+
+        let serve_in = sh2be.clone();
+        let serve_out = Arc::clone(&out);
+        let serve_host = Arc::clone(&host);
+        let serve = thread::spawn(move || {
+            let _ = serve_stdio(serve_in, serve_out, vec!["echo".to_string()], serve_host, dispatch, || {});
+        });
+
+        let mut sh_in = be2sh.clone();
+        assert!(matches!(read_frame(&mut sh_in).unwrap(), Some(Frame::Hello { .. })));
+
+        const BURST: u64 = 200;
+        for id in 1..=BURST {
+            write_frame(
+                &mut sh2be.clone(),
+                &Frame::Request { id, method: "echo".into(), params: json!(id) },
+            )
+            .unwrap();
+        }
+
+        // Answers may interleave — the pool is concurrent — so they are compared as a set.
+        let mut answered = std::collections::HashSet::new();
+        for _ in 0..BURST {
+            match read_frame(&mut sh_in).unwrap() {
+                Some(Frame::Response { id, result }) => {
+                    assert_eq!(result, Ok(json!(id)), "request {id} got another request's answer");
+                    assert!(answered.insert(id), "request {id} answered twice");
+                }
+                other => panic!("expected Response, got {other:?}"),
+            }
+        }
+        assert_eq!(answered.len() as u64, BURST);
+
+        sh2be.close();
+        serve.join().unwrap();
+    }
+
+    /// Handlers still run at the same time.
+    ///
+    /// The pool reuses threads, and one that reused a single thread would turn every backend into
+    /// a queue — a five-minute build would stop the editor answering anything at all. Two handlers
+    /// that can only finish together prove it does not: neither returns until both have arrived.
+    #[test]
+    fn handlers_run_concurrently() {
+        let be2sh = Pipe::new();
+        let sh2be = Pipe::new();
+
+        let out: SharedWriter = Arc::new(Mutex::new(be2sh.clone()));
+        let host = FrameHostCaller::new(Arc::clone(&out));
+
+        let gate = Arc::new((Mutex::new(0u32), Condvar::new()));
+        let gate_for_dispatch = Arc::clone(&gate);
+        let dispatch = move |_method: &str, _params: Value| -> Result<Value, String> {
+            let (lock, cv) = &*gate_for_dispatch;
+            let mut arrived = lock.lock().unwrap();
+            *arrived += 1;
+            cv.notify_all();
+            while *arrived < 2 {
+                let (next, timeout) = cv.wait_timeout(arrived, Duration::from_secs(10)).unwrap();
+                arrived = next;
+                // Reached only if the two were run one after the other, which is the failure.
+                if timeout.timed_out() {
+                    return Err("handlers were serialised".to_string());
+                }
+            }
+            Ok(json!("both"))
+        };
+
+        let serve_in = sh2be.clone();
+        let serve_out = Arc::clone(&out);
+        let serve_host = Arc::clone(&host);
+        let serve = thread::spawn(move || {
+            let _ = serve_stdio(serve_in, serve_out, vec!["wait".to_string()], serve_host, dispatch, || {});
+        });
+
+        let mut sh_in = be2sh.clone();
+        assert!(matches!(read_frame(&mut sh_in).unwrap(), Some(Frame::Hello { .. })));
+
+        for id in 1..=2u64 {
+            write_frame(&mut sh2be.clone(), &Frame::Request { id, method: "wait".into(), params: Value::Null }).unwrap();
+        }
+        for _ in 0..2 {
+            match read_frame(&mut sh_in).unwrap() {
+                Some(Frame::Response { result, .. }) => assert_eq!(result, Ok(json!("both"))),
+                other => panic!("expected Response, got {other:?}"),
+            }
         }
 
         sh2be.close();

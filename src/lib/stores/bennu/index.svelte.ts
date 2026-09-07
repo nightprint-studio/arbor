@@ -19,6 +19,7 @@
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { SvelteMap } from 'svelte/reactivity';
+import { coalesceLatest } from '$lib/utils/coalesce';
 import { operationsStore } from '$lib/feedback/stores/operations.svelte';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import { indexStats as ipcIndexStats, classIndex as ipcClassIndex } from '$lib/ipc/bennu';
@@ -117,10 +118,50 @@ function createBennuIndexStore() {
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined; }
   }
 
+  /**
+   * The reactive half of an index-progress event, applied at most once per animation frame.
+   *
+   * The backend emits one event per file during the reference walk — thousands on a real project —
+   * and each of them used to write four pieces of state and update the operation card. That is
+   * merely wasteful while you are watching it; it is the freeze you feel when you come BACK to a
+   * window left in the background, because the webview is power-throttled while unfocused and the
+   * backend feeding it is not, so the entire backlog is delivered in one go.
+   *
+   * Latest-wins, not batched: progress is a position, and every intermediate one is superseded by
+   * the one behind it. What survives coalescing is exactly what the screen was going to end up
+   * showing.
+   */
+  const applyProgress = coalesceLatest<{
+    phase: string;
+    detail: string | null;
+    ref: { phase: string; done: number; total: number } | null;
+  }>(({ phase: ph, detail, ref }) => {
+    // Bumped BEFORE the `done` guard — a config/references phase can still land after the poll
+    // flipped `indexing` false, and the inspector keys its refresh on this so beans/actions/
+    // relations show up once their phase completes.
+    //
+    // ⚠ Still a "something moved" signal, not a "there is a new answer" one — coalescing bounds it
+    // to one tick per frame, it does not make it meaningful. Anything reading it must be debounced:
+    // an effect that fires an un-debounced request per tick sends a request per frame of a
+    // minutes-long walk, each on its own backend thread, and the backend stops answering
+    // *everything* — which shows up as unrelated domains timing out and is miserable to attribute.
+    // Use `indexing` going false when what you want is "the build settled".
+    buildRevision += 1;
+    // A non-`ready` event after the cycle finished must not reopen the spinner.
+    if (done) return;
+    indexing = true;
+    phase = ph;
+    refProgress = ref;
+    operationsStore.update(OP_ID, { current: ph, activeDetail: detail });
+  });
+
   /** Arm a fresh indexing cycle for `root`: drop the class cache, show the job, reset
    *  the poll bookkeeping, and start the safety-net poll. Shared by `onProjectOpen`
    *  (project open) and `rebuild` (manual re-index) so both re-arm identically. */
   function beginCycle(root: string) {
+    // Land anything still queued from the previous cycle first, so it cannot arrive a frame later
+    // and describe this one with the old project's phase.
+    applyProgress.flush();
     currentRoot = root;
     classCache.delete(root);
     done = false;
@@ -211,35 +252,22 @@ function createBennuIndexStore() {
           // Events are live → disable the poll's no-event stop heuristics (see `sawEvent`),
           // so a long references phase isn't cut short by the type-count plateau / poll cap.
           sawEvent = true;
-          // Bump on every event, BEFORE the `done` guard — a config/references phase can
-          // still land after the poll flipped `indexing` false, and the inspector keys its
-          // refresh on this so beans/actions/relations show up once their phase completes.
-          //
-          // ⚠ This ticks on EVERY event, including the reference walk's per-file `progress`
-          // ones — thousands on a real project. It is a "something moved" signal, not a
-          // "there is a new answer" one. Anything reading it must be debounced or coalesced:
-          // an effect that fires an un-debounced request per tick sends one request per file
-          // indexed, each on its own backend thread, and the backend stops answering
-          // *everything* — which shows up as unrelated domains timing out and is miserable to
-          // attribute. Use `indexing` going false when what you want is "the build settled".
-          buildRevision += 1;
-          if (ph === 'ready') { markReady(root); return; }
-          // A non-`ready` event after the cycle finished must not reopen the spinner.
-          if (done) return;
-          indexing = true;
-          phase = ph;
+          // `ready` is terminal and rare: applied on the spot, ahead of any progress still
+          // queued in the coalescer, whose `done` guard then keeps it from reopening the
+          // spinner. It bumps the revision itself, since the coalesced half is skipped.
+          if (ph === 'ready') { buildRevision += 1; markReady(root); return; }
           // A `progress` event (the reference walk's files-done / total) refines the active
           // step's detail so the operation card shows real movement instead of a static
           // "References index"; other events just show the phase label.
           const hasCount = state === 'progress' && typeof doneN === 'number' && typeof total === 'number' && total > 0;
-          refProgress = hasCount ? { phase: ph, done: doneN, total } : null;
-          // The step's own label already names the phase — so the detail is JUST the count
-          // (avoids "References index — References index · N/M"); a plain phase event has no
-          // extra detail.
-          const detail = hasCount
-            ? `${doneN.toLocaleString()} / ${total.toLocaleString()} files`
-            : null;
-          operationsStore.update(OP_ID, { current: ph, activeDetail: detail });
+          applyProgress({
+            phase: ph,
+            // The step's own label already names the phase — so the detail is JUST the count
+            // (avoids "References index — References index · N/M"); a plain phase event has no
+            // extra detail.
+            detail: hasCount ? `${doneN!.toLocaleString()} / ${total!.toLocaleString()} files` : null,
+            ref: hasCount ? { phase: ph, done: doneN!, total: total! } : null,
+          });
         },
       );
       return () => { unlisten?.(); unlistenClasspath?.(); attached = false; };
@@ -271,6 +299,9 @@ function createBennuIndexStore() {
 
     /** Project closed / window teardown — clear the job + poll. */
     reset() {
+      // Drain before clearing: a progress event still in the coalescer would otherwise land a frame
+      // later and reopen the spinner for a project that is no longer open.
+      applyProgress.flush();
       stopPoll();
       pollToken += 1;
       done = false;

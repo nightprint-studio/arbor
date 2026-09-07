@@ -190,6 +190,44 @@ pub fn is_attached(program: &str) -> bool {
     OOP.read().map(|g| g.contains_key(program)).unwrap_or(false)
 }
 
+/// Fire `method` at **every** attached backend that advertises it, and don't wait for any of them.
+///
+/// For the handful of notifications the shell owes every product rather than one — today the
+/// app-focus state, which a backend needs so it can stop emitting progress into a window nobody is
+/// looking at (`arbor_be::prelude::FOCUS_METHOD`).
+///
+/// Two things it is careful about, both learned the expensive way:
+///
+///   * **It never blocks the caller.** `BrokerClient::call` is synchronous and framed over a pipe,
+///     and the caller here is the native window-event handler — the UI thread. One backend busy
+///     with a long request would freeze every window in the app.
+///   * **One thread per backend**, not one for all of them. A backend whose worker pool is
+///     saturated answers late; that must delay the notification to *it*, not to the others.
+///
+/// Backends that do not advertise the method are skipped, so an older or hand-rolled backend costs
+/// nothing and reports no error.
+pub fn broadcast(method: &'static str, params: Bytes) {
+    let targets: Vec<(&'static str, Arc<dyn BrokerClient>)> = match OOP.read() {
+        Ok(g) => g
+            .iter()
+            .filter(|(_, o)| o.methods.contains(method))
+            .map(|(program, o)| (*program, Arc::clone(&o.child)))
+            .collect(),
+        Err(_) => return,
+        // read lock released here ↓
+    };
+    for (program, child) in targets {
+        let params = params.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = child.call(method, params) {
+                // Debug, not warn: a backend that shut down between the snapshot and the call is
+                // the ordinary case, not a fault.
+                tracing::debug!("split_broker::broadcast({method}) to {program} failed: {e}");
+            }
+        });
+    }
+}
+
 /// Whether `method` is currently served out-of-process by `program`'s attached
 /// backend. Drives `crate::ipc::is_oop_method`.
 pub fn serves(program: &str, method: &str) -> bool {

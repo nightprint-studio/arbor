@@ -89,8 +89,8 @@ built on three scaffold pieces from `arbor-be`:
   - `stdout` — the single `SharedWriter` (the *protocol channel*; **all logs go to stderr**),
   - `sink` — `FrameEventSink`, the event egress (`state.emit(...)`),
   - `host` — `FrameHostCaller`, the **reverse channel** back to the shell,
-  - `rt` — a **multi-thread** tokio runtime (mandatory: each request is dispatched on its
-    own worker thread).
+  - `rt` — a **multi-thread** tokio runtime (mandatory: each request is dispatched on a
+    worker thread from the serve loop's pool, never on the reader).
 
 - **`App`** (`crates/foundation/be/src/app.rs`) — a fluent builder:
   - `.plugin_host(product_id, build_hooks)` wires the whole Lua plugin runtime,

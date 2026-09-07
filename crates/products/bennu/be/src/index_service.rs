@@ -31,7 +31,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Coalescing window for the config-graph rebuild after a `.xml` edit: the worker waits this long
 /// (absorbing the rest of a typing burst) before running the O(whole-project) rebuild, so a run of
@@ -67,6 +67,16 @@ use crate::web_discovery::{discover_jsp_files, discover_web_inputs};
 /// one of `"project"`, `"references"`, `"config"` (start before / end after each build
 /// phase) plus a terminal `{ "phase": "ready", "state": "end" }` once completion is live.
 const EVT_INDEX_PROGRESS: &str = "arbor://bennu/index-progress";
+
+/// The shortest gap between two `references` progress events while a window is in front — about
+/// ten updates a second, which is what a moving bar needs and more than a person can read.
+const PROGRESS_FOCUSED_INTERVAL: Duration = Duration::from_millis(100);
+
+/// …and while the app is in the background, where nobody is reading it and the frontend that
+/// receives it is power-throttled. Not zero: the card must be roughly right the moment you come
+/// back, and the frontend reads a live event stream as "the walk is still working" (its poll's
+/// give-up is only for a backend that emits nothing at all).
+const PROGRESS_UNFOCUSED_INTERVAL: Duration = Duration::from_secs(3);
 
 /// Emitted when a "Download sources" fetch finishes. Payload `{ "path": <decompiled-tab path>,
 /// "ok": <bool> }` — the FE clears the tab's download spinner and, on `ok`, reloads it from disk
@@ -3792,7 +3802,31 @@ fn build_rename_engine(
     );
     // Surface the O(N) reference walk as live progress in the "Indexing" operation card:
     // emit a `references` progress event (files done / total) as the walk advances.
+    //
+    // Rate-limited, and by whether anyone is looking. The walk calls this once **per file** —
+    // tens of thousands of times on a real project — and a progress bar needs about ten updates a
+    // second to look alive, so the rest were always waste. They stopped being merely waste when
+    // the window went to the background: the shell and its webview are power-throttled there and
+    // this process is not, so every one of them queued up unread and the whole backlog was
+    // delivered at once on the way back, which is the freeze this is part of fixing. Unfocused,
+    // one every few seconds is enough to keep the card honest for whenever you return.
+    //
+    // The last one is never dropped: a bar that stops at 19 997 of 20 000 looks stuck.
+    let last_progress: Mutex<Option<Instant>> = Mutex::new(None);
     let on_progress = |done: usize, total: usize| {
+        if done < total {
+            let interval = if arbor_be::prelude::app_focused() {
+                PROGRESS_FOCUSED_INTERVAL
+            } else {
+                PROGRESS_UNFOCUSED_INTERVAL
+            };
+            let now = Instant::now();
+            let mut last = last_progress.lock().unwrap_or_else(|p| p.into_inner());
+            if last.is_some_and(|prev| now.duration_since(prev) < interval) {
+                return;
+            }
+            *last = Some(now);
+        }
         sink.emit(
             EVT_INDEX_PROGRESS,
             json!({ "root": root_str, "phase": "references", "state": "progress", "done": done, "total": total }),

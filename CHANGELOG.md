@@ -7,6 +7,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Removed
+
+- **Cloud storage is no longer part of Arbor.** The panel is a plugin and the stores are reached by sandboxed provider packages, so the built-in implementation — object-storage operators, transfers, the Google sign-in, twenty-two internal handlers — is gone, along with the browser-side chunk-order and download-progress dialogs. Installing the `cloud-storage` package (with a provider, e.g. `cloud-gcs`) restores the panel, in any product that hosts plugins.
+
 ### Added
 
 - **A dependency whose jar is missing is now downloaded rather than reported.** The resolve already ran Maven; it ran it offline, so a project whose dependency tree had been walked but never built showed nineteen unresolvable jars and a suggestion to go and build it. On by default, and **Settings → Java → Download missing dependencies** turns it off for a metered connection or a slow corporate repository.
@@ -30,6 +34,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **The file-structure list ranks by match quality once you type in it.** With the box empty it is still the file's own order, because that is what an outline is for; with a query it answers the question actually being asked. Typing `uri` in a 66-member class used to put a constant where `u`, `r` and `i` are scattered across thirty-one characters five rows above the method called `uri`. The shared matcher also learned that a capital starts a word inside a name, and to spot the query sitting whole somewhere rather than only tracking its letters left to right — so `Uri` inside `requestHeaderToRequestUri` now counts for what it is. Go-to-file and the command palette rank better for the same reason.
 
 ### Fixed
+
+- **Coming back to a window you left in the background no longer freezes it.** The app is power-throttled while it is not in front and the backends serving it are not, so everything they emitted meanwhile — one event per file of an index walk, one per line of a build — arrived in a single burst, and each one asked the backend something in reply. Editor output, index progress and language-server diagnostics are now folded into one update per frame, the backend skips progress nobody is there to read, and no burst of requests can outnumber the threads a backend has to answer them.
+
+- **Switching between two Arbor windows no longer throttles the app.** Focus was tracked per window and acted on per process, so the window you left reporting its blur after the one you arrived at reported its focus put the whole app into efficiency mode — every window of it — while you were working in one.
 
 - **Go-to works on a static import.** Neither half of `import static …HandlerFunctions.http;` resolved: the type is bound by no ordinary import and the member is not a type at all, so clicking either did nothing. The type now opens itself, and the member opens the type that declares it.
 

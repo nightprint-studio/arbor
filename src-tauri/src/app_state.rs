@@ -12,7 +12,6 @@
 //! `corvus-be` / `sitta-be` (OOP) hosts all build through, so a fire fans out
 //! identically wherever the handler runs.
 
-use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 

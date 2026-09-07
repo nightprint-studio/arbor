@@ -46,9 +46,8 @@ import type {
 import { formatDuration, isBad, type RowStatus, type TestRow } from './test-tree';
 import { bennuUiStore } from './ui.svelte';
 import type { RunLogLine } from './run.svelte';
-
-/** Cap the retained log so a chatty run cannot grow the buffer unbounded. */
-const MAX_LINES = 10_000;
+import { appendLogLines } from './log-buffer';
+import { coalesceBatch } from '$lib/utils/coalesce';
 
 /**
  * How long results are gathered before the tree is rebuilt, in ms.
@@ -162,10 +161,22 @@ function createCargoTestStore() {
     stream: RunLogLine['stream'] = 'out',
     log?: Pick<RunLogLine, 'level' | 'pieces'>,
   ) {
-    const next =
-      lines.length >= MAX_LINES ? lines.slice(lines.length - MAX_LINES + 1) : lines.slice();
-    next.push({ text, stream, ...log });
-    lines = next;
+    // The run's own output goes in before our narration of it — buffering half a stream reorders it.
+    flushOutput.flush();
+    lines = appendLogLines(lines, [{ text, stream, ...log }]);
+  }
+
+  /** One flush per frame for `cargo test`'s stdout/stderr. A compile emits an event per line and a
+   *  backgrounded window delivers the whole backlog the moment it regains focus; batched rather
+   *  than latest-wins, because every line of a build log matters. */
+  const flushOutput = coalesceBatch<RunLogLine>((batch) => {
+    lines = appendLogLines(lines, batch);
+  });
+
+  /** Empty the log, dropping whatever the previous run still had queued. */
+  function clearLog() {
+    flushOutput.flush();
+    lines = [];
   }
 
   /** Publish everything buffered, and stand the timer down. */
@@ -214,7 +225,9 @@ function createCargoTestStore() {
       pieces?: RunLogLine['pieces'];
     }>('arbor://bennu/test-output', (e) => {
       if (!mine(e.payload.run_id)) return;
-      push(e.payload.text, e.payload.stream === 'stderr' ? 'err' : 'out', {
+      flushOutput({
+        text: e.payload.text,
+        stream: e.payload.stream === 'stderr' ? 'err' : 'out',
         level: e.payload.level,
         pieces: e.payload.pieces,
       });
@@ -329,7 +342,7 @@ function createCargoTestStore() {
     results.clear();
     messages.clear();
     blocks.clear();
-    lines = [];
+    clearLog();
     exitCode = null;
     cancelled = false;
     totals = null;
@@ -890,7 +903,7 @@ function createCargoTestStore() {
       results.clear();
       messages.clear();
       blocks.clear();
-      lines = [];
+      clearLog();
       exitCode = null;
       cancelled = false;
       totals = null;
@@ -909,7 +922,7 @@ function createCargoTestStore() {
       messages.clear();
       blocks.clear();
       collapsed.clear();
-      lines = [];
+      clearLog();
       running = false;
       runId = null;
       lastScope = null;

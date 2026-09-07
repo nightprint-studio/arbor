@@ -18,6 +18,7 @@
  */
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { coalesceLatestByKey } from '$lib/utils/coalesce';
 import {
   lspServers, lspStatus, lspRestart, lspStop, lspInstall, lspProblems,
   type LspServerInfo, type LspStatus,
@@ -81,6 +82,20 @@ function createLspStore() {
    * burst, and the call is by root anyway, so the last root to publish asks for everything that
    * covers it — which is every server there, since `bennu_lsp_problems` merges them.
    */
+  /**
+   * Tell the editor host that `file`'s diagnostics changed — at most once per file per frame.
+   *
+   * The host answers by asking the backend for that file's diagnostics, so an un-coalesced call is
+   * a round trip per publication. `cargo check` republishes the same file several times as it
+   * walks the crate graph, and a window that was in the background delivers every one of those
+   * publications at once the moment it regains focus. Keyed by file, because two files changing is
+   * two different answers; the same file changing twice is one.
+   */
+  const notifyDiagnostics = coalesceLatestByKey<string>(
+    (file) => onDiagnostics?.(file),
+    (file) => file,
+  );
+
   const problemsTimers = new Map<string, ReturnType<typeof setTimeout>>();
   function scheduleProblems(root: string) {
     // A timer **per root**, not one shared. A workspace's roots publish independently, and a
@@ -318,7 +333,7 @@ function createLspStore() {
       unlisteners.push(
         await listen<DiagnosticsEvent>('arbor://bennu/lsp-diagnostics', (e) => {
           const file = e.payload?.file;
-          if (file) onDiagnostics?.(file);
+          if (file) notifyDiagnostics(file);
           // …and the project-wide list the Problems panel shows. Two consumers of one event,
           // because they are two different questions: the editor wants the squiggles in the
           // buffer you are looking at, and the panel wants every file the servers have anything

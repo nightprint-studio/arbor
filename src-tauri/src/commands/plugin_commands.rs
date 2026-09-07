@@ -11,7 +11,8 @@
 
 use std::sync::atomic::Ordering;
 
-use tauri::State;
+// `Manager` for `Window::app_handle` — a trait method, so the trait has to be in scope.
+use tauri::{Manager, State};
 
 use arbor_plugin_types::prelude::hook_names;
 
@@ -54,19 +55,28 @@ pub fn frontend_ready(state: State<'_, AppState>) {
 // App focus / active-tab state — called by the frontend on visibility changes.
 // ---------------------------------------------------------------------------
 
-/// Two things happen when the focus state changes:
-///  1. `app_focused` is updated so focus-gated plugin schedulers can skip
-///     firing while the window is in the background.
-///  2. On Windows, EcoQoS / Efficiency Mode is toggled (by the native
-///     WindowEvent::Focused handler in lib.rs) so Task Manager shows the green
-///     leaf icon while Arbor is not in the foreground.
+/// A window's frontend reporting its own focus state.
+///
+/// The native `WindowEvent::Focused` handler is the primary source — it catches minimize and
+/// Alt-Tab reliably, which DOM events on WebView2 do not. This exists for what that cannot cover:
+/// the initial state a window pushes as it mounts, and the DOM fallback a frontend uses when the
+/// native listener could not be registered.
+///
+/// It goes through the same per-window set (`window::focus`) and the same single application
+/// point, because it is the same question. Writing `app_focused` directly here — which it used to
+/// do — meant one window's blur turning the flag off while another window of the same app had just
+/// taken the focus, since the flag, the OS throttle and the backends are all per PROCESS.
 #[tauri::command]
-pub fn set_app_focus(state: State<'_, AppState>, focused: bool) {
+pub fn set_app_focus(window: tauri::Window, focused: bool) {
     let t0 = std::time::Instant::now();
-    let prev = state.app_focused.swap(focused, Ordering::Relaxed);
+    let changed = crate::window::focus::set_window_focused(window.label(), focused);
+    if let Some(app_focused) = changed {
+        crate::window::events::apply_app_focus(window.app_handle(), app_focused);
+    }
     tracing::info!(
         target: "arbor::focus",
-        "set_app_focus(focused={focused}) prev={prev} took={}µs",
+        "set_app_focus(window={} focused={focused}) app_focused={changed:?} took={}µs",
+        window.label(),
         t0.elapsed().as_micros()
     );
 }

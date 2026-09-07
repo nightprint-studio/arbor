@@ -28,11 +28,8 @@ import type {
 } from '$lib/types/bennu';
 import { bennuUiStore } from './ui.svelte';
 import type { RunLogLine } from './run.svelte';
-
-/** Cap the retained log so a chatty Maven run can't grow the buffer unbounded. What this
- *  bounds is memory: the console renders only what is on screen ({@link BennuConsole}), so the
- *  old, much lower cap was paying for a DOM that no longer exists. */
-const MAX_LINES = 10_000;
+import { appendLogLines } from './log-buffer';
+import { coalesceBatch } from '$lib/utils/coalesce';
 
 // The row shape, the status vocabulary and the duration format are shared with the cargo runner —
 // there is one panel, so there is one row type. Re-exported because six components already import
@@ -109,9 +106,22 @@ function createBennuTestStore() {
     stream: RunLogLine['stream'] = 'out',
     log?: Pick<RunLogLine, 'level' | 'pieces'>,
   ) {
-    const next = lines.length >= MAX_LINES ? lines.slice(lines.length - MAX_LINES + 1) : lines.slice();
-    next.push({ text, stream, ...log });
-    lines = next;
+    // The run's own output goes in before our narration of it — buffering half a stream reorders it.
+    flushOutput.flush();
+    lines = appendLogLines(lines, [{ text, stream, ...log }]);
+  }
+
+  /** One flush per frame for the run's stdout/stderr: a chatty suite emits an event per line, and a
+   *  window that was in the background hands the whole backlog over the moment it regains focus.
+   *  Batched rather than latest-wins — every line of a test log matters. */
+  const flushOutput = coalesceBatch<RunLogLine>((batch) => {
+    lines = appendLogLines(lines, batch);
+  });
+
+  /** Empty the log, dropping whatever the previous run still had queued. */
+  function clearLog() {
+    flushOutput.flush();
+    lines = [];
   }
 
   /** A reported class name, keyed the way discovery spells it (`Outer$Inner` → `Outer.Inner`). */
@@ -148,7 +158,9 @@ function createBennuTestStore() {
       'arbor://bennu/test-output',
       (e) => {
         if (!mine(e.payload.run_id)) return;
-        push(e.payload.text, e.payload.stream === 'stderr' ? 'err' : 'out', {
+        flushOutput({
+          text: e.payload.text,
+          stream: e.payload.stream === 'stderr' ? 'err' : 'out',
           level: e.payload.level,
           pieces: e.payload.pieces,
         });
@@ -226,7 +238,7 @@ function createBennuTestStore() {
     lastScope = scope;
     lastRoot = root;
     results.clear();
-    lines = [];
+    clearLog();
     runningClass = null;
     exitCode = null;
     cancelled = false;
@@ -560,7 +572,7 @@ function createBennuTestStore() {
     /** Clear the last run's results + log (the panel's Clear action). */
     clear() {
       results.clear();
-      lines = [];
+      clearLog();
       exitCode = null;
       cancelled = false;
       totals = null;
@@ -573,7 +585,7 @@ function createBennuTestStore() {
       discovered = [];
       discoveredRoot = '';
       results.clear();
-      lines = [];
+      clearLog();
       collapsed.clear();
       running = false;
       runId = null;

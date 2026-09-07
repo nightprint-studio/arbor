@@ -2762,12 +2762,29 @@
       } catch { /* ignore */ }
       void ensureDragOverlay();
     }
-    // Keep the Devices list current: poll for removable-media changes and
-    // refresh the instant the window regains focus (e.g. after plugging a USB).
-    rootsTimer = setInterval(() => { void refreshRoots(); }, 4000);
+    // Keep the Devices list current: poll for removable-media changes and refresh the instant the
+    // window regains focus (e.g. after plugging a USB).
+    //
+    // The poll runs ONLY while the window has the focus — the same rule Bennu's external-change
+    // tick follows. A drive plugged in while you were elsewhere is noticed by the focus refresh
+    // below, which is both sooner and cheaper than having asked fifteen times a minute in the
+    // meantime; and a backgrounded window's requests are the ones that pile up unanswered, since
+    // the webview is power-throttled there while the backend serving them is not.
+    const startRootsPoll = () => {
+      if (rootsTimer === null) rootsTimer = setInterval(() => { void refreshRoots(); }, 4000);
+    };
+    const stopRootsPoll = () => {
+      if (rootsTimer !== null) { clearInterval(rootsTimer); rootsTimer = null; }
+    };
+    if (document.hasFocus()) startRootsPoll();
     try {
-      focusUnlisten = await getCurrentWindow().onFocusChanged(({ payload }) => { if (payload) void refreshRoots(); });
-    } catch { /* ignore */ }
+      focusUnlisten = await getCurrentWindow().onFocusChanged(({ payload }) => {
+        if (payload) { void refreshRoots(); startRootsPoll(); } else { stopRootsPoll(); }
+      });
+    } catch {
+      // No native focus events — poll unconditionally rather than never.
+      startRootsPoll();
+    }
     // Keyboard-first: park focus on the right control so navigation is live the
     // moment the explorer opens — save pickers focus the filename field (what
     // you came to type); any other browse view focuses the list so the arrow

@@ -41,46 +41,72 @@ const schedule: Schedule = typeof requestAnimationFrame === 'function'
   ? (cb) => { requestAnimationFrame(() => cb()); }
   : (cb) => { setTimeout(cb, 0); };
 
+/**
+ * A coalesced handler: call it with a payload, and call `flush()` to deliver whatever is
+ * pending **right now**.
+ *
+ * `flush` exists because buffering half of a stream reorders it. A console whose lines are
+ * coalesced but whose "Process finished" is written synchronously prints the verdict above the
+ * output it is a verdict on. Any code path that writes to the same destination without going
+ * through the coalescer must flush first — or go through it too.
+ */
+export interface Coalesced<P> {
+  (e: P): void;
+  /** Deliver the pending payload(s) immediately. No-op when nothing is pending. */
+  flush(): void;
+}
+
 /** Wrap `handle` so every payload that arrives within the same frame is
  *  collected, and `handle` runs once per frame with the full array.  Order
  *  is preserved.  Empty bursts never call the handler. */
-export function coalesceBatch<P>(handle: (batch: P[]) => void): (e: P) => void {
+export function coalesceBatch<P>(handle: (batch: P[]) => void): Coalesced<P> {
   let queue: P[] = [];
   let scheduled  = false;
-  return (e: P) => {
+  const drain = () => {
+    if (queue.length === 0) return;
+    const drained = queue;
+    queue = [];
+    handle(drained);
+  };
+  const push = ((e: P) => {
     queue.push(e);
     if (scheduled) return;
     scheduled = true;
     schedule(() => {
-      const drained = queue;
-      queue        = [];
-      scheduled    = false;
-      handle(drained);
+      scheduled = false;
+      drain();
     });
-  };
+  }) as Coalesced<P>;
+  push.flush = drain;
+  return push;
 }
 
 /** Wrap `handle` so only the **most recent** payload is delivered per frame.
  *  All intermediate payloads are dropped.  Use for "something changed —
  *  reload" semantics where the handler is idempotent. */
-export function coalesceLatest<P>(handle: (latest: P) => void): (e: P) => void {
+export function coalesceLatest<P>(handle: (latest: P) => void): Coalesced<P> {
   let latest: P | undefined;
   let scheduled = false;
   let has = false;
-  return (e: P) => {
+  const drain = () => {
+    if (!has) return;
+    const p = latest as P;
+    latest = undefined;
+    has = false;
+    handle(p);
+  };
+  const push = ((e: P) => {
     latest = e;
     has = true;
     if (scheduled) return;
     scheduled = true;
     schedule(() => {
       scheduled = false;
-      if (!has) return;
-      const p = latest as P;
-      latest = undefined;
-      has = false;
-      handle(p);
+      drain();
     });
-  };
+  }) as Coalesced<P>;
+  push.flush = drain;
+  return push;
 }
 
 /** Wrap `handle` so the latest payload is kept **per key** within the same
@@ -89,10 +115,16 @@ export function coalesceLatest<P>(handle: (latest: P) => void): (e: P) => void {
 export function coalesceLatestByKey<P>(
   handle: (latest: P) => void,
   keyOf:  (p: P) => string,
-): (e: P) => void {
+): Coalesced<P> {
   const latest = new Map<string, P>();
   let scheduled = false;
-  return (e: P) => {
+  const drain = () => {
+    if (latest.size === 0) return;
+    const drained = Array.from(latest.values());
+    latest.clear();
+    for (const p of drained) handle(p);
+  };
+  const push = ((e: P) => {
     const k = keyOf(e);
     if (!latest.has(k)) latest.set(k, e);   // preserve first-seen order
     latest.set(k, e);                       // but overwrite value with newest
@@ -100,9 +132,9 @@ export function coalesceLatestByKey<P>(
     scheduled = true;
     schedule(() => {
       scheduled = false;
-      const drained = Array.from(latest.values());
-      latest.clear();
-      for (const p of drained) handle(p);
+      drain();
     });
-  };
+  }) as Coalesced<P>;
+  push.flush = drain;
+  return push;
 }

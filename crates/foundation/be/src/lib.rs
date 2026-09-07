@@ -25,10 +25,12 @@
 pub mod app;
 pub mod app_ctx;
 pub mod dispatch;
+pub mod focus;
 pub mod io;
 pub mod prelude;
 
 pub use app::App;
 pub use app_ctx::BackendAppCtx;
 pub use dispatch::{Dispatcher, TOOLS_METHOD};
+pub use focus::{app_focused, set_app_focused, FOCUS_METHOD};
 pub use io::BackendIo;

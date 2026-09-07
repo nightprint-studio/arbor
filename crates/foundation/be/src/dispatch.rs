@@ -35,6 +35,24 @@ fn describe_tools(_ctx: &(dyn Any + 'static), _params: Value) -> Result<Value, S
     serde_json::to_value(arbor_rpc::tools()).map_err(|e| e.to_string())
 }
 
+/// [`crate::focus::FOCUS_METHOD`]'s body: record whether any window still has the OS focus.
+///
+/// Registered for every backend for the same reason `__tools` is — a backend that had to opt in
+/// is a backend that silently keeps emitting into a window nobody is looking at. Stateless, so
+/// like `describe_tools` it is a plain fn pointer valid for any `S`.
+///
+/// Tolerant on the way in: anything that is not `{ "focused": <bool> }` (a bare boolean, an older
+/// shell, a typo) reads as focused, which is the behaviour this replaced.
+fn set_focus(_ctx: &(dyn Any + 'static), params: Value) -> Result<Value, String> {
+    let focused = params
+        .get("focused")
+        .or(Some(&params))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    crate::focus::set_app_focused(focused);
+    Ok(Value::Null)
+}
+
 /// One extra handler group: its method map + a factory for the per-call context
 /// the group's handlers downcast to.
 struct ExtraGroup {
@@ -64,6 +82,7 @@ impl<S: 'static> Dispatcher<S> {
     pub fn new(state: Arc<S>, handle: tokio::runtime::Handle) -> Self {
         let mut sync: HashMap<&'static str, CallFn> = HashMap::new();
         sync.insert(TOOLS_METHOD, describe_tools);
+        sync.insert(crate::focus::FOCUS_METHOD, set_focus);
         Self {
             state,
             handle,

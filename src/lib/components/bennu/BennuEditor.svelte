@@ -2072,8 +2072,14 @@
     void bindingRev;
     if (!path || !isJspFileOf(path)) { jspBinding = null; return; }
     let cancelled = false;
-    void ipcJspActions(path).then((b) => { if (!cancelled) jspBinding = b; }).catch(() => { if (!cancelled) jspBinding = null; });
-    return () => { cancelled = true; };
+    // Debounced like every other `buildRevision`-driven fetch in this file: the counter ticks
+    // once per index-progress event — thousands during a reference walk, and all of them at once
+    // when a backgrounded window drains its event backlog on regaining focus. The timer is reset
+    // by each re-run, so a burst costs one request instead of one per tick.
+    const t = setTimeout(() => {
+      void ipcJspActions(path).then((b) => { if (!cancelled) jspBinding = b; }).catch(() => { if (!cancelled) jspBinding = null; });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
   });
   /** Pin (qname) or clear (null) the JSP's bound action, then re-fetch + re-lint. */
   async function selectJspAction(qname: string | null) {
