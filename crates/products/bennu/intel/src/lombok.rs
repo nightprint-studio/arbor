@@ -6,11 +6,11 @@
 //! module reproduces the members Lombok would generate, so they flow through the same
 //! `members_json` → resolver path as real declarations.
 //!
-//! Conservative by design: only members whose shape is unambiguous (getters/setters/`log`), and
-//! NEVER one that shadows a user-declared method of the same name (Lombok itself skips generation
-//! when the member already exists). `@Builder` / generated constructors / `equals`/`hashCode`/
-//! `toString` are deferred — they are lower navigation value and (for `@Builder`) need a synthetic
-//! nested type.
+//! Conservative by design: only members whose shape is unambiguous (getters/setters/`log`/the
+//! generated constructors/`@Builder`'s `builder()` entry point), and NEVER one that shadows a
+//! user-declared method of the same name (Lombok itself skips generation when the member already
+//! exists). `equals`/`hashCode`/`toString` are deferred — they are lower navigation value, and
+//! `@Builder`'s nested class is modelled only as far as its entry point.
 //!
 //! **Capability-gated.** Synthesis runs only when the file genuinely uses Lombok — i.e. it imports
 //! it (`import lombok.…` / a `lombok.*` wildcard), which at compile time requires the
@@ -23,6 +23,7 @@ use std::collections::HashSet;
 use bennu_java::prelude::{
     Annotation, FieldDecl, Import, Member, MemberKind, TypeDecl, TypeRef, Visibility,
 };
+use bennu_lombok::prelude::{annotation_is_lombok, file_uses_lombok, ImportPath};
 
 use crate::typemap::type_text_to_ref;
 
@@ -220,13 +221,17 @@ pub(crate) fn backing_field_candidates(accessor: &str) -> Vec<String> {
     out
 }
 
+/// The file's imports in the shared gate's shape — a field copy, so the index and `bennu-check` ask
+/// the same question of the same code.
+fn paths(imports: &[Import]) -> impl Iterator<Item = ImportPath<'_>> {
+    imports.iter().map(|i| ImportPath { path: &i.path, star: i.star, is_static: i.static_ })
+}
+
 /// Whether the file imports Lombok at all — any `import lombok.…` (specific) or `import lombok.*` /
 /// `import lombok.<sub>.*` (wildcard). Used as the capability gate: no Lombok import → the file
 /// doesn't (and can't, at compile time) use Lombok, so nothing is synthesized.
 fn file_imports_lombok(imports: &[Import]) -> bool {
-    imports
-        .iter()
-        .any(|i| i.path == "lombok" || i.path.starts_with("lombok."))
+    file_uses_lombok(paths(imports))
 }
 
 /// Whether the annotation simple-named `ann` resolves to a Lombok annotation IN THIS FILE: a specific
@@ -234,14 +239,7 @@ fn file_imports_lombok(imports: &[Import]) -> bool {
 /// `lombok.extern.slf4j.Slf4j`), or a `lombok`/`lombok.<sub>` wildcard import. This is what verifies
 /// "the annotation is correctly imported" — a bare `@Data` with no matching import isn't Lombok's.
 fn lombok_imported(ann: &str, imports: &[Import]) -> bool {
-    let suffix = format!(".{ann}");
-    imports.iter().any(|i| {
-        if i.star {
-            i.path == "lombok" || i.path.starts_with("lombok.")
-        } else {
-            i.path.starts_with("lombok.") && i.path.ends_with(&suffix)
-        }
-    })
+    annotation_is_lombok(ann, paths(imports))
 }
 
 /// Whether `annotations` contains one of `wanted` (simple names) that is ALSO correctly imported from
@@ -254,7 +252,8 @@ fn has_lombok(annotations: &[Annotation], imports: &[Import], wanted: &[&str]) -
 }
 
 /// The constructors `@NoArgsConstructor` / `@RequiredArgsConstructor` / `@AllArgsConstructor`
-/// (and the bundles `@Data` / `@Value`) generate, appended to `methods`.
+/// (the bundles `@Data` / `@Value`, and the implicit one behind `@Builder`) generate, appended to
+/// `methods`.
 ///
 /// These were missing entirely, and a missing constructor is not a quiet gap: a class that
 /// declares one constructor by hand and gets another from Lombok has a non-empty `<init>` list, so
@@ -303,6 +302,25 @@ fn synthesize_constructors(
             .copied()
             .collect::<Vec<_>>();
         wanted.push((all, &["AllArgsConstructor", "Value"]));
+    }
+    // `@Builder` / `@SuperBuilder` on a TYPE carry the all-args constructor the generated builder
+    // calls — the one every `Foo.builder()…build()` ends up in. Lombok adds it only when nothing
+    // else provides one: a hand-written constructor, or an explicit `@XxxArgsConstructor` (which is
+    // what a non-empty `wanted` means), suppresses it.
+    //
+    // The visibility is left at the default rather than read off the annotation: `@Builder(access =
+    // …)` sets the access of the generated builder CLASS, not of this constructor, and honouring it
+    // here would invent an inaccessibility — hence the empty `from`.
+    if wanted.is_empty()
+        && !existing_methods.iter().any(|(name, _)| name == "<init>")
+        && has_lombok(&td.annotations, imports, &["Builder", "SuperBuilder"])
+    {
+        let all = instance
+            .iter()
+            .filter(|f| !(f.is_final && f.has_initializer))
+            .copied()
+            .collect::<Vec<_>>();
+        wanted.push((all, &[]));
     }
 
     for (fields, from) in wanted {
@@ -895,6 +913,42 @@ mod tests {
             .expect("builder()");
         assert!(b.is_static, "builder() is static");
         assert!(b.params.is_empty(), "builder() takes no args");
+    }
+
+    #[test]
+    fn builder_carries_the_all_args_constructor_it_calls() {
+        let td = type_with(&["Builder"], vec![field("id", "long"), field("name", "String")]);
+        let m = synthesize(&td, &names(&lombok()), &HashSet::new());
+        let ctor = m
+            .methods
+            .iter()
+            .find(|x| x.name == "<init>")
+            .expect("@Builder implies the all-args constructor its builder calls");
+        assert_eq!(ctor.params.len(), 2, "one parameter per field");
+    }
+
+    #[test]
+    fn builder_adds_no_constructor_when_something_else_provides_one() {
+        // Lombok skips its implicit constructor when the class declares one by hand …
+        let td = type_with(&["Builder"], vec![field("id", "long")]);
+        let hand_written: HashSet<(String, usize)> =
+            [("<init>".to_string(), 0)].into_iter().collect();
+        let m = synthesize(&td, &names(&lombok()), &hand_written);
+        assert_eq!(
+            m.methods.iter().filter(|x| x.name == "<init>").count(),
+            0,
+            "a hand-written constructor suppresses the implicit one"
+        );
+        // … or when an explicit `@XxxArgsConstructor` asks for one.
+        let td = type_with(&["Builder", "NoArgsConstructor"], vec![field("id", "long")]);
+        let m = synthesize(&td, &names(&lombok()), &HashSet::new());
+        let ctors: Vec<usize> = m
+            .methods
+            .iter()
+            .filter(|x| x.name == "<init>")
+            .map(|x| x.params.len())
+            .collect();
+        assert_eq!(ctors, vec![0], "only the annotation's own no-args constructor");
     }
 
     #[test]

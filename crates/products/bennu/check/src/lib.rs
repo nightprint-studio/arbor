@@ -60,6 +60,9 @@ pub mod import_clash;
 pub mod imports;
 pub mod incremental;
 pub mod javac;
+/// The tree-sitter adaptation of `bennu-lombok` — internal, because what it exposes is a CST detail.
+/// The knowledge itself is the dependency-free crate every consumer shares.
+pub(crate) mod lombok;
 pub mod inspections;
 pub mod inherit_cycle;
 pub mod inheritance;

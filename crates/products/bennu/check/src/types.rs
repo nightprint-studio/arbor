@@ -25,6 +25,7 @@
 use std::collections::{HashMap, HashSet};
 
 use bennu_java::prelude::{extract_symbols, FileSymbols, TypeResolver};
+use bennu_lombok::prelude::{imports_keyword, ImportPath};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
@@ -197,16 +198,18 @@ fn supertype_roots(symbols: &FileSymbols, resolver: &dyn TypeResolver) -> Vec<St
 }
 
 /// Whether the file imports Lombok's `val` — the specific `import lombok.val;` or a `lombok.*`
-/// wildcard (`val` lives in the core `lombok` package). Only then is a `val`-typed local the Lombok
-/// inference keyword rather than an unresolved class named `val`.
+/// wildcard. Only then is a `val`-typed local the Lombok inference keyword rather than an unresolved
+/// class named `val`. The symbol model already holds the imports, so this is a field copy onto the
+/// shared gate's shape.
 fn imports_lombok_val(symbols: &FileSymbols) -> bool {
-    symbols.imports.iter().any(|i| {
-        if i.star {
-            i.path == "lombok"
-        } else {
-            i.path == "lombok.val"
-        }
-    })
+    imports_keyword(
+        "val",
+        symbols.imports.iter().map(|i| ImportPath {
+            path: &i.path,
+            star: i.star,
+            is_static: i.static_,
+        }),
+    )
 }
 
 /// Gather every type-parameter name declared anywhere in the file (`<T>`, `<K, V>`, `<T extends X>`).

@@ -1004,6 +1004,7 @@ name = "bennu-check"
 version = "0.3.0"
 dependencies = [
  "bennu-java",
+ "bennu-lombok",
  "bennu-proto",
  "tree-sitter",
  "tree-sitter-java",
@@ -1121,6 +1122,7 @@ dependencies = [
  "bennu-index",
  "bennu-intentions",
  "bennu-java",
+ "bennu-lombok",
  "bennu-naming",
  "bennu-project",
  "bennu-proto",
@@ -1184,6 +1186,10 @@ dependencies = [
  "cc",
  "tree-sitter",
 ]
+
+[[package]]
+name = "bennu-lombok"
+version = "0.3.0"
 
 [[package]]
 name = "bennu-lsp"

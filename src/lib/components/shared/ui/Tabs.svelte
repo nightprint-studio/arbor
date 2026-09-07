@@ -70,11 +70,13 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { tick } from 'svelte';
-  import { fly } from 'svelte/transition';
-  import { cubicOut } from 'svelte/easing';
   import { X, Plus, ChevronDown } from 'lucide-svelte';
-  import { animStore } from '$lib/stores/animations.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  // The overflow chevron opens the shared menu rather than a private one: anchoring, outside-click,
+  // Escape and arrow-key navigation are all things `Dropdown` already does, and a second hand-rolled
+  // copy of them inside a widget that sits in every product is exactly the surface that drifts.
+  import Dropdown from './Dropdown.svelte';
+  import type { DropdownItem } from './Dropdown.svelte';
 
   interface Props {
     items:        TabItem[];
@@ -211,7 +213,10 @@
       if (child === stripEl) continue;
       const el = child as HTMLElement;
       if (el.classList.contains('tabs-spacer')) continue;
-      if (el.classList.contains('tabs-overflow-btn')) continue;
+      // The chevron reaches the strip's parent wrapped in the shared Dropdown's own root, so the
+      // class to skip is the one handed to it — measuring it here AND reserving space for it below
+      // would charge the budget twice and hide a tab that fits.
+      if (el.classList.contains('tabs-overflow-slot')) continue;
       if (el.classList.contains('tabs-add')) continue;
       otherFixed += el.offsetWidth;
     }
@@ -302,40 +307,31 @@
   });
 
   // ── Overflow dropdown ───────────────────────────────────────────────────
-  let overflowMenuOpen = $state(false);
-  let overflowBtnEl:  HTMLElement | undefined = $state();
-  let overflowMenuEl: HTMLElement | undefined = $state();
-  let overflowMenuStyle = $state('');
-
-  function toggleOverflowMenu() {
-    if (!overflowBtnEl) return;
-    if (!overflowMenuOpen) {
-      const rect = overflowBtnEl.getBoundingClientRect();
-      overflowMenuStyle = `top: ${rect.bottom + 4}px; right: ${window.innerWidth - rect.right}px;`;
-    }
-    overflowMenuOpen = !overflowMenuOpen;
-  }
+  //
+  // The menu lists EVERY tab, not just the hidden ones: it doubles as the "jump to a tab" list once
+  // a strip is crowded, and a menu whose contents change shape as tabs slide in and out of view is
+  // one you cannot aim at. The hidden ones lead, because they are what the chevron is for.
+  const overflowItems = $derived.by<DropdownItem[]>(() => {
+    const entry = (t: TabItem): DropdownItem => ({
+      kind:     'item',
+      id:       t.id,
+      label:    t.label ?? t.id,
+      icon:     t.icon,
+      meta:     t.badge === undefined || t.badge === null || t.badge === '' ? undefined : String(t.badge),
+      active:   t.id === value,
+      disabled: t.disabled,
+      onclick:  () => selectFromMenu(t),
+    });
+    const hidden  = items.filter(t => hiddenIds.has(t.id));
+    const visible = items.filter(t => !hiddenIds.has(t.id));
+    if (hidden.length === 0 || visible.length === 0) return items.map(entry);
+    return [...hidden.map(entry), { kind: 'separator' }, ...visible.map(entry)];
+  });
 
   function selectFromMenu(item: TabItem) {
-    overflowMenuOpen = false;
     if (item.disabled) return;
     onSelect?.(item.id, item);
   }
-
-  $effect(() => {
-    if (!overflowMenuOpen) return;
-    function onClickOutside(e: PointerEvent) {
-      const t = e.target as Node;
-      if (!overflowMenuEl?.contains(t) && !overflowBtnEl?.contains(t)) overflowMenuOpen = false;
-    }
-    function onKeydown(e: KeyboardEvent) { if (e.key === 'Escape') overflowMenuOpen = false; }
-    document.addEventListener('pointerdown', onClickOutside);
-    document.addEventListener('keydown', onKeydown);
-    return () => {
-      document.removeEventListener('pointerdown', onClickOutside);
-      document.removeEventListener('keydown', onKeydown);
-    };
-  });
 
   // ── Helpers ─────────────────────────────────────────────────────────────
   function selectItem(item: TabItem) {
@@ -428,18 +424,32 @@
   </div>
 
   {#if overflow && hiddenCount > 0}
-    <button
-      type="button"
-      class="tabs-action tabs-overflow-btn"
-      class:tabs-action-active={overflowMenuOpen}
-      onclick={toggleOverflowMenu}
-      bind:this={overflowBtnEl}
-      use:tooltip={`${hiddenCount} more tab${hiddenCount === 1 ? '' : 's'}`}
-      aria-label="Show hidden tabs"
+    <!-- A slot of our own around the shared Dropdown: the strip's width budget is computed from
+         this container's children, and a wrapper we own is one we can measure and skip without
+         reaching into another widget's classes. -->
+    <div class="tabs-overflow-slot">
+    <Dropdown
+      items={overflowItems}
+      position="fixed"
+      direction="down"
+      width="280px"
     >
-      <ChevronDown size={13} />
-      <span class="tabs-overflow-count">{hiddenCount}</span>
-    </button>
+      {#snippet trigger({ open, toggle })}
+        <button
+          type="button"
+          class="tabs-action tabs-overflow-btn"
+          class:tabs-action-active={open}
+          onclick={toggle}
+          use:tooltip={`${hiddenCount} more tab${hiddenCount === 1 ? '' : 's'}`}
+          aria-label="Show hidden tabs"
+          aria-expanded={open}
+        >
+          <ChevronDown size={13} />
+          <span class="tabs-overflow-count">{hiddenCount}</span>
+        </button>
+      {/snippet}
+    </Dropdown>
+    </div>
   {/if}
 
   {#if onAdd}
@@ -456,41 +466,6 @@
 
   <div class="tabs-spacer"></div>
 </div>
-
-{#if overflow && overflowMenuOpen}
-  <div
-    class="tabs-overflow-menu"
-    bind:this={overflowMenuEl}
-    style={overflowMenuStyle}
-    role="menu"
-    transition:fly={{ y: -6, duration: animStore.dFast, easing: cubicOut }}
-  >
-    {#each items as item (item.id)}
-      {@const isActive = item.id === value}
-      {@const isHidden = hiddenIds.has(item.id)}
-      <button
-        type="button"
-        class="tabs-overflow-item"
-        class:active={isActive}
-        class:is-hidden={isHidden}
-        disabled={item.disabled}
-        onclick={() => selectFromMenu(item)}
-        role="menuitem"
-        use:tooltip={item.title ?? ''}
-      >
-        <span class="tabs-overflow-dot" class:dot-visible={isHidden} aria-hidden="true"></span>
-        {#if item.icon}
-          {@const Icon = item.icon}
-          <Icon size={12} />
-        {/if}
-        <span class="tabs-overflow-name">{item.label ?? item.id}</span>
-        {#if item.badge !== undefined && item.badge !== null && item.badge !== ''}
-          <span class="tabs-overflow-badge">{item.badge}</span>
-        {/if}
-      </button>
-    {/each}
-  </div>
-{/if}
 
 <style>
   /* ── Container ──────────────────────────────────────────────────────────── */
@@ -762,6 +737,12 @@
 
   .tabs-add { margin-left: 4px; }
 
+  .tabs-overflow-slot {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
   .tabs-overflow-btn {
     width: auto;
     padding: 0 7px 0 5px;
@@ -780,66 +761,5 @@
     text-align: center;
     line-height: 1.3;
     font-family: var(--font-ui-sans);
-  }
-
-  /* ── Overflow dropdown menu ───────────────────────────────────────────── */
-  .tabs-overflow-menu {
-    position: fixed;
-    z-index: var(--z-menu);
-    min-width: 280px;
-    max-height: 420px;
-    overflow-y: auto;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    padding: 5px;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
-    font-family: var(--font-ui-sans);
-  }
-  .tabs-overflow-item {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    width: 100%;
-    padding: 6px 10px;
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-    font-family: var(--font-ui-sans);
-    font-size: var(--font-size-sm);
-    text-align: left;
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .tabs-overflow-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .tabs-overflow-item.active { color: var(--accent); }
-  .tabs-overflow-item.is-hidden .tabs-overflow-name { color: var(--text-primary); }
-  .tabs-overflow-item:not(.is-hidden) .tabs-overflow-name { color: var(--text-muted); }
-  .tabs-overflow-item:disabled { opacity: 0.45; cursor: not-allowed; }
-
-  .tabs-overflow-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: transparent;
-    flex-shrink: 0;
-  }
-  .tabs-overflow-dot.dot-visible { background: var(--accent); }
-
-  .tabs-overflow-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-  }
-  .tabs-overflow-badge {
-    font-size: var(--font-size-2xs);
-    color: var(--text-muted);
-    background: var(--bg-overlay);
-    padding: 1px 5px;
-    border-radius: var(--radius-sm);
-    flex-shrink: 0;
   }
 </style>

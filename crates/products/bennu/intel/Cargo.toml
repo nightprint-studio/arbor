@@ -17,6 +17,10 @@ bennu-index = { path = "../index" }
 # native provider builds index records from `extract_symbols` and infers the receiver
 # type at a caret with `infer_receiver_type`.
 bennu-java = { path = "../java" }
+# What Lombok generates, and whether an annotation really resolves to it in this file. The member
+# synthesis in `src/lombok.rs` is the biggest consumer; `bennu-check` asks the same crate, so the
+# index and the checks cannot disagree about what a `@Builder` class contains.
+bennu-lombok = { path = "../lombok" }
 # The classpath member index (JDK bytecode): still used directly by the reference walk /
 # provider for JDK-type lookups outside the resolver.
 bennu-classpath = { path = "../classpath" }

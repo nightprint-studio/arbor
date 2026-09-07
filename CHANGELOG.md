@@ -23,6 +23,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- **The tab strip's "N more" menu is the app's standard menu now.** It anchors to the chevron, takes arrow keys and Escape, checks the tab you are on, and lists the hidden tabs first — instead of a second, hand-written copy of a dropdown living inside the tab widget.
+
 - **The type of a `var` is now shown for primitives and arithmetic too** — `int`, `char`, `long[]` — where before the hint simply did not appear. The engine learned the shapes it used to skip: arithmetic and comparison, `!`/`-`/`++`, indexing an array, `new int[n]`, `a.length`, `instanceof`, a conditional whose two arms agree, and picking the exactly-matching overload of `Math.max` and friends. Measured on Apache Commons Lang 3 against the type each author wrote: **70% → 93%** of locals typed, with no new false positives on code that compiles.
 
 ### Added
@@ -34,6 +36,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **The file-structure list ranks by match quality once you type in it.** With the box empty it is still the file's own order, because that is what an outline is for; with a query it answers the question actually being asked. Typing `uri` in a 66-member class used to put a constant where `u`, `r` and `i` are scattered across thirty-one characters five rows above the method called `uri`. The shared matcher also learned that a capital starts a word inside a name, and to spot the query sitting whole somewhere rather than only tracking its letters left to right — so `Uri` inside `requestHeaderToRequestUri` now counts for what it is. Go-to-file and the command palette rank better for the same reason.
 
 ### Fixed
+
+- **Go to declaration works on a library class's own neighbours.** Reading a dependency's source, the types it shares a package with — the ones Java puts in scope with no import line, and the ones such a file refers to most — resolved to nothing: `ApplicationContext extends MessageSource, ApplicationEventPublisher` was two dead jumps out of six.
+
+- **A Lombok `@Builder` class no longer reports its final fields as uninitialized.** `@Builder`, `@SuperBuilder` and `@NoArgsConstructor(force = true)` generate the constructor that assigns them, exactly as `@Data` and `@RequiredArgsConstructor` already did — and that constructor is now known to the index too, so calling it directly resolves.
 
 - **Coming back to a window you left in the background no longer freezes it.** The app is power-throttled while it is not in front and the backends serving it are not, so everything they emitted meanwhile — one event per file of an index walk, one per line of a build — arrived in a single burst, and each one asked the backend something in reply. Editor output, index progress and language-server diagnostics are now folded into one update per frame, the backend skips progress nobody is there to read, and no burst of requests can outnumber the threads a backend has to answer them.
 

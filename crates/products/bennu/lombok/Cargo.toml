@@ -1,0 +1,10 @@
+[package]
+name         = "bennu-lombok"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "What Lombok generates, as data. One catalogue of the annotations and one import gate, shared by every consumer that has to reason about members that exist in the compiled class and nowhere in the source. Knows nothing about how a file was parsed: names and import paths in, verdicts out — so the tree-sitter checks and the symbol-model index answer the same question the same way. Zero dependencies."
+
+[dependencies]

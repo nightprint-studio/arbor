@@ -133,20 +133,23 @@ pub(crate) fn is_type_var(binary: &str) -> bool {
 ///
 /// Matched on the annotation's LAST name segment, so `@Data` and `@lombok.Data` read the same. Only
 /// ever used to SUPPRESS, so an over-broad entry costs coverage on one file, never correctness —
-/// which is the right side to err on.
-const MEMBER_GENERATING_ANNOTATIONS: &[&str] = &[
-    // Lombok — members added to the annotated type itself.
-    "Data", "Value", "Getter", "Setter", "Builder", "SuperBuilder", "Accessors", "With",
-    "RequiredArgsConstructor", "AllArgsConstructor", "NoArgsConstructor", "EqualsAndHashCode",
-    "ToString", "UtilityClass", "FieldNameConstants",
-    // Lombok's loggers — each injects a `log` field.
-    "Slf4j", "XSlf4j", "Log", "Log4j", "Log4j2", "CommonsLog", "JBossLog", "Flogger", "CustomLog",
-    // Other generators whose output lands on the annotated type.
-    "AutoValue", "Immutable", "Generated",
-];
+/// which is the right side to err on. Deliberately NOT import-gated for the same reason: a project's
+/// own `@Data` generating nothing costs one file's coverage, and demanding the import here would
+/// re-introduce false "no such member" reports on the files this exists to protect.
+///
+/// Lombok's own names come from [`bennu_lombok`], so an annotation added to the catalogue is
+/// suppressed here without a second edit. Only the non-Lombok generators are listed.
+const OTHER_MEMBER_GENERATING_ANNOTATIONS: &[&str] = &["AutoValue", "Immutable", "Generated"];
 
-/// Whether the type declaration `decl` carries an annotation from
-/// [`MEMBER_GENERATING_ANNOTATIONS`] — i.e. whether its members are partly invisible to the index.
+/// Whether `simple` names an annotation whose output lands on the annotated type — Lombok's, or one
+/// of the [`OTHER_MEMBER_GENERATING_ANNOTATIONS`].
+fn generates_members(simple: &str) -> bool {
+    bennu_lombok::prelude::generates_members(simple)
+        || OTHER_MEMBER_GENERATING_ANNOTATIONS.contains(&simple)
+}
+
+/// Whether the type declaration `decl` carries a member-generating annotation — i.e. whether its
+/// members are partly invisible to the index.
 ///
 /// A `true` means every "does this name exist on this type?" check must stay silent for the file:
 /// the honest answer is "we cannot see all of them".
@@ -165,7 +168,7 @@ pub(crate) fn has_generated_members(decl: Node, bytes: &[u8]) -> bool {
             let Some(name) = m.child_by_field_name("name") else { continue };
             let Ok(t) = name.utf8_text(bytes) else { continue };
             let simple = t.rsplit('.').next().unwrap_or(t);
-            if MEMBER_GENERATING_ANNOTATIONS.contains(&simple) {
+            if generates_members(simple) {
                 return true;
             }
         }

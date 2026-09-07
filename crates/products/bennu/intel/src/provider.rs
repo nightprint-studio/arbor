@@ -951,6 +951,32 @@ impl NativeJavaProvider {
         self.resolver.as_deref().is_some_and(|r| r.jdk_index().has_dependency_tier())
     }
 
+/// The binary name of a type that is a **sibling in the buffer's own package** — the one kind of
+/// name that is in scope with no import at all (JLS §7.3).
+///
+/// It costs nothing in a project file, where the siblings are project types the ordinary go-to
+/// already opens. It is the difference between working and not inside a **library source view**,
+/// where the neighbours are exactly what the code refers to most: `ApplicationContext extends
+/// MessageSource, ApplicationEventPublisher` names two types in its own package, neither of them
+/// imported, and reading only the import list made both a dead go-to.
+fn same_package_type(
+    resolver: &dyn bennu_java::prelude::TypeResolver,
+    package: Option<&str>,
+    name: &str,
+) -> Option<String> {
+    let package = package?;
+    if package.is_empty() {
+        return None;
+    }
+    let binary = format!("{}/{}", package.replace('.', "/"), name);
+    // Confirmed against the classpath rather than assumed: the caret can be on any capitalised
+    // word — a javadoc reference, a type parameter, a name from a package that does not exist —
+    // and returning a binary nobody can decode would turn "go-to found nothing" into "go-to
+    // opened an empty stub". `members_of` is the same lookup the stub itself is built from, so a
+    // hit here is a view that will render.
+    resolver.members_of(&binary).map(|_| binary)
+}
+
 /// The binary name of the type a **static import** names, for a `name` written inside one.
 ///
 /// Two carets, one answer: on the type (`…handler.HandlerFunctions.http`, caret on
@@ -1001,14 +1027,24 @@ fn static_import_type(imports: &[bennu_java::prelude::Import], name: &str) -> Op
         let binary = if name.contains('.') {
             name.replace('.', "/")
         } else {
-            let imports = bennu_java::prelude::extract_symbols(source).imports;
+            let symbols = bennu_java::prelude::extract_symbols(source);
+            let imports = symbols.imports;
             match resolver.resolve_simple_name(name, &imports) {
                 Some(b) => b,
                 // A name written only inside a **static** import resolves through no ordinary
                 // import entry: `import static a.b.C.http;` binds `http`, not `C`, so neither the
                 // type nor the member is a simple name the resolver can look up — and go-to on
                 // either did nothing at all. The import itself says what they are.
-                None => Self::static_import_type(&imports, name)?,
+                None => Self::static_import_type(&imports, name)
+                    // …and a sibling in the buffer's OWN package is imported by nobody, because
+                    // JLS §7.3 already put it in scope. Reading only the imports made every such
+                    // name unresolvable, which is invisible in a project file (its siblings are
+                    // project types, resolved elsewhere) and constant inside a library source
+                    // view: `ApplicationContext` extends `MessageSource` and
+                    // `ApplicationEventPublisher`, both `org.springframework.context`, both with
+                    // no import line and both a dead go-to. Last, so an explicit import still
+                    // wins the name.
+                    .or_else(|| Self::same_package_type(resolver, symbols.package.as_deref(), name))?,
             }
         };
         if resolver.is_project_type(&binary) {
@@ -2444,5 +2480,87 @@ class C {}
             Some("com/acme/Constants")
         );
         assert_eq!(NativeJavaProvider::static_import_type(&imports, "nothing"), None);
+    }
+}
+
+#[cfg(test)]
+mod same_package_tests {
+    use std::sync::Arc;
+
+    use bennu_java::prelude::{ClassFlags, ClassMembers, TypeResolver};
+
+    use super::*;
+
+    /// A resolver that knows exactly one set of classes and resolves nothing by import — enough to
+    /// ask the only question this function has: does the buffer's own package plus this name name
+    /// something on the classpath?
+    struct Known(&'static [&'static str]);
+
+    fn empty_members() -> Arc<ClassMembers> {
+        Arc::new(ClassMembers {
+            superclass: None,
+            interfaces: Vec::new(),
+            methods: Vec::new(),
+            fields: Vec::new(),
+            flags: ClassFlags::default(),
+            type_params: Vec::new(),
+        })
+    }
+
+    impl TypeResolver for Known {
+        fn members_of(&self, binary_name: &str) -> Option<Arc<ClassMembers>> {
+            self.0.contains(&binary_name).then(empty_members)
+        }
+        fn resolve_simple_name(
+            &self,
+            _name: &str,
+            _imports: &[bennu_java::prelude::Import],
+        ) -> Option<String> {
+            None
+        }
+    }
+
+    const CLASSPATH: &[&str] = &[
+        "org/springframework/context/MessageSource",
+        "org/springframework/context/ApplicationEventPublisher",
+    ];
+
+    /// The reported bug, at its root: inside a library source view every sibling of the type being
+    /// read is in scope with no import (JLS §7.3), and reading only the import list made each one
+    /// resolve to nothing — so go-to on `MessageSource` from `ApplicationContext` did nothing at all.
+    #[test]
+    fn a_sibling_in_the_buffers_own_package_resolves_without_an_import() {
+        let r = Known(CLASSPATH);
+        assert_eq!(
+            NativeJavaProvider::same_package_type(&r, Some("org.springframework.context"), "MessageSource")
+                .as_deref(),
+            Some("org/springframework/context/MessageSource")
+        );
+    }
+
+    /// Confirmed against the classpath, never assumed. The caret can be on any capitalised word —
+    /// a javadoc reference, a type parameter — and answering with a binary nobody can decode would
+    /// turn "found nothing" into "opened an empty stub".
+    #[test]
+    fn a_name_the_classpath_does_not_have_is_not_invented() {
+        let r = Known(CLASSPATH);
+        assert_eq!(
+            NativeJavaProvider::same_package_type(&r, Some("org.springframework.context"), "Nonexistent"),
+            None
+        );
+        // Right name, wrong package.
+        assert_eq!(
+            NativeJavaProvider::same_package_type(&r, Some("com.acme"), "MessageSource"),
+            None
+        );
+    }
+
+    /// A buffer with no `package` line (the default package, and every unparseable buffer) has no
+    /// sibling scope to consult.
+    #[test]
+    fn a_buffer_without_a_package_resolves_nothing() {
+        let r = Known(CLASSPATH);
+        assert_eq!(NativeJavaProvider::same_package_type(&r, None, "MessageSource"), None);
+        assert_eq!(NativeJavaProvider::same_package_type(&r, Some(""), "MessageSource"), None);
     }
 }

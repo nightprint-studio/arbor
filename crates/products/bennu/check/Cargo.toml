@@ -13,6 +13,10 @@ bennu-proto = { path = "../proto" }
 # Type inference + the `TypeResolver` seam for the resolver-backed checks (unknown-member on an
 # inferred receiver). The pure-AST checks don't use it; `check_file` stays resolver-free.
 bennu-java = { path = "../java" }
+# What Lombok generates. Half a dozen checks have to stay silent about members that exist only in
+# the compiled class; they all ask this crate, so they cannot disagree about which annotation
+# generates what. See `src/lombok.rs` for the tree-sitter side of the adaptation.
+bennu-lombok = { path = "../lombok" }
 # Java grammar + runtime for the AST scans. Pinned to the workspace-shared tree-sitter 0.25
 # (native `links` lib — one version workspace-wide) with tree-sitter-java 0.23.
 tree-sitter      = "0.25"

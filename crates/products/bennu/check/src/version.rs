@@ -18,9 +18,12 @@ pub fn version_errors(root: Node, source: &str, java_major: u32) -> Vec<Diagnost
 /// `root` is still taken for the one-shot Lombok-`var`-import pre-scan.
 pub fn version_errors_nodes(root: Node, nodes: &[Node], source: &str, java_major: u32) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
-    // Lombok's `var` (and `val`) back-port local type inference to pre-10 via an annotation
-    // processor, so a `var` is legal on Java 8 when the file imports it. Detect the import once.
-    let lombok_var = has_lombok_var_import(root, bytes);
+    // Lombok's `var` back-ports local type inference to pre-10 via an annotation processor, so a
+    // `var` is legal on Java 8 when the file imports it (`import lombok.var;`, or a `lombok.*`
+    // wildcard). Detected once, from the shared gate — `import lombok.val;` alone is a different
+    // keyword and does not make `var` legal.
+    let lombok_var =
+        crate::lombok::imports_keyword("var", &crate::lombok::imports_from_root(root, bytes));
     let mut out = Vec::new();
     for &n in nodes {
         if let Some((feature, min)) = feature_at(n, bytes) {
@@ -146,23 +149,6 @@ fn anchor(n: Node, bytes: &[u8]) -> (usize, usize) {
 
 fn is_var(n: Node, bytes: &[u8]) -> bool {
     n.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok()) == Some("var")
-}
-
-/// Whether the file imports Lombok's `var`/`val` (`import lombok.var;`, `lombok.val`, or `lombok.*`),
-/// which makes a `var` legal below Java 10.
-fn has_lombok_var_import(root: Node, bytes: &[u8]) -> bool {
-    let mut c = root.walk();
-    for child in root.children(&mut c) {
-        if child.kind() == "import_declaration" {
-            if let Ok(t) = child.utf8_text(bytes) {
-                let t = t.replace(char::is_whitespace, "");
-                if t.contains("lombok.var") || t.contains("lombok.val") || t.contains("lombok.*") {
-                    return true;
-                }
-            }
-        }
-    }
-    false
 }
 
 fn has_sealed_modifier(n: Node, bytes: &[u8]) -> bool {

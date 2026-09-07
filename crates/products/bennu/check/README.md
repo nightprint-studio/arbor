@@ -3,8 +3,16 @@
 Java **validation without compiling** — the "red squiggle before you run Maven". Two tiers: pure
 tree-sitter-java scans (`check_file`, no resolver) and resolver-backed checks that run type
 inference (`check_file_resolved`). Both emit the wire `Diagnostic` (byte offsets) the Problems panel
-+ lint gutter already render. Leaf-ish crate (depends only on `bennu-java` + `bennu-proto`) —
-exhaustively unit-tested here, including with real type inference.
++ lint gutter already render. Leaf-ish crate (depends only on `bennu-java`, `bennu-lombok` and
+`bennu-proto`) — exhaustively unit-tested here, including with real type inference.
+
+## Lombok
+
+Several checks have to stay silent about members that exist in the compiled class and nowhere in the
+source. None of them owns that knowledge: it lives in `bennu-lombok` (which `bennu-intel` shares), and
+`src/lombok.rs` is only the tree-sitter adaptation — imports and annotations out of the CST, strings
+into the catalogue. Add a check that has to reason about Lombok and it goes through the same module,
+so it cannot disagree with the index about what a `@Builder` class contains.
 
 ## Pure-AST checks (`check_file`, no resolver)
 
@@ -26,7 +34,7 @@ exhaustively unit-tested here, including with real type inference.
 | `switch_selector_errors` | `error` | a `switch` on a `long` / `float` / `double` / `boolean` — types `switch` doesn't accept. Purely syntactic (declared type / literal), so no resolver needed. |
 | `final_reassignment_errors` | `error` | reassigning a `final` local or field that **already has an initializer** (`final int x = 1; x = 2;`, `this.f = …` on a `final` field with an initializer). Conservative — a `final` *without* an initializer (assigned once later, possibly across `if`/`else`) is never flagged; a shadowed local name is skipped; only unambiguous `this.field` field targets are considered. |
 | `package_mismatch` | `error` | the declared `package …;` doesn't match the file's location under its source root (needs `expected_package`, inferred from the path). The `change_package` helper produces the "set package to …" quick-fix edit. |
-| `version_errors` | `error` | a language feature used below the project's target Java version — records (16), sealed types (17), `var` (10), text blocks (15), switch arrows (14), lambdas / method references (8), try-with-resources (7), multi-catch (7), default/private interface methods (8/9). Needs `java_major`. A `var` is *not* flagged when the file imports Lombok's `var`/`val` (back-ported below 10). |
+| `version_errors` | `error` | a language feature used below the project's target Java version — records (16), sealed types (17), `var` (10), text blocks (15), switch arrows (14), lambdas / method references (8), try-with-resources (7), multi-catch (7), default/private interface methods (8/9). Needs `java_major`. A `var` is *not* flagged when the file imports Lombok's `var` (back-ported below 10). |
 | `ctor_check_errors` | `warning` | a `method_declaration` named exactly like its enclosing class/enum — an intended constructor written with a return type, which Java silently accepts as an ordinary method. Only class/enum; a real (return-typeless) constructor parses as a different node so never matches. (The "explicit constructor call must be first / can't be both `this()` and `super()`" cases are left to `syntax_errors` — the grammar rejects a misplaced chain call as an `ERROR`.) |
 | `generics_syntax_errors` | `error` | syntactic generics misuse: generic array creation (`new List<String>[]`), instantiating a type parameter (`new T()`), generics in an `instanceof` (a concrete `List<String>`, not an unbounded `?`) or a `catch` type, and `this`/`super` in a `static` context. Scoped type-parameter set gathered from enclosing declarations; anonymous/nested-type carve-outs keep `this`/`super` sound. |
 | `erasure_clash_errors` | `error` | two overloads in one type that are distinct in source but identical after generic type erasure (`f(List<String>)` vs `f(List<Integer>)`). Erases by stripping type arguments (keeps primitives/arrays); a bare single type-variable parameter is skipped (bound unknowable); byte-identical signatures are left to `duplicate_signatures`. |

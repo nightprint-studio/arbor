@@ -88,6 +88,9 @@ members = [
     "crates/products/bennu/classpath",
     "crates/products/bennu/index",
     "crates/products/bennu/java",
+    # What Lombok generates, as data: one annotation catalogue and one import gate, so the checks
+    # and the index answer "does this member exist in the compiled class" the same way. Zero deps.
+    "crates/products/bennu/lombok",
     "crates/products/bennu/intentions",
     "crates/products/bennu/jsp-grammar",
     "crates/products/bennu/jsp",

@@ -12,6 +12,7 @@
 //!   * an interface member is never `protected`, and a bodyless interface method is never `private`;
 //!   * an `enum` constructor takes no access modifier (it is implicitly private).
 
+use bennu_lombok::prelude::{generates_constructor, ParsedImport};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
@@ -33,13 +34,16 @@ pub fn declaration_errors(root: Node, source: &str) -> Vec<Diagnostic> {
 /// Slice-driven core (shared pre-collected node list — one traversal across all pure-AST checks).
 pub fn declaration_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
+    // Parsed once for the file: only `check_enum` consults it, but it used to walk out to the
+    // compilation unit and rescan the imports for every enum in the file.
+    let imports = crate::lombok::imports_from_nodes(nodes, bytes);
     let mut out = Vec::new();
     for &n in nodes {
         match n.kind() {
             "method_declaration" => check_method(n, bytes, &mut out),
             "class_declaration" => check_class(n, bytes, &mut out),
             "record_declaration" => check_record(n, bytes, &mut out),
-            "enum_declaration" => check_enum(n, bytes, &mut out),
+            "enum_declaration" => check_enum(n, bytes, &imports, &mut out),
             "field_declaration" => check_field(n, bytes, &mut out),
             "constructor_declaration" => check_constructor(n, bytes, &mut out),
             _ => {}
@@ -171,69 +175,16 @@ fn check_record(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Lombok annotations that generate a constructor. On an enum, `@AllArgsConstructor` /
-/// `@RequiredArgsConstructor` over the constant fields is the idiomatic way to write
-/// `OWNER("owner")` without hand-writing the constructor — so the constructor genuinely exists
-/// at compile time and is simply absent from the source tree.
-const LOMBOK_CTOR_ANNOTATIONS: [&str; 3] =
-    ["AllArgsConstructor", "RequiredArgsConstructor", "NoArgsConstructor"];
-
-/// Whether `n`'s `modifiers` carry an annotation named (last segment) one of `names`.
-fn has_annotation(n: Node, bytes: &[u8], names: &[&str]) -> bool {
-    let mut c = n.walk();
-    for ch in n.children(&mut c) {
-        if ch.kind() != "modifiers" {
-            continue;
-        }
-        let mut mc = ch.walk();
-        for m in ch.named_children(&mut mc) {
-            if !matches!(m.kind(), "marker_annotation" | "annotation") {
-                continue;
-            }
-            let Some(name) = m.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok())
-            else {
-                continue;
-            };
-            let last = name.rsplit('.').next().unwrap_or(name);
-            if names.contains(&last) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Whether the compilation unit imports Lombok (`import lombok.…`, including a `lombok.*`
-/// wildcard). The same gate `bennu-intel`'s Lombok synthesis uses, and for the same reason: the
-/// annotation only *does* anything when it resolves to Lombok, which requires the import — so a
-/// project's own `@AllArgsConstructor` in another package can't silence this check.
-fn file_imports_lombok(node: Node, bytes: &[u8]) -> bool {
-    // Walk out to the compilation unit, then scan its imports.
-    let mut root = node;
-    while let Some(p) = root.parent() {
-        root = p;
-    }
-    let mut c = root.walk();
-    for ch in root.children(&mut c) {
-        if ch.kind() != "import_declaration" {
-            continue;
-        }
-        if let Ok(t) = ch.utf8_text(bytes) {
-            if t.replace(char::is_whitespace, "").contains("importlombok.") {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-fn check_enum(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+fn check_enum(n: Node, bytes: &[u8], imports: &[ParsedImport], out: &mut Vec<Diagnostic>) {
     let Some(body) = n.child_by_field_name("body") else { return };
     // Lombok writes the constructor the constants call, so an annotated enum has one even though
     // the tree shows none. Without this, every `@AllArgsConstructor` enum with valued constants —
-    // the standard way to write one — was reported as missing its constructor.
-    let mut has_ctor = has_annotation(n, bytes, &LOMBOK_CTOR_ANNOTATIONS)
-        && file_imports_lombok(n, bytes);
+    // the standard way to write one — was reported as missing its constructor. Which annotations
+    // carry a constructor is `bennu-lombok`'s to say, and it applies the "only if Lombok is really
+    // in use" gate: a project's own `@AllArgsConstructor` in another package generates nothing.
+    let mut has_ctor = crate::lombok::has_lombok_annotation(n, bytes, imports, |a| {
+        generates_constructor(a.simple)
+    });
     let mut arg_constant: Option<Node> = None;
     let mut c = body.walk();
     for member in body.named_children(&mut c) {
