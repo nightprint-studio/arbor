@@ -315,28 +315,36 @@ pub(crate) struct TopType<'t> {
     pub(crate) decl_name: String,
 }
 
-/// The file's single top-level `class`/`enum`, or `None` when there are zero, several, or the shape
-/// is anything else. We restrict to ONE top-level class/enum so "the enclosing type" is unambiguous —
-/// with two top-level classes an identifier's owning type would need per-node attribution we skip.
-/// A top-level interface/record/annotation present alongside also bails: an interface body has no
-/// instance fields to reference bare, and a record's compact/canonical members are subtle enough to
-/// not risk mis-owning an identifier.
+/// The file's single top-level `class` / `enum` / `interface`, or `None` when there are zero,
+/// several, or the shape is anything else. We restrict to ONE top-level type so "the enclosing type"
+/// is unambiguous — with two an identifier's owning type would need per-node attribution we skip.
+/// A top-level record or annotation present alongside still bails: a record's compact/canonical
+/// members are subtle enough to not risk mis-owning an identifier.
+///
+/// An interface used to bail too, on the grounds that its body has no instance fields to reference
+/// bare. True, and beside the point: since Java 8 an interface body has `default` and `static`
+/// METHODS, and they call each other bare like any class. Excluding them left every `Failable*` in
+/// commons-lang — a `default andThen` whose whole body is `accept(t)` — unreadable to the three
+/// checks built on this, and an extraction out of one came out without the `throws E` it needed.
 pub(crate) fn single_top_level_type<'t>(root: Node<'t>, bytes: &[u8]) -> Option<TopType<'t>> {
     let mut found: Option<TopType> = None;
     let mut c = root.walk();
     for ch in root.named_children(&mut c) {
-        if matches!(ch.kind(), "class_declaration" | "enum_declaration") {
+        if matches!(
+            ch.kind(),
+            "class_declaration" | "enum_declaration" | "interface_declaration"
+        ) {
             if found.is_some() {
-                return None; // more than one top-level class/enum → ambiguous ownership → SKIP
+                return None; // more than one top-level type → ambiguous ownership → SKIP
             }
             let name = ch.child_by_field_name("name")?;
             let decl_name = name.utf8_text(bytes).ok()?.to_string();
             found = Some(TopType { node: ch, decl_name });
         } else if matches!(
             ch.kind(),
-            "interface_declaration" | "record_declaration" | "annotation_type_declaration"
+            "record_declaration" | "annotation_type_declaration"
         ) {
-            // A top-level interface/record/annotation present alongside makes ownership murky; bail.
+            // A top-level record/annotation present alongside makes ownership murky; bail.
             return None;
         }
     }
@@ -354,6 +362,23 @@ pub(crate) fn single_top_level_type<'t>(root: Node<'t>, bytes: &[u8]) -> Option<
 /// whose id differs. An anonymous class `new T(){…}` introduces its own `class_body`; a nested/local
 /// `class`/`enum`/`interface` introduces its own declaration node AND body — either trips the guard.
 pub(crate) fn scope_is_directly_top(node: Node, top: Node) -> bool {
+    scope_is_top(node, top, false)
+}
+
+/// [`scope_is_directly_top`], except that a **lambda** may be crossed.
+///
+/// A lambda body is not a new scope for method names: a bare `foo()` written inside one binds to the
+/// enclosing type exactly as it would outside, because a lambda declares no members and does not
+/// rebind `this`. The stricter predicate refuses it anyway, and rightly so for the checks that need
+/// to *type the arguments* — a lambda parameter written without a type has no type to read. Where
+/// only the BINDING is at stake, refusing costs a real answer: `andThen` in commons-lang's
+/// `Failable*` interfaces is a one-line lambda that calls `accept(t)`, and reading nothing there
+/// left every extraction out of one of them without the `throws E` it needed.
+pub(crate) fn scope_is_top_across_lambdas(node: Node, top: Node) -> bool {
+    scope_is_top(node, top, true)
+}
+
+fn scope_is_top(node: Node, top: Node, allow_lambda: bool) -> bool {
     // `top`'s own body node id — the one body we're allowed to cross.
     let top_body_id = top.child_by_field_name("body").map(|b| b.id());
 
@@ -364,8 +389,13 @@ pub(crate) fn scope_is_directly_top(node: Node, top: Node) -> bool {
             return true;
         }
         match p.kind() {
-            // A lambda: its parameters/captures live in a scope we don't fully model → SKIP.
-            "lambda_expression" => return false,
+            // A lambda: its parameters/captures live in a scope we don't fully model → SKIP,
+            // unless the caller only needs the name binding (see `scope_is_top_across_lambdas`).
+            "lambda_expression" => {
+                if !allow_lambda {
+                    return false;
+                }
+            }
             // Any nested/local type declaration between us and `top` → its members add/shadow names
             // the caller didn't gather (it gathered `top`'s members + supertypes, nothing else) → SKIP.
             "class_declaration"

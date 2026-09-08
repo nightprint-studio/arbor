@@ -506,3 +506,295 @@ fn slf4j_injects_a_log_field() {
         "…and it is private: {from_outside:?}"
     );
 }
+
+/// **`@Builder(toBuilder = true)` generates an instance `toBuilder()`**, the method the whole
+/// pattern exists for: take this value, get a builder pre-filled from it, change one field, build.
+/// Only the static `builder()` was modelled, so every `x.toBuilder()` in a codebase written this way
+/// read as a method nobody declared.
+///
+/// The class here is the shape that reported it — `@Value @Builder(toBuilder = true) @Jacksonized`,
+/// with a `@Builder.Default` field among plain ones.
+#[test]
+fn to_builder_is_generated_and_chains_like_the_static_factory() {
+    let p = Project::new(&[
+        (
+            "AttributeEntry.java",
+            "package shop;\n\
+             import lombok.Builder;\n\
+             import lombok.Value;\n\
+             import lombok.extern.jackson.Jacksonized;\n\
+             @Value\n\
+             @Builder(toBuilder = true)\n\
+             @Jacksonized\n\
+             public class AttributeEntry {\n\
+             \x20   String contributedBy;\n\
+             \x20   @Builder.Default\n\
+             \x20   String enforcement = \"MANDATORY\";\n\
+             }\n",
+        ),
+        (
+            "Use.java",
+            "package shop;\n\
+             public class Use {\n\
+             \x20   AttributeEntry with(AttributeEntry e) {\n\
+             \x20       return e.toBuilder().contributedBy(\"me\").build();\n\
+             \x20   }\n\
+             }\n",
+        ),
+    ]);
+    assert_eq!(p.validate_errors("Use.java"), Vec::<String>::new());
+
+    // And the chain is TYPED, not merely tolerated: hover on the call says what it returns.
+    let s = p.source("Use.java").to_string();
+    let h = p
+        .hover("Use.java", at(&s, "toBuilder()") + 1)
+        .expect("hover on the generated toBuilder");
+    assert!(
+        h.signature.contains("toBuilder"),
+        "the card describes it, got {:?}",
+        h.signature
+    );
+}
+
+/// The `@Builder.Default` field is a constructor parameter, because Lombok moves its initializer
+/// out of the field and into a `$default$…` method — leaving a blank final the constructor assigns.
+/// Counting it out left the all-args constructor one parameter short, and calling the real one read
+/// as the wrong arity.
+#[test]
+fn a_builder_default_field_is_still_a_constructor_parameter() {
+    let p = Project::new(&[
+        (
+            "Entry.java",
+            // The field is written `final` on purpose: that is the shape the exclusion was for — a
+            // final field with an initializer cannot be assigned twice, so an all-args constructor
+            // normally skips it. `@Builder.Default` is exactly the case where that reasoning is
+            // wrong, and where the parameter comes back.
+            "package shop;\n\
+             import lombok.Builder;\n\
+             @Builder\n\
+             public class Entry {\n\
+             \x20   private final String name;\n\
+             \x20   @Builder.Default\n\
+             \x20   private final String kind = \"SCALAR\";\n\
+             }\n",
+        ),
+        (
+            "Use.java",
+            "package shop;\n\
+             public class Use {\n\
+             \x20   Entry make() { return new Entry(\"a\", \"b\"); }\n\
+             }\n",
+        ),
+    ]);
+    assert_eq!(p.validate_errors("Use.java"), Vec::<String>::new());
+}
+
+/// `@Singular` is written to get the single-element adder — `.tag("a").tag("b")` — and the clearing
+/// method beside it. Only the plural setter existed, so the idiomatic call was reported as missing.
+#[test]
+fn singular_adds_the_element_and_clear_methods_to_the_builder() {
+    let p = Project::new(&[
+        (
+            "Post.java",
+            "package shop;\n\
+             import java.util.List;\n\
+             import lombok.Builder;\n\
+             import lombok.Singular;\n\
+             @Builder\n\
+             public class Post {\n\
+             \x20   @Singular private List<String> tags;\n\
+             \x20   @Singular(\"entry\") private List<String> entries;\n\
+             }\n",
+        ),
+        (
+            "Use.java",
+            "package shop;\n\
+             public class Use {\n\
+             \x20   Post make() {\n\
+             \x20       return Post.builder().tag(\"a\").tag(\"b\").clearTags().entry(\"x\").build();\n\
+             \x20   }\n\
+             }\n",
+        ),
+    ]);
+    assert_eq!(p.validate_errors("Use.java"), Vec::<String>::new());
+}
+
+/// `@SuperBuilder` builds a HIERARCHY: the subclass's builder carries the superclass's fields too,
+/// and those live in another file — nothing available while the index is built can enumerate them.
+/// A half-modelled builder is worse than none, because the missing half resolves against a type we
+/// do model and reads as a method nobody declared. So the chain stays untyped and quiet.
+#[test]
+fn a_super_builder_over_a_parent_does_not_report_the_parents_own_setters() {
+    let p = Project::new(&[
+        (
+            "Base.java",
+            "package shop;\n\
+             import lombok.experimental.SuperBuilder;\n\
+             @SuperBuilder\n\
+             public class Base {\n\
+             \x20   private String id;\n\
+             }\n",
+        ),
+        (
+            "Child.java",
+            "package shop;\n\
+             import lombok.experimental.SuperBuilder;\n\
+             @SuperBuilder\n\
+             public class Child extends Base {\n\
+             \x20   private String extra;\n\
+             }\n",
+        ),
+        (
+            "Use.java",
+            "package shop;\n\
+             public class Use {\n\
+             \x20   Child make() { return Child.builder().id(\"1\").extra(\"x\").build(); }\n\
+             }\n",
+        ),
+    ]);
+    assert_eq!(p.validate_errors("Use.java"), Vec::<String>::new());
+}
+
+/// And a plain `@Builder` inherits nothing, so its builder stays fully modelled — a name that is
+/// NOT a field of it is still reported. The silence above is the narrow case, not a blanket.
+#[test]
+fn a_plain_builder_still_reports_a_setter_that_does_not_exist() {
+    let p = Project::new(&[
+        (
+            "Post.java",
+            "package shop;\n\
+             import lombok.Builder;\n\
+             @Builder\n\
+             public class Post {\n\
+             \x20   private String title;\n\
+             }\n",
+        ),
+        (
+            "Use.java",
+            "package shop;\n\
+             public class Use {\n\
+             \x20   Post make() { return Post.builder().nope(\"x\").build(); }\n\
+             }\n",
+        ),
+    ]);
+    let errors = p.validate_errors("Use.java");
+    assert!(
+        errors.iter().any(|e| e.contains("nope")),
+        "a setter that is no field must still be reported, got {errors:?}"
+    );
+}
+
+/// **`@Value` makes the fields `private final` and the class `final`.**
+///
+/// The source writes them bare — that is the point of the annotation — so read as written they were
+/// package-private and mutable to everything downstream, and the class looked extendable when javac
+/// says it is not. `@NonFinal` on a field is the documented way out and is honoured.
+#[test]
+fn value_makes_its_fields_final_and_its_class_final() {
+    let p = Project::new(&[(
+        "Money.java",
+        "package shop;\n\
+         import lombok.Value;\n\
+         import lombok.experimental.NonFinal;\n\
+         @Value\n\
+         public class Money {\n\
+         \x20   String currency;\n\
+         \x20   @NonFinal String note;\n\
+         }\n",
+    )]);
+    let cm = p.members("shop/Money").expect("the value class is indexed");
+    assert!(cm.flags.is_final, "a @Value class is final");
+    let field = |n: &str| cm.fields.iter().find(|f| f.name == n).expect("field");
+    assert!(field("currency").is_final, "@Value makes a field final");
+    assert_eq!(
+        field("currency").visibility,
+        bennu_java::prelude::Visibility::Private,
+        "and private"
+    );
+    assert!(!field("note").is_final, "@NonFinal opts the field out");
+}
+
+/// `@Builder` on a **static factory** builds what the factory returns, from the factory's own
+/// parameters — not from the class's fields. The builder is named after the return type, which is
+/// Lombok's rule and the reason a class can carry more than one.
+#[test]
+fn a_builder_on_a_static_method_takes_its_parameters() {
+    let p = Project::new(&[
+        (
+            "Report.java",
+            "package shop;\n\
+             import lombok.Builder;\n\
+             public class Report {\n\
+             \x20   private String unrelatedField;\n\
+             \x20   @Builder\n\
+             \x20   public static Report of(String title, int pages) { return null; }\n\
+             }\n",
+        ),
+        (
+            "Use.java",
+            "package shop;\n\
+             public class Use {\n\
+             \x20   Report make() { return Report.builder().title(\"t\").pages(3).build(); }\n\
+             }\n",
+        ),
+    ]);
+    assert_eq!(p.validate_errors("Use.java"), Vec::<String>::new());
+    // And it is the FACTORY's parameters, not the class's fields: a field of the class is not a
+    // setter on this builder.
+    let cm = p
+        .members("shop/Report/ReportBuilder")
+        .expect("the builder type is indexed");
+    let names: Vec<&str> = cm.methods.iter().map(|m| m.name.as_str()).collect();
+    assert!(names.contains(&"title") && names.contains(&"pages"), "got {names:?}");
+    assert!(!names.contains(&"unrelatedField"), "got {names:?}");
+}
+
+/// `@Delegate` copies every public method of the field's type onto the owner. Which methods those
+/// are is a question about another type, and there is no answer while this index is built — so the
+/// type says its list is incomplete, and no check concludes "no such method" from it.
+#[test]
+fn a_delegate_field_stops_the_owner_being_reported_for_missing_methods() {
+    let p = Project::new(&[
+        (
+            "Bag.java",
+            "package shop;\n\
+             import java.util.ArrayList;\n\
+             import lombok.experimental.Delegate;\n\
+             public class Bag {\n\
+             \x20   @Delegate private final ArrayList<String> items = new ArrayList<>();\n\
+             }\n",
+        ),
+        (
+            "Use.java",
+            "package shop;\n\
+             public class Use {\n\
+             \x20   void run(Bag b) { b.add(\"x\"); b.clear(); }\n\
+             }\n",
+        ),
+    ]);
+    assert_eq!(p.validate_errors("Use.java"), Vec::<String>::new());
+}
+
+/// And the silence is exactly that class: one WITHOUT a `@Delegate` still reports a method nobody
+/// declares.
+#[test]
+fn a_class_without_a_delegate_still_reports_a_method_that_does_not_exist() {
+    let p = Project::new(&[
+        (
+            "Plain.java",
+            "package shop;\n\
+             public class Plain {\n\
+             \x20   public void known() {}\n\
+             }\n",
+        ),
+        (
+            "Use.java",
+            "package shop;\n\
+             public class Use {\n\
+             \x20   void run(Plain p) { p.nope(); }\n\
+             }\n",
+        ),
+    ]);
+    let errors = p.validate_errors("Use.java");
+    assert!(errors.iter().any(|e| e.contains("nope")), "got {errors:?}");
+}

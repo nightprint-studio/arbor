@@ -28,7 +28,9 @@
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> — go to <strong>file</strong> by name</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Y</kbd> — go to <strong>symbol</strong> (methods and fields, project-wide; functions and constants on a Rust project)</li>
   <li><kbd>Tab</kbd> — inside the navigator, move between <strong>All · Classes · Files · Symbols</strong></li>
-  <li><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>→</kbd> — navigate <strong>back</strong> / <strong>forward</strong> through your recent jumps (across files)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>→</kbd> — navigate <strong>back</strong> / <strong>forward</strong> through the places you jumped to (across files). Actions make a stop — a go-to, a usage, a hit, a tab switch — and moving the caret does not</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Backspace</kbd> — back to the <strong>last place you edited</strong>; press it again to walk further back through the session's edits</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd> — <strong>recent locations</strong>: the same history as a filterable list, with the line you were on, and a toggle for the places you edited</li>
   <li><kbd>Ctrl</kbd> + <kbd>F12</kbd> — <strong>file structure</strong>: a searchable outline of the file in front of you. On a language-server file the server supplies it, so a Rust file lists its structs, traits, impls and functions</li>
   <li><kbd>Ctrl</kbd> + <kbd>H</kbd> — <strong>type hierarchy</strong> of the type at the caret: its implementors, or by direction what it is built on. The caret may be anywhere inside the type — on a member it climbs to the owner</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> — <strong>call hierarchy</strong> of the method at the caret: its callers, or by direction what it calls. Both open the Hierarchy panel, which expands one level at a time and takes the keyboard as it opens — a recursive chain is walked as far as you care to and no further</li>

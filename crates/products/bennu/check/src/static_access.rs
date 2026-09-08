@@ -398,6 +398,29 @@ mod tests {
 
     // ── POSITIVES (must flag) ────────────────────────────────────────────────────────────────────
 
+    /// A top-level INTERFACE is a type this reads now — it has `default` and `static` methods that
+    /// call each other bare. What must not follow is the reading of its fields: JLS §9.3 makes every
+    /// one of them `public static final`, so a `static` method naming one is correct Java.
+    #[test]
+    fn an_interfaces_own_field_is_static_and_not_flagged() {
+        let mut r = resolver();
+        r.members.insert(
+            "com/acme/I".to_string(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: None,
+                interfaces: Vec::new(),
+                methods: vec![method("nop", "void").stat()],
+                // As the index records it once JLS §9.3 is applied.
+                fields: vec![field("NOP", "int").stat()],
+                flags: Default::default(),
+            },
+        );
+        r.simple.insert("I".to_string(), "com/acme/I".to_string());
+        let src = "interface I { int NOP = 0; static int nop() { return NOP; } }";
+        assert!(diags_with(src, &r).is_empty(), "{:?}", diags_with(src, &r));
+    }
+
     #[test]
     fn instance_field_and_method_from_static_method_are_flagged() {
         let src = wrap(

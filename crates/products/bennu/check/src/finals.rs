@@ -23,7 +23,7 @@ use tree_sitter::Node;
 #[cfg(test)]
 use tree_sitter::Parser;
 
-use crate::method_sig::method_param_binaries;
+use crate::method_sig::{member_param_binaries, method_param_binaries};
 use crate::nodes::{has_keyword, text};
 use crate::walk::for_each_supertype;
 
@@ -321,7 +321,7 @@ fn check_type_final_overrides(
                     && m.name != "<init>"
                     && m.name != "<clinit>";
                 if overridable {
-                    let params = m.params.iter().map(|p| p.binary_name.clone()).collect();
+                    let params = member_param_binaries(m);
                     final_methods.entry(m.name.clone()).or_default().push(params);
                 }
             }

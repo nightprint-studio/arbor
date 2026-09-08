@@ -6,7 +6,8 @@
 //!
 //! The rule (docs: never a false "cannot resolve"): a class the resolver cannot answer for might be
 //! the one that declares the member, so we never report it absent on a hierarchy we could not read
-//! to the end. A `false` is returned only when the *entire* reachable hierarchy is known and
+//! to the end — and a class that says its own list is incomplete
+//! ([`ClassFlags::has_hidden_members`]) reads the same way, because it means the same thing. A `false` is returned only when the *entire* reachable hierarchy is known and
 //! nothing matched — which is exactly what [`bennu_java::prelude::Walk::complete`] says.
 
 use bennu_java::prelude::{walk, walk_up, ClassMembers, TypeRef, TypeResolver};
@@ -18,8 +19,14 @@ pub fn hierarchy_has(
     binary: &str,
     matches: &dyn Fn(&ClassMembers) -> bool,
 ) -> bool {
-    let walked = walk(resolver, &TypeRef::simple(binary), |a| matches(&a.members).then_some(()));
-    walked.found.is_some() || !walked.complete
+    let mut hidden = false;
+    let walked = walk(resolver, &TypeRef::simple(binary), |a| {
+        hidden |= a.members.flags.has_hidden_members;
+        matches(&a.members).then_some(())
+    });
+    // A type that says its member list is not the whole list is exactly as conclusive as one we
+    // could not read at all — see [`hierarchy_fully_known`].
+    walked.found.is_some() || !walked.complete || hidden
 }
 
 /// Visit `binary` + every KNOWN supertype, calling `visit(members)` on each. Unlike
@@ -56,5 +63,15 @@ pub fn reaches(resolver: &dyn TypeResolver, from: &str, target: &str) -> bool {
 /// Which is the shared walk's own verdict — this is the question `complete` was added to answer,
 /// and asking it a second way was how two walks came to disagree about the same hierarchy.
 pub fn hierarchy_fully_known(resolver: &dyn TypeResolver, binary: &str) -> bool {
-    walk::<()>(resolver, &TypeRef::simple(binary), |_| None).complete
+    let mut hidden = false;
+    let walked = walk::<()>(resolver, &TypeRef::simple(binary), |a| {
+        hidden |= a.members.flags.has_hidden_members;
+        None
+    });
+    // `has_hidden_members` is the same answer as an unresolvable supertype, said by a type that DID
+    // resolve: some of its members are real and not in the list. A Lombok `@Delegate` field puts
+    // every public method of another type onto its owner, and a `@SuperBuilder` builder carries its
+    // parent's setters — neither is enumerable while this index is built, so a check that concludes
+    // "no such member" from the list would be reporting correct code.
+    walked.complete && !hidden
 }

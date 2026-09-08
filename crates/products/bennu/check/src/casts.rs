@@ -456,8 +456,22 @@ mod tests {
         // implicit `extends Object` the index didn't capture, so its hierarchy walk never reaches
         // Object. Casting an `Object` to it must still be legal.
         members.insert("com/acme/Orphan".to_string(), cls(None, vec![]));
+        // `Base.make(Object) -> Widget` — the inherited overload a subclass can shadow by name while
+        // declaring a different arity of its own (the `java.text.Format.format` shape).
+        members.insert(
+            "com/acme/Base".to_string(),
+            cls(
+                Some("java/lang/Object"),
+                vec![Member::method(
+                    "make",
+                    TypeRef::simple("com/acme/Widget".to_string()),
+                    vec![TypeRef::simple("java/lang/Object".to_string())],
+                )],
+            ),
+        );
         let simple = [
             ("Object", "java/lang/Object"),
+            ("Base", "com/acme/Base"),
             ("Animal", "com/acme/Animal"),
             ("Dog", "com/acme/Dog"),
             ("Cat", "com/acme/Cat"),
@@ -476,6 +490,36 @@ mod tests {
     fn diags(body: &str) -> Vec<String> {
         let src = format!("class C {{ Provider p; void m() {{ {body} }} }}");
         type_compat_errors(&src, &resolver()).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn a_bare_call_binds_the_inherited_overload_not_the_own_wrong_arity_one() {
+        // `CompositeFormat extends java.text.Format` declares ONE `format`, the 3-arg one, and
+        // writes `return format(parseObject(input));` — the *inherited* `format(Object) -> String`.
+        // Reading the sole same-named declaration whatever its arity typed that call as the 3-arg
+        // return and called a compiling file wrong. An arity that cannot take the call is not a
+        // candidate, and the answer comes from the supertype.
+        let src = "class C extends Base { \
+                   Cat make(Cat a, Widget b, Animal c) { return a; } \
+                   Widget m() { return make(p.obj()); } \
+                   Provider p; }";
+        let d: Vec<String> =
+            type_compat_errors(src, &resolver()).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn a_bare_call_that_does_match_the_own_arity_still_binds_it() {
+        // The other half of the same rule: at the arity it declares, the class's own method wins —
+        // `make(Cat, Widget, Animal)` is a `Cat`, which is not a `Widget`.
+        let src = "class C extends Base { \
+                   Cat make(Cat a, Widget b, Animal c) { return a; } \
+                   Widget m() { return make(c, w, a); } \
+                   Cat c; Widget w; Animal a; }";
+        let d: Vec<String> =
+            type_compat_errors(src, &resolver()).into_iter().map(|x| x.message).collect();
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`Cat` cannot be returned as `Widget`"), "{d:?}");
     }
 
     #[test]

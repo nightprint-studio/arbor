@@ -25,7 +25,7 @@
 use std::collections::{HashMap, HashSet};
 
 use bennu_java::prelude::{extract_symbols, FileSymbols, TypeResolver};
-use bennu_lombok::prelude::{imports_keyword, ImportPath};
+use bennu_lombok::prelude::{file_uses_lombok, imports_keyword, ImportPath};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
@@ -120,6 +120,16 @@ pub fn unresolved_types_in(
         {
             continue;
         }
+        // Lombok's `@__`, the placeholder that carries annotations onto generated code:
+        // `@Getter(onMethod_ = @__(@JsonProperty))`. No such type is declared anywhere — Lombok
+        // reads it out of the tree and throws it away — so a resolver is right that it resolves to
+        // nothing, and reporting it is still wrong: the line compiles, and IntelliJ says nothing.
+        // Gated on the two things that make it Lombok's rather than a class somebody failed to
+        // import: it is the value of an `onMethod` / `onConstructor` / `onParam` element (with or
+        // without Lombok's trailing underscore), and the file imports Lombok.
+        if name == "__" && lombok_on_x_value(n, bytes) && imports_lombok(symbols) {
+            continue;
+        }
         // Resolvable via imports, the file's OWN package (no import needed), or the global lookup.
         // Uses the shared `type_binary` so a bare same-package type (`C` referencing a sibling class in
         // `com.acme`) resolves to `com/acme/C` instead of being falsely flagged.
@@ -201,6 +211,31 @@ fn supertype_roots(symbols: &FileSymbols, resolver: &dyn TypeResolver) -> Vec<St
 /// wildcard. Only then is a `val`-typed local the Lombok inference keyword rather than an unresolved
 /// class named `val`. The symbol model already holds the imports, so this is a field copy onto the
 /// shared gate's shape.
+/// Whether this `@__` sits where Lombok's `onX` syntax puts it — the value of an `onMethod`,
+/// `onConstructor` or `onParam` element, whose Java-8 spellings end in `_`.
+fn lombok_on_x_value(name_node: Node, bytes: &[u8]) -> bool {
+    // `identifier(__)` → `annotation` / `marker_annotation` → `element_value_pair(key = onMethod_)`.
+    let Some(pair) = name_node.parent().and_then(|a| a.parent()) else { return false };
+    if pair.kind() != "element_value_pair" {
+        return false;
+    }
+    let Some(key) = pair.child_by_field_name("key").and_then(|k| k.utf8_text(bytes).ok()) else {
+        return false;
+    };
+    // `onMethod`, `onConstructor`, `onParam` — and the `_`-suffixed spellings Lombok added so the
+    // element could be written without a warning on Java 8.
+    let key = key.strip_suffix('_').unwrap_or(key);
+    matches!(key, "onMethod" | "onConstructor" | "onParam")
+}
+
+fn imports_lombok(symbols: &FileSymbols) -> bool {
+    file_uses_lombok(symbols.imports.iter().map(|i| ImportPath {
+        path: &i.path,
+        star: i.star,
+        is_static: i.static_,
+    }))
+}
+
 fn imports_lombok_val(symbols: &FileSymbols) -> bool {
     imports_keyword(
         "val",
@@ -403,6 +438,41 @@ mod tests {
         // No `import lombok.val;` → `val` is not the inference keyword, it's an unresolved type.
         let d = diags("class C { void m() { val y = new Widget(); } }");
         assert!(d.iter().any(|m| m.contains("val")), "unimported val is a real unresolved type: {d:?}");
+    }
+
+    /// Lombok's `@__`, the placeholder that carries annotations onto the code Lombok writes:
+    /// `@Getter(onMethod_ = @__(@JsonProperty))`. Nothing declares the type, and the file compiles —
+    /// Lombok reads the placeholder out of the tree and discards it — so reporting it is a false
+    /// positive on a shape used all over a Lombok codebase.
+    #[test]
+    fn lombok_on_x_placeholder_is_not_flagged() {
+        // `@Widget` stands in for `@Getter` — the annotation the resolver in these tests knows;
+        // what is under test is the placeholder inside it, and the Lombok import that gates it.
+        let src = "import lombok.*;\nclass C { @Widget(onMethod_ = @__(@Widget)) int i; }";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+        // Both spellings, and the constructor variant.
+        let plain = "import lombok.*;\nclass C { @Widget(onMethod = @__(@Widget)) int i; }";
+        assert!(diags(plain).is_empty(), "{:?}", diags(plain));
+        let ctor = "import lombok.*;\n@Widget(onConstructor_ = @__(@Widget)) class C { }";
+        assert!(diags(ctor).is_empty(), "{:?}", diags(ctor));
+    }
+
+    /// And the carve-out is exactly that shape, not the name. A `@__` written anywhere else, or in a
+    /// file with no Lombok, is an annotation nothing declares — which is what it looks like.
+    #[test]
+    fn a_placeholder_outside_lombok_is_still_flagged() {
+        let elsewhere = "import lombok.*;\nclass C { @__ int i; }";
+        assert!(diags(elsewhere).iter().any(|m| m.contains("__")), "{:?}", diags(elsewhere));
+        let no_lombok = "class C { @Widget(onMethod_ = @__(@Widget)) int i; }";
+        assert!(diags(no_lombok).iter().any(|m| m.contains("__")), "{:?}", diags(no_lombok));
+    }
+
+    /// The annotations INSIDE the placeholder are ordinary annotations and stay checked — that is
+    /// the whole reason the placeholder is written.
+    #[test]
+    fn what_the_placeholder_carries_is_still_checked() {
+        let src = "import lombok.*;\nclass C { @Widget(onMethod_ = @__(@Nope)) int i; }";
+        assert!(diags(src).iter().any(|m| m.contains("Nope")), "{:?}", diags(src));
     }
 
     #[test]

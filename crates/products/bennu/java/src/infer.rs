@@ -131,9 +131,11 @@ pub struct MethodResolution {
     /// arity / argument checks post-process (param counts, checkable signatures). Order is the walk
     /// order; duplicates across override/inherit are kept (callers dedupe as needed).
     pub candidates: Vec<Member>,
-    /// True iff every class in the hierarchy resolved (no `members_of` gap and no depth blow-out). A
-    /// `false` means the checks must stay conservative — an unknown supertype might declare/overload
-    /// the method, so a "does not exist" / "no such arity" assertion would risk a false positive.
+    /// True iff every class in the hierarchy resolved (no `members_of` gap, no depth blow-out) AND
+    /// none of them declared its member list incomplete
+    /// ([`ClassFlags::has_hidden_members`](crate::seam::ClassFlags::has_hidden_members)). A `false`
+    /// means the checks must stay conservative — an unknown supertype might declare/overload the
+    /// method, so a "does not exist" / "no such arity" assertion would risk a false positive.
     pub complete: bool,
 }
 
@@ -144,7 +146,12 @@ pub struct MethodResolution {
 /// one answer to "what does this type inherit" for every consumer that asks.
 fn walk_methods(resolver: &dyn TypeResolver, binary: &str, name: &str) -> MethodResolution {
     let mut candidates: Vec<Member> = Vec::new();
+    let mut hidden = false;
     let walked = crate::hierarchy::walk::<()>(resolver, &TypeRef::simple(binary), |a| {
+        // A type that declares its own list incomplete answers the same as one that would not
+        // resolve at all: some of its methods are real and not here. Lombok's `@Delegate` and a
+        // `@SuperBuilder` builder are the two that say so.
+        hidden |= a.members.flags.has_hidden_members;
         for m in &a.members.methods {
             if m.name == name && m.kind == MemberKind::Method {
                 candidates.push(m.clone());
@@ -152,7 +159,7 @@ fn walk_methods(resolver: &dyn TypeResolver, binary: &str, name: &str) -> Method
         }
         None
     });
-    MethodResolution { candidates, complete: walked.complete }
+    MethodResolution { candidates, complete: walked.complete && !hidden }
 }
 
 /// Infer the static type of the expression immediately LEFT of the `.` at
@@ -771,21 +778,61 @@ impl Ctx<'_> {
     }
 
     /// The return type of a statically-imported static METHOD `name` (a bare `max(…)` call), or `None`.
+    ///
+    /// A file may import the same NAME from more than one owner, and then the call decides which
+    /// one it means. WireMock's tests do exactly that:
+    ///
+    /// ```java
+    /// import static com.github.tomakehurst.wiremock.client.WireMock.*;              // options(UrlPattern)
+    /// import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;  // options()
+    ///
+    /// new WireMockServer(options().dynamicPort());
+    /// ```
+    ///
+    /// Taking the first owner that has *a* method of that name answered `options()` with the
+    /// **one-argument** `WireMock.options(UrlPattern)` — a `MappingBuilder`, which has no
+    /// `dynamicPort()`, so the next call in the chain was reported as a method that does not exist
+    /// on a line javac and IntelliJ both accept. (The single-candidate shortcut in
+    /// [`Self::select_overload`] is right where it stands — one method of a name on one receiver is
+    /// trusted whatever our parameter model made of it — but across owners there is no such thing
+    /// as "the" method, and the argument count is the only thing that tells them apart.)
+    ///
+    /// So: an owner answers only if it declares the name at an arity this call can actually use.
+    /// A specifically imported member is asked before a wildcard, which is the order a reader has in
+    /// mind when they name one member and star the rest.
     fn static_import_method(
         &self,
         name: &str,
         args: &[Node],
         enclosing: Option<&str>,
     ) -> Option<TypeRef> {
-        for t in crate::static_import::static_import_targets(&self.symbols.imports) {
-            if t.member.as_deref().map_or(true, |m| m == name) {
-                let owner = TypeRef::simple(t.owner_binary);
-                if let Some(tr) = self.method_return_on(&owner, name, args, enclosing) {
-                    return Some(tr);
-                }
+        let targets = crate::static_import::static_import_targets(&self.symbols.imports);
+        let named = targets.iter().filter(|t| t.member.as_deref() == Some(name));
+        let starred = targets.iter().filter(|t| t.member.is_none());
+        for t in named.chain(starred) {
+            if !self.declares_at_arity(&t.owner_binary, name, args.len()) {
+                continue;
+            }
+            let owner = TypeRef::simple(t.owner_binary.clone());
+            if let Some(tr) = self.method_return_on(&owner, name, args, enclosing) {
+                return Some(tr);
             }
         }
         None
+    }
+
+    /// Whether `owner` (or its supertypes) declares `name` with a parameter count this call can
+    /// satisfy — varargs included, since a `String...` takes any number of them.
+    ///
+    /// Deliberately a question about the DECLARATION, not about the argument types: inferring the
+    /// arguments here would cost a full inference pass per candidate owner, and the count already
+    /// separates the cases that motivated it.
+    fn declares_at_arity(&self, owner_binary: &str, name: &str, argc: usize) -> bool {
+        self.cache
+            .resolve_methods(self.resolver, owner_binary, name)
+            .candidates
+            .iter()
+            .any(|m| arity_admits(m.params.len(), last_is_array(m), argc))
     }
 
     /// Classify `name` against the lambda scopes enclosing `use_node`. If it's a parameter of an
@@ -1568,13 +1615,29 @@ impl Ctx<'_> {
             .types
             .iter()
             .find(|t| t.fqn == fqn || t.name == fqn)?;
+        let argc = args.len();
+        // Only the declarations this call could actually bind to. Filtering by arity BEFORE
+        // anything else is what stops a class from shadowing what it inherits: `CompositeFormat
+        // extends java.text.Format` declares one `format`, the 3-arg one, and writes
+        // `return format(parseObject(input));` — the inherited 1-arg `Format.format(Object)`.
+        // Trusting the sole same-named declaration typed that call as `StringBuffer` and the
+        // return-type check called a compiling file wrong. A method that cannot take this many
+        // arguments is not a candidate, and the type is not declared *here*.
         let same_named: Vec<&crate::symbols::MethodDecl> = td
             .methods
             .iter()
             .filter(|m| m.name == method_name)
+            .filter(|m| {
+                let last_array = m.params.last().is_some_and(|p| {
+                    let t = p.type_text.trim_end();
+                    t.ends_with("...") || t.ends_with("[]")
+                });
+                arity_admits(m.params.len(), last_array, argc)
+            })
             .collect();
-        // Declared nowhere on this type — ask the one it extends, and translate the answer back
-        // through the type arguments written in the `extends` clause.
+        // Nothing here can take this call — ask the type it extends, and translate the answer back
+        // through the type arguments written in the `extends` clause. When that dead-ends too, the
+        // caller falls through to the classpath resolver, which sees the library supertypes.
         if same_named.is_empty() {
             let parent = self.resolve_type_text(td.extends.as_ref()?)?;
             let ret = self.method_return_of_source_type_from(
@@ -1585,20 +1648,12 @@ impl Ctx<'_> {
             )?;
             return Some(self.substitute_generics(&ret, &parent));
         }
-        // A single method of this name isn't an overload → trust it (behavior identical to before).
+        // A single candidate isn't an overload → trust it.
         if let [only] = same_named.as_slice() {
             return self.resolve_type_text(&only.return_type_text);
         }
-        let argc = args.len();
         let mut ret_text: Option<&str> = None;
         for md in same_named.iter().copied() {
-            let last_array = md.params.last().is_some_and(|p| {
-                let t = p.type_text.trim_end();
-                t.ends_with("...") || t.ends_with("[]")
-            });
-            if !arity_admits(md.params.len(), last_array, argc) {
-                continue;
-            }
             match ret_text {
                 None => ret_text = Some(md.return_type_text.as_str()),
                 Some(t) if t == md.return_type_text.as_str() => {}

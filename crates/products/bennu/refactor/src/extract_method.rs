@@ -120,10 +120,31 @@ pub fn extract_method(root: Node<'_>, source: &str, start: usize, end: usize) ->
         if !read_inside.contains(name) {
             continue;
         }
+        // A name the SELECTION declares is not free, whatever an earlier sibling block called one
+        // of its own locals. Passing it made the call hand over a variable that is out of scope
+        // there, and gave the extracted method a parameter its own declaration redeclares.
+        if declared_inside.iter().any(|(inner, _)| inner == name) {
+            continue;
+        }
         // A name declared twice in two sibling blocks appears twice here; the selection can only
         // see one of them, and a signature with a repeated parameter does not compile.
         if parameters.iter().any(|p| &p.name == name) {
             continue;
+        }
+        // A multi-catch parameter's type is `A | B`, which is a `catch` clause and nothing else —
+        // a method parameter needs one type, and the one Java uses there is the least upper bound
+        // of the alternatives, which is not something this crate can compute. Written out verbatim
+        // it is not even Java: `void doX(NoSuchFieldException | IllegalAccessException e)`.
+        if type_text.contains('|') {
+            return Some(Err(Refusal::new(
+                id,
+                label,
+                format!(
+                    "`{name}` is caught as `{}`, and a method parameter takes one type — catch a \
+                     common supertype first",
+                    type_text.trim()
+                ),
+            )));
         }
         if crate::selection::is_inferred_type(type_text) {
             return Some(Err(Refusal::new(
@@ -139,9 +160,21 @@ pub fn extract_method(root: Node<'_>, source: &str, start: usize, end: usize) ->
     }
 
     // 2. The return value: what the selection declares and the code after it reads.
+    //
+    // "Declares" means *at the selection's own level*. A name declared in a nested scope — a `for`
+    // header, an `if` branch, a catch — dies with that scope, so the code after the selection can
+    // only be reading a DIFFERENT variable of the same name. `for (int i = …)` inside the selection
+    // and another `for (int i = …)` after it is the commonest shape in Java there is, and reading
+    // the inner `i` as the extracted method's return value produced `int i = doIsDigit(…);` at the
+    // call site: `variable i is already defined`, or `cannot find symbol: variable i`, depending on
+    // which of the two the caller reached first.
     let after_start = last.end_byte();
     let read_after = names_read_in_range(&method, after_start, body.end_byte(), source);
-    let mut produced: Vec<(String, String)> = declared_inside
+    let live_after: Vec<(String, String)> = statements
+        .iter()
+        .flat_map(|statement| declarations_under(*statement, source, Some(after_start)))
+        .collect();
+    let mut produced: Vec<(String, String)> = live_after
         .iter()
         .filter(|(name, _)| read_after.contains(name))
         .cloned()
@@ -219,15 +252,19 @@ pub fn extract_method(root: Node<'_>, source: &str, start: usize, end: usize) ->
     let arguments = parameters.iter().map(|p| p.name.clone()).collect::<Vec<_>>().join(", ");
     let return_type = returned.as_ref().map(|(_, t)| t.clone()).unwrap_or_else(|| "void".into());
     let modifiers = if is_static(&method, source) { "private static " } else { "private " };
-    // A type parameter the METHOD declares does not exist in a sibling method, so the extracted one
-    // has to declare it too. A CLASS's type parameter needs nothing — it is in scope for every
-    // member — which is why this looks like it works until the first `<T> void f(…)`.
-    let type_params = borrowed_type_parameters(&method, &parameters, &return_type, source);
     // The enclosing method's `throws`, carried over. Precisely which of them the moved statements
     // can actually raise is a question for the resolver; declaring the same set is sound — the body
     // was legal inside a method that declared them — and it is what keeps a checked exception from
     // becoming an "unreported exception" the moment it moves.
     let throws = declared_throws(&method, first, source);
+    // A type parameter the METHOD declares does not exist in a sibling method, so the extracted one
+    // has to declare it too. A CLASS's type parameter needs nothing — it is in scope for every
+    // member — which is why this looks like it works until the first `<T> void f(…)`.
+    // Computed AFTER the throws clause because a `throws` is part of the signature: the whole point
+    // of `<E extends Throwable> Instant now(…) throws E` is a type variable that appears nowhere but
+    // there, and reading only the parameters and the return type left the extracted method with a
+    // `throws E` naming nothing.
+    let type_params = borrowed_type_parameters(&method, &parameters, &return_type, &throws, source);
 
     // The moved statements, re-indented from the block they were in to the block they are going to.
     let moved = reindent(
@@ -350,6 +387,18 @@ fn escaping_in(
     None
 }
 
+/// Whether `child` sits in the part of `try_node` its own `catch` clauses protect: the body, or a
+/// try-with-resources' resource list (a resource initializer runs inside the protection, JLS
+/// §14.20.3). A statement in the try's own `catch` or `finally` is NOT protected by it.
+fn protected_by(try_node: Node<'_>, child: Node<'_>) -> bool {
+    if child.kind() == "resource_specification" {
+        return true;
+    }
+    try_node
+        .child_by_field_name("body")
+        .is_some_and(|b| b.id() == child.id())
+}
+
 /// What the extracted method must declare it throws, as ` throws A, B`.
 ///
 /// Two sources, and the second is the one that is easy to miss. The enclosing method's own `throws`
@@ -359,8 +408,21 @@ fn escaping_in(
 /// corresponding try statement"). So every `catch` between the selection and the method contributes
 /// its types too.
 ///
-/// Over-declaring is safe: `throws IOException` on a method that cannot raise it is legal, and the
-/// `try` that prompted it is right there to catch it. Under-declaring is not.
+/// Over-declaring is safe **where the try protects the call** — `throws IOException` on a method
+/// that cannot raise it is legal, and the try that prompted it is right there to catch it. Two
+/// places where it is not, and both were being counted:
+///
+///   * a try INSIDE the selection. Its catch clauses move with the body and handle it there, so the
+///     extracted method raises nothing on their account. Extracting a whole
+///     `try { … } catch (Exception e) { … }` declared `throws Exception`, and the call — in a
+///     method that had no reason to declare anything — stopped compiling.
+///   * a try the selection sits in the CATCH or FINALLY of. Those clauses are not protected by
+///     their own try (JLS §14.20.2), so a call there that declares the exception is a call nobody
+///     catches.
+///
+/// Under-declaring is not safe either, and that is the case this walk exists for: an exception the
+/// body raises and an enclosing try catches never reaches the method's own clause, so without it
+/// the try around the call would have nothing to catch.
 fn declared_throws(method: &Node<'_>, first: Node<'_>, source: &str) -> String {
     let mut kinds: Vec<String> = Vec::new();
     let mut push = |text: &str| {
@@ -383,16 +445,21 @@ fn declared_throws(method: &Node<'_>, first: Node<'_>, source: &str) -> String {
         }
     }
 
-    let mut node = Some(first);
+    // From the selection's PARENT: a try inside the selection travels with it.
+    let mut child = first;
+    let mut node = first.parent();
     while let Some(n) = node {
         if n.id() == method.id() {
             break;
         }
-        if n.kind() == "try_statement" || n.kind() == "try_with_resources_statement" {
+        if (n.kind() == "try_statement" || n.kind() == "try_with_resources_statement")
+            && protected_by(n, child)
+        {
             for catch_type in descendants(n, "catch_type") {
                 push(text(&catch_type, source));
             }
         }
+        child = n;
         node = n.parent();
     }
 
@@ -408,10 +475,16 @@ fn declared_throws(method: &Node<'_>, first: Node<'_>, source: &str) -> String {
 ///
 /// Verbatim, bounds included: `<T extends Comparable<T>>` means something the name alone does not,
 /// and a bound dropped in the move is a signature that accepts more than the body can handle.
+///
+/// The `throws` clause counts as part of the signature, and is the case that is easy to forget:
+/// `<E extends Throwable> Instant now(FailableConsumer<Instant, E> c) throws E` is a shape real
+/// code is full of, and extracting a statement out of it produced `Instant doNow() throws E` —
+/// a method whose only mention of `E` is the one place nobody looked.
 fn borrowed_type_parameters(
     method: &Node<'_>,
     parameters: &[Parameter],
     return_type: &str,
+    throws: &str,
     source: &str,
 ) -> String {
     let Some(declared) = method.child_by_field_name("type_parameters") else {
@@ -422,7 +495,7 @@ fn borrowed_type_parameters(
     let signature: String = parameters
         .iter()
         .map(|p| p.type_text.as_str())
-        .chain(std::iter::once(return_type))
+        .chain([return_type, throws])
         .collect::<Vec<_>>()
         .join(" ");
     let words: Vec<&str> =
@@ -604,29 +677,94 @@ fn locals_before(method: &Node<'_>, offset: usize, source: &str) -> Vec<(String,
             out.push((text(&name, source).to_string(), format!("{}[]", text(&ty, source))));
         }
     }
-    for declaration in descendants(*method, "local_variable_declaration") {
-        if declaration.start_byte() >= offset {
-            continue;
+    out.extend(declarations_under(*method, source, Some(offset)));
+    out
+}
+
+/// Every local a subtree DECLARES, in each of the shapes Java has for one — `before` keeps only the
+/// declarations that start before an offset.
+///
+/// One walker, because both questions this file asks are the same question asked of a different
+/// subtree: what is declared before the selection (and so can be passed to it) and what the
+/// selection declares itself (and so must not be). They were two lists built two ways, and the
+/// second knew only about `local_variable_declaration` — so a `catch (Throwable t)` INSIDE the
+/// selection did not count as declaring `t`, and a same-named local from a sibling block earlier in
+/// the method was passed in as a parameter: the call handed over a `t` that is not in scope there,
+/// and the extracted method got a parameter its own `catch` immediately redeclared.
+fn declarations_under(node: Node<'_>, source: &str, before: Option<usize>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    // Before the offset AND still in scope there. A local's scope ends with the block that declares
+    // it, so a name declared in a branch the selection is not in is not the name the selection
+    // reads — and typing the parameter from it is how `uvp` came out `long` in a selection that
+    // reads the `BigInteger uvp` declared after that branch. `long` has no `.add`, so the extracted
+    // method did not compile.
+    let keep = |n: &Node<'_>| {
+        before.is_none_or(|offset| n.start_byte() < offset && scope_covers(*n, offset))
+    };
+    for declaration in descendants(node, "local_variable_declaration") {
+        if keep(&declaration) {
+            out.extend(declared_in(&declaration, source));
         }
-        out.extend(declared_in(&declaration, source));
     }
-    // The three other ways Java declares a local, none of which is a `local_variable_declaration`:
-    // the variable of an enhanced `for`, a `catch` parameter, and a try-with-resources resource.
-    // Each one missed is a name the extracted method reads and cannot see.
-    for kind in ["enhanced_for_statement", "catch_formal_parameter", "resource"] {
-        for node in descendants(*method, kind) {
-            if node.start_byte() >= offset {
+    // The four other ways, none of which is a `local_variable_declaration`: the variable of an
+    // enhanced `for`, a `catch` parameter, a try-with-resources resource, and the binding of a
+    // type pattern (`x instanceof String s`). Each one missed is a name read by code that cannot
+    // see it — or passed in as a parameter that is redeclared on the next line.
+    for kind in ["enhanced_for_statement", "catch_formal_parameter", "resource", "type_pattern"] {
+        for n in descendants(node, kind) {
+            // An enhanced `for` declares its variable for its own body, so the construct IS the
+            // scope; the other three are covered by the walk in `scope_covers`.
+            let in_scope = before.is_none_or(|offset| {
+                n.start_byte() < offset
+                    && if n.kind() == "enhanced_for_statement" {
+                        offset < n.end_byte()
+                    } else {
+                        scope_covers(n, offset)
+                    }
+            });
+            if !in_scope {
                 continue;
             }
-            let ty = node
+            let ty = n
                 .child_by_field_name("type")
-                .or_else(|| descendants(node, "catch_type").first().copied());
-            if let (Some(name), Some(ty)) = (node.child_by_field_name("name"), ty) {
+                .or_else(|| descendants(n, "catch_type").first().copied());
+            if let (Some(name), Some(ty)) = (n.child_by_field_name("name"), ty) {
                 out.push((text(&name, source).to_string(), text(&ty, source).to_string()));
             }
         }
     }
     out
+}
+
+/// Whether the scope of the declaration at `decl` still covers `offset`.
+///
+/// A local is visible from its declaration to the end of the construct that declares it: the block,
+/// or the `for` / `catch` / try-with-resources whose own header it sits in. Two same-named locals in
+/// sibling blocks are both "declared before" a selection that follows them, and only one of them —
+/// at most — can be the one it reads.
+fn scope_covers(decl: Node<'_>, offset: usize) -> bool {
+    let mut node = decl.parent();
+    while let Some(scope) = node {
+        if matches!(
+            scope.kind(),
+            "block"
+                | "constructor_body"
+                | "switch_block"
+                | "switch_block_statement_group"
+                | "catch_clause"
+                | "for_statement"
+                | "enhanced_for_statement"
+                | "try_with_resources_statement"
+                | "lambda_expression"
+                | "if_statement"
+                | "while_statement"
+                | "do_statement"
+        ) {
+            return scope.start_byte() <= offset && offset < scope.end_byte();
+        }
+        node = scope.parent();
+    }
+    true // no enclosing scope found — say yes rather than drop a name that may be needed
 }
 
 /// The parameter list of a callable, or the callable itself when it has none — so a caller can walk
@@ -637,13 +775,10 @@ fn params_of<'t>(method: &Node<'t>) -> Node<'t> {
 
 /// The same, for the statements of the selection.
 fn locals_in(statements: &[Node<'_>], source: &str) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    for statement in statements {
-        for declaration in descendants(*statement, "local_variable_declaration") {
-            out.extend(declared_in(&declaration, source));
-        }
-    }
-    out
+    statements
+        .iter()
+        .flat_map(|statement| declarations_under(*statement, source, None))
+        .collect()
 }
 
 fn declared_in(declaration: &Node<'_>, source: &str) -> Vec<(String, String)> {
@@ -968,6 +1103,54 @@ mod tests {
         );
     }
 
+    /// A multi-catch parameter has no single type to write into a signature.
+    #[test]
+    fn a_multi_catch_parameter_the_selection_reads_is_refused() {
+        let source = "class A {\n    void f() {\n        try {\n            g();\n        } catch (java.io.IOException | InterruptedException e) {\n            log(e);\n            log(e);\n        }\n    }\n    void g() {}\n    void log(Object o) {}\n}";
+        let Some(Err(refusal)) = run(source, "log(e);", "log(e);") else { panic!("expected a refusal") };
+        assert!(refusal.reason.contains("one type"), "{}", refusal.reason);
+    }
+
+    /// A loop variable inside the selection is not the loop variable after it. Reading the two as
+    /// one made the extracted method "return" the inner `i`, and the call site declared an `i` the
+    /// caller already had — `variable i is already defined`, 16 broken extractions in commons-lang.
+    #[test]
+    fn a_name_declared_in_a_nested_scope_is_not_the_one_read_afterwards() {
+        let source = "import java.util.List;\nclass A {\n    int f(List<Integer> acc, int n) {\n        for (int i = 0; i < n; i++) {\n            acc.add(i);\n        }\n        int i = n;\n        return i;\n    }\n}";
+        let Some(Ok(plan)) = run(source, "for (int i", "acc.add(i);\n        }") else {
+            panic!("no plan")
+        };
+        let applied = plan.apply(source);
+        // The `i` the loop declares dies with the loop; the `i` after it is the caller's own, so
+        // nothing comes back and the call site declares nothing.
+        assert!(applied.contains("        doAdd(acc, n);"), "{applied}");
+        assert!(applied.contains("private void doAdd(List<Integer> acc, int n) {"), "{applied}");
+    }
+
+    /// The `throws` clause is part of the signature, and for a very common shape it is the ONLY
+    /// place the type variable appears. `DurationUtils.now` in commons-lang is exactly it, and the
+    /// extracted method came out `private static Instant doNow() throws E` — `cannot find symbol:
+    /// class E`, 27 broken extractions in one file's worth of shape.
+    #[test]
+    fn a_type_parameter_used_only_by_the_throws_clause_moves_too() {
+        let source = "class A {\n    static <E extends Throwable> int now(int n) throws E {\n        int start = n * 2;\n        return start;\n    }\n}";
+        let Some(Ok(plan)) = run(source, "int start", "n * 2;") else { panic!("no plan") };
+        let applied = plan.apply(source);
+        assert!(
+            applied.contains("private static <E extends Throwable> int extracted(int n) throws E {"),
+            "{applied}"
+        );
+    }
+
+    /// And the other direction: a method with no `throws` borrows no type parameter for one.
+    #[test]
+    fn a_type_parameter_the_signature_never_names_is_not_declared() {
+        let source = "class A {\n    static <E extends Throwable> int now(int n) {\n        int start = n * 2;\n        return start;\n    }\n}";
+        let Some(Ok(plan)) = run(source, "int start", "n * 2;") else { panic!("no plan") };
+        let applied = plan.apply(source);
+        assert!(applied.contains("private static int extracted(int n) {"), "{applied}");
+    }
+
     /// A CLASS's type parameter is in scope for every member and must NOT be re-declared — doing so
     /// would shadow it and quietly make the method generic over a different `T`.
     #[test]
@@ -1022,6 +1205,56 @@ mod tests {
         let source = "import java.io.*;\nclass A {\n    void f(Reader r) throws IOException {\n        int c = r.read();\n        take(c);\n    }\n    void take(int x) {}\n}";
         let Some(Ok(plan)) = run(source, "int c = r.read();", "take(c);") else { panic!("no plan") };
         assert!(plan.apply(source).contains("extracted(Reader r) throws IOException {"), "{}", plan.apply(source));
+    }
+
+    /// A `try` INSIDE the selection handles the exception itself: it travels with the body, so the
+    /// extracted method raises nothing on its account. Declaring it anyway made the CALL — in a
+    /// method with no reason to declare anything — stop compiling. Measured on commons-lang.
+    #[test]
+    fn a_try_inside_the_selection_declares_nothing() {
+        let source = "import java.io.*;\nclass A {\n    void f(Reader r) {\n        try {\n            int c = r.read();\n        } catch (IOException e) {\n        }\n    }\n}";
+        let Some(Ok(plan)) = run(source, "try {", "}") else { panic!("no plan") };
+        let out = plan.apply(source);
+        assert!(!out.contains("throws"), "the catch moved with the body:\n{out}");
+    }
+
+    /// A selection in a `catch` block is NOT protected by that catch's own `try` (JLS §14.20.2), so
+    /// its types must not be added to the clause: the call sits where nothing catches them.
+    #[test]
+    fn a_selection_inside_a_catch_does_not_inherit_that_catch() {
+        let source = "import java.io.*;\nclass A {\n    void f(Reader r) {\n        try {\n            r.read();\n        } catch (IOException e) {\n            log(e);\n        }\n    }\n    void log(Exception e) {}\n}";
+        let Some(Ok(plan)) = run(source, "log(e);", "log(e);") else { panic!("no plan") };
+        let out = plan.apply(source);
+        assert!(!out.contains("throws"), "a catch does not protect itself:\n{out}");
+    }
+
+    /// A name the SELECTION declares is not a parameter, whatever an earlier sibling block called
+    /// one of its own locals. Passing it handed the call a variable out of scope there, and gave
+    /// the method a parameter its own `catch` redeclared.
+    #[test]
+    fn a_name_the_selection_declares_is_not_a_parameter() {
+        // Two sibling `catch (RuntimeException t)`: the first puts `t` among the names declared
+        // before the second, and the second declares its own.
+        let source = "class A {\n    void f() {\n        try { g(); } catch (RuntimeException t) { first(t); }\n        try { g(); } catch (RuntimeException t) { second(t); }\n    }\n    void g() {}\n    void first(RuntimeException e) {}\n    void second(RuntimeException e) {}\n}";
+        let Some(Ok(plan)) = run(source, "try { g(); } catch (RuntimeException t) { second(t); }", "second(t); }")
+        else {
+            panic!("no plan")
+        };
+        let out = plan.apply(source);
+        // The signature takes nothing, and the call passes nothing: `t` belongs to the body.
+        assert!(out.contains("private void doG() {"), "`t` is declared inside, not passed:\n{out}");
+        assert!(out.contains("doG();"), "so the call passes nothing:\n{out}");
+    }
+
+    /// Two same-named locals in sibling blocks are both "declared before" a later selection, and at
+    /// most one is in scope there. Typing the parameter from the other one is how a `BigInteger`
+    /// became a `long` — and `long` has no `.add`.
+    #[test]
+    fn a_parameter_is_typed_from_the_declaration_that_is_in_scope() {
+        let source = "class A {\n    void f(boolean b) {\n        if (b) {\n            long v = 1L;\n            use(v);\n        }\n        String v = \"x\";\n        int n = v.length();\n        use(n);\n    }\n    void use(long x) {}\n    void use(int x) {}\n}";
+        let Some(Ok(plan)) = run(source, "int n = v.length();", "use(n);") else { panic!("no plan") };
+        let out = plan.apply(source);
+        assert!(out.contains("extracted(String v)"), "the in-scope `v` is a String:\n{out}");
     }
 
     /// Regression: a checked exception the body raises and a surrounding `try` catches never

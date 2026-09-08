@@ -143,6 +143,8 @@
   import { uiStore as sharedUiStore } from '$lib/stores/ui.svelte';
   import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import BennuFileStructureModal from './BennuFileStructureModal.svelte';
+  import BennuRecentLocationsModal from './BennuRecentLocationsModal.svelte';
+  import { bennuNavStore } from '$lib/stores/bennu/nav-history.svelte';
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { watchRoots, TREE_CHANGED, type TreeChanged } from '$lib/ipc/bennu/tree-watch';
@@ -487,6 +489,18 @@
     }
   });
 
+  // The navigation history belongs to the project too — and unlike the index it has to be
+  // dropped for EVERY kind of project, Cargo and demo included, which is why it is not folded
+  // into the effect above (that one returns early for exactly those). Stepping Back into a path
+  // from the project you just closed would open a file from somewhere else.
+  let lastNavRoot: string | null = null;
+  $effect(() => {
+    const root = projectStore.project?.root ?? null;
+    if (root === lastNavRoot) return;
+    lastNavRoot = root;
+    untrack(() => bennuNavStore.reset());
+  });
+
   // The project's Java language level, for the editor decisions that are only correct with it —
   // today, which postfix templates may emit `var`. Cheap (it reads the build file, which the JDK
   // status resolution has already parsed) and Java-only, like everything that consults it.
@@ -693,6 +707,8 @@
     optimizeImportsInBuffer: () => Promise<void>;
     navBack: () => void;
     navForward: () => void;
+    navLastEdit: () => void;
+    navToPlace: (place: { file: string; line: number; col: number }) => void;
     caretContext: () => { source: string; offset: number } | null;
     applyGeneratedEdits: (
       edits: readonly { start: number; end: number; replacement: string }[],
@@ -739,6 +755,11 @@
   // The picker is hosted here because it is a window-level dialog, and the caret it was opened
   // AT is remembered: the user may click around the list for a while, and the methods have to be
   // written where the class was, not where the caret ended up.
+  // ── recent locations (Ctrl+Shift+E) ─────────────────────────────────────────
+  // The window owns the popup, the editor owns the history and the jump — the same split as the
+  // two modals below.
+  let recentLocationsOpen = $state(false);
+
   // ── safe delete ─────────────────────────────────────────────────────────────
   // The same shape as the override pair below: the window owns the dialog, the editor owns the
   // caret. One pattern for "a caret action that opens a modal", not two.
@@ -1398,6 +1419,17 @@
         when: !!projectStore.project },
       { id: 'gotodef', title: 'Go to declaration', icon: 'target', shortcut: 'Ctrl+B',
         action: () => run(() => editor?.goToDefinition()), when: canNav },
+      // The navigation history, findable by name. Back and Forward are muscle memory once you
+      // know them, and unfindable until you do.
+      { id: 'navback', title: 'Back', icon: 'history', shortcut: 'Ctrl+Alt+Left',
+        action: () => run(() => editor?.navBack()), when: !!projectStore.activeFilePath },
+      { id: 'navforward', title: 'Forward', icon: 'history', shortcut: 'Ctrl+Alt+Right',
+        action: () => run(() => editor?.navForward()), when: !!projectStore.activeFilePath },
+      { id: 'navlastedit', title: 'Last edit location', icon: 'history', shortcut: 'Ctrl+Shift+Backspace',
+        action: () => run(() => editor?.navLastEdit()), when: bennuNavStore.hasEdits },
+      { id: 'recentlocations', title: 'Recent locations…', icon: 'history', shortcut: 'Ctrl+Shift+E',
+        action: () => run(() => (recentLocationsOpen = true)),
+        when: bennuNavStore.recent.length > 0 },
       // Not gated on the ecosystem: the navigator has two engines behind it. A Java project's
       // types and members come from the symbol index; a Cargo project's come from the language
       // server, and the tab reads **Types** there because what it finds are structs, enums and
@@ -2009,6 +2041,13 @@
       if (e.key === 'ArrowLeft')  { e.preventDefault(); editor?.navBack(); return; }
       if (e.key === 'ArrowRight') { e.preventDefault(); editor?.navForward(); return; }
     }
+    // The other two halves of the same history, both IntelliJ's own bindings: back to where you
+    // were TYPING (a different question from where you were reading), and the whole list of
+    // recent places, which is what you reach for instead of pressing Back five times.
+    if (e.ctrlKey && e.shiftKey && !e.altKey) {
+      if (e.key === 'Backspace') { e.preventDefault(); editor?.navLastEdit(); return; }
+      if (e.key === 'E' || e.key === 'e') { e.preventDefault(); recentLocationsOpen = true; return; }
+    }
 
     // Format with whichever engine knows the file: its language server (rustfmt for Rust), or
     // Bennu's own formatter for Java. Alt+Shift+F rather than IntelliJ's Ctrl+Alt+L: Chromium
@@ -2374,6 +2413,13 @@
 
 {#if bennuUiStore.navOpen}
   <BennuGotoModal onClose={() => bennuUiStore.closeNav()} />
+{/if}
+
+{#if recentLocationsOpen}
+  <BennuRecentLocationsModal
+    onClose={() => (recentLocationsOpen = false)}
+    onPick={(place) => editor?.navToPlace(place)}
+  />
 {/if}
 
 {#if bennuUiStore.fileStructureOpen}

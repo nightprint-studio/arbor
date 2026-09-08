@@ -149,7 +149,14 @@ pub fn enum_constants(members: &ClassMembers, enum_binary: &str) -> Vec<String> 
     members
         .fields
         .iter()
-        .filter(|f| f.is_static && f.return_type.binary_name == enum_binary)
+        .filter(|f| {
+            // NOT an array of it. A compiled enum carries `private static final E[] $VALUES`, the
+            // array `values()` copies — and since the array depth moved out of the binary name into
+            // `TypeRef::dims`, `E[]` and `E` are the same string. So `$VALUES` read as a constant,
+            // and a switch that covers every case of a *library* enum was reported as missing one
+            // named `$VALUES`, which cannot be written in a case label at all.
+            f.is_static && !f.return_type.is_array() && f.return_type.binary_name == enum_binary
+        })
         .map(|f| f.name.clone())
         .collect()
 }
@@ -241,12 +248,22 @@ mod tests {
     }
 
     fn enum_cls(binary: &str, constants: &[&str]) -> ClassMembers {
+        // Every enum ALSO carries `private static final E[] $VALUES` once compiled — the array
+        // `values()` copies. It is in the fixture because it is in every real library enum, and
+        // leaving it out is what let a check that mistakes it for a constant pass here.
+        let values = Member::field("$VALUES", TypeRef::simple(binary.to_string()).arrayed(1))
+            .stat()
+            .final_();
         ClassMembers {
             type_params: Vec::new(),
             superclass: Some(TypeRef::simple("java/lang/Enum")),
             interfaces: Vec::new(),
             methods: Vec::new(),
-            fields: constants.iter().map(|c| constant(c, binary)).collect(),
+            fields: constants
+                .iter()
+                .map(|c| constant(c, binary))
+                .chain(std::iter::once(values))
+                .collect(),
             flags: ClassFlags { is_enum: true, is_final: true, ..ClassFlags::default() },
         }
     }
@@ -283,6 +300,26 @@ mod tests {
         .map(|(s, b)| (s.to_string(), b.to_string()))
         .collect();
         MapResolver { members, simple }
+    }
+
+    /// **A compiled enum's `$VALUES` is not one of its constants.**
+    ///
+    /// `values()` returns a copy of a hidden `private static final E[] $VALUES`, and the array
+    /// depth of a type lives beside its name rather than in it — so `E[]` and `E` compare equal,
+    /// and the field read as a constant. A switch covering every real case of a library enum was
+    /// then reported as missing one called `$VALUES`, which is not a name that can be written in a
+    /// case label.
+    #[test]
+    fn the_hidden_values_array_is_not_an_enum_constant() {
+        // A switch EXPRESSION, which is the form that has to be exhaustive.
+        let all = "int x = switch (c) { case RED -> 1; case GREEN -> 2; case BLUE -> 3; }; return x;";
+        assert!(diags(all).is_empty(), "{:?}", diags(all));
+        // And the check still counts the real ones: dropping a case is still reported, and the
+        // message names that case and nothing else.
+        let missing = diags("int x = switch (c) { case RED -> 1; case GREEN -> 2; }; return x;");
+        assert_eq!(missing.len(), 1, "{missing:?}");
+        assert!(missing[0].contains("BLUE"), "{missing:?}");
+        assert!(!missing[0].contains("VALUES"), "{missing:?}");
     }
 
     /// Run the check over a method body and return the messages. `c` is a `Color` field, so

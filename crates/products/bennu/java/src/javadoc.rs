@@ -85,10 +85,25 @@ pub struct FileDocs {
     pub fields: HashMap<String, String>,
     /// Doc by nested-type simple name — `Map.Entry`'s own block, reached from `Map$Entry`.
     pub types: HashMap<String, String>,
+    /// Method names this file declares MORE THAN ONCE — whether or not each one is documented.
+    ///
+    /// The question `method` has to answer is *is this name overloaded*, and [`methods`] cannot
+    /// answer it: a bucket dropped for an arity collision leaves no trace, and an overload with no
+    /// doc block never enters the map at all. Both cases look identical to "one method of that
+    /// name", which is the one shape the fallback is allowed to answer for.
+    ///
+    /// Names, not signatures, and file-wide: two same-named methods in two nested types of one file
+    /// count as overloaded here. That is the same conservatism [`methods`] already has — it is keyed
+    /// by name and arity with no owner — and it errs towards saying nothing.
+    ///
+    /// [`methods`]: FileDocs::methods
+    pub overloaded: HashSet<String>,
 }
 
 impl FileDocs {
     pub fn is_empty(&self) -> bool {
+        // `overloaded` is bookkeeping about what was declared, not documentation: a file of
+        // undocumented overloads fills it and still documents nothing.
         self.type_doc.is_none()
             && self.methods.is_empty()
             && self.fields.is_empty()
@@ -98,11 +113,20 @@ impl FileDocs {
     /// The doc for a method, preferring the overload of `arity` and falling back to the only one of
     /// that name when the caller does not know the count (a hover on a declaration rather than a
     /// call). `None` when the name is overloaded and nothing narrows it.
+    ///
+    /// The fallback is worth having for one shape in particular: a lone **varargs** method, where
+    /// the call site counts three arguments and the declaration has two parameters, so the arity
+    /// asked for is not the arity declared. It must not survive contact with an overloaded name,
+    /// though — answering `get(String)` with the block written above `get()` is not a near miss,
+    /// it is the documentation of a different method.
     pub fn method(&self, name: &str, arity: Option<usize>) -> Option<&String> {
         if let Some(n) = arity {
             if let Some(doc) = self.methods.get(&(name.to_string(), n)) {
                 return Some(doc);
             }
+        }
+        if self.overloaded.contains(name) {
+            return None;
         }
         let mut hits = self.methods.iter().filter(|((n, _), _)| n == name);
         let only = hits.next()?;
@@ -118,6 +142,10 @@ pub fn declarations(source: &str) -> FileDocs {
     // Arity collisions are resolved by dropping both, so the pass records what it has seen rather
     // than overwriting — see `FileDocs::methods`.
     let mut ambiguous: HashSet<(String, usize)> = HashSet::new();
+    // How many times each method name is DECLARED, documented or not — the only way to know that a
+    // name is overloaded, since the map below keeps neither the collisions it drops nor the
+    // declarations that carry no doc block.
+    let mut declared: HashMap<String, usize> = HashMap::new();
     let mut outermost_seen = false;
 
     let mut stack = vec![tree.root_node()];
@@ -126,11 +154,11 @@ pub fn declarations(source: &str) -> FileDocs {
         for ch in n.named_children(&mut c) {
             stack.push(ch);
         }
-        let Some(doc) = leading(source, n.start_byte()) else { continue };
+        let doc = leading(source, n.start_byte());
         match n.kind() {
             "class_declaration" | "interface_declaration" | "enum_declaration"
             | "record_declaration" | "annotation_type_declaration" => {
-                let Some(name) = child_name(&n, bytes) else { continue };
+                let (Some(name), Some(doc)) = (child_name(&n, bytes), doc) else { continue };
                 // Every type is keyed by its simple name, which is what a caller holding a binary
                 // name has. `type_doc` is the convenience on top: the file's own type, for the
                 // caller that asked about `Optional` and does not want to spell it twice. Depth is
@@ -151,6 +179,8 @@ pub fn declarations(source: &str) -> FileDocs {
                     }
                 };
                 let Some(arity) = parameter_count(&n) else { continue };
+                *declared.entry(name.clone()).or_default() += 1;
+                let Some(doc) = doc else { continue };
                 let key = (name, arity);
                 if ambiguous.contains(&key) {
                     continue;
@@ -161,6 +191,7 @@ pub fn declarations(source: &str) -> FileDocs {
                 }
             }
             "field_declaration" => {
+                let Some(doc) = doc else { continue };
                 for name in declarator_names(&n, bytes) {
                     out.fields.entry(name).or_insert_with(|| doc.clone());
                 }
@@ -168,6 +199,11 @@ pub fn declarations(source: &str) -> FileDocs {
             _ => {}
         }
     }
+    out.overloaded = declared
+        .into_iter()
+        .filter(|&(_, count)| count > 1)
+        .map(|(name, _)| name)
+        .collect();
     out
 }
 
@@ -261,6 +297,27 @@ public class Box<T> {
         assert_eq!(docs.method("get", Some(0)).map(String::as_str), Some("Undocumented arity twin."));
         assert_eq!(docs.method("get", Some(1)), None, "two one-argument overloads: no answer");
         assert_eq!(docs.method("get", None), None, "and none without an arity either");
+    }
+
+    /// The other half of "is this name overloaded": an overload with **no doc block** never enters
+    /// the map, so a name with one documented and one undocumented declaration used to look like a
+    /// name with exactly one method — and the hover answered every call of it with the block above
+    /// the other one.
+    #[test]
+    fn an_undocumented_overload_still_makes_the_name_ambiguous() {
+        let docs = declarations("class A { /** One. */ void run() {} void run(int n) {} }");
+        assert_eq!(docs.method("run", Some(0)).map(String::as_str), Some("One."));
+        assert_eq!(docs.method("run", Some(1)), None, "the undocumented overload has no doc");
+        assert_eq!(docs.method("run", None), None, "and the name alone does not pick one");
+    }
+
+    /// The fallback that survives: a LONE varargs method, where the call counts more arguments than
+    /// the declaration has parameters. Nothing else is named `join`, so there is nothing to confuse
+    /// it with.
+    #[test]
+    fn a_lone_method_answers_for_an_arity_it_does_not_declare() {
+        let docs = declarations("class A { /** Joins. */ String join(String sep, Object... parts) { return null; } }");
+        assert_eq!(docs.method("join", Some(4)).map(String::as_str), Some("Joins."));
     }
 
     #[test]

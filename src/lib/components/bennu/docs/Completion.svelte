@@ -178,6 +178,35 @@
   already assigned, plus the <code>@NonNull</code> ones.
 </p>
 <p>
+  <strong><code>@Builder</code></strong> is modelled as the class it really generates: the static
+  <code>builder()</code>, a setter per field returning the builder so the chain stays typed,
+  <code>build()</code>, and — with <code>toBuilder = true</code> — the instance
+  <code>toBuilder()</code> that starts from an existing object. <code>@Singular</code> adds the two
+  methods it is written for: the single-element adder (<code>.tag("a")</code>, named from the field
+  or from <code>@Singular("tag")</code>) and <code>clearTags()</code>. A field marked
+  <code>@Builder.Default</code> is still a constructor parameter — Lombok moves its initializer out
+  of the field, so the constructor does assign it.
+</p>
+<p>
+  <code>@Builder</code> is also read where Lombok allows it to be written: on a
+  <strong>constructor</strong> or a <strong>static factory</strong>, where the builder takes that
+  element's <em>parameters</em> rather than the class's fields, is named after what it builds, and
+  <code>build()</code> returns that.
+</p>
+<p>
+  Two shapes generate members that depend on a type this cannot read while indexing:
+  <code>@Delegate</code>, which copies every public method of a field's type onto the owner, and a
+  <code>@SuperBuilder</code> builder, which carries its parent's setters. Both mark the type as
+  having <strong>more members than the list</strong>, so nothing concludes "no such method" from
+  their absence — the rest of the type is still checked exactly as before.
+</p>
+<p>
+  <code>@Value</code> is honoured as what it stands for: the fields are <code>private final</code>
+  and the class is <code>final</code>, though the source writes none of that.
+  <code>@FieldDefaults(makeFinal = true, level = …)</code> does the same, and the per-field escape
+  hatches — <code>@NonFinal</code>, <code>@PackagePrivate</code> — are honoured.
+</p>
+<p>
   A primitive <code>boolean</code> field whose name <em>already</em> begins with <code>is</code> keeps
   it rather than getting a second one, exactly as Lombok does: <code>isRunning</code> gives
   <code>isRunning()</code> and <code>setRunning(…)</code>, and <code>is_attivo</code> gives

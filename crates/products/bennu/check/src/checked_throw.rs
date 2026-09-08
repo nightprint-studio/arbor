@@ -282,11 +282,6 @@ pub(crate) fn caught_by_enclosing_try(
     let mut child = throw;
     let mut cur = throw.parent();
     while let Some(n) = cur {
-        // Stop at the callable boundary — a try outside the callable can't catch a throw inside it via
-        // normal flow (and we've already established `callable` is the nearest callable).
-        if n.id() == callable.id() {
-            return false;
-        }
         if matches!(n.kind(), "try_statement" | "try_with_resources_statement") {
             // Only protected if `child` is the try's BLOCK (field `body`), not a catch/finally clause.
             if is_try_body(n, child) && try_catches(n, bytes, symbols, resolver, thrown) {
@@ -294,6 +289,17 @@ pub(crate) fn caught_by_enclosing_try(
             }
             // If we entered via a catch/finally of this try, this try does NOT protect the throw; keep
             // walking outward (an OUTER try still might catch it).
+        }
+        // Then stop at the boundary — a try outside the callable can't catch a throw inside it via
+        // normal flow (and we've already established `callable` is the nearest callable).
+        //
+        // AFTER the test, not before it: the boundary is a *method* for the unhandled-throw check,
+        // but for `checked_exceptions_in` it is the smallest node covering the range — which, when
+        // a whole `try { … } catch (…) { … }` is the range, IS that try. Returning at the boundary
+        // first never looked at it, so extracting a try/catch produced a method declaring the very
+        // exception its own catch handles, and the call could not compile where the original did.
+        if n.id() == callable.id() {
+            return false;
         }
         child = n;
         cur = n.parent();

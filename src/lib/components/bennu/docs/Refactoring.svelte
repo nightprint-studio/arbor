@@ -49,10 +49,14 @@
     <div class="fc-title">Extract method</div>
     <div class="fc-desc">
       The selected statements become a method and a call. The locals it reads become parameters,
-      typed as they were declared; a local it produces that the code afterwards reads becomes the
-      return value. A <code>static</code> method extracts a <code>static</code> one, a generic one
-      carries its type parameters with their bounds, the checked exceptions the moved body can raise
-      are declared on it, and the moved body is re-indented rather than pasted.
+      typed as they were declared; a local it produces that <em>outlives</em> the selection and the
+      code afterwards reads becomes the return value — a name declared inside a loop or a branch of
+      the selection dies with it, whatever the code after happens to call its own variables. A
+      <code>static</code> method extracts a <code>static</code> one, a generic one carries the type
+      parameters its new signature needs with their bounds — the <code>throws</code> clause counts —
+      the checked exceptions the moved body can raise are declared on it, and the moved body is
+      re-indented rather than pasted. A name caught as <code>A | B</code> has no single type to write
+      into a signature, so a selection that reads one is refused instead.
     </div>
   </div>
   <div class="fc-item">

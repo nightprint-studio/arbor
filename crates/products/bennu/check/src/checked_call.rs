@@ -115,8 +115,19 @@ pub fn checked_exceptions_in(
     // The smallest node the range covers: the boundary a `try` has to be inside of to count as
     // handling something on the moved body's behalf.
     let range_root = root.descendant_for_byte_range(start, end).unwrap_or(root);
+    // The type parameters the enclosing TYPES declare — in scope for every member, so a method
+    // extracted beside this one can still name them.
+    let own_type_vars = enclosing_type_parameters(range_root, bytes);
     for n in crate::prelude::collect_nodes(root) {
         if n.start_byte() < start || n.end_byte() > end {
+            continue;
+        }
+        // A call inside a lambda or a class body that the range CONTAINS raises nothing on the
+        // range's behalf: that body runs when someone invokes it, not when the moved statements do.
+        // `run(() -> consumer.accept(o))` is the shape — `accept` declares `throws T` and the
+        // method around it declares nothing, because the `T` never reaches it. Reading through the
+        // arrow put `throws T` on the extracted method and left the call site unable to compile.
+        if crosses_a_body_boundary(n, range_root) {
             continue;
         }
         let raised: Vec<String> = match n.kind() {
@@ -166,7 +177,27 @@ pub fn checked_exceptions_in(
             // calling the answer complete is how `throws E` got replaced by a clause without it.
             // Not knowing costs the set its authority; it does not get to cost the clause a name.
             if !hierarchy_fully_known(resolver, &binary) {
-                complete = false;
+                // Unless it is one of the ENCLOSING TYPE's own type parameters. `void accept(byte v)
+                // throws E` on a `FailableConsumer<E>` is the shape half of commons-lang's
+                // `function` package is made of, and there the `E` in the callee's clause and the
+                // `E` in scope here are the same variable — so the extracted method can declare it,
+                // and needs to: without it the moved `accept(t)` has nowhere to throw.
+                //
+                // The receiver is what makes that true, and it is not a detail — which is why the
+                // name arrives here already re-read through it (`throws_of::through_receiver`). A
+                // `closer.accept(get())` on a `FailableConsumer<? super T, ? extends Exception>`
+                // comes back as a wildcard capture rather than as the class's own `E`, so the test
+                // below fails and the set abstains, which is the honest answer: that exception has
+                // no name that can be written down here.
+                //
+                // A `try` inside the range is the other thing that could make declaring it wrong,
+                // and whether a `catch` handles an unresolvable `E` is not a question this can
+                // answer — so a protected call abstains instead of guessing.
+                if own_type_vars.contains(&binary) && !inside_a_try_within(n, range_root) {
+                    out.push(binary);
+                } else {
+                    complete = false;
+                }
                 continue;
             }
             // Unchecked needs no declaring, so leaving it out takes nothing away.
@@ -186,6 +217,94 @@ pub fn checked_exceptions_in(
     }
     out.sort();
     CheckedExceptions { kinds: out, complete }
+}
+
+/// The names written in the `<…>` of every class / interface / record the node sits in.
+///
+/// Types only, and deliberately: a class's type parameter is in scope for every member, so a
+/// sibling method extracted from this one can name it without declaring anything. A METHOD's own
+/// parameter would have to travel with the extraction, and the clause that needs it is the one the
+/// method already wrote — which the guess carries anyway.
+///
+/// Not "is this identifier shaped like a type variable": a single capital letter is a legal class
+/// name, and a `throws T` naming a class the index simply does not carry must keep costing the set
+/// its authority. Only a name the file itself declares as a type parameter is one we can promise
+/// still resolves after the move.
+fn enclosing_type_parameters(node: Node, bytes: &[u8]) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    let mut cur = Some(node);
+    while let Some(n) = cur {
+        let is_type = matches!(
+            n.kind(),
+            "class_declaration" | "interface_declaration" | "record_declaration" | "enum_declaration"
+        );
+        if is_type {
+            if let Some(params) = n.child_by_field_name("type_parameters") {
+                let mut cursor = params.walk();
+                for p in params.named_children(&mut cursor) {
+                    if p.kind() != "type_parameter" {
+                        continue;
+                    }
+                    if let Some(name) = p.named_child(0).and_then(|x| x.utf8_text(bytes).ok()) {
+                        out.insert(name.to_string());
+                    }
+                }
+            }
+        }
+        cur = n.parent();
+    }
+    out
+}
+
+/// Whether reaching `node` from `range_root` passes through a body of its own — a lambda, or the
+/// body of a class or method declared inside the range. What such a body throws is that body's
+/// business; the range only *creates* it.
+fn crosses_a_body_boundary(node: Node, range_root: Node) -> bool {
+    // From the node itself, so that a node which IS the range root crosses nothing — the walk used
+    // to start at the parent and then climb straight past the range into whatever body held it,
+    // which silenced every selection that was exactly one call.
+    let mut cur = Some(node);
+    while let Some(n) = cur {
+        if n.id() == range_root.id() {
+            return false;
+        }
+        if n.id() != node.id()
+            && matches!(
+                n.kind(),
+                "lambda_expression"
+                    | "class_body"
+                    | "interface_body"
+                    | "enum_body"
+                    | "annotation_type_body"
+                    | "method_declaration"
+                    | "constructor_declaration"
+            )
+        {
+            return true;
+        }
+        cur = n.parent();
+    }
+    false
+}
+
+/// Whether a `try` **inside the range** protects this call — entered through its body, not through
+/// one of its `catch`/`finally` clauses (JLS §14.20.2).
+fn inside_a_try_within(call: Node, range_root: Node) -> bool {
+    let mut child = call;
+    let mut cur = call.parent();
+    while let Some(n) = cur {
+        if matches!(n.kind(), "try_statement" | "try_with_resources_statement")
+            && n.child_by_field_name("body").is_some_and(|b| b.id() == child.id())
+        {
+            return true;
+        }
+        if n.id() == range_root.id() {
+            return false;
+        }
+        child = n;
+        cur = n.parent();
+    }
+    false
 }
 
 /// What a range raises, and whether the answer is the whole of it.
@@ -496,6 +615,33 @@ mod tests {
 
     fn diags(src: &str) -> Vec<String> {
         checked_call_errors(src, &resolver()).into_iter().map(|d| d.message).collect()
+    }
+
+    fn raised(src: &str, from: &str, to: &str) -> CheckedExceptions {
+        let start = src.find(from).unwrap();
+        let end = src.find(to).unwrap() + to.len();
+        checked_exceptions_in(src, start, end, &resolver())
+    }
+
+    /// A call inside a lambda the range CONTAINS raises nothing on the range's behalf: that body
+    /// runs when someone invokes it. Read through the arrow, `register(() -> f.readAllBytes())`
+    /// put `throws IOException` on an extracted method whose call site could not compile.
+    #[test]
+    fn a_call_inside_a_lambda_the_range_contains_raises_nothing() {
+        let src = "class C { void m(Files f) { register(() -> f.readAllBytes()); } \
+                   void register(Runnable r) {} }";
+        let got = raised(&src, "register(", "readAllBytes());");
+        assert!(got.kinds.is_empty(), "{got:?}");
+    }
+
+    /// And the range INSIDE a lambda still answers for itself — the extracted method is called from
+    /// in there, so what it raises is its own.
+    #[test]
+    fn a_range_inside_a_lambda_still_raises_what_it_calls() {
+        let src = "class C { void m(Files f) { register(() -> f.readAllBytes()); } \
+                   void register(Runnable r) {} }";
+        let got = raised(&src, "f.readAllBytes()", "f.readAllBytes()");
+        assert_eq!(got.kinds, vec!["java/io/IOException".to_string()], "{got:?}");
     }
 
     // ── positives ─────────────────────────────────────────────────────────────────

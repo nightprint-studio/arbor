@@ -266,6 +266,15 @@ impl Plan {
 /// that can never reach it, and the call site stops compiling. Measured: `throws E, Exception` on a
 /// method extracted from one that declares only `throws E`.
 ///
+/// Adding was tried again, deliberately, because the bound has a hole: a selection inside a
+/// **lambda** takes its budget for checked exceptions from the functional interface it implements
+/// (`void accept(byte) throws E`), which the guess — text, no resolver — cannot see. Twenty-five
+/// clauses on commons-lang are missing for that reason. Adding the proven names back cost
+/// **seventy** other extractions, all the same way: `E` is usually a type parameter of the METHOD
+/// the body came from, so a new method declaring `throws E` names something that does not exist at
+/// its own signature. 124 broken became 176. The hole is real and the fix for it is the type
+/// parameter, not the clause.
+///
 /// Narrowing is the useful direction — dropping what the body does not actually raise — and it is
 /// safe only against a complete answer. An incomplete one is missing exceptions, and a clause that
 /// lost one is an extracted method that does not compile. Hence the flag rather than a merge.

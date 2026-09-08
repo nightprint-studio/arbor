@@ -40,6 +40,30 @@
   setting: every candidate entry has to be decompressed to be read, so it is a cost you take for
   the question you are asking now.
 </p>
+<h2>Back, Forward and the places you have been</h2>
+<p>
+  <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>←</kbd> goes <strong>back</strong> to where you jumped
+  from, <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>→</kbd> forward again. A stop is recorded when an
+  <strong>action</strong> navigates — a go-to, a usage, a structure or find hit, a diagnostic, a
+  switch to another tab — and never when the caret merely moves: arrow keys, a click, page-down and
+  scrolling are reading, not navigation, so the history stays a list of places you chose to go to.
+  Each jump remembers <strong>both ends</strong>, so the first Back lands exactly where you left,
+  down to the column, and navigating after a Back starts a new branch the way a browser does.
+</p>
+<p>
+  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Backspace</kbd> goes back to where you were
+  <strong>typing</strong> — a separate history, because "where was I reading" and "where was I
+  editing" are different questions. Press it again to walk further back through the session's edits.
+</p>
+<p>
+  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd> opens <strong>Recent locations</strong>: the same
+  history as a list, most recent first, each row showing the line you were on. Type to filter by
+  file name or by the text of the line, ↑/↓ to move, <kbd>Enter</kbd> to go. <strong>Edited
+  only</strong> keeps the places you changed — which is how you find the file you were working on
+  before the interruption. It is what you reach for instead of pressing Back five times and reading
+  four screens on the way.
+</p>
+
 <h2>Go to line</h2>
 <p>
   <kbd>Ctrl</kbd> + <kbd>G</kbd> opens the go-to-line box — type <code>42</code> or

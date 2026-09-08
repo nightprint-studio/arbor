@@ -28,7 +28,7 @@ use tree_sitter::Node;
 
 use crate::nodes::{is_primitive, is_type_var, simple_name};
 
-use crate::method_sig::method_param_binaries;
+use crate::method_sig::{member_param_binaries, method_param_binaries, written_binary};
 use crate::nodes::{has_keyword, text};
 use crate::resolve::type_binary_at;
 use crate::walk::{for_each_supertype, hierarchy_fully_known, reaches};
@@ -81,11 +81,11 @@ fn check_type(
                     && m.name != "<init>"
                     && m.name != "<clinit>";
                 if overridable {
-                    let params = m.params.iter().map(|p| p.binary_name.clone()).collect();
+                    let params = member_param_binaries(m);
                     inherited
                         .entry(m.name.clone())
                         .or_default()
-                        .push((params, m.return_type.binary_name.clone()));
+                        .push((params, written_binary(&m.return_type)));
                 }
             }
         });

@@ -219,6 +219,14 @@ impl Project {
         self.completion_resolver.is_project_type(binary)
     }
 
+    /// The members the index holds for `binary` — what every check reads. A test that is about
+    /// what the index RECORDS (a flag, a synthesized member) asserts here rather than through a
+    /// diagnostic, which would only say that some check happened to look.
+    pub fn members(&self, binary: &str) -> Option<std::sync::Arc<bennu_java::prelude::ClassMembers>> {
+        use bennu_java::prelude::TypeResolver;
+        self.completion_resolver.members_of(binary)
+    }
+
     /// The source text of `file` (for computing expected offsets / lines).
     pub fn source(&self, file: &str) -> &str {
         self.sources

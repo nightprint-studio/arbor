@@ -571,6 +571,7 @@ fn convert_flags(f: &bennu_classpath::prelude::ClassFlags) -> JClassFlags {
         is_annotation: f.is_annotation,
         is_record: f.is_record,
         is_sealed: f.is_sealed,
+        has_hidden_members: f.has_hidden_members,
     }
 }
 

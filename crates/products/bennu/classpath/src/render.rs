@@ -243,4 +243,36 @@ mod tests {
         assert_eq!(field_type("TT;").unwrap(), "T");
         assert_eq!(field_type("I").unwrap(), "int");
     }
+
+    /// A field with no `Signature` attribute carries its DESCRIPTOR, and a primitive field never
+    /// has that attribute — so `I` is the ordinary case, not an exotic one. `is_bytecode_field`
+    /// admitted the lone base letter and the parser behind it did not, which is how a `long` field
+    /// came out as `J` on the line that is supposed to read as Java.
+    ///
+    /// The array beside it is the same shape one level down, and it always worked — an array
+    /// descriptor descends through the branch that takes base types. That disagreement between two
+    /// halves of one grammar is what this pins.
+    #[test]
+    fn every_primitive_descriptor_reads_and_so_does_its_array() {
+        for (descriptor, java) in [
+            ("I", "int"), ("J", "long"), ("S", "short"), ("B", "byte"),
+            ("C", "char"), ("Z", "boolean"), ("F", "float"), ("D", "double"),
+        ] {
+            assert_eq!(field_type(descriptor).as_deref(), Some(java), "descriptor {descriptor}");
+            assert_eq!(
+                field_type(&format!("[{descriptor}")).as_deref(),
+                Some(format!("{java}[]").as_str()),
+                "array of {descriptor}",
+            );
+        }
+    }
+
+    /// And the widening stops at the grammar: a lone letter that is NOT a base type is not a field
+    /// type, and neither is an unterminated class descriptor.
+    #[test]
+    fn a_letter_that_is_not_a_base_type_is_not_a_field_type() {
+        assert_eq!(field_type("Q"), None);
+        assert_eq!(field_type("Ljava/lang/String"), None);
+        assert_eq!(field_type("names"), None);
+    }
 }

@@ -34,7 +34,7 @@ use crate::nodes::{child_of_kind, simple_name};
 
 use crate::checked_throw::is_checked;
 use crate::resolve::type_binary;
-use crate::method_sig::method_param_binaries;
+use crate::method_sig::{member_param_binaries, method_param_binaries};
 use crate::nodes::{text};
 use crate::walk::{for_each_supertype, hierarchy_fully_known, reaches};
 
@@ -131,7 +131,7 @@ fn check_method_widening(
             if !overridable || sm.name != name {
                 continue;
             }
-            let sm_params: Vec<String> = sm.params.iter().map(|p| p.binary_name.clone()).collect();
+            let sm_params = member_param_binaries(sm);
             if sm_params == params {
                 matches.push(sm.throws.clone());
             }

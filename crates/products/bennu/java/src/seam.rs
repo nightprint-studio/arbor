@@ -245,6 +245,21 @@ pub struct ClassFlags {
     pub is_annotation: bool,
     pub is_record: bool,
     pub is_sealed: bool,
+    /// Whether this type has members that exist at compile time but are NOT in this list — so
+    /// "no such member" cannot be concluded from its absence here.
+    ///
+    /// Two Lombok shapes set it, and both are cases where the generated members depend on a type
+    /// this index cannot read while it is being built: `@Delegate` on a field copies every public
+    /// method of the field's type onto the owner, and a `@SuperBuilder` builder carries the setters
+    /// of its parent's builder. Reporting the difference would be reporting correct code — and
+    /// modelling half of it is worse than modelling none, because the half that IS modelled makes
+    /// the rest look deliberate.
+    ///
+    /// Consulted by every check that concludes a member does not exist. `#[serde(default)]` so an
+    /// index persisted before this field still loads (as `false` — the honest default for a type
+    /// that was written before anything could set it).
+    #[serde(default)]
+    pub has_hidden_members: bool,
 }
 
 /// The resolved members of a class, plus its supertype links so the walk can pick up

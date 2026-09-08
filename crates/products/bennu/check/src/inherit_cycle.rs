@@ -130,15 +130,21 @@ fn check_overrides(
 ) {
     let Some(body) = n.child_by_field_name("body") else { return };
 
-    // Direct supertypes (extends + implements) as binary names. An unresolvable supertype means the
-    // hierarchy is incomplete → we can't assert "overrides nothing" → skip the WHOLE type.
-    let mut supers: Vec<String> = Vec::new();
-    for text in direct_supertype_texts(n, bytes) {
-        match type_binary(&text, symbols, resolver) {
-            Some(bin) => supers.push(bin),
-            None => return, // unresolvable supertype → bail (conservative)
-        }
-    }
+    // Direct supertypes (extends + implements) as binary names, read in the scope a HEADER is read
+    // in — the shared reading, not a sixth copy of it.
+    //
+    // This check used to resolve them file-at-large, and that is not where a header's names live: a
+    // member type's scope is the *body* of its class (JLS §6.3). `class HashCodeBuilder implements
+    // Builder<Integer>`, in a class that also declares a nested `Builder`, names the same-package
+    // INTERFACE — which is why javac compiles commons-lang. Bound to the nested class instead, the
+    // interface's `build()` was in no supertype at all, and four classes that implement it were
+    // reported for overriding nothing.
+    //
+    // `None` — one supertype did not resolve — means the hierarchy is incomplete, so we cannot
+    // assert "overrides nothing" and skip the WHOLE type.
+    let Some(supers) = crate::supertypes::binaries_complete(n, bytes, symbols, resolver) else {
+        return;
+    };
     if supers.is_empty() {
         return; // no explicit supertype (only Object) → an @Override can only mean an Object method;
                 // we don't have Object's method table guaranteed, so nothing to assert here safely.
@@ -209,52 +215,6 @@ fn has_override_annotation(md: Node, bytes: &[u8]) -> bool {
 }
 
 // ── CST helpers ──────────────────────────────────────────────────────────────
-
-/// The `(text)` of every direct supertype of a class/enum/record/interface: the `extends` type(s)
-/// plus the `implements` types. For an interface the `extends_interfaces` list folds in here too.
-fn direct_supertype_texts(n: Node, bytes: &[u8]) -> Vec<String> {
-    let mut out = Vec::new();
-    // `extends S` on a class: `superclass` wrapper → the type node under it.
-    if let Some(w) = n.child_by_field_name("superclass") {
-        collect_type_texts(w, bytes, &mut out);
-    }
-    // `implements I, J` on a class/enum/record: `interfaces` wrapper → `type_list`.
-    if let Some(w) = n.child_by_field_name("interfaces") {
-        collect_type_texts(w, bytes, &mut out);
-    }
-    // `extends I, J` on an interface: an `extends_interfaces` child (no field name).
-    let mut c = n.walk();
-    for ch in n.named_children(&mut c) {
-        if ch.kind() == "extends_interfaces" {
-            collect_type_texts(ch, bytes, &mut out);
-        }
-    }
-    out
-}
-
-/// Collect the text of every type node under `wrapper` (recurses through `type_list` / wrappers).
-fn collect_type_texts(wrapper: Node, bytes: &[u8], out: &mut Vec<String>) {
-    let mut stack = vec![wrapper];
-    while let Some(node) = stack.pop() {
-        if is_class_type_node(node.kind()) {
-            if let Ok(t) = node.utf8_text(bytes) {
-                out.push(t.to_string());
-            }
-            continue; // a generic type's args are children — don't descend into them as supertypes
-        }
-        let mut c = node.walk();
-        for ch in node.named_children(&mut c) {
-            stack.push(ch);
-        }
-    }
-}
-
-/// Whether a kind is a REFERENCE type as written — the only thing an `extends`, `implements` or
-/// `throws` list can hold. Primitives and arrays are excluded on purpose; see
-/// `erasure_clash::is_written_type_node` for the predicate that includes them.
-fn is_class_type_node(kind: &str) -> bool {
-    matches!(kind, "type_identifier" | "scoped_type_identifier" | "generic_type")
-}
 
 fn with_parse(source: &str, f: impl FnOnce(Node) -> Vec<Diagnostic>) -> Vec<Diagnostic> {
     match bennu_java::prelude::parse_java(source) {

@@ -192,6 +192,24 @@ fn check_missing_impls(
     for m in &td.methods {
         provided.insert(m.name.clone());
     }
+    // And the members nobody wrote. A Lombok accessor exists only in the INDEX — `@Getter` with
+    // `@Accessors(fluent = true)` on a field `alias` is the method `alias()`, and the tree above
+    // has no trace of it — so a class implementing an interface through its generated accessors was
+    // reported for not implementing methods it does implement.
+    //
+    // Asked by the class's own fully-qualified name rather than by simple name: that is what keeps
+    // the two `EntrySet`s of one file apart, which is the reason this reads the tree in the first
+    // place.
+    if let Some(cm) = resolver.members_of(&td.fqn.replace('.', "/")) {
+        for m in &cm.methods {
+            provided.insert(m.name.clone());
+        }
+    } else if generates_methods(n, bytes) {
+        // The index cannot answer for this class — a buffer that has not been indexed yet — and it
+        // carries an annotation that invents methods. What it provides is not knowable here, and
+        // this check's rule throughout is that an incomplete picture says nothing.
+        return;
+    }
 
     let name_node = n.child_by_field_name("name");
     let cls = class_name(n, bytes).unwrap_or("this class");
@@ -203,6 +221,43 @@ fn check_missing_impls(
             format!("`{cls}` is not abstract and does not implement abstract method `{m}()`"),
         ));
     }
+}
+
+/// Whether `decl` carries a Lombok annotation that invents METHODS — the ones that can satisfy an
+/// interface. Constructors and `log` fields cannot, so they are deliberately not in this set: a
+/// `@Slf4j` class is checked like any other.
+fn generates_methods(decl: Node, bytes: &[u8]) -> bool {
+    const METHOD_GENERATING: &[&str] = &[
+        "Data", "Value", "Getter", "Setter", "With", "Accessors", "Builder", "SuperBuilder",
+    ];
+    let imports = crate::lombok::imports_from_root(root_of(decl), bytes);
+    if crate::lombok::has_lombok_annotation(decl, bytes, &imports, |a| {
+        METHOD_GENERATING.contains(&a.simple)
+    }) {
+        return true;
+    }
+    // Field-level `@Getter` / `@Setter`, which is how a single accessor is asked for.
+    let Some(body) = decl.child_by_field_name("body") else { return false };
+    let mut c = body.walk();
+    for m in body.named_children(&mut c) {
+        if m.kind() == "field_declaration"
+            && crate::lombok::has_lombok_annotation(m, bytes, &imports, |a| {
+                METHOD_GENERATING.contains(&a.simple)
+            })
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// The compilation unit `decl` lives in — where the imports are.
+fn root_of(decl: Node) -> Node {
+    let mut n = decl;
+    while let Some(p) = n.parent() {
+        n = p;
+    }
+    n
 }
 
 /// Whether `m` is an abstract method a concrete subclass must implement: an `abstract` class method,
@@ -346,6 +401,17 @@ mod tests {
             "com/acme/R".to_string(),
             cm(flags(|f| { f.is_record = true; f.is_final = true; }), Some("java/lang/Record"), &[], vec![]),
         );
+        // A class whose ONLY implementation of `Task.run` is a Lombok accessor: nothing in its
+        // source declares `run`, and the index has it because `@Getter` on a field named `run`
+        // (with `@Accessors(fluent = true)`) generates exactly that.
+        members.insert(
+            "com/acme/Generated".to_string(),
+            cm(ClassFlags::default(), Some("java/lang/Object"), &["com/acme/Task"], {
+                let mut m = abstract_method("run");
+                m.is_abstract = false;
+                vec![m]
+            }),
+        );
         let simple = [
             ("Foo", "com/acme/Foo"),
             ("Task", "com/acme/Task"),
@@ -368,6 +434,43 @@ mod tests {
     }
 
     // ── extends / implements legality ──────────────────────────────────────────
+
+    /// **A class that implements its interface through a Lombok-generated accessor.**
+    ///
+    /// `@Accessors(fluent = true)` names the getter after the field, so `@Getter` on `run` IS the
+    /// implementation of `Task.run()` — and nothing in the source says so. Reading only the tree,
+    /// the class looked like it implemented nothing, and a correct class was reported for a method
+    /// it does provide. The index knows, because that is where a generated member lives.
+    #[test]
+    fn an_interface_implemented_by_a_lombok_accessor_is_not_reported() {
+        let src = "package com.acme;\n\
+                   import lombok.Getter;\n\
+                   import lombok.experimental.Accessors;\n\
+                   @Getter @Accessors(fluent = true)\n\
+                   class Generated implements Task { private String run; }";
+        assert!(abs(src).is_empty(), "{:?}", abs(src));
+    }
+
+    /// And when the index cannot answer — a buffer nobody has indexed yet — a class that generates
+    /// methods says nothing rather than guessing, which is this check's rule everywhere else.
+    #[test]
+    fn a_lombok_class_the_index_has_never_seen_is_left_alone() {
+        let src = "package com.acme;\n\
+                   import lombok.Getter;\n\
+                   import lombok.experimental.Accessors;\n\
+                   @Getter @Accessors(fluent = true)\n\
+                   class NotIndexedYet implements Task { private String run; }";
+        assert!(abs(src).is_empty(), "{:?}", abs(src));
+    }
+
+    /// The gate is Lombok, not "any class we cannot look up": a plain class that really does not
+    /// implement the interface is still reported.
+    #[test]
+    fn a_plain_class_that_implements_nothing_is_still_reported() {
+        let d = abs("package com.acme;\nclass Plain implements Task { }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("run()"), "{d:?}");
+    }
 
     #[test]
     fn extends_final_is_flagged() {

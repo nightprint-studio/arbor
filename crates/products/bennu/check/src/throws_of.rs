@@ -108,23 +108,30 @@ fn thrown_by_invocation<'t>(
     // `arguments` take, through the same guards. This used to give up here, "aligned with
     // members/arity" as they were at the time; they moved on and this did not, so a method that
     // called its own `throws IOException` helper looked exception-free to everything downstream.
-    let receiver = match n.child_by_field_name("object") {
+    // The receiver WITH its type arguments, not just its binary name: a `throws E` is written in the
+    // callee's own alphabet, and `after.accept(t)` on a `FBC<E>` means *our* `E` only because the
+    // receiver says so. Two receivers of the same class can disagree — `FailableConsumer<? super T,
+    // ? extends Exception>` puts a wildcard capture where `FBC<E>` puts a name — and reading the
+    // letter without the arguments cannot tell them apart.
+    let receiver_type = match n.child_by_field_name("object") {
         Some(obj) => {
             // SKIP: receiver type not inferable, or the empty/unknown type → we can't gather a
             // trustworthy candidate set (an un-indexed type might overload the method differently).
             let ty = infer_node_type_cached(root, source, symbols, &obj, resolver, cache);
             match ty {
-                Some(ty) if !ty.binary_name.is_empty() => ty.binary_name,
+                Some(ty) if !ty.binary_name.is_empty() => ty,
                 _ => return Thrown::Unknown,
             }
         }
-        None => match bare.filter(|b| b.judgeable(n, bytes).is_some()) {
-            Some(b) => b.top_binary.clone(),
+        None => match bare.filter(|b| b.judgeable_across_lambdas(n, bytes).is_some()) {
+            // No arguments: inside its own body a type's parameters stand for themselves.
+            Some(b) => bennu_java::prelude::TypeRef::simple(b.top_binary.clone()),
             // Not judgeable — a nested type, a static import, a name the guards decline — so the
             // honest answer is still "unknown", exactly as before.
             None => return Thrown::Unknown,
         },
     };
+    let receiver = receiver_type.binary_name.clone();
     // The overload set for this name across the receiver's hierarchy (memoized walk shared with the
     // member/arity/argument checks). `complete` is the hierarchy-fully-known gate.
     let res = cache.resolve_methods(resolver, &receiver, method);
@@ -140,7 +147,12 @@ fn thrown_by_invocation<'t>(
         return Thrown::Unknown;
     }
 
-    let thrown = bounds(&res.candidates.iter().collect::<Vec<_>>());
+    let thrown = through_receiver(
+        bounds(&res.candidates.iter().collect::<Vec<_>>()),
+        &receiver_type,
+        method,
+        resolver,
+    );
     // `x.clone()` reaching `Object.clone()` is not evidence of a checked exception.
     //
     // `Object.clone()` is `protected`, so a call on a plain receiver only compiles when the receiver
@@ -210,6 +222,52 @@ fn thrown_by_creation<'t>(
     Thrown::Known(ty_node, thrown)
 }
 
+
+/// The two bounds re-read in the CALLER's alphabet: every type variable the callee's clause names is
+/// substituted through the arguments the receiver was written with.
+///
+/// `void accept(byte v) throws E` reached through a `FBC<E>` still throws our `E`; reached through a
+/// `FailableConsumer<? super T, ? extends Exception>` it throws a wildcard capture, which has no
+/// name to write and comes back unresolvable — which is the honest answer, and the one that keeps a
+/// refactoring from putting a plausible wrong letter on a signature.
+///
+/// A variable with no argument to stand for — a bare call inside the declaring type's own body, a
+/// raw receiver — is left alone: inside its own body a type parameter IS its own name.
+fn through_receiver(
+    thrown: Throws,
+    receiver: &bennu_java::prelude::TypeRef,
+    method: &str,
+    resolver: &dyn TypeResolver,
+) -> Throws {
+    if receiver.type_args.is_empty() {
+        return thrown;
+    }
+    let Some(declared_on) = bennu_java::prelude::declaring_method(resolver, receiver, method) else {
+        return thrown;
+    };
+    if declared_on.type_args.is_empty() {
+        return thrown;
+    }
+    let Some(members) = resolver.members_of(&declared_on.binary_name) else { return thrown };
+    let params = members.type_params.clone();
+    if params.is_empty() {
+        return thrown;
+    }
+    let map = |names: Vec<String>| -> Vec<String> {
+        names
+            .into_iter()
+            .map(|binary| {
+                bennu_java::prelude::substitute(
+                    &bennu_java::prelude::TypeRef::simple(binary),
+                    &params,
+                    &declared_on.type_args,
+                )
+                .binary_name
+            })
+            .collect()
+    };
+    Throws { definitely: map(thrown.definitely), possibly: map(thrown.possibly) }
+}
 
 /// Both bounds over the candidate overloads.
 ///

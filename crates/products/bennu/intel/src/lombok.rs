@@ -130,7 +130,7 @@ pub fn synthesize(
     // that follows (`.name(x).build()`) resolves against an unknown type, which the member checks
     // treat as "might exist" → never a false "cannot resolve method". So the whole builder chain stops
     // erroring without us modelling a synthetic builder class.
-    if has_lombok(&td.annotations, imports, &["Builder", "SuperBuilder"])
+    if builder_site(td, imports).is_some()
         && !existing_methods.contains(&("builder".to_string(), 0))
     {
         methods.push(Member {
@@ -139,11 +139,7 @@ pub fn synthesize(
             // The REAL builder type, which is now modelled (`synthesize_nested_types`) — and a
             // binary name with slashes, like every other. `{owner}$Builder` matched no type at all,
             // so the chain after `builder()` resolved against nothing.
-            return_type: TypeRef::simple(
-                builder_type_name(td, imports)
-                    .map(|n| format!("{owner}/{n}"))
-                    .unwrap_or_else(|| format!("{owner}/Builder")),
-            ),
+            return_type: TypeRef::simple(builder_binary(td, imports, &owner)),
             params: Vec::new(),
             is_static: true,
             is_abstract: false,
@@ -151,6 +147,28 @@ pub fn synthesize(
             is_final: false,
             visibility: Visibility::Public,
             raw_signature: format!("{}Builder builder()", td.name),
+            throws: Vec::new(),
+            annotations: Vec::new(),
+        });
+    }
+
+    // `@Builder(toBuilder = true)` adds an INSTANCE `toBuilder()` — a builder pre-filled from this
+    // object, which is how a value type is "modified". Same return type as the static factory, so
+    // the chain that follows it is typed the same way.
+    if builder_flag(td, imports, "toBuilder")
+        && !existing_methods.contains(&("toBuilder".to_string(), 0))
+    {
+        methods.push(Member {
+            name: "toBuilder".to_string(),
+            kind: MemberKind::Method,
+            return_type: TypeRef::simple(builder_binary(td, imports, &owner)),
+            params: Vec::new(),
+            is_static: false,
+            is_abstract: false,
+            is_default: false,
+            is_final: false,
+            visibility: Visibility::Public,
+            raw_signature: format!("{}Builder toBuilder()", td.name),
             throws: Vec::new(),
             annotations: Vec::new(),
         });
@@ -275,6 +293,7 @@ fn synthesize_constructors(
     let imports = names.imports;
     let owner = td.fqn.replace('.', "/");
     let is_value = has_lombok(&td.annotations, imports, &["Value"]);
+    let has_builder = has_lombok(&td.annotations, imports, &["Builder", "SuperBuilder"]);
     let instance: Vec<&bennu_java::prelude::FieldDecl> =
         td.fields.iter().filter(|f| !f.is_static).collect();
 
@@ -298,7 +317,7 @@ fn synthesize_constructors(
     if has_lombok(&td.annotations, imports, &["AllArgsConstructor"]) || is_value {
         let all = instance
             .iter()
-            .filter(|f| !(f.is_final && f.has_initializer))
+            .filter(|f| takes_a_constructor_parameter(f, has_builder))
             .copied()
             .collect::<Vec<_>>();
         wanted.push((all, &["AllArgsConstructor", "Value"]));
@@ -311,13 +330,11 @@ fn synthesize_constructors(
     // The visibility is left at the default rather than read off the annotation: `@Builder(access =
     // …)` sets the access of the generated builder CLASS, not of this constructor, and honouring it
     // here would invent an inaccessibility — hence the empty `from`.
-    if wanted.is_empty()
-        && !existing_methods.iter().any(|(name, _)| name == "<init>")
-        && has_lombok(&td.annotations, imports, &["Builder", "SuperBuilder"])
+    if wanted.is_empty() && !existing_methods.iter().any(|(name, _)| name == "<init>") && has_builder
     {
         let all = instance
             .iter()
-            .filter(|f| !(f.is_final && f.has_initializer))
+            .filter(|f| takes_a_constructor_parameter(f, has_builder))
             .copied()
             .collect::<Vec<_>>();
         wanted.push((all, &[]));
@@ -363,6 +380,57 @@ fn synthesize_constructors(
             annotations: Vec::new(),
         });
     }
+}
+
+/// Whether an all-args constructor takes this field.
+///
+/// A `final` field with an initializer normally does not: it is already assigned, and Lombok cannot
+/// assign it twice. `@Builder.Default` inverts that — Lombok MOVES the initializer out of the field
+/// into a `$default$x()` method, leaving a blank final that the constructor does assign. Without
+/// this, a `@Value @Builder` class with one defaulted field had a constructor one parameter short,
+/// and every call of the real one read as the wrong arity.
+fn takes_a_constructor_parameter(f: &FieldDecl, has_builder: bool) -> bool {
+    if has_builder && is_builder_default(f) {
+        return true;
+    }
+    !(f.is_final && f.has_initializer)
+}
+
+/// The binary name of the builder class Lombok generates for `td`.
+///
+/// One helper because three places need the same answer, and `{owner}$Builder` — which one of them
+/// used to build by hand — matched no type at all, so everything after `builder()` resolved against
+/// nothing.
+fn builder_binary(td: &TypeDecl, imports: &[Import], owner: &str) -> String {
+    builder_type_name(td, imports)
+        .map(|n| format!("{owner}/{n}"))
+        .unwrap_or_else(|| format!("{owner}/Builder"))
+}
+
+/// Whether `@Builder` / `@SuperBuilder` on this type sets the boolean `key` — `toBuilder = true`.
+fn builder_flag(td: &TypeDecl, imports: &[Import], key: &str) -> bool {
+    let Some(site) = builder_site(td, imports) else { return false };
+    // `toBuilder()` copies an instance of the type back into a builder, so it only means anything
+    // where the builder builds THIS type: the class itself, or one of its constructors. A static
+    // factory that builds something else has nothing to copy from.
+    let anns = match site.on {
+        None => &td.annotations,
+        Some(m) if m.name == "<init>" => &m.annotations,
+        Some(_) => return false,
+    };
+    anns.iter()
+        .filter(|a| a.name == "Builder" || a.name == "SuperBuilder")
+        .any(|a| a.args.iter().any(|(k, v)| k == key && v.trim() == "true"))
+}
+
+/// Whether the field carries `@Builder.Default`.
+///
+/// Its simple name is `Default` — annotation names are recorded by their last segment — so the
+/// qualified spelling is what tells it from anything else called `Default`.
+fn is_builder_default(f: &FieldDecl) -> bool {
+    f.annotations
+        .iter()
+        .any(|a| a.qualified == "Builder.Default" || a.qualified == "lombok.Builder.Default")
 }
 
 /// What an accessor annotation's `AccessLevel` asks for: a visibility, or `None` for
@@ -1451,39 +1519,86 @@ pub fn synthesize_nested_types(
     }
 
     if let Some(name) = builder_type_name(td, imports) {
+        let site = builder_site(td, imports).expect("a name means a site");
         let builder_binary = format!("{owner}/{name}");
-        let mut methods: Vec<Member> = instance
-            .iter()
-            .map(|f| {
-                let ftype = type_text_to_ref(&names.only(td), &owner, &f.type_text);
-                Member {
-                    name: f.name.clone(),
-                    kind: MemberKind::Method,
-                    // Returns the builder — this is what keeps a chain typed past its first call.
-                    return_type: TypeRef::simple(builder_binary.clone()),
-                    params: vec![ftype],
-                    is_static: false,
-                    is_abstract: false,
-                    is_default: false,
-                    is_final: false,
-                    visibility: Visibility::Public,
-                    raw_signature: format!("{name} {}({})", f.name, f.type_text),
-                    throws: Vec::new(),
-                    annotations: Vec::new(),
+        let builds = |mname: String, params: Vec<TypeRef>, written: String| Member {
+            name: mname.clone(),
+            kind: MemberKind::Method,
+            // Returns the builder — this is what keeps a chain typed past its first call.
+            return_type: TypeRef::simple(builder_binary.clone()),
+            params,
+            is_static: false,
+            is_abstract: false,
+            is_default: false,
+            is_final: false,
+            visibility: Visibility::Public,
+            raw_signature: format!("{name} {mname}({written})"),
+            throws: Vec::new(),
+            annotations: Vec::new(),
+        };
+        let mut methods: Vec<Member> = Vec::new();
+        // A `@Builder` on a constructor or a static method builds from that element's PARAMETERS;
+        // the class's own fields are not what it collects. `@Singular` is written on a parameter
+        // there, and reaches this the same way.
+        // One list either way: what the builder collects is a name, a written type and the
+        // annotations on it — a field of the class, or a parameter of the annotated element.
+        let collected: Vec<(&str, &str, &[Annotation])> = match site.on {
+            Some(m) => m
+                .params
+                .iter()
+                .map(|p| (p.name.as_str(), p.type_text.as_str(), p.annotations.as_slice()))
+                .collect(),
+            None => instance
+                .iter()
+                .map(|f| (f.name.as_str(), f.type_text.as_str(), f.annotations.as_slice()))
+                .collect(),
+        };
+        for (fname, ftext, fanns) in collected {
+            let ftype = type_text_to_ref(&names.only(td), &owner, ftext);
+            methods.push(builds(fname.to_string(), vec![ftype.clone()], ftext.to_string()));
+            // `@Singular` on a collection field adds the two methods the annotation exists for: one
+            // that appends a single element, and one that empties what has been collected. Without
+            // them the idiomatic call — `.tag("a").tag("b")` — read as a method nobody declared,
+            // which is the whole point of writing `@Singular` in the first place.
+            let Some(singular) = singular_name(fanns, fname, imports) else { continue };
+            if singular != fname {
+                // One parameter per type argument: a `Map<K, V>` collects PAIRS, so its adder takes
+                // both. A raw collection contributes none, and then there is nothing to add with.
+                let params: Vec<TypeRef> = ftype.type_args.clone();
+                if !params.is_empty() {
+                    let written = params
+                        .iter()
+                        .map(|p| p.binary_name.rsplit(['/', '$']).next().unwrap_or("").to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    methods.push(builds(singular, params, written));
                 }
-            })
-            .collect();
+            }
+            methods.push(builds(
+                format!("clear{}", capitalize(fname)),
+                Vec::new(),
+                String::new(),
+            ));
+        }
+        // `build()` returns what the annotated element produces: the class for a type-level or
+        // constructor `@Builder`, the declared return type for a static factory.
+        let built = match site.on {
+            Some(m) if m.name != "<init>" => {
+                type_text_to_ref(&names.only(td), &owner, &m.return_type_text)
+            }
+            _ => TypeRef::simple(owner.clone()),
+        };
         methods.push(Member {
             name: "build".to_string(),
             kind: MemberKind::Method,
-            return_type: TypeRef::simple(owner.clone()),
+            return_type: built,
             params: Vec::new(),
             is_static: false,
             is_abstract: false,
             is_default: false,
             is_final: false,
             visibility: Visibility::Public,
-            raw_signature: format!("{} build()", td.name),
+            raw_signature: format!("{} build()", site.builds),
             throws: Vec::new(),
             annotations: Vec::new(),
         });
@@ -1494,12 +1609,184 @@ pub fn synthesize_nested_types(
                 interfaces: Vec::new(),
                 methods,
                 fields: Vec::new(),
-                flags: Default::default(),
+                flags: bennu_java::prelude::ClassFlags {
+                    has_hidden_members: !builder_is_complete(td, imports),
+                    ..Default::default()
+                },
                 type_params: Vec::new(),
             },
         });
     }
     out
+}
+
+/// The name of the single-element adder `@Singular` puts on the builder, or `None` when the field
+/// does not carry it.
+///
+/// `@Singular("tag")` names it outright. Otherwise Lombok derives it from the field name, and only
+/// for plurals it recognises — a name it cannot singularise is a compile error there, so answering
+/// `None` for the shapes below is the same as saying "Lombok generated nothing to find".
+fn singular_name(annotations: &[Annotation], name: &str, imports: &[Import]) -> Option<String> {
+    if !has_lombok(annotations, imports, &["Singular"]) {
+        return None;
+    }
+    let explicit = annotations
+        .iter()
+        .find(|a| a.name == "Singular")
+        .and_then(|a| {
+            a.args
+                .iter()
+                .find(|(k, _)| k == "value")
+                .map(|(_, v)| v.clone())
+                .or_else(|| a.positional.first().cloned())
+                .or_else(|| a.strings.first().map(|st| st.value.clone()))
+        })
+        .map(|v| v.trim().trim_matches('"').to_string())
+        .filter(|v| !v.is_empty());
+    if explicit.is_some() {
+        return explicit;
+    }
+    // English plurals, in the order that matters: `entries` → `entry` before `entries` → `entrie`.
+    for (suffix, replacement) in [("ies", "y"), ("sses", "ss"), ("shes", "sh"), ("ches", "ch"), ("xes", "x")] {
+        if let Some(stem) = name.strip_suffix(suffix) {
+            if !stem.is_empty() {
+                return Some(format!("{stem}{replacement}"));
+            }
+        }
+    }
+    let stem = name.strip_suffix('s').filter(|s| !s.is_empty() && !s.ends_with('s'))?;
+    Some(stem.to_string())
+}
+
+/// Whether the type has members that exist at compile time and cannot be enumerated here.
+///
+/// `@Delegate` on a field (or on a no-arg method) copies every public instance method of that
+/// field's TYPE onto the owner. Which methods those are is a question about another type, and while
+/// this index is being built there is nothing to ask — so the honest answer is "this list is not the
+/// whole list", which is what [`ClassFlags::has_hidden_members`] says to every check that would
+/// otherwise conclude a member does not exist.
+pub fn hides_members(td: &TypeDecl, imports: &[Import]) -> bool {
+    if !file_imports_lombok(imports) {
+        return false;
+    }
+    td.fields.iter().any(|f| has_lombok(&f.annotations, imports, &["Delegate"]))
+        || td
+            .methods
+            .iter()
+            .any(|m| m.params.is_empty() && has_lombok(&m.annotations, imports, &["Delegate"]))
+}
+
+/// Whether `@Value` (or `@FieldDefaults(makeFinal = true)`) makes this type's fields `final`.
+///
+/// `@Value` is documented as shorthand for, among other things, `@FieldDefaults(makeFinal = true,
+/// level = PRIVATE)` — the fields in the source carry no modifiers at all, and the ones the compiler
+/// sees are `private final`. Reading them as written meant a `@Value` class's fields were
+/// package-private and mutable to everything downstream.
+pub fn makes_fields_final(td: &TypeDecl, imports: &[Import]) -> bool {
+    if !file_imports_lombok(imports) {
+        return false;
+    }
+    has_lombok(&td.annotations, imports, &["Value"])
+        || field_defaults_flag(td, imports, "makeFinal")
+}
+
+/// The visibility `@Value` / `@FieldDefaults` gives the fields, or `None` when neither applies.
+pub fn field_visibility(td: &TypeDecl, imports: &[Import]) -> Option<Visibility> {
+    if !file_imports_lombok(imports) {
+        return None;
+    }
+    if has_lombok(&td.annotations, imports, &["Value"]) {
+        return Some(Visibility::Private);
+    }
+    let a = td.annotations.iter().find(|a| a.name == "FieldDefaults")?;
+    let level = a.args.iter().find(|(k, _)| k == "level").map(|(_, v)| v.as_str())?;
+    match level.rsplit('.').next()?.trim() {
+        "PRIVATE" => Some(Visibility::Private),
+        "PROTECTED" => Some(Visibility::Protected),
+        "PACKAGE" | "MODULE" => Some(Visibility::Package),
+        "PUBLIC" => Some(Visibility::Public),
+        _ => None,
+    }
+}
+
+/// Whether a FIELD opts out of what `@Value` / `@FieldDefaults` would do to it — Lombok's
+/// `@NonFinal` and `@PackagePrivate`, the two escape hatches written on the field itself.
+pub fn opts_out_of_final(f: &FieldDecl, imports: &[Import]) -> bool {
+    has_lombok(&f.annotations, imports, &["NonFinal"])
+}
+
+pub fn opts_out_of_private(f: &FieldDecl, imports: &[Import]) -> bool {
+    has_lombok(&f.annotations, imports, &["PackagePrivate"])
+}
+
+/// Whether the CLASS is `final` because of Lombok: `@Value` makes it so, and `@NonFinal` on the
+/// class takes it back.
+pub fn is_value_class(td: &TypeDecl, imports: &[Import]) -> bool {
+    file_imports_lombok(imports)
+        && has_lombok(&td.annotations, imports, &["Value"])
+        && !has_lombok(&td.annotations, imports, &["NonFinal"])
+}
+
+fn field_defaults_flag(td: &TypeDecl, imports: &[Import], key: &str) -> bool {
+    has_lombok(&td.annotations, imports, &["FieldDefaults"])
+        && td
+            .annotations
+            .iter()
+            .filter(|a| a.name == "FieldDefaults")
+            .any(|a| a.args.iter().any(|(k, v)| k == key && v.trim() == "true"))
+}
+
+/// Where this type's `@Builder` is written.
+///
+/// Lombok takes it on the type, on a **constructor**, or on a **static method** — and the last two
+/// are not a footnote: `@Builder` on a static factory is how a class with several ways to be built
+/// gets several builders. What changes is where the builder's setters come from (the annotated
+/// element's PARAMETERS, not the class's fields) and what `build()` returns (the element's return
+/// type, which for a constructor is the class).
+struct BuilderSite<'a> {
+    /// The annotated element, or `None` when the annotation is on the type itself.
+    on: Option<&'a bennu_java::prelude::MethodDecl>,
+    /// The simple name of what `build()` returns.
+    builds: String,
+}
+
+/// The `@Builder` that applies to `td`, if any. The type's own wins — Lombok would generate both,
+/// but a class annotated on both sides is vanishingly rare beside the cost of guessing wrong.
+fn builder_site<'a>(td: &'a TypeDecl, imports: &[Import]) -> Option<BuilderSite<'a>> {
+    if has_lombok(&td.annotations, imports, &["Builder", "SuperBuilder"]) {
+        return Some(BuilderSite { on: None, builds: td.name.clone() });
+    }
+    let on = td
+        .methods
+        .iter()
+        .find(|m| has_lombok(&m.annotations, imports, &["Builder"]))?;
+    // A constructor builds its own class; a static method builds whatever it returns.
+    let builds = if on.name == "<init>" {
+        td.name.clone()
+    } else {
+        erased_simple_name(&on.return_type_text)
+    };
+    Some(BuilderSite { on: Some(on), builds })
+}
+
+/// `List<String>` → `List`, `a.b.C` → `C` — the simple name a builder is named after.
+fn erased_simple_name(type_text: &str) -> String {
+    let base = bennu_java::prelude::erase_type_arguments(type_text);
+    let base = base.trim().trim_end_matches("[]");
+    base.rsplit(['.', '$']).next().unwrap_or(base).to_string()
+}
+
+/// Whether the builder we synthesize for `td` is the WHOLE builder.
+///
+/// `@SuperBuilder` exists to build a hierarchy: the subclass's builder carries the superclass's
+/// fields as well as its own, and those live in another file — nothing available while this index is
+/// being built can enumerate them. So the setters we can write ARE written (the chain stays typed,
+/// and `build()` still says what it returns), and the type is marked as having members beyond the
+/// list — which is what stops `.parentField(x)` being reported as a method nobody declares.
+///
+/// Plain `@Builder` does not inherit anything, so it is complete whatever the class extends.
+fn builder_is_complete(td: &TypeDecl, imports: &[Import]) -> bool {
+    !(has_lombok(&td.annotations, imports, &["SuperBuilder"]) && td.extends.is_some())
 }
 
 /// The names of the nested types Lombok generates for `td` — without building their members.
@@ -1547,15 +1834,19 @@ fn field_constants_type_name(annotations: &[Annotation], imports: &[Import]) -> 
 /// The name of the `@Builder` / `@SuperBuilder` class, or `None` when neither is present.
 /// Lombok's default is `<Type>Builder`; `builderClassName = "X"` overrides it.
 fn builder_type_name(td: &TypeDecl, imports: &[Import]) -> Option<String> {
-    if !has_lombok(&td.annotations, imports, &["Builder", "SuperBuilder"]) {
-        return None;
-    }
-    let named = td
-        .annotations
+    let site = builder_site(td, imports)?;
+    // The annotation that carries `builderClassName` is the one that was written, wherever it sits.
+    let anns = match site.on {
+        Some(m) => &m.annotations,
+        None => &td.annotations,
+    };
+    let named = anns
         .iter()
         .find(|a| a.name == "Builder" || a.name == "SuperBuilder")
         .and_then(|a| a.args.iter().find(|(k, _)| k == "builderClassName"))
         .map(|(_, v)| v.trim().trim_matches('"').to_string())
         .filter(|v| !v.is_empty());
-    Some(named.unwrap_or_else(|| format!("{}Builder", td.name)))
+    // Lombok names it after what it BUILDS — the class for a type-level or constructor `@Builder`,
+    // the return type for a static factory.
+    Some(named.unwrap_or_else(|| format!("{}Builder", site.builds)))
 }

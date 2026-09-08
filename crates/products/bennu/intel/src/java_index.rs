@@ -595,11 +595,31 @@ fn file_records(
     (records, next_id, type_count, member_count)
 }
 
+/// The scope a type's HEADER is read in: the type that ENCLOSES it, or nothing at all when it is
+/// top-level. Never the type itself — see [`build_class_members`].
+///
+/// The parent path of a binary name is either the enclosing TYPE or the package, and the project
+/// map is what tells them apart: a package is not a type anyone declared.
+fn header_scope_owner(owner: &str, names: &crate::typemap::FileNames) -> String {
+    match owner.rsplit_once('/') {
+        Some((parent, _)) if (names.is_project)(parent) => parent.to_string(),
+        _ => String::new(),
+    }
+}
+
 /// Build a resolved [`ClassMembers`] (java seam shape) from a source [`TypeDecl`],
 /// resolving each written type text to a binary name via imports + project types.
 fn build_class_members(td: &TypeDecl, names: &crate::typemap::FileNames) -> ClassMembers {
     // Every simple type name written INSIDE this type resolves against this type's scope first.
     let owner = td.fqn.replace('.', "/");
+    // The HEADER is read in the enclosing type's scope, not this type's own. A member type's scope
+    // is the *body* of its class (JLS §6.3), and `extends`/`implements` are not the body:
+    // `class HashCodeBuilder … implements Builder<Integer>`, in a class that also declares a nested
+    // `Builder`, names the same-package INTERFACE — which is why javac compiles commons-lang. Read
+    // in its own scope it bound to the nested class, so the interface's `build()` was not among its
+    // supertypes' members: the `@Override` was reported as overriding nothing, and a rename of it
+    // moved neither the interface's declaration nor the other implementors.
+    let header = header_scope_owner(&owner, names);
     // Through `type_text_to_ref` and not `resolve_binary`, so `extends Range<Double>` keeps its
     // `Double`. The arguments on this clause are the ONLY record of how this type binds its
     // supertype's variables: with the bare name, a walk arrives at `Range` knowing it declares a
@@ -608,11 +628,11 @@ fn build_class_members(td: &TypeDecl, names: &crate::typemap::FileNames) -> Clas
     let superclass = td
         .extends
         .as_ref()
-        .map(|s| type_text_to_ref(names, &owner, s));
+        .map(|s| type_text_to_ref(names, &header, s));
     let interfaces = td
         .implements
         .iter()
-        .map(|i| type_text_to_ref(names, &owner, i))
+        .map(|i| type_text_to_ref(names, &header, i))
         .collect();
 
     let mut methods: Vec<Member> = td
@@ -686,6 +706,42 @@ fn build_class_members(td: &TypeDecl, names: &crate::typemap::FileNames) -> Clas
     //
     // Without it, `MyUtils.helper()` on a `@UtilityClass` resolved to an *instance* method and was
     // reported as a non-static member referenced from a static context: correct code, flagged.
+    // `@Value` / `@FieldDefaults(makeFinal = true)` rewrite the fields the same way: what the source
+    // writes bare, the compiler sees as `private final`. Read as written, a `@Value` class's fields
+    // were package-private and mutable to everything downstream — including the rule that decides
+    // whether a name is a constant. The two per-field escape hatches Lombok gives (`@NonFinal`,
+    // `@PackagePrivate`) are honoured, or this would claim `final` about a field written to opt out.
+    let makes_final = crate::lombok::makes_fields_final(td, names.imports);
+    let field_vis = crate::lombok::field_visibility(td, names.imports);
+    if makes_final || field_vis.is_some() {
+        for (f, decl) in fields.iter_mut().zip(td.fields.iter()) {
+            if decl.is_static {
+                continue; // `@Value` is about the value's own state, not the class's constants
+            }
+            if makes_final && !crate::lombok::opts_out_of_final(decl, names.imports) {
+                f.is_final = true;
+            }
+            if let Some(v) = field_vis {
+                if !crate::lombok::opts_out_of_private(decl, names.imports) {
+                    f.visibility = v;
+                }
+            }
+        }
+    }
+
+    // JLS §9.3: every field an interface (or an `@interface`) declares is implicitly
+    // `public static final`, whether or not the source writes the words — and almost none do.
+    // Read as written, `FailableToLongFunction.NOP` was an INSTANCE field, so the interface's own
+    // `static nop()` referencing it came out as "non-static member referenced from a static
+    // context": forty-four of them across commons-lang's `function` package, every one of them
+    // correct Java.
+    if matches!(td.kind, bennu_java::prelude::TypeKind::Interface | bennu_java::prelude::TypeKind::Annotation) {
+        for f in &mut fields {
+            f.is_static = true;
+            f.is_final = true;
+        }
+    }
+
     let utility = crate::lombok::is_utility_class(td, names.imports);
     if utility {
         for m in &mut methods {
@@ -705,7 +761,11 @@ fn build_class_members(td: &TypeDecl, names: &crate::typemap::FileNames) -> Clas
         interfaces,
         methods,
         fields,
-        flags: class_flags(td, utility),
+        flags: class_flags(
+            td,
+            utility || crate::lombok::is_value_class(td, names.imports),
+            crate::lombok::hides_members(td, names.imports),
+        ),
         type_params: td.type_params.clone(),
     }
 }
@@ -714,18 +774,20 @@ fn build_class_members(td: &TypeDecl, names: &crate::typemap::FileNames) -> Clas
 /// read — the project-source counterpart to the bytecode-decoded flags. Interfaces + annotation
 /// types are `is_interface` (and implicitly abstract); enums / records set their own bit (the
 /// checks treat those as un-extendable directly, so no need to also force `is_final`).
-/// `is_utility` = the type is a Lombok `@UtilityClass`, which makes it `final` (see
-/// [`crate::lombok::is_utility_class`]) even though no `final` modifier is written.
-fn class_flags(td: &TypeDecl, is_utility: bool) -> ClassFlags {
+/// `is_final_by_lombok` = the type is a Lombok `@UtilityClass` or `@Value`, both of which make it
+/// `final` even though no `final` modifier is written. `has_hidden_members` says its member list is
+/// not the whole list — see [`ClassFlags::has_hidden_members`].
+fn class_flags(td: &TypeDecl, is_final_by_lombok: bool, has_hidden_members: bool) -> ClassFlags {
     let is_interface = matches!(td.kind, TypeKind::Interface | TypeKind::Annotation);
     ClassFlags {
         is_interface,
         is_abstract: is_interface || td.is_abstract,
-        is_final: td.is_final || is_utility,
+        is_final: td.is_final || is_final_by_lombok,
         is_enum: matches!(td.kind, TypeKind::Enum),
         is_annotation: matches!(td.kind, TypeKind::Annotation),
         is_record: matches!(td.kind, TypeKind::Record),
         is_sealed: td.is_sealed,
+        has_hidden_members,
     }
 }
 
@@ -895,6 +957,27 @@ mod tests {
     }
 
     use super::*;
+
+    /// JLS §9.3: a field declared in an interface is `public static final` whether or not the
+    /// source says so, and almost no source does. Recorded as written, the interface's own `static`
+    /// factory naming one came out as a non-static member referenced from a static context — forty-
+    /// four of those across commons-lang's `function` package, on code that compiles.
+    #[test]
+    fn an_interface_field_is_static_and_final_without_the_words() {
+        let fs = extract_symbols(
+            "package p;\npublic interface I { I NOP = null; static I nop() { return NOP; } }\n",
+        );
+        let td = fs.types.iter().find(|t| t.name == "I").unwrap();
+        let cm = build_class_members(td, &names_of(&fs));
+        let nop = cm.fields.iter().find(|f| f.name == "NOP").unwrap();
+        assert!(nop.is_static, "{nop:?}");
+        assert!(nop.is_final, "{nop:?}");
+        // A class's bare field is unchanged — the rule is the interface's, not everyone's.
+        let cs = extract_symbols("package p;\npublic class C { int n; }\n");
+        let ctd = cs.types.iter().find(|t| t.name == "C").unwrap();
+        let ccm = build_class_members(ctd, &names_of(&cs));
+        assert!(!ccm.fields.iter().find(|f| f.name == "n").unwrap().is_static);
+    }
 
     /// The exclusion list comes from a comma-separated box, so blanks and stray spaces are the
     /// normal shape of it — and an empty entry would be a name that matches nothing while

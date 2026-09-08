@@ -23,7 +23,7 @@ use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
 use crate::check_id::CheckId;
-use crate::method_sig::method_param_binaries;
+use crate::method_sig::{member_param_binaries, method_param_binaries};
 use crate::nodes::{has_keyword, text};
 use crate::walk::for_each_supertype;
 
@@ -70,7 +70,7 @@ fn check_type(
                     && m.name != "<init>"
                     && m.name != "<clinit>";
                 if inherited {
-                    let params = m.params.iter().map(|p| p.binary_name.clone()).collect();
+                    let params = member_param_binaries(m);
                     promised.entry(m.name.clone()).or_default().push((params, m.visibility));
                 }
             }
@@ -218,6 +218,19 @@ mod tests {
                 ],
             ),
         );
+        // A public method taking an ARRAY. The index records it as `java/lang/String` + `dims: 1`,
+        // while the tree spells the same parameter `java/lang/String[]` — the two used to be
+        // compared as they came, so no override of this method ever matched one.
+        members.insert(
+            "com/acme/Arrays".into(),
+            ty(
+                false,
+                vec![Member {
+                    params: vec![TypeRef::simple("java/lang/String").arrayed(1)],
+                    ..method("names", Visibility::Public)
+                }],
+            ),
+        );
         members.insert(
             "com/acme/Pkg".into(),
             ty(false, vec![method("hidden", Visibility::Package)]),
@@ -226,6 +239,8 @@ mod tests {
             ("Runnable", "java/lang/Runnable"),
             ("Sup", "com/acme/Sup"),
             ("Pkg", "com/acme/Pkg"),
+            ("Arrays", "com/acme/Arrays"),
+            ("String", "java/lang/String"),
             ("Object", "java/lang/Object"),
         ]
         .iter()
@@ -288,6 +303,22 @@ mod tests {
     #[test]
     fn a_static_method_of_the_same_name_is_not_an_override() {
         assert!(codes("class A extends Sup { private static void greet() {} }").is_empty());
+    }
+
+    /// **A parameter that is an array is still the same parameter.** The tree writes
+    /// `java/lang/String[]` and the index holds `java/lang/String` with the depth beside it; while
+    /// those were compared as they came, every method taking an array read as an overload of the
+    /// one it overrides, and this check — like the three others built on the same question — simply
+    /// said nothing about it.
+    #[test]
+    fn an_array_parameter_still_matches_the_method_it_overrides() {
+        assert_eq!(
+            codes("class A extends Arrays { protected void names(String[] all) {} }"),
+            ["weaker-access-override"]
+        );
+        // And the match is by the WHOLE type: a non-array parameter of the element type is an
+        // overload, exactly as it was.
+        assert!(codes("class A extends Arrays { protected void names(String one) {} }").is_empty());
     }
 
     /// A different signature is a different method — an overload, not an override.

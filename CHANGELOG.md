@@ -31,11 +31,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **Recent locations** (`Ctrl+Shift+E`) — the places you have been, most recent first, with the line you were on, filterable by file name or by that line's text, and with a toggle for the ones you edited.
+
+- **Back to the last place you edited** (`Ctrl+Shift+Backspace`), walking further back through the session's edits on each press.
+
 - **Parameter-name hints for library methods, from the library's own sources.** They appear for any dependency whose sources are on disk — the JDK's, and anything fetched with "Download sources" — and for nothing else: a class file carries no parameter names unless it was compiled with `-parameters`, and a decompiled stub's `arg0` is a placeholder, not a name. Sources that arrive while you are working take effect immediately, in every file that calls that library.
 
 ### Changed
 
 - **The file-structure list ranks by match quality once you type in it.** With the box empty it is still the file's own order, because that is what an outline is for; with a query it answers the question actually being asked. Typing `uri` in a 66-member class used to put a constant where `u`, `r` and `i` are scattered across thirty-one characters five rows above the method called `uri`. The shared matcher also learned that a capital starts a word inside a name, and to spot the query sitting whole somewhere rather than only tracking its letters left to right — so `Uri` inside `requestHeaderToRequestUri` now counts for what it is. Go-to-file and the command palette rank better for the same reason.
+
+- **Back and Forward follow what you navigated, not where the caret went.** A stop is recorded when an action navigates — a go-to, a usage, a structure or find hit, a diagnostic, a tab switch — instead of on any caret move over three lines, so the history no longer fills with places nobody chose to go to. Each jump remembers both ends, so the first Back lands exactly where you jumped from, and arriving in a tab you had been reading halfway down comes back to where you were rather than to line 1.
 
 ### Fixed
 
@@ -56,6 +62,38 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Coming back to a window you left in the background no longer freezes it.** The app is power-throttled while it is not in front and the backends serving it are not, so everything they emitted meanwhile — one event per file of an index walk, one per line of a build — arrived in a single burst, and each one asked the backend something in reply. Editor output, index progress and language-server diagnostics are now folded into one update per frame, the backend skips progress nobody is there to read, and no burst of requests can outnumber the threads a backend has to answer them.
 
 - **Switching between two Arbor windows no longer throttles the app.** Focus was tracked per window and acted on per process, so the window you left reporting its blur after the one you arrived at reported its focus put the whole app into efficiency mode — every window of it — while you were working in one.
+
+- **More of Lombok is read as what it stands for.** `@Value` makes the fields `private final` and the class `final` (as does `@FieldDefaults`, with `@NonFinal` / `@PackagePrivate` honoured); `@Builder` is read where Lombok allows it — on a constructor or a static factory, taking that element's parameters; and a type whose members Lombok generates from a type this cannot read while indexing — `@Delegate`, a `@SuperBuilder` builder — is marked as having more members than the list, so nothing reports them missing.
+
+- **`@Builder(toBuilder = true)` generates `toBuilder()`**, and `@Singular` its element adder (`.tag("a")`) and `clearTags()` — the methods those options are written for, all previously reported as not existing. A `@Builder.Default` field counts as a constructor parameter again, and a `@SuperBuilder` over a parent class leaves its chain unresolved rather than reporting the parent's own setters as missing.
+
+- **Extract method breaks sixteen times less often.** Measured over every valid extraction in Apache Commons Lang — 15,809 of them, each compiled with javac: 178 broken became 11 (98.9% → 99.9%). A `try` inside the selection no longer makes the new method declare the exception its own `catch` handles; a selection sitting in a `catch` no longer inherits that catch's types; a name the selection declares itself — a `catch` variable, a for-each variable, a resource, a pattern binding — is no longer passed in as a parameter; a parameter is typed from the declaration that is actually in scope, not from a same-named local in a branch the selection is not in; a loop variable inside the selection is no longer mistaken for the same-named one after it; a type parameter the new signature needs travels with it, `throws` clause included; and a selection whose only free name is caught as `A | B` is refused rather than written into a signature that is not Java.
+
+- **A method extracted out of a lambda declares what that lambda throws — and one that only creates a lambda no longer does.** `default FBC<E> andThen(FBC<E> after) { return t -> { accept(t); after.accept(t); }; }` is the shape, and the two halves failed opposite ways: extracting out of the arrow lost the `throws E` the moved call needs, while extracting a `register(() -> read(f))` gained a `throws IOException` that can never reach the caller. A type variable is also read through the receiver it arrives on now, so the `E` of a `FBC<E>` is this file's `E`, and the one behind a `Consumer<? super T, ? extends Exception>` is correctly a name that cannot be written down.
+
+- **A call with no receiver binds to the overload that takes that many arguments.** `CompositeFormat extends java.text.Format` declares one `format`, the three-argument one, and writes `return format(parseObject(input));` — the inherited `format(Object)`. Reading the class's own declaration whatever the arity typed that call as a `StringBuffer` and reported a compiling file as returning the wrong type.
+
+- **An interface's fields are `static`, as Java says they are.** JLS §9.3 makes every field an interface declares `public static final` whether or not the source writes the words, and almost no source does — so an interface's own `static` factory naming one was reported as a non-static member referenced from a static context. Bare calls and bare names inside `default` and `static` interface methods are now read at all, which is what surfaced it.
+
+- **A class no longer implements its own nested class by mistake.** `class HashCodeBuilder … implements Builder<Integer>`, in a class that also declares a nested `Builder`, names the same-package interface — a member type's scope is the body of its class, and a header is not the body. Bound to the wrong one, four commons-lang classes were reported for overriding nothing, and renaming such a method left the interface and every other implementor behind.
+
+- **A `switch` over a library enum is no longer told it is missing a case called `$VALUES`.** That is the hidden array `values()` copies, and it read as a constant once the array depth of a type moved out of its name.
+
+- **Back no longer lands on line 1 of a tab you were reading halfway down.** The stop a tab switch records is the place that tab was left at — read from what the editor remembers for the file, instead of waiting for the restoring scroll to announce itself.
+
+- **A library's primitive field reads as its type.** `int count` was shown as `I`, and `long` as `J`, wherever a field of a dependency is described — a field with no generics carries its descriptor and nothing was reading it.
+
+- **A class that implements an interface through a Lombok accessor is no longer reported for not implementing it.** With `@Accessors(fluent = true)`, `@Getter` on a field `alias` *is* the interface's `alias()` — and nothing in the source says so, so the check was reading only what was written.
+
+- **A bare call now picks the static import whose argument count fits.** A file that stars in one class and names a member of another — `import static …WireMock.*;` beside `import static …WireMockConfiguration.options;` — typed `options()` as the one-argument `options(UrlPattern)`, so the next call in the chain was reported as a method that does not exist.
+
+- **Lombok's `@__` placeholder is no longer reported as an unresolved symbol.** `@Getter(onMethod_ = @__(@JsonProperty))` names a type nothing declares, on purpose: Lombok reads it and throws it away. What it carries is still checked.
+
+- **A hover no longer answers an overloaded method with another overload's Javadoc.** With two `get` methods of one argument, or with one documented and one not, the block above a different `get` was shown instead of nothing.
+
+- **A method that takes an array is recognised as the override it is.** Overriding a `final` method, narrowing an inherited method's visibility, widening its `throws`, returning an incompatible type — none of those were reported on any signature with an array parameter, because the two halves of the comparison spelled the array differently.
+
+- **An annotation element declared as an array no longer reports the list it is meant to hold.** `@MyAnn(strings = {"a", "b"})` was told that `strings` holds one value, not a list — for every array-typed element, in every project. The array depth of a type had moved out of its name, and this check was still reading the name.
 
 - **Go-to works on a static import.** Neither half of `import static …HandlerFunctions.http;` resolved: the type is bound by no ordinary import and the member is not a type at all, so clicking either did nothing. The type now opens itself, and the member opens the type that declares it.
 

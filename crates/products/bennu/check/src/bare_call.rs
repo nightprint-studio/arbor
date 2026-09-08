@@ -136,6 +136,26 @@ pub(crate) fn bare_call_scope<'t>(
 impl<'t> BareCalls<'t> {
     /// The method name this call names, when it is a bare call in a position we may judge.
     pub(crate) fn judgeable<'a>(&self, call: Node, bytes: &'a [u8]) -> Option<&'a str> {
+        self.judgeable_in(call, bytes, false)
+    }
+
+    /// [`Self::judgeable`], but a lambda between the call and the top type is not a reason to
+    /// decline. For the checks that need the argument TYPES it is; for the ones that only need to
+    /// know which method the name binds to — `throws_of` — it never was.
+    pub(crate) fn judgeable_across_lambdas<'a>(
+        &self,
+        call: Node,
+        bytes: &'a [u8],
+    ) -> Option<&'a str> {
+        self.judgeable_in(call, bytes, true)
+    }
+
+    fn judgeable_in<'a>(
+        &self,
+        call: Node,
+        bytes: &'a [u8],
+        across_lambdas: bool,
+    ) -> Option<&'a str> {
         if call.child_by_field_name("object").is_some() {
             return None;
         }
@@ -144,7 +164,12 @@ impl<'t> BareCalls<'t> {
         if name_node.has_error() || args.has_error() {
             return None;
         }
-        if !scope_is_directly_top(call, self.top_node) {
+        let in_scope = if across_lambdas {
+            crate::scopes::scope_is_top_across_lambdas(call, self.top_node)
+        } else {
+            scope_is_directly_top(call, self.top_node)
+        };
+        if !in_scope {
             return None;
         }
         let name = name_node.utf8_text(bytes).ok()?;

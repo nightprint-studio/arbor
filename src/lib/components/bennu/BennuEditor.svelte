@@ -140,7 +140,7 @@
   import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
   import { bennuHierarchyStore } from '$lib/stores/bennu/hierarchy.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
-  import { bennuNavStore } from '$lib/stores/bennu/nav-history.svelte';
+  import { bennuNavStore, type NavPlace } from '$lib/stores/bennu/nav-history.svelte';
   import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { collectIntentions, type GenerateMode, type IntentionItem } from './bennu-intentions';
@@ -345,26 +345,103 @@
 
   // ── Navigation history (Ctrl+Alt+←/→) ─────────────────────────────────────────
   //
-  // Record a "place" when the caret makes a real JUMP — a different file, or a big in-file hop
-  // (a go-to / structure / find click) — not on every arrow keystroke.
+  // **A stop is an ACTION, not a caret movement.** Go to declaration, a usage, a structure or
+  // find hit, a diagnostic, a switch to another tab — those navigate. Arrow keys, a click and
+  // page-down are reading, and while they pushed stops (anything over three lines did) the ring
+  // filled with places nobody chose to go to, which is what Back then walked through.
   //
-  // The hard part is that **one navigation is several caret events**. Every cross-file jump in
-  // Bennu is `openFile(…)` and then `requestGoto(line)`: the open lands the buffer wherever it
-  // starts, the scroll follows. Treating those as two places is what put stops in the ring
-  // nobody ever visited — Back from a go-to took you to line 1 of the file you had just arrived
-  // in, and a Back that crossed files recorded its own landing, truncating the branch and
-  // killing Forward. So two pieces of state below: which jump we are still waiting to land, and
-  // whether the entry we last pushed was a file opening that the next hop should refine.
-  let lastNav: { file: string; line: number } | null = null;
-  /** The landing of a programmatic Back/Forward, with a budget of buffer events to ignore
-   *  before giving up on it — so a jump that can never land (a shorter file, a navigation the
-   *  user superseded) cannot wedge the history shut. */
+  // The other half of feeling like IntelliJ's is that **the stop you are sitting on follows your
+  // caret** (`refine`). Nothing is pushed by reading, but the entry for the file you are in always
+  // says where you are — so the moment you jump away it is already the place you left, and coming
+  // back lands there rather than on the line you first arrived at. That one property removes all
+  // the origin bookkeeping: the previous entry IS the origin, kept current for free.
+  //
+  // What is left is that **one navigation is several events**: a cross-file jump is `openFile(…)`
+  // and then `requestGoto(line)`, so the buffer arrives at the top of the file before the scroll
+  // says which line was wanted. That arrival is provisional — and provisional is not a guess: the
+  // request is issued before the buffer swap, so at arrival time we can simply ask whether a go-to
+  // is already waiting to be consumed. If one is, the open belongs to it; if none is, the file was
+  // opened on its own (a tab switch, the project tree) and its stop is final.
+  /** The caret's last known place, updated by every caret event. */
+  let lastPlace: NavPlace | null = null;
+  /** The landing of a programmatic Back/Forward, with a budget of events to ignore before giving
+   *  up on it — so a jump that can never land (a shorter file, a navigation the user superseded)
+   *  cannot wedge the history shut. */
   let pendingJump: { file: string; line: number; budget: number } | null = null;
-  /** The file whose OPENING we just recorded. The next jump inside it refines that entry
-   *  instead of pushing a second one. Consumed by the first caret event either way. */
-  let justOpened: string | null = null;
-  const NAV_JUMP_LINES = 3; // an in-file move larger than this counts as a jump
-  const NAV_SETTLE_EVENTS = 4; // buffer events a pending jump may swallow before it gives up
+  /** The file we have just ARRIVED in as part of a jump, whose stop the jump's own scroll still
+   *  has to name. */
+  let provisionalIn: string | null = null;
+  const NAV_SETTLE_EVENTS = 4; // events a pending jump may swallow before it gives up
+
+  /** Whether a go-to has been requested and not yet consumed — i.e. whether the file that is
+   *  arriving was opened *by* a jump. */
+  function jumpPending(): boolean {
+    // Untracked: this is reached from the caret callback, which CodeMirror fires synchronously
+    // from inside whichever `$effect` caused the scroll. A tracked read there would make the
+    // go-to relay a dependency of that effect, and the next request would re-run it — the same
+    // self-invalidation the history store's mutators are untracked for.
+    return untrack(() => {
+      const t = bennuUiStore.gotoTarget;
+      return !!t && t.nonce !== consumedGotoNonce;
+    });
+  }
+
+  /** Swallow an event that belongs to a Back/Forward we are executing: its landing is already IN
+   *  the ring at the index we stepped to, and recording it again would truncate the branch we just
+   *  moved into — which is why Forward used to stop working after any Back that crossed a file.
+   *  Returns whether the event was consumed. */
+  function settlingJump(place: NavPlace): boolean {
+    if (!pendingJump) return false;
+    const arrived =
+      isSamePath(pendingJump.file, place.file) && Math.abs(pendingJump.line - place.line) <= 1;
+    if (arrived) {
+      pendingJump = null;
+      return true;
+    }
+    if (pendingJump.budget > 0) {
+      pendingJump.budget -= 1;
+      return true;
+    }
+    // Never landed, or the user went elsewhere meanwhile: stop blocking the history.
+    pendingJump = null;
+    return false;
+  }
+
+  /** A file arrived under the caret — a tab switch, a file opened from the tree, or the buffer of
+   *  a cross-file jump. */
+  function arriveIn(place: NavPlace) {
+    if (settlingJump(place)) return;
+    // Both orders happen: the scroll relay may run before the buffer swap or after it. If the stop
+    // we are on is already in this file, the jump recorded its destination first and THIS is the
+    // buffer landing underneath it — not a second stop at the top of the file. Leave the ring
+    // alone; the scroll's own caret event refines it.
+    const cur = bennuNavStore.current;
+    if (cur && isSamePath(cur.file, place.file)) return;
+    bennuNavStore.push(place);
+    provisionalIn = jumpPending() ? place.file : null;
+  }
+
+  /** A navigation landed on `dest`. The origin needs no argument: the entry below is the place we
+   *  were, kept current by `refine`. */
+  function recordJump(dest: NavPlace) {
+    if (settlingJump(dest)) return;
+    if (provisionalIn && isSamePath(provisionalIn, dest.file)) {
+      provisionalIn = null;
+      bennuNavStore.replace(dest); // the scroll that the opening was for — one stop, not two
+      return;
+    }
+    provisionalIn = null;
+    bennuNavStore.push(dest);
+  }
+
+  /** A navigation the editor performs itself (go-to-declaration inside one file, Ctrl+G, a marker
+   *  jump). The panels do not need this: they all go through `requestGoto`, which the relay
+   *  records. Called BEFORE the scroll, so the entry it pushes is the destination while the one
+   *  below it is still where the caret is. */
+  function noteNavigation(line: number, col = 1) {
+    const file = activePath;
+    if (file) recordJump({ file, line, col });
+  }
 
   function onCaret(line: number, col: number) {
     caretLine = line; caretCol = col;
@@ -389,51 +466,34 @@
     const path = activePath;
     if (!path) return;
 
+    // Where this tab was last left, read BEFORE the line below overwrites it with the event being
+    // handled. On an arrival that event is the top of the file — the buffer lands there and the
+    // view state is restored afterwards — so recording it would make Back land on line 1 of a file
+    // you had been reading halfway down. The refinement cannot be left to the restoring scroll:
+    // whether that produces a caret event at all is CodeMirror's business, not ours, and a history
+    // that depends on it is a history that is wrong whenever it does not.
+    const arriving = !lastPlace || !isSamePath(lastPlace.file, path);
+    const left_at = arriving ? projectStore.caretOf(path) : null;
+
     // Remembered across restarts (debounced hard in the store — this runs on every arrow key).
     // The live `viewStates` snapshot below is finer while the window is open; this is the part
     // that survives closing it.
     projectStore.rememberCaret(path, line, col);
 
-    if (pendingJump) {
-      const arrived =
-        isSamePath(pendingJump.file, path) && Math.abs(pendingJump.line - line) <= 1;
-      if (!arrived && pendingJump.budget > 0) {
-        // On the way: the buffer being swapped, the target file opening at wherever it starts.
-        // The old file can report a last caret position too, before `activePath` catches up —
-        // hence swallowing by budget rather than by which file this event is in.
-        pendingJump.budget -= 1;
-        return;
-      }
-      pendingJump = null;
-      if (arrived) {
-        // Already in the ring at the index we just stepped to. Recording it again would
-        // truncate the branch this step moved into — which is why Forward stopped working
-        // after any Back that crossed a file.
-        lastNav = { file: path, line };
-        justOpened = null;
-        return;
-      }
-      // Never landed, or the user went somewhere else meanwhile: fall through and treat this
-      // as an ordinary event rather than blocking the history for the rest of the session.
+    const place = { file: path, line, col };
+    // A DIFFERENT file under the caret is a navigation whoever caused it: a tab switch, a file
+    // opened from the tree, or the buffer of a cross-file jump.
+    if (arriving) {
+      lastPlace = place;
+      arriveIn(left_at ? { file: path, line: left_at.line, col: left_at.col } : place);
+      return;
     }
-
-    const opened = justOpened;
-    justOpened = null;
-    const changedFile = !lastNav || !isSamePath(lastNav.file, path);
-    const movedFar = !!lastNav && Math.abs(lastNav.line - line) > NAV_JUMP_LINES;
-    const jumped = changedFile || movedFar;
-    if (jumped) {
-      const place = { file: path, line, col };
-      if (opened && isSamePath(opened, path)) {
-        bennuNavStore.replace(place); // the scroll that the opening was for
-      } else {
-        bennuNavStore.record(place);
-        // Only a file OPENING is provisional. Two deliberate hops inside one file are two
-        // stops, and collapsing them would lose the one you meant to come back to.
-        justOpened = changedFile ? path : null;
-      }
-    }
-    lastNav = { file: path, line };
+    lastPlace = place;
+    // Ordinary movement inside the file we are already in. It pushes nothing — this is reading —
+    // but the stop we are sitting on follows the caret, so leaving this file remembers where we
+    // were. Not while a Back/Forward is still landing: that would rewrite the entry it is aiming
+    // at with a position on the way to it.
+    if (!settlingJump(place)) bennuNavStore.refine(place);
   }
 
   /** Navigate to a recorded place (cross-file via the goto relay so the remounted editor
@@ -453,6 +513,26 @@
   export function navBack() { void navGo(bennuNavStore.back()); }
   /** Ctrl+Alt+→ — jump forward again after a Back. */
   export function navForward() { void navGo(bennuNavStore.forward()); }
+
+  /** Ctrl+Shift+Backspace — back to where you were last TYPING.
+   *
+   *  A separate history from the jump ring on purpose: "where was I reading" and "where was I
+   *  editing" are different questions, and mixing them is half of what made stepping back
+   *  useless. Pressing it again walks further back through the session's edits. */
+  export function navLastEdit() {
+    const place = bennuNavStore.stepEdit();
+    if (!place) return;
+    // An edit place is not in the jump ring, so going there IS a navigation — and the entry we are
+    // on is already where we are, so pushing the destination is the whole of it.
+    bennuNavStore.push(place);
+    void navGo(place);
+  }
+
+  /** Ctrl+Shift+E — go to a place picked from Recent Locations. */
+  export function navToPlace(place: NavPlace) {
+    bennuNavStore.push(place);
+    void navGo(place);
+  }
 
   // ── Restore the caret a restart lost ─────────────────────────────────────────
   //
@@ -479,6 +559,9 @@
     if (!caret || (caret.line === 1 && caret.col === 1)) return;
     void tick().then(() => {
       if (projectStore.activeFilePath !== path) return;
+      // No history call here: the scroll moves the caret, and the caret handler refines the stop
+      // this tab switch pushed — which is what stops Back landing on line 1 of a tab you had been
+      // reading halfway down.
       editorComp?.scrollToLineCol(caret.line, caret.col);
     });
   });
@@ -502,7 +585,12 @@
     if (!t || t.nonce === consumedGotoNonce) return;
     consumedGotoNonce = t.nonce;
     // A go-to names the line; the remembered caret must not overrule it when the buffer lands.
-    restoredCaretFor = projectStore.activeFilePath;
+    const file = projectStore.activeFilePath;
+    restoredCaretFor = file;
+    // THE place every panel's navigation is recorded: usages, dependencies, tests, structure,
+    // catalog, TODOs, find-in-files, build diagnostics and the editor's own go-to all reach the
+    // editor through this one relay, so one call here covers every one of them.
+    if (file) recordJump({ file, line: t.line, col: 1 });
     void tick().then(() => editorComp?.scrollToLineCol(t.line, 1));
   });
 
@@ -514,7 +602,14 @@
     if (!t || t.nonce === consumedGotoOffsetNonce) return;
     consumedGotoOffsetNonce = t.nonce;
     restoredCaretFor = projectStore.activeFilePath;
-    void tick().then(() => editorComp?.scrollToByteOffset(t.offset));
+    // Recorded after the move: a byte offset says nothing about which line it is until the editor
+    // has resolved it. The caret's own event has already refined the entry we are leaving, so the
+    // push below lands on top of the right origin.
+    void tick().then(() => {
+      editorComp?.scrollToByteOffset(t.offset);
+      const file = projectStore.activeFilePath;
+      if (file && editorComp) recordJump({ file, line: caretLine, col: caretCol });
+    });
   });
 
   // ── Edits → store ────────────────────────────────────────────────────────────
@@ -524,7 +619,12 @@
   let docRevision = $state(0);
 
   function onInput(text: string) {
-    if (activePath) projectStore.setSource(activePath, text);
+    if (activePath) {
+      projectStore.setSource(activePath, text);
+      // Where you were typing, for Ctrl+Shift+Backspace. Merged by region in the store, so a
+      // burst of typing is one place rather than one per keystroke.
+      bennuNavStore.noteEdit({ file: activePath, line: caretLine, col: caretCol });
+    }
     docRevision += 1;
   }
 
@@ -3055,6 +3155,7 @@
       await runFindUsages(source, offset, editorComp.coordsAtByteOffset(offset), null);
       return true;
     }
+    noteNavigation(d.line, d.col);
     editorComp.scrollToLineCol(d.line, d.col);
     return true;
   }
@@ -3285,6 +3386,7 @@
     } else if (t.offset > 0) {
       editorComp?.scrollToByteOffset(t.offset);
     } else if (t.line > 0) {
+      noteNavigation(t.line);
       editorComp?.scrollToLineCol(t.line, 1);
     }
     return true;
@@ -3645,7 +3747,10 @@
     if (m) {
       const line = parseInt(m[1], 10);
       const col = m[2] ? parseInt(m[2], 10) : 1;
-      if (line > 0) editorComp?.scrollToLineCol(line, col);
+      if (line > 0) {
+        noteNavigation(line, col); // Ctrl+G is a navigation, and Back must come back from it
+        editorComp?.scrollToLineCol(line, col);
+      }
     }
     gotoOpen = false;
   }

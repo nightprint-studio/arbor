@@ -184,8 +184,16 @@ impl<'a> SigParser<'a> {
     }
 
     pub fn parse_field_signature(&mut self) -> PResult<TypeSig> {
-        // A field signature is a single ReferenceTypeSignature.
-        self.reference_type_signature()
+        // A field SIGNATURE (JVMS §4.7.9.1) is a single ReferenceTypeSignature — a base type is
+        // excluded there because an `int` field is not generic and carries no Signature attribute
+        // at all. But this parser is also the one that reads a field DESCRIPTOR (§4.3.2), which is
+        // what a field without that attribute has, and a descriptor may perfectly well be `I`.
+        //
+        // Read strictly, the two disagreed in a way that showed: `[I` parsed — the array branch
+        // descends through `java_type_signature`, which takes base types — while the `I` inside it
+        // did not, on its own. Accepting the wider grammar is the honest reading of what callers
+        // actually hand this: whatever the class file wrote for the field's type.
+        self.java_type_signature()
     }
 
     // --- productions ------------------------------------------------------

@@ -243,6 +243,75 @@ mod tests {
         unknown_members(&src, &resolver()).into_iter().map(|d| d.message).collect()
     }
 
+    /// **Two static imports offering the same NAME, and only the argument count tells them apart.**
+    ///
+    /// Straight out of a WireMock test: `WireMock.*` is starred in (its `options(UrlPattern)` builds
+    /// an HTTP OPTIONS stub) and `WireMockConfiguration.options` is named (its `options()` builds a
+    /// server configuration). Taking the first owner that has *a* method called `options` typed
+    /// `options()` as the one-argument one, so the chain continued on a `MappingBuilder` and
+    /// `dynamicPort()` was reported as a method that does not exist — on a line javac accepts.
+    #[test]
+    fn a_bare_call_picks_the_static_import_whose_arity_fits() {
+        fn ty(methods: Vec<Member>) -> ClassMembers {
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
+                interfaces: Vec::new(),
+                methods,
+                fields: Vec::new(),
+                flags: Default::default(),
+            }
+        }
+        let mut members = HashMap::new();
+        members.insert("java/lang/Object".to_string(), ty(vec![]));
+        // The starred owner: one `options`, and it takes an argument.
+        members.insert(
+            "com/acme/Stubs".to_string(),
+            ty(vec![Member::method(
+                "options",
+                TypeRef::simple("com/acme/MappingBuilder"),
+                vec![TypeRef::simple("java/lang/String")],
+            )
+            .stat()]),
+        );
+        members.insert("com/acme/MappingBuilder".to_string(), ty(vec![]));
+        // The named owner: `options()` with none, returning something that goes on being configured.
+        members.insert(
+            "com/acme/Config".to_string(),
+            ty(vec![
+                Member::method("options", TypeRef::simple("com/acme/Config"), vec![]).stat(),
+                Member::method("dynamicPort", TypeRef::simple("com/acme/Config"), vec![]),
+            ]),
+        );
+        members.insert("com/acme/Server".to_string(), ty(vec![]));
+        let simple: HashMap<String, String> = [
+            ("Server", "com/acme/Server"),
+            ("Config", "com/acme/Config"),
+            ("MappingBuilder", "com/acme/MappingBuilder"),
+        ]
+        .iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+        let r = MapResolver { members, simple };
+
+        // The starred import comes FIRST, as it does in the real file.
+        let head = "import static com.acme.Stubs.*;\nimport static com.acme.Config.options;\n";
+        let msgs = |src: &str| -> Vec<String> {
+            unknown_members(src, &r).into_iter().map(|d| d.message).collect()
+        };
+
+        // In a field initialiser — where the real one is — and in a method body.
+        let field = format!("{head}class C {{ static final Server s = new Server(options().dynamicPort()); }}");
+        let body = format!("{head}class C {{ void m() {{ Server s = new Server(options().dynamicPort()); }} }}");
+        assert!(msgs(&field).is_empty(), "{:?}", msgs(&field));
+        assert!(msgs(&body).is_empty(), "{:?}", msgs(&body));
+
+        // And the other one still answers when the call really does pass an argument: a typo on its
+        // result is still caught, so this is arity choosing an owner, not the check going quiet.
+        let one_arg = format!("{head}class C {{ void m() {{ options(\"/x\").nope(); }} }}");
+        assert_eq!(msgs(&one_arg).len(), 1, "{:?}", msgs(&one_arg));
+    }
+
     #[test]
     fn known_method_on_inferred_local_is_ok() {
         assert!(diags("String s = \"x\"; s.length();").is_empty());

@@ -66,3 +66,54 @@ fn a_nested_type_name_resolves_against_its_own_outer_type() {
         edits.iter().map(|e| (&e.file, e.start)).collect::<Vec<_>>()
     );
 }
+
+/// **A type's own nested class must not capture a name written in its HEADER.**
+///
+/// `class HashCodeBuilder … implements Builder<Integer>`, in a class that also declares a nested
+/// `Builder`, names the same-package INTERFACE: a member type's scope is the *body* of its class
+/// (JLS §6.3), and `extends`/`implements` are not the body. That is why javac compiles
+/// commons-lang, where this shape is written four times.
+///
+/// Read in its own scope, the header bound to the nested class — so the interface's `build()` was
+/// in no supertype of it, the `@Override` was reported as overriding nothing, and renaming the
+/// method moved neither the interface's own declaration nor the other implementors.
+#[test]
+fn a_headers_supertype_is_not_the_types_own_nested_class() {
+    let p = Project::new(&[
+        (
+            "Builder.java",
+            "package b;\n\
+             public interface Builder<T> {\n\
+             \x20   T build();\n\
+             }\n",
+        ),
+        (
+            "HashCodeBuilder.java",
+            "package b;\n\
+             public class HashCodeBuilder implements Builder<Integer> {\n\
+             \x20   public static class Builder {\n\
+             \x20       public HashCodeBuilder get() { return null; }\n\
+             \x20   }\n\
+             @Override\n\
+             \x20   public Integer build() { return Integer.valueOf(1); }\n\
+             }\n",
+        ),
+    ]);
+    // The header named the interface, so the class implements it and the `@Override` is one.
+    assert_eq!(p.validate_errors("HashCodeBuilder.java"), Vec::<String>::new());
+
+    // And the rename carries the interface's declaration with it — the half a wrong supertype
+    // silently dropped.
+    let src = p.source("HashCodeBuilder.java").to_string();
+    let at_build = at(&src, "public Integer build()") + "public Integer ".len();
+    let plan = p.rename("HashCodeBuilder.java", at_build, "Build").expect("a plan");
+    let files: Vec<String> = plan
+        .files
+        .iter()
+        .map(|f| f.file.rsplit(['/', '\\']).next().unwrap_or(&f.file).to_string())
+        .collect();
+    assert!(
+        files.iter().any(|f| f == "Builder.java"),
+        "the interface's own `build()` must be renamed too, got {files:?}",
+    );
+}

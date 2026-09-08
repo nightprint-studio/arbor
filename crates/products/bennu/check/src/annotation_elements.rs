@@ -15,7 +15,7 @@
 
 use std::collections::HashSet;
 
-use bennu_java::prelude::{FileSymbols, MemberKind, TypeResolver};
+use bennu_java::prelude::{FileSymbols, MemberKind, TypeRef, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
@@ -112,7 +112,7 @@ fn check_annotation(
             // The element exists — is the value a shape its declared type can hold?
             let Some(element) = elements.iter().find(|m| m.name == key) else { continue };
             if let Some(value) = pair.child_by_field_name("value") {
-                let declared = &element.return_type.binary_name;
+                let declared = &element.return_type;
                 check_value_type(value, declared, key, bytes, out);
                 check_constant_names(value, declared, bytes, symbols, resolver, out);
             }
@@ -183,8 +183,21 @@ mod tests {
         }
     }
 
+    /// An element of a given type, written as Java writes it (`String[]`) and recorded the way the
+    /// index records it: the ELEMENT in the name, the depth in `dims`.
+    ///
+    /// These fixtures used to put the brackets in the name, which no producer has done since the
+    /// depth moved to `dims` — so every array test here passed against a shape that no longer
+    /// reaches the check, while real projects were told their `String[]` element holds one value.
     fn element_of(name: &str, ty: &str) -> Member {
-        Member { return_type: TypeRef::simple(ty), ..element(name) }
+        Member { return_type: type_ref(ty), ..element(name) }
+    }
+
+    /// `String[]` → `java/lang/String` + `dims: 1`, the shape both producers build: a bytecode
+    /// descriptor decodes to it, and so does a project element's written type.
+    fn type_ref(ty: &str) -> TypeRef {
+        let (base, dims) = bennu_java::prelude::split_array_dims(ty);
+        TypeRef::simple(base).arrayed(dims as u8)
     }
 
     /// An element with NO `default` — one a use site has to supply.
@@ -194,7 +207,7 @@ mod tests {
 
     /// A required element of a given type.
     fn required_of(name: &str, ty: &str) -> Member {
-        Member { return_type: TypeRef::simple(ty), ..required(name) }
+        Member { return_type: type_ref(ty), ..required(name) }
     }
 
     /// An element with a `default` clause, which is what nearly every configuration annotation
@@ -236,6 +249,13 @@ mod tests {
                 element_of("nullable", "boolean"),
                 element_of("length", "int"),
                 element_of("tags", "java/lang/String[]"),
+                // Deliberately in the OLD spelling — an index persisted before `dims` existed
+                // loads with `dims: 0` and the brackets still in the name, and a stale cache must
+                // not turn every list back into an error.
+                Member {
+                    return_type: TypeRef::simple("java/lang/String[]"),
+                    ..element("stale_tags")
+                },
                 // `Class<?>[]` — the array marker survives the generic argument list now (it used
                 // to be parsed away, leaving a name indistinguishable from a plain `Class`).
                 element_of("kind", "java/lang/Class[]"),
@@ -279,7 +299,10 @@ mod tests {
                 fields: vec![
                     Member::field("MUTABLE", TypeRef::simple("java/lang/String")).stat(),
                     Member::field("CONST", TypeRef::simple("java/lang/String")).stat().final_(),
-                    Member::field("OBJS", TypeRef::simple("com/acme/MyObj[]")).stat().final_(),
+                    Member::field("OBJS", type_ref("com/acme/MyObj[]")).stat().final_(),
+                    // `final`, of the right ELEMENT family, and still not a constant variable —
+                    // the case that reads as constant if array-ness is asked of the name alone.
+                    Member::field("NAMES", type_ref("java/lang/String[]")).stat().final_(),
                 ],
                 flags: ClassFlags::default(),
             },
@@ -594,6 +617,49 @@ mod tests {
         assert!(codes(r#"class A { @Column(tags = {"a", "b"}) String f; }"#).is_empty());
     }
 
+    /// **The regression, in the user's words: a `String[]` element used the way a `String[]`
+    /// element is used, reported as an error.**
+    ///
+    /// It is the same sentence as the test above, and that one passed throughout — because its
+    /// fixture spelled the type `java/lang/String[]`, and nothing has produced that spelling since
+    /// the array depth moved into `TypeRef::dims`. This one asserts against the shape the index
+    /// really builds, which is the only shape the check ever sees in a project.
+    #[test]
+    fn a_list_given_to_a_string_array_element_is_what_that_element_is_for() {
+        let ty = type_ref("java/lang/String[]");
+        assert_eq!(ty.binary_name, "java/lang/String", "the name holds the ELEMENT");
+        assert_eq!(ty.dims, 1, "and the depth lives beside it");
+        assert!(codes(r#"class A { @Column(tags = {"a", "b"}) String f; }"#).is_empty());
+        assert!(codes(r#"class A { @Column(tags = {}) String f; }"#).is_empty());
+    }
+
+    /// An index written before `dims` existed still says `String[]` in the name. It must read as an
+    /// array too — otherwise a stale cache brings the whole false positive back.
+    #[test]
+    fn a_list_given_to_an_element_from_a_stale_index_is_still_fine() {
+        assert!(codes(r#"class A { @Column(stale_tags = {"a", "b"}) String f; }"#).is_empty());
+    }
+
+    /// And the message names the type the way the declaration writes it — `String[]`, not the
+    /// element left in the name.
+    #[test]
+    fn the_message_writes_the_array_back_with_its_brackets() {
+        let ds = diags(r#"class A { @Column(one_kind = {String.class}) String f; }"#);
+        assert!(ds[0].message.contains("`Class`"), "{}", ds[0].message);
+        assert_eq!(pretty(&type_ref("java/lang/String[]")), "String[]");
+        assert_eq!(pretty(&TypeRef::simple("java/lang/String[]")), "String[]");
+    }
+
+    /// `static final String[] NAMES` is `final`, and of the right element family, and is still not
+    /// a constant variable — an array never is.
+    #[test]
+    fn a_final_array_field_is_not_a_constant_value() {
+        assert_eq!(
+            codes(r#"class A { @Named(id = Holder.NAMES) String f; }"#),
+            ["non-constant-annotation-value"]
+        );
+    }
+
     #[test]
     fn a_literal_of_the_wrong_kind_is_flagged() {
         assert_eq!(codes(r#"class A { @Column(length = "no") String f; }"#), ["annotation-value-type"]);
@@ -764,13 +830,14 @@ fn scan_value(value: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
 /// once per entry.
 fn check_constant_names(
     value: Node,
-    declared: &str,
+    declared: &TypeRef,
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
     out: &mut Vec<Diagnostic>,
 ) {
-    let (base, _) = bennu_java::prelude::split_array_dims(declared);
+    // The ELEMENT family is what decides: `String[]` takes strings, one per entry.
+    let (base, _) = bennu_java::prelude::split_array_dims(&declared.binary_name);
     if !(crate::nodes::is_primitive(base) || base == "java/lang/String") {
         return;
     }
@@ -851,13 +918,18 @@ fn not_a_constant_variable(
     if !field.is_final {
         return Some(format!("`{name}` is not `final`"));
     }
-    let (base, _) = bennu_java::prelude::split_array_dims(&field.return_type.binary_name);
-    if crate::nodes::is_primitive(base) || base == "java/lang/String" {
+    // An ARRAY is never a constant variable, however constant its elements would be — so the family
+    // test has to be asked of the whole type, not of the element left in the name once the depth
+    // moved to `dims`. `static final String[] NAMES` is the shape that slipped through.
+    let ty = &field.return_type;
+    if !ty.is_array()
+        && (crate::nodes::is_primitive(&ty.binary_name) || ty.binary_name == "java/lang/String")
+    {
         return None; // final and of the right family — the initializer is the part we do not judge
     }
     Some(format!(
         "`{name}` is declared `{}`, and only a `final` primitive or `String` is one",
-        pretty(&field.return_type.binary_name)
+        pretty(ty)
     ))
 }
 
@@ -912,21 +984,22 @@ fn find_field(
 /// This is the half of the question the tree can answer; the other half is the type checker's.
 fn check_value_type(
     value: Node,
-    declared: &str,
+    declared: &TypeRef,
     key: &str,
     bytes: &[u8],
     out: &mut Vec<Diagnostic>,
 ) {
-    // Array-ness is read off the declared binary name, and it is trustworthy in both directions:
-    // a library element's type comes from a bytecode descriptor, a project element's from
-    // `resolve_written_type`, and both spell an array `elem[]`.
+    // Array-ness is asked of the TYPE, never read off its spelling — `TypeRef::is_array` is the one
+    // place that knows, and it answers for both shapes an index can hold.
     //
-    // They did not always agree. The written-type parse used to stop at the closing `>` of a
-    // generic argument list, so `Class<?>[]` was recorded as `Class` with the array marker silently
-    // gone — commons-lang has eleven such elements, and every one was reported for the list it is
-    // supposed to hold. The dimensions are peeled BEFORE the arguments now (see
-    // `bennu_java::typename::split_array_dims`), so this needs no gate.
-    let is_array = declared.contains('[');
+    // Reading the name was the bug. The array depth moved out of the binary name into `TypeRef::dims`
+    // (an array has no members of its own, so every `members_of` question wants the element type),
+    // and both producers followed it: a bytecode descriptor decodes to `java/lang/String` + `dims: 1`,
+    // and so does a project element's `String[]`. Nothing spells `elem[]` any more — so `contains('[')`
+    // answered *no* for every array element in every real project, and `@Ann(strings = {"a", "b"})`,
+    // the shape those elements exist for, was reported as a list given to something that holds one
+    // value. Only the fixtures here still wrote the old spelling, which is why the check looked right.
+    let is_array = declared.is_array();
     if value.kind() == "element_value_array_initializer" {
         if !is_array {
             out.push(CheckId::AnnotationValueType.at(
@@ -943,7 +1016,7 @@ fn check_value_type(
         return;
     }
     let Some(got) = literal_kind(value) else { return };
-    let want = declared_kind(declared);
+    let want = declared_kind(&declared.binary_name);
     let Some(want) = want else { return };
     if got != want {
         let _ = bytes;
@@ -985,13 +1058,12 @@ fn declared_kind(binary: &str) -> Option<&'static str> {
     })
 }
 
-/// A declared type as a Java reader would write it.
-fn pretty(binary: &str) -> String {
-    let base = binary.trim_end_matches("[]");
+/// A declared type as a Java reader would write it — `java/lang/String` + `dims: 1` → `String[]`.
+///
+/// The depth is taken from wherever it is: `dims` for anything the current index built, brackets in
+/// the name for a record persisted before `dims` existed.
+fn pretty(ty: &TypeRef) -> String {
+    let (base, in_name) = bennu_java::prelude::split_array_dims(&ty.binary_name);
     let name = base.rsplit(['/', '$']).next().unwrap_or(base);
-    if binary.contains('[') {
-        format!("{name}[]")
-    } else {
-        name.to_string()
-    }
+    format!("{name}{}", "[]".repeat(in_name.max(ty.dims as usize)))
 }
