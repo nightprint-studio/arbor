@@ -62,6 +62,16 @@ pub fn split_declaration(root: Node<'_>, source: &str, start: usize, end: usize)
             "the array brackets are written on the name rather than the type — move them to the type first",
         )));
     }
+    // `int[] a = {};` — the braces are DECLARATION syntax. Split off into `a = {};` they are an
+    // "illegal start of expression", which is the same fact `inline-variable` refuses on.
+    if value.kind() == "array_initializer" {
+        return Some(Err(Refusal::new(
+            id,
+            label,
+            "an array written with braces is declaration syntax and cannot stand alone in an \
+             assignment — write `new int[]{…}` first",
+        )));
+    }
 
     let indent = indent_at(source, decl.start_byte());
     let nl = newline(source);
@@ -158,7 +168,17 @@ pub fn to_var(root: Node<'_>, source: &str, start: usize, end: usize) -> Outcome
         "var".to_string(),
         "type",
     )];
-    Some(Ok(Plan::new(id, label, edits).caret_at(ty.start_byte())))
+    // What the tree can rule out is above; what it cannot see is the type of the initialiser when
+    // that is a name or a call. `int cp1 = c1;` with a `char c1` becomes `var cp1 = c1;` — a `char`
+    // — and the next `cp1 = Character.toCodePoint(…)` stops compiling. A caller with a resolver
+    // checks the claim; one without is exactly where it was.
+    Some(Ok(Plan::new(id, label, edits)
+        .caret_at(ty.start_byte())
+        .guarded_by(crate::plan::TypeGuard {
+            start: value.start_byte(),
+            end: value.end_byte(),
+            written: text(&ty, source).trim().to_string(),
+        })))
 }
 
 /// Plan a *`var` → explicit type*. The type comes from the caller's resolver.
@@ -285,18 +305,13 @@ fn type_is_doing_work(ty: &Node<'_>, value: &Node<'_>, source: &str) -> Option<&
     // The diamond takes its type arguments FROM the declared type: `List<String> xs = new
     // ArrayList<>()` is an `ArrayList<String>` only because the left-hand side says so. Remove the
     // type and it becomes `ArrayList<Object>`, which every later use rejects.
-    if value.kind() == "object_creation_expression" {
-        let created = value
-            .child_by_field_name("type")
-            .map(|t| text(&t, source))
-            .unwrap_or_default();
-        if created.replace(char::is_whitespace, "").ends_with("<>") {
-            return Some(
-                "the `<>` takes its type arguments from the written type — spell them out first, or the \
-                 declaration becomes a collection of `Object`",
-            );
-        }
+    if value.kind() == "object_creation_expression" && is_diamond(value) {
+        return Some(
+            "the `<>` takes its type arguments from the written type — spell them out first, or the \
+             declaration becomes a collection of `Object`",
+        );
     }
+    let _ = source;
 
     // A declaration widens its initialiser: `long total = 0` holds an `int` literal in a `long`.
     // `var` infers the literal's own type, so the next `total += aLong` stops compiling. Only `int`
@@ -315,7 +330,43 @@ fn type_is_doing_work(ty: &Node<'_>, value: &Node<'_>, source: &str) -> Option<&
 /// Java's own list, and it is short: a lambda, a method reference and an array initialiser have no
 /// type of their own to infer, and `null` has one that means nothing. Each is a compile error under
 /// `var`, so each is a refusal here rather than a plan that breaks the file.
+/// Whether a `new X<>(…)` writes the diamond — its type arguments come from the target, so there is
+/// nothing for `var` to read.
+fn is_diamond(creation: &Node<'_>) -> bool {
+    // The `<>` hangs off the created TYPE (`new ArrayList<>()` is a `generic_type` with an empty
+    // `type_arguments`), not off the creation node itself.
+    creation.child_by_field_name("type").is_some_and(|t| {
+        crate::selection::descendants(t, "type_arguments")
+            .iter()
+            .any(|a| a.named_child_count() == 0)
+    })
+}
+
 fn uninferable(value: &Node<'_>) -> Option<&'static str> {
+    // Anywhere inside, not only at the top. A conditional is a single expression whose type comes
+    // from its arms, so `cond ? new HashMap<>() : new HashMap<>(x)` and `cond ? f::g : null` are as
+    // unwritable as the arm itself — and the top node is a `ternary_expression`, which said nothing.
+    for child in crate::selection::descendants_any(
+        *value,
+        &["lambda_expression", "method_reference", "array_initializer"],
+    ) {
+        if child.id() == value.id() {
+            continue; // the node itself is answered by the match below
+        }
+        if let Some(reason) = uninferable(&child) {
+            return Some(reason);
+        }
+    }
+    if crate::selection::descendants(*value, "object_creation_expression")
+        .iter()
+        .filter(|c| c.id() != value.id())
+        .any(is_diamond)
+    {
+        return Some(
+            "the `<>` takes its type arguments from what this is assigned to — spell them out \
+             first, or the declaration becomes a collection of `Object`",
+        );
+    }
     match value.kind() {
         "lambda_expression" => {
             Some("a lambda takes its type from what it is assigned to, so `var` has nothing to read")
@@ -434,6 +485,36 @@ mod tests {
     }
 
     /// Measured on `commons-lang3`: 9 of the 16 files this refactoring broke were this one shape.
+    /// What the tree cannot see, the plan declares instead of guessing at. `int cp1 = c1;` looks
+    /// fine here and is only safe if `c1` is an `int` — which is a question for a resolver.
+    #[test]
+    fn to_var_says_what_it_is_assuming_about_the_initialiser() {
+        let src = "class A {\n    void f(char c1) {\n        int cp1 = c1;\n        use(cp1);\n    }\n    void use(int n) {}\n}";
+        let tree = parse_java(src).unwrap();
+        let at = src.find("int cp1").unwrap();
+        let Some(Ok(plan)) = to_var(tree.root_node(), src, at, at) else { panic!("no plan") };
+        let guard = plan.type_guard.expect("a guard");
+        assert_eq!(guard.written, "int");
+        assert_eq!(&src[guard.start..guard.end], "c1");
+    }
+
+    /// The diamond does not have to be the whole initialiser. A conditional takes its type from its
+    /// arms, so `cond ? new HashMap<>() : new HashMap<>(x)` is as target-typed as either arm — and
+    /// the top node is a `ternary_expression`, which the old check read and said nothing about.
+    #[test]
+    fn a_diamond_inside_a_conditional_is_refused_too() {
+        let src = "class A {\n    void f(boolean c, java.util.Map<String, String> other) {\n        java.util.Map<String, String> m = c ? new java.util.HashMap<>() : new java.util.HashMap<>(other);\n    }\n}";
+        assert!(refusal(src, "java.util.Map<String, String> m", to_var).contains("`<>`"));
+    }
+
+    /// `int[] a = {};` split apart leaves `a = {};` — the braces are declaration syntax and nothing
+    /// else, which is the same fact `inline-variable` already refuses on.
+    #[test]
+    fn splitting_a_brace_array_initialiser_is_refused() {
+        let src = "class A {\n    void f() {\n        int[] a = {};\n        use(a);\n    }\n    void use(int[] x) {}\n}";
+        assert!(refusal(src, "int[] a", split_declaration).contains("declaration syntax"));
+    }
+
     #[test]
     fn a_diamond_takes_its_arguments_from_the_written_type() {
         let src = "class A {\n    void f() {\n        java.util.List<String> xs = new java.util.ArrayList<>();\n    }\n}";

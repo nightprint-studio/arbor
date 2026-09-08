@@ -9,7 +9,7 @@ pub use crate::offers::{plan_for, plans_at, refactorings_at};
 
 // What comes back.
 pub use crate::plan::{
-    merge_throws, written_name, Outcome, Plan, RefactorEdit, Refusal, ThrowsSlot, TypeNeed,
+    merge_throws, written_name, Outcome, Plan, RefactorEdit, Refusal, ThrowsSlot, TypeGuard, TypeNeed,
     TypeSlot,
 };
 

@@ -1256,6 +1256,15 @@ impl Ctx<'_> {
         args: &[Node],
         enclosing: Option<&str>,
     ) -> Option<TypeRef> {
+        // JLS §10.7: an array's `clone()` is covariant — it hands back the array type itself, not
+        // `Object`. Every array type overrides it that way, and no array has `ClassMembers` for the
+        // walk to find, so the walk climbed to `Object.clone()` and typed `names.clone()` as an
+        // `Object`. Writing that into a declaration gave `Object clone = excludeFieldNames.clone();`
+        // and the `return clone;` after it stopped compiling — forty-nine broken extractions on
+        // commons-lang, the largest family there was.
+        if recv.dims > 0 && method_name == "clone" && args.is_empty() {
+            return Some(recv.clone());
+        }
         // The receiver seen AS the type that DECLARES the method, carrying the arguments that
         // actually reach it. A method inherited from `Range<T>` and called on a `DoubleRange` must
         // be read against `Range<Double>`: substituting its `T` against the receiver's own list
@@ -1276,8 +1285,19 @@ impl Ctx<'_> {
         // Declaring-type variables first (`List<Foo>.get` → `Foo`), then the ones no receiver can
         // answer for because the METHOD declares them.
         let ret = self.substitute_generics(&ret, &declared_on);
+        // The variables the RECEIVER put there. After substitution the return type may still name a
+        // variable, and there are two completely different reasons it might: the callee declares one
+        // of its own, or the receiver's type argument IS a variable of ours. They are told apart by
+        // where they came from and by nothing else — `Function<Integer, T>.apply(T t) -> R` under
+        // `R = T` leaves a `T` that is OURS, and binding the callee's `T` from the `int` argument
+        // rewrote it to `int`, so `allocator.apply(length)` came out an `int` instead of a `T`.
+        let from_receiver: Vec<String> = declared_on
+            .type_args
+            .iter()
+            .flat_map(collect_type_variable_names)
+            .collect();
         Some(match picked {
-            Some(m) => self.bind_method_type_vars(&ret, m, args, enclosing),
+            Some(m) => self.bind_method_type_vars(&ret, m, args, enclosing, &from_receiver),
             None => ret,
         })
     }
@@ -1304,6 +1324,7 @@ impl Ctx<'_> {
         m: &Member,
         args: &[Node],
         enclosing: Option<&str>,
+        from_receiver: &[String],
     ) -> TypeRef {
         // Only worth the argument inference when something in the return type is still open.
         if !self.mentions_type_variable(ret) {
@@ -1317,10 +1338,23 @@ impl Ctx<'_> {
             if bindings.iter().any(|(v, _)| *v == p.binary_name) {
                 continue; // first occurrence wins; a second would need a join we don't compute
             }
+            if from_receiver.iter().any(|v| *v == p.binary_name) {
+                continue; // the receiver's variable, not the callee's — same letter, different thing
+            }
             let Some(arg) = args.get(i) else { continue };
-            let Some(arg_ty) = self.infer_expr(arg, enclosing) else { continue };
+            let Some(mut arg_ty) = self.infer_expr(arg, enclosing) else { continue };
             if arg_ty.binary_name.is_empty() || self.is_type_variable(&arg_ty.binary_name) {
                 continue; // an untypeable argument binds nothing
+            }
+            // `T[]` is an identity parameter over `T`, not over `T[]`: the array depth belongs to
+            // the PARAMETER and has to come off the argument before it stands for the variable.
+            // `Arrays.stream(T[] a) -> Stream<T>` passed a `String[]` bound `T = String[]`, so the
+            // stream came out `Stream<String[]>` and every `line.startsWith(…)` after it stopped
+            // compiling — forty-nine broken extractions on commons-lang, the single largest family.
+            // An argument shallower than the parameter is the varargs call (`asList("a")` against
+            // `asList(T...)`), where the argument already IS the element: left as it is.
+            if arg_ty.dims >= p.dims {
+                arg_ty.dims -= p.dims;
             }
             bindings.push((p.binary_name.clone(), arg_ty));
         }
@@ -1500,8 +1534,10 @@ impl Ctx<'_> {
         }
         TypeRef {
             binary_name: bn.clone(),
-            // Substituting a type ARGUMENT never changes how deep the array is.
+            // Substituting a type ARGUMENT never changes how deep the array is, nor whether the
+            // position stood in for a captured wildcard.
             dims: member_ret.dims,
+            wildcard: member_ret.wildcard,
             type_args: member_ret
                 .type_args
                 .iter()
@@ -1708,15 +1744,24 @@ impl Ctx<'_> {
             if !matches!(p.kind(), "formal_parameter" | "spread_parameter") {
                 continue;
             }
-            let matches = p
-                .child_by_field_name("name")
+            // A varargs parameter exposes neither a `name` nor a `type` field — see
+            // `parameter_name_node`. Asking for them returned `None`, so `OPTION... options` was
+            // invisible here and the name fell through to whatever ELSE carried it: on
+            // `NumericEntityUnescaper` that is the field `EnumSet<OPTION> options`, and every type
+            // read off the parameter was the field's.
+            let matches = crate::symbols::parameter_name_node(&p)
                 .and_then(|n| node_text(&n, self.bytes))
                 .is_some_and(|pn| pn == name);
             if matches {
-                let t = p
-                    .child_by_field_name("type")
-                    .and_then(|n| node_text(&n, self.bytes))?;
-                return self.resolve_type_text(&t);
+                let (type_node, varargs) = crate::symbols::parameter_type_node(&p)?;
+                let text = node_text(&type_node, self.bytes)?;
+                let resolved = self.resolve_type_text(&text)?;
+                // `T... xs` IS a `T[]` inside the body — the one place the written text and the
+                // parameter's real type differ.
+                return Some(match varargs {
+                    true => resolved.clone().arrayed(resolved.dims.saturating_add(1)),
+                    false => resolved,
+                });
             }
         }
         None
@@ -2081,6 +2126,9 @@ impl Ctx<'_> {
             binary_name: self.simple_to_binary(&t.name),
             type_args: t.args.iter().map(|a| self.to_binary_ref(a)).collect(),
             dims: t.dims,
+            // Carried across from the parse: a `? extends X` written in SOURCE is as unwritable at
+            // a declaration as one decoded out of bytecode.
+            wildcard: t.wildcard,
         }
     }
 
@@ -2347,6 +2395,19 @@ fn from_binary(bn: &str) -> String {
 /// no package separator. A real class always carries a lowercase package segment or a mixed-case /
 /// multi-letter simple name, so this never misfires on `String`/`Foo`. Kept to ONE letter (plus
 /// digits) to avoid classifying a rare 2-letter default-package class as a variable.
+/// Every type-variable name inside `ty`, at any depth — the names a receiver contributed, which a
+/// method-level binding must not touch.
+fn collect_type_variable_names(ty: &TypeRef) -> Vec<String> {
+    let mut out = Vec::new();
+    if is_type_var(&ty.binary_name) {
+        out.push(ty.binary_name.clone());
+    }
+    for a in &ty.type_args {
+        out.extend(collect_type_variable_names(a));
+    }
+    out
+}
+
 fn is_type_var(bn: &str) -> bool {
     let mut chars = bn.chars();
     match chars.next() {
@@ -2402,12 +2463,20 @@ fn sole<'m>(members: &[&'m Member]) -> Option<&'m Member> {
 /// Substitute every `(variable, type)` binding into `ty`, at any depth.
 fn apply_bindings(ty: &TypeRef, bindings: &[(String, TypeRef)]) -> TypeRef {
     if let Some((_, bound)) = bindings.iter().find(|(v, _)| *v == ty.binary_name) {
-        return bound.clone();
+        // The array depth of the POSITION survives the substitution and adds to whatever the
+        // variable stands for: `T[]` under `T = String` is `String[]`, not `String`. Dropping it
+        // made `ArraySorter.sort(T[] a) -> T[]` come back as a plain `String`, and the declaration
+        // written from it could not take the array it was handed. Same rule as
+        // `hierarchy::substitute`, which is where the other half of the engine does this.
+        let mut out = bound.clone();
+        out.dims = out.dims.saturating_add(ty.dims);
+        return out;
     }
     TypeRef {
         binary_name: ty.binary_name.clone(),
         type_args: ty.type_args.iter().map(|a| apply_bindings(a, bindings)).collect(),
         dims: ty.dims,
+        wildcard: ty.wildcard,
     }
 }
 
@@ -2929,6 +2998,7 @@ mod shadowing_tests {
                         binary_name: "java/util/List".into(),
                         type_args: vec![TypeRef::simple("acme/Impresa")],
                         dims: 0,
+                        wildcard: false,
                     },
                     vec![],
                 ),
@@ -3131,6 +3201,7 @@ mod shadowing_tests {
                     binary_name: "acme/Spec".into(),
                     type_args: vec![TypeRef::simple("java/lang/Object")],
                     dims: 0,
+                    wildcard: false,
                 },
                 vec![],
             )])
@@ -3142,6 +3213,123 @@ mod shadowing_tests {
             None,
             "unresolved, NOT java/lang/Object — Object is what makes the next call a false error",
         );
+    }
+
+    /// A varargs parameter exposes neither a `name` nor a `type` field, so every lookup that asked
+    /// for them found nothing and the name fell through to whatever ELSE carried it. On
+    /// `NumericEntityUnescaper` the constructor's `OPTION... options` lost to the field
+    /// `EnumSet<OPTION> options`, and every type read off the parameter was the field's.
+    #[test]
+    fn a_varargs_parameter_is_visible_and_is_an_array() {
+        let mut r = resolver();
+        r.members.insert("acme/Opt".into(), cm(vec![]));
+        r.simple.insert("Opt".into(), "acme/Opt".into());
+        r.members.insert("acme/Box".into(), cm(vec![]));
+        r.simple.insert("Box".into(), "acme/Box".into());
+        // A FIELD of the same name, deliberately of a different type — the shadowing this restores.
+        let src = "class C {\n    Box options;\n    C(Opt... options) {\n        Object o = options;\n    }\n}";
+        let start = src.find("Object o = options").unwrap() + "Object o = ".len();
+        let ty = infer_expression_type(src, start, start + "options".len(), &r).unwrap();
+        assert_eq!(ty.binary_name, "acme/Opt", "{ty:?}");
+        assert_eq!(ty.dims, 1, "a `T...` parameter is a `T[]` inside the body: {ty:?}");
+    }
+
+    /// The callee's type variable and the receiver's can be the same letter and different things.
+    /// `Function<Integer, T>.apply(T t) -> R` under `R = T` leaves OUR `T`, and binding the callee's
+    /// `T` from the `int` argument rewrote it — `allocator.apply(length)` came out an `int`.
+    #[test]
+    fn a_type_variable_the_receiver_supplied_is_not_bound_from_the_arguments() {
+        let mut r = resolver();
+        let mut func = cm(vec![Member::method(
+            "apply",
+            TypeRef::simple("R"),
+            vec![TypeRef::simple("T")],
+        )]);
+        func.type_params = vec!["T".to_string(), "R".to_string()];
+        r.members.insert("acme/Func".into(), func);
+        r.simple.insert("Func".into(), "acme/Func".into());
+        r.simple.insert("Integer".into(), "java/lang/Integer".into());
+        r.members.insert("java/lang/Integer".into(), cm(vec![]));
+        let src = "class C {\n    <T> void m(Func<Integer, T> allocator, int length) {\n        Object o = allocator.apply(length);\n    }\n}";
+        // The answer is the receiver's `T`, which is a type VARIABLE and therefore not something
+        // the public inference hands out — so `None` is the honest result. What must never come
+        // back is `int`: that is the callee's `T` bound from the argument, wearing our letter.
+        assert_eq!(
+            infer_call(src, "allocator.apply(length)", &r),
+            None,
+            "the receiver's `T` is unresolved, NOT the `int` the callee's `T` binds to",
+        );
+    }
+
+    /// JLS §10.7: an array's `clone()` hands back the array type, not `Object`. The walk finds no
+    /// members for an array and climbs to `Object.clone()`, so `names.clone()` typed as an `Object`
+    /// — and a declaration written from that could not take the array it was handed.
+    #[test]
+    fn an_arrays_clone_is_the_array_type() {
+        let r = resolver();
+        let src = "class C { void m(String[] names) { Object o = names.clone(); } }";
+        let start = src.find("names.clone()").unwrap();
+        let ty = infer_expression_type(src, start, start + "names.clone()".len(), &r).unwrap();
+        assert_eq!(ty.binary_name, "java/lang/String", "{ty:?}");
+        assert_eq!(ty.dims, 1, "{ty:?}");
+    }
+
+    /// `T[]` is an identity parameter over `T`, and `T[]` in the RETURN keeps its own depth on top
+    /// of whatever `T` turned out to be. Getting either half wrong types `sort(String[])` as a
+    /// `String` or as a `String[][]`; getting both wrong cancels out until one is fixed.
+    #[test]
+    fn an_array_parameter_binds_the_element_and_an_array_return_keeps_its_depth() {
+        let mut r = resolver();
+        r.members.insert(
+            "acme/ArraySorter".into(),
+            cm(vec![Member::method(
+                "sort",
+                TypeRef::simple("T").arrayed(1),
+                vec![TypeRef::simple("T").arrayed(1)],
+            )
+            .stat()]),
+        );
+        r.simple.insert("ArraySorter".into(), "acme/ArraySorter".into());
+        let src = "class C { void m(String[] names) { Object o = ArraySorter.sort(names); } }";
+        let start = src.find("ArraySorter.sort(names)").unwrap();
+        let ty =
+            infer_expression_type(src, start, start + "ArraySorter.sort(names)".len(), &r).unwrap();
+        assert_eq!(ty.binary_name, "java/lang/String", "{ty:?}");
+        assert_eq!(ty.dims, 1, "{ty:?}");
+    }
+
+    /// The same binding read through a generic return: `stream(T[]) -> Stream<T>` over a `String[]`
+    /// is a `Stream<String>`, and binding `T` to the whole `String[]` made it a `Stream<String[]>`
+    /// whose every `line.startsWith(…)` stopped compiling.
+    #[test]
+    fn an_array_parameter_binds_the_element_inside_a_generic_return() {
+        let mut r = resolver();
+        let mut stream = cm(vec![]);
+        stream.type_params = vec!["T".to_string()];
+        r.members.insert("java/util/stream/Stream".into(), stream);
+        r.members.insert(
+            "acme/Arrays".into(),
+            cm(vec![Member::method(
+                "stream",
+                TypeRef {
+                    binary_name: "java/util/stream/Stream".into(),
+                    type_args: vec![TypeRef::simple("T")],
+                    dims: 0,
+                    wildcard: false,
+                },
+                vec![TypeRef::simple("T").arrayed(1)],
+            )
+            .stat()]),
+        );
+        r.simple.insert("Arrays".into(), "acme/Arrays".into());
+        let src = "class C { void m(String[] lines) { Object o = Arrays.stream(lines); } }";
+        let start = src.find("Arrays.stream(lines)").unwrap();
+        let ty =
+            infer_expression_type(src, start, start + "Arrays.stream(lines)".len(), &r).unwrap();
+        assert_eq!(ty.binary_name, "java/util/stream/Stream", "{ty:?}");
+        assert_eq!(ty.type_args.len(), 1, "{ty:?}");
+        assert_eq!(ty.type_args[0].binary_name, "java/lang/String", "{ty:?}");
+        assert_eq!(ty.type_args[0].dims, 0, "{ty:?}");
     }
 
     #[test]
@@ -3249,7 +3437,7 @@ mod method_type_var_tests {
             methods: vec![
                 Member::method(
                     "ofNullable",
-                    TypeRef { binary_name: "acme/Opt".into(), dims: 0, type_args: vec![TypeRef::simple("T")] },
+                    TypeRef { binary_name: "acme/Opt".into(), dims: 0, type_args: vec![TypeRef::simple("T")], wildcard: false },
                     vec![TypeRef::simple("T")],
                 )
                 .stat(),

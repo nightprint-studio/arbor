@@ -653,6 +653,26 @@ pub fn parameter_name_node<'a>(param: &Node<'a>) -> Option<Node<'a>> {
     Some(declarator.child_by_field_name("name").unwrap_or(declarator))
 }
 
+/// The **type node** of a parameter, with the same trap as [`parameter_name_node`]: a
+/// `spread_parameter` exposes no `type` field either, so its type is the child that is neither the
+/// modifiers nor the declarator.
+///
+/// The `bool` says whether the parameter is **varargs**, because `T... xs` is a `T[]` inside the
+/// method body and a caller reading the written text alone would type it `T`.
+pub fn parameter_type_node<'a>(param: &Node<'a>) -> Option<(Node<'a>, bool)> {
+    if let Some(t) = param.child_by_field_name("type") {
+        return Some((t, false));
+    }
+    if param.kind() != "spread_parameter" {
+        return None;
+    }
+    let mut c = param.walk();
+    let t = param
+        .named_children(&mut c)
+        .find(|ch| !matches!(ch.kind(), "modifiers" | "variable_declarator"))?;
+    Some((t, true))
+}
+
 /// Whether this `class_body` is the body of an anonymous class — i.e. it hangs off a
 /// `new X() { … }` or an enum constant with a body, rather than off a type declaration.
 pub fn is_anonymous_body(body: &Node) -> bool {

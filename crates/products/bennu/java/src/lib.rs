@@ -181,6 +181,7 @@ mod tests {
             binary_name: bn.into(),
             type_args: args,
             dims: 0,
+            wildcard: false,
         }
     }
     fn m(name: &str, ret: TypeRef) -> Member {

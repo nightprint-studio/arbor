@@ -102,7 +102,7 @@ pub fn inline_method(root: Node<'_>, source: &str, offset: usize) -> Outcome {
     }
 
     let parameters = parameter_names(&declaration, source);
-    let arguments = argument_texts(&call, source);
+    let arguments = argument_nodes(&call);
     if parameters.len() != arguments.len() {
         return Some(Err(Refusal::new(
             id,
@@ -114,13 +114,14 @@ pub fn inline_method(root: Node<'_>, source: &str, offset: usize) -> Outcome {
     // The substitutions, as edits into the BODY's text.
     let mut replacements: Vec<(usize, usize, String)> = Vec::new();
     for (index, parameter) in parameters.iter().enumerate() {
-        let argument = &arguments[index];
+        let argument_node = arguments[index];
+        let argument = text(&argument_node, source).to_string();
         let sites: Vec<Node<'_>> = identifiers(expression)
             .into_iter()
             .filter(|n| text(n, source) == parameter)
             .filter(|n| !is_field_name(n))
             .collect();
-        if sites.len() > 1 && !is_simple(argument) {
+        if sites.len() > 1 && !is_simple(&argument) {
             return Some(Err(Refusal::new(
                 id,
                 label,
@@ -130,7 +131,7 @@ pub fn inline_method(root: Node<'_>, source: &str, offset: usize) -> Outcome {
                 ),
             )));
         }
-        let written = match needs_wrapping(argument) {
+        let written = match needs_wrapping(&argument_node) {
             true => format!("({argument})"),
             false => argument.clone(),
         };
@@ -178,11 +179,11 @@ fn parameter_names(declaration: &Node<'_>, source: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn argument_texts(call: &Node<'_>, source: &str) -> Vec<String> {
+fn argument_nodes<'t>(call: &Node<'t>) -> Vec<Node<'t>> {
     call.child_by_field_name("arguments")
         .map(|args| {
             let mut cursor = args.walk();
-            args.named_children(&mut cursor).map(|a| text(&a, source).to_string()).collect()
+            args.named_children(&mut cursor).collect()
         })
         .unwrap_or_default()
 }
@@ -205,10 +206,43 @@ fn is_simple(argument: &str) -> bool {
         && !trimmed.contains('(')
 }
 
-/// Whether an argument needs wrapping on the way into the body.
-fn needs_wrapping(argument: &str) -> bool {
-    let trimmed = argument.trim();
-    trimmed.contains(' ') && !trimmed.starts_with('(')
+/// Whether an argument needs wrapping on the way into the body — read off the node's KIND, not off
+/// its text.
+///
+/// The text rule was "it has a space in it and does not start with a paren", and a **cast** defeats
+/// both halves at once: `(GenericArrayType) type` starts with `(`, so nothing was added, and the
+/// body's `t.getGenericComponentType()` became `(GenericArrayType) type.getGenericComponentType()`
+/// — which parses, binds the selection to `type` instead of to the cast, and asks `Type` for a
+/// method it does not have. Ten broken inlines in one file, every one of them a cast.
+///
+/// So: anything that is not an atomic primary gets parentheses. Wrapping one that did not need them
+/// costs a pair of brackets; not wrapping one that did costs a program that means something else.
+fn needs_wrapping(argument: &Node<'_>) -> bool {
+    !matches!(
+        argument.kind(),
+        "identifier"
+            | "this"
+            | "super"
+            | "field_access"
+            | "method_invocation"
+            | "array_access"
+            | "parenthesized_expression"
+            | "object_creation_expression"
+            | "array_creation_expression"
+            | "class_literal"
+            | "string_literal"
+            | "character_literal"
+            | "decimal_integer_literal"
+            | "hex_integer_literal"
+            | "octal_integer_literal"
+            | "binary_integer_literal"
+            | "decimal_floating_point_literal"
+            | "hex_floating_point_literal"
+            | "true"
+            | "false"
+            | "null_literal"
+            | "method_reference"
+    )
 }
 
 /// Whether the inlined expression needs wrapping where the call was — the same rule as
@@ -293,6 +327,18 @@ mod tests {
         let source = "class A {\n    int plus(int n) { return n + 1; }\n    int f(int a) {\n        return plus(a) * 3;\n    }\n}";
         let Some(Ok(plan)) = run(source, "plus(a)") else { panic!("no plan") };
         assert!(plan.apply(source).contains("return (a + 1) * 3;"), "{}", plan.apply(source));
+    }
+
+    /// A **cast** argument starts with `(` and contains a space, which is how the old text rule
+    /// managed to be wrong in both directions at once. Substituted bare, it binds the selection to
+    /// the operand instead of to the cast: `t.getGenericComponentType()` became
+    /// `(GenericArrayType) type.getGenericComponentType()`, which parses and asks the wrong type.
+    #[test]
+    fn a_cast_argument_is_parenthesised_on_the_way_in() {
+        let source = "class C {\n    String show(Object type) {\n        return name((Sub) type);\n    }\n    String name(Sub s) { return s.label(); }\n}";
+        let Some(Ok(plan)) = run(source, "name((Sub) type)") else { panic!("no plan") };
+        let out = plan.apply(source);
+        assert!(out.contains("return ((Sub) type).label();"), "{out}");
     }
 
     #[test]

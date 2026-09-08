@@ -37,6 +37,25 @@ pub struct TypeRef {
     /// `#[serde(default)]` so an index persisted before this field still loads.
     #[serde(default)]
     pub dims: u8,
+    /// Whether this reference stands for a **captured wildcard** — a `?`, `? extends X` or
+    /// `? super X` that the decoder collapsed onto its bound.
+    ///
+    /// The collapse itself is right and stays: every member lookup in the engine needs a concrete
+    /// class to ask about, and variance is not a question `members_of` can answer. What was missing
+    /// is that the collapse is **lossy in one direction only**. Reading members off `Class<?>` as if
+    /// it were `Class<Object>` is harmless; WRITING it back into source is not — `Class<Annotation>
+    /// c = a.annotationType();` does not compile, because the compiler has a capture there and a
+    /// capture has no name anyone can type.
+    ///
+    /// So the bound stays where every consumer already reads it, and this bit records that it is
+    /// standing in for something unwritable. Twenty-six broken refactorings on commons-lang3 came
+    /// down to its absence: a type that looked perfectly ordinary right up to the moment it was
+    /// written into a declaration.
+    ///
+    /// `#[serde(default)]` so an index persisted before this field still loads — as `false`, which
+    /// is what an ordinary type is.
+    #[serde(default)]
+    pub wildcard: bool,
 }
 
 /// A bare binary name IS a type reference — a raw supertype, a non-generic class.
@@ -62,7 +81,23 @@ impl TypeRef {
             binary_name: binary_name.into(),
             type_args: Vec::new(),
             dims: 0,
+            wildcard: false,
         }
+    }
+
+    /// The same type, marked as standing in for a captured wildcard. See [`TypeRef::wildcard`].
+    pub fn captured(mut self) -> Self {
+        self.wildcard = true;
+        self
+    }
+
+    /// Whether this type — at any depth, in any argument — stands in for a captured wildcard.
+    ///
+    /// The recursive form is the one every caller wants: the capture is almost never at the top,
+    /// it is an ARGUMENT (`Class<? extends Annotation>`, `Map<String, ? extends Factory>`), and a
+    /// declaration carrying one does not compile whatever the outer name is.
+    pub fn names_a_wildcard(&self) -> bool {
+        self.wildcard || self.type_args.iter().any(TypeRef::names_a_wildcard)
     }
 
     /// The same type, `dims` levels of array deep.

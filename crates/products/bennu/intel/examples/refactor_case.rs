@@ -701,6 +701,15 @@ fn fill(plan: &mut Plan, source: &str, resolver: &dyn TypeResolver) -> bool {
             _ => plan.type_slot = None,
         }
     }
+    if let Some(guard) = plan.type_guard.clone() {
+        if let Declarable::Writable(inferred, _) =
+            declarable_type_detail(source, guard.start, guard.end, resolver)
+        {
+            if inferred != guard.written {
+                return false; // the backend refuses here; the harness has to do the same
+            }
+        }
+    }
     if let Some(slot) = plan.throws_slot.clone() {
         let proven = checked_exceptions_in(source, slot.start, slot.end, resolver);
         plan.fill_throws(&merge_throws(&slot.placeholder, &proven.kinds, proven.complete, source));

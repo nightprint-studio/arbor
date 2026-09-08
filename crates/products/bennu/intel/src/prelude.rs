@@ -5,7 +5,7 @@
 //! the prelude is the canonical call-site path.
 
 pub use crate::provider::{
-    declarable_type_at, declarable_type_detail, render_type_for_source, Declarable, DocumentSymbol, IntelError, IntelProvider, LibraryMember, LibraryTarget,
+    declarable_type_at, declarable_type_detail, render_type_for_source, render_type_for_source_with, Declarable, DocumentSymbol, IntelError, IntelProvider, LibraryMember, LibraryTarget,
     Location, LspClientProvider, NativeJavaProvider, Position, ProjectMember, TextEdit,
 };
 

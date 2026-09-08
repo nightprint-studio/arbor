@@ -49,12 +49,27 @@ pub struct TypeRef {
     /// written back into source. `#[serde(default)]` so an index written before this still loads.
     #[serde(default)]
     pub dims: u8,
+    /// Whether this stands in for a **captured wildcard** — a `?`, `? extends X` or `? super X`
+    /// that [`type_arg_to_ref`] collapsed onto its bound.
+    ///
+    /// The collapse is what member resolution needs and it stays; the bit is for the other
+    /// direction. `Class<? extends Annotation>` decodes to `Class<Annotation>`, which reads members
+    /// correctly and cannot be WRITTEN back — the compiler has a capture there, and a capture has
+    /// no name. `#[serde(default)]` so an index written before this still loads.
+    #[serde(default)]
+    pub wildcard: bool,
 }
 
 impl TypeRef {
     /// A plain (non-generic, non-array) reference to `binary_name`.
     pub fn plain(binary_name: impl Into<String>) -> Self {
-        Self { binary_name: binary_name.into(), type_args: Vec::new(), dims: 0 }
+        Self { binary_name: binary_name.into(), type_args: Vec::new(), dims: 0, wildcard: false }
+    }
+
+    /// The same reference, marked as standing in for a captured wildcard.
+    pub fn captured(mut self) -> Self {
+        self.wildcard = true;
+        self
     }
 
     /// The same reference, `dims` levels of array deep.
@@ -545,16 +560,18 @@ fn class_type_to_ref(ct: &ClassType) -> TypeRef {
     // Phase-1 targets; if present we still surface the outer args, which is what the
     // element-type carry-through uses.
     let type_args = ct.args.iter().map(type_arg_to_ref).collect();
-    TypeRef { binary_name, type_args, dims: 0 }
+    TypeRef { binary_name, type_args, dims: 0, wildcard: false }
 }
 
 fn type_arg_to_ref(a: &TypeArg) -> TypeRef {
     match a {
         TypeArg::Exact(t) => type_ref_from_sig(t),
-        TypeArg::Extends(t) => type_ref_from_sig(t),
-        TypeArg::Super(t) => type_ref_from_sig(t),
+        // A bounded wildcard collapses onto its bound, which is what a member lookup needs — and is
+        // marked, because it is NOT what a declaration may be written with. See [`TypeRef::wildcard`].
+        TypeArg::Extends(t) => type_ref_from_sig(t).captured(),
+        TypeArg::Super(t) => type_ref_from_sig(t).captured(),
         // Unbounded `?` has no usable element type; Object is the safe upper bound.
-        TypeArg::Unbounded => TypeRef::plain("java/lang/Object"),
+        TypeArg::Unbounded => TypeRef::plain("java/lang/Object").captured(),
     }
 }
 
@@ -638,6 +655,29 @@ mod tests {
         let r = type_ref_from_sig(&sig);
         assert_eq!(r.binary_name, "java/lang/Class");
         assert_eq!(r.type_args[0].binary_name, "java/lang/Object");
+        // …and says it is standing in for a capture, which `Class<Object>` alone cannot express.
+        assert!(r.type_args[0].wildcard);
+        assert!(!r.wildcard, "the outer type is not itself a wildcard");
+    }
+
+    /// A BOUNDED wildcard is the case that reads as an ordinary type right up to the moment someone
+    /// writes it down: `Class<? extends Annotation>` collapses onto `Annotation`, which is a real
+    /// name, and `Class<Annotation> c = a.annotationType();` does not compile.
+    #[test]
+    fn a_bounded_wildcard_keeps_its_bound_and_is_marked() {
+        for sig_text in [
+            "Ljava/lang/Class<+Ljava/lang/annotation/Annotation;>;",
+            "Ljava/lang/Class<-Ljava/lang/annotation/Annotation;>;",
+        ] {
+            let sig = crate::sig::parse_field(sig_text).unwrap();
+            let r = type_ref_from_sig(&sig);
+            assert_eq!(r.type_args[0].binary_name, "java/lang/annotation/Annotation", "{sig_text}");
+            assert!(r.type_args[0].wildcard, "{sig_text}");
+        }
+        // An exact argument is not a wildcard and must stay writable.
+        let sig = crate::sig::parse_field("Ljava/lang/Class<Ljava/lang/String;>;").unwrap();
+        let r = type_ref_from_sig(&sig);
+        assert!(!r.type_args[0].wildcard);
     }
 
     /// `[TT;` is `T[]`: the ELEMENT in the name, the depth beside it.

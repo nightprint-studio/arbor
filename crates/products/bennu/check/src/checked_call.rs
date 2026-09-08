@@ -133,7 +133,21 @@ pub fn checked_exceptions_in(
         let raised: Vec<String> = match n.kind() {
             "method_invocation" | "object_creation_expression" => {
                 match thrown_by(n, &root, source, bytes, &symbols, resolver, &cache, bare.as_ref()) {
-                    Thrown::Known(_, throws) => throws.definitely.clone(),
+                    Thrown::Known(_, throws) => {
+                        // The overload set disagrees: something is thrown if one signature binds
+                        // and not if another does, and which one binds is a question this does not
+                        // answer. The INTERSECTION is still sound as a lower bound — it is what
+                        // "must be caught or declared" is judged on — but it is not the whole
+                        // answer, and a caller that REPLACES a clause with it wipes what the code
+                        // needed. `CharSequenceTranslator.translate` has a `throws IOException`
+                        // overload and one without; the intersection came back empty and called
+                        // itself authoritative, so the extracted method lost the clause its own
+                        // enclosing method had written.
+                        if throws.possibly.len() != throws.definitely.len() {
+                            complete = false;
+                        }
+                        throws.definitely.clone()
+                    }
                     // A call we cannot read costs the whole set its authority — but not its
                     // contents: what the other calls proved is still true, and a caller that only
                     // wants to know "does this range raise IOException" can still use it.

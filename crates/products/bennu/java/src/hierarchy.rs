@@ -63,6 +63,9 @@ pub fn substitute(ty: &TypeRef, params: &[String], args: &[TypeRef]) -> TypeRef 
         binary_name: ty.binary_name.clone(),
         type_args: ty.type_args.iter().map(|t| substitute(t, params, args)).collect(),
         dims: ty.dims,
+        // A substitution replaces what a variable STANDS FOR, not what it is written as: a position
+        // that was a captured wildcard is still one afterwards.
+        wildcard: ty.wildcard,
     }
 }
 

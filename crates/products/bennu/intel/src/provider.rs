@@ -1393,6 +1393,7 @@ fn static_import_type(imports: &[bennu_java::prelude::Import], name: &str) -> Op
             // The brackets were trimmed off `base` two lines up; the depth they carried is the
             // difference between `Foo` and `Foo[]` and belongs on the reference.
             dims: written.matches("[]").count().min(u8::MAX as usize) as u8,
+            wildcard: false,
         })
     }
 
@@ -1943,7 +1944,9 @@ pub fn declarable_type_detail(
         return Declarable::Unknown;
     };
     let mut imports: Vec<String> = Vec::new();
-    let written = render_type_for_source(&tr, &mut imports);
+    let written = render_type_for_source_with(&tr, &mut imports, &|binary| {
+        resolver.members_of(binary).is_some()
+    });
     if written.is_empty() || written == "void" {
         return Declarable::Unwritable;
     }
@@ -1961,8 +1964,16 @@ pub fn declarable_type_detail(
     // not compile. The two are indistinguishable once substituted, so this declines rather than
     // guesses — and declining is a good outcome for a local, which then keeps `var`, exactly what
     // javac itself would have inferred.
-    if written.contains("<Object>") || written.contains("<Object,") || written.contains(", Object>")
-    {
+    // A captured wildcard has no name anyone can type. `a.annotationType()` is a
+    // `Class<? extends Annotation>`; the decoder collapses that onto its bound, which is what every
+    // member lookup needs and is NOT what `Class<Annotation> c = a.annotationType();` means to the
+    // compiler. The bit says the bound is standing in for something unwritable — and where the
+    // whole point of the declaration is to write it down, that is a refusal. A local then keeps
+    // `var`, which is what javac infers there anyway.
+    if tr.names_a_wildcard() {
+        return Declarable::Unwritable;
+    }
+    if names_object_as_a_type_argument(&tr) {
         return Declarable::Unwritable;
     }
     // A type in the file's OWN package needs no import, and asking for one is not merely redundant:
@@ -1975,6 +1986,19 @@ pub fn declarable_type_detail(
         .filter(|fqn| !own.as_ref().is_some_and(|p| fqn.starts_with(&format!("{p}."))))
         .collect();
     Declarable::Writable(written, imports)
+}
+
+/// Whether `Object` appears anywhere as a type ARGUMENT of `tr` — at any depth, in any position.
+///
+/// Read off the tree rather than off the rendered string, which is where the first version of this
+/// lived: `<Object>`, `<Object,` and `, Object>` between them miss the MIDDLE argument of a
+/// three-parameter generic, and `Collector<CharSequence, Object, String>` — what
+/// `Collectors.joining()` becomes once its capture is substituted away — went through as a type to
+/// write.
+fn names_object_as_a_type_argument(tr: &bennu_java::prelude::TypeRef) -> bool {
+    tr.type_args
+        .iter()
+        .any(|a| a.binary_name == "java/lang/Object" || names_object_as_a_type_argument(a))
 }
 
 /// The package a Java source declares, if it declares one.
@@ -2007,15 +2031,37 @@ pub fn render_type_for_source(
     tr: &bennu_java::prelude::TypeRef,
     imports: &mut Vec<String>,
 ) -> String {
+    render_type_for_source_with(tr, imports, &|_| false)
+}
+
+/// [`render_type_for_source`], told which binary names are TYPES.
+///
+/// A library type spells its nesting with `$` (`java/util/Map$Entry`), and the split is free. A
+/// PROJECT type does not: the index turns `p.Processor.Arch` into `p/Processor/Arch`, so nesting and
+/// packaging look identical, and the last segment came out as the whole name — `Arch bIT_64 =
+/// Processor.Arch.BIT_64;`, which does not compile, because `Arch` is not a name `ArchUtils` can
+/// see. Asking the resolver whether the path one segment up is itself a type is what tells the two
+/// apart, and it is the only thing that can.
+pub fn render_type_for_source_with(
+    tr: &bennu_java::prelude::TypeRef,
+    imports: &mut Vec<String>,
+    is_type: &dyn Fn(&str) -> bool,
+) -> String {
     let binary = tr.binary_name.trim();
     if binary.is_empty() {
         return String::new();
     }
     let written = if binary.contains('/') {
-        let dotted = binary.replace('/', ".");
+        let (outer_binary, project_nested) = split_project_nesting(binary, is_type);
+        let dotted = outer_binary.replace('/', ".");
         let (outer, nested) = match dotted.split_once('$') {
             Some((outer, rest)) => (outer.to_string(), rest.replace('$', ".")),
             None => (dotted.clone(), String::new()),
+        };
+        let nested = match (nested.is_empty(), project_nested.is_empty()) {
+            (_, true) => nested,
+            (true, false) => project_nested,
+            (false, false) => format!("{nested}.{project_nested}"),
         };
         // `java.lang` is implicit; importing it is noise the compiler already has. The name is the
         // ELEMENT type — the depth lives in `dims` — so it is already the thing to import; the trim
@@ -2035,14 +2081,39 @@ pub fn render_type_for_source(
     if tr.type_args.is_empty() {
         return tr.with_brackets(&written);
     }
-    let args: Vec<String> =
-        tr.type_args.iter().map(|a| render_type_for_source(a, imports)).collect();
+    let args: Vec<String> = tr
+        .type_args
+        .iter()
+        .map(|a| render_type_for_source_with(a, imports, is_type))
+        .collect();
     tr.with_brackets(&format!("{written}<{}>", args.join(", ")))
+}
+
+/// Split a `/`-separated binary into the outermost type and the nested names under it, by asking
+/// `is_type` about each prefix. `p/Processor/Arch` with `p/Processor` a known type gives
+/// `("p/Processor", "Arch")`; a plain `p/Processor` gives `("p/Processor", "")`.
+fn split_project_nesting(binary: &str, is_type: &dyn Fn(&str) -> bool) -> (String, String) {
+    let mut segments: Vec<&str> = binary.split('/').collect();
+    let mut nested: Vec<&str> = Vec::new();
+    // Bounded by the segment count, which is what the loop consumes.
+    while segments.len() > 1 {
+        let cut = segments.len() - 1;
+        let head = segments[..cut].join("/");
+        if !is_type(&head) {
+            break;
+        }
+        nested.insert(0, segments[cut]);
+        segments.truncate(cut);
+    }
+    (segments.join("/"), nested.join("."))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{reads_as_type_name, render_stub, render_type_for_source};
+    use super::{
+        names_object_as_a_type_argument, reads_as_type_name, render_stub, render_type_for_source,
+        render_type_for_source_with,
+    };
     use bennu_java::prelude::{ClassFlags, ClassMembers, Member, TypeRef, Visibility};
 
     /// The guard exists so an arbitrary matched fragment never reaches the resolver as a
@@ -2111,6 +2182,7 @@ mod tests {
             binary_name: "java/util/List".into(),
             type_args: vec![TypeRef::simple("java/lang/String")],
             dims: 0,
+            wildcard: false,
         };
         assert_eq!(render_type_for_source(&list, &mut imports), "List<String>");
         // `java.lang` is implicit; `java.util` is not.
@@ -2465,4 +2537,80 @@ mod same_package_tests {
         assert_eq!(NativeJavaProvider::same_package_type(&r, None, "MessageSource"), None);
         assert_eq!(NativeJavaProvider::same_package_type(&r, Some(""), "MessageSource"), None);
     }
+
+    /// A library type spells its nesting with `$`; a PROJECT type reaches the index as
+    /// `p/Processor/Arch`, where nesting and packaging look identical. Written from the last
+    /// segment alone it came out `Arch bIT_64 = Processor.Arch.BIT_64;` — and `Arch` is not a name
+    /// `ArchUtils` can see. Asking which prefix is itself a type is the only thing that can tell
+    /// the two apart.
+    #[test]
+    fn a_project_nested_type_is_written_through_its_outer_name() {
+        let is_type = |b: &str| b == "org/apache/commons/lang3/Processor";
+        let mut imports = Vec::new();
+        let arch = bennu_java::prelude::TypeRef::simple("org/apache/commons/lang3/Processor/Arch");
+        assert_eq!(
+            render_type_for_source_with(&arch, &mut imports, &is_type),
+            "Processor.Arch"
+        );
+        // The import is the OUTER type, which is the one a file can import.
+        assert_eq!(imports, vec!["org.apache.commons.lang3.Processor".to_string()]);
+        // And a path whose prefix is only a package is untouched.
+        let plain = bennu_java::prelude::TypeRef::simple("org/apache/commons/lang3/Processor");
+        assert_eq!(
+            render_type_for_source_with(&plain, &mut Vec::new(), &is_type),
+            "Processor"
+        );
+    }
+
+    /// The refusal the whole `wildcard` bit exists for: a type that carries a capture at any depth
+    /// is not one a declaration may be written with, and the outer name looks perfectly ordinary.
+    #[test]
+    fn a_captured_wildcard_anywhere_makes_a_type_unwritable() {
+        use bennu_java::prelude::TypeRef;
+        let capture = TypeRef {
+            binary_name: "java/lang/Class".into(),
+            type_args: vec![TypeRef::simple("java/lang/annotation/Annotation").captured()],
+            dims: 0,
+            wildcard: false,
+        };
+        assert!(capture.names_a_wildcard());
+        // Nested one level deeper — the shape `Map<String, ? extends Factory>` has.
+        let nested = TypeRef {
+            binary_name: "java/util/Map".into(),
+            type_args: vec![TypeRef::simple("java/lang/String"), capture.clone()],
+            dims: 0,
+            wildcard: false,
+        };
+        assert!(nested.names_a_wildcard());
+        // And an ordinary generic stays writable.
+        let plain = TypeRef {
+            binary_name: "java/util/List".into(),
+            type_args: vec![TypeRef::simple("java/lang/String")],
+            dims: 0,
+            wildcard: false,
+        };
+        assert!(!plain.names_a_wildcard());
+    }
+
+    /// The `Object`-as-a-type-argument rule is read off the tree, not off the rendered string: the
+    /// string form missed the MIDDLE argument of a three-parameter generic, which is exactly where
+    /// `Collectors.joining()` puts its captured accumulator.
+    #[test]
+    fn object_is_spotted_in_the_middle_argument_too() {
+        use bennu_java::prelude::TypeRef;
+        let collector = TypeRef {
+            binary_name: "java/util/stream/Collector".into(),
+            type_args: vec![
+                TypeRef::simple("java/lang/CharSequence"),
+                TypeRef::simple("java/lang/Object"),
+                TypeRef::simple("java/lang/String"),
+            ],
+            dims: 0,
+            wildcard: false,
+        };
+        assert!(names_object_as_a_type_argument(&collector));
+        // A plain `Object` that is the type ITSELF is not a captured argument and stays writable.
+        assert!(!names_object_as_a_type_argument(&TypeRef::simple("java/lang/Object")));
+    }
+
 }

@@ -238,6 +238,20 @@ pub fn extract_constant(root: Node<'_>, source: &str, start: usize, end: usize) 
     }
     let type_decl = enclosing_type(expr)?;
     let body = type_decl.child_by_field_name("body")?;
+    // The new field goes in the type's BODY, so an expression outside that body cannot read it. The
+    // shape that reaches here is an annotation on the type declaration itself —
+    // `@SuppressWarnings("deprecation") public class ObjectUtils {…}` — where the literal sits
+    // before the `{`, and the constant lifted out of it was declared inside: `cannot find symbol:
+    // variable TEXT`, eight of them across three files. An annotation on a MEMBER is inside the
+    // body and is fine, which is why the test is the body and not the annotation.
+    if expr.start_byte() < body.start_byte() {
+        return Some(Err(Refusal::new(
+            id,
+            label,
+            "this is in the type's own header, and a constant declared inside the type is not in \
+             scope there",
+        )));
+    }
     // A field may only read a field declared before it. Extracting out of one field's initialiser
     // and appending the constant after the last field puts the declaration BELOW its own use —
     // "illegal forward reference", from a refactoring that looks right on the screen.
@@ -314,14 +328,36 @@ fn unfit(expr: &Node<'_>, source: &str) -> Option<&'static str> {
     // declare. `var f = () -> x;` and `var e = null;` do not compile at all, and `var l = new
     // ArrayList<>();` compiles as the wrong thing. No resolver fixes these: the answer is not in
     // the expression.
-    if matches!(expr.kind(), "lambda_expression" | "method_reference" | "null_literal") {
+    // Anywhere inside, not only at the top: a conditional's type comes from its arms, so
+    // `errorHandler != null ? errorHandler::accept : null` has no type of its own either, and the
+    // top node is a `ternary_expression`, which said nothing.
+    if !crate::selection::descendants_any(*expr, &["lambda_expression", "method_reference"])
+        .is_empty()
+        || expr.kind() == "null_literal"
+    {
         return Some("this has no type of its own — it takes one from what it is assigned to");
     }
-    if expr.kind() == "object_creation_expression"
-        && expr
-            .child_by_field_name("type")
-            .and_then(|t| crate::selection::descendants(t, "type_arguments").first().copied())
-            .is_some_and(|a| a.named_child_count() == 0)
+    // An assignment buried in the expression. Naming it moves WHEN it runs, and Java's definite
+    // assignment analysis follows the `&&` it was written behind: hoisting
+    // `enabled && (len = match(…)) != 0` above the `if` left `len` unassigned as far as the
+    // compiler could prove, and every later read of it stopped compiling.
+    if !crate::selection::descendants_any(*expr, &["assignment_expression", "update_expression"])
+        .is_empty()
+    {
+        return Some(
+            "this assigns something as it is evaluated, and naming it moves when that happens",
+        );
+    }
+    // A diamond ANYWHERE inside, for the same reason as the lambda above: a conditional's type comes
+    // from its arms, and `cond ? new ImmutablePair<>(l, r) : nullPair()` is exactly as target-typed
+    // as the `new` on its own. Reading only the top node saw a `ternary_expression` and said nothing.
+    if crate::selection::descendants(*expr, "object_creation_expression")
+        .iter()
+        .any(|c| {
+            c.child_by_field_name("type")
+                .and_then(|t| crate::selection::descendants(t, "type_arguments").first().copied())
+                .is_some_and(|a| a.named_child_count() == 0)
+        })
     {
         return Some("the diamond takes its type from what it is assigned to — write the type arguments first");
     }
@@ -960,6 +996,45 @@ mod tests {
         assert_eq!(plan.name.as_deref(), Some("compute"), "{:?}", plan.name);
     }
 
+    /// The same, one level in. A conditional's type comes from its arms, so a method reference or a
+    /// diamond inside one is as target-typed as the arm itself — and the top node is a
+    /// `ternary_expression`, which the old check read and said nothing about.
+    #[test]
+    fn a_method_reference_or_diamond_inside_a_conditional_is_refused_too() {
+        let source = "class A {\n    void f(Runnable r, boolean c) {\n        run(c ? r::run : null);\n    }\n    void run(Runnable x) {}\n}";
+        let tree = parse_java(source).unwrap();
+        let start = source.find("c ? r::run : null").unwrap();
+        match extract_variable(tree.root_node(), source, start, start + "c ? r::run : null".len()) {
+            Some(Err(refusal)) => assert!(refusal.reason.contains("no type of its own"), "{}", refusal.reason),
+            other => panic!("{other:?}"),
+        }
+
+        let diamond = "class A {\n    java.util.List<String> f(boolean c, java.util.List<String> o) {\n        return c ? new java.util.ArrayList<>() : o;\n    }\n}";
+        let tree = parse_java(diamond).unwrap();
+        let start = diamond.find("c ? new java.util.ArrayList<>() : o").unwrap();
+        let end = start + "c ? new java.util.ArrayList<>() : o".len();
+        match extract_variable(tree.root_node(), diamond, start, end) {
+            Some(Err(refusal)) => assert!(refusal.reason.contains("diamond"), "{}", refusal.reason),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// An assignment buried in the expression. Naming it moves WHEN it runs, and Java's definite
+    /// assignment analysis follows the `&&` it was written behind.
+    #[test]
+    fn an_expression_that_assigns_as_it_evaluates_is_refused() {
+        let source = "class A {\n    void f(boolean on) {\n        int len;\n        if (on && (len = g()) != 0) {\n            use(len);\n        }\n    }\n    int g() { return 0; }\n    void use(int n) {}\n}";
+        let tree = parse_java(source).unwrap();
+        let start = source.find("on && (len = g()) != 0").unwrap();
+        let end = start + "on && (len = g()) != 0".len();
+        match extract_variable(tree.root_node(), source, start, end) {
+            Some(Err(refusal)) => {
+                assert!(refusal.reason.contains("when that happens"), "{}", refusal.reason)
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
     /// A lambda has no type of its own, and no resolver changes that — the answer is in the target.
     #[test]
     fn a_lambda_is_refused_because_its_type_comes_from_the_target() {
@@ -1069,6 +1144,26 @@ mod tests {
             Some(Err(refusal)) => assert!(refusal.reason.contains("before the class's static fields"), "{}", refusal.reason),
             other => panic!("{other:?}"),
         }
+    }
+
+    /// `@SuppressWarnings("deprecation")` on the CLASS puts the literal before the `{`, and the
+    /// constant lifted out of it goes inside — a field that is not in scope where it is used.
+    #[test]
+    fn a_constant_in_the_types_own_header_is_refused() {
+        let source = "@SuppressWarnings(\"deprecation\")\npublic class C {\n    void m() {}\n}";
+        let tree = parse_java(source).unwrap();
+        let start = source.find("\"deprecation\"").unwrap();
+        match extract_constant(tree.root_node(), source, start, start + 13) {
+            Some(Err(refusal)) => {
+                assert!(refusal.reason.contains("type's own header"), "{}", refusal.reason)
+            }
+            other => panic!("{other:?}"),
+        }
+        // The same annotation on a MEMBER is inside the body, and still works.
+        let ok = "public class C {\n    @SuppressWarnings(\"deprecation\")\n    void m() {}\n}";
+        let tree = parse_java(ok).unwrap();
+        let start = ok.find("\"deprecation\"").unwrap();
+        assert!(matches!(extract_constant(tree.root_node(), ok, start, start + 13), Some(Ok(_))));
     }
 
     /// Regression: an expression inside a lambda. Hoisted above the statement it lands where the

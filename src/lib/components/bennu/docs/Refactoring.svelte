@@ -64,6 +64,9 @@
     <div class="fc-desc">
       The expression gets a name — a local above the statement it was in, or a
       <code>private static final</code> beside the class's other fields when it is constant to read.
+      A constant is refused in the type's own header, where an annotation like
+      <code>@SuppressWarnings</code> sits before the <code>&#123;</code> and a field declared inside
+      would not be in scope.
       The type is resolved against the project, so the declaration says <code>List&lt;String&gt;</code>
       and not <code>var</code>, and the import it needs comes with it. The name steps aside from
       anything already in scope — a field the method reads on its own gets the name it has, and the
@@ -71,8 +74,11 @@
       it. Where the surrounding code is what decides the expression's type, in an argument, a
       <code>return</code> or an arm of a conditional, a type the engine works out but cannot write
       is a refusal instead: <code>var</code> there would infer the expression again with nothing to
-      infer from. An expression it cannot type at all still gets <code>var</code>, which is what
-      javac would infer anyway.
+      infer from. A type carrying a <strong>captured wildcard</strong> — what
+      <code>a.annotationType()</code> gives, a <code>Class&lt;? extends Annotation&gt;</code> — is a
+      refusal for the same reason at a field and keeps <code>var</code> at a local: the compiler has
+      a capture there, and a capture has no name anyone can type. An expression it cannot type at all
+      still gets <code>var</code>, which is what javac would infer anyway.
     </div>
   </div>
   <div class="fc-item">
@@ -101,9 +107,16 @@
     <div class="fc-title">Inline variable · Inline method</div>
     <div class="fc-desc">
       The value goes back where the name was, parenthesised wherever the surrounding expression
-      binds tighter. A one-expression method goes back into its call the same way, with its
-      arguments substituted where the parameters are read — structurally, so a local that happens to
-      share a parameter's name is untouched.
+      binds tighter. Which occurrences count is a question of scope, not of spelling: the ones in
+      the declaration's own scope, after it, that read the variable — not a method of the same name
+      (<code>Math.max</code>), not the selector after a dot, not a lambda parameter, and not a second
+      variable of the same name in the next block. It declines where the declaration was doing work
+      the expression alone cannot: a <code>final byte n = 5;</code> narrows a constant in a way only
+      an assignment may, and a value moved into a lambda becomes a capture, so it may only read
+      locals that never change. A one-expression method goes back into its call the same way, with
+      its arguments substituted where the parameters are read — structurally, so a local that happens
+      to share a parameter's name is untouched, and an argument that is not a simple name is
+      parenthesised so a cast keeps binding to what it was cast from.
     </div>
   </div>
 </div>

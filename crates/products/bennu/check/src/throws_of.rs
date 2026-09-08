@@ -257,12 +257,20 @@ fn through_receiver(
         names
             .into_iter()
             .map(|binary| {
-                bennu_java::prelude::substitute(
+                let substituted = bennu_java::prelude::substitute(
                     &bennu_java::prelude::TypeRef::simple(binary),
                     &params,
                     &declared_on.type_args,
-                )
-                .binary_name
+                );
+                // A capture has no name that can be written on a `throws` clause. `runnable.run()`
+                // on a `FailableRunnable<?>` throws one, and reading it as the wildcard's BOUND —
+                // `Object`, which is not even a `Throwable` — dropped it from the set entirely and
+                // called the answer complete. The empty name is what every caller already treats as
+                // "not something I can judge".
+                match substituted.names_a_wildcard() {
+                    true => String::new(),
+                    false => substituted.binary_name,
+                }
             })
             .collect()
     };

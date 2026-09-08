@@ -374,7 +374,7 @@ mod tests {
         // (which lacks it) → a false "cannot resolve method". `R` now stays unresolved → the call is
         // skipped conservatively.
         fn gen(bn: &str, args: Vec<TypeRef>) -> TypeRef {
-            TypeRef { binary_name: bn.to_string(), dims: 0, type_args: args }
+            TypeRef { binary_name: bn.to_string(), dims: 0, type_args: args, wildcard: false }
         }
         fn ty(type_params: Vec<&str>, superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {
             ClassMembers {
@@ -436,7 +436,7 @@ mod tests {
         // class's same-named `String result` field. Before the fix the field won and `result.getName()`
         // was falsely flagged (String has no getName).
         fn gen(bn: &str, args: Vec<TypeRef>) -> TypeRef {
-            TypeRef { binary_name: bn.to_string(), dims: 0, type_args: args }
+            TypeRef { binary_name: bn.to_string(), dims: 0, type_args: args, wildcard: false }
         }
         fn ty(type_params: Vec<&str>, superclass: Option<&str>, methods: Vec<Member>) -> ClassMembers {
             ClassMembers {

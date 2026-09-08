@@ -34,7 +34,7 @@ pub use crate::javadoc::{
 // and the test that recognises one. Shared so the extractor and the caret query derive it the
 // same way rather than each having its own idea.
 pub use crate::symbols::{
-    anonymous_supertype_name, anonymous_type_name, is_anonymous_body, parameter_name_node,
+    anonymous_supertype_name, anonymous_type_name, is_anonymous_body, parameter_name_node, parameter_type_node,
 };
 pub use crate::typename::{
     declared_type_in_scope, erase_type_arguments, inherited_member_type, inherited_member_type_of, is_primitive,

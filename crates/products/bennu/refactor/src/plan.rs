@@ -58,6 +58,30 @@ pub struct Plan {
     /// A `throws` clause this plan could only guess at; see [`ThrowsSlot`].
     #[serde(default)]
     pub throws_slot: Option<ThrowsSlot>,
+    /// A claim about a type this plan depends on but cannot check; see [`TypeGuard`].
+    #[serde(default)]
+    pub type_guard: Option<TypeGuard>,
+}
+
+/// A fact the plan is only correct under, and can only assert from the text.
+///
+/// *Declaration to `var`* is the whole of it so far, and the fact is: **what `var` infers here is
+/// what the source wrote.** The refactoring reads the tree and can rule out the shapes where that is
+/// visibly false — a diamond, a literal in a widening declaration, a lambda — but it cannot see the
+/// type of `c1` in `int cp1 = c1;`, and where `c1` is a `char`, `var` narrows the declaration and
+/// the next `cp1 = someInt` stops compiling.
+///
+/// So the plan says what it is assuming and names the span to check it against. A caller with a
+/// resolver infers that span: a type that **differs** from `written` refuses the plan, and anything
+/// else — nothing inferred, a type it cannot write down — leaves it standing, which is what a caller
+/// without a resolver does anyway. Only a positive disagreement is evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TypeGuard {
+    /// The expression whose inferred type must match.
+    pub start: usize,
+    pub end: usize,
+    /// The type the source writes, as it writes it.
+    pub written: String,
 }
 
 impl Plan {
@@ -82,6 +106,7 @@ impl Plan {
             name: None,
             caret: None,
             type_slot: None,
+            type_guard: None,
             throws_slot: None,
         }
     }
@@ -103,6 +128,12 @@ impl Plan {
 
     pub fn needing_type(mut self, slot: TypeSlot) -> Self {
         self.type_slot = Some(slot);
+        self
+    }
+
+    /// Attach the fact this plan is only correct under; see [`TypeGuard`].
+    pub fn guarded_by(mut self, guard: TypeGuard) -> Self {
+        self.type_guard = Some(guard);
         self
     }
 

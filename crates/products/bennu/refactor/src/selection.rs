@@ -304,6 +304,24 @@ pub fn descendants<'t>(node: Node<'t>, kind: &str) -> Vec<Node<'t>> {
     out
 }
 
+/// Every node under `node` whose kind is one of `kinds` — the same walk as [`descendants`] when the
+/// question is about a family rather than one shape.
+pub fn descendants_any<'t>(node: Node<'t>, kinds: &[&str]) -> Vec<Node<'t>> {
+    let mut out = Vec::new();
+    collect_any(node, kinds, &mut out);
+    out
+}
+
+fn collect_any<'t>(node: Node<'t>, kinds: &[&str], out: &mut Vec<Node<'t>>) {
+    if kinds.contains(&node.kind()) {
+        out.push(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_any(child, kinds, out);
+    }
+}
+
 /// Whether `node` carries the `static` modifier.
 pub fn is_static(node: &Node<'_>, source: &str) -> bool {
     let mut cursor = node.walk();

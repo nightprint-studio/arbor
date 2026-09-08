@@ -105,6 +105,27 @@ pub(crate) fn bennu_refactor_plan(
     let mut plan = outcome.map_err(|refusal| refusal.reason)?;
     let mut imports: Vec<String> = Vec::new();
 
+    // A claim the plan could only assert from the text, checked against the resolver. Only a type
+    // that DISAGREES refuses: an unknown or unwritable answer is no evidence, and the plan is then
+    // exactly what a caller without a resolver would have applied. See `TypeGuard`.
+    if let Some(guard) = plan.type_guard.clone() {
+        if let bennu_intel::prelude::Declarable::Writable(inferred, _) =
+            crate::index_service::IndexService::global().infer_type_detail(
+                &args.file,
+                &args.source,
+                guard.start,
+                guard.end,
+            )
+        {
+            if inferred != guard.written {
+                return Err(format!(
+                    "`var` would infer `{inferred}` here, not the `{}` this declares",
+                    guard.written
+                ));
+            }
+        }
+    }
+
     if let Some(slot) = plan.type_slot.clone() {
         use bennu_intel::prelude::Declarable;
         use bennu_refactor::prelude::TypeNeed;

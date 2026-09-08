@@ -13,6 +13,22 @@
 //! - **A side effect used more than once.** `int n = next(); use(n); use(n);` becomes two calls.
 //!   Refused whenever the initialiser is not a pure read and there is more than one use.
 //!
+//! ## What counts as a use of the name
+//!
+//! Not "every identifier that spells it", which is what this used to gather and is how inlining a
+//! local called `max` rewrote `Math.max(start, 0)` into `Math.(len1 - len2)(start, 0)`. Three
+//! separate things wear the same word and none of them is a read of the variable:
+//!
+//! - a **method name** (`Math.max(…)`) and a **field selector** (`p.max`) — the name after the dot
+//!   belongs to a different namespace entirely (JLS §6.5.1, "obscuring");
+//! - a **binding occurrence** — a declarator, a parameter, a `catch` variable, a for-each variable,
+//!   a pattern binding, and the one that produced `sorted.forEach(zoneNames[i] -> …)`: a **lambda
+//!   parameter**, which is an identifier with no `formal_parameter` around it;
+//! - a use of a **different variable of the same name** in a sibling or nested scope. Java lets a
+//!   method declare `zoneName` twice in two different loops, and it lets an inner scope shadow an
+//!   outer one; the uses that belong to THIS declaration are the ones inside its own scope, after
+//!   it, and not under an inner declaration that took the name over.
+//!
 //! ## Parentheses
 //!
 //! `int t = a + b; return t * 2;` must become `return (a + b) * 2;` and not `return a + b * 2;`.
@@ -37,9 +53,10 @@ pub fn inline_variable(root: Node<'_>, source: &str, offset: usize) -> Outcome {
     let name = text(&name_node, source);
     let method = enclosing_callable(name_node)?;
 
-    // The declaration this name belongs to. A parameter has no initialiser to inline, and saying so
-    // is more useful than the row not being there — it is the commonest wrong guess.
-    let Some(declarator) = declarator_of(&method, name, source) else {
+    // The declaration this name belongs to — the one in scope AT THE CARET, not the first one the
+    // method happens to declare. Two `for` loops each declaring `zoneName` are two variables, and
+    // taking the first meant inlining a value from the wrong one.
+    let Some(declarator) = declarator_in_scope(name_node, &method, name, source) else {
         if is_parameter(&method, name, source) {
             return Some(Err(Refusal::new(id, label, "a parameter has no value to inline here")));
         }
@@ -59,12 +76,16 @@ pub fn inline_variable(root: Node<'_>, source: &str, offset: usize) -> Outcome {
         )));
     }
 
-    // Every read of the name in this method. `is_declaration_name` is what excludes the declarator's
-    // own name node, which is an `identifier` like any other and would otherwise be "inlined" into
-    // itself.
-    let uses: Vec<Node<'_>> = identifiers(method)
+    // Every read of THIS variable: inside the scope it lives in, after its declaration, spelled the
+    // same, actually a reference rather than a method name or a binding, and not taken over by an
+    // inner declaration of the same name. See the module docs — each of those four was a defect.
+    let scope = scope_of(declaration);
+    let uses: Vec<Node<'_>> = identifiers(scope)
         .into_iter()
-        .filter(|n| text(n, source) == name && !is_declaration_name(n))
+        .filter(|n| text(n, source) == name)
+        .filter(|n| n.start_byte() >= declaration.end_byte())
+        .filter(|n| is_a_reference(n))
+        .filter(|n| !shadowed_between(*n, scope, name, source))
         .collect();
 
     if let Some(reason) = unsafe_to_inline(&method, &declaration, &value, name, &uses, source) {
@@ -98,11 +119,118 @@ pub fn inline_variable(root: Node<'_>, source: &str, offset: usize) -> Outcome {
     Some(Ok(Plan::new(id, label, edits).named(name.to_string())))
 }
 
-/// The declarator that introduces `name` in this method.
-fn declarator_of<'t>(method: &Node<'t>, name: &str, source: &str) -> Option<Node<'t>> {
-    descendants(*method, "variable_declarator").into_iter().find(|d| {
-        d.child_by_field_name("name").map(|n| text(&n, source)) == Some(name)
-    })
+/// The declarator that introduces `name` **where `at` stands** — the innermost enclosing scope that
+/// declares it, walking outward, which is what Java's own lookup does.
+///
+/// Searching the method for the first declarator of that name is what this used to do, and a method
+/// is allowed to declare the same name in several disjoint scopes: `FastDateParser` has a
+/// `zoneName` in one loop and another in the next, and the caret on the second one inlined the
+/// first one's value.
+fn declarator_in_scope<'t>(
+    at: Node<'t>,
+    method: &Node<'t>,
+    name: &str,
+    source: &str,
+) -> Option<Node<'t>> {
+    let mut node = Some(at);
+    while let Some(n) = node {
+        for declarator in descendants(n, "variable_declarator") {
+            let same = declarator.child_by_field_name("name").map(|x| text(&x, source)) == Some(name);
+            // Declared before the caret, and in THIS scope rather than in a nested one we happen to
+            // contain (that one is a different variable, invisible here).
+            if same
+                && declarator.start_byte() <= at.start_byte()
+                && scope_of(enclosing(declarator, &["local_variable_declaration"])?).id() == n.id()
+            {
+                return Some(declarator);
+            }
+        }
+        if n.id() == method.id() {
+            break;
+        }
+        node = n.parent();
+    }
+    None
+}
+
+/// The scope a declaration's name lives in: the block (or block-like construct) that contains it.
+fn scope_of<'t>(declaration: Node<'t>) -> Node<'t> {
+    let mut node = declaration.parent();
+    while let Some(n) = node {
+        if matches!(
+            n.kind(),
+            "block"
+                | "constructor_body"
+                | "switch_block"
+                | "switch_block_statement_group"
+                | "for_statement"
+                | "enhanced_for_statement"
+                | "try_with_resources_statement"
+                | "lambda_expression"
+        ) {
+            return n;
+        }
+        node = n.parent();
+    }
+    declaration
+}
+
+/// Whether this identifier is a **reference to a variable** rather than something else wearing the
+/// same word: a method name, the selector after a dot, or a binding occurrence.
+fn is_a_reference(node: &Node<'_>) -> bool {
+    let Some(parent) = node.parent() else { return true };
+    let is_field = |field: &str| {
+        parent.child_by_field_name(field).map(|n| n.id()) == Some(node.id())
+    };
+    match parent.kind() {
+        // `Math.max(…)` — the name belongs to the method namespace, not the variable one.
+        "method_invocation" if is_field("name") => false,
+        // `p.max` — the selector is a member of whatever `p` is.
+        "field_access" if is_field("field") => false,
+        "scoped_identifier" if is_field("name") => false,
+        // Every binding form. The lambda parameter is the one with no wrapper node of its own:
+        // `x -> …` puts a bare `identifier` in the lambda's `parameters` field.
+        "variable_declarator" | "formal_parameter" | "catch_formal_parameter"
+        | "enhanced_for_statement" | "type_pattern" | "resource" | "labeled_statement"
+            if is_field("name") =>
+        {
+            false
+        }
+        "lambda_expression" if is_field("parameters") => false,
+        "inferred_parameters" => false,
+        _ => true,
+    }
+}
+
+/// Whether a scope between `use_node` and `scope` declares `name` itself, so the use reads THAT
+/// variable and not ours.
+fn shadowed_between(use_node: Node<'_>, scope: Node<'_>, name: &str, source: &str) -> bool {
+    let mut node = use_node.parent();
+    while let Some(n) = node {
+        if n.id() == scope.id() {
+            return false;
+        }
+        let binds = match n.kind() {
+            "lambda_expression" => n
+                .child_by_field_name("parameters")
+                .is_some_and(|p| identifiers(p).iter().any(|i| text(i, source) == name)),
+            "enhanced_for_statement" | "catch_formal_parameter" | "resource" | "type_pattern" => n
+                .child_by_field_name("name")
+                .is_some_and(|x| text(&x, source) == name),
+            "block" | "for_statement" | "switch_block_statement_group" => {
+                descendants(n, "variable_declarator").iter().any(|d| {
+                    d.child_by_field_name("name").map(|x| text(&x, source)) == Some(name)
+                        && d.start_byte() < use_node.start_byte()
+                })
+            }
+            _ => false,
+        };
+        if binds {
+            return true;
+        }
+        node = n.parent();
+    }
+    false
 }
 
 fn is_parameter(method: &Node<'_>, name: &str, source: &str) -> bool {
@@ -114,14 +242,6 @@ fn is_parameter(method: &Node<'_>, name: &str, source: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Whether this identifier IS a declaration's name rather than a use of one.
-fn is_declaration_name(node: &Node<'_>) -> bool {
-    node.parent().is_some_and(|p| {
-        matches!(p.kind(), "variable_declarator" | "formal_parameter" | "catch_formal_parameter")
-            && p.child_by_field_name("name").map(|n| n.id()) == Some(node.id())
-    })
-}
-
 /// The reason this cannot be inlined, if there is one. See the module docs for the three.
 fn unsafe_to_inline(
     method: &Node<'_>,
@@ -131,6 +251,32 @@ fn unsafe_to_inline(
     uses: &[Node<'_>],
     source: &str,
 ) -> Option<&'static str> {
+    // A narrowing the DECLARATION was allowed to make and an expression is not. `final byte n = 5;`
+    // compiles because JLS §5.2 lets a constant that fits narrow in an assignment; the literal is
+    // still an `int` everywhere else, so `f(n)` against an `f(byte)` becomes `f(5)` and stops
+    // compiling. Eight of these in one file, all on `byte maxElementChars = 5;`.
+    if narrows_at_the_declaration(declaration, value, source) {
+        return Some(
+            "the declared type narrows the value, which only an assignment may do — inlining it \
+             would leave a wider expression where a narrower type is expected",
+        );
+    }
+    // Moving the value INTO a lambda makes everything it reads a captured variable, and a captured
+    // variable has to be effectively final. The guard below only looks at what changes AFTER the
+    // declaration, which is the right question for the value; this is a different one, and its
+    // answer is the whole method: `subarray` reassigns both its parameters before declaring
+    // `newSize`, so `newSize` is fine and `endIndexExclusive - startIndexInclusive` is not.
+    if uses.iter().any(|u| crosses_a_lambda(*u, declaration)) {
+        for read in identifiers(*value) {
+            let captured = text(&read, source);
+            if captured != name && is_assigned(method, captured, source) {
+                return Some(
+                    "one of the values this reads is reassigned in this method, and a lambda may \
+                     only capture a variable that never changes",
+                );
+            }
+        }
+    }
     // `int[] t = {1, 2};` — the braces are declaration syntax, not an expression, so the value
     // cannot be moved anywhere the name was. `new int[]{1, 2}` can, and is a different text.
     if value.kind() == "array_initializer" {
@@ -162,6 +308,51 @@ fn unsafe_to_inline(
         }
     }
     None
+}
+
+/// Whether the declaration's written type is a primitive NARROWER than the value's own type, so the
+/// declaration is performing a narrowing that JLS §5.2 permits only there.
+///
+/// Syntactic on purpose and deliberately narrow: an integer literal is an `int`, and a `byte`,
+/// `short` or `char` declared from one is the whole of the shape this has to catch. A cast, a
+/// method call, or a variable of the right type is not a narrowing and is left alone.
+fn narrows_at_the_declaration(declaration: &Node<'_>, value: &Node<'_>, source: &str) -> bool {
+    let Some(ty) = declaration.child_by_field_name("type") else { return false };
+    if !matches!(text(&ty, source).trim(), "byte" | "short" | "char") {
+        return false;
+    }
+    is_integer_constant(value)
+}
+
+/// An integer literal, or one behind a sign or parentheses — the constant expressions §5.2 narrows.
+fn is_integer_constant(expr: &Node<'_>) -> bool {
+    match expr.kind() {
+        "decimal_integer_literal" | "hex_integer_literal" | "octal_integer_literal"
+        | "binary_integer_literal" => true,
+        "unary_expression" | "parenthesized_expression" => {
+            expr.named_child(0).is_some_and(|c| is_integer_constant(&c))
+        }
+        _ => false,
+    }
+}
+
+/// Whether reaching `use_node` from the declaration passes into a lambda or an anonymous class —
+/// a body that CAPTURES what it reads instead of simply reading it.
+fn crosses_a_lambda(use_node: Node<'_>, declaration: &Node<'_>) -> bool {
+    let mut node = use_node.parent();
+    while let Some(n) = node {
+        if n.id() == declaration.id() || n.end_byte() < declaration.end_byte() {
+            return false;
+        }
+        if matches!(n.kind(), "lambda_expression" | "class_body") {
+            return true;
+        }
+        if n.kind() == "method_declaration" || n.kind() == "constructor_declaration" {
+            return false;
+        }
+        node = n.parent();
+    }
+    false
 }
 
 /// Whether `name` is the target of an assignment or an increment anywhere in the method.
@@ -277,6 +468,67 @@ mod tests {
         let tree = parse_java(source).unwrap();
         let at = source.find(needle).unwrap() + delta;
         inline_variable(tree.root_node(), source, at)
+    }
+
+    fn applied(source: &str, needle: &str) -> String {
+        let Some(Ok(plan)) = run(source, needle) else { panic!("no plan for {needle}") };
+        plan.apply(source)
+    }
+
+    /// The name after a dot belongs to another namespace. Inlining a local called `max` rewrote the
+    /// `max` of `Math.max(start, 0)` and produced `Math.(len1 - len2)(start, 0)` — text that does
+    /// not parse, which is the worst thing a refactoring can hand back.
+    #[test]
+    fn a_method_of_the_same_name_is_not_a_use() {
+        let src = "class C {\n    int m(int a, int b) {\n        final int max = a - b;\n        int f = Math.max(a, 0);\n        return f + max;\n    }\n}";
+        let out = applied(src, "max = a - b");
+        assert!(out.contains("Math.max(a, 0)"), "{out}");
+        assert!(out.contains("return f + (a - b);"), "{out}");
+    }
+
+    /// Two loops may each declare `zoneName`; they are two variables. Taking the first declarator in
+    /// the method inlined the wrong value into the second one's uses.
+    #[test]
+    fn a_same_named_local_in_a_sibling_scope_is_a_different_variable() {
+        let src = "class C {\n    void m(String[] names) {\n        for (int i = 0; i < 1; i++) {\n            final String zoneName = names[i];\n            use(zoneName);\n        }\n        for (int i = 0; i < 1; i++) {\n            final String zoneName = names[0];\n            use(zoneName);\n        }\n    }\n    void use(String s) {}\n}";
+        let out = applied(src, "zoneName = names[0]");
+        // The second loop lost its declaration and took its own value…
+        assert!(out.contains("use(names[0]);"), "{out}");
+        // …and the first one is untouched.
+        assert!(out.contains("final String zoneName = names[i];"), "{out}");
+        assert!(out.contains("use(zoneName);"), "{out}");
+    }
+
+    /// A lambda parameter is an identifier with no wrapper of its own, so nothing marked it as a
+    /// binding: `sorted.forEach(zoneName -> f(zoneName))` came out `forEach(names[i] -> …)`.
+    #[test]
+    fn a_lambda_parameter_of_the_same_name_is_not_rewritten() {
+        let src = "class C {\n    void m(java.util.List<String> rows, String[] names) {\n        final String row = names[0];\n        use(row);\n        rows.forEach(row -> use(row));\n    }\n    void use(String s) {}\n}";
+        let out = applied(src, "row = names[0]");
+        assert!(out.contains("use(names[0]);"), "{out}");
+        assert!(out.contains("rows.forEach(row -> use(row));"), "{out}");
+    }
+
+    /// `final byte n = 5;` compiles because an assignment may narrow a constant that fits (JLS
+    /// §5.2). The literal is an `int` everywhere else, so the value cannot simply move.
+    #[test]
+    fn a_declaration_that_narrows_a_constant_is_refused() {
+        let src = "class C {\n    void m() {\n        final byte n = 5;\n        take(n);\n    }\n    void take(byte b) {}\n}";
+        let Some(Err(refusal)) = run(src, "n = 5") else { panic!("expected a refusal") };
+        assert!(refusal.reason.contains("narrow"), "{}", refusal.reason);
+        // A `char` from a char literal is not a narrowing and still inlines.
+        let ok = "class C {\n    void m() {\n        final char c = 'x';\n        take(c);\n    }\n    void take(char c) {}\n}";
+        assert!(matches!(run(ok, "c = 'x'"), Some(Ok(_))), "a char literal narrows nothing");
+    }
+
+    /// Moving a value into a lambda makes what it reads a CAPTURE, and a capture must be effectively
+    /// final. `subarray` reassigns both parameters before declaring the local, so the local is fine
+    /// and the expression behind it is not.
+    #[test]
+    fn a_value_moved_into_a_lambda_may_only_read_effectively_final_locals() {
+        let src = "class C {\n    int m(int lo, int hi) {\n        lo = lo + 1;\n        final int size = hi - lo;\n        return run(() -> size);\n    }\n    int run(java.util.function.IntSupplier s) { return 0; }\n}";
+        let Some(Err(refusal)) = run(src, "size = hi - lo") else { panic!("expected a refusal") };
+        assert!(refusal.reason.contains("never changes"), "{}", refusal.reason);
     }
 
     #[test]

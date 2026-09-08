@@ -2,8 +2,9 @@
 //!
 //! Turns `Map<String, List<Foo>>` into `SimpleTypeRef { name: "Map", args: [String,
 //! List<Foo>] }`. It does not resolve names to binary form — that's the caller's job
-//! (imports + resolver). It strips array brackets and wildcards down to a best-effort
-//! nominal core (Phase-1: no bounds/wildcard modelling).
+//! (imports + resolver). It strips array brackets and collapses wildcards onto their bound —
+//! which is the nominal core every member lookup needs — while recording that it did, so a
+//! consumer WRITING the type back into source can decline. See [`SimpleTypeRef::wildcard`].
 
 /// A parsed type reference in *simple* (unresolved) name form.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +16,12 @@ pub struct SimpleTypeRef {
     /// resolves members wants the element, and only a consumer that WRITES the type back into
     /// source wants the brackets. Losing them here is how an extracted `String[]` became `String`.
     pub dims: u8,
+    /// Whether this node is a `?`, `? extends X` or `? super X` collapsed onto its bound.
+    ///
+    /// Same reason as [`Self::dims`], and the same shape of bug: the collapse is what a member
+    /// lookup needs, and it is exactly wrong for the one consumer that writes the type back out.
+    /// `Class<? extends Annotation>` is not `Class<Annotation>` at a declaration.
+    pub wildcard: bool,
 }
 
 /// Parse a Java type text into a [`SimpleTypeRef`]. Returns `None` for empty /
@@ -53,6 +60,7 @@ pub fn parse_type_text(text: &str) -> Option<SimpleTypeRef> {
         name: name.to_string(),
         args,
         dims,
+        wildcard: false,
     })
 }
 
@@ -102,17 +110,52 @@ fn parse_arg(s: &str) -> Option<SimpleTypeRef> {
         return None;
     }
     if let Some(rest) = s.strip_prefix("? extends ") {
-        return parse_type_text(rest.trim());
+        return parse_type_text(rest.trim()).map(mark_wildcard);
     }
     if let Some(rest) = s.strip_prefix("? super ") {
-        return parse_type_text(rest.trim());
+        return parse_type_text(rest.trim()).map(mark_wildcard);
     }
     if s == "?" {
         return Some(SimpleTypeRef {
             name: "Object".to_string(),
             args: Vec::new(),
             dims: 0,
+                wildcard: true,
         });
     }
     parse_type_text(s)
+}
+
+/// The bound of a wildcard, marked as standing in for one.
+fn mark_wildcard(mut t: SimpleTypeRef) -> SimpleTypeRef {
+    t.wildcard = true;
+    t
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A wildcard argument keeps its bound — which is what a member lookup asks for — and says it
+    /// is one, which is what a declaration has to know before writing it down.
+    #[test]
+    fn a_wildcard_argument_keeps_its_bound_and_is_marked() {
+        let t = parse_type_text("Class<? extends Annotation>").unwrap();
+        assert_eq!(t.name, "Class");
+        assert!(!t.wildcard);
+        assert_eq!(t.args[0].name, "Annotation");
+        assert!(t.args[0].wildcard);
+
+        let bare = parse_type_text("Class<?>").unwrap();
+        assert_eq!(bare.args[0].name, "Object");
+        assert!(bare.args[0].wildcard);
+
+        let sup = parse_type_text("Consumer<? super Order>").unwrap();
+        assert_eq!(sup.args[0].name, "Order");
+        assert!(sup.args[0].wildcard);
+
+        // An ordinary argument is not a wildcard and stays writable.
+        let plain = parse_type_text("List<String>").unwrap();
+        assert!(!plain.args[0].wildcard);
+    }
 }

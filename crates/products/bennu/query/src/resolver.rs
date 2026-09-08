@@ -633,8 +633,11 @@ fn convert_typeref(t: &bennu_classpath::prelude::TypeRef) -> JTypeRef {
         binary_name: t.binary_name.clone(),
         type_args: t.type_args.iter().map(convert_typeref).collect(),
         // The bridge between the two type models: the depth has to cross it, or a `String[]` read
-        // out of bytecode arrives on the other side as a `String`.
+        // out of bytecode arrives on the other side as a `String` — and so does the capture bit, or
+        // a `Class<?>` arrives as a perfectly ordinary `Class<Object>` that nothing will decline to
+        // write into a declaration.
         dims: t.dims,
+        wildcard: t.wildcard,
     }
 }
 
@@ -816,6 +819,7 @@ mod tests {
                     binary_name: "int".into(),
                     type_args: Vec::new(),
                     dims: 0,
+                    wildcard: false,
                 },
                 params: Vec::new(),
                 is_static: false,

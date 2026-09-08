@@ -16,6 +16,8 @@ use bennu_java::prelude::{Import, TypeRef};
 struct Parsed {
     name: String,
     args: Vec<Parsed>,
+    /// A `?`, `? extends X` or `? super X` collapsed onto its bound — see [`TypeRef::wildcard`].
+    wildcard: bool,
 }
 
 /// A simple type name resolved against the type that DECLARES it — its own nested types, then its
@@ -76,6 +78,7 @@ fn to_binary_ref(names: &FileNames, owner: &str, p: &Parsed) -> TypeRef {
             .map(|a| to_binary_ref(names, owner, a))
             .collect(),
         dims: p.name.matches("[]").count().min(u8::MAX as usize) as u8,
+        wildcard: p.wildcard,
     }
 }
 
@@ -272,6 +275,7 @@ fn parse_type(s: &str) -> Option<Parsed> {
     Some(Parsed {
         name: format!("{name}{}", "[]".repeat(dims)),
         args,
+        wildcard: false,
     })
 }
 
@@ -315,17 +319,19 @@ fn push_arg(chunk: &str, out: &mut Vec<Parsed>) {
     if t.is_empty() {
         return;
     }
-    // Wildcards `?` / `? extends X` / `? super X` collapse to their bound or Object.
-    let resolved = if t == "?" {
-        "Object"
+    // Wildcards `?` / `? extends X` / `? super X` collapse to their bound or Object — and say so,
+    // because the bound is the right answer for a member lookup and the wrong one for a declaration.
+    let (resolved, wildcard) = if t == "?" {
+        ("Object", true)
     } else if let Some(rest) = t.strip_prefix("? extends ") {
-        rest.trim()
+        (rest.trim(), true)
     } else if let Some(rest) = t.strip_prefix("? super ") {
-        rest.trim()
+        (rest.trim(), true)
     } else {
-        t
+        (t, false)
     };
-    if let Some(p) = parse_type(resolved) {
+    if let Some(mut p) = parse_type(resolved) {
+        p.wildcard = wildcard;
         out.push(p);
     }
 }
@@ -333,6 +339,28 @@ fn push_arg(chunk: &str, out: &mut Vec<Parsed>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The index-build path has its own parser, and it collapsed wildcards the same way with the
+    /// same loss. A project field written `Map<String, ? extends FormatFactory>` reached every
+    /// consumer as an ordinary `Map<String, FormatFactory>`, and a declaration written from it did
+    /// not compile.
+    #[test]
+    fn a_wildcard_argument_is_marked_through_the_index_parse() {
+        let names = FileNames {
+            package: "p",
+            imports: &[],
+            project_types: &Default::default(),
+            is_project: &|_| false,
+            file_types: &[],
+        };
+        let t = type_text_to_ref(&names, "p/Owner", "java.util.Map<java.lang.String, ? extends p.Factory>");
+        assert_eq!(t.type_args.len(), 2, "{t:?}");
+        assert!(!t.wildcard, "{t:?}");
+        assert!(!t.type_args[0].wildcard, "{t:?}");
+        assert!(t.type_args[1].wildcard, "{t:?}");
+        // And the bound is still the name every member lookup needs.
+        assert!(t.type_args[1].binary_name.ends_with("Factory"), "{t:?}");
+    }
 
     /// `p/Upload/Checker` and `p/Download/Checker` both spell `Checker`; each must win inside its own
     /// outer type. This is the case the project-wide simple→binary map cannot express.
