@@ -648,54 +648,14 @@ fn find_decl_node_start(
     None
 }
 
-/// Extract and clean the `/** … */` Javadoc block that ends immediately above the
-/// declaration starting at `decl_start` in `source`. Returns the joined, trimmed doc text
-/// (leading `*` and the `/**` / `*/` markers stripped, capped ~600 chars), or `None` when
-/// the lines directly above the declaration aren't a Javadoc block.
-pub(crate) fn leading_javadoc(source: &str, decl_start: usize) -> Option<String> {
-    // Everything above the declaration. We look only at the whitespace/comment tail here —
-    // a modifier keyword (`public`) between the comment and the node can't occur, since the
-    // declaration node start already precedes modifiers.
-    let head = &source[..decl_start];
-    let trimmed = head.trim_end();
-    if !trimmed.ends_with("*/") {
-        return None;
-    }
-    // Find the matching `/**` opening the block that this `*/` closes.
-    let open = trimmed.rfind("/**")?;
-    let close = trimmed.len() - "*/".len();
-    if open + "/**".len() > close {
-        return None; // malformed / `/**/`
-    }
-    let inner = &trimmed[open + "/**".len()..close];
-
-    let mut lines: Vec<String> = Vec::new();
-    for raw in inner.lines() {
-        let mut l = raw.trim();
-        // Strip a leading `*` (the Javadoc gutter) and one following space.
-        if let Some(rest) = l.strip_prefix('*') {
-            l = rest.strip_prefix(' ').unwrap_or(rest);
-        }
-        lines.push(l.to_string());
-    }
-    // Drop leading/trailing empty lines, then join.
-    while lines.first().map(|s| s.is_empty()).unwrap_or(false) {
-        lines.remove(0);
-    }
-    while lines.last().map(|s| s.is_empty()).unwrap_or(false) {
-        lines.pop();
-    }
-    let joined = lines.join("\n");
-    let doc = joined.trim();
-    if doc.is_empty() {
-        return None;
-    }
-    Some(doc.chars().take(600).collect())
-}
 
 /// A resolved hover card for the symbol under the caret (the intel-level view the be layer
 /// maps to the wire `HoverInfo`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Default` so a card about something that is not a resolved declaration — a local variable, whose
+/// whole content is its written type — fills the resolution fields by leaving them out, and stays
+/// unchanged when a new one is added.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HoverInfo {
     /// The signature line: a member's `raw_signature` (or a synthesized `name(...)`
     /// fallback), or a type's dotted FQCN.
@@ -709,6 +669,21 @@ pub struct HoverInfo {
     /// immediately above it, markers stripped, capped ~600 chars). `None` for a JDK /
     /// dep-jar symbol (source not readable) or a declaration with no Javadoc.
     pub doc: Option<String>,
+    /// What the card resolved to, in binary form: the **declaring** type for a member, the type
+    /// itself for a type.
+    ///
+    /// Carried because [`Self::container`] cannot be turned back into it. A member's container is
+    /// the declaring type dotted, which is reversible; a *type*'s container is its package, and the
+    /// binary name is simply not in the card. A caller that owns the source archives — the one that
+    /// can answer "and what does the library say about this?" — needs the binary name to find the
+    /// entry, so the resolution says what it resolved instead of making it be inferred.
+    pub owner: Option<String>,
+    /// The member's own name (`<init>` for a constructor), `None` for a type.
+    pub member: Option<String>,
+    /// The parameter count of the overload this card describes. `None` for a field, a type, or a
+    /// method whose overload could not be told apart — in which case it is genuinely unknown, and a
+    /// consumer must not pick one.
+    pub arity: Option<usize>,
 }
 
 /// Build a [`HoverInfo`] for a classified [`DeclKey`], resolving a member's signature from
@@ -748,12 +723,15 @@ pub(crate) fn hover_for_key(
                 kind: kind.to_string(),
                 container: package,
                 doc: None,
+                owner: Some(binary.clone()),
+                member: None,
+                arity: None,
             }
         }
         DeclKey::Method { owner, name } => {
             let found = member_signature(resolver, owner, name, true, argc);
-            let (signature, declaring) =
-                found.unwrap_or_else(|| (format!("{name}(…)"), owner.clone()));
+            let (signature, declaring, arity) =
+                found.unwrap_or_else(|| (format!("{name}(…)"), owner.clone(), None));
             HoverInfo {
                 signature,
                 kind: "method".to_string(),
@@ -761,16 +739,23 @@ pub(crate) fn hover_for_key(
                 // inherited method and being told the subclass owns it is a wrong answer.
                 container: Some(declaring.replace('/', ".")),
                 doc: None,
+                owner: Some(declaring),
+                member: Some(name.clone()),
+                arity,
             }
         }
         DeclKey::Field { owner, name } => {
             let found = member_signature(resolver, owner, name, false, None);
-            let (signature, declaring) = found.unwrap_or_else(|| (name.clone(), owner.clone()));
+            let (signature, declaring, _) =
+                found.unwrap_or_else(|| (name.clone(), owner.clone(), None));
             HoverInfo {
                 signature,
                 kind: "field".to_string(),
                 container: Some(declaring.replace('/', ".")),
                 doc: None,
+                owner: Some(declaring),
+                member: Some(name.clone()),
+                arity: None,
             }
         }
     }
@@ -785,27 +770,60 @@ pub(crate) fn hover_for_key(
 /// the caret takes) — the only thing that tells two overloads apart. Without it this took the first
 /// member of the name it met, and `o.customer("x")` was answered with the no-argument getter. A
 /// name with one member is unaffected, which is the overwhelming majority of hovers.
+///
+/// The third element is the picked overload's parameter count (methods only) — what a caller needs
+/// to find the same overload in the library's source, where the documentation is.
 fn member_signature(
     resolver: &dyn TypeResolver,
     owner: &str,
     name: &str,
     is_method: bool,
     argc: Option<usize>,
-) -> Option<(String, String)> {
+) -> Option<(String, String, Option<usize>)> {
     // The shared walk ends a branch on a supertype it cannot resolve rather than the whole search —
     // an un-indexed base class must not hide a member the subclass declares itself.
     bennu_java::prelude::walk_up(resolver, &bennu_java::prelude::TypeRef::simple(owner), |a| {
         let pool = if is_method { &a.members.methods } else { &a.members.fields };
         let m = pick_member(pool, name, argc)?;
         let bn = a.ty.binary_name.clone();
+        let arity = is_method.then_some(m.params.len());
         if !m.raw_signature.is_empty() {
-            return Some((m.raw_signature.clone(), bn));
+            let sig = readable_signature(m, name, is_method, &bn);
+            return Some((sig, bn, arity));
         }
         // No recorded signature: synthesize a minimal one from the name (+ empty param list for a
         // method) so the hover still shows something meaningful.
         let sig = if is_method { format!("{name}()") } else { name.to_string() };
-        Some((sig, bn))
+        Some((sig, bn, arity))
     })
+}
+
+/// A member's signature as a person reads it.
+///
+/// `raw_signature` carries two different things and the hover card was showing both. A member built
+/// from **project source** holds text somebody wrote — `String orElseThrow(Supplier<X> supplier)` —
+/// and is right as it stands. A member decoded from a **class file** holds the JVMS §4.7.9.1
+/// string, and pointing at `Optional.orElseThrow` printed
+/// `<X:Ljava/lang/Throwable;>(Ljava/util/function/Supplier<+TX;>;)TT;^TX;` into the tooltip.
+///
+/// So a bytecode signature is rendered — by the same code the decompiled source view uses, which is
+/// what stops the card and the stub from describing one method two ways. Parameters are written as
+/// their types alone: a class file carries no parameter names, and `arg0` in a card that is being
+/// read as documentation is a claim the code does not make.
+fn readable_signature(m: &Member, name: &str, is_method: bool, declaring: &str) -> String {
+    let raw = &m.raw_signature;
+    if is_method {
+        // A constructor is `<init>` in bytecode and is written as its class — the one place the
+        // declaring type's name belongs in the signature line rather than on the meta line.
+        let ctor = (m.name == "<init>")
+            .then(|| declaring.rsplit(['/', '$']).next().unwrap_or(declaring));
+        if let Some(core) = bennu_classpath::prelude::render_method_core(raw, name, ctor, &[]) {
+            return core;
+        }
+    } else if let Some(ty) = bennu_classpath::prelude::render_field_type(raw) {
+        return format!("{ty} {name}");
+    }
+    raw.clone()
 }
 
 /// The member of `pool` named `name` that a call passing `argc` arguments would bind to.
@@ -2487,7 +2505,7 @@ mod tests {
             },
         )
         .expect("type decl found");
-        let doc = leading_javadoc(src, start).expect("javadoc found");
+        let doc = bennu_java::prelude::leading_javadoc(src, start).expect("javadoc found");
         assert_eq!(doc, "Represents an order.\nSecond line.");
     }
 
@@ -2502,7 +2520,7 @@ mod tests {
             },
         )
         .expect("method decl found");
-        let doc = leading_javadoc(src, start).expect("javadoc found");
+        let doc = bennu_java::prelude::leading_javadoc(src, start).expect("javadoc found");
         assert_eq!(doc, "Does the thing.");
     }
 
@@ -2516,7 +2534,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(leading_javadoc(src, start).is_none());
+        assert!(bennu_java::prelude::leading_javadoc(src, start).is_none());
     }
 }
 

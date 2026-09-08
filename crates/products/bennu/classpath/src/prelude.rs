@@ -52,6 +52,13 @@ pub use crate::resources::{
 // The container abstraction + its three impls.
 pub use crate::source::{ClassSource, DirSource, JarSource, JimageSource};
 
+// A decoded signature written back as Java — the one rendering every consumer shows a person.
+pub use crate::render::{
+    field_type as render_field_type, is_bytecode_field, is_bytecode_method,
+    method_core as render_method_core, method_core_of as render_method_core_of, placeholder_names,
+    type_arg as render_type_arg, type_param as render_type_param, type_sig as render_type_sig,
+};
+
 // The homegrown JVMS §4.7.9.1 Signature decoder (types + entry points).
 pub use crate::sig::{
     parse_class as parse_class_signature, parse_field as parse_field_signature,

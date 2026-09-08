@@ -45,6 +45,12 @@ pub struct MissingArtifact {
     /// Whether the repository holds *some* version of it, which separates a wrong version from a
     /// coordinate nobody has ever fetched.
     pub other_versions: Vec<String>,
+    /// The reactor module that wants it — its directory relative to the project root. On a
+    /// multi-module project this is the first thing to know and the coordinate alone never said it.
+    pub module: String,
+    /// The dependency that drags it in, `groupId:artifactId:version`. Empty when the module
+    /// declares it itself — which is also how the two cases are told apart.
+    pub via: String,
 }
 
 /// What the dependency tier is actually standing on.
@@ -116,13 +122,22 @@ fn missing_rows(repo: &LocalRepo, resolution: &Resolution) -> Vec<MissingArtifac
     resolution
         .missing
         .iter()
-        .map(|c| MissingArtifact {
-            coord: c.gav(),
-            group_id: c.group_id.clone(),
-            artifact_id: c.artifact_id.clone(),
-            version: c.version.clone(),
-            path: repo.artifact_file(c).to_string_lossy().replace('\\', "/"),
-            other_versions: repo.versions(&c.group_id, &c.artifact_id).into_iter().take(6).collect(),
+        .map(|c| {
+            let origin = resolution.origin_of(c).cloned().unwrap_or_default();
+            MissingArtifact {
+                coord: c.gav(),
+                group_id: c.group_id.clone(),
+                artifact_id: c.artifact_id.clone(),
+                version: c.version.clone(),
+                path: repo.artifact_file(c).to_string_lossy().replace('\\', "/"),
+                other_versions: repo
+                    .versions(&c.group_id, &c.artifact_id)
+                    .into_iter()
+                    .take(6)
+                    .collect(),
+                module: origin.module,
+                via: origin.via,
+            }
         })
         .collect()
 }

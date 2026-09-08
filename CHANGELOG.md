@@ -25,6 +25,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **The tab strip's "N more" menu is the app's standard menu now.** It anchors to the chevron, takes arrow keys and Escape, checks the tab you are on, and lists the hidden tabs first — instead of a second, hand-written copy of a dropdown living inside the tab widget.
 
+- **Folders in the project tree no longer wear the colours that mean "type".** A source root under `src/main` was the same blue as the class rings sitting under it, so a column of marks read as a column of same-kind things. The role tint stays, damped — the folder says where you are, the mark says what the file is.
+
 - **The type of a `var` is now shown for primitives and arithmetic too** — `int`, `char`, `long[]` — where before the hint simply did not appear. The engine learned the shapes it used to skip: arithmetic and comparison, `!`/`-`/`++`, indexing an array, `new int[n]`, `a.length`, `instanceof`, a conditional whose two arms agree, and picking the exactly-matching overload of `Math.max` and friends. Measured on Apache Commons Lang 3 against the type each author wrote: **70% → 93%** of locals typed, with no new false positives on code that compiles.
 
 ### Added
@@ -38,6 +40,16 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ### Fixed
 
 - **Go to declaration works on a library class's own neighbours.** Reading a dependency's source, the types it shares a package with — the ones Java puts in scope with no import line, and the ones such a file refers to most — resolved to nothing: `ApplicationContext extends MessageSource, ApplicationEventPublisher` was two dead jumps out of six.
+
+- **Hovering a library method shows a signature, not a JVM descriptor.** Pointing at `Optional.orElseThrow` answered `<X:Ljava/lang/Throwable;>(Ljava/util/function/Supplier<+TX;>;)TT;^TX;`; it now reads `<X extends Throwable> T orElseThrow(Supplier<? extends X>) throws X`, the same rendering the decompiled view has always used.
+
+- **A library's Javadoc appears on the hover card.** It comes from the dependency's sources jar or the JDK's `src.zip` — the same place the parameter-name hints come from — so a dependency whose sources are downloaded now documents itself the way the project's own code does.
+
+- **The signature strip fills in the receiver's type arguments.** Inside `Optional<PathPattern>.orElseThrow(…)` it said `: T`, which describes the declaration rather than the call; it now says `: PathPattern`.
+
+- **The "dependencies not resolved" warning no longer names artifacts the project has never asked for.** A `<profile>` inside a *library's* pom is dead code for whoever depends on it — nothing downstream can switch it on and Maven never fetches what it names — but its contents were being counted as the project's own, so a project using Jersey was told that EclipseLink MOXy was missing from its local repository.
+
+- **A missing dependency now says which module wants it, and what pulled it in.** On a reactor of a dozen modules a bare coordinate left the search for the guilty pom to the reader; the warning now reads `com.acme:legacy-core:2.4.0 (in service, via org.acme:core:1.0)`.
 
 - **A Lombok `@Builder` class no longer reports its final fields as uninitialized.** `@Builder`, `@SuperBuilder` and `@NoArgsConstructor(force = true)` generate the constructor that assigns them, exactly as `@Data` and `@RequiredArgsConstructor` already did — and that constructor is now known to the index too, so calling it directly resolves.
 

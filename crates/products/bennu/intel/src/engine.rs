@@ -33,7 +33,7 @@ use crate::refs::{
     RenameTarget, SourceFile,
 };
 use crate::rename::{
-    decl_site_for_key, generated_aliases, hover_for_key, leading_javadoc, plan_types,
+    decl_site_for_key, generated_aliases, hover_for_key, plan_types,
     project_source, rename_plan, resolve_declaration, DeclarationLocation, Edit, HoverInfo,
     RenamePlan, SubtypeMap, TypeRename,
 };
@@ -696,6 +696,6 @@ impl SemanticEngine {
         let file = live.index.file_declaring(key.owner_binary())?;
         let source = project_source(&live.java_files, file)?;
         let decl_start = decl_site_for_key(source, key)?;
-        leading_javadoc(source, decl_start)
+        bennu_java::prelude::leading_javadoc(source, decl_start)
     }
 }

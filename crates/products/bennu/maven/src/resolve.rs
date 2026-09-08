@@ -26,9 +26,17 @@
 //! at the artifact that declares them, and Maven's scope table. What it deliberately does not do is
 //! activate profiles or pick a version out of a range — both are decisions about a *build*, and
 //! inventing one here would produce a classpath no build ever has.
+//!
+//! Profiles are read all the same, and the rule is where they were written. In the **project's own**
+//! poms they are half the reason a legacy tree resolves at all, so their jars are used when the
+//! repository happens to hold them — and their absence is never reported, because whether one is on
+//! is a fact about a build. In a **library's** pom the same absence is not even a maybe: no
+//! downstream build can switch that profile on, so Maven never fetches what it names and neither
+//! does anything here.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use bennu_deps::prelude::{parse_pom, Pom};
 
@@ -55,11 +63,56 @@ pub struct Resolution {
     /// Reactor modules, by `groupId:artifactId` — resolved from source, never looked for in the
     /// repository.
     pub reactor: Vec<String>,
+    /// How the graph reached each unresolved coordinate, keyed by [`Coord::gav`]. Covers
+    /// [`Self::missing`] and [`Self::unversioned`].
+    ///
+    /// A reactor of a dozen modules reports one coordinate and the person reading it has to guess
+    /// which module wants it — and for a transitive, which of its own dependencies dragged it in.
+    /// Both answers are known at the moment the walk gives up on the artifact; nothing but this
+    /// carried them out.
+    pub origins: HashMap<String, Origin>,
+}
+
+/// Where an unresolved coordinate came from.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Origin {
+    /// The reactor module whose dependency tree reached it — its directory relative to the
+    /// project root, or its `artifactId` for the root module itself.
+    pub module: String,
+    /// The artifact that declares it, as `groupId:artifactId:version`. Empty when the module
+    /// declares it directly, which is the case where there is nothing in between to name.
+    pub via: String,
+}
+
+impl Origin {
+    /// The parenthetical the user reads after the coordinate: which module, and through what.
+    pub fn describe(&self) -> String {
+        match (self.module.as_str(), self.via.as_str()) {
+            ("", "") => String::new(),
+            (module, "") => format!("in {module}"),
+            ("", via) => format!("via {via}"),
+            (module, via) => format!("in {module}, via {via}"),
+        }
+    }
 }
 
 impl Resolution {
     pub fn is_complete(&self) -> bool {
         self.missing.is_empty() && self.unversioned.is_empty()
+    }
+
+    /// Where the graph reached `coord` from, when it is one of the unresolved ones.
+    pub fn origin_of(&self, coord: &Coord) -> Option<&Origin> {
+        self.origins.get(&coord.gav())
+    }
+
+    /// A coordinate as the user should read it: the `gav`, plus where it came from when that is
+    /// known. The one string every message about a missing artifact should be built from.
+    pub fn describe(&self, coord: &Coord) -> String {
+        match self.origin_of(coord).map(Origin::describe).filter(|d| !d.is_empty()) {
+            Some(origin) => format!("{} ({origin})", coord.gav()),
+            None => coord.gav(),
+        }
     }
 
     /// The jar paths as the strings every cache and wire type uses.
@@ -89,17 +142,19 @@ impl Resolution {
         }
         let mut parts = Vec::new();
         if !self.missing.is_empty() {
+            // Not parenthesised: each entry carries its own `(in module, via …)`, and a list in
+            // brackets whose items are themselves bracketed is a sentence nobody can parse.
             parts.push(format!(
-                "{} not in the local repository ({})",
+                "{} not in the local repository — {}",
                 self.missing.len(),
-                sample(self.missing.iter().map(|c| c.gav()))
+                sample(self.missing.iter().map(|c| self.describe(c)))
             ));
         }
         if !self.unversioned.is_empty() {
             parts.push(format!(
-                "{} with no resolvable version ({})",
+                "{} with no resolvable version — {}",
                 self.unversioned.len(),
-                sample(self.unversioned.iter().map(|c| c.gav()))
+                sample(self.unversioned.iter().map(|c| self.describe(c)))
             ));
         }
         Some(parts.join("; "))
@@ -140,7 +195,8 @@ pub fn resolve(root: &Path, repo: &LocalRepo) -> Resolution {
     let mut seen_missing: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<Node> = VecDeque::new();
 
-    for eff in &effectives {
+    for (eff, (dir, _)) in effectives.iter().zip(modules.iter()) {
+        let module: Rc<str> = Rc::from(module_label(root, dir, eff).as_str());
         for dep in &eff.dependencies {
             if reactor.contains(&dep.coord.ga()) {
                 continue;
@@ -153,6 +209,7 @@ pub fn resolve(root: &Path, repo: &LocalRepo) -> Resolution {
             }
             if !usable_version(dep) {
                 if dep.profile.is_empty() {
+                    record_origin(&mut out, &dep.coord, &module, None);
                     push_once(&mut out.unversioned, &mut seen_missing, dep.coord.clone(), "v");
                 }
                 continue;
@@ -163,6 +220,8 @@ pub fn resolve(root: &Path, repo: &LocalRepo) -> Resolution {
                 depth: 0,
                 excluded: dep.exclusions.iter().cloned().collect(),
                 from_profile: !dep.profile.is_empty(),
+                module: Rc::clone(&module),
+                via: None,
             });
         }
     }
@@ -194,6 +253,7 @@ pub fn resolve(root: &Path, repo: &LocalRepo) -> Resolution {
                 // pom with a `was` and a `weblogic` profile reports a dozen missing artifacts on a
                 // tree that builds perfectly.
                 if !node.from_profile {
+                    record_origin(&mut out, &node.coord, &node.module, node.via.as_deref());
                     push_once(&mut out.missing, &mut seen_missing, node.coord.clone(), "m");
                 }
                 // Its pom is missing too, so there is nothing under it to walk. Recording the
@@ -207,6 +267,9 @@ pub fn resolve(root: &Path, repo: &LocalRepo) -> Resolution {
         }
         let Some(eff) = reader.effective(&node.coord) else { continue };
         let children: Vec<Resolved> = eff.dependencies.clone();
+        // Built once and shared by every child rather than formatted per edge — a real graph is
+        // thousands of edges and this is only ever read for the handful that fail to resolve.
+        let via: Rc<str> = Rc::from(node.coord.gav().as_str());
         for mut child in children {
             if !transitively_relevant(&node.scope, &child) {
                 continue;
@@ -235,7 +298,16 @@ pub fn resolve(root: &Path, repo: &LocalRepo) -> Resolution {
                 scope: effective_scope(&node.scope, &child.scope),
                 depth: node.depth + 1,
                 excluded,
-                from_profile: node.from_profile,
+                // A `<profile>` in a *library's* pom is the one case where "might not be used" is
+                // certain: a downstream build has no way to switch it on, and Maven never fetches
+                // it. Jersey's parent declares MOXy under `<profile id="moxy">`, every jersey
+                // artifact inherits that pom, and reading the flag off the branch's root instead of
+                // off the declaration reported `org.eclipse.persistence.moxy:5.0.0-B09` as a
+                // missing dependency of a project that has never heard of it — a coordinate no
+                // amount of downloading would ever make right, since nothing wants it.
+                from_profile: node.from_profile || !child.profile.is_empty(),
+                module: Rc::clone(&node.module),
+                via: Some(Rc::clone(&via)),
             });
         }
     }
@@ -254,14 +326,37 @@ struct Node {
     depth: usize,
     /// `groupId:artifactId` excluded anywhere along the path that reached this node.
     excluded: HashSet<String>,
-    /// Whether the declaration that started this branch lives under a `<profile>` — see the
-    /// reporting rule where an artifact fails to resolve.
+    /// Whether anything on the path that reached this node was declared under a `<profile>` — see
+    /// the reporting rule where an artifact fails to resolve.
     from_profile: bool,
+    /// The reactor module this branch started from. See [`Origin::module`].
+    module: Rc<str>,
+    /// The artifact that declares this one, `None` for a module's own declaration.
+    via: Option<Rc<str>>,
 }
 
 fn push_once(out: &mut Vec<Coord>, seen: &mut HashSet<String>, coord: Coord, tag: &str) {
     if seen.insert(format!("{tag}{}", coord.gav())) {
         out.push(coord);
+    }
+}
+
+/// Remember where an unresolved coordinate came from. First sighting wins, which is the shortest
+/// path to it: the queue is breadth-first, so the first module to want it is the nearest answer.
+fn record_origin(out: &mut Resolution, coord: &Coord, module: &str, via: Option<&str>) {
+    out.origins.entry(coord.gav()).or_insert_with(|| Origin {
+        module: module.to_string(),
+        via: via.unwrap_or_default().to_string(),
+    });
+}
+
+/// What to call a reactor module in a message: its directory relative to the project root, which is
+/// the name in `<modules>` and the one the user can act on. The root module has no relative path,
+/// so it is named by its `artifactId`.
+fn module_label(root: &Path, dir: &Path, eff: &Effective) -> String {
+    match dir.strip_prefix(root).ok().map(|r| r.to_string_lossy().replace('\\', "/")) {
+        Some(rel) if !rel.is_empty() => rel,
+        _ => eff.coord.artifact_id.clone(),
     }
 }
 
@@ -678,5 +773,99 @@ mod tests {
         assert!(r.missing.is_empty());
         assert_eq!(r.unversioned.len(), 1);
         assert!(r.shortfall().unwrap().contains("no resolvable version"));
+    }
+
+    /// A `<profile>` inside a **library's** pom is dead code as far as this project is concerned:
+    /// nothing downstream can switch it on, so Maven never fetches what it names. Reporting it is
+    /// how a project that has never heard of MOXy is told one of *its* dependencies is missing —
+    /// Jersey's parent declares it under `<profile id="moxy">` and every jersey artifact inherits
+    /// that pom.
+    #[test]
+    fn a_transitives_profile_dependency_is_never_reported_missing() {
+        let f = Fixture::new("transitive-profile");
+        f.install(
+            "org.glassfish.jersey",
+            "project",
+            "4.0.2",
+            "<project><groupId>org.glassfish.jersey</groupId><artifactId>project</artifactId><version>4.0.2</version>
+             <profiles><profile><id>moxy</id><dependencies>
+               <dependency><groupId>org.eclipse.persistence</groupId>
+                 <artifactId>org.eclipse.persistence.moxy</artifactId><version>5.0.0-B09</version></dependency>
+             </dependencies></profile></profiles></project>",
+        );
+        f.install(
+            "org.glassfish.jersey.core",
+            "jersey-common",
+            "4.0.2",
+            "<project><parent><groupId>org.glassfish.jersey</groupId><artifactId>project</artifactId>
+               <version>4.0.2</version></parent>
+             <groupId>org.glassfish.jersey.core</groupId><artifactId>jersey-common</artifactId>
+             <version>4.0.2</version></project>",
+        );
+        f.write_pom(
+            "",
+            &format!(
+                "<project><groupId>p</groupId><artifactId>app</artifactId><version>1</version>\
+                 <dependencies>{}</dependencies></project>",
+                dep("org.glassfish.jersey.core", "jersey-common", "4.0.2")
+            ),
+        );
+        let r = f.resolve();
+        assert!(r.missing.is_empty(), "MOXy is nobody's dependency here: {:?}", r.missing);
+        assert!(r.is_complete());
+    }
+
+    /// The coordinate on its own does not answer the only question a reactor of a dozen modules
+    /// raises — *which* module wants it, and what dragged it in.
+    #[test]
+    fn a_missing_artifact_names_the_module_and_what_pulled_it_in() {
+        let f = Fixture::new("origin");
+        f.install(
+            "com.acme",
+            "core",
+            "1.0",
+            &lib("com.acme", "core", "1.0", &dep("com.acme", "absent", "2.4.0")),
+        );
+        f.write_pom(
+            "",
+            "<project><groupId>p</groupId><artifactId>root</artifactId><version>1</version>
+             <packaging>pom</packaging><modules><module>service</module></modules></project>",
+        );
+        f.write_pom(
+            "service",
+            &format!(
+                "<project><parent><groupId>p</groupId><artifactId>root</artifactId><version>1</version></parent>\
+                 <artifactId>service</artifactId><dependencies>{}</dependencies></project>",
+                dep("com.acme", "core", "1.0")
+            ),
+        );
+        let r = f.resolve();
+        assert_eq!(r.missing.len(), 1, "{:?}", r.missing);
+        let origin = r.origin_of(&r.missing[0]).expect("an origin was recorded");
+        assert_eq!(origin.module, "service");
+        assert_eq!(origin.via, "com.acme:core:1.0");
+        assert_eq!(
+            r.describe(&r.missing[0]),
+            "com.acme:absent:2.4.0 (in service, via com.acme:core:1.0)"
+        );
+        assert!(r.shortfall().unwrap().contains("in service, via com.acme:core:1.0"));
+    }
+
+    /// What a module declares itself has nothing in between to name, and saying `via` anyway would
+    /// be noise on the commonest case.
+    #[test]
+    fn a_directly_declared_missing_artifact_names_only_its_module() {
+        let f = Fixture::new("origin-direct");
+        f.write_pom(
+            "",
+            &format!(
+                "<project><groupId>p</groupId><artifactId>app</artifactId><version>1</version>\
+                 <dependencies>{}</dependencies></project>",
+                dep("com.acme", "absent", "2.4.0")
+            ),
+        );
+        let r = f.resolve();
+        assert_eq!(r.missing.len(), 1);
+        assert_eq!(r.describe(&r.missing[0]), "com.acme:absent:2.4.0 (in app)");
     }
 }

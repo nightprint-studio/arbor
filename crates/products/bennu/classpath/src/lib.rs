@@ -42,6 +42,8 @@ pub mod maven;
 pub mod members;
 pub mod meta;
 pub mod prelude;
+// A decoded bytecode signature, written back as the Java a person reads.
+pub mod render;
 // Non-class jar entries: the descriptor files a library ships to describe itself.
 pub mod resources;
 pub mod sig;

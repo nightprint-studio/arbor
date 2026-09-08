@@ -236,6 +236,12 @@
   answer it: Bennu's own for Java, the language server for everything else.
 </p>
 <p>
+  It describes the <em>call</em>, not the declaration: the receiver's type arguments are filled in,
+  so <code>Optional&lt;PathPattern&gt;.orElseThrow(…)</code> reads <code>: PathPattern</code> rather
+  than <code>: T</code>. A type variable the receiver does not bind — one the call's own arguments
+  decide — is left as written, because nothing here knows what it is.
+</p>
+<p>
   <strong>Inlay hints</strong> (Settings → Editor) draw what the code doesn't say:
   the parameter name in front of each argument that doesn't already carry it —
   <code>transfer(source: from, target: to, amount: 500)</code>, the type a <code>var</code> or a Lombok

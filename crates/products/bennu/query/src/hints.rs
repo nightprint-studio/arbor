@@ -189,7 +189,14 @@ fn call_candidates(
         let ty = call.child_by_field_name("type")?;
         let resolved = infer_node_type_cached(root, source, symbols, &ty, resolver, cache)?;
         let cm = resolver.members_of(&resolved.binary_name)?;
-        let ctors = non_empty(cm.methods.iter().filter(|m| m.name == "<init>").cloned().collect())?;
+        // `new Box<Order>(…)` takes an `Order`, not a `T` — the arguments are written right there.
+        let ctors = non_empty(
+            cm.methods
+                .iter()
+                .filter(|m| m.name == "<init>")
+                .map(|m| substituted(m, &cm.type_params, &resolved.type_args))
+                .collect(),
+        )?;
         return Some((resolved.binary_name, ctors));
     }
     let name_node = call.child_by_field_name("name")?;
@@ -204,7 +211,7 @@ fn call_candidates(
         }
     };
     let mut out: Vec<Member> = Vec::new();
-    collect_named(resolver, &owner.binary_name, name, &mut out);
+    collect_named(resolver, &owner, name, &mut out);
     // The DECLARING type, not the receiver: an inherited method's parameter names are written in
     // the file that declares it, and asking the subclass's source for them finds nothing.
     let declared_on = bennu_java::prelude::declaring_method(resolver, &owner, name)
@@ -217,21 +224,54 @@ fn non_empty(v: Vec<Member>) -> Option<Vec<Member>> {
     (!v.is_empty()).then_some(v)
 }
 
-/// Gather every method called `name` on `binary` and its supertypes, most-derived first.
-fn collect_named(resolver: &dyn TypeResolver, binary: &str, name: &str, out: &mut Vec<Member>) {
-    bennu_java::prelude::walk_up::<()>(resolver, &bennu_java::prelude::TypeRef::simple(binary), |a| {
+/// Gather every method called `name` on `owner` and its supertypes, most-derived first — **with the
+/// receiver's type arguments substituted in**.
+///
+/// The substitution is the difference between a strip that describes the call and one that
+/// describes the declaration. `Optional<PathPattern>.orElseThrow(…)` is declared
+/// `T orElseThrow(Supplier<? extends X>)`, and a strip reading `: T` answers a question nobody
+/// asked: the reader knows the method, they are looking to be told what it gives *here*.
+///
+/// It is exact rather than a guess, and free, because the hierarchy walk already carries it: each
+/// [`Ancestor`](bennu_java::prelude::Ancestor) arrives as seen from where the walk started
+/// (`List<String>`, not `List<E>`), so a method inherited from a generic supertype substitutes
+/// against that supertype's own parameter list. A variable nothing binds — a method-level `<X>`,
+/// whose argument comes from the call rather than the receiver — is left as written, which is the
+/// honest answer and what it already showed.
+fn collect_named(
+    resolver: &dyn TypeResolver,
+    owner: &bennu_java::prelude::TypeRef,
+    name: &str,
+    out: &mut Vec<Member>,
+) {
+    bennu_java::prelude::walk_up::<()>(resolver, owner, |a| {
         for m in &a.members.methods {
             if m.kind == MemberKind::Method && m.name == name {
+                let m = substituted(m, &a.members.type_params, &a.ty.type_args);
                 // An override arrives again from every level it is declared at; the first (most
                 // derived) is the one the call binds to, and the shared walk is breadth-first, so
                 // that is the one that gets here first.
                 if !out.iter().any(|k| k.params == m.params) {
-                    out.push(m.clone());
+                    out.push(m);
                 }
             }
         }
         None
     });
+}
+
+/// `m` with each type variable of `params` replaced by the matching entry of `args`, in its
+/// parameters and its return type. See [`collect_named`].
+fn substituted(m: &Member, params: &[String], args: &[bennu_java::prelude::TypeRef]) -> Member {
+    if params.is_empty() || args.is_empty() {
+        return m.clone();
+    }
+    let sub = bennu_java::prelude::substitute;
+    Member {
+        return_type: sub(&m.return_type, params, args),
+        params: m.params.iter().map(|p| sub(p, params, args)).collect(),
+        ..m.clone()
+    }
 }
 
 /// Whether `m` could take a call of `argc` arguments (a trailing array parameter is varargs).
@@ -639,6 +679,39 @@ mod tests {
             "repository.findById(identifier).orElseThrow()",
             "order"
         ));
+    }
+
+    /// The strip is about the call, and `Optional<PathPattern>.orElseThrow(…)` gives a
+    /// `PathPattern`. Answering `T` describes the declaration, which the reader can already see.
+    #[test]
+    fn the_receivers_type_arguments_reach_the_rendered_signature() {
+        use bennu_java::prelude::TypeRef;
+        let m = Member::method(
+            "orElseThrow",
+            TypeRef::simple("T"),
+            vec![TypeRef::simple("java/util/function/Supplier")],
+        );
+        let bound = substituted(&m, &["T".to_string()], &[TypeRef::simple("com/acme/PathPattern")]);
+        assert_eq!(bound.return_type.binary_name, "com/acme/PathPattern");
+        assert_eq!(render_type(&bound.return_type), "PathPattern");
+    }
+
+    /// A method-level variable — `<X>` on `orElseThrow`, bound by the argument rather than by the
+    /// receiver — is not in the class's list and must be left exactly as written.
+    #[test]
+    fn a_variable_the_receiver_does_not_bind_is_left_alone() {
+        use bennu_java::prelude::TypeRef;
+        let m = Member::method("orElseThrow", TypeRef::simple("X"), vec![]);
+        let bound = substituted(&m, &["T".to_string()], &[TypeRef::simple("com/acme/PathPattern")]);
+        assert_eq!(bound.return_type.binary_name, "X");
+    }
+
+    /// A raw receiver has nothing to substitute with, and inventing `Object` would be a claim.
+    #[test]
+    fn a_raw_receiver_changes_nothing() {
+        use bennu_java::prelude::TypeRef;
+        let m = Member::method("get", TypeRef::simple("E"), vec![]);
+        assert_eq!(substituted(&m, &["E".to_string()], &[]).return_type.binary_name, "E");
     }
 
     #[test]

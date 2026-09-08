@@ -112,22 +112,39 @@
   });
 
 
+  /** A folder tint: the role's hue, damped toward the muted text colour.
+   *
+   *  The five semantic hues mean **type kind** everywhere else in Bennu — a class is
+   *  `--info`, an interface `--success`, an enum `--warning`, a record the tag purple — and
+   *  the folder roles were reaching for exactly the same five at full strength. Under
+   *  `src/main` that put a blue folder directly above a column of blue class rings, which is
+   *  two different vocabularies drawn in one colour: the eye reads a row of same-coloured
+   *  marks as a row of same-*kind* things.
+   *
+   *  Damping settles it without giving up the role. A folder still reads as blue-ish or
+   *  green-ish, so the source root is still identifiable at a glance; it just sits behind the
+   *  file marks instead of beside them, which is the right order — the folder is where you
+   *  are, the mark is what the thing is. */
+  function damped(hue: string): string {
+    return `color-mix(in srgb, ${hue} 45%, var(--text-muted))`;
+  }
+
   /** The folder-icon tint by source-root role, so the tree conveys context at a glance.
    *
    *  Maven: main (blue) / test (green) / resources (amber) / webapp (purple). Cargo has its
    *  own conventional roots — `crates` and `src` are code (blue), `tests` / `benches` are
    *  test (green), `examples` and `content` are data/samples (amber) — and the Maven
    *  patterns are more specific, so they're tried first and a polyglot repo still reads
-   *  correctly. */
+   *  correctly. Every one of them is [`damped`] — see there for why. */
   function folderColor(path: string): string {
     const p = path.replace(/\\/g, '/');
-    if (/\/src\/(main|test)\/resources(\/|$)/.test(p)) return 'var(--warning)';
-    if (/\/src\/test(\/|$)/.test(p)) return 'var(--success)';
-    if (/\/src\/main\/webapp(\/|$)/.test(p)) return 'var(--color-tag, #c792ea)';
-    if (/\/src\/main(\/|$)/.test(p)) return 'var(--info)';
-    if (/\/(tests|benches)(\/|$)/.test(p)) return 'var(--success)';
-    if (/\/(examples|content)(\/|$)/.test(p)) return 'var(--warning)';
-    if (/\/(crates|src)(\/|$)/.test(p)) return 'var(--info)';
+    if (/\/src\/(main|test)\/resources(\/|$)/.test(p)) return damped('var(--warning)');
+    if (/\/src\/test(\/|$)/.test(p)) return damped('var(--success)');
+    if (/\/src\/main\/webapp(\/|$)/.test(p)) return damped('var(--color-tag, #c792ea)');
+    if (/\/src\/main(\/|$)/.test(p)) return damped('var(--info)');
+    if (/\/(tests|benches)(\/|$)/.test(p)) return damped('var(--success)');
+    if (/\/(examples|content)(\/|$)/.test(p)) return damped('var(--warning)');
+    if (/\/(crates|src)(\/|$)/.test(p)) return damped('var(--info)');
     return 'var(--text-muted)';
   }
 

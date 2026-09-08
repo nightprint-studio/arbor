@@ -25,6 +25,11 @@ pub use crate::ast::{lower as lower_ast, AstNode};
 // The grammar itself, for callers that walk a parse rather than ask a question of it —
 // the syntax-tree panel. One pin for the whole workspace (see `grammar.rs`).
 pub use crate::grammar::{language as java_language, parse_java};
+// The `/** … */` above a declaration — for one offset, or for every declaration in a file (which is
+// how a library's documentation is read out of its `-sources.jar`).
+pub use crate::javadoc::{
+    declarations as javadoc_declarations, leading as leading_javadoc, FileDocs,
+};
 // Anonymous-class identity: the synthetic name an unnamed `new X() { … }` body is filed under,
 // and the test that recognises one. Shared so the extractor and the caret query derive it the
 // same way rather than each having its own idea.

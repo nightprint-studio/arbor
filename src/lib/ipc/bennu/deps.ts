@@ -239,6 +239,12 @@ export interface MissingArtifact {
   /** Versions of the same artifact that ARE installed, which is what separates a mistyped version
    *  from a coordinate nobody has ever fetched. */
   other_versions: string[];
+  /** The reactor module that wants it, as its directory relative to the project root. On a
+   *  multi-module project this is the first thing to know, and the coordinate alone never said it. */
+  module: string;
+  /** The dependency that drags it in, `groupId:artifactId:version`. Empty when the module declares
+   *  it itself — which is also how the two cases are told apart. */
+  via: string;
 }
 
 /** What the dependency tier is actually standing on. */

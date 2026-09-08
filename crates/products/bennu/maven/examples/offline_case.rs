@@ -52,11 +52,13 @@ fn main() {
     println!("reactor    : {}", res.reactor.len());
     println!("read in    : {took:?}\n");
 
+    // Described, not bare: on a reactor the coordinate alone never says which module wants it, and
+    // for a transitive it never says what dragged it in — which is the whole of the next question.
     for coord in &res.missing {
-        println!("  MISSING     {}", coord.gav());
+        println!("  MISSING     {}", res.describe(coord));
     }
     for coord in &res.unversioned {
-        println!("  NO VERSION  {}", coord.gav());
+        println!("  NO VERSION  {}", res.describe(coord));
     }
 
     let Some(cp) = args.next() else { return };

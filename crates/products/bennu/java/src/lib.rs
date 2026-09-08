@@ -25,6 +25,8 @@ pub mod grammar;
 pub mod hierarchy;
 pub mod import_hint;
 pub mod infer;
+// The `/** … */` block above a declaration, for one offset or for a whole file.
+pub mod javadoc;
 pub mod prelude;
 pub mod scaffold;
 pub mod seam;

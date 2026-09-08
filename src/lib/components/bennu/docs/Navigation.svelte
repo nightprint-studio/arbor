@@ -133,10 +133,19 @@
   appears once the index is warm.
 </p>
 <p>
-  A <strong>Javadoc</strong> on a project declaration is read rather than dumped: the prose comes
-  first, then <code>@param</code>, <code>@return</code> and <code>@throws</code> as a labelled list,
-  with <code>&lbrace;@link …&rbrace;</code> shown as what it names and <code>@deprecated</code>
+  A <strong>Javadoc</strong> is read rather than dumped: the prose comes first, then
+  <code>@param</code>, <code>@return</code> and <code>@throws</code> as a labelled list, with
+  <code>&lbrace;@link …&rbrace;</code> shown as what it names and <code>@deprecated</code>
   highlighted.
+</p>
+<p>
+  A <strong>library's</strong> documentation appears on the same card, from the same place its
+  parameter names come from: the dependency's sources jar, or the JDK's own <code>src.zip</code>. A
+  dependency whose sources are not downloaded shows the signature alone — a <code>.class</code>
+  carries no comments — and “Download sources” on its decompiled view fills the cards in from then
+  on. The signature itself is written as Java either way, generics and
+  <code>throws</code> included: <code>&lt;X extends Throwable&gt; T orElseThrow(Supplier&lt;? extends
+  X&gt;) throws X</code>.
 </p>
 <p>
   Hovering a <strong>variable</strong> — a local, a parameter, a loop variable, a

@@ -204,6 +204,20 @@ fn write_view(file_binary: &str, text: &str) -> Option<String> {
 /// A library type's parameter names, by `(method name, parameter count)`.
 type ParamNameMap = HashMap<(String, usize), Vec<String>>;
 
+/// What a library type's **source** says that its bytecode cannot.
+///
+/// Two questions, one read. A class file carries neither parameter names (`-parameters` is off by
+/// default and almost no published jar turns it on) nor comments, so both answers live in the
+/// `-sources.jar` or the JDK's `src.zip` — the same archive, the same entry, the same parse. Asking
+/// them separately meant opening and parsing a Spring source file twice, once for a hint and once
+/// for a tooltip, and two memos that could disagree about whether the type had source at all.
+struct LibraryFacts {
+    /// Parameter names by `(method name, parameter count)`.
+    params: ParamNameMap,
+    /// Every `/** … */` in the file, keyed by what it documents.
+    docs: bennu_java::prelude::FileDocs,
+}
+
 /// [`bennu_query::prelude::LibraryParamNames`] over a project's source archives.
 ///
 /// The rule is one line and it is the whole feature: **only real source counts.** A decompiled stub
@@ -218,26 +232,8 @@ struct SourceParamNames<'a> {
 
 impl bennu_query::prelude::LibraryParamNames for SourceParamNames<'_> {
     fn names_for(&self, owner_binary: &str, method: &str, arity: usize) -> Option<Vec<String>> {
-        let key = (self.root.clone(), owner_binary.to_string());
-        // Memo first, including the negative: most types in most projects have no source, and that
-        // answer must not cost an archive read on every keystroke.
-        if let Some(hit) = {
-            let g = self.svc.library_param_names.lock().unwrap_or_else(|p| p.into_inner());
-            g.get(&key).cloned()
-        } {
-            return hit?.get(&(method.to_string(), arity)).cloned();
-        }
-        let parsed = self
-            .svc
-            .serve_source_view(&self.provider, &self.root, owner_binary)
-            .filter(|(_, _, is_stub)| !is_stub)
-            .map(|(text, _, _)| Arc::new(param_names_in(&text)));
-        self.svc
-            .library_param_names
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(key, parsed.clone());
-        parsed?.get(&(method.to_string(), arity)).cloned()
+        let facts = self.svc.source_facts(&self.provider, &self.root, owner_binary)?;
+        facts.params.get(&(method.to_string(), arity)).cloned()
     }
 }
 
@@ -690,13 +686,14 @@ struct ConfigRebuild {
 /// The process-wide index service (one per `bennu-be`).
 pub struct IndexService {
     slots: Mutex<HashMap<PathBuf, Arc<ProjectSlot>>>,
-    /// Parameter names read out of a **library's source**, per `(project root, type)`.
+    /// What a **library's source** says about a type — its parameter names and its Javadoc — per
+    /// `(project root, type)`.
     ///
-    /// Inlay hints run over the whole buffer on every validation, and every call into a library
-    /// would otherwise re-open the archive, re-read the entry and re-parse it. `None` is memoised
-    /// as firmly as a hit: "this type has no downloaded source" is the answer for most types in
-    /// most projects, and it is the one that must not cost an archive read each time.
-    library_param_names: Mutex<HashMap<(String, String), Option<Arc<ParamNameMap>>>>,
+    /// Inlay hints run over the whole buffer on every validation, and a hover fires on every pointer
+    /// rest; each would otherwise re-open the archive, re-read the entry and re-parse it. `None` is
+    /// memoised as firmly as a hit: "this type has no downloaded source" is the answer for most
+    /// types in most projects, and it is the one that must not cost an archive read each time.
+    library_facts: Mutex<HashMap<(String, String), Option<Arc<LibraryFacts>>>>,
     /// Per-project include-graph cache (keyed by forward-slashed root) for the form analysis —
     /// avoids re-parsing every JSP on each tab switch. Loaded from disk on first use, refreshed
     /// incrementally, persisted back. Behind an inner `Mutex` so a build holds the lock without
@@ -795,7 +792,7 @@ impl IndexService {
     pub fn global() -> &'static IndexService {
         SERVICE.get_or_init(|| IndexService {
             slots: Mutex::new(HashMap::new()),
-            library_param_names: Mutex::new(HashMap::new()),
+            library_facts: Mutex::new(HashMap::new()),
             include_caches: Mutex::new(HashMap::new()),
             include_synced: Mutex::new(HashSet::new()),
             build_gen: Mutex::new(HashMap::new()),
@@ -1429,12 +1426,47 @@ impl IndexService {
         )
     }
 
-    /// Drop the parsed library-source parameter names for `root`.
+    /// What a library type's source says — parameter names and Javadoc — memoised per
+    /// `(root, type)`, negatives included. See [`LibraryFacts`].
+    ///
+    /// `None` when the type has no **real** source: a decompiled stub is not one. Its `arg0` is the
+    /// decompiler's invention and it carries no comments at all, so answering from it would put a
+    /// made-up parameter name in a hint and an empty card behind a tooltip.
+    fn source_facts(
+        &self,
+        provider: &NativeJavaProvider,
+        root: &str,
+        binary: &str,
+    ) -> Option<Arc<LibraryFacts>> {
+        let key = (root.to_string(), binary.to_string());
+        if let Some(hit) = {
+            let g = self.library_facts.lock().unwrap_or_else(|p| p.into_inner());
+            g.get(&key).cloned()
+        } {
+            return hit;
+        }
+        let parsed = self
+            .serve_source_view(provider, root, binary)
+            .filter(|(_, _, is_stub)| !is_stub)
+            .map(|(text, _, _)| {
+                Arc::new(LibraryFacts {
+                    params: param_names_in(&text),
+                    docs: bennu_java::prelude::javadoc_declarations(&text),
+                })
+            });
+        self.library_facts
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(key, parsed.clone());
+        parsed
+    }
+
+    /// Drop the parsed library-source facts for `root`.
     ///
     /// Called when a `-sources.jar` lands: until then every type in that artifact answered "no
     /// source", and the memo would keep saying so for the rest of the session.
-    pub fn forget_library_param_names(&self, root: &str) {
-        let mut g = self.library_param_names.lock().unwrap_or_else(|p| p.into_inner());
+    pub fn forget_library_facts(&self, root: &str) {
+        let mut g = self.library_facts.lock().unwrap_or_else(|p| p.into_inner());
         g.retain(|(r, _), _| r != root);
     }
 
@@ -2278,9 +2310,20 @@ impl IndexService {
             return None;
         }
         let slot = self.slot_for_file(file)?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
         // 1. The reference-index classifier: fields / methods / types (with Javadoc).
         if let Some(engine) = slot.semantics() {
-            if let Some(info) = engine.hover(file, source, offset) {
+            if let Some(mut info) = engine.hover(file, source, offset) {
+                // The engine reads the doc off PROJECT source, which it has. A library's is in its
+                // `-sources.jar` (or the JDK's `src.zip`) — archives this layer owns, and the whole
+                // reason `Optional.orElseThrow` used to hover as a bare signature with nothing under
+                // it while the project's own methods came with their documentation.
+                if info.doc.is_none() {
+                    info.doc = self.library_doc(&provider, &norm_path(&slot.root), &info);
+                }
                 return Some(hover_info_of(info));
             }
         }
@@ -2288,11 +2331,34 @@ impl IndexService {
         //    TYPE via the provider's full (JDK-aware) resolver, so hovering a `var`/`val` (or any
         //    local) shows what it is. Runs on the provider, not the semantic engine (which is
         //    project-only and can't type a JDK `var`).
-        let provider = {
-            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
-            Arc::clone(&g)
-        };
         provider.var_hover(source, offset).map(hover_info_of)
+    }
+
+    /// What the **library's own source** documents about what a hover card resolved to.
+    ///
+    /// `None` whenever there is nothing honest to say: the card is about a local rather than a
+    /// declaration, the owning type has no downloaded source, the file documents nothing for that
+    /// member, or the member's name is overloaded at an arity nothing narrows — in which case the
+    /// doc of the wrong overload would be worse than an empty card.
+    fn library_doc(
+        &self,
+        provider: &NativeJavaProvider,
+        root: &str,
+        info: &IntelHoverInfo,
+    ) -> Option<String> {
+        let owner = info.owner.as_deref()?;
+        let facts = self.source_facts(provider, root, owner)?;
+        let doc = match info.member.as_deref() {
+            // A type: its own block, found by simple name — the served entry is the OUTER file, so a
+            // nested type's documentation is in it under its own name.
+            None => {
+                let simple = owner.rsplit(['/', '$']).next().unwrap_or(owner);
+                facts.docs.types.get(simple).or(facts.docs.type_doc.as_ref())
+            }
+            Some(name) if info.kind == "field" => facts.docs.fields.get(name),
+            Some(name) => facts.docs.method(name, info.arity),
+        };
+        doc.cloned()
     }
 
     /// Resolve the library/JDK type `name` references in `source` to an on-disk **source view** for
@@ -2801,7 +2867,7 @@ impl IndexService {
                     // Until this moment every type in that artifact answered "no source", and the
                     // memo holds negatives as firmly as hits — so without this the parameter names
                     // that just became knowable stay unknown for the rest of the session.
-                    svc.forget_library_param_names(&root);
+                    svc.forget_library_facts(&root);
                     let _ = svc.decompiled_stub(&file, &source, &name);
                     sink.emit(EVT_SOURCES_READY, json!({ "path": &view_path, "ok": true }));
                     finish_bennu_job(&sink, job, true, None);
@@ -4128,8 +4194,12 @@ fn split_classpath_entries(raw: &str) -> Vec<String> {
     out
 }
 
-/// Map an intel [`IntelHoverInfo`] onto the wire [`HoverInfo`] (field-for-field). Kept in
-/// the be layer so the wire mapping lives at the process boundary (like `references`).
+/// Map an intel [`IntelHoverInfo`] onto the wire [`HoverInfo`]. Kept in the be layer so the wire
+/// mapping lives at the process boundary (like `references`).
+///
+/// The intel card also carries what it *resolved to* — the owning binary name, the member, its
+/// arity. That is working state for this layer (it is how a library's documentation is found, see
+/// [`IndexService::library_doc`]) and stops here: the editor draws a card, it does not resolve one.
 fn hover_info_of(h: IntelHoverInfo) -> HoverInfo {
     HoverInfo { signature: h.signature, kind: h.kind, container: h.container, doc: h.doc }
 }

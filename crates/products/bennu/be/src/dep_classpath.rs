@@ -258,7 +258,10 @@ fn still_missing(
             continue;
         }
         paths.push(path);
-        coords.push(coord.gav());
+        // Described, not bare: on a reactor of a dozen modules a coordinate on its own does not say
+        // which pom wants it, and for a transitive it does not say what dragged it in — which is
+        // the whole of what the person reading the warning has to find out next.
+        coords.push(offline.describe(coord));
     }
     (paths, coords)
 }
@@ -268,8 +271,10 @@ fn shortfall_message(
     missing: &[String],
     offline: &bennu_maven::prelude::Resolution,
 ) -> Option<String> {
-    /// Enough to recognise the problem; the full list is in the Dependencies panel.
-    const SHOW: usize = 3;
+    /// Enough to recognise the problem; the full list is in the Dependencies panel. Two rather
+    /// than three because each entry now carries its module and what pulled it in, and a
+    /// notification that has to be scrolled is one nobody reads to the end.
+    const SHOW: usize = 2;
     if missing.is_empty() && offline.unversioned.is_empty() {
         return None;
     }
@@ -279,12 +284,18 @@ fn shortfall_message(
         // downloads a POM to walk the dependency graph and the jar only when something compiles
         // against it, so the folder is usually right there with just the pom in it. Saying "jar"
         // is what stops the next twenty minutes being spent proving the folder exists.
-        parts.push(format!("{} whose jar is not in the local repository ({})", missing.len(), sample(missing, SHOW)));
+        // Not parenthesised: each entry carries its own `(in module, via …)`, and a bracketed list
+        // whose items are themselves bracketed is a sentence nobody can parse.
+        parts.push(format!(
+            "{} whose jar is not in the local repository — {}",
+            missing.len(),
+            sample(missing, SHOW)
+        ));
     }
     if !offline.unversioned.is_empty() {
-        let names: Vec<String> = offline.unversioned.iter().map(|c| c.gav()).collect();
+        let names: Vec<String> = offline.unversioned.iter().map(|c| offline.describe(c)).collect();
         parts.push(format!(
-            "{} with no resolvable version ({})",
+            "{} with no resolvable version — {}",
             names.len(),
             sample(&names, SHOW)
         ));

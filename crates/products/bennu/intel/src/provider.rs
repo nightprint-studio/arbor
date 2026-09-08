@@ -124,8 +124,8 @@ fn unresolved_local_hover(
     Some(crate::rename::HoverInfo {
         signature: format!("{written} {name}"),
         kind: "variable".to_string(),
-        container: None,
         doc: Some(doc),
+        ..Default::default()
     })
 }
 
@@ -409,8 +409,16 @@ fn render_stub(binary: &str, cm: &bennu_java::prelude::ClassMembers) -> String {
         // wildcards `Supplier<? extends X>`, and a type-variable `throws X`) — the IntelliJ-style
         // shape. Fall back to the erased seam fields when the method carries no generic signature
         // (a plain descriptor either renders identically here or fails to parse → this branch).
-        let core = generic_method_core(&m.raw_signature, &m.name, is_ctor.then_some(simple))
-            .unwrap_or_else(|| {
+        //
+        // A stub is compiled against, so its parameters need names even though the class file has
+        // none: `arg0` is the honest placeholder here, and the one place it is allowed.
+        let core = bennu_classpath::prelude::render_method_core(
+            &m.raw_signature,
+            &m.name,
+            is_ctor.then_some(simple),
+            &bennu_classpath::prelude::placeholder_names(m.params.len()),
+        )
+        .unwrap_or_else(|| {
                 let params: Vec<String> = m
                     .params
                     .iter()
@@ -450,114 +458,6 @@ fn render_stub(binary: &str, cm: &bennu_java::prelude::ClassMembers) -> String {
     }
     s.push_str("}\n");
     s
-}
-
-/// The generic method "core" — `<TypeParams> Ret name(Params) throws X` (no modifiers / body) —
-/// decoded from a method's bytecode `Signature` (carried in `raw_signature`). `None` when there's no
-/// generic signature to decode (a plain erased descriptor may still parse, in which case it renders
-/// identically to the erased path). `ctor_simple` is `Some(simpleClassName)` for a `<init>` so it
-/// renders as `Simple(...)` without a return type. This is what makes the decompiled stub match
-/// IntelliJ's `<X extends Throwable> T orElseThrow(Supplier<? extends X> arg0) throws X` instead of the
-/// erased `T orElseThrow(Supplier<X> arg0) throws Throwable`.
-fn generic_method_core(
-    raw_signature: &str,
-    name: &str,
-    ctor_simple: Option<&str>,
-) -> Option<String> {
-    let ms = bennu_classpath::prelude::parse_method_signature(raw_signature).ok()?;
-    let type_params = if ms.type_params.is_empty() {
-        String::new()
-    } else {
-        let ps: Vec<String> = ms.type_params.iter().map(render_sig_type_param).collect();
-        format!("<{}> ", ps.join(", "))
-    };
-    let params: Vec<String> = ms
-        .params
-        .iter()
-        .enumerate()
-        .map(|(i, p)| format!("{} arg{i}", render_sig_type(p)))
-        .collect();
-    let throws = if ms.throws.is_empty() {
-        String::new()
-    } else {
-        let ts: Vec<String> = ms.throws.iter().map(render_sig_type).collect();
-        format!(" throws {}", ts.join(", "))
-    };
-    let head = match ctor_simple {
-        Some(simple) => format!("{type_params}{simple}"),
-        None => format!("{type_params}{} {name}", render_sig_type(&ms.result)),
-    };
-    Some(format!("{head}({}){throws}", params.join(", ")))
-}
-
-/// Render a decoded generic-signature type to readable simple-name Java (`Supplier<? extends X>`,
-/// `List<String>`, `T`, `int[]`). Simple names only — a stub reads cleaner than fully-qualified.
-fn render_sig_type(t: &bennu_classpath::prelude::TypeSig) -> String {
-    use bennu_classpath::prelude::TypeSig;
-    match t {
-        TypeSig::Base(c) => match c {
-            'I' => "int",
-            'J' => "long",
-            'S' => "short",
-            'B' => "byte",
-            'C' => "char",
-            'Z' => "boolean",
-            'F' => "float",
-            'D' => "double",
-            _ => "Object",
-        }
-        .to_string(),
-        TypeSig::Void => "void".to_string(),
-        TypeSig::TypeVar(n) => n.clone(),
-        TypeSig::Array(inner) => format!("{}[]", render_sig_type(inner)),
-        TypeSig::Class(ct) => {
-            let mut s = ct.name.rsplit('.').next().unwrap_or(&ct.name).to_string();
-            if !ct.args.is_empty() {
-                let a: Vec<String> = ct.args.iter().map(render_sig_arg).collect();
-                s.push_str(&format!("<{}>", a.join(", ")));
-            }
-            for (iname, iargs) in &ct.inners {
-                s.push('.');
-                s.push_str(iname);
-                if !iargs.is_empty() {
-                    let a: Vec<String> = iargs.iter().map(render_sig_arg).collect();
-                    s.push_str(&format!("<{}>", a.join(", ")));
-                }
-            }
-            s
-        }
-    }
-}
-
-/// Render one `<...>` type argument (`?`, `? extends X`, `? super X`, or an exact type).
-fn render_sig_arg(a: &bennu_classpath::prelude::TypeArg) -> String {
-    use bennu_classpath::prelude::TypeArg;
-    match a {
-        TypeArg::Unbounded => "?".to_string(),
-        TypeArg::Extends(t) => format!("? extends {}", render_sig_type(t)),
-        TypeArg::Super(t) => format!("? super {}", render_sig_type(t)),
-        TypeArg::Exact(t) => render_sig_type(t),
-    }
-}
-
-/// Render a method/class type parameter (`X extends Throwable`, `T`), suppressing a vacuous
-/// `extends Object` bound.
-fn render_sig_type_param(tp: &bennu_classpath::prelude::TypeParam) -> String {
-    let mut bounds: Vec<String> = Vec::new();
-    if let Some(cb) = &tp.class_bound {
-        let s = render_sig_type(cb);
-        if s != "Object" {
-            bounds.push(s);
-        }
-    }
-    for ib in &tp.interface_bounds {
-        bounds.push(render_sig_type(ib));
-    }
-    if bounds.is_empty() {
-        tp.name.clone()
-    } else {
-        format!("{} extends {}", tp.name, bounds.join(" & "))
-    }
 }
 
 /// Errors a provider can return.
@@ -1419,7 +1319,9 @@ fn static_import_type(imports: &[bennu_java::prelude::Import], name: &str) -> Op
             signature: format!("{} {name}", render_type_ref(&ty)),
             kind,
             container,
-            doc: None,
+            // The card is about the variable, not about its type — a library doc pulled in here
+            // would answer a question nobody asked. `owner` stays empty for the same reason.
+            ..Default::default()
         })
     }
 

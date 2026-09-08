@@ -61,6 +61,16 @@ fn scaffold_new_file(kind: NewFileKind, dir: &Path, name: &str) -> ScaffoldResul
 // Declaration-site CST scans (go-to-declaration / rename / inherited-members consume these).
 fn find_type_name_span(source: &str, simple: &str) -> Option<(usize, usize)>   // NAME token of a type decl
 fn binary_of_type_at(source: &str, simple: &str, line: i64) -> Option<String>  // JVM binary name by (name, line)
+
+// Javadoc: the `/** … */` above a declaration, cleaned of its markers and gutter.
+fn leading_javadoc(source: &str, decl_start: usize) -> Option<String>   // for ONE offset
+fn javadoc_declarations(source: &str) -> FileDocs                       // for a WHOLE file
+//   FileDocs { type_doc, types: {simple name}, methods: {(name, arity)}, fields: {name} }
+// The file-at-once form is how a LIBRARY's documentation is read: a `.class` has no comments, so
+// the only copy is in its `-sources.jar` (or the JDK's `src.zip`), and one parse of that entry
+// answers every hover into the type instead of re-reading the archive per pointer move. Overloads
+// that agree on arity are dropped rather than merged — the doc of the wrong overload is worse
+// than none.
 ```
 
 > The Alt+Enter **intention** transforms (parameterize logging, NP-safe equals) used to live here;

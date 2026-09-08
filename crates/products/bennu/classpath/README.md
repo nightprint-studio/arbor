@@ -14,6 +14,13 @@ stack plus a homegrown Signature decoder.
   the one piece no Rust crate does (docs §4). Ported verbatim from the proven spike;
   its test cases (`Optional.map`, `List.iterator`, `Map.entrySet`, class signatures)
   are kept.
+- **…and writing it back as Java** (`render.rs`) — `<X extends Throwable> T
+  orElseThrow(Supplier<? extends X>) throws X` out of
+  `<X:Ljava/lang/Throwable;>(Ljava/util/function/Supplier<+TX;>;)TT;^TX;`. One rendering,
+  because there were two consumers of it and only one of them had it: the decompiled
+  source view read like Java while the hover card printed the descriptor. Parameter names
+  are the caller's to supply (`placeholder_names` for a generator that must write *a*
+  name; nothing for a tooltip, where `arg0` would be a claim the class file does not make).
 - **One `ClassSource` trait** (`source.rs`) over three container formats:
 
   | Impl            | Container                       | Resource path                         |
