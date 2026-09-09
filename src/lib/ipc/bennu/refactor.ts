@@ -30,6 +30,36 @@ export interface RefactorOffer {
   reason: string;
   /** The name it would introduce, when it introduces one. */
   name: string;
+  /** This row asks a question rather than making an edit: it opens the target picker, and the
+   *  answer comes back as `target` on the plan call. */
+  picks_target: boolean;
+}
+
+/** One type a member could move into — a row of the target picker. */
+export interface MoveTarget {
+  /** Simple name; what the row says and what the plan is asked for. */
+  name: string;
+  /** Fully-qualified. Two `Builder`s in a project is the normal case, and this is what tells them
+   *  apart — which is why it is the row's subtitle rather than a detail. */
+  qualified: string;
+  /** The file that declares it, sent back with the choice so nothing resolves it twice. */
+  file: string;
+  /** `class` · `interface` · `enum` · `record` — the row's glyph. */
+  kind: string;
+  /** Picking this one **widens** the member to `protected`, because it is `private` and the class
+   *  it leaves still reads it. */
+  widens: boolean;
+}
+
+/** The types the member at the caret could move into. Wire: `bennu_move_targets`. */
+export function moveTargets(
+  file: string,
+  source: string,
+  start: number,
+  end: number,
+  id: string,
+): Promise<MoveTarget[]> {
+  return bennu('bennu_move_targets', { args: { file, source, start, end, id } });
 }
 
 /** One byte-range replacement. */
@@ -92,8 +122,20 @@ export function refactorPlan(
   start: number,
   end: number,
   id: string,
+  target?: MoveTarget,
 ): Promise<RefactorPlan> {
-  return bennu('bennu_refactor_plan', { args: { file, source, start, end, id } });
+  return bennu('bennu_refactor_plan', {
+    args: {
+      file,
+      source,
+      start,
+      end,
+      id,
+      // Both empty for every refactoring that needs no target, which is all but the three moves.
+      target: target?.name ?? '',
+      target_file: target?.file ?? '',
+    },
+  });
 }
 
 /** Create the file for a type that does not resolve, beside the file that names it, and answer with

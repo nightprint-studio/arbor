@@ -128,7 +128,11 @@
   import {
     intentionsAt as ipcIntentionsAt, type IntentionOffer, type DiagRef,
   } from '$lib/ipc/bennu/intentions';
-  import { createClass, refactorings, refactorPlan, type RefactorPlan } from '$lib/ipc/bennu/refactor';
+  import {
+    createClass, moveTargets, refactorings, refactorPlan,
+    type MoveTarget, type RefactorPlan,
+  } from '$lib/ipc/bennu/refactor';
+  import BennuMoveTargetPicker from './BennuMoveTargetPicker.svelte';
   import { validationTarget as ipcValidationTarget } from '$lib/ipc/bennu/validation';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
   import type {
@@ -2633,7 +2637,14 @@
             id: `refactor:${offer.id}`,
             label: offer.reason ? `${offer.label} — ${offer.reason}` : offer.label,
             icon: Wand2,
-            run: offer.reason ? () => {} : () => void runRefactoring(path, offer.id),
+            run: offer.reason
+              ? () => {}
+              // A row that ends in `…` asks which type rather than editing. Two different
+              // gestures, and the backend says which this is — the editor does not read it off
+              // the label.
+              : offer.picks_target
+                ? () => void pickMoveTarget(path, offer)
+                : () => void runRefactoring(path, offer.id),
           });
         }
       }
@@ -2672,12 +2683,12 @@
    * Everything arrives as one `replaceByteRanges`, so the whole refactoring — the call, the moved
    * body, the import — is one undo.
    */
-  async function runRefactoring(path: string, id: string) {
+  async function runRefactoring(path: string, id: string, target?: MoveTarget) {
     const src = editorComp?.getValue() ?? '';
     const sel = editorComp?.selectionByteRange() ?? { start: 0, end: 0, empty: true };
     let plan: RefactorPlan;
     try {
-      plan = await refactorPlan(path, src, sel.start, sel.end, id);
+      plan = await refactorPlan(path, src, sel.start, sel.end, id, target);
     } catch (e) {
       toastStore.show(String(e), 'error');
       return;
@@ -2741,6 +2752,52 @@
         }.`,
         'warning',
       );
+    }
+  }
+
+  /**
+   * Apply the move the picker's chosen target settles — the second half of {@link pickMoveTarget}.
+   *
+   * Exported because the picker is mounted beside the editor rather than inside it, the way every
+   * other Bennu overlay is: it owns its visibility from the store, and the one thing it cannot own
+   * is the buffer the edits land in.
+   */
+  export async function applyMoveTarget(target: MoveTarget) {
+    const req = bennuRefactorStore.moveReq;
+    bennuRefactorStore.closeMove();
+    if (!req) return;
+    // Only against the file it was asked about: a target chosen after switching tabs describes a
+    // member that is not under the caret any more.
+    if (projectStore.activeFilePath !== req.file) return;
+    await runRefactoring(req.file, req.id, target);
+  }
+
+  /**
+   * Ask which type a member is moving into, then run the move with that answer.
+   *
+   * The candidates come from the **index**, not the buffer, which is the whole reason this step
+   * exists — a superclass in another file and a subtype declared elsewhere are invisible to the
+   * list Alt+Enter was answered from. They are fetched while the picker is already open, so the
+   * gesture never waits on a project that is still building; it says so instead.
+   */
+  async function pickMoveTarget(path: string, offer: { id: string; label: string; name: string }) {
+    const src = editorComp?.getValue() ?? '';
+    const sel = editorComp?.selectionByteRange() ?? { start: 0, end: 0, empty: true };
+    bennuRefactorStore.startMove({
+      id: offer.id,
+      title: offer.label,
+      member: offer.name,
+      file: path,
+    });
+    try {
+      const found = await moveTargets(path, src, sel.start, sel.end, offer.id);
+      // The tab may have changed while the index answered; a list for another file is not an
+      // answer to this question.
+      if (bennuRefactorStore.moveReq?.file !== path) return;
+      bennuRefactorStore.setMoveTargets(found);
+    } catch (e) {
+      bennuRefactorStore.closeMove();
+      toastStore.show(String(e), 'error');
     }
   }
 

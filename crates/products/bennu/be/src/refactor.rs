@@ -41,6 +41,29 @@ pub struct RefactorArgs {
     /// Which refactoring to plan. Empty on [`bennu_refactorings`], which asks for all of them.
     #[serde(default)]
     pub id: String,
+    /// The type a member move was told to go to, when the user picked one — see
+    /// [`bennu_move_targets`]. Empty for every refactoring that needs no target and for the rows
+    /// that carry theirs in the id.
+    #[serde(default)]
+    pub target: String,
+    /// That type's file, which the picker already knew. Saves resolving the name a second time,
+    /// and resolves it the way the picker did rather than a way that might differ.
+    #[serde(default)]
+    pub target_file: String,
+}
+
+impl RefactorArgs {
+    /// What the plan calls itself once a target has been picked. The label is not decoration: it is
+    /// what the editor shows while the edits are being previewed, and `Move member` says less than
+    /// `Move member to \`Builder\`` about what is about to happen.
+    fn label_for_target(&self) -> String {
+        let verb = match bennu_refactor::prelude::MoveDirection::from_id(&self.id) {
+            bennu_refactor::prelude::MoveDirection::Up => "Pull member up to",
+            bennu_refactor::prelude::MoveDirection::Down => "Push member down to",
+            bennu_refactor::prelude::MoveDirection::Across => "Move member to",
+        };
+        format!("{verb} `{}`", self.target)
+    }
 }
 
 /// One row of the Alt+Enter list.
@@ -55,6 +78,10 @@ pub struct RefactorOffer {
     pub reason: String,
     /// The name it would introduce, when it introduces one.
     pub name: String,
+    /// This row does not act: it opens the **target picker**, and the choice comes back as
+    /// `target` on the plan call. The editor needs to know before it runs the row, because the two
+    /// are different gestures — one edits, one asks a question.
+    pub picks_target: bool,
 }
 
 /// What can be refactored at the caret or over the selection.
@@ -69,7 +96,7 @@ pub(crate) fn bennu_refactorings(
     if !is_java(&args.file) {
         return Ok(Vec::new());
     }
-    Ok(refactorings_at(&args.source, args.start, args.end)
+    let mut offers: Vec<RefactorOffer> = refactorings_at(&args.source, args.start, args.end)
         .into_iter()
         .map(|outcome| match outcome {
             Ok(plan) => RefactorOffer {
@@ -77,15 +104,58 @@ pub(crate) fn bennu_refactorings(
                 label: plan.label,
                 reason: String::new(),
                 name: plan.name.unwrap_or_default(),
+                picks_target: false,
             },
             Err(refusal) => RefactorOffer {
                 id: refusal.id,
                 label: refusal.label,
                 reason: refusal.reason,
                 name: String::new(),
+                picks_target: false,
             },
         })
-        .collect())
+        .collect();
+    offers.extend(picker_rows(&args));
+    Ok(offers)
+}
+
+/// The rows that open the target picker — one per move family, added to whatever the buffer alone
+/// could answer.
+///
+/// **Added, not substituted.** The rows the pure crate produces name a target in this same file and
+/// are one keystroke each; a picker in front of them would be a dialog between the user and the
+/// thing they already pointed at. These are for the targets that are *not* here — a superclass in
+/// another file, a subtype the index knows about — which is the case the buffer can say nothing
+/// about, and until now the case that simply had no answer.
+fn picker_rows(args: &RefactorArgs) -> Vec<RefactorOffer> {
+    let Some(site) = bennu_refactor::prelude::move_site(&args.source, args.start, args.end) else {
+        return Vec::new();
+    };
+    let mut rows = Vec::new();
+    if !site.supertypes.is_empty() {
+        rows.push(RefactorOffer {
+            id: "pull-up-member@pick".to_string(),
+            label: "Pull member up to…".to_string(),
+            reason: String::new(),
+            name: site.member.clone(),
+            picks_target: true,
+        });
+    }
+    rows.push(RefactorOffer {
+        id: "push-down-member@pick".to_string(),
+        label: "Push member down to…".to_string(),
+        reason: String::new(),
+        name: site.member.clone(),
+        picks_target: true,
+    });
+    rows.push(RefactorOffer {
+        id: "move-member@pick".to_string(),
+        label: "Move member to…".to_string(),
+        reason: String::new(),
+        name: site.member,
+        picks_target: true,
+    });
+    rows
 }
 
 /// The edits for one refactoring, with every type it needs resolved.
@@ -100,8 +170,26 @@ pub(crate) fn bennu_refactor_plan(
     if !is_java(&args.file) {
         return Err("refactorings are only offered for Java files".to_string());
     }
-    let outcome = plan_for(&args.id, &args.source, args.start, args.end)
-        .ok_or_else(|| format!("`{}` no longer applies here", args.id))?;
+    // A target the **picker** chose is not in the offer list — the list is answered from the buffer
+    // and this target may be in a file it has never seen. So the plan is asked for directly, with
+    // the direction read off the id the row carried: which of the three moves this is decides every
+    // check that follows, and a string typed in the wrong place here would refuse every instance
+    // member for a reason that has nothing to do with what was asked.
+    let outcome = if args.target.is_empty() {
+        plan_for(&args.id, &args.source, args.start, args.end)
+            .ok_or_else(|| format!("`{}` no longer applies here", args.id))?
+    } else {
+        bennu_refactor::prelude::move_member_plan(
+            &args.source,
+            args.start,
+            args.end,
+            &args.target,
+            bennu_refactor::prelude::MoveDirection::from_id(&args.id),
+            &args.id,
+            &args.label_for_target(),
+        )
+        .ok_or("there is no member to move at the caret")?
+    };
     let mut plan = outcome.map_err(|refusal| refusal.reason)?;
     let mut imports: Vec<String> = Vec::new();
 
@@ -186,6 +274,25 @@ pub(crate) fn bennu_refactor_plan(
         }
     }
 
+    // The Java the code this plan writes needs, against the Java the project targets. A `default`
+    // method written into a Java 7 project compiles nowhere, and finding that out from the build is
+    // the worst way to be told. Unknown on either side leaves the plan alone: a level nobody could
+    // read is not evidence of an old one — see `NeedsLevel`.
+    if let Some(needs) = plan.needs_level.clone() {
+        let level = crate::index_service::IndexService::global()
+            .root_for_file(&args.file)
+            .and_then(|root| crate::index_service::IndexService::global().jdk_version_of(&root))
+            .and_then(|declared| bennu_refactor::prelude::language_level(&declared));
+        if let Some(level) = level {
+            if level < needs.at_least {
+                return Err(format!(
+                    "this project targets Java {level}, and {} — Java {}",
+                    needs.because, needs.at_least
+                ));
+            }
+        }
+    }
+
     // A nested type given its own file leaves behind every `Outer.Inner` in the project — an
     // `import a.b.Outer.Inner;` two packages away included. Nothing in the file the refactoring was
     // invoked in can show that, so the pure crate says what it needs checked and this is where it
@@ -225,6 +332,12 @@ pub(crate) fn bennu_refactor_plan(
     Ok(RefactorPlanDto::of(plan, &args.file))
 }
 
+/// Where a transfer is going to land — the picker's answer when there was one, go-to-declaration's
+/// when there was not.
+struct TargetFile {
+    file: String,
+}
+
 /// A file other than this one that uses the symbol at `offset`, named for the sentence.
 ///
 /// `None` also when the index cannot answer — it may still be building — and that is deliberate in
@@ -257,15 +370,23 @@ fn used_by_another_file(args: &RefactorArgs, offset: usize) -> Option<String> {
 /// [`MemberTransfer`]: bennu_refactor::prelude::MemberTransfer
 fn transfer_edits(plan: &Plan, args: &RefactorArgs) -> Result<Vec<RefactorEdit>, String> {
     let transfer = plan.transfer.as_ref().ok_or("this plan moves nothing between files")?;
-    let target = crate::index_service::IndexService::global()
-        .declaration(&args.file, &args.source, transfer.target_at)
-        .ok_or_else(|| {
-            format!(
-                "`{}` could not be resolved — either the index is still building, or it is a type \
-                 this project does not hold the source of",
-                transfer.target
-            )
-        })?;
+    // The picker already resolved the type — it is how it listed it — so the file comes back with
+    // the choice rather than being looked up a second time, possibly a different way.
+    let target = match args.target_file.is_empty() {
+        false => TargetFile { file: args.target_file.clone() },
+        true => TargetFile {
+            file: crate::index_service::IndexService::global()
+                .declaration(&args.file, &args.source, transfer.target_at)
+                .ok_or_else(|| {
+                    format!(
+                        "`{}` could not be resolved — either the index is still building, or it is \
+                         a type this project does not hold the source of",
+                        transfer.target
+                    )
+                })?
+                .file,
+        },
+    };
     if !is_java(&target.file) {
         return Err(format!(
             "`{}` is not a source file of this project, so the member cannot be written into it",
@@ -300,6 +421,144 @@ fn unnameable(source: &str, slot: &bennu_refactor::prelude::TypeSlot) -> String 
         "the type of `{}` could not be resolved, and this refactoring needs it written out — the call may return nothing to name, or its type may be decided by the context it sits in",
         source.get(slot.start..slot.end).unwrap_or_default().trim()
     )
+}
+
+/// Args for [`bennu_move_targets`].
+#[derive(Deserialize)]
+pub struct MoveTargetsArgs {
+    pub file: String,
+    pub source: String,
+    pub start: usize,
+    pub end: usize,
+    /// The refactoring asking: `pull-up-member`, `push-down-member` or `move-member`, with or
+    /// without the `@pick` the offer row carries.
+    pub id: String,
+}
+
+/// One type a member could move into.
+#[derive(Serialize)]
+pub struct MoveTarget {
+    /// Simple name — what the row says, and what the plan is asked for.
+    pub name: String,
+    /// Fully-qualified, for the subtitle: two `Builder`s in a project is the normal case.
+    pub qualified: String,
+    /// The file that declares it, so the plan can go straight there without a second lookup.
+    pub file: String,
+    /// `class` · `interface` · `enum` · `record` — the row's glyph.
+    pub kind: String,
+    /// Picking this one **widens** the member to `protected`: it is `private` and the class it
+    /// leaves still reads it. Said on the row, because a visibility change nobody was told about is
+    /// the kind of thing found later, in a review.
+    pub widens: bool,
+}
+
+/// Every type the member at the caret could move into, for the picker.
+///
+/// ## Why this is a separate call and not part of the offer list
+///
+/// The offer list is what Alt+Enter shows, and it is answered from the buffer alone — no index, no
+/// project, a few microseconds. The candidates are the opposite: for *move member* they are every
+/// type the project declares, which is thousands on a real codebase and needs the index warm. Asking
+/// for them up front would put that cost on every Alt+Enter, for a list nobody opened.
+///
+/// So the menu carries one row per family, and the row opens the picker, and the picker asks this.
+///
+/// ## Where each family's candidates come from
+///
+/// - **pull up** — the supertypes the class *writes*, resolved through this file's own imports.
+///   Reading them off the source rather than the hierarchy is deliberate: those are the ones a pull
+///   up can name, and the hierarchy would also offer `Object`.
+/// - **push down** — the subtypes the index knows, which is the half the buffer cannot see and the
+///   reason this refactoring needed a picker at all.
+/// - **move** — every type in the project, minus the one the member is already in. The picker
+///   filters; a list is not a menu.
+#[arbor_rpc::handler]
+pub(crate) fn bennu_move_targets(
+    _ctx: &BennuState,
+    args: MoveTargetsArgs,
+) -> Result<Vec<MoveTarget>, String> {
+    if !is_java(&args.file) {
+        return Ok(Vec::new());
+    }
+    let Some(site) = bennu_refactor::prelude::move_site(&args.source, args.start, args.end) else {
+        return Ok(Vec::new());
+    };
+    let service = crate::index_service::IndexService::global();
+    // Only a pull up can widen: down and across keep the member where everything can already see
+    // it, and an interface makes its members public anyway.
+    let widening = site.widens_private
+        && bennu_refactor::prelude::MoveDirection::from_id(&args.id)
+            == bennu_refactor::prelude::MoveDirection::Up;
+    let by_name = |name: &str| -> Option<MoveTarget> {
+        let root = service.root_for_file(&args.file)?;
+        let entry = service
+            .class_index(&root)?
+            .into_iter()
+            .find(|e| e.simple == name)?;
+        Some(MoveTarget {
+            widens: widening && entry.kind != "interface" && entry.kind != "annotation",
+            name: entry.simple,
+            qualified: entry.fqcn,
+            file: entry.file,
+            kind: entry.kind,
+        })
+    };
+
+    match bennu_refactor::prelude::MoveDirection::from_id(&args.id) {
+        // The supertypes this class writes. A name the project does not declare — `Serializable`,
+        // anything from a jar — is dropped rather than offered: a member cannot be written into a
+        // class file, and finding that out after picking it is a worse answer than not offering it.
+        bennu_refactor::prelude::MoveDirection::Up => {
+            Ok(site.supertypes.iter().filter_map(|s| by_name(simple_of(s))).collect())
+        }
+        bennu_refactor::prelude::MoveDirection::Down => {
+            let Some(binary) = service.classify_type(&args.file, &args.source, args.start) else {
+                return Ok(Vec::new());
+            };
+            let items = service.hierarchy_step(
+                &args.file,
+                &bennu_intel::prelude::HierarchyHandle::Type { binary },
+                bennu_intel::prelude::HierarchyDirection::Subtypes,
+            );
+            Ok(items
+                .into_iter()
+                // A subtype with no file is one from a dependency: nothing here can write into it.
+                .filter(|item| is_java(&item.file))
+                .map(|item| MoveTarget {
+                    qualified: item.detail.clone().unwrap_or_else(|| item.name.clone()),
+                    name: item.name,
+                    file: item.file,
+                    kind: item.kind,
+                    widens: false,
+                })
+                .collect())
+        }
+        bennu_refactor::prelude::MoveDirection::Across => {
+            let root = service
+                .root_for_file(&args.file)
+                .ok_or("no project holds this file")?;
+            let index = service
+                .class_index(&root)
+                .ok_or("the project index is still building — the list of types is not ready yet")?;
+            Ok(index
+                .into_iter()
+                .filter(|e| e.simple != site.owner)
+                .map(|e| MoveTarget {
+                    name: e.simple,
+                    qualified: e.fqcn,
+                    file: e.file,
+                    kind: e.kind,
+                    widens: false,
+                })
+                .collect())
+        }
+    }
+}
+
+/// A written type name without its package or its type arguments.
+fn simple_of(written: &str) -> &str {
+    let base = written.split('<').next().unwrap_or(written).trim();
+    base.rsplit('.').next().unwrap_or(base)
 }
 
 /// A planned refactoring, on the wire.

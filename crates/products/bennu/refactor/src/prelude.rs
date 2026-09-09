@@ -9,8 +9,8 @@ pub use crate::offers::{plan_for, plans_at, refactorings_at};
 
 // What comes back.
 pub use crate::plan::{
-    merge_throws, written_name, MemberTransfer, NewSource, Outcome, Plan, RefactorEdit, Refusal,
-    ThrowsSlot, TypeGuard, TypeNeed, TypeSlot,
+    language_level, merge_throws, written_name, MemberTransfer, NeedsLevel, NewSource, Outcome,
+    Plan, RefactorEdit, Refusal, ThrowsSlot, TypeGuard, TypeNeed, TypeSlot,
 };
 
 // The individual transforms, for a caller that wants one rather than the list.
@@ -23,7 +23,10 @@ pub use crate::inline_method::inline_method;
 pub use crate::field::introduce_field;
 pub use crate::inline_var::inline_variable;
 pub use crate::move_class::move_class;
-pub use crate::move_member::{adapt_modifiers, member_moves, move_member_to, transfer_into};
+pub use crate::move_member::{
+    adapt_modifiers, member_moves, move_member_plan, move_member_to, move_site, transfer_into,
+    MoveDirection, MoveSite,
+};
 pub use crate::switch::if_chain_to_switch;
 
 // Where a member goes, for a caller that has to write one into a file this crate never saw.

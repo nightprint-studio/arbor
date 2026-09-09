@@ -290,6 +290,79 @@ mod tests {
         }
     }
 
+    /// Apply, and insist the result is still Java.
+    fn parses(source: &str, needle: &str) -> String {
+        let out = applied(source, needle);
+        assert!(
+            parse_java(&out).is_some_and(|t| !t.root_node().has_error()),
+            "does not parse:\n{out}"
+        );
+        out
+    }
+
+    /// `final` does not travel: a final field assigned outside a constructor does not compile.
+    #[test]
+    fn a_final_local_loses_the_final_on_the_way() {
+        let src = "class A {\n    void f(int n) {\n        final int total = n;\n        use(total);\n    }\n}";
+        let out = parses(src, "final int total");
+        assert!(out.contains("private int total;"), "{out}");
+        assert!(out.contains("        total = n;"), "{out}");
+        assert!(!out.contains("final"), "{out}");
+    }
+
+    /// The field is written with the indentation the class's own members carry, not four spaces.
+    #[test]
+    fn the_field_takes_the_files_own_indentation() {
+        let src = "class A {\n  int a;\n  void f() {\n    int b = 1;\n    use(b);\n  }\n}";
+        let out = parses(src, "int b = 1");
+        assert!(out.contains("\n  private int b;"), "{out}");
+    }
+
+    /// An enum's constants come first, so the field lands in the member section after them.
+    #[test]
+    fn a_local_in_an_enum_becomes_a_field_after_the_constants() {
+        let src = "enum E {\n    BIG, SMALL;\n\n    void f() {\n        int n = 1;\n        use(n);\n    }\n}";
+        let out = parses(src, "int n = 1");
+        let field = out.find("private int n;").unwrap();
+        assert!(field > out.find("BIG, SMALL;").unwrap(), "{out}");
+    }
+
+    /// A local of a **nested** class becomes a field of that class, not of the one around it.
+    #[test]
+    fn the_field_lands_on_the_class_the_local_is_in() {
+        let src = "class Outer {\n    static class Inner {\n        void f() {\n            int n = 1;\n            use(n);\n        }\n    }\n}";
+        let out = parses(src, "int n = 1");
+        assert!(out.contains("    static class Inner {\n        private int n;"), "{out}");
+    }
+
+    /// A generic class's own type parameter is a perfectly good field type — only the method's is
+    /// not, and the two are easy to conflate.
+    #[test]
+    fn a_local_typed_with_a_generic_class_parameter_becomes_a_field() {
+        let src = "class Box<T> {\n    void f(T in) {\n        T held = in;\n        use(held);\n    }\n}";
+        let out = parses(src, "T held");
+        assert!(out.contains("private T held;"), "{out}");
+    }
+
+    /// A local declared inside a lambda still belongs to the class the lambda is written in.
+    #[test]
+    fn a_local_inside_a_lambda_becomes_a_field_of_the_enclosing_class() {
+        let src = "class A {\n    void f() {\n        run(() -> {\n            int n = 1;\n            use(n);\n        });\n    }\n}";
+        let out = parses(src, "int n = 1");
+        assert!(out.contains("    private int n;"), "{out}");
+        assert!(out.contains("            n = 1;"), "{out}");
+    }
+
+    /// The caret lands on the field's name, which is the thing worth typing over.
+    #[test]
+    fn the_caret_lands_on_the_new_fields_name() {
+        let src = "class A {\n    void f(int n) {\n        int total = n;\n        use(total);\n    }\n}";
+        let Some(Ok(plan)) = outcome(src, "int total") else { panic!("expected a plan") };
+        let out = plan.apply(src);
+        let caret = plan.caret.expect("a caret");
+        assert_eq!(&out[caret..caret + "total".len()], "total");
+    }
+
     #[test]
     fn a_local_becomes_a_field_and_the_initialisation_stays_put() {
         let src = "class A {\n    void f(int a, int b) {\n        int total = a + b;\n        use(total);\n    }\n}";

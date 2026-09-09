@@ -83,6 +83,41 @@ pub struct Plan {
     /// A source file this plan needs written; see [`NewSource`].
     #[serde(default)]
     pub new_source: Option<NewSource>,
+    /// A Java language level the code this plan writes needs; see [`NeedsLevel`].
+    #[serde(default)]
+    pub needs_level: Option<NeedsLevel>,
+}
+
+/// The Java version the code this plan writes will not compile below.
+///
+/// The same shape as every other slot here: this crate knows **what it wrote**, the caller knows
+/// **what the project is**, and neither can answer alone. Two of the refactorings write code with a
+/// floor, and both floors are easy to walk past on the codebases this editor exists for:
+///
+/// - a method pulled into an **interface** keeps its body as a `default` one, which is **Java 8**;
+/// - a `switch` over a **`String`** is **Java 7**.
+///
+/// A caller that does not know the project's level leaves the plan alone, which is what a caller
+/// without one would have done anyway — the same rule [`TypeGuard`] follows, and for the same
+/// reason: only a positive disagreement is evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NeedsLevel {
+    /// The lowest Java release that accepts it: `7`, `8`.
+    pub at_least: u16,
+    /// What needs it, in the words of the code — the whole of what the user is told when the
+    /// project is older than that.
+    pub because: String,
+}
+
+/// Read a Java language level as a pom writes it: `"1.8"` and `"8"` are both 8, `"17"` is 17.
+///
+/// `None` for anything that is not a version — `"toolchains"`, an empty string, a property nobody
+/// substituted. Unknown is not "old": refusing a refactoring because a level could not be parsed
+/// would refuse it on every project that resolves its JDK through a toolchain.
+pub fn language_level(declared: &str) -> Option<u16> {
+    let text = declared.trim();
+    let text = text.strip_prefix("1.").unwrap_or(text);
+    text.split(['.', '-']).next()?.parse().ok()
 }
 
 /// A member this plan removed, and the type it has to land in — which is in another file.
@@ -111,6 +146,11 @@ pub struct MemberTransfer {
     /// The member's text, dedented to column zero — the caller re-indents it for the body it goes
     /// into, which is the only place the right indentation is known.
     pub member: String,
+    /// Whether `private` must become `protected` on the way — see `adapt_modifiers`. A private
+    /// member is invisible to the class it came from once it is one level up, so where that class
+    /// reads it the move only works widened.
+    #[serde(default)]
+    pub widen_private: bool,
     /// Names the member reads from the type it is leaving, and which the target must already
     /// declare. A name missing there is a member that will not compile once it lands.
     pub requires: Vec<String>,
@@ -196,6 +236,7 @@ impl Plan {
             throws_slot: None,
             transfer: None,
             new_source: None,
+            needs_level: None,
         }
     }
 
@@ -234,6 +275,12 @@ impl Plan {
     /// Attach the file this plan needs written; see [`NewSource`].
     pub fn creating(mut self, source: NewSource) -> Self {
         self.new_source = Some(source);
+        self
+    }
+
+    /// Attach the Java version the code this plan writes needs; see [`NeedsLevel`].
+    pub fn needing_level(mut self, at_least: u16, because: impl Into<String>) -> Self {
+        self.needs_level = Some(NeedsLevel { at_least, because: because.into() });
         self
     }
 
@@ -532,6 +579,19 @@ mod tests {
             ],
         );
         assert_eq!(plan.apply(source), "var p = this.params;\np.add(param);");
+    }
+
+    /// A pom writes the level four different ways, and "unknown" must not read as "old".
+    #[test]
+    fn a_language_level_is_read_the_way_a_pom_writes_it() {
+        assert_eq!(language_level("1.8"), Some(8));
+        assert_eq!(language_level("8"), Some(8));
+        assert_eq!(language_level("17"), Some(17));
+        assert_eq!(language_level(" 21 "), Some(21));
+        // Not a version: a toolchain resolves it later, and refusing here would refuse on every
+        // project that uses one.
+        assert_eq!(language_level("toolchains"), None);
+        assert_eq!(language_level(""), None);
     }
 
     #[test]

@@ -5,12 +5,15 @@
  *     off it. The modal previews via `bennu_rename_plan` and applies on confirm.
  *   • **Find usages** (Alt+F7): a caret-anchored popover listing the resolved use
  *     sites from `bennu_references`; picking one opens the file + jumps to the line.
+ *   • **Move target picker**: the second half of a member move — which type it lands in — when
+ *     the answer is not written in the file the caret is in. See `BennuMoveTargetPicker`.
  *
  * Window-local session UI state. Rune-store pattern: private `$state`, returned
  * getters + methods (CLAUDE.md · "Store pattern").
  */
 
 import type { UsageHit } from '$lib/ipc/bennu/nav';
+import type { MoveTarget } from '$lib/ipc/bennu/refactor';
 
 /** The caret context a rename is requested against (the buffer is classified at the
  *  BE against `source`/`offset`; `initialName` seeds the modal input). */
@@ -30,6 +33,18 @@ export interface RenameRequest {
    * the header shows and what "unchanged" is measured against.
    */
   suggestedName?: string;
+}
+
+/** What the move-target picker is open for. */
+export interface MoveRequest {
+  /** The refactoring's id — carries the direction, and goes back with the choice. */
+  id: string;
+  /** The menu row's own words, so the picker's placeholder says what was asked for. */
+  title: string;
+  /** The member being moved. */
+  member: string;
+  /** The file the caret is in, so a choice made after switching tabs is dropped. */
+  file: string;
 }
 
 /** Caret-anchored popover position, viewport coords. */
@@ -52,6 +67,11 @@ function createBennuRefactorStore() {
   // The identifier under the caret when usages was invoked (for the empty-state copy).
   let usagesSymbol = $state<string | null>(null);
 
+  // ── Move target picker ──────────────────────────────────────────────────────
+  let moveReq = $state<MoveRequest | null>(null);
+  let moveTargets = $state<MoveTarget[]>([]);
+  let moveLoading = $state(false);
+
   return {
     get renameOpen() { return renameOpen; },
     get renameReq() { return renameReq; },
@@ -63,6 +83,10 @@ function createBennuRefactorStore() {
     get usagesHits() { return usagesHits; },
     get usagesSymbol() { return usagesSymbol; },
 
+    get moveReq() { return moveReq; },
+    get moveTargets() { return moveTargets; },
+    get moveLoading() { return moveLoading; },
+
     /** Open the rename modal for a caret context. */
     openRename(req: RenameRequest) {
       renameReq = req;
@@ -71,6 +95,22 @@ function createBennuRefactorStore() {
     closeRename() {
       renameOpen = false;
       renameReq = null;
+    },
+
+    /** Open the target picker in a loading state; the candidates arrive with `setMoveTargets`. */
+    startMove(req: MoveRequest) {
+      moveReq = req;
+      moveTargets = [];
+      moveLoading = true;
+    },
+    setMoveTargets(targets: MoveTarget[]) {
+      moveTargets = targets;
+      moveLoading = false;
+    },
+    closeMove() {
+      moveReq = null;
+      moveTargets = [];
+      moveLoading = false;
     },
 
     /** Open the usages popover in a loading state at `anchor`, for `symbol`. */

@@ -136,7 +136,16 @@ pub fn if_chain_to_switch(root: Node<'_>, source: &str, start: usize, end: usize
     out.push_str(&format!("{base}}}"));
 
     let edits = vec![RefactorEdit::new(head.start_byte(), head.end_byte(), out, "switch")];
-    Some(Ok(Plan::new(id, label, edits).caret_at(head.start_byte())))
+    let plan = Plan::new(id, label, edits).caret_at(head.start_byte());
+    // A `switch` over a `String` is Java 7, and a chain of `s.equals("a")` is the one shape here
+    // that produces one. The caller knows what the project targets; this knows what was written.
+    Some(Ok(match kind {
+        TestKind::Equals => plan.needing_level(
+            7,
+            format!("a `switch` over `{subject}`, which is a String — Java added that in 7"),
+        ),
+        TestKind::Equality => plan,
+    }))
 }
 
 /// One rung of the chain: what it tests, and what it does.
@@ -431,6 +440,129 @@ mod tests {
         }
     }
 
+    /// Apply, and insist the result is still Java.
+    ///
+    /// The cheapest assertion in the file and the one that earns its keep: a `switch` is written
+    /// out as text, and text written out as text is where a missing brace or a lost `;` becomes a
+    /// file that does not parse. Every positive case below goes through here.
+    fn parses(source: &str, needle: &str) -> String {
+        let out = applied(source, needle);
+        assert!(parse_java(&out).is_some_and(|t| !t.root_node().has_error()), "does not parse:\n{out}");
+        out
+    }
+
+    /// A body that is a single statement rather than a block still gets its braces — the arms of a
+    /// colon `switch` share one scope, and two of them declaring `int n` collide without them.
+    #[test]
+    fn an_arm_whose_body_is_one_statement_still_gets_braces() {
+        let src = "class A {\n    void f(int k) {\n        if (k == 1)\n            a();\n        else if (k == 2)\n            b();\n        else\n            c();\n    }\n}";
+        let out = parses(src, "if (k == 1)");
+        assert!(out.contains("case 1: {"), "{out}");
+        assert!(out.contains("break;"), "{out}");
+    }
+
+    /// The braces are what makes two arms declaring the same name legal.
+    #[test]
+    fn two_arms_may_declare_the_same_name() {
+        let src = "class A {\n    void f(int k) {\n        if (k == 1) {\n            int n = 1;\n            use(n);\n        } else if (k == 2) {\n            int n = 2;\n            use(n);\n        } else {\n            c();\n        }\n    }\n}";
+        let out = parses(src, "if (k == 1)");
+        assert_eq!(out.matches("int n =").count(), 2, "{out}");
+    }
+
+    /// What is nested inside an arm keeps its shape: the re-indent moves the block, not the lines
+    /// relative to each other.
+    #[test]
+    fn a_nested_statement_keeps_its_relative_indentation() {
+        let src = "class A {\n    void f(int k) {\n        if (k == 1) {\n            if (ok()) {\n                a();\n            }\n        } else if (k == 2) {\n            b();\n        } else {\n            c();\n        }\n    }\n}";
+        let out = parses(src, "if (k == 1)");
+        assert!(out.contains("                if (ok()) {\n                    a();\n                }"), "{out}");
+    }
+
+    /// No `else` means no `default`, and the arms are the rungs that were there.
+    #[test]
+    fn a_chain_without_an_else_has_no_default() {
+        let src = "class A {\n    void f(int k) {\n        if (k == 1) {\n            a();\n        } else if (k == 2) {\n            b();\n        } else if (k == 3) {\n            c();\n        }\n    }\n}";
+        let out = parses(src, "if (k == 1)");
+        assert!(!out.contains("default:"), "{out}");
+        assert_eq!(out.matches("case ").count(), 3, "{out}");
+    }
+
+    #[test]
+    fn a_chain_on_char_literals_converts() {
+        let src = "class A {\n    void f(char c) {\n        if (c == 'a') {\n            a();\n        } else if (c == 'b') {\n            b();\n        } else {\n            z();\n        }\n    }\n}";
+        let out = parses(src, "if (c == 'a')");
+        assert!(out.contains("case 'a': {"), "{out}");
+    }
+
+    /// The constant may be written on either side of the `==`.
+    #[test]
+    fn the_constant_may_come_first() {
+        let src = "class A {\n    void f(int k) {\n        if (1 == k) {\n            a();\n        } else if (2 == k) {\n            b();\n        } else {\n            c();\n        }\n    }\n}";
+        let out = parses(src, "if (1 == k)");
+        assert!(out.contains("switch (k) {"), "{out}");
+        assert!(out.contains("case 1: {"), "{out}");
+    }
+
+    /// An arm that throws leaves, so it gets no `break` either.
+    #[test]
+    fn an_arm_that_throws_gets_no_break() {
+        let src = "class A {\n    void f(int k) {\n        if (k == 1) {\n            throw new IllegalStateException();\n        } else if (k == 2) {\n            b();\n        } else {\n            c();\n        }\n    }\n}";
+        let out = parses(src, "if (k == 1)");
+        assert_eq!(out.matches("break;").count(), 2, "{out}");
+    }
+
+    /// An arm ending in an `if`/`else` where **both** halves return cannot complete normally
+    /// either — and a `break` after it is the unreachable statement javac rejects.
+    #[test]
+    fn an_arm_whose_branches_all_return_gets_no_break() {
+        let src = "class A {\n    int f(int k) {\n        if (k == 1) {\n            if (ok()) {\n                return 1;\n            } else {\n                return 2;\n            }\n        } else if (k == 2) {\n            return 3;\n        } else {\n            return 0;\n        }\n    }\n}";
+        let out = parses(src, "if (k == 1)");
+        assert!(!out.contains("break;"), "{out}");
+    }
+
+    /// …and one where only one half returns can, so it gets one.
+    #[test]
+    fn an_arm_with_one_returning_branch_still_gets_a_break() {
+        let src = "class A {\n    int f(int k) {\n        if (k == 1) {\n            if (ok()) {\n                return 1;\n            }\n        } else if (k == 2) {\n            return 3;\n        } else {\n            return 0;\n        }\n    }\n}";
+        let out = parses(src, "if (k == 1)");
+        assert_eq!(out.matches("break;").count(), 1, "{out}");
+    }
+
+    /// A caret on a middle rung converts the rest of the ladder, which is what "replace this
+    /// chain" means from where the user is standing.
+    #[test]
+    fn a_caret_on_a_middle_rung_converts_from_there() {
+        let src = "class A {\n    void f(int k) {\n        if (k == 1) {\n            a();\n        } else if (k == 2) {\n            b();\n        } else if (k == 3) {\n            c();\n        } else {\n            d();\n        }\n    }\n}";
+        let out = parses(src, "if (k == 2)");
+        // The first rung is untouched and the switch begins at the second.
+        assert!(out.contains("if (k == 1) {"), "{out}");
+        assert!(out.contains("switch (k) {"), "{out}");
+        assert!(!out.contains("case 1:"), "{out}");
+    }
+
+    /// A field is a subject too — re-reading `this.kind` cannot change it.
+    #[test]
+    fn a_field_is_a_subject() {
+        let src = "class A {\n    int kind;\n    void f() {\n        if (this.kind == 1) {\n            a();\n        } else if (this.kind == 2) {\n            b();\n        } else {\n            c();\n        }\n    }\n}";
+        let out = parses(src, "if (this.kind");
+        assert!(out.contains("switch (this.kind) {"), "{out}");
+    }
+
+    /// The file's own indentation is read off the code, not assumed to be four spaces.
+    #[test]
+    fn the_files_own_indent_step_is_used() {
+        let src = "class A {\n  void f(int k) {\n    if (k == 1) {\n      a();\n    } else if (k == 2) {\n      b();\n    } else {\n      c();\n    }\n  }\n}";
+        let out = parses(src, "if (k == 1)");
+        assert!(out.contains("\n      case 1: {"), "{out}");
+    }
+
+    /// A rung testing something else entirely is not a chain about one value.
+    #[test]
+    fn a_rung_that_is_not_an_equality_is_silent() {
+        let src = "class A {\n    void f(int k) {\n        if (k == 1) {\n            a();\n        } else if (k > 2) {\n            b();\n        } else {\n            c();\n        }\n    }\n}";
+        assert!(outcome(src, "if (k == 1)").is_none());
+    }
+
     #[test]
     fn a_chain_on_one_int_becomes_a_switch() {
         let src = "class A {\n    void f(int kind) {\n        if (kind == 1) {\n            a();\n        } else if (kind == 2) {\n            b();\n        } else {\n            c();\n        }\n    }\n}";
@@ -465,6 +597,22 @@ mod tests {
         let out = applied(src, "if (s.equals");
         assert!(out.contains("switch (s) {"), "{out}");
         assert!(out.contains("case \"a\": {"), "{out}");
+    }
+
+    /// A `switch` over a String is Java 7, and this editor exists for codebases that are not.
+    #[test]
+    fn a_string_switch_puts_a_java_floor_on_the_file() {
+        let src = "class A {\n    void f(String s) {\n        if (s.equals(\"a\")) {\n            a();\n        } else if (s.equals(\"b\")) {\n            b();\n        } else {\n            c();\n        }\n    }\n}";
+        let Some(Ok(plan)) = outcome(src, "if (s.equals") else { panic!("expected a plan") };
+        assert_eq!(plan.needs_level.expect("a floor").at_least, 7);
+    }
+
+    /// …and a chain over an `int` needs nothing.
+    #[test]
+    fn an_int_switch_needs_no_particular_java() {
+        let src = "class A {\n    void f(int kind) {\n        if (kind == 1) {\n            a();\n        } else if (kind == 2) {\n            b();\n        } else {\n            c();\n        }\n    }\n}";
+        let Some(Ok(plan)) = outcome(src, "if (kind == 1)") else { panic!("expected a plan") };
+        assert!(plan.needs_level.is_none());
     }
 
     /// `"a".equals(s)` survives a null `s`; `switch (s)` does not.

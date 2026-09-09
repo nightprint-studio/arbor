@@ -128,6 +128,7 @@
   import BennuNamingFixModal from './BennuNamingFixModal.svelte';
   import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
   import BennuRenameModal from './BennuRenameModal.svelte';
+  import BennuMoveTargetPicker from './BennuMoveTargetPicker.svelte';
   import BennuUsagesPopover from './BennuUsagesPopover.svelte';
   import BennuGotoModal from './BennuGotoModal.svelte';
   import BennuIndexInspectorModal from './BennuIndexInspectorModal.svelte';
@@ -2528,6 +2529,20 @@
 
 <!-- Alt+F7 find-usages popover — owns its visibility via bennuRefactorStore. -->
 <BennuUsagesPopover />
+
+<!-- Which type a member is moving into, when the file the caret is in cannot say. Owns its
+     visibility via bennuRefactorStore, like the popover above; the apply goes back through the
+     editor, which owns the buffer. -->
+{#if bennuRefactorStore.moveReq}
+  <BennuMoveTargetPicker
+    title={bennuRefactorStore.moveReq.title}
+    member={bennuRefactorStore.moveReq.member}
+    targets={bennuRefactorStore.moveTargets}
+    loading={bennuRefactorStore.moveLoading}
+    onPick={(target) => { void editor?.applyMoveTarget(target); }}
+    onClose={() => { bennuRefactorStore.closeMove(); editor?.focusEditor(); }}
+  />
+{/if}
 
 {#if bennuRefactorStore.renameOpen}
   <BennuRenameModal onClose={() => { bennuRefactorStore.closeRename(); editor?.focusEditor(); }} />

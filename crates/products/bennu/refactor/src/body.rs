@@ -110,11 +110,15 @@ pub fn insertion_point(body: &Node<'_>, source: &str) -> Option<usize> {
 /// else keeps the company it had, and appending it is the only placement that never reorders
 /// anything the reader was relying on.
 pub fn append_point(body: &Node<'_>, source: &str) -> Option<usize> {
-    let close = body.end_byte();
-    // The `}` is on its own line in nearly every file; land at the start of that line so the
-    // inserted text does not have to know whether to open one.
-    let start = line_start(source, close.checked_sub(1)?);
-    Some(if source[start..close].trim().is_empty() { start } else { close.saturating_sub(1) })
+    // The `}` itself, not one past it: comparing against the range that *includes* the brace is
+    // how this landed **inside** the closing line for two days. The result compiled — javac has no
+    // opinion about where a brace sits — so nothing but a test could have said so.
+    let brace = body.end_byte().checked_sub(1)?;
+    let start = line_start(source, brace);
+    let alone = source.get(start..brace).is_some_and(|before| before.trim().is_empty());
+    // On its own line in nearly every file: land at the START of that line, so the inserted text
+    // ends with a newline and the brace keeps the indentation it was written with.
+    Some(if alone { start } else { brace })
 }
 
 /// Where a moved member goes at the end of a body, and what has to be written before it.
@@ -160,7 +164,27 @@ pub fn member_indent(source: &str, body: &Node<'_>) -> String {
             return indent;
         }
     }
-    format!("{}    ", indent_at(source, body.start_byte()))
+    // An **empty** body has nothing to read, and four spaces is a guess that is wrong in every file
+    // written with two or with tabs — which is where the first member ever written into a class
+    // lands crooked. So the step comes off the file itself.
+    format!("{}{}", indent_at(source, body.start_byte()), indent_step(source))
+}
+
+/// The indentation step this file is written with — one level, whatever that is here.
+///
+/// Read off the first place the file indents: the first non-blank line more indented than the one
+/// before it, and the difference between them. Tabs, two spaces and four all answer for themselves.
+/// Four spaces when the file never indents at all, which is a file with nothing to copy.
+pub fn indent_step(source: &str) -> String {
+    let mut previous = "";
+    for line in source.lines().filter(|l| !l.trim().is_empty()) {
+        let indent = &line[..line.len() - line.trim_start().len()];
+        if indent.len() > previous.len() && indent.starts_with(previous) {
+            return indent[previous.len()..].to_string();
+        }
+        previous = indent;
+    }
+    "    ".to_string()
 }
 
 /// The member of a type body that contains `expr`, when the expression is NOT inside a method or
@@ -416,6 +440,49 @@ mod tests {
     #[test]
     fn a_moved_member_is_appended_before_the_closing_brace() {
         let src = "class A {\n    int a;\n}";
+        let tree = parse_java(src).unwrap();
+        let ty = types_in(tree.root_node()).remove(0);
+        let body = body_of(&ty).unwrap();
+        assert_eq!(append_point(&body, src), Some(src.rfind('}').unwrap()));
+    }
+
+    /// The brace keeps the indentation it was written with — a nested body's `}` sits at its own
+    /// level, and landing after it put that brace at column zero. It still compiled, which is why
+    /// only a test could say so.
+    #[test]
+    fn an_indented_closing_brace_keeps_its_indentation() {
+        let src = "class Host {\n  static class Inner {\n  }\n}";
+        let tree = parse_java(src).unwrap();
+        let inner = types_in(tree.root_node()).remove(1);
+        let body = body_of(&inner).unwrap();
+        let at = append_point(&body, src).unwrap();
+        assert_eq!(&src[at..at + 3], "  }");
+    }
+
+    /// A body written on one line has nothing to land at the start of, so it lands at the brace.
+    /// The step is the file's own, not four spaces — a class written with two got its first
+    /// member at six.
+    #[test]
+    fn the_indent_step_is_read_off_the_file() {
+        assert_eq!(indent_step("class A {\n  int a;\n}"), "  ");
+        assert_eq!(indent_step("class A {\n\tint a;\n}"), "\t");
+        assert_eq!(indent_step("class A {\n    int a;\n}"), "    ");
+        assert_eq!(indent_step("class A {}"), "    ");
+    }
+
+    /// An empty body reads the step from the file rather than assuming one.
+    #[test]
+    fn an_empty_body_indents_its_first_member_the_way_the_file_does() {
+        let src = "class Host {\n  static class Inner {\n  }\n}";
+        let tree = parse_java(src).unwrap();
+        let inner = types_in(tree.root_node()).remove(1);
+        let body = body_of(&inner).unwrap();
+        assert_eq!(member_indent(src, &body), "    ");
+    }
+
+    #[test]
+    fn a_one_line_body_appends_at_the_brace() {
+        let src = "class A { int a; }";
         let tree = parse_java(src).unwrap();
         let ty = types_in(tree.root_node()).remove(0);
         let body = body_of(&ty).unwrap();

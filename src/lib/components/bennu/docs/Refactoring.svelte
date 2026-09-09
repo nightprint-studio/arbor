@@ -134,26 +134,30 @@
       <code>"a".equals(s)</code> — the null-safe form, which falls through on a null <code>s</code>
       where <code>switch (s)</code> throws. When an arm ends in a <code>try</code> or a nested
       <code>switch</code>, where whether a <code>break</code> would be reachable cannot be read off
-      the text, the whole conversion is refused rather than guessed.
+      the text, the whole conversion is refused rather than guessed. A chain over strings produces a
+      <code>switch</code> over a <code>String</code>, which is <strong>Java 7</strong> — on a project
+      targeting less, that is said rather than written.
     </div>
   </div>
   <div class="fc-item">
     <div class="fc-title">Pull up · Push down · Move member</div>
     <div class="fc-desc">
       A member changes the type it belongs to. What differs between the three is only which type,
-      and the menu is where you choose: <em>pull up</em> reads the target off the
-      <code>extends</code> or <code>implements</code> clause — there is nothing to ask — while
-      <em>push down</em> and <em>move</em> put one row per candidate type in the list. The target may
-      be in another file, and then that file is edited too, with the imports the member reads carried
-      over. What it checks first is what it leaves behind, and each refusal names the thing that
+      and the menu is where you choose: every target written in this file — each
+      <code>extends</code> and <code>implements</code> clause, each subtype declared here — is its
+      own row, so the common move is one keystroke and no dialog. The rows ending in
+      <strong>…</strong> ask instead, and that is the case the file cannot answer: they open a
+      filterable list of every candidate the <em>project index</em> knows — a superclass in another
+      file, a subtype declared elsewhere, any type in the project for a sideways move. Whichever way
+      the target is chosen, a target in another file means that file is edited too, with the imports
+      the member reads carried over. What it checks first is what it leaves behind, and each refusal names the thing that
       keeps the member where it is: a method that reads <code>count</code> will not go to a type that
       has no <code>count</code>; one written in terms of the class's type parameter will not go
       anywhere that never declared it; one that names its own class — a factory returning it, a
       <code>new</code> of it — means the same class wherever it lands, so it stays. So do a
       <code>super</code> call, which means a different method once it moves; an
       <code>@Override</code>, which is a promise about the type the member is declared in; a method
-      with no body, which is a contract rather than code; a <code>private</code> member pulled up,
-      which the class it came from could no longer see; a name the target already declares; a member
+      with no body, which is a contract rather than code; a name the target already declares; a member
       that anything still calls or that a subclass overrides, moved anywhere but up; a call to one of
       its own <strong>overloads</strong>, which reads as recursion and is not — the overload stays
       behind, and the call meets a class where only the moved one exists; and a pull up into a
@@ -165,7 +169,18 @@
       home requires — a method landing in an interface becomes <code>default</code> and drops the
       modifiers one may not carry, one landing back in a class loses that <code>default</code> and
       keeps the <code>public</code> the interface gave it, and an <code>enum</code> whose constants
-      had no <code>;</code> gets one.
+      had no <code>;</code> gets one. A <code>private</code> member pulled up is
+      <strong>widened to <code>protected</code></strong> where the class it leaves still reads it —
+      the smallest change that works whether or not the supertype shares a package — and the row
+      says so rather than doing it quietly; one nothing reads goes up exactly as written. Into an
+      interface no widening is needed at all: members there are implicitly public, which is also why
+      a method keeping its body becomes a <code>default</code> one and a <code>private static</code>
+      helper does not stay private. That last part has a floor: <code>default</code> and
+      <code>static</code> interface methods are <strong>Java 8</strong>, and a project targeting
+      less is told so instead of being handed code its compiler rejects. The one member that stays
+      put whatever the rules allow is <code>serialVersionUID</code> and its serialization
+      neighbours: the runtime reads those <em>by name</em>, so no source mentioning them proves
+      nothing.
     </div>
   </div>
   <div class="fc-item">

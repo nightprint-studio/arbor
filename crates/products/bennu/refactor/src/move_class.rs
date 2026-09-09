@@ -319,6 +319,86 @@ mod tests {
         }
     }
 
+    /// The plan, with **both** halves insisted on as Java: the file that is written and the file
+    /// that is left. A move class is the one refactoring here that produces two files, and a
+    /// removal that took a brace with it would leave the second one broken in silence.
+    fn both_parse(source: &str, needle: &str) -> (String, String) {
+        let Some(Ok(plan)) = outcome(source, needle) else { panic!("expected a plan") };
+        let created = plan.new_source.clone().expect("a file").text;
+        let left = plan.apply(source);
+        for (what, text) in [("the new file", &created), ("what is left", &left)] {
+            assert!(
+                parse_java(text).is_some_and(|t| !t.root_node().has_error()),
+                "{what} does not parse:\n{text}"
+            );
+        }
+        (created, left)
+    }
+
+    /// Only the imports the type actually reads travel with it — an unused one in a new file is
+    /// noise, and a missing one is a file that does not compile.
+    #[test]
+    fn only_the_imports_the_type_reads_travel() {
+        let src = "package p;\n\nimport java.util.List;\nimport java.util.Map;\n\nclass Order {\n    Map<String, String> lookup;\n\n    static class Line {\n        List<String> parts;\n    }\n}\n";
+        let (created, _) = both_parse(src, "static class Line");
+        assert!(created.contains("import java.util.List;"), "{created}");
+        assert!(!created.contains("import java.util.Map;"), "{created}");
+    }
+
+    /// A file with no package declaration produces one with none either.
+    #[test]
+    fn a_file_without_a_package_makes_one_without_a_package() {
+        let src = "class Order {\n    static class Line {\n        int qty;\n    }\n}\n";
+        let (created, _) = both_parse(src, "static class Line");
+        assert!(!created.contains("package"), "{created}");
+        assert!(created.starts_with("class Line"), "{created}");
+    }
+
+    /// `final` is a modifier a top-level type may carry, so it stays. Only the three that cannot
+    /// go.
+    #[test]
+    fn a_modifier_a_top_level_type_may_keep_is_kept() {
+        let src = "class Order {\n    private static final class Line {\n        int qty;\n    }\n}\n";
+        let (created, _) = both_parse(src, "private static final class Line");
+        assert!(created.starts_with("final class Line"), "{created}");
+    }
+
+    /// A `public` nested type stays public — and Java then requires the file to be named after it,
+    /// which is exactly what the caller writes.
+    #[test]
+    fn a_public_nested_type_stays_public() {
+        let src = "package p;\n\nclass Order {\n    public static class Line {\n        int qty;\n    }\n}\n";
+        let (created, _) = both_parse(src, "public static class Line");
+        assert!(created.contains("public class Line"), "{created}");
+    }
+
+    /// A record nests implicitly static and travels with its header intact.
+    #[test]
+    fn a_nested_record_moves_whole() {
+        let src = "class Order {\n    record Line(int qty, String sku) {\n    }\n}\n";
+        let (created, left) = both_parse(src, "record Line");
+        assert!(created.contains("record Line(int qty, String sku)"), "{created}");
+        assert!(!left.contains("record Line"), "{left}");
+    }
+
+    /// The javadoc above a nested type is about the type, and the type is leaving.
+    #[test]
+    fn what_is_left_behind_is_still_a_class() {
+        let src = "package p;\n\nclass Order {\n    int total;\n\n    static class Line {\n        int qty;\n    }\n\n    int total() {\n        return total;\n    }\n}\n";
+        let (_, left) = both_parse(src, "static class Line");
+        assert!(left.contains("int total()"), "{left}");
+        assert!(!left.contains("class Line"), "{left}");
+    }
+
+    /// A nested type inside a nested type is still a move — its own file, same package.
+    #[test]
+    fn a_doubly_nested_type_moves_to_the_package() {
+        let src = "package p;\n\nclass Order {\n    static class Line {\n        static class Part {\n            int qty;\n        }\n    }\n}\n";
+        let (created, _) = both_parse(src, "static class Part");
+        assert!(created.contains("class Part {"), "{created}");
+        assert!(created.starts_with("package p;"), "{created}");
+    }
+
     #[test]
     fn a_static_nested_class_gets_its_own_file() {
         let src = "package p;\n\nimport java.util.List;\n\nclass Order {\n    static class Line {\n        List<String> parts;\n    }\n}\n";

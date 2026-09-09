@@ -73,7 +73,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let Some(root) = args.next() else {
         eprintln!(
-            "usage: refactor_case <project-dir> [files=N] [stride=N] [only=<id>] [workers=N] [cp=<classpath>] [show]"
+            "usage: refactor_case <project-dir> [files=N] [stride=N] [only=<id>] [workers=N] [level=N] [cp=<classpath>] [show]"
         );
         std::process::exit(2);
     };
@@ -87,6 +87,9 @@ fn main() {
         .unwrap_or(usize::MAX);
     let stride: usize = opt("stride=").and_then(|s| s.parse().ok()).unwrap_or(1);
     let only = opt("only=");
+    // What this run compiles at, so a plan that needs a newer Java is refused here exactly as the
+    // backend refuses it against the project's own level. `level=N` for a corpus judged older.
+    let level: u16 = opt("level=").and_then(|s| s.parse().ok()).unwrap_or(21);
     let classpath = opt("cp=");
     let show = rest.iter().any(|a| a == "show");
 
@@ -192,6 +195,7 @@ fn main() {
                         show,
                         resolver.as_ref(),
                         &types,
+                        level,
                         &mut local,
                     );
                     shared.lock().expect("aggregate").absorb(local);
@@ -333,6 +337,7 @@ fn sweep_file(
     show: bool,
     resolver: &dyn TypeResolver,
     types: &BTreeMap<String, PathBuf>,
+    level: u16,
     out: &mut Aggregate,
 ) {
     let Ok(source) = fs::read_to_string(file) else {
@@ -371,7 +376,7 @@ fn sweep_file(
             // A plan that reaches a SECOND file — a member pulled into a superclass, a nested
             // type given its own — is applied to both and both are judged. Skipping them would
             // score the half that stayed behind, which is the half that always compiles.
-            let elsewhere = match spread(&mut plan, file, types) {
+            let elsewhere = match spread(&mut plan, file, types, level) {
                 Ok(spread) => spread,
                 Err(reason) => {
                     let tally = out.stats.entry(plan.id.clone()).or_default();
@@ -459,8 +464,17 @@ fn spread(
     plan: &mut Plan,
     file: &Path,
     types: &BTreeMap<String, PathBuf>,
+    level: u16,
 ) -> Result<Vec<Elsewhere>, String> {
     let mut out = Vec::new();
+    // The same check the backend makes, against the level this harness actually **compiles** at —
+    // which is the honest level to judge against here, since that compile is the oracle. A plan
+    // needing more than that would be refused in the editor too.
+    if let Some(needs) = &plan.needs_level {
+        if level < needs.at_least {
+            return Err(format!("needs Java {}, this run compiles at {level}", needs.at_least));
+        }
+    }
     if let Some(transfer) = plan.transfer.clone() {
         let path = types
             .get(&transfer.target)

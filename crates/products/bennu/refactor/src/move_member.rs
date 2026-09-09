@@ -24,8 +24,10 @@
 //!   target — here when the target is here, by the caller when it is not.
 //! - **`super`.** A `super.render()` in a method pulled up means a different method afterwards, and
 //!   in a class with no superclass it means nothing at all.
-//! - **`private`.** A private member pulled up is invisible to the class it came from — the code
-//!   that called it stops compiling, which is not a thing to discover after applying.
+//! - **`private`, pulled up.** Invisible to the class it came from, so where that class reads it
+//!   the member is **widened to `protected`** on the way and the row says so — the smallest change
+//!   that works whether or not the supertype shares a package. Into an interface it needs nothing:
+//!   members there are implicitly public.
 //! - **A name the target already has.** Two members with one name, or a silent override.
 //! - **Several variables at once** (`int a, b;`), where there is no one member to move.
 //!
@@ -46,6 +48,14 @@ use crate::plan::{MemberTransfer, Outcome, Plan, RefactorEdit, Refusal};
 use crate::selection::{descendants, enclosing, enclosing_type, indent_at, newline, text, TYPE_DECLS};
 
 const PULL_UP: (&str, &str) = ("pull-up-member", "Pull member up");
+
+/// Members the **runtime** reads by name, where no source mention proves anything.
+///
+/// The serialization ones, which is the whole list that matters here: `serialVersionUID` decides
+/// what a class deserializes as, and the three private hooks the ObjectStream calls reflectively.
+/// A move of any of them compiles perfectly and changes what the program does.
+const READ_BY_THE_RUNTIME: &[&str] =
+    &["serialVersionUID", "writeObject", "readObject", "readObjectNoData", "writeReplace", "readResolve"];
 const PUSH_DOWN: (&str, &str) = ("push-down-member", "Push member down");
 const MOVE: (&str, &str) = ("move-member", "Move member to");
 
@@ -64,10 +74,20 @@ pub fn member_moves(
     let Some(owner) = enclosing_type(member) else { return Vec::new() };
     let mut out = Vec::new();
 
-    // Pull up: the target is the first supertype the class names. `implements` counts — a `default`
-    // method pulled into the interface is the commonest pull-up there is.
-    if let Some((supertype, at)) = supertype_written(&owner, source) {
-        out.push(plan_move(root, source, &member, &owner, &supertype, at, PULL_UP, "up"));
+    // Pull up: **every** supertype the class names, not just the first. `implements` counts — a
+    // `default` method pulled into the interface is the commonest pull-up there is — and a class
+    // that implements three of them had two of its answers hidden while this took `.next()`.
+    // The id stays bare where there is one, so the one-answer case reads and behaves as it did.
+    let supertypes = supertypes_written(&owner, source);
+    let sole = supertypes.len() == 1;
+    for (supertype, at) in &supertypes {
+        let id = if sole { PULL_UP.0.to_string() } else { format!("{}:{supertype}", PULL_UP.0) };
+        let label = if sole {
+            PULL_UP.1.to_string()
+        } else {
+            format!("Pull member up to `{supertype}`")
+        };
+        out.push(plan_move(root, source, &member, &owner, supertype, *at, (&id, &label), "up"));
     }
     // Push down: one row per subtype declared here. A subtype in ANOTHER file cannot be seen from
     // this crate, and the caller with the index adds those rows itself.
@@ -112,12 +132,109 @@ pub fn move_member_to(
     start: usize,
     end: usize,
     target: &str,
+    direction: MoveDirection,
     id: &str,
     label: &str,
 ) -> Outcome {
     let member = member_at(root, source, start, end)?;
     let owner = enclosing_type(member)?;
-    plan_move(root, source, &member, &owner, target, member.start_byte(), (id, label), "across")
+    // A target the caller located has no written name in this file to point a resolver at — the
+    // caller knows the file already, which is how it found the type. `member.start_byte()` keeps
+    // the field well-formed and is never asked about.
+    let at = supertype_written(&owner, source)
+        .filter(|_| direction == MoveDirection::Up)
+        .map(|(_, at)| at)
+        .unwrap_or_else(|| member.start_byte());
+    plan_move(root, source, &member, &owner, target, at, (id, label), direction.as_str())
+}
+
+/// Which way a member is moving, which is the whole of what makes the three refactorings differ.
+///
+/// Not a string at the API edge: `"across"` typed where `"up"` was meant refuses every instance
+/// member for a reason that has nothing to do with the move being asked for, and nothing catches it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveDirection {
+    /// Into a supertype. The member stays reachable under the same name, by inheritance.
+    Up,
+    /// Into a subtype. Everything that reached it through the supertype loses it.
+    Down,
+    /// Into a type that is neither. `this` would be a different object, so only `static` goes.
+    Across,
+}
+
+impl MoveDirection {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Up => "up",
+            Self::Down => "down",
+            Self::Across => "across",
+        }
+    }
+
+    /// Read a direction off the wire, where it arrives as the refactoring's own id.
+    pub fn from_id(id: &str) -> Self {
+        match id.split(['@', ':']).next().unwrap_or(id) {
+            "pull-up-member" => Self::Up,
+            "push-down-member" => Self::Down,
+            _ => Self::Across,
+        }
+    }
+}
+
+/// Plan a member move from source text, for a caller that has no parse of its own.
+///
+/// The entry point a **target picker** needs: the editor found the type, the backend has its file,
+/// and neither of them holds a tree. Everything else is [`move_member_to`].
+pub fn move_member_plan(
+    source: &str,
+    start: usize,
+    end: usize,
+    target: &str,
+    direction: MoveDirection,
+    id: &str,
+    label: &str,
+) -> Outcome {
+    let tree = bennu_java::prelude::parse_java(source)?;
+    move_member_to(tree.root_node(), source, start, end, target, direction, id, label)
+}
+
+/// What a caret on a member's own header is standing on — the gesture all three moves answer to.
+///
+/// The **offer list's** question, asked once: a caller that wants to add a row per family needs to
+/// know whether there is a member here at all, and which supertypes it could be pulled into. It
+/// gets that without planning anything, because planning needs a target and finding one is the
+/// caller's half.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoveSite {
+    /// The member's name, for the row.
+    pub member: String,
+    /// The type it is declared in.
+    pub owner: String,
+    /// The supertypes that type names, as the source writes them — every one a pull up could
+    /// target, not just the first.
+    pub supertypes: Vec<String>,
+    /// Whether the member is `static`, which is the only kind that moves sideways on its own.
+    pub is_static: bool,
+    /// Whether pulling it up would have to **widen** it to `protected` — it is `private` and the
+    /// class still reads it. A picker says so on the row rather than surprising anyone afterwards.
+    pub widens_private: bool,
+}
+
+/// The move site at the caret, or `None` when the caret is not on a member's header.
+pub fn move_site(source: &str, start: usize, end: usize) -> Option<MoveSite> {
+    let tree = bennu_java::prelude::parse_java(source)?;
+    let root = tree.root_node();
+    let member = member_at(root, source, start, end)?;
+    let owner = enclosing_type(member)?;
+    Some(MoveSite {
+        member: member_name(&member, source)?.to_string(),
+        owner: owner.child_by_field_name("name").map(|n| text(&n, source))?.to_string(),
+        supertypes: supertypes_of(&owner, source),
+        is_static: has_modifier(&member, source, "static"),
+        widens_private: has_modifier(&member, source, "private")
+            && member_name(&member, source)
+                .is_some_and(|name| still_used_by(root, &member, source, name).is_some()),
+    })
 }
 
 /// Whether the type's first supertype is written with type arguments.
@@ -132,16 +249,27 @@ fn supertype_is_generic(owner: &Node<'_>) -> bool {
     generic
 }
 
-/// The first supertype a type names, and where that name is written.
-fn supertype_written(owner: &Node<'_>, source: &str) -> Option<(String, usize)> {
-    let first = supertypes_of(owner, source).into_iter().next()?;
-    // The written span of that same name, found by looking for it in the type's own header — the
-    // supertypes come back as text, and the offset has to be the one a resolver can be asked about.
+/// Every supertype a type names, and where each name is written.
+///
+/// The offset matters as much as the name: it is what a caller with a resolver asks
+/// go-to-declaration about, so `Base` resolves through **this** file's imports and package rather
+/// than through a guess at which `Base` was meant.
+fn supertypes_written(owner: &Node<'_>, source: &str) -> Vec<(String, usize)> {
     let header_end =
         owner.child_by_field_name("body").map(|b| b.start_byte()).unwrap_or(owner.end_byte());
-    let header = source.get(owner.start_byte()..header_end)?;
-    let at = header.find(&first).map(|i| owner.start_byte() + i)?;
-    Some((first, at))
+    let Some(header) = source.get(owner.start_byte()..header_end) else { return Vec::new() };
+    supertypes_of(owner, source)
+        .into_iter()
+        .filter_map(|name| {
+            let at = header.find(&name).map(|i| owner.start_byte() + i)?;
+            Some((name, at))
+        })
+        .collect()
+}
+
+/// The first supertype a type names, and where that name is written.
+fn supertype_written(owner: &Node<'_>, source: &str) -> Option<(String, usize)> {
+    supertypes_written(owner, source).into_iter().next()
 }
 
 /// Rewrite a member's own modifiers for the kind of type it is landing in.
@@ -155,9 +283,15 @@ fn supertype_written(owner: &Node<'_>, source: &str) -> Option<(String, usize)> 
 /// Annotations and everything else are left exactly as written: only keyword tokens are added and
 /// removed, in place, so a `@Deprecated` on its own line stays on its own line.
 ///
+/// `widen_private` is the third thing it does and the one that turns a refusal into a move: a
+/// `private` member pulled up is invisible to the class it came from, so where that class actually
+/// reads it, `private` becomes **`protected`** — the smallest widening that works whether or not the
+/// supertype shares a package. Only where it is needed: a private member nothing reads goes up
+/// exactly as written, because the smallest edit is the one that changes least.
+///
 /// `None` when the member's text does not parse on its own, which is a refusal to touch it rather
 /// than a guess at what it meant.
-pub fn adapt_modifiers(member: &str, into_interface: bool) -> Option<String> {
+pub fn adapt_modifiers(member: &str, into_interface: bool, widen_private: bool) -> Option<String> {
     let wrapped = format!("class __Wrap {{\n{member}\n}}");
     let tree = bennu_java::prelude::parse_java(&wrapped)?;
     let offset = "class __Wrap {\n".len();
@@ -172,9 +306,21 @@ pub fn adapt_modifiers(member: &str, into_interface: bool) -> Option<String> {
     // What must go, and what must arrive. An interface's members are implicitly `public`, and its
     // fields implicitly `static final`, so those words are dropped rather than kept — they are not
     // wrong there, but `protected` and `final` on a `default` method are.
+    // Widening comes first, and only outside an interface: there, `private` is dropped along with
+    // every other access keyword and the member is implicitly public, which is wider still.
+    if widen_private && !into_interface && has_modifier(&node, &wrapped, "private") {
+        let swapped = replace_keyword(member, &node, offset, "private", "protected")?;
+        return adapt_modifiers(&swapped, into_interface, false);
+    }
     let (drop, add): (&[&str], Option<&str>) = match (into_interface, is_field, is_static, has_body) {
         (true, true, _, _) => (&["public", "protected", "private", "static", "final"], None),
-        (true, false, true, _) => (&["public", "final", "synchronized", "native"], None),
+        // `private` is in the list for a reason that is easy to miss: a `private static` method in
+        // an interface is legal from Java 9, and it is private **to the interface** — the class that
+        // was calling it would still not see it. Dropped, the member is implicitly public.
+        (true, false, true, _) => (
+            &["public", "protected", "private", "final", "synchronized", "native"],
+            None,
+        ),
         (true, false, false, true) => (
             &["public", "protected", "private", "final", "synchronized", "native", "abstract", "default"],
             Some("default"),
@@ -272,7 +418,22 @@ pub fn transfer_into(
     // here, where the target's source is. See [`adapt_modifiers`].
     let into_interface =
         matches!(target_decl.kind(), "interface_declaration" | "annotation_type_declaration");
-    let adapted = adapt_modifiers(&transfer.member, into_interface)
+    // The same rule the in-file path applies, read off the member's own text. The two used to check
+    // different things, and this is the half that checked less.
+    if into_interface {
+        let wrapped = format!("class __Wrap {{\n{}\n}}", transfer.member);
+        let parsed = bennu_java::prelude::parse_java(&wrapped);
+        let node = parsed.as_ref().and_then(|tree| {
+            let ty = types_in(tree.root_node()).into_iter().next()?;
+            members_of(&body_of(&ty)?).into_iter().next()
+        });
+        if let Some(node) = node {
+            if let Some(reason) = interface_refuses(&node, &wrapped, &transfer.target) {
+                return Err(reason);
+            }
+        }
+    }
+    let adapted = adapt_modifiers(&transfer.member, into_interface, transfer.widen_private)
         .ok_or("the member's text does not stand on its own")?;
     let mut edits = vec![RefactorEdit::new(
         at,
@@ -307,6 +468,23 @@ pub fn transfer_into(
         edits.push(RefactorEdit::new(import_at, import_at, added, "import").in_file(target_file));
     }
     Ok(edits)
+}
+
+/// Swap one modifier keyword for another, in place.
+fn replace_keyword(
+    member: &str,
+    node: &Node<'_>,
+    offset: usize,
+    from: &str,
+    to: &str,
+) -> Option<String> {
+    let mut cursor = node.walk();
+    let modifiers = node.children(&mut cursor).find(|c| c.kind() == "modifiers")?;
+    let mut inner = modifiers.walk();
+    let word = modifiers.children(&mut inner).find(|c| c.kind() == from)?;
+    let mut out = member.to_string();
+    out.replace_range(word.start_byte() - offset..word.end_byte() - offset, to);
+    Some(out)
 }
 
 /// Where an `import` goes in a file: after the last one, else after the `package` line, else at the
@@ -422,6 +600,18 @@ fn plan_move(
         }
     }
 
+    // A `private` member the class still reads has to be widened on the way up, or the read it
+    // leaves behind stops compiling. Worked out here, where both halves are known, and carried into
+    // the label so the row states what it will do rather than a dialog asking whether it may.
+    let widening = direction == "up"
+        && has_modifier(member, source, "private")
+        && still_used_by(root, member, source, name).is_some();
+    let (id, label) = if widening {
+        (id, &*format!("{label} (widening it to `protected`)"))
+    } else {
+        (id, label)
+    };
+
     // The text that moves, javadoc included — a doc comment that stayed behind would document a
     // member that is no longer there.
     let (from_start, from_end) = span_of(member, source);
@@ -436,6 +626,7 @@ fn plan_move(
             target: target.to_string(),
             target_at,
             member: reindent(&moved, &own_indent, ""),
+            widen_private: widening,
             requires,
             imports: imports_the_member_reads(root, member, source),
         })));
@@ -449,7 +640,7 @@ fn plan_move(
     let nl = newline(source);
     let into_interface =
         matches!(target_decl.kind(), "interface_declaration" | "annotation_type_declaration");
-    let adapted = adapt_modifiers(&reindent(&moved, &own_indent, ""), into_interface)?;
+    let adapted = adapt_modifiers(&reindent(&moved, &own_indent, ""), into_interface, widening)?;
     let insertion = format!("{terminator}{nl}{}{nl}", reindent(&adapted, "", &indent));
 
     let plan = Plan::new(
@@ -458,7 +649,27 @@ fn plan_move(
         vec![removal, RefactorEdit::new(at, at, insertion, "member")],
     )
     .named(name);
-    Some(Ok(plan))
+    Some(Ok(level_for(plan, into_interface, member)))
+}
+
+/// The Java floor a member landing in an interface puts under the file.
+///
+/// A method that keeps its body there is a `default` one and a `static` one is a static interface
+/// method: **both are Java 8**, and this editor exists for codebases that are not. Read here, where
+/// what was written is known; checked by the caller, which is the only side that knows what the
+/// project targets.
+fn level_for(plan: Plan, into_interface: bool, member: &Node<'_>) -> Plan {
+    if !into_interface || member.kind() != "method_declaration" {
+        return plan;
+    }
+    let name = plan.name.clone().unwrap_or_default();
+    plan.needing_level(
+        8,
+        format!(
+            "`{name}` keeps its body, and a method with a body in an interface is a `default` or \
+             `static` one — which Java added in 8"
+        ),
+    )
 }
 
 /// Why this member cannot move at all — whatever the target is.
@@ -506,13 +717,38 @@ fn unfit(root: Node<'_>, member: &Node<'_>, source: &str, direction: &str) -> Op
              that can live anywhere"
         ));
     }
-    // A private member pulled up is invisible from the class it came from: every call to it stops
-    // compiling. Pushed down it is invisible to everything ABOVE, which is the same fact seen from
-    // the other side and cannot be checked from this file alone.
-    if direction == "up" && has_modifier(member, source, "private") {
+    // A `final` field with no initialiser is assigned by a **constructor**, and a final field may
+    // only be assigned by the class that declares it (JLS §8.3.1.2). Moved up, that constructor
+    // stays behind and stops compiling — `cannot assign a value to final variable`, thirty times on
+    // Apache Commons Lang the day the `private` rule was relaxed. No visibility fixes it, which is
+    // why this is not the widening case below.
+    if direction == "up"
+        && member.kind() == "field_declaration"
+        && has_modifier(member, source, "final")
+        && !descendants(*member, "variable_declarator")
+            .iter()
+            .all(|d| d.child_by_field_name("value").is_some())
+    {
         return Some(format!(
-            "`{name}` is `private`, so pulled up it would be invisible to the class it came from"
+            "`{name}` is `final` with no value here, so a constructor assigns it — and a `final` \
+             field may only be assigned by the class that declares it"
         ));
+    }
+    // A private member pulled up is invisible from the class it came from — which is a reason to
+    // **widen** it, not to refuse. Refusing on `private` alone was sound and useless: 252 of the
+    // refusals on Apache Commons Lang were `serialVersionUID`, and each of the rest was a pull up
+    // that only needed `protected`. See `widening` below and `adapt_modifiers`.
+    //
+    // `serialVersionUID` itself still stays, and for the reason safe delete already refuses on: the
+    // serialization runtime reads it **by name**, so no source mentioning it proves nothing, and
+    // moving it up silently changes what the subclass serializes as.
+    if direction == "up" && has_modifier(member, source, "private") {
+        if READ_BY_THE_RUNTIME.contains(&name) {
+            return Some(format!(
+                "`{name}` is read by name at run time rather than by any code, so moving it changes \
+                 what this class does without anything here saying so"
+            ));
+        }
     }
     // Moving an INSTANCE member to an unrelated class is a different refactoring: `this` would mean
     // an object of that class, and deciding which of the method's parameters should become the new
@@ -533,8 +769,54 @@ fn unfit(root: Node<'_>, member: &Node<'_>, source: &str, direction: &str) -> Op
                 "`{name}` is still used by `{user}`, which would not see it once it moves"
             ));
         }
+    } else if let Some(user) = used_outside_the_hierarchy(root, member, source, name) {
+        // Going up, inheritance keeps the member reachable — but only for the class it left and
+        // the classes under it. A **sibling nested class** calling it unqualified, which works
+        // only because they share a top-level body, has no inheritance to fall back on:
+        // `cannot find symbol: method appendDigits(…)`, twice on Apache Commons Lang.
+        return Some(format!(
+            "`{name}` is used by `{user}`, which is not under `{}` — inheritance would not carry it \
+             there",
+            enclosing_type(*member)
+                .and_then(|t| t.child_by_field_name("name"))
+                .map(|n| text(&n, source))
+                .unwrap_or("this type")
+        ));
     }
     None
+}
+
+/// A type in this file that uses the member and is **neither its owner nor under it**.
+///
+/// The distinction a pull up turns on: everything inside the owner, and everything that extends it,
+/// keeps reaching the member by inheritance once it is one level up. Anything else was reaching it
+/// some other way — sharing a top-level body is the one that looks like inheritance and is not.
+fn used_outside_the_hierarchy(
+    root: Node<'_>,
+    member: &Node<'_>,
+    source: &str,
+    name: &str,
+) -> Option<String> {
+    let owner = enclosing_type(*member)?;
+    let owner_name = owner.child_by_field_name("name").map(|n| text(&n, source))?;
+    let under: Vec<usize> = std::iter::once(owner)
+        .chain(subtypes_of(root, source, owner_name))
+        .map(|t| t.id())
+        .collect();
+    crate::selection::identifiers(root)
+        .into_iter()
+        .filter(|identifier| {
+            text(identifier, source) == name
+                && !(identifier.start_byte() >= member.start_byte()
+                    && identifier.end_byte() <= member.end_byte())
+                && !names_a_declaration(identifier)
+        })
+        .find_map(|identifier| {
+            let scope = enclosing_type(identifier)?;
+            (!under.contains(&scope.id()))
+                .then(|| scope.child_by_field_name("name").map(|n| text(&n, source).to_string()))
+                .flatten()
+        })
 }
 
 /// What still needs this member where it is — anything in this file that names it.
@@ -578,26 +860,9 @@ fn target_refuses(
     if members_of(&body).iter().any(|m| member_name(m, source) == Some(name)) {
         return Some(format!("`{target}` already declares `{name}`"));
     }
-    // An interface may not hold an instance field, and a method with a body has to say `default`.
     if matches!(target_decl.kind(), "interface_declaration" | "annotation_type_declaration") {
-        // A field of an interface is implicitly `public static final`, so it must be initialised
-        // where it is declared (JLS §9.3) — an uninitialised one has nowhere to be assigned.
-        if member.kind() == "field_declaration" {
-            let initialised = descendants(*member, "variable_declarator")
-                .iter()
-                .all(|d| d.child_by_field_name("value").is_some());
-            // Implicitly `public static final` there (JLS §9.3): it must be initialised where it is
-            // declared, and it must already BE static and final, or the code that assigns it — a
-            // constructor, a setter — stops compiling the moment it arrives.
-            if !initialised
-                || !has_modifier(member, source, "static")
-                || !has_modifier(member, source, "final")
-            {
-                return Some(format!(
-                    "`{target}` is an interface, where a field is implicitly `public static final` \
-                     and initialised where it is declared"
-                ));
-            }
+        if let Some(reason) = interface_refuses(member, source, target) {
+            return Some(reason);
         }
     }
     if let Some(missing) = requires.iter().find(|needed| {
@@ -606,6 +871,28 @@ fn target_refuses(
         return Some(format!("`{name}` reads `{missing}`, which stays behind"));
     }
     None
+}
+
+/// Why an **interface** cannot take this member.
+///
+/// Shared by both paths on purpose. The in-file plan and the cross-file [`transfer_into`] used to
+/// check different things, and the half that checked less is the half that produced `= expected`:
+/// a `private final` field with no value, written into an interface where it is implicitly
+/// `public static final` and must be initialised where it is declared (JLS §9.3).
+fn interface_refuses(member: &Node<'_>, source: &str, target: &str) -> Option<String> {
+    if member.kind() != "field_declaration" {
+        return None;
+    }
+    let initialised = descendants(*member, "variable_declarator")
+        .iter()
+        .all(|d| d.child_by_field_name("value").is_some());
+    (!initialised || !has_modifier(member, source, "static") || !has_modifier(member, source, "final"))
+        .then(|| {
+            format!(
+                "`{target}` is an interface, where a field is implicitly `public static final` and \
+                 initialised where it is declared"
+            )
+        })
 }
 
 /// The names this member takes from the type it is leaving.
@@ -755,6 +1042,17 @@ mod tests {
             .unwrap_or_else(|| panic!("no `{id}` among the offers"))
     }
 
+    /// Apply, and insist the result is still Java — the assertion that catches the worst thing a
+    /// move can produce, which is a file that does not parse.
+    fn parses(plan: &Plan, source: &str) -> String {
+        let out = plan.apply(source);
+        assert!(
+            bennu_java::prelude::parse_java(&out).is_some_and(|t| !t.root_node().has_error()),
+            "does not parse:\n{out}"
+        );
+        out
+    }
+
     const PAIR: &str = "class Base {\n    void common() {\n    }\n}\n\nclass Impl extends Base {\n    /** Doc. */\n    void moved() {\n        work();\n    }\n\n    void work() {\n    }\n}\n";
 
     #[test]
@@ -776,13 +1074,62 @@ mod tests {
         assert!(refusal.reason.contains("reads `work`"), "{}", refusal.reason);
     }
 
+    /// A private member the class still reads is widened on the way, and the row says so.
     #[test]
-    fn a_private_member_cannot_be_pulled_up() {
+    fn a_private_member_the_class_reads_goes_up_as_protected() {
+        let src = "class Base {\n}\n\nclass Impl extends Base {\n    private void moved() {\n    }\n\n    void caller() {\n        moved();\n    }\n}\n";
+        let Ok(plan) = by_id(src, "private void moved", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        assert!(plan.label.contains("protected"), "{}", plan.label);
+        let out = plan.apply(src);
+        assert!(out.contains("protected void moved()"), "{out}");
+        assert!(!out.contains("private void moved"), "{out}");
+    }
+
+    /// Into an interface it needs no widening at all: members there are implicitly public, and
+    /// `protected` is not a modifier one may carry.
+    #[test]
+    fn a_private_method_pulled_into_an_interface_is_not_made_protected() {
+        let src = "interface Base {\n}\n\nclass Impl implements Base {\n    private void moved() {\n    }\n\n    void caller() {\n        moved();\n    }\n}\n";
+        let Ok(plan) = by_id(src, "private void moved", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        let out = plan.apply(src);
+        assert!(out.contains("default void moved()"), "{out}");
+        assert!(!out.contains("protected"), "{out}");
+        assert!(!out.contains("private void moved"), "{out}");
+    }
+
+    /// A `private static` method in an interface is legal from Java 9 and private **to the
+    /// interface** — the class that called it would still not see it.
+    #[test]
+    fn a_private_static_method_does_not_stay_private_in_an_interface() {
+        let adapted = adapt_modifiers("private static int two() {\n    return 2;\n}", true, false)
+            .unwrap();
+        assert!(adapted.starts_with("static int two()"), "{adapted}");
+    }
+
+    /// …and one nothing reads goes up **unchanged**: the smallest edit is the one that changes
+    /// least, and nothing forces a widening here.
+    #[test]
+    fn a_private_member_nothing_reads_goes_up() {
         let src = "class Base {\n}\n\nclass Impl extends Base {\n    private void moved() {\n    }\n}\n";
-        let Err(refusal) = by_id(src, "private void moved", "pull-up-member") else {
+        let Ok(plan) = by_id(src, "private void moved", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        assert!(plan.apply(src).contains("class Base {\n\n    private void moved()"), "{}", plan.apply(src));
+    }
+
+    /// `serialVersionUID` is the exception, and for the reason safe delete already refuses on: the
+    /// serialization runtime reads it by name, so no source mentioning it proves nothing.
+    #[test]
+    fn a_member_the_runtime_reads_by_name_stays() {
+        let src = "class Base {\n}\n\nclass Impl extends Base {\n    private static final long serialVersionUID = 1L;\n}\n";
+        let Err(refusal) = by_id(src, "serialVersionUID", "pull-up-member") else {
             panic!("expected a refusal")
         };
-        assert!(refusal.reason.contains("`private`"), "{}", refusal.reason);
+        assert!(refusal.reason.contains("by name at run time"), "{}", refusal.reason);
     }
 
     #[test]
@@ -911,14 +1258,14 @@ mod tests {
     #[test]
     fn the_modifiers_an_interface_forbids_are_dropped() {
         let adapted =
-            adapt_modifiers("protected final synchronized void work() {\n}", true).unwrap();
+            adapt_modifiers("protected final synchronized void work() {\n}", true, false).unwrap();
         assert_eq!(adapted, "default void work() {\n}");
     }
 
     /// An annotation is left exactly where it was written.
     #[test]
     fn an_annotation_keeps_its_own_line() {
-        let adapted = adapt_modifiers("@Deprecated\npublic void work() {\n}", true).unwrap();
+        let adapted = adapt_modifiers("@Deprecated\npublic void work() {\n}", true, false).unwrap();
         assert!(adapted.starts_with("@Deprecated\n"), "{adapted}");
         assert!(adapted.contains("default void work()"), "{adapted}");
     }
@@ -1036,6 +1383,210 @@ mod tests {
             panic!("expected a refusal")
         };
         assert!(refusal.reason.contains("still used by `Breaker`"), "{}", refusal.reason);
+    }
+
+    /// A class implementing three interfaces has three answers, and only one used to be offered.
+    #[test]
+    fn every_supertype_is_its_own_row() {
+        let src = "interface A {\n}\n\ninterface B {\n}\n\nclass Impl implements A, B {\n    static int two() {\n        return 2;\n    }\n}\n";
+        let ids: Vec<String> = moves(src, "static int two")
+            .into_iter()
+            .map(|o| match o {
+                Ok(p) => p.id,
+                Err(r) => r.id,
+            })
+            .collect();
+        assert!(ids.contains(&"pull-up-member:A".to_string()), "{ids:?}");
+        assert!(ids.contains(&"pull-up-member:B".to_string()), "{ids:?}");
+    }
+
+    /// …and with a single supertype the id stays bare, so the common case reads as it did.
+    #[test]
+    fn one_supertype_keeps_the_plain_id() {
+        let src = "class Base {\n}\n\nclass Impl extends Base {\n    static int two() {\n        return 2;\n    }\n}\n";
+        assert!(matches!(by_id(src, "static int two", "pull-up-member"), Ok(_)));
+    }
+
+    /// The site a target picker asks about: a member's header, and every type it could go up into.
+    #[test]
+    fn the_move_site_reports_the_member_and_its_supertypes() {
+        let src = "interface A {\n}\n\nclass Impl implements A {\n    static int two() {\n        return 2;\n    }\n}\n";
+        let at = src.find("static int two").unwrap();
+        let site = move_site(src, at, at).expect("a site");
+        assert_eq!(site.member, "two");
+        assert_eq!(site.owner, "Impl");
+        assert_eq!(site.supertypes, vec!["A"]);
+        assert!(site.is_static);
+        // …and a caret in the body is not a site.
+        let inside = src.find("return 2").unwrap();
+        assert!(move_site(src, inside, inside).is_none());
+    }
+
+    /// The picker's entry point: a target the caller located, planned from text alone.
+    #[test]
+    fn a_picked_target_is_planned_from_source_text() {
+        let src = "class Base {\n}\n\nclass Impl extends Base {\n    static int two() {\n        return 2;\n    }\n}\n";
+        let at = src.find("static int two").unwrap();
+        let Some(Ok(plan)) = move_member_plan(
+            src,
+            at,
+            at,
+            "Base",
+            MoveDirection::Up,
+            "pull-up-member",
+            "Pull member up",
+        ) else {
+            panic!("expected a plan")
+        };
+        assert!(plan.apply(src).contains("class Base {\n\n    static int two()"), "{}", plan.apply(src));
+    }
+
+    /// A direction typed as a string is the mistake this enum exists to make impossible.
+    #[test]
+    fn the_direction_is_read_off_the_refactorings_own_id() {
+        assert_eq!(MoveDirection::from_id("pull-up-member"), MoveDirection::Up);
+        assert_eq!(MoveDirection::from_id("pull-up-member:Base"), MoveDirection::Up);
+        assert_eq!(MoveDirection::from_id("push-down-member@pick"), MoveDirection::Down);
+        assert_eq!(MoveDirection::from_id("move-member:B"), MoveDirection::Across);
+    }
+
+    /// A method keeping its body inside an interface is a `default` one, which is Java 8.
+    #[test]
+    fn a_method_pulled_into_an_interface_puts_a_java_floor_on_the_file() {
+        let src = "interface Base {\n}\n\nclass Impl implements Base {\n    public void work() {\n        run();\n    }\n}\n";
+        let Ok(plan) = by_id(src, "public void work", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        let level = plan.needs_level.expect("a floor");
+        assert_eq!(level.at_least, 8);
+        assert!(level.because.contains("`default`"), "{}", level.because);
+    }
+
+    /// …and a class target puts none: nothing there is newer than Java 1.
+    #[test]
+    fn a_move_between_classes_needs_no_particular_java() {
+        let src = "class Base {\n}\n\nclass Impl extends Base {\n    public void work() {\n    }\n}\n";
+        let Ok(plan) = by_id(src, "public void work", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        assert!(plan.needs_level.is_none());
+    }
+
+    /// The positive push down: the member lands in the subtype and leaves the supertype.
+    #[test]
+    fn a_member_pushed_down_lands_in_the_subtype() {
+        let src = "class Base {\n    /** Doc. */\n    void helper() {\n        System.out.println(1);\n    }\n}\n\nclass Impl extends Base {\n}\n";
+        let Ok(plan) = by_id(src, "void helper", "push-down-member:Impl") else {
+            panic!("expected a plan")
+        };
+        let out = parses(&plan, src);
+        assert!(out.contains("class Impl extends Base {\n\n    /** Doc. */\n    void helper()"), "{out}");
+        assert!(out.starts_with("class Base {\n}"), "{out}");
+    }
+
+    /// A field moves the same way a method does, javadoc and initialiser included.
+    #[test]
+    fn a_field_moves_with_its_value() {
+        let src = "class Base {\n}\n\nclass Impl extends Base {\n    static final int LIMIT = 10;\n}\n";
+        let Ok(plan) = by_id(src, "static final int LIMIT", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        let out = parses(&plan, src);
+        assert!(out.contains("class Base {\n\n    static final int LIMIT = 10;\n}"), "{out}");
+    }
+
+    /// An interface will not take a field that is not already a constant: there it would become
+    /// `public static final`, and whatever assigned it would stop compiling.
+    #[test]
+    fn an_interface_refuses_a_field_that_is_not_a_constant() {
+        let src = "interface Base {\n}\n\nclass Impl implements Base {\n    int count;\n}\n";
+        let Err(refusal) = by_id(src, "int count;", "pull-up-member") else {
+            panic!("expected a refusal")
+        };
+        assert!(refusal.reason.contains("public static final"), "{}", refusal.reason);
+    }
+
+    /// …and takes one that is.
+    #[test]
+    fn an_interface_takes_a_constant() {
+        let src = "interface Base {\n}\n\nclass Impl implements Base {\n    static final int LIMIT = 10;\n}\n";
+        let Ok(plan) = by_id(src, "static final int LIMIT", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        let out = parses(&plan, src);
+        // Implicitly `public static final` there, so the words come off.
+        assert!(out.contains("interface Base {\n\n    int LIMIT = 10;\n}"), "{out}");
+    }
+
+    /// The body a member came from keeps its own indentation step, and the one it goes to gets its.
+    #[test]
+    fn a_member_is_re_indented_for_the_body_it_lands_in() {
+        let src = "class Host {\n  static class Base {\n  }\n\n  static class Impl extends Base {\n    static int two() {\n      return 2;\n    }\n  }\n}\n";
+        let Ok(plan) = by_id(src, "static int two", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        let out = parses(&plan, src);
+        assert!(out.contains("    static int two() {\n      return 2;\n    }"), "{out}");
+    }
+
+    /// A member with no javadoc and a blank line above it does not drag the blank line along.
+    #[test]
+    fn a_comment_a_blank_line_away_stays_behind() {
+        let src = "class Base {\n}\n\nclass Impl extends Base {\n    // A section heading.\n\n    static int two() {\n        return 2;\n    }\n}\n";
+        let Ok(plan) = by_id(src, "static int two", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        let out = parses(&plan, src);
+        assert!(out.contains("// A section heading."), "{out}");
+        assert!(!out.contains("class Base {\n\n    // A section heading."), "{out}");
+    }
+
+    /// A `final` field with no value is assigned by a constructor that stays behind, and a final
+    /// field may only be assigned by the class that declares it — no visibility fixes that.
+    #[test]
+    fn a_final_field_a_constructor_assigns_cannot_be_pulled_up() {
+        let src = "class Base {\n}\n\nclass Impl extends Base {\n    private final int limit;\n\n    Impl(int limit) {\n        this.limit = limit;\n    }\n}\n";
+        let Err(refusal) = by_id(src, "private final int limit", "pull-up-member") else {
+            panic!("expected a refusal")
+        };
+        assert!(refusal.reason.contains("may only be assigned by the class"), "{}", refusal.reason);
+    }
+
+    /// …and one that carries its own value goes up, because nothing else assigns it.
+    #[test]
+    fn a_final_field_with_a_value_goes_up() {
+        let src = "class Base {\n}\n\nclass Impl extends Base {\n    private final int limit = 10;\n}\n";
+        assert!(matches!(by_id(src, "private final int limit", "pull-up-member"), Ok(_)));
+    }
+
+    /// The cross-file half checks what the in-file half checks — that divergence wrote a field
+    /// with no value into an interface, where it is implicitly `final`.
+    #[test]
+    fn a_transfer_into_an_interface_refuses_a_field_that_is_not_a_constant() {
+        let src = "class Impl implements Base {\n    static int count;\n}\n";
+        let Ok(plan) = by_id(src, "static int count", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        let err = transfer_into(&plan, "interface Base {\n}\n", "Base.java").unwrap_err();
+        assert!(err.contains("public static final"), "{err}");
+    }
+
+    /// A sibling nested class reaches a member by sharing a top-level body, not by inheritance —
+    /// so a pull up takes it out of reach.
+    #[test]
+    fn a_member_a_sibling_nested_class_calls_cannot_be_pulled_up() {
+        let src = "class Host {\n    interface Rule {\n    }\n\n    static class A implements Rule {\n        static int two() {\n            return 2;\n        }\n    }\n\n    static class B {\n        int f() {\n            return two();\n        }\n    }\n}\n";
+        let Err(refusal) = by_id(src, "static int two", "pull-up-member") else {
+            panic!("expected a refusal")
+        };
+        assert!(refusal.reason.contains("not under `A`"), "{}", refusal.reason);
+    }
+
+    /// …while a subclass keeps reaching it, which is what a pull up is for.
+    #[test]
+    fn a_subclass_that_calls_it_does_not_block_a_pull_up() {
+        let src = "class Base {\n}\n\nclass Impl extends Base {\n    static int two() {\n        return 2;\n    }\n}\n\nclass Deeper extends Impl {\n    int f() {\n        return two();\n    }\n}\n";
+        assert!(matches!(by_id(src, "static int two", "pull-up-member"), Ok(_)));
     }
 
     /// A type argument is not something a move may invent.
