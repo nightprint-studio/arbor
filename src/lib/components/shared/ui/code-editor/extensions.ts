@@ -32,7 +32,7 @@ import {
   closeBrackets, closeBracketsKeymap, type CompletionSource,
 } from '@codemirror/autocomplete';
 
-import { documentHighlights, serverFolding } from './server-layers';
+import { documentHighlights, serverFolding, unusedDeclarations } from './server-layers';
 import { inlayHints } from './inlay-hints';
 import { signatureHints } from './signature-hint';
 import { codeLensLayer } from './code-lens';
@@ -421,6 +421,10 @@ export function createCodeEditorExtensions(
   // descriptor is provider-backed, because that is exactly when there is something to push: it costs
   // one state field holding an empty decoration set until the host pushes anything.
   if (lang.intel) exts.push(documentHighlights());
+
+  // The dimming of a declaration nothing reaches. Same terms: one idle state field until the host
+  // pushes anything, and the host is what knows whether the provider can answer the question at all.
+  if (lang.intel) exts.push(unusedDeclarations());
 
   // Inlay hints and the parameter strip, on the same terms and for the same reason: both are
   // things only a provider can know, both cost one idle state field until something is pushed, and

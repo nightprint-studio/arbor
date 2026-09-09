@@ -815,6 +815,7 @@ fn hover_wire(markdown: &str) -> HoverInfo {
         kind: String::new(),
         container,
         doc: (!prose.trim().is_empty()).then(|| plainish(&prose)),
+        artifact: None,
     }
 }
 

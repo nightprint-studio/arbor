@@ -21,6 +21,22 @@
    * Levels that are already there are stepped through rather than refused — typing
    * `src/main/resources` where `src/main` exists creates `resources` and says so.
    *
+   * ## A package is a name, not a place
+   *
+   * In package territory the field opens **pre-filled with the package you were on**, and every
+   * level of it is editable — the folders are then created from the **source root**, not from the
+   * row that was selected.
+   *
+   * That is the whole of what "New Package on `it.acme.web` can only make children of
+   * `it.acme.web`" was missing. A sibling (`it.acme.model`) and a package one level up
+   * (`it.other`) are things you want roughly as often as a child, and with the prefix fixed the
+   * only way to either was to walk up the tree first and open this dialog somewhere else — for a
+   * dialog whose entire subject is a dotted name you could have simply typed. It is also what
+   * IntelliJ does, which matters here because it is what the muscle memory expects.
+   *
+   * Outside package territory the field stays empty and the folders are created **in** `dir`: a
+   * directory chain is a place, and `assets/icons` typed on `src/` means one inside the other.
+   *
    * Keyboard-first: the field auto-focuses, Enter creates, Esc cancels (Modal owns it).
    */
   import { FolderPlus, Package } from 'lucide-svelte';
@@ -32,6 +48,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { newFolder } from '$lib/ipc/bennu/file-ops';
+  import { packageOfDir, sourceRootOf } from './package-tree';
 
   let {
     /** The directory to create in (absolute). */
@@ -41,7 +58,23 @@
     onClose,
   }: { dir: string; asPackage?: boolean; onClose: () => void } = $props();
 
-  let name = $state('');
+  /**
+   * Where the levels are created.
+   *
+   * For a package that is the **source root**: the typed name is the whole package, so it has to
+   * be resolved from the root the packages hang off, or deleting a segment would create a folder
+   * called `it.acme` next to the one it was meant to replace. Falls back to `dir` when the path is
+   * not under a recognised source root — which is also what a plain folder always uses.
+   */
+  const base = $derived((asPackage ? sourceRootOf(dir) : null) ?? dir);
+
+  /** The package `dir` stands for, dotted. `''` at the source root (the default package). */
+  const currentPackage = $derived(asPackage ? (packageOfDir(dir) ?? '') : '');
+
+  // Pre-filled with where you are, with a trailing dot so the common case — a child — is Enter
+  // after one word, and the uncommon ones are a few Backspaces. Not `$derived`: this is the field's
+  // starting value, and the user edits it.
+  let name = $state(currentPackage ? `${currentPackage}.` : '');
   let busy = $state(false);
 
   /** The characters no filesystem takes. The separators are absent on purpose — they have
@@ -77,10 +110,14 @@
   const canCreate = $derived(segments.length > 0 && !problem && !busy);
 
   /** Where the new folders will be, relative to the project — the preview line. */
-  const dirRel = $derived(projectStore.relativePath(dir));
+  const baseRel = $derived(projectStore.relativePath(base));
   const preview = $derived(
-    (dirRel === '.' ? '' : `${dirRel}/`) + segments.join('/'),
+    (baseRel === '.' ? '' : `${baseRel}/`) + segments.join('/'),
   );
+
+  /** The package the typed name stands for — what the preview says in the language the dialog is
+   *  actually in. Empty outside package territory. */
+  const packagePreview = $derived(asPackage ? segments.join('.') : '');
 
   const title = $derived(asPackage ? 'New Package' : 'New Folder');
   const placeholder = $derived(asPackage ? 'it.acme.web' : 'assets/icons');
@@ -91,7 +128,7 @@
     if (!root) return;
     busy = true;
     try {
-      const res = await newFolder(root, dir, name.trim(), asPackage);
+      const res = await newFolder(root, base, name.trim(), asPackage);
       // The tree first, then the reveal: the reveal searches the tree, so a row that has not
       // arrived yet is a row it reports as missing.
       await projectStore.refreshTree();
@@ -119,7 +156,14 @@
   }
 
   let nameEl = $state<HTMLInputElement | undefined>();
-  $effect(() => { nameEl?.focus(); });
+  // Focused with the caret at the END, never selected: the pre-filled prefix is the thing you
+  // usually want to keep, and a selection would make the first keystroke delete it.
+  $effect(() => {
+    const el = nameEl;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  });
 </script>
 
 <Modal {onClose} width="480px" height="auto" padBody={false} ariaLabel="New folder">
@@ -147,16 +191,24 @@
     <div class="nd-note">
       {#if problem}
         <span class="nd-bad">{problem}</span>
+      {:else if asPackage && segments.length > 0}
+        <!-- In package territory the useful preview is the PACKAGE, not the folder chain: it is
+             what the name means, and the only way to see that a deleted segment moved you up a
+             level rather than sideways. The path follows it, because that is where it lands. -->
+        <span class="nd-preview">
+          <code>{packagePreview}</code>
+          <span class="nd-path">{preview}</span>
+        </span>
       {:else if segments.length > 1}
-        <!-- The point of the whole dialog, said out loud: a slash (or a dot, in a package) is
-             another level, and here is the chain it makes. -->
+        <!-- The point of the whole dialog, said out loud: a slash is another level, and here is
+             the chain it makes. -->
         <span class="nd-preview">{segments.length} folders · <code>{preview}</code></span>
       {:else if segments.length === 1}
         <span class="nd-preview"><code>{preview}</code></span>
       {:else}
         <span class="nd-hint">
           {asPackage
-            ? 'A dot or a slash makes another level — it.acme.web is three folders.'
+            ? 'The whole package — edit any part of it to create a sibling or one further up.'
             : 'A slash makes another level — assets/icons is two folders.'}
         </span>
       {/if}
@@ -196,4 +248,5 @@
   .nd-hint { color: var(--text-disabled); }
   .nd-preview { color: var(--info); display: flex; align-items: center; gap: 5px; }
   .nd-preview code { font-family: var(--font-code); color: var(--text-secondary); }
+  .nd-path { color: var(--text-disabled); font-family: var(--font-code); }
 </style>

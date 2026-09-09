@@ -5,8 +5,8 @@
 //! on `bennu_open_project`). They differ only in what they return:
 //!   * `bennu_rename_plan` → the **preview** (`old→new` per file, with a `reason` and an
 //!     `inferred` flag per edit) the FE renders before the user confirms;
-//!   * `bennu_rename_apply` → the same edits **flattened** — the FE applies them through
-//!     CodeMirror so undo works (the backend never writes the buffers).
+//!   * `bennu_rename_apply` → the same edits **flattened**, plus the file move they imply — the
+//!     FE applies them through CodeMirror so undo works (the backend never writes the buffers).
 //!
 //! Both return the empty/`None` answer (never an error) when the engine is still building
 //! or the caret isn't on a renameable identifier — the FE degrades gracefully.
@@ -19,7 +19,9 @@
 
 use bennu_core::prelude::BennuState;
 use bennu_intel::prelude::{Edit as IntelEdit, RenamePlan};
-use bennu_proto::prelude::{RenameEdit, RenameFileEdits, RenameFileMove, RenamePreview};
+use bennu_proto::prelude::{
+    RenameApplyResult, RenameEdit, RenameFileEdits, RenameFileMove, RenamePreview,
+};
 use serde::Deserialize;
 
 use crate::index_service::IndexService;
@@ -55,22 +57,35 @@ fn bennu_rename_plan(_ctx: &BennuState, args: RenameArgs) -> Result<Option<Renam
     Ok(plan.map(preview_of))
 }
 
-/// The concrete edits the FE applies (the flattened plan). Same classification as
-/// [`bennu_rename_plan`]; returns `[]` when there's nothing to do (unrenameable / still
-/// building).
+/// The concrete edits the FE applies (the flattened plan), **and the file move they imply**.
+///
+/// Same classification as [`bennu_rename_plan`]; an empty result when there's nothing to do
+/// (unrenameable / still building).
+///
+/// The `file_rename` is here and not only in the preview because of where this handler is
+/// actually called from: the **inline** rename, the small field Shift+F6 opens at the caret. That
+/// path never asks for a preview, so for as long as the move travelled only with `RenamePreview`,
+/// renaming a public top-level type through it left the type renamed everywhere and the file still
+/// called `Order.java` — which does not compile. The move is not a detail of the preview; it is
+/// half of what renaming a type *is*.
 #[arbor_rpc::handler]
-fn bennu_rename_apply(_ctx: &BennuState, args: RenameArgs) -> Result<Vec<RenameEdit>, String> {
+fn bennu_rename_apply(_ctx: &BennuState, args: RenameArgs) -> Result<RenameApplyResult, String> {
+    // A server-backed file: the server's edits, and no move. A rename that has to move a file is a
+    // Java rule (the public-type/filename tie), and LSP expresses file operations in a channel this
+    // seam does not carry — inventing one here would be guessing on the server's behalf.
     if let Some(edits) =
         crate::lsp_route::rename_apply(&args.file, &args.source, args.offset, &args.new_name)
     {
-        return Ok(edits);
+        return Ok(RenameApplyResult { edits, file_rename: None });
     }
     let plan =
         IndexService::global().plan_rename(&args.file, &args.source, args.offset, &args.new_name);
-    let edits = plan
-        .map(|p| p.files.into_iter().flat_map(|f| f.edits).map(wire_edit).collect())
-        .unwrap_or_default();
-    Ok(edits)
+    let Some(plan) = plan else {
+        return Ok(RenameApplyResult::default());
+    };
+    let file_rename = plan.file_rename.map(|r| RenameFileMove { from: r.from, to: r.to });
+    let edits = plan.files.into_iter().flat_map(|f| f.edits).map(wire_edit).collect();
+    Ok(RenameApplyResult { edits, file_rename })
 }
 
 /// Map an intel [`RenamePlan`] onto the wire [`RenamePreview`].

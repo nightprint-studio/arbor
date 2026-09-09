@@ -16,7 +16,7 @@
     History,
     Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
     DownloadCloud, FileDown, Variable, Database, Clock, Columns3, ListPlus, SquarePen,
-    Languages, CaseSensitive,
+    Languages, CaseSensitive, FileCog,
     // The gutter's ▶ and the two other things pressing it might have meant.
     Play, Bug, SlidersHorizontal,
   } from 'lucide-svelte';
@@ -56,6 +56,7 @@
   import { formatBuffer, optimizeImports } from '$lib/ipc/bennu/format';
   import {
     signatureHelp as ipcSignatureHelp, inlayHints as ipcInlayHints, type SignatureHelp,
+    usageCounts as ipcUsageCounts, type UsageCount,
   } from '$lib/ipc/bennu/hints';
   import type { DiagnosticSeverity, SourceEdit, TreeNode } from '$lib/types/bennu';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
@@ -111,6 +112,7 @@
     type NpmScript, type NpmVersionHint,
   } from '$lib/ipc/bennu/npm';
   import { isPackageManifest } from './package-json-lang';
+  import { isPomFile, pomVersionHints, type PomVersionHint } from '$lib/ipc/bennu/maven';
   import BennuEnvVarModal from './BennuEnvVarModal.svelte';
   import BennuMacroExpandModal from './BennuMacroExpandModal.svelte';
   import { makeByteToU16, makeU16ToByte } from '$lib/components/shared/ui/code-editor';
@@ -204,6 +206,8 @@
     setFoldRanges: (
       ranges: readonly { start: number; end: number; placeholder?: string }[],
     ) => void;
+    /** Replace the unused-declaration layer — the names of members nothing in the project reaches. */
+    setUnusedRanges: (spans: readonly { start: number; end: number }[]) => void;
     /** Replace the inlay hints — the text drawn between the code, never in it. */
     setInlayHints: (
       hints: readonly { offset: number; label: string; before?: boolean }[],
@@ -275,6 +279,14 @@
   // carries the tab's undo/redo HISTORY as well as its cursor and scroll — a remount builds a
   // fresh CodeMirror state, so without it everything you had typed in a file you came back to
   // was still there and none of it was undoable.
+  //
+  // ⚠️ Filed under the key the EDITOR reports, never under `activePath`. The last snapshot a tab
+  // produces is the one emitted as it is torn down, and it is torn down *because* `activePath`
+  // has already become the next file — so reading it in the callback wrote the outgoing tab's
+  // cursor, scroll and undo history under the incoming tab's name. What that looked like:
+  // Back into a file restored a snapshot from whenever it was first opened (the top of it), and
+  // the file you had just jumped INTO got a foreign scroll offset applied a frame after it
+  // landed. Both read as "navigation puts me at line 1 of the class".
   const viewStates = new Map<string, EditorViewSnapshot>();
   // A closed tab's snapshot goes with it. The history is the largest thing in there, and it is
   // bounded by the tabs you have open rather than by everything you have opened this session.
@@ -411,6 +423,35 @@
     return false;
   }
 
+  /**
+   * The file a navigation is opening RIGHT NOW, from the moment it asks for it to the moment its
+   * scroll is consumed.
+   *
+   * The thing `jumpPending()` was supposed to answer and structurally could not. A cross-file
+   * go-to is `await openFile(f)` and then `requestGoto(line)`, so at the instant the buffer lands
+   * — which is when `arriveIn` runs — **nothing has been requested yet**: the arrival looked like
+   * a tab switch, got its own stop at line 1 of the file, and the real destination was pushed on
+   * top a moment later. Two stops for one navigation, and Back went to the first: line 1 of the
+   * class you had just jumped into.
+   *
+   * Set before the open rather than inferred after it, because "was this arrival part of a jump"
+   * is a fact the caller has and nothing downstream can recover.
+   */
+  let openingFor: string | null = null;
+
+  /**
+   * Open `file` and land on `line` — the one way the editor navigates across files.
+   *
+   * Every caller used to write the two steps out, and the pair is not two steps: it is one
+   * navigation whose halves the history has to be told about together. Centralised so a new
+   * go-to cannot get it wrong by writing the obvious thing.
+   */
+  async function openAt(file: string, line: number, col = 1) {
+    openingFor = file;
+    await projectStore.openFile(file);
+    bennuUiStore.requestGoto(line, col);
+  }
+
   /** A file arrived under the caret — a tab switch, a file opened from the tree, or the buffer of
    *  a cross-file jump. */
   function arriveIn(place: NavPlace) {
@@ -422,7 +463,11 @@
     const cur = bennuNavStore.current;
     if (cur && isSamePath(cur.file, place.file)) return;
     bennuNavStore.push(place);
-    provisionalIn = jumpPending() ? place.file : null;
+    // Provisional when a navigation is bringing this file in: either a Back/Forward whose scroll
+    // is already queued, or an `openAt` that has not asked for its line yet. The second is the
+    // ordinary go-to, and it was the half that was missing.
+    const navigating = jumpPending() || (!!openingFor && isSamePath(openingFor, place.file));
+    provisionalIn = navigating ? place.file : null;
   }
 
   /** A navigation landed on `dest`. The origin needs no argument: the entry below is the place we
@@ -507,8 +552,10 @@
     if (!place) return;
     pendingJump = { file: place.file, line: place.line, budget: NAV_SETTLE_EVENTS };
     if (!isSamePath(place.file, projectStore.activeFilePath)) {
-      await projectStore.openFile(place.file);
-      bennuUiStore.requestGoto(place.line);
+      // The column too. The ring remembers one — the whole point of a stop following your caret is
+      // that coming back lands where you left, and a relay that only carried the line put you at
+      // the start of it.
+      await openAt(place.file, place.line, place.col);
     } else {
       editorComp?.scrollToLineCol(place.line, place.col);
     }
@@ -583,19 +630,59 @@
   // `openFile(f)` followed by `requestGoto(line)`, so at the instant the effect runs the mounted
   // editor may still be the OLD file's. After the flush, `editorComp` is the one for the file the
   // jump was asked about.
+  /**
+   * A jump whose line the buffer could not yet hold.
+   *
+   * `openFile` makes a tab active and its TEXT arrives afterwards, so the relay below can run
+   * against an empty (or still-previous) document — where `scrollToLineCol(400)` clamps to line 1
+   * and the navigation silently lands at the top. Nothing downstream can tell that apart from a
+   * jump to line 1 that worked, which is why the intent is kept here rather than inferred there.
+   *
+   * A plain `let`, deliberately: the effect that consumes it re-runs on the BUFFER arriving, which
+   * is the event being waited for. Making it `$state` would add a dependency and buy nothing.
+   */
+  let pendingReveal: { file: string; line: number; col: number } | null = null;
+  $effect(() => {
+    const path = activePath;
+    const source = path ? projectStore.sourceOf(path) : '';
+    const want = pendingReveal;
+    if (!path || !source || !want || !isSamePath(want.file, path)) return;
+    pendingReveal = null;
+    void tick().then(() => {
+      if (projectStore.activeFilePath !== path) return;
+      editorComp?.scrollToLineCol(want.line, want.col);
+    });
+  });
+
   let consumedGotoNonce = 0;
   $effect(() => {
     const t = bennuUiStore.gotoTarget;
     if (!t || t.nonce === consumedGotoNonce) return;
     consumedGotoNonce = t.nonce;
-    // A go-to names the line; the remembered caret must not overrule it when the buffer lands.
-    const file = projectStore.activeFilePath;
-    restoredCaretFor = file;
-    // THE place every panel's navigation is recorded: usages, dependencies, tests, structure,
-    // catalog, TODOs, find-in-files, build diagnostics and the editor's own go-to all reach the
-    // editor through this one relay, so one call here covers every one of them.
-    if (file) recordJump({ file, line: t.line, col: 1 });
-    void tick().then(() => editorComp?.scrollToLineCol(t.line, 1));
+    void tick().then(() => {
+      // ⚠️ AFTER the flush, and this is the whole of a real bug rather than tidiness. A CROSS-FILE
+      // go-to is `openFile(f)` then `requestGoto(line)`, so at the instant this effect runs
+      // `activeFilePath` may still be the file being LEFT — as the comment above already said
+      // about `editorComp`. Recording the stop before the flush therefore filed the DESTINATION's
+      // line number against the ORIGIN's path, and Back then returned to that line in the wrong
+      // file: a small line number in a big class is the top of it, which is exactly what going
+      // back felt like.
+      const file = projectStore.activeFilePath;
+      // A go-to names the place; the remembered caret must not overrule it when the buffer lands.
+      restoredCaretFor = file;
+      // THE place every panel's navigation is recorded: usages, dependencies, tests, structure,
+      // catalog, TODOs, find-in-files, build diagnostics and the editor's own go-to all reach the
+      // editor through this one relay, so one call here covers every one of them.
+      if (file) recordJump({ file, line: t.line, col: t.col });
+      // The navigation is over: its arrival has been collapsed into its destination.
+      openingFor = null;
+      // Asked for now, and asked for again if the text is not here yet — see `pendingReveal`.
+      // Both, rather than one or the other: when the buffer is already loaded this is the whole
+      // of it, and the effect above never fires; when it is not, this scrolls an empty document
+      // and the effect does the real work the moment there is a line 400 to go to.
+      if (file) pendingReveal = { file, line: t.line, col: t.col };
+      editorComp?.scrollToLineCol(t.line, t.col);
+    });
   });
 
   // ── Goto-by-byte-offset relay: the Forms tool window requests a jump to a `<form>`
@@ -1109,7 +1196,14 @@
     // variant rather than normalised into the Cargo one, because a span that means two things
     // depending on where it came from is the kind of detail that eats a quote six months later.
     | { kind: 'npm-version'; hint: NpmVersionHint }
-    | { kind: 'script'; script: NpmScript; manager: string };
+    // The Maven one is the same offer for the third ecosystem, and its span is the version's TEXT
+    // inside `<version>…</version>` — no quotes either side to preserve, unlike the two above.
+    | { kind: 'pom-version'; hint: PomVersionHint }
+    | { kind: 'script'; script: NpmScript; manager: string }
+    // How many places use a declaration — the count above every member of a Java file. Muted,
+    // because it is information you may happen to want rather than an offer: forty accented rows
+    // above forty members would make the file unreadable.
+    | { kind: 'usages'; mark: UsageCount };
   let lenses: EditorLens[] = [];
 
   /** Push the current list, keyed by index — the key only has to identify a lens within the list the
@@ -1138,6 +1232,24 @@
             key,
           };
         }
+        if (entry.kind === 'usages') {
+          const m = entry.mark;
+          // The word, not just the number: "3" above a method is a number with no unit, and the
+          // one place a reader meets this is above a member they were reading for another reason.
+          //
+          // And nothing else. The backend already left out everything a framework calls, so what
+          // arrives is worth a row — there is no reason left to explain, and a row that explains
+          // itself above every member is what made a test file unreadable.
+          return {
+            start: m.decl,
+            title: m.count === 0 ? 'no usages' : `${m.count} usage${m.count === 1 ? '' : 's'}`,
+            actionable: m.count > 0,
+            key,
+          };
+        }
+        // The three version hints — Cargo, npm, Maven — draw identically, and deliberately: they
+        // are the same offer about three ecosystems, and a reader who has learnt what the arrow
+        // means in one manifest should not have to learn it again in the next.
         return {
           start: entry.hint.offset,
           // An arrow and the accent tone, because this one is an OFFER rather than a count: it
@@ -1155,9 +1267,16 @@
   $effect(() => {
     const path = activePath;
     if (!path || !isLspFileOf(path)) {
-      // Not cleared for a manifest: that buffer's lenses come from the effect below, and clearing
-      // here would race it into an empty layer on every keystroke.
-      if (!isCargoManifest(path) && !isPackageManifest(path)) pushLenses([]);
+      // Not cleared for a manifest or a Java file: those buffers' lenses come from the effects
+      // below, and clearing here would race them into an empty layer on every keystroke.
+      if (
+        !isCargoManifest(path) &&
+        !isPackageManifest(path) &&
+        !isPomFile(path) &&
+        !isJavaFileOf(path)
+      ) {
+        pushLenses([]);
+      }
       return;
     }
     void lspState;
@@ -1195,6 +1314,32 @@
         .then((hints) => {
           if (cancelled || projectStore.activeFilePath !== path) return;
           pushLenses(hints.map((hint) => ({ kind: 'version' as const, hint })));
+        })
+        .catch(() => {});
+    }, 900);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  // ── Version hints (pom.xml) ─────────────────────────────────────────────────────
+  //
+  // The same offer as the Cargo one above, for the ecosystem where it was missing entirely: a Java
+  // project could be told a dependency was missing from `~/.m2`, but never that a newer one exists
+  // — the local repository can only ever know about versions somebody here has already adopted, so
+  // by its measure a dependency nobody has updated is permanently current.
+  //
+  // Only what the pom itself pins: a `<version>` inherited from a parent or a BOM, or written as a
+  // `${property}`, is left alone. See `maven_central.rs` for why.
+  $effect(() => {
+    const path = activePath;
+    if (!path || !isPomFile(path)) return;
+    const src = projectStore.sourceOf(path);
+    let cancelled = false;
+    // The same long debounce, for the same reason: behind it is one request per dependency.
+    const t = setTimeout(() => {
+      void pomVersionHints(path, src)
+        .then((hints) => {
+          if (cancelled || projectStore.activeFilePath !== path) return;
+          pushLenses(hints.map((hint) => ({ kind: 'pom-version' as const, hint })));
         })
         .catch(() => {});
     }, 900);
@@ -1326,6 +1471,26 @@
       updateDependencyVersion(entry.hint);
       return;
     }
+    if (entry.kind === 'usages') {
+      // The same surface Alt+F7 fills, at the declaration's own name — pressing a count asks for
+      // the list it counted, which is the only thing the number leaves you wanting.
+      const src = editorComp?.getValue() ?? '';
+      void runFindUsages(
+        src,
+        entry.mark.start,
+        editorComp?.coordsAtByteOffset(entry.mark.start) ?? null,
+        entry.mark.name,
+      );
+      return;
+    }
+    if (entry.kind === 'pom-version') {
+      if (!editorComp) return;
+      // The span is the text BETWEEN the tags, already trimmed — see `version_span` in the pom
+      // parser. Writing the element here would produce `<version><version>6.1.14</version>`.
+      editorComp.replaceByteRange(entry.hint.start, entry.hint.end, entry.hint.latest);
+      toastStore.show(`${entry.hint.coord} → ${entry.hint.latest}`, 'success');
+      return;
+    }
     if (entry.kind === 'npm-version') {
       if (!editorComp) return;
       // The bare version: this span is the string's CONTENTS, quotes excluded — see the variant's
@@ -1385,7 +1550,7 @@
 
     if (hits.length === 1) {
       const hit = hits[0];
-      void projectStore.openFile(hit.file).then(() => bennuUiStore.requestGoto(hit.line));
+      void openAt(hit.file, hit.line);
       return;
     }
     if (hits.length > 1) {
@@ -1547,6 +1712,48 @@
     return () => { cancelled = true; clearTimeout(t); };
   });
 
+  // ── Usage counts, and what nothing reaches ──────────────────────────────────────
+  //
+  // How many places use each declaration, drawn above it, and the name of one nothing reaches drawn
+  // faint. Both from one answer, because they are one fact: the count IS the information, and
+  // "unused" is what a count of zero means when it is safe to believe it.
+  //
+  // Keyed on the DOCUMENT, like the inlay hints, and on the index revision as well — this reads the
+  // whole-project reference index, so a count is wrong until the index has caught up with the file
+  // that changed. That dependency is what makes a method you have just stopped calling go grey
+  // without the file it is declared in being touched.
+  //
+  // The debounce is the longest of the three pushed layers on purpose: a count that is one keystroke
+  // stale is invisible, and asking for it per keystroke would walk the index per keystroke.
+  $effect(() => {
+    const path = activePath;
+    const revision = docRevision;
+    const on = bennuSettingsStore.usageCounts;
+    const indexed = bennuIndexStore.buildRevision;
+    if (!path || !on || !isJavaFileOf(path)) {
+      // Only the unused layer is cleared here. The lens layer belongs to whichever effect owns this
+      // buffer, and clearing it for a `Cargo.toml` because Java has nothing to say would wipe the
+      // version hints that effect had just pushed.
+      editorComp?.setUnusedRanges([]);
+      if (isJavaFileOf(path)) pushLenses([]);
+      return;
+    }
+    void revision;
+    void indexed;
+    const src = editorComp?.getValue() ?? '';
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void ipcUsageCounts(path, src)
+        .then((marks) => {
+          if (cancelled || projectStore.activeFilePath !== path) return;
+          pushLenses(marks.map((mark) => ({ kind: 'usages' as const, mark })));
+          editorComp?.setUnusedRanges(marks.filter((m) => m.unused));
+        })
+        .catch(() => {});
+    }, 600);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
   // ── Expand / shrink selection ───────────────────────────────────────────────────
   //
   // The server answers with the WHOLE chain from the token under the caret out to the file, so
@@ -1647,6 +1854,20 @@
   // reference, the path variable. Debounced with the buffer, and byte→UTF-16 mapped
   // because the backend speaks bytes and the editor speaks code units.
   let springMarks = $state<{ from: number; to: number; className: string }[]>([]);
+  /**
+   * The spans where a framework annotation names a **type as a string** — a
+   * `@ConditionalOnClass(name = "…")`.
+   *
+   * Kept beside the marks rather than read back out of them, because they answer a different
+   * question: the marks are a colour, this is where Ctrl+B has somewhere to go. The backend
+   * decides what counts (`spring::class_ref`), so the editor never has to guess whether a string
+   * holds a class name — it follows what was coloured.
+   *
+   * The go-to needs it because the framework extension cannot answer for a LIBRARY class: its
+   * target is a file and an offset, and a class inside a jar has neither. From the span the editor
+   * reaches the same decompiled view every other library go-to uses.
+   */
+  let classRefSpans = $state<{ from: number; to: number; fqcn: string }[]>([]);
   let springGutter = $state<ExtGutterMark[]>([]);
   /** What the active frameworks offer to write into this buffer — the toolbar's contents.
    *  Contributed rather than enumerated here: whether this file is an entity or a repository is
@@ -1675,15 +1896,21 @@
         // own and must not blink out because rust-analyzer is absent, misconfigured or still
         // starting.
         || isRustFileOf(path));
-    if (!path || !wantsFramework) { springMarks = []; springGutter = []; fwActions = []; return; }
+    if (!path || !wantsFramework) {
+      springMarks = []; classRefSpans = []; springGutter = []; fwActions = []; return;
+    }
     const src = projectStore.sourceOf(path);
     void bennuIndexStore.buildRevision; // new beans / new keys after a rebuild
     let cancelled = false;
     const t = setTimeout(() => {
       void extHighlights(path, src)
-        .then((hs) => { if (!cancelled) springMarks = toSpringMarks(src, hs); })
+        .then((hs) => {
+          if (cancelled) return;
+          springMarks = toSpringMarks(src, hs);
+          classRefSpans = toClassRefSpans(src, hs);
+        })
         // No framework on this project (or an older backend) — no marks, no noise.
-        .catch(() => { if (!cancelled) springMarks = []; });
+        .catch(() => { if (!cancelled) { springMarks = []; classRefSpans = []; } });
       void extGutter(path, src)
         .then((gs) => { if (!cancelled) springGutter = gs; })
         .catch(() => { if (!cancelled) springGutter = []; });
@@ -2155,6 +2382,20 @@
       className: `cm-fw cm-fw-${h.kind.replace(/\./g, '-')}`,
     }));
   }
+
+  /** The class-naming spans among the highlights, with the text they hold — what a Ctrl+B inside
+   *  one has to follow. `spring.class-name` is the backend's word for "this string is a type". */
+  function toClassRefSpans(src: string, hs: ExtHighlight[]) {
+    const toU16 = makeByteToU16(src);
+    return hs
+      .filter((h) => h.kind === 'spring.class-name')
+      .map((h) => {
+        const from = toU16(h.start);
+        const to = toU16(h.end);
+        return { from, to, fqcn: src.slice(from, to).trim() };
+      })
+      .filter((s) => s.fqcn.length > 0);
+  }
   // Error / warning counts for the editor's top-right status badge (IntelliJ-style).
   const diagCounts = $derived.by(() => {
     let errors = 0, warnings = 0;
@@ -2440,6 +2681,8 @@
     if (id === 'np-equals') return ArrowLeftRight;
     if (id === 'change-package') return Package;
     if (id === 'move-to-package') return FolderInput;
+    if (id === 'rename-type-to-file') return CaseSensitive;
+    if (id === 'rename-file-to-type') return FileCog;
     if (id === 'override-methods') return Wand2;
     if (id.startsWith('naming-fix:')) return CaseSensitive;
     return Wand2; // the simplification family (isEmpty / boolean / negated comparison)
@@ -2458,6 +2701,7 @@
     if (o.action === 'move-to-package') { await moveFileToPackage(path); return; }
     if (o.action === 'create-class') { await createMissingClass(path, o); return; }
     if (o.action === 'override-methods') { onOverride?.(); return; }
+    if (o.action === 'rename-file') { await renameFileTo(path, o.replacement); return; }
     if (o.action !== 'rename-symbol' && o.action !== 'rename-symbol-preview') return;
     if (!editorComp) return;
 
@@ -2476,13 +2720,38 @@
       return;
     }
     try {
-      const edits = await ipcRenameApply(path, source, o.start, o.replacement);
+      const { edits, file_rename } = await ipcRenameApply(path, source, o.start, o.replacement);
       if (!edits.length) { toastStore.show('Nothing to rename here', 'info'); return; }
       const failed = await projectStore.applyEdits(edits);
+      // The file the rename takes with it — after the edits, which are addressed to the old path.
+      if (file_rename) {
+        const base = file_rename.to.split('/').pop() ?? file_rename.to;
+        await projectStore.renameFile(file_rename.from, base).catch((e: unknown) => {
+          toastStore.show(`Renamed, but the file could not be renamed: ${e}`, 'error');
+        });
+      }
       if (failed) toastStore.show(`Renamed, but ${failed} file(s) could not be written`, 'error');
       else toastStore.show(`Renamed to “${o.replacement}”`, 'success');
     } catch {
       toastStore.show('Rename failed', 'error');
+    }
+  }
+
+  /**
+   * Rename the open file itself (the `rename-file` intention).
+   *
+   * The file only — no edit, because there is nothing in the source to change: this is the half of
+   * the file-name/type-name disagreement where the **type** is the name worth keeping. The store
+   * saves, moves, re-points the tab and refreshes the tree, which is why this does not do any of
+   * that itself.
+   */
+  async function renameFileTo(path: string, base: string) {
+    if (!base) return;
+    try {
+      await projectStore.renameFile(path, base);
+      toastStore.show(`Renamed the file to ${base}`, 'success');
+    } catch (e) {
+      toastStore.show(`Could not rename the file: ${e}`, 'error');
     }
   }
 
@@ -2971,17 +3240,35 @@
     const target = renameName;
     renameBusy = true;
     try {
-      const edits = await ipcRenameApply(ctx.file, ctx.source, ctx.offset, target);
+      const { edits, file_rename } = await ipcRenameApply(ctx.file, ctx.source, ctx.offset, target);
       if (!edits.length) { toastStore.show('Nothing to rename here', 'info'); closeInlineRename(); return; }
       // The splicing is the store's (see `applyEdits`) — this only counts what it was asked to do,
       // for a message that says how far the rename reached.
       const files = new Set(edits.map((e) => e.file)).size;
       const failed = await projectStore.applyEdits(edits);
+
+      // Then the file, if the type is what the file is named after. AFTER the edits, because the
+      // edits are addressed to the old path — and not optional: Java ties a public top-level type
+      // to its filename, so renaming one without the other leaves code that does not compile. This
+      // is the half the inline path used to drop on the floor.
+      let moved = '';
+      if (file_rename) {
+        const base = file_rename.to.split('/').pop() ?? file_rename.to;
+        try {
+          await projectStore.renameFile(file_rename.from, base);
+          moved = ` · file renamed to ${base}`;
+        } catch (e) {
+          toastStore.show(`Renamed, but the file could not be renamed to ${base}: ${e}`, 'error');
+          closeInlineRename();
+          return;
+        }
+      }
+
       if (failed) {
         toastStore.show(`Renamed, but ${failed} file(s) could not be written`, 'error');
       } else {
         toastStore.show(
-          `Renamed to “${target}” · ${edits.length} edit(s) in ${files} file(s)`,
+          `Renamed to “${target}” · ${edits.length} edit(s) in ${files} file(s)${moved}`,
           'success',
         );
       }
@@ -3233,8 +3520,7 @@
       await runFindUsages(source, offset, editorComp.coordsAtByteOffset(offset), word || null);
       return true;
     }
-    await projectStore.openFile(target.file);
-    bennuUiStore.requestGoto(target.line);
+    await openAt(target.file, target.line, target.col ?? 1);
     return true;
   }
 
@@ -3286,6 +3572,22 @@
     if (!t) return false;
     openDefinitionFile(t.file, t.start);
     return true;
+  }
+
+  /** Ctrl+B inside a string that names a type — `@ConditionalOnClass(name = "…")`.
+   *
+   *  Follows what the backend **coloured**: `classRefSpans` is exactly the set of strings
+   *  `spring::class_ref` says holds a class name, so the editor never decides for itself whether a
+   *  string looks like an FQCN. That is the same rule the colour draws, which is what keeps the
+   *  promise the colour makes — a span that looks followable is one. */
+  async function tryGoToNamedClass(offset: number): Promise<boolean> {
+    if (!editorComp) return false;
+    // The chain speaks bytes and the spans are the editor's code units — the same conversion the
+    // marks went through on the way in, run once here rather than kept in a parallel list.
+    const pos = makeByteToU16(editorComp.getValue())(offset);
+    const hit = classRefSpans.find((s) => pos >= s.from && pos <= s.to);
+    if (!hit) return false;
+    return await tryGoToDecompiled(hit.fqcn);
   }
 
   /** Last-resort go-to into a **library/JDK type** — a class/interface with no project source. The
@@ -3395,8 +3697,7 @@
     if (!path || isJavaFile || !ref) return false;
     const target = await ipcJspIncludeTarget(path, ref).catch(() => null);
     if (!target) return false;
-    await projectStore.openFile(target);
-    bennuUiStore.requestGoto(1);
+    await openAt(target, 1);
     return true;
   }
 
@@ -3418,8 +3719,7 @@
       ? (classes.find((c) => c.fqcn === word) ?? classes.find((c) => c.simple === last))
       : (classes.find((c) => c.simple === word) ?? classes.find((c) => c.fqcn.endsWith('.' + word)));
     if (!hit) return false;
-    await projectStore.openFile(hit.file);
-    bennuUiStore.requestGoto(hit.line);
+    await openAt(hit.file, hit.line);
     return true;
   }
 
@@ -3481,6 +3781,9 @@
     const t = await ipcMybatisNav(path, editorComp.getValue(), offset).catch(() => null);
     if (!t) return false;
     if (!isSamePath(t.file, path)) {
+      // A byte offset takes its own relay, which the history does not watch — so the arrival is
+      // announced the same way and the line is what the ring records.
+      openingFor = t.file;
       await projectStore.openFile(t.file);
       if (t.offset > 0) bennuUiStore.requestGotoOffset(t.offset);
       else bennuUiStore.requestGoto(t.line);
@@ -3533,6 +3836,11 @@
     //     After the language's own answer, so a real symbol still wins; before the stop, because
     //     the stop is what kept this unreachable on exactly the two file kinds it is for.
     if (offset != null && (await tryGoToFrameworkExt(offset))) return;
+    // 1a-bis. A class named as a STRING inside an annotation — `@ConditionalOnClass(name = "…")`.
+    //     The step above already answered when the project declares it; this is the other case,
+    //     which is the usual one: the class lives in a jar, so there is no file for a framework
+    //     target to point at and the decompiled view is where it opens.
+    if (offset != null && (await tryGoToNamedClass(offset))) return;
     // 1b. A server-backed buffer stops here. Everything below is a Java-stack resolver — a JSP
     //     page variable, a Struts action, a MyBatis statement, a library class from the
     //     classpath — and none of them has anything to say about a Rust file. Falling through
@@ -4161,9 +4469,10 @@
           tabSize={bennuSettingsStore.tabSize}
           indentUnit={bennuSettingsStore.indentStyle === 'tabs' ? '\t' : ' '.repeat(bennuSettingsStore.tabSize)}
           initialState={viewStates.get(activePath)}
+          stateKey={activePath}
           oninput={onInput}
           oncaret={onCaret}
-          onViewState={(s) => { if (activePath) viewStates.set(activePath, s); }}
+          onViewState={(s, key) => { if (key) viewStates.set(key, s); }}
           onGoto={onEditorGoto}
           onLensPress={(key) => void onLensPress(key)}
         />
@@ -4558,6 +4867,18 @@
   :global(.cm-content .cm-fw-spring-spel-keyword span) { color: var(--syntax-keyword, #cc7832); font-weight: 600; }
   :global(.cm-content .cm-fw-spring-placeholder-default),
   :global(.cm-content .cm-fw-spring-placeholder-default span) { color: var(--text-muted); font-style: italic; }
+  /* A type named as a string. Coloured as a TYPE, in the same colour the language gives one it can
+     see — because that is what it is, and the only reason it is written as text is that the class
+     may be absent at compile time. Underlined faintly rather than tinted like a placeholder: the
+     underline is the affordance that says a name can be followed, and a type is not a value. */
+  :global(.cm-content .cm-fw-spring-class-name),
+  :global(.cm-content .cm-fw-spring-class-name span) {
+    color: var(--syntax-type, #4d78cc);
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-decoration-color: color-mix(in srgb, var(--syntax-type, #4d78cc) 55%, transparent);
+    text-underline-offset: 2px;
+  }
 
   /*
    * The fulcrum i18n markup, inside a TOML string.

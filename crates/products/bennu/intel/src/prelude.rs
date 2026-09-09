@@ -100,3 +100,6 @@ pub use crate::hierarchy::{
 };
 
 pub use crate::safe_delete::{safe_delete_plan, SafeDelete};
+pub use crate::framework_entry::{entry_for_method, entry_for_type};
+pub use crate::import_census::{ImportCensus, MAX_BAND, SATURATE_AT};
+pub use crate::usage_marks::{usage_marks, UsageMark};

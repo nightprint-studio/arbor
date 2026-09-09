@@ -11,7 +11,7 @@
 //! [`FrameworkExtension`]: bennu_ext::prelude::FrameworkExtension
 
 // The extension itself — what a host registers.
-pub use crate::ext::SpringExtension;
+pub use crate::ext::{ClassNameSource, SpringExtension};
 
 // The model a query answers from.
 pub use crate::model::{
@@ -73,6 +73,6 @@ pub use crate::props_intel::{env_var_at, is_property_source};
 // Beans declared inside an allowlisted dependency, read from bytecode. Their own tier and
 // their own type on purpose — a library bean is a declaration Spring may or may not act on,
 // and merging it into the project's model would state it as a fact.
-pub use crate::library_beans::{
+pub use crate::library_beans::{bean_defs_of, 
     beans_of_class, beans_of_classes, LibraryBean, LibraryBeanAllowlist, LibraryBeanGroup,
 };

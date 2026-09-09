@@ -27,6 +27,8 @@ pub mod diag_cache;
 // find-usages, go-to, hover, inherited members and the hierarchies all answer from.
 pub mod engine;
 pub mod hierarchy;
+pub mod framework_entry;
+pub mod import_census;
 pub mod java_index;
 // Internal: Lombok generated-member synthesis, an implementation detail of index-building
 // (java_index). Not part of the public surface, so it stays a private module (no prelude entry).
@@ -37,6 +39,7 @@ pub mod refcache;
 pub mod refs;
 pub mod rename;
 pub mod safe_delete;
+pub mod usage_marks;
 pub mod spell;
 // Spring stereotype-bean policy: reads bennu-java's generic annotations and derives the
 // annotation-declared beans (`@Service`/`@Component`/…) the config resolver consults as a

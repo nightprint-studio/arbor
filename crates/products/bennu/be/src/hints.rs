@@ -2,8 +2,10 @@
 //!
 //! [`bennu_signature_help`] answers for one caret (the strip above the line); [`bennu_inlay_hints`]
 //! answers for the whole buffer (the parameter names and inferred `var` types drawn between the
-//! code). Both are Java-only and resolver-backed: a language served by a language server gets the
-//! same two features from its server, through `lsp_route`.
+//! code); [`bennu_usage_counts`] answers for the whole buffer too — how many places use each of its
+//! declarations, and which of them nothing reaches. All are Java-only and resolver-backed: a
+//! language served by a language server gets the same features from its server, through
+//! `lsp_route`.
 //!
 //! Neither returns an error. A caret that is not in a call, an index still building, a file no
 //! project owns — all mean "nothing to draw", and a hint that failed loudly would be a dialog
@@ -89,5 +91,68 @@ fn bennu_inlay_hints(_ctx: &BennuState, args: InlayArgs) -> Result<Vec<InlayWire
         .inlay_hints(&args.file, &args.source)
         .into_iter()
         .map(|h| InlayWire { offset: h.offset, label: h.label, before: h.before })
+        .collect())
+}
+
+/// Args for [`bennu_usage_counts`].
+#[derive(Deserialize)]
+pub struct UsageCountArgs {
+    pub file: String,
+    pub source: String,
+}
+
+/// One declaration's use count, on the wire.
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageCountWire {
+    /// Byte offset of the declaration, annotations included — where the row above it is drawn.
+    pub decl: usize,
+    /// Byte span of the NAME token — what a "nothing reaches this" tint colours.
+    pub start: usize,
+    pub end: usize,
+    /// `"type"` | `"method"` | `"field"`.
+    pub kind: String,
+    /// The declared name.
+    pub name: String,
+    /// How many use sites the index holds. The declaration is not one of them.
+    pub count: usize,
+    /// True only when the count of zero is a fact about the **program** and not merely about the
+    /// index — see `bennu_intel::usage_marks`. The editor greys exactly these.
+    pub unused: bool,
+}
+
+/// How many places use each declaration in the buffer.
+///
+/// **Not** one per declaration: an entry point nothing else calls is left out entirely, so the
+/// caller draws what it is given and never has to decide what is worth saying.
+///
+/// Java-only, and empty — never an error — while the index is still building or for a file no
+/// project owns. A count that is one edit stale is worth having; a dialog about one is not.
+#[arbor_rpc::handler]
+fn bennu_usage_counts(
+    _ctx: &BennuState,
+    args: UsageCountArgs,
+) -> Result<Vec<UsageCountWire>, String> {
+    if !crate::intel::is_java_file(&args.file) {
+        return Ok(Vec::new());
+    }
+    Ok(IndexService::global()
+        .usage_marks(&args.file, &args.source)
+        .into_iter()
+        // A declaration a framework calls, that nothing else does, is dropped rather than sent
+        // with an explanation attached. "no usages · the test runner runs it" above every method
+        // of a test file is true, useless, and the reason the editor was in the way.
+        .filter(|m| !m.is_silent())
+        .map(|m| {
+            let unused = m.is_unused();
+            UsageCountWire {
+                decl: m.decl,
+                start: m.start,
+                end: m.end,
+                kind: m.kind.to_string(),
+                name: m.name,
+                count: m.count,
+                unused,
+            }
+        })
         .collect())
 }

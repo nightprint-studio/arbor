@@ -131,6 +131,21 @@ function createBennuDiagnosticsStore() {
     setServerDiagnostics(root: string, list: FileDiagnostics[]) {
       serverDiagnostics.set(root, list);
     },
+    /**
+     * Forget what a root's servers reported — it is not open any more.
+     *
+     * Load-bearing, not tidying. The map is keyed by root and the getter flattens **all** of it,
+     * so closing a project left its problems in the panel: a Rust workspace closed an hour ago
+     * went on contributing every `cargo check` error to a Java project's Problems list, and the
+     * language server outliving the project is exactly what makes them keep arriving.
+     *
+     * Called by the project store, which is the only thing that knows what is open. The
+     * diagnostics store must not ask it — the dependency runs the other way, and reversing it
+     * would be a cycle.
+     */
+    forgetRoot(root: string) {
+      serverDiagnostics.delete(root);
+    },
 
     /** The project mojibake-scan hits, grouped by file (empty until a scan is added to Problems). */
     get mojibakeDiagnostics() { return mojibakeDiagnostics; },

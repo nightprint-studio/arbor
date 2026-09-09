@@ -19,7 +19,7 @@
  * row with no icon reads as a broken row rather than as an unfamiliar one.
  */
 
-import { Braces, Code2, FileCode2, SquareFunction, Variable } from 'lucide-svelte';
+import { Boxes, Braces, Code2, FileCode2, Network, Package, Route, SquareFunction, Variable } from 'lucide-svelte';
 import SymbolKindIconRaw from './SymbolKindIcon.svelte';
 import type { IconComponent } from '$lib/types/icon';
 
@@ -92,6 +92,15 @@ const GLYPHS: Record<string, KindGlyph> = {
   constant:  { icon: Variable,       color: 'var(--warning)' },
   enummember: { icon: Variable,      color: 'var(--warning)' },
   'enum member': { icon: Variable,   color: 'var(--warning)' },
+  // ── what the index holds that is not a symbol ──
+  // A jar, a bean, an action and a config edge are rows in the index inspector, and they belong in
+  // this table for the same reason everything else does: the shape of a kind must not depend on
+  // which list you are reading it in.
+  jar:       { icon: Package,        color: 'var(--text-muted)' },
+  // A bean is a named *instance*, not a type — so not a ring, which says "which kind of type".
+  bean:      { icon: Boxes,          color: 'var(--info)' },
+  action:    { icon: Route,          color: 'var(--warning)' },
+  relation:  { icon: Network,        color: 'var(--text-muted)' },
   typeparameter: { icon: Code2,      color: 'var(--text-muted)' },
   'type parameter': { icon: Code2,   color: 'var(--text-muted)' },
 };

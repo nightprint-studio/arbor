@@ -16,6 +16,13 @@ pub use crate::repo::{compare_versions, local_repository, sort_versions_desc, Co
 // What is in it.
 pub use crate::catalog::{Artifact, Catalog};
 
+// What is NOT in it yet — Central's metadata, parsed and cached. The GET belongs to the caller.
+pub use crate::central::{
+    cache_is_fresh, cache_path as central_cache_path, is_newer, is_prerelease,
+    latest_release as central_latest_release, metadata_url, parse_metadata, read_cache, write_cache,
+    Metadata, CENTRAL,
+};
+
 // The bundled table, for a machine whose repository cannot answer yet.
 pub use crate::known::{describe as describe_coordinate, LIBRARIES, PLUGINS};
 

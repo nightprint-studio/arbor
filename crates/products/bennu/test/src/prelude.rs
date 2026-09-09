@@ -6,7 +6,8 @@
 
 // Discovery: what in a file is a test, and where.
 pub use crate::discover::{
-    discover_in_source, discover_tests, TestClass, TestFramework, TestMethod, TEST_MARKERS,
+    discover_in_source, discover_tests, TestClass, TestFramework, TestMethod,
+    DYNAMIC_TEST_ANNOTATIONS, LIFECYCLE_ANNOTATIONS, TEST_MARKERS,
 };
 
 // Selection: the Maven command line for a chosen scope.

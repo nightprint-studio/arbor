@@ -169,6 +169,14 @@ pub(crate) fn open_and_start(
     // file's project through this, and a Cargo root that never registered made every caret-based
     // framework query on it answer "no project owns this file" — see `frameworks::register_root`.
     crate::frameworks::register_root(&args.root);
+    // The Spring extension needs classpath type names to complete a class written as a string
+    // (`@ConditionalOnClass(name = "…")`), and it cannot have them — a class name is a fact about
+    // the classpath, not about Spring. Installed here, once, as a live lookup rather than a
+    // snapshot: the index rebuilds and the answer has to rebuild with it.
+    crate::frameworks::set_spring_class_names(
+        &args.root,
+        std::sync::Arc::new(ProjectClassNames { root: args.root.replace('\\', "/") }),
+    );
 
     // Retention, off-thread. Opening a project is the one moment that is already slow for
     // other reasons and happens once per session — which is exactly what a policy that
@@ -526,4 +534,21 @@ fn bennu_move_to_package(_ctx: &BennuState, args: MoveToPackageArgs) -> Result<M
     std::fs::rename(src_path, &target).map_err(|e| format!("move file: {e}"))?;
 
     Ok(MoveResult { new_path: target.to_string_lossy().replace('\\', "/") })
+}
+
+/// The project's classpath type names, as the Spring extension's [`ClassNameSource`].
+///
+/// Holds the ROOT and not the provider: a provider is replaced every time the index rebuilds, and
+/// a source pinned to one would go on completing from the classpath the project had when it was
+/// opened.
+///
+/// [`ClassNameSource`]: bennu_spring::prelude::ClassNameSource
+struct ProjectClassNames {
+    root: String,
+}
+
+impl bennu_spring::prelude::ClassNameSource for ProjectClassNames {
+    fn matching(&self, typed: &str, limit: usize) -> Vec<String> {
+        IndexService::global().type_name_matches(&self.root, typed, limit)
+    }
 }

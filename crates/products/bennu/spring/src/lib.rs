@@ -43,6 +43,10 @@
 pub mod beans;
 // The curated stand-in used until the jars' own metadata is available.
 pub mod builtin_meta;
+
+/// Where a Spring annotation names a **type as a string** — the one rule behind its colour, its
+/// go-to and its completion.
+pub mod class_ref;
 // `@ConfigurationProperties` → the full key each bound field binds (nesting, maps, lists, renames).
 pub mod config_props;
 pub mod endpoints;

@@ -57,6 +57,13 @@ pub struct RawDependency {
     /// Byte offset of the `<dependency>` tag, and its 1-based line.
     pub offset: usize,
     pub line: u32,
+    /// Byte span of the **text inside** `<version>` — not the element, the value. `None` when the
+    /// pom declares no version at all (a managed dependency), which is the case where there is
+    /// nothing to replace and an offer to update would have nowhere to write.
+    ///
+    /// Trimmed the same way [`version`](Self::version) is, so `<version> 1.2 </version>` yields the
+    /// span of `1.2` and replacing it leaves the surrounding whitespace alone.
+    pub version_span: Option<(usize, usize)>,
 }
 
 impl RawDependency {
@@ -257,6 +264,30 @@ impl<'a> Doc<'a> {
         self.child(i, name).map(|c| self.text(c)).unwrap_or_default()
     }
 
+    /// The byte span of the trimmed text content of the element opened at `i`, or `None` when it
+    /// has none — the writable half of [`text`](Self::text), for a caller that wants to replace a
+    /// value rather than read it.
+    ///
+    /// Same trimming, deliberately: two functions that disagree about where a value starts is how a
+    /// replacement lands one space to the left of what was read.
+    fn text_span(&self, i: usize) -> Option<(usize, usize)> {
+        let close = self.close_of(i)?;
+        let (start, end) = (self.scan.tags[i].end, self.scan.tags[close].start);
+        if start > end || end > self.source.len() {
+            return None;
+        }
+        let raw = &self.source[start..end];
+        if raw.contains('<') {
+            return None;
+        }
+        let lead = raw.len() - raw.trim_start().len();
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        Some((start + lead, start + lead + trimmed.len()))
+    }
+
     /// The index of the close tag that ends the element opened at `i`.
     fn close_of(&self, i: usize) -> Option<usize> {
         if self.scan.tags[i].kind != TagKind::Open {
@@ -302,6 +333,7 @@ impl<'a> Doc<'a> {
             profile: profile.to_string(),
             offset: tag.start,
             line: line_at(self.source, tag.start),
+            version_span: self.child(i, "version").and_then(|c| self.text_span(c)),
         }
     }
 
@@ -483,4 +515,36 @@ mod tests {
         let absent = parse("<project><parent><artifactId>p</artifactId></parent></project>");
         assert_eq!(absent.parent.unwrap().relative_path, None);
     }
+    #[test]
+    fn the_version_span_is_the_value_and_not_the_element() {
+        let src = "<project><dependencies><dependency>\
+<groupId>g</groupId><artifactId>a</artifactId><version>1.2.3</version>\
+</dependency></dependencies></project>";
+        let pom = parse(src);
+        let (s, e) = pom.dependencies[0].version_span.expect("a literal version has a span");
+        assert_eq!(&src[s..e], "1.2.3");
+    }
+
+    #[test]
+    fn a_padded_version_spans_only_what_was_read() {
+        // The two must agree: a span wider than the text is a replacement that eats the whitespace
+        // the file was formatted with.
+        let src = "<project><dependencies><dependency>\
+<artifactId>a</artifactId><version>\n      4.0.1\n    </version>\
+</dependency></dependencies></project>";
+        let pom = parse(src);
+        let d = &pom.dependencies[0];
+        let (s, e) = d.version_span.unwrap();
+        assert_eq!(&src[s..e], "4.0.1");
+        assert_eq!(d.version, "4.0.1");
+    }
+
+    #[test]
+    fn a_managed_dependency_has_no_version_to_replace() {
+        let src = "<project><dependencies><dependency>\
+<groupId>g</groupId><artifactId>a</artifactId>\
+</dependency></dependencies></project>";
+        assert_eq!(parse(src).dependencies[0].version_span, None);
+    }
+
 }

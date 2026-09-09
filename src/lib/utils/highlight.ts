@@ -233,3 +233,55 @@ export function highlightJsonChunk(
 
   return { html: out.join(''), nextPos: i };
 }
+
+// ── The DOM variant ──────────────────────────────────────────────────────────────
+
+/**
+ * The same grammars as {@link highlightCode}, emitted as **DOM** instead of an HTML string.
+ *
+ * For the one caller that must not produce markup at all: the hover card, whose whole contract is
+ * that a doc comment out of somebody's jar is data and never something the page runs. `Prism.highlight`
+ * builds a string, and a string has to be handed to `innerHTML` to become anything — so this uses
+ * `Prism.tokenize`, the same pass one layer down, and walks the token tree into elements whose text
+ * arrives through `textContent`. The class names are Prism's own (`token <type>`), so the colours are
+ * the ones `app.css` already defines and a code block in a tooltip matches one in a rendered `.md`.
+ *
+ * A language Prism does not know — including the project's hand-written grammars in
+ * `prism-languages/`, which produce HTML rather than tokens — comes back as one plain text node.
+ * Uncoloured is the honest failure here; guessing at a grammar would paint half a block as a string.
+ */
+export function highlightToDom(text: string, language?: string | null): DocumentFragment {
+  const frag = document.createDocumentFragment();
+  const grammar = language ? Prism.languages[language] : undefined;
+  if (!grammar) {
+    frag.appendChild(document.createTextNode(text));
+    return frag;
+  }
+  try {
+    appendTokens(frag, Prism.tokenize(text, grammar));
+  } catch {
+    frag.textContent = text;
+  }
+  return frag;
+}
+
+/** One level of Prism's token tree. `content` is a string, a token, or an array of either. */
+function appendTokens(parent: Node, tokens: unknown): void {
+  const list = Array.isArray(tokens) ? tokens : [tokens];
+  for (const t of list) {
+    if (typeof t === 'string') {
+      parent.appendChild(document.createTextNode(t));
+      continue;
+    }
+    const token = t as { type?: string; alias?: string | string[]; content?: unknown };
+    if (token?.type === undefined) {
+      parent.appendChild(document.createTextNode(String(t ?? '')));
+      continue;
+    }
+    const span = document.createElement('span');
+    const alias = Array.isArray(token.alias) ? token.alias.join(' ') : (token.alias ?? '');
+    span.className = `token ${token.type}${alias ? ` ${alias}` : ''}`;
+    appendTokens(span, token.content);
+    parent.appendChild(span);
+  }
+}

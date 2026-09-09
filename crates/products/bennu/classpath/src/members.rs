@@ -246,6 +246,11 @@ impl<S: crate::source::ClassSource> SourceMemberIndex<S> {
     pub fn source(&self) -> &S {
         &self.source
     }
+
+    /// The archive `binary_name` came out of — see [`ClassSource::origin`].
+    pub fn origin(&self, binary_name: &str) -> Option<std::path::PathBuf> {
+        self.source.origin(binary_name)
+    }
 }
 
 impl<S: crate::source::ClassSource> MemberIndex for SourceMemberIndex<S> {
@@ -269,6 +274,13 @@ impl crate::source::ClassSource for Box<dyn crate::source::ClassSource> {
     }
     fn class_names(&self) -> Vec<String> {
         (**self).class_names()
+    }
+    // ⚠️ EVERY method of the trait has to be forwarded here, and a defaulted one is the trap:
+    // leaving `origin` out compiles, because the trait supplies a default — so the box silently
+    // answers `None` instead of asking what it wraps, and the whole chain behind it goes quiet
+    // with nothing to read. The dependency tier is reached through exactly one of these boxes.
+    fn origin(&self, binary_name: &str) -> Option<std::path::PathBuf> {
+        (**self).origin(binary_name)
     }
 }
 
@@ -903,4 +915,40 @@ mod tests {
             vec!["java/io/IOException".to_string()],
         );
     }
+    // ── the boxed source has to forward EVERY method, defaults included ────────────────────────
+
+    /// A source that knows where one class lives — the only thing the test is about.
+    struct Located;
+
+    impl crate::source::ClassSource for Located {
+        fn class_bytes(&self, _binary_name: &str) -> Result<Option<Vec<u8>>, String> {
+            Ok(None)
+        }
+        fn origin(&self, binary_name: &str) -> Option<std::path::PathBuf> {
+            (binary_name == "org/acme/Thing").then(|| std::path::PathBuf::from("/m2/acme/thing.jar"))
+        }
+    }
+
+    /// The failure this locks is silent by construction: `origin` has a default on the trait, so a
+    /// `Box` forwarding impl that omits it **compiles** and answers `None` — and every caller
+    /// behind the box (the whole dependency tier is reached through one) goes quiet with no error
+    /// to read anywhere. A compiler that cannot warn about it is a test's job.
+    #[test]
+    fn a_boxed_source_forwards_origin_and_does_not_take_the_default() {
+        use crate::source::ClassSource;
+        let boxed: Box<dyn ClassSource> = Box::new(Located);
+        assert_eq!(
+            boxed.origin("org/acme/Thing"),
+            Some(std::path::PathBuf::from("/m2/acme/thing.jar")),
+            "the box answered for itself instead of asking what it wraps"
+        );
+        assert_eq!(boxed.origin("org/acme/Other"), None);
+    }
+
+    #[test]
+    fn a_source_member_index_asks_the_source_it_wraps() {
+        let idx = SourceMemberIndex::new(Box::new(Located) as Box<dyn crate::source::ClassSource>);
+        assert_eq!(idx.origin("org/acme/Thing"), Some(std::path::PathBuf::from("/m2/acme/thing.jar")));
+    }
+
 }

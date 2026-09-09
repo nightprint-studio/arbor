@@ -475,6 +475,22 @@ impl SemanticEngine {
         )
     }
 
+    /// How many places use **every declaration** in one buffer — the counts drawn above a file's
+    /// members, and the greying-out of the ones nothing reaches.
+    ///
+    /// One parse and a lookup per declaration, rather than [`Self::find_usages`] thirty times: that
+    /// one classifies a caret through the resolver, which is the right price for a keystroke and
+    /// the wrong one for a whole file.
+    ///
+    /// Same wiring as [`Self::safe_delete`], and for the same reason — the `policy` resolver is
+    /// what knows an override of a library method is reached from outside the project. With the
+    /// walk resolver here, a file would come back with every `toString` greyed out.
+    pub fn usage_marks(&self, source: &str) -> Vec<crate::usage_marks::UsageMark> {
+        let Some(policy) = self.full_policy() else { return Vec::new() };
+        let live = self.live();
+        crate::usage_marks::usage_marks(&live.index, source, &*policy, &live.subtypes)
+    }
+
     /// The binary name of the **type** declared at `file`:`offset`, if the caret is on one.
     ///
     /// The classification half of a rename, on its own. It costs an index + resolver lookup and
@@ -674,7 +690,23 @@ impl SemanticEngine {
         };
         // How many arguments the call under the caret passes — what tells two overloads apart.
         let argc = bennu_java::prelude::call_arity_at(source, offset);
-        let mut info = hover_for_key(&key, &*self.resolver, argc);
+        // The FULL resolver when there is one, and not the walk's.
+        //
+        // The walk resolver is project-only by design (see `for_project`), so `members_of` on
+        // anything from a jar answers `None` — and every question the card asks it then falls back:
+        // `@Bean` was reported as a **class** because "is it an annotation" is read off the class
+        // flags, and a library member's signature was the synthesized `name(…)` for the same
+        // reason. It is the same trap rename and safe delete document, arriving here as a card
+        // that calls every library type a class.
+        //
+        // Cost is one memoized `members_of` on a card that already reads an archive off disk to
+        // find the library's Javadoc.
+        let policy = self.full_policy();
+        let resolver: &dyn TypeResolver = match policy.as_deref() {
+            Some(full) => full,
+            None => &*self.resolver,
+        };
+        let mut info = hover_for_key(&key, resolver, argc);
         // Best-effort: attach the leading Javadoc of the PROJECT declaration this key
         // resolves to (None for a classpath-only / JDK symbol we can't read the source of).
         info.doc = self.project_doc_for_key(&key);

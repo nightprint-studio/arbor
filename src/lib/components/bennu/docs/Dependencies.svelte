@@ -29,6 +29,13 @@
   <code>mvnw</code> wrapper.
 </p>
 <p>
+  <strong>A pom that changes re-resolves by itself.</strong> Saving one — adding a dependency,
+  bumping a version — has the classpath resolved again and the index rebuilt behind it, a few
+  seconds later, without anything being pressed. It waits for the file to settle first, so a save
+  in the middle of an edit does not start a rebuild against half a
+  <code>&lt;dependency&gt;</code>.
+</p>
+<p>
   The panel's header carries the three things that change what is <em>on disk</em>, as opposed to
   the refresh beside them which only re-reads it. All three are background jobs and report in the
   Jobs panel.
@@ -39,7 +46,7 @@
     <div class="fc-desc">
       Drops the cached classpath, re-reads the local repository, and reindexes. The two halves of
       "make the editor agree with what is on disk" — doing either alone leaves you with the other's
-      stale answer.
+      stale answer. Rarely needed by hand: saving a pom does it on its own.
     </div>
   </div>
   <div class="fc-item">

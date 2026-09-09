@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bennu_index::prelude::SymbolKind;
+use bennu_java::prelude::{AnnotationSite, ElementTarget, TypeResolver};
+
+use crate::import_census::ImportCensus;
 use bennu_proto::prelude::{CompletionItem, Diagnostic};
 
 use bennu_classpath::prelude::ClassSource;
@@ -556,6 +559,10 @@ pub struct NativeJavaProvider {
     /// lambdas) for a JDK type instead of a signatures-only stub. `None` on a bare-JRE / no-sources
     /// install (→ stub) and on the pre-index provider.
     jdk_sources: Option<bennu_classpath::prelude::JavaSourceZip>,
+    /// How often each type is imported across the project — the strongest ranking term for a
+    /// simple name that resolves to several types, and the only one this index can supply.
+    /// Empty for the pre-index provider, and empty is simply "no opinion". See [`ImportCensus`].
+    imports: Arc<ImportCensus>,
 }
 
 impl std::fmt::Debug for NativeJavaProvider {
@@ -582,10 +589,82 @@ impl NativeJavaProvider {
         }
     }
 
+    /// Give the provider the project's import census — see [`ImportCensus`].
+    ///
+    /// Builder-style rather than a parameter of [`for_project`](Self::for_project), because it
+    /// arrives from a different place: the census falls out of the index build, and the provider is
+    /// constructed from the *persisted* index afterwards, twice. A parameter would have to be
+    /// threaded through both constructions and every test that calls one.
+    pub fn with_imports(mut self, census: Arc<ImportCensus>) -> Self {
+        self.imports = census;
+        self
+    }
+
     /// Candidate importable FQNs (dotted, sorted) for a simple type name — the "Import class"
     /// intention's picker list. Empty for the pre-index provider or an unknown name.
     pub fn import_candidates(&self, simple: &str) -> &[String] {
         self.class_names.candidates(simple)
+    }
+
+    /// The **dependency jar** `binary` was decoded from, when a dependency declares it.
+    ///
+    /// What a hover card needs to say which library a type comes from. Cheap enough to ask on
+    /// every tooltip and no cache is warranted: the jars are opened once when the classpath is
+    /// resolved and each holds its central directory in memory from then on, so this is one hash
+    /// probe per jar and no I/O — against a card that already reads a file from disk to find the
+    /// declaration's Javadoc.
+    ///
+    /// A **path**, not a coordinate: turning `…/org/springframework/spring-core/6.1.14/…jar` into
+    /// `org.springframework:spring-core:6.1.14` is a fact about a Maven repository's layout, and
+    /// this crate does not know about Maven. The caller that does converts it.
+    pub fn origin_jar(&self, binary: &str) -> Option<std::path::PathBuf> {
+        self.resolver.as_deref()?.jdk_index().origin_of(binary)
+    }
+
+    /// What a type **is** — `class` / `interface` / `enum` / `record` / `annotation` — read off the
+    /// class flags through whichever tier owns it. `None` when the name resolves to nothing.
+    ///
+    /// The kind of a JDK type has no other source: there is no jar to re-open on a modern JDK, and
+    /// the member index this asks is already built and already holding the answer.
+    pub fn type_kind(&self, binary: &str) -> Option<String> {
+        use bennu_java::prelude::TypeResolver; // brings `members_of` into scope
+        let resolver = self.resolver.as_deref()?;
+        let name = resolver.bytecode_name(binary);
+        resolver.members_of(&name)?; // resolves, or there is nothing honest to say
+        // The SAME flags→kind rule the hover card uses, rather than a second reading of the same
+        // five booleans — the two would drift the first time a language adds a kind.
+        Some(
+            crate::rename::hover_for_key(
+                &crate::refs::DeclKey::Type { binary: name },
+                resolver,
+                None,
+            )
+            .kind,
+        )
+    }
+
+    /// Type names on the classpath matching what has been typed, as dot-form FQNs, best first.
+    ///
+    /// The index behind it is the one "Import class" already uses — JDK, dependencies and the
+    /// project's own types in one axis — so a caller does not have to know which tier a name lives
+    /// in, which is exactly the question a user completing a class name does not want to answer.
+    pub fn type_name_matches(&self, typed: &str, limit: usize) -> Vec<String> {
+        // A qualified prefix (`org.springframework.web.`) matches on the WHOLE name; a bare one
+        // matches on the simple name, which is what people type.
+        let simple_typed = typed.rsplit('.').next().unwrap_or(typed);
+        let mut out: Vec<String> = Vec::new();
+        for simple in self.class_names.matches_for_prefix(simple_typed, limit * 4) {
+            for fqn in self.class_names.candidates(simple) {
+                if typed.contains('.') && !fqn.starts_with(typed) {
+                    continue;
+                }
+                out.push(fqn.clone());
+                if out.len() >= limit {
+                    return out;
+                }
+            }
+        }
+        out
     }
 
     /// Whether `binary` names a PROJECT source type (not the JDK / a dependency). Used by the
@@ -601,7 +680,7 @@ impl NativeJavaProvider {
     /// Type-name completion candidates at `offset` in `text`: distinct simple type names from the
     /// class-name index whose name starts with the capitalised prefix under the caret. Empty unless
     /// the caret is on a bare identifier (NOT after a `.`) whose first char is uppercase.
-    fn type_completions(&self, text: &str, offset: usize) -> Vec<CompletionItem> {
+    fn type_completions(&self, text: &str, offset: usize, census: bool) -> Vec<CompletionItem> {
         const MAX: usize = 50;
         let (ident_start, prefix) = ident_prefix(text, offset);
         // A type reference starts with an uppercase letter; requiring it keeps the list focused and
@@ -618,8 +697,16 @@ impl NativeJavaProvider {
         if is_member_access(text, ident_start) {
             return Vec::new();
         }
-        self.class_names
-            .matches_for_prefix(&prefix, MAX)
+        // The name index ranks by how well the name matches. What it cannot know is which of two
+        // equally-matching names is the one *this file* is likely to mean — see `proximity`, which
+        // is the difference between `Order` offering your own `Order` and offering `java.awt`'s.
+        //
+        // A stable sort, so the index's match tiers survive intact and this only reorders inside
+        // them. It is a tie-break, not a second opinion about the prefix.
+        let here = Proximity::of(text, census.then_some(&*self.imports));
+        let mut ranked: Vec<&str> = self.class_names.matches_for_prefix(&prefix, MAX);
+        ranked.sort_by_key(|simple| here.rank(self.class_names.candidates(simple)));
+        ranked
             .into_iter()
             .map(|simple| {
                 let candidates = self.class_names.candidates(simple);
@@ -633,6 +720,76 @@ impl NativeJavaProvider {
                     auto_import: single_import_candidate(candidates),
                     ..Default::default()
                 }
+            })
+            .collect()
+    }
+
+    /// The **annotation types** whose name starts with what has been typed after an `@`.
+    ///
+    /// Two narrowings, and the first is the one that matters. `@` says the name is an annotation
+    /// type, which cuts the candidate set by two orders of magnitude — and until this existed the
+    /// popup above an `@` offered every class in the project, which is a list with the answer
+    /// buried in it at the one moment the answer was nearly knowable.
+    ///
+    /// The second is `@Target`: an annotation declares what it may be attached to, so above a field
+    /// the ones that only go on a method are not candidates. That one **ranks** rather than filters,
+    /// because "the resolver did not read a `@Target`" and "it has none" arrive as the same empty
+    /// answer, and hiding on the strength of it would hide every annotation from a jar whose
+    /// bytes were not decoded.
+    fn annotation_completions(
+        &self,
+        text: &str,
+        site: &AnnotationSite,
+        census: bool,
+    ) -> Vec<CompletionItem> {
+        const MAX: usize = 40;
+        // A wider sweep than is offered, because most of what a prefix matches is an ordinary class
+        // and will be dropped. Bounded all the same: the filter costs a resolver lookup per name.
+        const CONSIDERED: usize = 300;
+        let Some(resolver) = self.resolver.as_deref() else { return Vec::new() };
+        if site.prefix.is_empty() && site.target == ElementTarget::Unknown {
+            // A bare `@` with nothing else written is every annotation in the world, in no order
+            // anyone would want. One letter is enough to make the list mean something.
+            return Vec::new();
+        }
+        let here = Proximity::of(text, census.then_some(&*self.imports));
+        let mut scored: Vec<(u8, Rank, String, Option<String>)> = Vec::new();
+        for simple in self.class_names.matches_for_prefix(&site.prefix, CONSIDERED) {
+            let candidates = self.class_names.candidates(simple);
+            let annotations: Vec<String> = candidates
+                .iter()
+                .filter(|fqn| is_annotation_type(resolver, fqn))
+                .cloned()
+                .collect();
+            let Some(first) = annotations.first() else { continue };
+            // Legal here, by its own `@Target`. Ranked ahead rather than kept alone — see above.
+            let fits = annotations.iter().any(|fqn| {
+                let binary = fqn.replace('.', "/");
+                let target = resolver
+                    .class_annotations(&binary)
+                    .into_iter()
+                    .find(|a| a.name == "Target")
+                    .map(target_text_of)
+                    .unwrap_or_default();
+                bennu_java::prelude::target_admits(&target, site.target)
+            });
+            scored.push((
+                u8::from(!fits),
+                here.rank(&annotations),
+                simple.to_string(),
+                single_import_candidate(&annotations).or_else(|| Some(first.clone())),
+            ));
+        }
+        scored.sort();
+        scored.truncate(MAX);
+        scored
+            .into_iter()
+            .map(|(_, _, simple, import)| CompletionItem {
+                label: simple,
+                kind: "annotation".to_string(),
+                detail: import.clone(),
+                auto_import: import.filter(|fqn| !fqn.starts_with("java.lang.")),
+                ..Default::default()
             })
             .collect()
     }
@@ -772,6 +929,9 @@ impl NativeJavaProvider {
             walk_resolver: walk,
             class_names,
             jdk_sources,
+            // Empty until the caller hands one over — see `with_imports`. Empty is "no opinion",
+            // which ranks exactly as the census being switched off does.
+            imports: Arc::default(),
         })
     }
 
@@ -837,6 +997,10 @@ impl NativeJavaProvider {
                 // One small archive, re-opened rather than shared: `JavaSourceZip` is not behind an
                 // `Arc`, and one file is not what the descriptor budget is spent on.
                 jdk_sources: bennu_classpath::prelude::resolve_jdk_sources(jdk_version),
+                // Carried, not recomputed: the census is a fact about the project's sources, and
+                // the dependency tier changes what is on the classpath rather than what the
+                // project imports. Rebuilding it here would mean re-reading every file.
+                imports: Arc::clone(&self.imports),
             })
         })())
     }
@@ -950,7 +1114,17 @@ fn static_import_type(imports: &[bennu_java::prelude::Import], name: &str) -> Op
         if resolver.is_project_type(&binary) {
             return None;
         }
-        Some(binary)
+        // Asked in this order on purpose. `is_project_type` wants the **project's** spelling of a
+        // nested type (`pkg/Outer/Inner`, which is what its index files), and everything downstream
+        // of here wants the **bytecode's** (`pkg/Outer$Inner`, which is what a jar holds): the
+        // decompiled view writes this name into its `package` line, and "Download sources" probes
+        // each jar's central directory for it literally. A dotted name reaches here with every
+        // separator turned into a slash — right for a top-level type and wrong for every nested one
+        // — and the mistake was invisible because reading a nested type's MEMBERS retries the `$`
+        // form internally. So the members were real and the name was not: `DefaultParts.FluxContent`
+        // opened a stub declaring `package …multipart.DefaultParts;`, and its Download sources said
+        // no dependency jar contained the type. Truthfully, about a name nothing had.
+        Some(resolver.bytecode_name(&binary))
     }
 
     /// The REAL `.java` source for `binary` from the JDK's `src.zip` (method bodies, loops, locals,
@@ -1607,11 +1781,144 @@ fn type_detail(fqns: &[String]) -> Option<String> {
     }
 }
 
-impl IntelProvider for NativeJavaProvider {
-    fn completion(
+
+// ── which of two equally-matching names this file probably meant ─────────────────────────────
+
+/// What the buffer says about which package the caret lives in, and what the project says about
+/// which candidate it usually means.
+///
+/// The ranking terms the name index cannot supply. It knows how well a name matches what was typed
+/// and whether the project declares it — which is right, and which leaves `Order` in a Spring
+/// project offering `java.awt`'s neighbours above the `Order` three files away.
+///
+/// ## Two questions, and they are not the same question
+///
+/// **Certainty** is what *this file* has already said. If it imports `it.acme.model.Order`, there
+/// is nothing to rank: the file named the one it means. Its own package and a wildcard it imports
+/// are the same kind of fact, one step weaker. Nothing may outrank these — not popularity, not
+/// anything — because they are not evidence about the answer, they *are* the answer.
+///
+/// **Everything else** is weighed. Two terms:
+///
+/// * **distance**, by shared package segments, then the JDK, then the rest of the classpath;
+/// * **popularity**, from [`ImportCensus`] — how many files in this project import that exact type.
+///
+/// They are combined rather than ordered, and that is the whole design decision. Ordering distance
+/// first would mean a `it.acme.model.List` nobody has ever imported permanently outranking the
+/// `java.util.List` written in four hundred files, purely for sharing two package segments —
+/// which is the case the census exists for. Ordering popularity first would let one import
+/// anywhere beat a sibling package. So popularity is worth [`POPULARITY_WEIGHT`] points a band,
+/// which is enough for real evidence to cross the distance tiers and not enough for weak evidence
+/// to.
+///
+/// With the census off, every popularity is zero and this degrades exactly to distance — the
+/// counts are not consulted at all rather than consulted with a smaller weight.
+struct Proximity<'a> {
+    /// The package the buffer declares, dotted. Empty for the default package.
+    package: String,
+    /// The FQNs this file imports, plus its `.*` imports as written.
+    imported: Vec<String>,
+    /// The project's import census, or `None` when the setting is off.
+    census: Option<&'a ImportCensus>,
+}
+
+/// What one band of [`ImportCensus::popularity`] is worth against distance.
+///
+/// Eight bands at four points each is a 28-point swing over a distance range of 10..40 — sized so
+/// a type this project leans on can cross from the far end, and one imported once or twice cannot
+/// cross from anywhere.
+const POPULARITY_WEIGHT: i32 = 4;
+
+/// How near a candidate is, lower first: the certainty tier, then the weighed score within it.
+type Rank = (u8, i32);
+
+impl<'a> Proximity<'a> {
+    fn of(text: &str, census: Option<&'a ImportCensus>) -> Self {
+        let symbols = bennu_java::prelude::extract_symbols(text);
+        Self {
+            package: symbols.package.unwrap_or_default(),
+            imported: symbols.imports.into_iter().map(|i| i.path).collect(),
+            census,
+        }
+    }
+
+    /// A sort key over a simple name's candidate FQNs — **lower is nearer**. The name is ranked by
+    /// its nearest candidate: one good reading is what makes a name worth offering.
+    fn rank(&self, candidates: &[String]) -> Rank {
+        candidates.iter().map(|fqn| self.rank_one(fqn)).min().unwrap_or((u8::MAX, i32::MAX))
+    }
+
+    fn rank_one(&self, fqn: &str) -> Rank {
+        if self.imported.iter().any(|i| i == fqn) {
+            return (0, 0);
+        }
+        let package = fqn.rsplit_once('.').map(|(p, _)| p).unwrap_or("");
+        // The file wildcard-imports the package — it named it, one step less specifically. The
+        // import's `path` is already written without the `.*` (see `Import::star`).
+        if self.imported.iter().any(|i| i == package) {
+            return (1, 0);
+        }
+        if package == self.package {
+            return (2, 0);
+        }
+        // Nearer the more of the package chain is shared, so a sibling beats a cousin. Bounded at
+        // eight segments, which is deeper than any package anybody navigates.
+        let shared = shared_segments(&self.package, package).min(8) as i32;
+        let distance = if shared > 0 {
+            10 + (8 - shared)
+        } else if fqn.starts_with("java.") || fqn.starts_with("javax.") {
+            // Not because the JDK is special, but because a name matching both a JDK type and
+            // something in a jar nobody here has opened is, overwhelmingly, the JDK one.
+            30
+        } else {
+            40
+        };
+        let popularity = self.census.map_or(0, |c| c.popularity(fqn)) as i32;
+        (3, distance - popularity * POPULARITY_WEIGHT)
+    }
+}
+
+/// How many leading dot-separated segments two package names share.
+fn shared_segments(a: &str, b: &str) -> usize {
+    a.split('.').zip(b.split('.')).take_while(|(x, y)| x == y && !x.is_empty()).count()
+}
+
+/// Whether `fqn` names an annotation type, according to the resolver that can read its flags.
+///
+/// `false` when the type cannot be resolved at all, which is the direction that shows *fewer*
+/// wrong things: an unreadable type offered above an `@` is a name that will not compile there.
+fn is_annotation_type(resolver: &dyn TypeResolver, fqn: &str) -> bool {
+    resolver
+        .members_of(&fqn.replace('.', "/"))
+        .is_some_and(|m| m.flags.is_annotation)
+}
+
+/// The raw source of a `@Target(...)`'s argument, however it was written — `@Target(METHOD)`,
+/// `@Target({METHOD, FIELD})` and `@Target(value = METHOD)` all reach here.
+fn target_text_of(target: bennu_java::prelude::Annotation) -> String {
+    if let Some(first) = target.positional.first() {
+        return first.clone();
+    }
+    target
+        .args
+        .iter()
+        .find(|(k, _)| k == "value")
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default()
+}
+
+impl NativeJavaProvider {
+    /// Completion at `at`, saying whether the **import census** may order the answer.
+    ///
+    /// The flag is a parameter and not a field because it is a *setting*, read per request: a
+    /// switch that took effect at the next index build would stop counting immediately in one
+    /// direction and go on ranking by stale counts in the other. Off means the census is not
+    /// consulted at all — not consulted with a lower weight.
+    pub fn complete_at(
         &self,
         at: &Position,
         source: Option<&str>,
+        census: bool,
     ) -> Result<Vec<CompletionItem>, IntelError> {
         // No index yet (pre-open / still building) → benign empty, not an error.
         let Some(resolver) = self.resolver.as_deref() else {
@@ -1656,10 +1963,29 @@ impl IntelProvider for NativeJavaProvider {
         if !qualified.is_empty() {
             return Ok(qualified);
         }
+        // An `@` narrows the legal names harder than anything else in Java — from every type on the
+        // classpath to the annotation types on it — so it gets its own answer rather than being
+        // left to the general type-name path, which offered every class in the project above an
+        // `@`. See `annotation_completions`.
+        if let Some(site) = bennu_java::prelude::annotation_site(text, offset) {
+            return Ok(self.annotation_completions(text, &site, census));
+        }
         // Otherwise TYPE-NAME completion, when the caret sits on a bare, capitalised identifier
         // prefix (not a member access after a `.`). Selecting a name inserts it; the "Import class"
         // intention (Alt+Enter) then adds the import.
-        Ok(self.type_completions(text, offset))
+        Ok(self.type_completions(text, offset, census))
+    }
+}
+
+impl IntelProvider for NativeJavaProvider {
+    /// The seam's completion: the census on, which is its default. A caller that has read the
+    /// setting calls [`complete_at`](NativeJavaProvider::complete_at) instead.
+    fn completion(
+        &self,
+        at: &Position,
+        source: Option<&str>,
+    ) -> Result<Vec<CompletionItem>, IntelError> {
+        self.complete_at(at, source, true)
     }
 
     fn hover(&self, _at: &Position) -> Result<Option<String>, IntelError> {
@@ -2611,6 +2937,148 @@ mod same_package_tests {
         assert!(names_object_as_a_type_argument(&collector));
         // A plain `Object` that is the type ITSELF is not a captured argument and stays writable.
         assert!(!names_object_as_a_type_argument(&TypeRef::simple("java/lang/Object")));
+    }
+
+}
+
+// ── which of two equally-matching names this file probably meant ──────────────────────────
+
+mod proximity_tests {
+    use super::{shared_segments, Proximity};
+
+    const FILE: &str = "package it.acme.web;\n\
+                        import it.acme.model.Order;\n\
+                        import java.util.*;\n\
+                        class Ctl {}\n";
+
+    fn nearer(file: &str, a: &str, b: &str) -> bool {
+        let p = Proximity::of(file, None);
+        p.rank(&[a.to_string()]) < p.rank(&[b.to_string()])
+    }
+
+    #[test]
+    fn what_the_file_already_imports_wins_outright() {
+        // The file said which `Order` it means. There is nothing left to rank.
+        assert!(nearer(FILE, "it.acme.model.Order", "java.awt.Order"));
+        assert_eq!(Proximity::of(FILE, None).rank(&["it.acme.model.Order".into()]).0, 0);
+    }
+
+    #[test]
+    fn a_wildcard_import_is_the_file_naming_the_package() {
+        assert!(nearer(FILE, "java.util.List", "org.other.List"));
+    }
+
+    #[test]
+    fn the_file_s_own_package_needs_no_import_and_ranks_accordingly() {
+        assert!(nearer(FILE, "it.acme.web.Helper", "org.apache.Helper"));
+    }
+
+    #[test]
+    fn a_sibling_package_beats_a_cousin_and_both_beat_a_stranger() {
+        assert!(nearer(FILE, "it.acme.web.dto.Row", "it.other.Row"));
+        assert!(nearer(FILE, "it.acme.batch.Row", "org.apache.Row"));
+    }
+
+    #[test]
+    fn the_jdk_beats_a_jar_nobody_here_has_named() {
+        assert!(nearer(FILE, "java.time.Duration", "org.joda.Duration"));
+    }
+
+    #[test]
+    fn a_name_is_ranked_by_its_nearest_candidate() {
+        // `List` resolves to both `java.util` (wildcard-imported here) and somewhere far away.
+        // The near one is what makes the name near.
+        let p = Proximity::of(FILE, None);
+        let both = ["org.far.List".to_string(), "java.util.List".to_string()];
+        assert_eq!(p.rank(&both), p.rank(&["java.util.List".to_string()]));
+    }
+
+    #[test]
+    fn a_file_in_the_default_package_shares_nothing_with_anyone() {
+        // The empty package must not read as a prefix of every package there is.
+        let p = Proximity::of("class A {}\n", None);
+        assert_eq!(p.rank(&["org.apache.Thing".into()]), p.rank(&["it.acme.Thing".into()]));
+    }
+
+    #[test]
+    fn shared_segments_counts_whole_segments_and_not_characters() {
+        assert_eq!(shared_segments("it.acme.web", "it.acme.model"), 2);
+        assert_eq!(shared_segments("it.acme", "it.acmerie"), 1);
+        assert_eq!(shared_segments("", "it.acme"), 0);
+    }
+    // ── and when the project's own imports overrule the distance ──────────────────────────────
+
+    /// A census in which `fqn` is imported by `times` files.
+    fn used(fqn: &str, times: usize) -> crate::import_census::ImportCensus {
+        let mut c = crate::import_census::ImportCensus::default();
+        let file = bennu_java::prelude::extract_symbols(&format!("package p;\nimport {fqn};\n"));
+        for _ in 0..times {
+            c.add_file(&file);
+        }
+        c
+    }
+
+    fn nearer_with(
+        census: &crate::import_census::ImportCensus,
+        file: &str,
+        a: &str,
+        b: &str,
+    ) -> bool {
+        let p = Proximity::of(file, Some(census));
+        p.rank(&[a.to_string()]) < p.rank(&[b.to_string()])
+    }
+
+    #[test]
+    fn a_type_the_project_leans_on_beats_a_near_one_nobody_imports() {
+        // The case the census exists for. Without it `it.acme.model.List` wins on a shared package
+        // prefix alone — a class nobody has ever imported, above the `List` written in 400 files.
+        //
+        // A fixture with no `java.util` wildcard on purpose: with one, `java.util.List` wins on
+        // certainty and the two terms being measured here never come into it.
+        const PLAIN: &str = "package it.acme.web;\nclass Ctl {}\n";
+        let c = used("java.util.List", 400);
+        assert!(nearer_with(&c, PLAIN, "java.util.List", "it.acme.model.List"));
+        // And with the census off the near one wins again — the counts are not consulted at all,
+        // which is the whole promise of the switch.
+        assert!(nearer(PLAIN, "it.acme.model.List", "java.util.List"));
+    }
+
+    #[test]
+    fn a_jar_this_project_lives_in_beats_a_near_name_nobody_uses() {
+        let c = used("org.apache.commons.lang3.StringUtils", 300);
+        assert!(nearer_with(
+            &c,
+            FILE,
+            "org.apache.commons.lang3.StringUtils",
+            "it.acme.model.StringUtils",
+        ));
+    }
+
+    #[test]
+    fn one_import_somewhere_is_not_enough_to_cross_a_package() {
+        // Weak evidence must not move anything: a type imported once may well be the mistake.
+        let c = used("org.random.Row", 1);
+        assert!(nearer_with(&c, FILE, "it.acme.model.Row", "org.random.Row"));
+    }
+
+    #[test]
+    fn what_the_file_itself_imports_cannot_be_outranked_by_any_count() {
+        // `FILE` imports `it.acme.model.Order`. The file has already said which one it means, and
+        // that is not evidence about the answer — it IS the answer.
+        let c = used("java.awt.Order", 5000);
+        assert!(nearer_with(&c, FILE, "it.acme.model.Order", "java.awt.Order"));
+    }
+
+    #[test]
+    fn the_file_s_own_package_also_survives_a_popular_stranger() {
+        let c = used("org.far.Helper", 5000);
+        assert!(nearer_with(&c, FILE, "it.acme.web.Helper", "org.far.Helper"));
+    }
+
+    #[test]
+    fn between_two_names_nobody_imports_distance_still_decides() {
+        let c = crate::import_census::ImportCensus::default();
+        assert!(nearer_with(&c, FILE, "it.acme.model.Thing", "org.far.Thing"));
     }
 
 }

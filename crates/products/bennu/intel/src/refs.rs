@@ -1613,6 +1613,12 @@ pub fn classify_caret(
     )
 }
 
+/// Whether `inner` lies within `outer`'s byte range — the cheap "is this the same subtree" test,
+/// for a name node that may itself be a `scoped_identifier` holding the clicked segment.
+fn contains_node(outer: &Node, inner: &Node) -> bool {
+    outer.start_byte() <= inner.start_byte() && inner.end_byte() <= outer.end_byte()
+}
+
 /// The core of [`classify_caret`] over an ALREADY-PARSED `root`, so a caller that has already
 /// parsed `source` (rename's [`classify_target`]) doesn't re-parse it, and the receiver-type
 /// inference reuses the same tree + a single symbol extraction (via [`infer_receiver_type_at`])
@@ -1725,6 +1731,25 @@ fn classify_caret_at(
                 name: ident_text,
             })
         }
+        // An annotation's NAME is a type reference, and the grammar does not say so: a
+        // `marker_annotation`'s name field is a plain `identifier` (or a `scoped_identifier` for
+        // `@org.junit.Test`), never a `type_identifier`. Without this arm it fell through to the
+        // bare-identifier fallback at the bottom and was resolved as a **field of the enclosing
+        // class** — so hovering `@DynamicPropertySource` said `FIELD DynamicPropertySource` of the
+        // test class it was written in, and go-to and find-usages agreed with it, because all
+        // three ask this one function.
+        "marker_annotation" | "annotation" => {
+            let name = parent.child_by_field_name("name")?;
+            // Only the name itself. A caret inside `@Column(name = "x")`'s arguments is on
+            // something else entirely, and claiming it is the annotation type would make go-to
+            // jump away from what was clicked.
+            if name.id() != ident.id() && !contains_node(&name, &ident) {
+                return None;
+            }
+            let text = name.utf8_text(bytes).map(str::to_string).unwrap_or(ident_text);
+            let symbols = extract_symbols_from_root(root, source);
+            type_key(&text, project_types, resolver, &symbols.imports)
+        }
         "type_identifier" | "scoped_type_identifier" | "generic_type" => {
             // Use the FULL type expression (the parent), not just the clicked segment, so a
             // fully-qualified `alpha.Widget` resolves by its package (never the ambiguous bare
@@ -1740,6 +1765,18 @@ fn classify_caret_at(
             if ident.kind() == "type_identifier" {
                 let symbols = extract_symbols_from_root(root, source);
                 return type_key(&ident_text, project_types, resolver, &symbols.imports);
+            }
+            // `@org.junit.jupiter.api.Test` — the clicked segment sits inside a
+            // `scoped_identifier` whose parent is the annotation. The whole dotted name is what
+            // resolves, exactly as it is for a qualified type expression above.
+            if parent.kind() == "scoped_identifier" {
+                if let Some(gp) = parent.parent() {
+                    if matches!(gp.kind(), "marker_annotation" | "annotation") {
+                        let text = parent.utf8_text(bytes).unwrap_or(&ident_text).to_string();
+                        let symbols = extract_symbols_from_root(root, source);
+                        return type_key(&text, project_types, resolver, &symbols.imports);
+                    }
+                }
             }
             // A bare `identifier` that isn't a declaration name, a member selector
             // (`x.foo` / `foo.bar()` — handled above), or a local/param (filtered before

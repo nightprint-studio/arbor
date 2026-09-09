@@ -254,6 +254,10 @@ function kindToType(kind: string): string {
     case 'parameter':  return 'variable';
     case 'keyword':    return 'keyword';
     case 'constant':   return 'constant';
+    // Its own icon, not `class`: after an `@` the popup is nothing but annotations, and the point
+    // of the glyph there is to say at a glance that the filter took — that this is a list of the
+    // right kind of thing, and not the whole classpath again.
+    case 'annotation': return 'annotation';
     case 'package':    return 'namespace';
     default:           return 'text';
   }
@@ -344,12 +348,20 @@ function insideStringLiteral(ctx: CompletionContext): boolean {
 const javaCompletionSource: CompletionSource = async (
   ctx: CompletionContext,
 ): Promise<CompletionResult | null> => {
-  // Trigger on `.` explicitly, or on an in-progress identifier word. Bail on an
+  // Trigger on `.` explicitly, on `@`, or on an in-progress identifier word. Bail on an
   // empty word unless the completion was explicitly requested (Ctrl+Space) or we
-  // just typed a `.`.
+  // just typed one of the two characters that narrow the answer on their own.
+  //
+  // The `@` earns its place: it is the only character in Java that cuts the legal names from
+  // *every type on the classpath* to *the annotation types on it*, and above a declaration it
+  // narrows further still — so the popup at that instant is short and nearly always contains the
+  // answer. Waiting for a letter first would hide the one list worth opening unasked.
   const before = ctx.matchBefore(/\.?[\w$]*$/);
   const dotTrigger = ctx.matchBefore(/\.$/) != null;
-  if (!ctx.explicit && !dotTrigger && (!before || before.from === before.to)) return null;
+  const atTrigger = ctx.matchBefore(/@$/) != null;
+  if (!ctx.explicit && !dotTrigger && !atTrigger && (!before || before.from === before.to)) {
+    return null;
+  }
 
   const path = projectStore.activeFilePath;
   if (!path) return null;

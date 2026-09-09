@@ -46,6 +46,15 @@ impl ClasspathIndex {
         Self { jdk, deps: None }
     }
 
+    /// The dependency jar `binary_name` came out of, when a dependency declares it.
+    ///
+    /// The **dependency** tier only, and deliberately: the JDK is not a Maven artifact, so naming
+    /// the jimage or `rt.jar` as the origin of `java.util.List` would answer a question nobody
+    /// asked with something that is not a coordinate.
+    pub fn origin_of(&self, binary_name: &str) -> Option<std::path::PathBuf> {
+        self.deps.as_ref()?.origin(binary_name)
+    }
+
     /// The decoded JDK tier, to hand to a second classpath view.
     ///
     /// Sharing is the whole reason this field is an `Arc` — see its doc. A second

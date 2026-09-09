@@ -47,3 +47,34 @@ export function signatureHelp(
 export function inlayHints(file: string, source: string): Promise<InlayHint[]> {
   return bennu('bennu_inlay_hints', { args: { file, source } });
 }
+
+/** One declaration's use count — mirrors the BE `UsageCountWire`. */
+export interface UsageCount {
+  /** Byte offset of the declaration, annotations included — where the row above it is drawn. */
+  decl: number;
+  /** Byte span of the NAME token — what the "nothing reaches this" tint colours. */
+  start: number;
+  end: number;
+  /** `"type"` | `"method"` | `"field"`. */
+  kind: string;
+  /** The declared name. */
+  name: string;
+  /** How many use sites the index holds. The declaration itself is not one of them. */
+  count: number;
+  /** True only when a count of zero is a fact about the **program** and not merely about the
+   *  index — anything carrying an annotation, any override, and `main` are excluded, because
+   *  something outside the code can reach each of them. Grey exactly these. */
+  unused: boolean;
+}
+
+/** How many places use each declaration in the buffer — **minus the ones not worth a word**.
+ *
+ *  A declaration a framework calls and nothing else does (a `@Test`, a `@Bean`, `main`, an
+ *  override) is not in the list at all: its count is zero by design, and saying so above every
+ *  method of a test file is noise. What arrives is what should be drawn.
+ *
+ *  Java-only; resolves to `[]` while the index is still building or for a file no project owns.
+ *  Wire: `bennu_usage_counts` — `{ file, source }`. */
+export function usageCounts(file: string, source: string): Promise<UsageCount[]> {
+  return bennu('bennu_usage_counts', { args: { file, source } });
+}

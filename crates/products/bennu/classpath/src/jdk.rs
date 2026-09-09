@@ -58,6 +58,12 @@ impl MultiSource {
 }
 
 impl ClassSource for MultiSource {
+    /// The first source in the chain that holds it — the same order `class_bytes` resolves in, so
+    /// the jar named is the jar the class was actually decoded from.
+    fn origin(&self, binary_name: &str) -> Option<std::path::PathBuf> {
+        self.sources.iter().find_map(|s| s.origin(binary_name))
+    }
+
     fn class_bytes(&self, binary_name: &str) -> Result<Option<Vec<u8>>, String> {
         for s in &self.sources {
             if let Some(bytes) = s.class_bytes(binary_name)? {

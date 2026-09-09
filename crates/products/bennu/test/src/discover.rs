@@ -201,13 +201,18 @@ fn test_method(m: &MethodFacts, source: &str) -> TestMethod {
 }
 
 /// The JUnit 5 annotations under which one declaration yields several executions.
-const DYNAMIC_TEST_ANNOTATIONS: &[&str] =
+pub const DYNAMIC_TEST_ANNOTATIONS: &[&str] =
     &["ParameterizedTest", "RepeatedTest", "TestFactory", "TestTemplate"];
 
 /// Annotations that mark a *lifecycle* method (setup / teardown / data provider). These are
 /// not tests, and under a class-level TestNG `@Test` they are the methods that must be
 /// excluded — otherwise every `@BeforeMethod` shows up in the tree as a test that never runs.
-const LIFECYCLE_ANNOTATIONS: &[&str] = &[
+///
+/// Public because a second consumer asks the same question for a different reason: the usage
+/// counts need to know that a `@BeforeEach` is called by JUnit and not by any code, so that it is
+/// not reported as used nowhere. One list, or the two would drift into disagreeing about which
+/// methods a test framework invokes.
+pub const LIFECYCLE_ANNOTATIONS: &[&str] = &[
     "Before", "After", "BeforeClass", "AfterClass", // JUnit 4
     "BeforeEach", "AfterEach", "BeforeAll", "AfterAll", // JUnit 5
     "BeforeMethod", "AfterMethod", "BeforeTest", "AfterTest", // TestNG

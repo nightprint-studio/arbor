@@ -74,12 +74,18 @@
 <h3>Reaching what is inside the dependencies</h3>
 <p>
   The <strong>Source</strong> picker on the header row decides whose code the Classes and Files
-  tabs are about: <strong>Project</strong>, <strong>Dependencies</strong>, or
-  <strong>Project &amp; dependencies</strong> — which ranks the two into one list rather than
-  making you check two tabs for one question. That is how you reach what is on the classpath and
-  nowhere in the tree: the framework annotation whose package you are trying to remember, the
-  <code>struts-default.xml</code> that declares the interceptor stack, the schema an XML file is
-  validated against.
+  tabs are about: <strong>Project</strong>, the outside, or <strong>both</strong> — which ranks
+  the two into one list rather than making you check two tabs for one question. That is how you
+  reach what is on the classpath and nowhere in the tree: the framework annotation whose package
+  you are trying to remember, the <code>struts-default.xml</code> that declares the interceptor
+  stack, the schema an XML file is validated against.
+</p>
+<p>
+  For <strong>Classes</strong> the outside is <em>dependencies &amp; JDK</em>: half of what anyone
+  looks up by name is in the JDK — <code>List</code>, <code>Optional</code>, <code>Path</code> —
+  and it opens the same way everything else does, on the real <code>.java</code> from the JDK's own
+  <code>src.zip</code>. For <strong>Files</strong> it is the dependency jars alone: from Java 9 the
+  JDK is a single image file, and there is nothing in it a reader would recognise as a file to open.
 </p>
 <p>
   A row from a dependency is <strong>tinted</strong> and says which <strong>artifact</strong> it

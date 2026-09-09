@@ -16,9 +16,22 @@ use std::collections::{HashMap, HashSet};
 
 use tree_sitter::Node;
 
-/// How much of a doc block is kept. Long enough for the sentence that says what a thing is and the
-/// `@param`/`@return` lines under it; short enough that a tooltip stays a tooltip.
-const MAX_DOC: usize = 600;
+/// How much of a doc block is kept.
+///
+/// It was 600 — one sentence and its `@param` lines — because the card that showed it could not
+/// scroll, so anything longer was a wall. The card scrolls now, and a real class-level block is
+/// *the* thing a reader hovers a library type for: `@Bean`'s runs past four thousand characters,
+/// `@Configuration`'s further still, and both were being cut mid-word.
+///
+/// So the cap is no longer a judgement about how much documentation is worth reading — it is only
+/// a bound against the pathological, and it is set where no comment anybody has written reaches it.
+/// It costs nothing to hold: these blocks are read out of a source file that is already in memory,
+/// so the real bound was always the size of that file.
+const MAX_DOC: usize = 20_000;
+
+/// What a cut block ends with, so a truncated tooltip says it was cut instead of stopping
+/// mid-sentence and looking like the author's own last word.
+const ELLIPSIS: &str = " …";
 
 /// Extract and clean the `/** … */` block that ends immediately above the declaration starting at
 /// `decl_start`.
@@ -63,7 +76,15 @@ fn clean(inner: &str) -> Option<String> {
     }
     let joined = lines.join("\n");
     let doc = joined.trim();
-    (!doc.is_empty()).then(|| doc.chars().take(MAX_DOC).collect())
+    if doc.is_empty() {
+        return None;
+    }
+    if doc.chars().count() <= MAX_DOC {
+        return Some(doc.to_string());
+    }
+    let mut cut: String = doc.chars().take(MAX_DOC).collect();
+    cut.push_str(ELLIPSIS);
+    Some(cut)
 }
 
 /// Every documented declaration in one Java source.
@@ -330,6 +351,26 @@ public class Box<T> {
     fn a_line_comment_above_a_declaration_is_not_a_doc_block() {
         let docs = declarations("class A { // not javadoc\n void run() {} }");
         assert!(docs.methods.is_empty());
+    }
+
+    /// A block longer than the cap comes back cut **and saying so**. Before the card could
+    /// scroll, the cut was invisible: a class doc stopped mid-word and read as the author's
+    /// own last sentence.
+    #[test]
+    fn an_oversized_block_is_cut_and_marked() {
+        let long = "x".repeat(MAX_DOC + 500);
+        let src = format!("/**\n * {long}\n */\nclass A {{}}");
+        let doc = leading(&src, src.find("class").unwrap()).unwrap();
+        assert!(doc.ends_with(ELLIPSIS), "a cut block says it was cut");
+        assert_eq!(doc.chars().count(), MAX_DOC + ELLIPSIS.chars().count());
+    }
+
+    /// And a block that fits carries no marker — an ellipsis on a complete sentence would be
+    /// the card inventing an omission.
+    #[test]
+    fn a_block_that_fits_is_not_marked() {
+        let src = "/** All of it. */\nclass A {}";
+        assert_eq!(leading(src, src.find("class").unwrap()).unwrap(), "All of it.");
     }
 
     #[test]

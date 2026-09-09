@@ -513,7 +513,7 @@ const RESOLVER_EPOCH: u64 = 2;
 /// The max (rather than a hash of all of them) is enough: any edit to any pom moves it forward. Same
 /// bounded walk the classpath collector uses, so a deep reactor is covered and a large repo isn't
 /// crawled. `None` when no pom is readable at all.
-fn poms_mtime(root: &Path) -> Option<u64> {
+pub(crate) fn poms_mtime(root: &Path) -> Option<u64> {
     /// Matches the classpath collector's depth — the same reactor shape.
     const MAX_DEPTH: usize = 6;
     let mut newest: Option<u64> = None;

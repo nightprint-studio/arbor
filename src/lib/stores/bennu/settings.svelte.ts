@@ -57,6 +57,9 @@ export interface BennuSettingsSnapshot {
   stickyScroll: boolean;
   /** Draw inlay hints — argument names at call sites, and the type a `var` was inferred as. */
   inlayHints: boolean;
+  /** Draw how many places use each declaration, above it, and fade the name of one nothing
+   *  reaches. Java only — it is the reference index answering. */
+  usageCounts: boolean;
   /** Vertical margin guide column (IntelliJ's hard-wrap ruler). 0 = hidden. */
   rightMargin: number;
   /** Which SQL dialect `.sql` buffers are highlighted as. Config-backed. */
@@ -96,6 +99,9 @@ export interface BennuSettingsSnapshot {
   autoPopup: boolean;
   popupDelayMs: number;
   caseSensitive: boolean;
+  /** Let the project's own imports order type-name completion. Config-backed, and read by the
+   *  backend on every completion — turning it off stops the counts being used at once. */
+  importCensus: boolean;
   autoImport: boolean;
   // Folding
   foldingEnabled: boolean;
@@ -130,6 +136,7 @@ const DEFAULTS: BennuSettingsSnapshot = {
   indentGuides: true,
   stickyScroll: true,
   inlayHints: true,
+  usageCounts: true,
   rightMargin: 120,
   sqlDialect: 'portable',
   htmlScriptsAllowed: [],
@@ -146,6 +153,7 @@ const DEFAULTS: BennuSettingsSnapshot = {
   autoPopup: true,
   popupDelayMs: 150,
   caseSensitive: false,
+  importCensus: true,
   autoImport: true,
   foldingEnabled: true,
   foldBlockComments: false,
@@ -174,6 +182,7 @@ function createSettingsStore() {
   let indentGuides = $state(DEFAULTS.indentGuides);
   let stickyScroll = $state(DEFAULTS.stickyScroll);
   let inlayHints = $state(DEFAULTS.inlayHints);
+  let usageCounts = $state(DEFAULTS.usageCounts);
   let rightMargin = $state(DEFAULTS.rightMargin);
   let sqlDialect = $state<SqlDialectSetting>(DEFAULTS.sqlDialect);
   let autosave = $state(DEFAULTS.autosave);
@@ -187,6 +196,7 @@ function createSettingsStore() {
   let autoPopup = $state(DEFAULTS.autoPopup);
   let popupDelayMs = $state(DEFAULTS.popupDelayMs);
   let caseSensitive = $state(DEFAULTS.caseSensitive);
+  let importCensus = $state(DEFAULTS.importCensus);
   let autoImport = $state(DEFAULTS.autoImport);
   // Folding
   let foldingEnabled = $state(DEFAULTS.foldingEnabled);
@@ -220,11 +230,12 @@ function createSettingsStore() {
   function snapshot(): BennuSettingsSnapshot {
     return {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
-      highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, inlayHints, rightMargin,
+      highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, inlayHints,
+      usageCounts, rightMargin,
       sqlDialect, htmlScriptsAllowed, mavenAutoDownload, markdownLivePreview, historyDiffSplit, autosave,
       collapseLibraryFrames, searchDependencies,
       localHistory, localHistoryDays, localHistoryMaxMb, localHistoryMaxFileMb,
-      autoPopup, popupDelayMs, caseSensitive, autoImport,
+      autoPopup, popupDelayMs, caseSensitive, importCensus, autoImport,
       foldingEnabled, foldBlockComments,
       javaBlankLines, javaIndentCaseBody,
       finalParams, useLombokVal, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
@@ -262,6 +273,7 @@ function createSettingsStore() {
         completion_auto_popup: autoPopup,
         completion_delay_ms: popupDelayMs,
         completion_case_sensitive: caseSensitive,
+        completion_import_census: importCensus,
         default_encoding: defaultEncoding,
         excluded_dirs: excludedDirList(),
         html_scripts_allowed: htmlScriptsAllowed,
@@ -321,6 +333,8 @@ function createSettingsStore() {
     setStickyScroll(v: boolean) { stickyScroll = v; persist(); },
     get inlayHints() { return inlayHints; },
     setInlayHints(v: boolean) { inlayHints = v; persist(); },
+    get usageCounts() { return usageCounts; },
+    setUsageCounts(v: boolean) { usageCounts = v; persist(); },
     get rightMargin() { return rightMargin; },
     setRightMargin(v: number) { rightMargin = v; persist(); },
     get sqlDialect() { return sqlDialect; },
@@ -355,6 +369,8 @@ function createSettingsStore() {
     setPopupDelayMs(v: number) { popupDelayMs = v; void persistConfigBacked(); },
     get caseSensitive() { return caseSensitive; },
     setCaseSensitive(v: boolean) { caseSensitive = v; void persistConfigBacked(); },
+    get importCensus() { return importCensus; },
+    setImportCensus(v: boolean) { importCensus = v; void persistConfigBacked(); },
     get autoImport() { return autoImport; },
     setAutoImport(v: boolean) { autoImport = v; void persistConfigBacked(); },
 
@@ -437,6 +453,7 @@ function createSettingsStore() {
         autoPopup = cfg.completion_auto_popup ?? DEFAULTS.autoPopup;
         popupDelayMs = cfg.completion_delay_ms ?? DEFAULTS.popupDelayMs;
         caseSensitive = cfg.completion_case_sensitive ?? DEFAULTS.caseSensitive;
+        importCensus = cfg.completion_import_census ?? DEFAULTS.importCensus;
         // An unknown label from a hand-edited config would reach the BE as an encoding nothing
         // can decode with; the Select offers exactly these three.
         defaultEncoding = (SOURCE_ENCODINGS as readonly string[]).includes(cfg.default_encoding)
@@ -483,6 +500,7 @@ function createSettingsStore() {
       indentGuides = DEFAULTS.indentGuides;
       stickyScroll = DEFAULTS.stickyScroll;
       inlayHints = DEFAULTS.inlayHints;
+      usageCounts = DEFAULTS.usageCounts;
       rightMargin = DEFAULTS.rightMargin;
       sqlDialect = DEFAULTS.sqlDialect;
       htmlScriptsAllowed = [];
@@ -496,6 +514,7 @@ function createSettingsStore() {
       autoPopup = DEFAULTS.autoPopup;
       popupDelayMs = DEFAULTS.popupDelayMs;
       caseSensitive = DEFAULTS.caseSensitive;
+      importCensus = DEFAULTS.importCensus;
       autoImport = DEFAULTS.autoImport;
       foldingEnabled = DEFAULTS.foldingEnabled;
       foldBlockComments = DEFAULTS.foldBlockComments;

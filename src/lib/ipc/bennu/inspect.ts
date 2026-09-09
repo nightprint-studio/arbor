@@ -63,6 +63,11 @@ export interface IndexEntry {
   /** Absolute path (forward slashes) of an openable source site, or `null` when the
    *  entry has no navigable location (a jar, a JDK module, a member with no source). */
   file: string | null;
+  /** What the entry **is**, for the row's icon: a type kind (`class` / `interface` / `enum` /
+   *  `record` / `annotation`), a member kind (`method` / `field`), or one of the inspector's own
+   *  (`jar` / `module` / `bean` / `action` / `relation`). Empty from a backend that predates it,
+   *  which draws as the neutral glyph. */
+  kind: string;
   /** 1-based line to jump to when `file` is set; `null` otherwise. */
   line: number | null;
 }
@@ -75,7 +80,7 @@ export interface IndexEntry {
 const MOCK_INDEX_ENTRIES = false;
 
 const MOCK_FIXTURES: Partial<Record<IndexKind, IndexEntry[]>> = {
-  jdk: [{ primary: 'Language level', secondary: '1.8 · maven.compiler.source', file: null, line: null }],
+  jdk: [{ primary: 'Language level', secondary: '1.8 · maven.compiler.source', file: null, line: null, kind: 'module' }],
 };
 
 /** List every index entry of `kind` for the project at `root`. `kind` is one of the

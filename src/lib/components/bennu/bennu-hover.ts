@@ -65,7 +65,9 @@ export function makeHoverSource(fetchInfo: HoverFetch) {
       end: to,
       above: true,
       create() {
-        return { dom: hoverCardDom(resolved) };
+        // A Javadoc's `<pre>` blocks are Java — that is what the comment documents, and it stays
+        // true when the pointer is in a JSP and the symbol came from a taglib.
+        return { dom: hoverCardDom({ ...resolved, codeLanguage: 'java' }) };
       },
     };
   };

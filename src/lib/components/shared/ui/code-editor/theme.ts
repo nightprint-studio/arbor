@@ -172,13 +172,40 @@ export const codeEditorTheme = EditorView.theme(
       borderLeft: '2px solid var(--warning)',
     },
 
+    // ── Tooltip hosts that must shrink instead of clip ────────────────────────
+    // CodeMirror measures a tooltip, and when there is less room above (or below) the
+    // caret than the card is tall it sets an explicit `height` on the HOST element —
+    // `.cm-tooltip-hover`, the div it wraps every hover section in. That host had no
+    // `overflow`, so the forced height did not shorten the card, it **cropped** it: a long
+    // Javadoc ended mid-sentence with no scrollbar anywhere, and the card's own
+    // `overflow-y: auto` never engaged because the card itself still believed it had all
+    // the room it asked for.
+    //
+    // A flex column with `min-height: 0` on the sections is the whole fix: the imposed
+    // height reaches the section, the section gives it to its scrollable body, and the
+    // worst case becomes a short card you scroll rather than a sentence that stops.
+    '.cm-tooltip.cm-tooltip-hover': {
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    },
+    '.cm-tooltip.cm-tooltip-hover > .cm-tooltip-section': { minHeight: '0' },
+
     // ── Hover card (a language `intel.hover` source) ──────────────────────────
     // One card shape for every product: a monospaced title (a signature, a column
     // name), a muted meta line, and an optional wrapped body. Bennu renders symbol
     // signatures into it and Picus renders column facts; keeping the class names
     // product-neutral is what stops the second one from forking the CSS.
+    //
+    // The headline never scrolls and the body does — a card whose signature scrolls away
+    // is one you have to scroll back up to identify.
     '.cm-tooltip .cm-hover-card': {
-      padding: '8px 11px', maxWidth: '520px', maxHeight: '340px', overflowY: 'auto',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      minHeight: '0', maxWidth: '640px', maxHeight: '440px',
+      fontFamily: 'var(--font-ui-sans)',
+    },
+    '.cm-hover-card .cm-hc-headline': { flex: '0 0 auto', padding: '8px 11px 7px' },
+    '.cm-hover-card .cm-hc-body': {
+      flex: '1 1 auto', minHeight: '0', overflowY: 'auto', overscrollBehavior: 'contain',
+      padding: '8px 11px 9px', borderTop: '1px solid var(--border-subtle)', outline: 'none',
     },
     // The head is the answer: a small kind tag, then the signature. They sit on one line
     // so the eye lands on the name, not on a label above it.
@@ -200,12 +227,79 @@ export const codeEditorTheme = EditorView.theme(
       fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)',
       marginTop: '3px', wordBreak: 'break-all',
     },
+    // Fainter than the package above it: it answers a rarer question, and a coordinate is long
+    // enough that at the package's weight it would be the loudest thing on the card.
+    '.cm-hover-card .cm-hc-artifact': {
+      fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-2xs)', color: 'var(--text-disabled)',
+      marginTop: '1px', wordBreak: 'break-all',
+    },
     '.cm-hover-card .cm-hc-doc': {
       fontFamily: 'var(--font-ui-sans)', fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)',
-      lineHeight: '1.5',
-      marginTop: '7px', paddingTop: '7px', borderTop: '1px solid var(--border-subtle)',
-      whiteSpace: 'pre-wrap',
+      lineHeight: '1.5', wordBreak: 'break-word',
     },
+
+    // ── Rendered Javadoc ──────────────────────────────────────────────────────
+    // A doc comment is HTML and it is now rendered as such (`hover-card.ts`), so the card
+    // needs a small typographic scale of its own. Deliberately flat: one heading size for
+    // every `<h1>`–`<h6>`, one code style. A tooltip that reproduces a web page's hierarchy
+    // is a tooltip nobody skims.
+    // Spacing above rather than below, so the paragraph that opens a body — which is bare text,
+    // not a `<p>`, because nothing precedes it to separate it from — does not sit flush against
+    // the one after it.
+    '.cm-hover-card .cm-hc-doc p': { margin: '6px 0 0' },
+    '.cm-hover-card .cm-hc-doc p:first-child': { marginTop: '0' },
+    '.cm-hover-card .cm-hc-doc h4': {
+      margin: '9px 0 4px', fontSize: 'var(--font-size-3xs)', fontWeight: '700',
+      letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)',
+    },
+    '.cm-hover-card .cm-hc-doc h4:first-child': { marginTop: '0' },
+    '.cm-hover-card .cm-hc-doc ul, .cm-hover-card .cm-hc-doc ol': {
+      margin: '4px 0 6px', paddingLeft: '17px',
+    },
+    '.cm-hover-card .cm-hc-doc li': { margin: '2px 0' },
+    '.cm-hover-card .cm-hc-doc code': {
+      fontFamily: 'var(--font-code)', fontSize: '0.92em',
+      backgroundColor: 'var(--bg-base)', border: '1px solid var(--border-subtle)',
+      borderRadius: 'var(--radius-sm)', padding: '0 3px',
+    },
+    // A `{@link}` names something you could go and read: coloured like the accent so it
+    // reads as a reference, not as a literal you are meant to type.
+    '.cm-hover-card .cm-hc-doc code.cm-hc-ref': {
+      color: 'var(--accent)', backgroundColor: 'transparent', border: 'none', padding: '0',
+    },
+    // A code sample scrolls sideways rather than wrapping: a wrapped line of Java is a line
+    // that no longer says what it did.
+    '.cm-hover-card .cm-hc-doc pre': {
+      margin: '6px 0', padding: '6px 8px',
+      backgroundColor: 'var(--bg-base)', border: '1px solid var(--border-subtle)',
+      borderRadius: 'var(--radius-sm)',
+      overflowX: 'auto', whiteSpace: 'pre',
+      fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-2xs)', lineHeight: '1.45',
+      color: 'var(--text-primary)',
+    },
+    '.cm-hover-card .cm-hc-doc pre code': {
+      backgroundColor: 'transparent', border: 'none', padding: '0', fontSize: 'inherit',
+    },
+    '.cm-hover-card .cm-hc-doc blockquote': {
+      margin: '6px 0', paddingLeft: '8px',
+      borderLeft: '2px solid var(--border-subtle)', color: 'var(--text-muted)',
+    },
+    '.cm-hover-card .cm-hc-doc table': {
+      borderCollapse: 'collapse', margin: '6px 0', fontSize: 'var(--font-size-2xs)',
+    },
+    '.cm-hover-card .cm-hc-doc td, .cm-hover-card .cm-hc-doc th': {
+      border: '1px solid var(--border-subtle)', padding: '2px 6px', textAlign: 'left',
+    },
+    '.cm-hover-card .cm-hc-doc hr': {
+      border: 'none', borderTop: '1px solid var(--border-subtle)', margin: '7px 0',
+    },
+    // Text, not a link — clicking one inside a Tauri webview would navigate the app itself.
+    '.cm-hover-card .cm-hc-doc .cm-hc-anchor': {
+      color: 'var(--accent)', textDecoration: 'underline', textUnderlineOffset: '2px',
+    },
+    '.cm-hover-card .cm-hc-doc dl': { margin: '4px 0' },
+    '.cm-hover-card .cm-hc-doc dd': { margin: '0 0 4px 12px' },
+
     // `@param` / `@return` / `@throws` as a definition list: the subject in the left
     // column, its text in the right, so a six-parameter method stays readable.
     '.cm-hover-card .cm-hc-tags': {
@@ -218,6 +312,7 @@ export const codeEditorTheme = EditorView.theme(
     },
     '.cm-hover-card .cm-hc-tags dd': {
       margin: '0', fontFamily: 'var(--font-ui-sans)', color: 'var(--text-secondary)',
+      lineHeight: '1.45',
     },
     '.cm-hover-card .cm-hc-tags dt.cm-hc-deprecated': { color: 'var(--warning)', fontWeight: '700' },
 
@@ -393,6 +488,11 @@ export const codeEditorTheme = EditorView.theme(
     '.cm-completionLabel': { color: 'var(--text-primary)' },
     '.cm-completionDetail': { color: 'var(--text-muted)', fontStyle: 'normal', marginLeft: '0.6em' },
     '.cm-completionMatchedText': { color: 'var(--accent)', textDecoration: 'none', fontWeight: '700' },
+    // CodeMirror ships a glyph for its own dozen completion types and none for this one, so an
+    // annotation would render with an empty icon column — a gap in a list where every other row has
+    // a mark, which reads as a broken row rather than as a kind. The `@` is the same character that
+    // asked for the list.
+    '.cm-completionIcon-annotation::after': { content: "'@'" },
   },
   { dark: true },
 );

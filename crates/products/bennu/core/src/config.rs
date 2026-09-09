@@ -69,6 +69,29 @@ pub struct BennuConfig {
     /// Require a candidate to start with the typed prefix, matching case. `false` by default,
     /// which is the fuzzy, case-insensitive matching CodeMirror does on its own.
     pub completion_case_sensitive: bool,
+    /// Let the project's own `import` statements order type-name completion — the count of how
+    /// many files import each candidate, as a ranking term. `true` by default.
+    ///
+    /// Read on **every completion**, not at index-build time, so turning it off stops the counts
+    /// being used at once rather than at the next rebuild. That is the whole meaning of the switch:
+    /// it says whether to consult the census, not whether to have one. A switch that also decided
+    /// what gets built would take effect immediately in one direction and silently not in the
+    /// other.
+    #[serde(default = "yes")]
+    pub completion_import_census: bool,
+    /// Absolute paths of the project roots the user has turned **spell-check** on for.
+    ///
+    /// A list of roots and not a switch, because that is the shape of the decision: spell-checking
+    /// identifiers and comments is worth it on a codebase somebody is writing prose into and noise
+    /// on a legacy one full of abbreviations, and answering that for one project says nothing about
+    /// the next.
+    ///
+    /// Persisted for the reason the list exists at all: it used to live in memory for the length of
+    /// a session, so every project — and every restart of the same project — asked again, and the
+    /// dictionaries being installed already did not stop the asking. The dictionaries themselves
+    /// are global and downloaded once; this is only who wants them used.
+    #[serde(default)]
+    pub spell_check_roots: Vec<String>,
     /// Absolute paths of the HTML files whose **own scripts** the user has allowed to run in the
     /// editor's preview, and asked to be remembered.
     ///
@@ -281,6 +304,12 @@ pub struct BennuConfig {
     ///
     /// A table: it stays at the end with the others.
     pub cargo: CargoConfig,
+    /// **Maven Central** — the Java half of the same question crates.io answers for Rust. See
+    /// [`MavenConfig`].
+    ///
+    /// A table: it stays at the end with the others.
+    #[serde(default)]
+    pub maven: MavenConfig,
     /// **First-run tour** — whether the user has been through Bennu's, and at which schema
     /// version. See [`OnboardingConfig`].
     ///
@@ -337,6 +366,38 @@ pub struct CargoConfig {
 impl Default for CargoConfig {
     fn default() -> Self {
         Self { crates_io: true, index_ttl_hours: 24 }
+    }
+}
+
+/// Maven Central — the one part of Bennu's **Java** side that reaches the network on its own.
+///
+/// The mirror image of [`CargoConfig`], and separate from it on purpose: the two switches are
+/// pressed by different people for different reasons. A Java shop behind a corporate proxy that
+/// only ever sees an internal Nexus wants this off and has no opinion about crates.io; a Rust
+/// developer on a train is the other way round.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MavenConfig {
+    /// Whether Bennu may read `maven-metadata.xml` from Maven Central — which is what the
+    /// "newer version available" hints above a pom's dependencies are made of.
+    ///
+    /// `true` by default, and the traffic is one small XML file per artifact per
+    /// [`Self::metadata_ttl_hours`]. Off makes the Java side entirely local again: the hints
+    /// disappear, and nothing else changes — the classpath, the resolution and the diagnostics
+    /// have never needed the network and still do not.
+    pub central: bool,
+    /// How long cached artifact metadata stays fresh, in hours.
+    ///
+    /// A day by default. A library does not release more than weekly, and "your dependency is four
+    /// versions behind" does not become more true by being asked hourly. `0` reads as the default
+    /// rather than as "always refetch" — that would be one request per dependency per pom open,
+    /// which is exactly what the cache exists to prevent.
+    pub metadata_ttl_hours: u32,
+}
+
+impl Default for MavenConfig {
+    fn default() -> Self {
+        Self { central: true, metadata_ttl_hours: 24 }
     }
 }
 
@@ -472,6 +533,14 @@ pub struct LibraryBeansConfig {
     pub artifact_id_prefix: Vec<String>,
 }
 
+/// `true`, for a `#[serde(default)]` on a boolean whose absence must not read as "off".
+///
+/// A bare `#[serde(default)]` on a `bool` is `false`, so a config written before a new
+/// opt-out setting existed would silently arrive with the feature disabled.
+fn yes() -> bool {
+    true
+}
+
 impl Default for BennuConfig {
     fn default() -> Self {
         Self {
@@ -488,6 +557,8 @@ impl Default for BennuConfig {
             completion_auto_popup: true,
             completion_delay_ms: 150,
             completion_case_sensitive: false,
+            completion_import_census: true,
+            spell_check_roots: Vec::new(),
             html_scripts_allowed: Vec::new(),
             maven_auto_download: true,
             markdown_live_preview: true,
@@ -531,6 +602,7 @@ impl Default for BennuConfig {
             library_beans: LibraryBeansConfig::default(),
             lsp: LspConfig::default(),
             cargo: CargoConfig::default(),
+            maven: MavenConfig::default(),
             onboarding: OnboardingConfig::default(),
         }
     }

@@ -389,17 +389,31 @@ export function renamePlan(
   return bennu('bennu_rename_plan', { args: { file, source, offset, new_name: newName } });
 }
 
-/** The concrete edits to apply for a rename (the flattened plan). The FE applies each
- *  through CodeMirror so undo works — the backend never writes buffers. Returns `[]`
- *  when there's nothing to do (unrenameable / still building). Prefer previewing with
- *  {@link renamePlan} first; call this on confirm.
+/** What applying a rename takes: the flattened edits, and the file move they imply. */
+export interface RenameApplyResult {
+  /** Every edit, across every file — each carries its own `file`. */
+  edits: RenameEdit[];
+  /** The file that has to be renamed with the type, when the type is what the file is named
+   *  after. Applied AFTER the edits, which are addressed to the old path. */
+  file_rename?: RenameFileMove | null;
+}
+
+/** The concrete edits to apply for a rename (the flattened plan), **and the file move it
+ *  implies**. The FE applies each edit through CodeMirror so undo works — the backend never
+ *  writes buffers — then carries out the move. Returns an empty result when there's nothing to
+ *  do (unrenameable / still building). Prefer previewing with {@link renamePlan} first; call
+ *  this on confirm.
+ *
+ *  The move travels here and not only with {@link renamePlan} because the **inline** rename
+ *  (the field Shift+F6 opens at the caret) never asks for a preview: without it, renaming a
+ *  public top-level type renamed it everywhere and left the file called after the old name.
  *  Wire: `bennu_rename_apply` — `RenameArgs { file, source, offset, new_name }`. */
 export function renameApply(
   file: string,
   source: string,
   offset: number,
   newName: string,
-): Promise<RenameEdit[]> {
+): Promise<RenameApplyResult> {
   return bennu('bennu_rename_apply', { args: { file, source, offset, new_name: newName } });
 }
 
@@ -538,6 +552,9 @@ export interface HoverInfo {
   container: string | null;
   /** Javadoc / leading comment — `null` for now (extraction deferred on the BE). */
   doc: string | null;
+  /** The dependency it came out of, as `groupId:artifactId:version`. `null` for the project's own
+   *  code and for the JDK, neither of which is an artifact. */
+  artifact?: string | null;
 }
 
 /** Resolve the hover info for the symbol at `file`:`offset` (UTF-8 byte offset).

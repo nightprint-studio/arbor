@@ -30,7 +30,12 @@ fn set_bennu_config(_state: &BennuState, config: BennuConfig) -> Result<(), Stri
     // config is one of those things: it is how an executable path is pinned by hand, and how
     // a disabled server is turned back on.
     crate::lsp_registry::LspRegistry::global().forget_missing();
-    save(&config)
+    // Completion reads this one from a hot flag rather than from the file — a TOML parse per
+    // keystroke would be paying for the switch on every character typed — so saving has to push
+    // it. Without this the toggle would appear to do nothing until the next project open.
+    save(&config)?;
+    crate::index_service::refresh_import_census_setting();
+    Ok(())
 }
 
 /// Read the persisted **workspace store** (every named workspace + which is active + each

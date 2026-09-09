@@ -265,6 +265,8 @@ pub fn annotation_beans(units: &[JavaUnit]) -> Vec<BeanDef> {
                         is_abstract: false,
                         supertypes: supertypes_of(t, &u.facts),
                         conditions: conditions_of(&t.annotations, &u.facts),
+                        // The project\'s own — see `BeanDef::artifact`.
+                        artifact: String::new(),
                     });
                 }
             }
@@ -298,6 +300,8 @@ pub fn annotation_beans(units: &[JavaUnit]) -> Vec<BeanDef> {
                         .into_iter()
                         .chain(conditions_of(&t.annotations, &u.facts))
                         .collect(),
+                    // The project's own — see `BeanDef::artifact`.
+                    artifact: String::new(),
                 });
             }
         }
@@ -347,6 +351,8 @@ pub fn xml_beans(files: &[XmlBeanFile]) -> Vec<BeanDef> {
                 // XML has its own conditional mechanism (`<beans profile=>`), already carried
                 // by `profile` above.
                 conditions: Vec::new(),
+                // The project\'s own — see `BeanDef::artifact`.
+                artifact: String::new(),
             });
         }
     }

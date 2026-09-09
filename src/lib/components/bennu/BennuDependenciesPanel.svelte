@@ -47,6 +47,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { buildUnitDir, openBuildUnitMenu } from './build-unit-menu';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { dependenciesStore } from '$lib/stores/bennu/dependencies.svelte';
@@ -159,6 +160,25 @@
    * All three are backend jobs that report through the Jobs panel and return immediately — none of
    * them blocks the panel, and none of them is undone by closing it.
    */
+  /**
+   * Start one of them and say so, either way.
+   *
+   * The `.catch(() => undefined)` these three used to carry was the whole of their error handling,
+   * which meant a backend that refused — a root with no pom, a dead reverse channel — produced a
+   * menu that closed and nothing else. All three of these are invisible by nature: none opens a
+   * window, none changes a file you have open, and the work happens on a thread. So the only
+   * evidence that a press did anything is what we say about it.
+   */
+  async function runMaven(what: string, start: (root: string) => Promise<string>) {
+    if (!root) return;
+    try {
+      await start(root);
+      toastStore.show(`${what} started — see the Jobs panel`, 'info');
+    } catch (e) {
+      toastStore.show(`${what} could not start: ${e}`, 'error');
+    }
+  }
+
   const mavenActions = $derived<DropdownItem[]>([
     {
       kind: 'item',
@@ -166,7 +186,7 @@
       label: 'Re-resolve dependencies & rebuild index',
       subtitle: 'Drops the cached classpath, re-reads the repository, reindexes',
       icon: RotateCw,
-      onclick: () => root && void mavenReload(root).catch(() => undefined),
+      onclick: () => void runMaven('Re-resolve', mavenReload),
     },
     {
       kind: 'item',
@@ -175,7 +195,7 @@
       subtitle: 'mvn dependency:go-offline — the only thing here that uses the network',
       icon: Download,
       shortcut: 'Alt+Shift+U',
-      onclick: () => root && void mavenDownload(root).catch(() => undefined),
+      onclick: () => void runMaven('Download', mavenDownload),
     },
     {
       kind: 'item',
@@ -183,7 +203,7 @@
       label: 'Download sources',
       subtitle: 'So Ctrl+B into a library lands on real source, not a decompiled stub',
       icon: FileCode2,
-      onclick: () => root && void mavenDownloadSources(root).catch(() => undefined),
+      onclick: () => void runMaven('Download sources', mavenDownloadSources),
     },
   ]);
 

@@ -33,6 +33,7 @@ import type { Extension } from '@codemirror/state';
 import { insertCompletionText, type Completion, type CompletionContext, type CompletionResult }
   from '@codemirror/autocomplete';
 import type { EditorView, Tooltip } from '@codemirror/view';
+import { getLanguage as prismLanguage } from '$lib/utils/diff-formatter';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
 import { completionNoteStore } from '$lib/stores/bennu/completion-note.svelte';
 import { completion as ipcCompletion } from '$lib/ipc/bennu';
@@ -362,7 +363,9 @@ export function backendHoverSource(
         pos: from,
         end: to,
         above: true,
-        create: () => ({ dom: hoverCardDom(info) }),
+        // A server's doc is written in the language it serves, so a code block in it is that
+        // language — read off the file rather than assumed, since one descriptor serves several.
+        create: () => ({ dom: hoverCardDom({ ...info, codeLanguage: prismLanguage(path) }) }),
       } as Tooltip;
     })
     .catch(() => null);

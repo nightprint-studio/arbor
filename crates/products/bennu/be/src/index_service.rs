@@ -577,6 +577,11 @@ struct ProjectSlot {
     /// simple name → binary name for the project's own declared types (seeds the
     /// resolver so bare project-type names resolve). Rebuilt on patch.
     simple_names: Mutex<BTreeMap<String, String>>,
+    /// How often each type is imported across this project — the completion ranking term, counted
+    /// during the index build. On the slot and not only on the provider because the provider is
+    /// built twice per build (JDK-only, then with the dependency tier) and the census is a fact
+    /// about the project's sources that neither of those two stages produces.
+    imports: RwLock<Arc<bennu_intel::prelude::ImportCensus>>,
     /// The "Go to Class" navigator entries, captured during the full build (same parse as
     /// the symbol index — no separate whole-project scan). Served by `bennu_class_index`
     /// instantly after the first index. Empty until the build lands; refreshed best-effort
@@ -925,6 +930,9 @@ impl IndexService {
         encoding_label: &str,
         sink: Arc<dyn EventSink>,
     ) {
+        // Pick up a config edited outside the app. The save handler pushes this too, so the toggle
+        // is immediate; this is the other way it can have changed.
+        refresh_import_census_setting();
         // Keep the background-work sink current: the classpath watcher has no request of its
         // own to take one from.
         *self.sink.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&sink));
@@ -944,6 +952,7 @@ impl IndexService {
             encoding_label: encoding_label.to_string(),
             non_compliant: RwLock::new(Vec::new()),
             simple_names: Mutex::new(BTreeMap::new()),
+            imports: RwLock::new(Arc::default()),
             classes: RwLock::new(Vec::new()),
             provider: RwLock::new(Arc::new(NativeJavaProvider::new())),
             config: RwLock::new(None),
@@ -1042,6 +1051,8 @@ impl IndexService {
             let pairs: Vec<(String, String)> =
                 simple.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
             *slot.simple_names.lock().unwrap_or_else(|p| p.into_inner()) = simple;
+            let census = Arc::new(built.imports);
+            *slot.imports.write().unwrap_or_else(|p| p.into_inner()) = Arc::clone(&census);
             eprintln!(
                 "bennu-be: index built for {} ({types} types, {members} members)",
                 root_path.display()
@@ -1079,7 +1090,9 @@ impl IndexService {
                 &pairs,
                 jdk_index_path(&jdk_version),
                 None,
-            ) {
+            )
+            .map(|p| p.with_imports(Arc::clone(&census)))
+            {
                 Ok(p) => {
                     slot.type_names.store(p.class_name_count(), Ordering::Relaxed);
                     *slot.provider.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(p);
@@ -1339,7 +1352,7 @@ impl IndexService {
             Arc::clone(&g)
         };
         let at = Position { file: file.to_string(), offset };
-        provider.completion(&at, source).unwrap_or_default()
+        provider.complete_at(&at, source, import_census_enabled()).unwrap_or_default()
     }
 
     /// Every method the class enclosing `offset` in `source` could override — the
@@ -2101,6 +2114,14 @@ impl IndexService {
         slot.semantics()?.safe_delete(file, source, offset)
     }
 
+    /// How many places use every declaration in `source` — the counts drawn above a file's
+    /// members. Empty while the index is still building, or when no project owns the file.
+    pub fn usage_marks(&self, file: &str, source: &str) -> Vec<bennu_intel::prelude::UsageMark> {
+        let Some(slot) = self.slot_for_file(file) else { return Vec::new() };
+        let Some(engine) = slot.semantics() else { return Vec::new() };
+        engine.usage_marks(source)
+    }
+
     /// A refusal naming the LIBRARY type that declares the member at the caret, for a member the
     /// project itself does not declare. `None` when the caret isn't on a resolvable member, or when
     /// the declaring type turns out to be project code after all (then the engine's silence is
@@ -2324,7 +2345,18 @@ impl IndexService {
                 if info.doc.is_none() {
                     info.doc = self.library_doc(&provider, &norm_path(&slot.root), &info);
                 }
-                return Some(hover_info_of(info));
+                // Which dependency it came out of. One hash probe per jar against central
+                // directories already in memory — cheaper than the doc lookup above, which reads
+                // an archive off disk — so it is asked outright rather than deferred behind a
+                // spinner the card would have to be rebuilt for.
+                let artifact = info
+                    .owner
+                    .as_deref()
+                    .and_then(|owner| provider.origin_jar(owner))
+                    .and_then(|jar| artifact_of_jar(&jar));
+                let mut wire = hover_info_of(info);
+                wire.artifact = artifact;
+                return Some(wire);
             }
         }
         // 2. Fallback: a local variable / parameter isn't keyed in the reference index — resolve its
@@ -2586,6 +2618,33 @@ impl IndexService {
             .get(&PathBuf::from(root))
             .map(|s| s.dep_jars.read().unwrap_or_else(|p| p.into_inner()).clone())
             .unwrap_or_default()
+    }
+
+    /// Classpath type names matching `typed`, as dot-form FQNs — the "Import class" index, asked
+    /// by name. Empty before the index exists, which is the same answer as "nothing matches" and
+    /// is the right one either way: a completion cannot wait.
+    pub fn type_name_matches(&self, root: &str, typed: &str, limit: usize) -> Vec<String> {
+        let Some(slot) = self.slot_for_file(root) else { return Vec::new() };
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.type_name_matches(typed, limit)
+    }
+
+    /// What a classpath type **is** — `class` / `interface` / `enum` / `record` / `annotation`.
+    ///
+    /// Answered from the member index the project already has open, which is the point: the
+    /// alternative is re-reading the class file, and on the JDK tier there is no jar to re-read it
+    /// out of. `None` when nothing resolves the name, which a caller renders as a plain class
+    /// rather than as a guess.
+    pub fn type_kind(&self, root: &str, binary: &str) -> Option<String> {
+        let slot = self.slot_for_file(root)?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.type_kind(binary)
     }
 
     /// The on-disk **source view** for a library/JDK `binary`, best-first: the REAL `.java` from the
@@ -3070,7 +3129,10 @@ impl IndexService {
                 let file = (!m.file.is_empty()).then(|| m.file.clone());
                 // Line only when we have an openable file AND a known declaring-type line.
                 let line = file.as_ref().and(line_of.get(&owner_dotted).copied());
-                IndexEntry { primary: m.name, secondary, file, line }
+                // A member is a method or a field, and a list that draws the same mark for both
+                // is a list you have to read the signature of to tell them apart.
+                let kind = if m.signature.is_empty() { "field" } else { "method" };
+                IndexEntry { primary: m.name, secondary, file, line, kind: kind.to_string() }
             })
             .collect()
     }
@@ -3326,14 +3388,20 @@ impl IndexService {
     /// worker (see [`schedule_config_rebuild`]), never directly on the keystroke path.
     fn rebuild_config(&self, slot: &Arc<ProjectSlot>) {
         let inputs = discover_web_inputs(&slot.root);
-        if inputs.struts_roots.is_empty() && inputs.spring_files.is_empty() {
+        // Same reasoning as the initial build: the beans come from Java, the guard is about XML.
+        // Leaving it as it was here would have let a project's beans appear on the first index and
+        // vanish on the first edit.
+        let annotation_beans = self.annotation_beans_cached(slot);
+        if inputs.struts_roots.is_empty()
+            && inputs.spring_files.is_empty()
+            && annotation_beans.is_empty()
+        {
             return;
         }
         let (graph, _report) = bennu_web::prelude::build_web_graph(&inputs);
         // Config `config-*` files are read back into OWNED memory (no lingering mmap), so
         // re-ingesting into the current gen dir is safe to overwrite. Snapshot the path.
         let index_dir = slot.index_dir.read().unwrap_or_else(|p| p.into_inner()).clone();
-        let annotation_beans = self.annotation_beans_cached(slot);
         match ingest_config_graph(&graph, &index_dir, &annotation_beans) {
             Ok(cfg) => {
                 *slot.config.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(cfg));
@@ -3521,6 +3589,28 @@ fn validate_files_parallel(
 /// successful completion (matching `is_system`, which purges the registry entry) — an ephemeral pass
 /// visible only while it runs; any other category lingers as completed. `non_cancellable` because no
 /// FE cancel is wired to these yet.
+/// Whether the project's import census may order type-name completion.
+///
+/// A hot flag rather than a config read, because the reader is **completion**: `config::load()`
+/// parses a TOML file, and doing that per keystroke to answer one boolean would be paying for the
+/// switch on every character typed.
+///
+/// Refreshed where the setting can change — when the config is saved, and when a project opens, so
+/// a file edited by hand outside the app is picked up too. Defaults to on, which is also what a
+/// config written before the setting existed reads as.
+static IMPORT_CENSUS: AtomicBool = AtomicBool::new(true);
+
+/// Read the switch. Off means the counts are not consulted at all — see
+/// `NativeJavaProvider::complete_at`.
+pub(crate) fn import_census_enabled() -> bool {
+    IMPORT_CENSUS.load(Ordering::Relaxed)
+}
+
+/// Re-read the switch from the config on disk. Called from the config-set handler and on open.
+pub(crate) fn refresh_import_census_setting() {
+    IMPORT_CENSUS.store(bennu_core::config::load().completion_import_census, Ordering::Relaxed);
+}
+
 pub(crate) fn register_bennu_job(
     host: &Arc<dyn HostCaller>,
     sink: &Arc<dyn EventSink>,
@@ -3780,6 +3870,14 @@ fn build_dependency_tier(
                     jdk_index_path(jdk_version),
                     None,
                 )
+                // The fallback rebuilds from the persisted index, which does not carry the census —
+                // hence the slot's copy. Without this the dependency tier landing would silently
+                // cost the project its import ranking for the rest of the session.
+                .map(|p| {
+                    let census =
+                        Arc::clone(&slot.imports.read().unwrap_or_else(|e| e.into_inner()));
+                    p.with_imports(census)
+                })
             });
         match built {
             Ok(p) => {
@@ -3959,12 +4057,23 @@ fn build_config_graph(
 ) {
     emit_progress(sink, root_str, "config", "start");
     let inputs = discover_web_inputs(root);
+    // Annotation-declared Spring beans (`@Service`/`@Component`/…) from the already-read Java
+    // sources — the Option-B C1 fallback map. Reuses `sources` (no third disk walk).
+    //
+    // Collected BEFORE the guard, and that is the fix: these are a fact about the project's
+    // **Java**, and the guard below is about its **XML**. A Spring Boot project has no
+    // `struts.xml` and no `applicationContext.xml`, so it fell out here and got no
+    // `ConfigResolver` at all — which is why the index inspector's Beans tab was empty on every
+    // modern project and full only on a legacy one, and why resolving an `@Autowired` name found
+    // nothing there either. The beans had been collected all along; nothing was keeping them.
+    let annotation_beans = collect_annotation_beans(sources);
     if inputs.struts_roots.is_empty()
         && inputs.spring_files.is_empty()
         && inputs.mapper_files.is_empty()
+        && annotation_beans.is_empty()
     {
         emit_progress(sink, root_str, "config", "end");
-        return; // no web config — nothing to ingest
+        return; // no web config and no beans — nothing to ingest
     }
     let (graph, report) = bennu_web::prelude::build_web_graph(&inputs);
     if !report.unresolved_includes.is_empty() {
@@ -3973,9 +4082,6 @@ fn build_config_graph(
             report.unresolved_includes.len()
         );
     }
-    // Annotation-declared Spring beans (`@Service`/`@Component`/…) from the already-read Java
-    // sources — the Option-B C1 fallback map. Reuses `sources` (no third disk walk).
-    let annotation_beans = collect_annotation_beans(sources);
     match ingest_config_graph(&graph, index_dir, &annotation_beans) {
         Ok(cfg) => {
             let (a, b, r) = (cfg.action_count(), cfg.bean_count(), cfg.relation_count());
@@ -4201,7 +4307,31 @@ fn split_classpath_entries(raw: &str) -> Vec<String> {
 /// arity. That is working state for this layer (it is how a library's documentation is found, see
 /// [`IndexService::library_doc`]) and stops here: the editor draws a card, it does not resolve one.
 fn hover_info_of(h: IntelHoverInfo) -> HoverInfo {
-    HoverInfo { signature: h.signature, kind: h.kind, container: h.container, doc: h.doc }
+    HoverInfo { signature: h.signature, kind: h.kind, container: h.container, doc: h.doc, artifact: None }
+}
+
+/// The local Maven repository, resolved once.
+///
+/// `LocalRepo::discover()` reads `settings.xml` and the environment, which is a handful of file
+/// reads — right once, and wrong on every tooltip. What it produces is a root path that does not
+/// move while the process runs.
+static LOCAL_REPO: std::sync::OnceLock<bennu_maven::prelude::LocalRepo> = std::sync::OnceLock::new();
+
+/// `groupId:artifactId:version` for a jar **inside the local repository**, or `None`.
+///
+/// The path IS the coordinate in Maven's layout, so this is string work over a path that was
+/// already in hand. `None` for a jar somewhere else — a `system`-scoped dependency, a lib folder
+/// — where the layout says nothing and a guess would be worse than silence.
+fn artifact_of_jar(jar: &Path) -> Option<String> {
+    let repo = LOCAL_REPO.get_or_init(bennu_maven::prelude::LocalRepo::discover);
+    let coord = repo.coord_at(jar)?;
+    (!coord.group_id.is_empty() && !coord.artifact_id.is_empty()).then(|| {
+        if coord.version.is_empty() {
+            format!("{}:{}", coord.group_id, coord.artifact_id)
+        } else {
+            format!("{}:{}:{}", coord.group_id, coord.artifact_id, coord.version)
+        }
+    })
 }
 
 /// Map an intel [`DeclarationLocation`] onto the wire [`DeclarationTarget`] (field-for-field).
@@ -4324,7 +4454,13 @@ fn jar_entry_of(path: &str) -> Option<IndexEntry> {
         return None;
     }
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or(path).to_string();
-    Some(IndexEntry { primary: name, secondary: path.replace('\\', "/"), file: None, line: None })
+    Some(IndexEntry {
+        primary: name,
+        secondary: path.replace('\\', "/"),
+        file: None,
+        line: None,
+        kind: "jar".to_string(),
+    })
 }
 
 /// The resolved-JDK summary for the index inspector: a single [`IndexEntry`] naming the
@@ -4341,6 +4477,7 @@ fn jdk_entries(slot: &Arc<ProjectSlot>) -> Vec<IndexEntry> {
         secondary: "resolved language level".to_string(),
         file: None,
         line: None,
+        kind: "module".to_string(),
     }]
 }
 
@@ -4365,16 +4502,34 @@ fn config_entries_of(cfg: &ConfigResolver, kind: &str) -> Vec<IndexEntry> {
     match kind {
         // Spring beans: primary = bean id, secondary = impl class FQCN, file = the config
         // fragment (the bean's declaration site). No per-bean line is parsed.
-        "beans" => graph
-            .beans
-            .iter()
-            .map(|b| IndexEntry {
-                primary: b.id.clone(),
-                secondary: b.class.clone(),
+        // Spring beans: the XML `<bean>` declarations **and** the ones a stereotype annotation
+        // declares. Only the first were listed, which is why a project whose beans are all
+        // `@Service` and `@Component` — that is, a project written this century — saw an empty
+        // tab. The resolver has had them all along; nothing was asking it.
+        "beans" => {
+            let mut out: Vec<IndexEntry> = graph
+                .beans
+                .iter()
+                .map(|b| IndexEntry {
+                    primary: b.id.clone(),
+                    secondary: b.class.clone(),
+                    file: config_site(&b.source_file),
+                    line: None,
+                    kind: "bean".to_string(),
+                })
+                .collect();
+            // The class file, not a config fragment: an annotation bean IS its class, so the row
+            // opens the thing it names rather than nothing at all.
+            out.extend(cfg.annotation_beans().map(|b| IndexEntry {
+                primary: b.name.clone(),
+                secondary: b.fqcn.clone(),
                 file: config_site(&b.source_file),
                 line: None,
-            })
-            .collect(),
+                kind: "bean".to_string(),
+            }));
+            out.sort_by(|a, b| a.primary.cmp(&b.primary));
+            out
+        }
         // Struts actions: primary = qualified name, secondary = resolved class FQCN (the C1
         // chain), file = the `<action>` config fragment. No per-action line is parsed.
         "actions" => graph
@@ -4385,6 +4540,7 @@ fn config_entries_of(cfg: &ConfigResolver, kind: &str) -> Vec<IndexEntry> {
                 secondary: cfg.resolve_action_class(&a.qualified_name).unwrap_or_default(),
                 file: config_site(&a.source_file),
                 line: None,
+                kind: "action".to_string(),
             })
             .collect(),
         // Config edges: primary = the edge label (`from → to`), secondary = the relation
@@ -4397,6 +4553,7 @@ fn config_entries_of(cfg: &ConfigResolver, kind: &str) -> Vec<IndexEntry> {
                 secondary: rel_kind_label(r.kind).to_string(),
                 file: None,
                 line: None,
+                kind: "relation".to_string(),
             })
             .collect(),
         _ => Vec::new(),

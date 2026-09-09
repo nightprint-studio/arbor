@@ -75,6 +75,27 @@ export function packageOfDir(path: string): string | null {
 }
 
 /**
+ * The **source root** a directory lives under, or `null` when it lives under none.
+ *
+ * The counterpart to {@link packageOfDir}: that one answers *what package is this*, this one
+ * answers *what is that package a package of*. Together they let a dialog treat a package as a
+ * name rather than as a place — you type `it.acme.model` where `it.acme.web` was, and the folders
+ * are created from the root, not from wherever the tree happened to be selected.
+ *
+ * The source root itself answers with itself: it is the container, and the default package is a
+ * real package inside it.
+ */
+export function sourceRootOf(path: string): string | null {
+  const fwd = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  for (const suffix of SOURCE_ROOT_SUFFIXES) {
+    if (fwd === suffix || fwd.endsWith('/' + suffix)) return fwd;
+    const at = fwd.indexOf('/' + suffix + '/');
+    if (at >= 0) return fwd.slice(0, at + suffix.length + 1);
+  }
+  return null;
+}
+
+/**
  * A copy of `node` and everything under it.
  *
  * Load-bearing, not defensive: {@link compactMiddleDirs} rewrites names and children

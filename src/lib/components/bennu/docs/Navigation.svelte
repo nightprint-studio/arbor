@@ -122,6 +122,70 @@
   <code>setValue(int value)</code> does not report its own parameter as a use of
   <code>this.value</code>. A declaration is never a use of itself.
 </p>
+<h2>What a hover card says</h2>
+<p>
+  The signature, then the package, then — for a type that came out of a jar — the
+  <strong>dependency it belongs to</strong>, as <code>groupId:artifactId:version</code>. The
+  package says <em>which</em> type; the coordinate says <em>whose</em>, which on a long classpath
+  is the question actually being asked: two jars declaring the same simple name, or a class from a
+  starter nobody remembers adding.
+</p>
+<p>
+  Below that, the documentation — from your own source, or from the library's
+  <code>-sources.jar</code> when it has been downloaded.
+</p>
+
+<h2>Usage counts, and what nothing reaches</h2>
+<p>
+  Above a class, method or field, a line saying how many places use it. It is the same
+  whole-project index find-usages reads, so it counts uses in files you have never opened, and
+  pressing the line opens the very list it counted. Turn it off in
+  <strong>Settings → Editor → Usage counts</strong>.
+</p>
+<p>
+  A declaration nothing reaches has its <strong>name drawn faint</strong>. That claim is
+  deliberately harder to earn than a count of zero, because a name faded wrongly is an invitation to
+  delete working code. Zero uses is a fact about the index; unused is a fact about the program.
+</p>
+<p>
+  So a declaration is one of <strong>three</strong> things, and only the first two are drawn at all:
+</p>
+<ul>
+  <li><strong>Nothing outside the code reaches it.</strong> The count is the whole story, and a zero
+    fades the name. This is the case the feature exists for.</li>
+  <li><strong>Something might.</strong> It carries an annotation the engine does not recognise —
+    <code>@Deprecated</code>, something of your own — so no claim either way is safe. The count is
+    shown and nothing is faded: a deprecated method nobody calls is exactly what you were looking
+    for.</li>
+  <li><strong>Something does, by design.</strong> A <code>@Test</code> is run by JUnit, a
+    <code>@Bean</code> built by Spring, a <code>@GetMapping</code> called by the dispatcher, a
+    <code>@PrePersist</code> by the persistence provider, <code>main</code> by the JVM, an override
+    through its supertype. For these a count of zero is not a finding, it is the wrong question —
+    so <strong>nothing is drawn at all</strong>. A row saying “no usages” above every method of a
+    test file is true and useless.</li>
+</ul>
+<p>
+  The last of those still shows a count when there <em>is</em> one: a <code>@Bean</code> method
+  called from another <code>@Bean</code> method in the same configuration is an ordinary call, and
+  the number is worth having. Silence is only ever for a zero.
+</p>
+<p>
+  <strong>A type whose members a framework calls is one itself</strong> — which is how a test class
+  goes quiet without anybody guessing from its name. A class holding <code>@Test</code> methods is a
+  class JUnit instantiates; the same reasoning covers a configuration full of <code>@Bean</code>
+  factories and a controller full of mappings. A <code>TestUtils</code> with no test in it is an
+  ordinary class, and if nothing uses it you are told.
+</p>
+<p>
+  A constructor gets no count at all rather than a count of zero: its callers are <code>new</code>
+  expressions, which the index keys by the type.
+</p>
+<p>
+  What is left — a plain declaration, no annotation, no supertype, nothing calling it — is exactly
+  the set <em>Safe delete</em> would agree to remove. One question, asked once, so the colour and
+  the refactoring cannot disagree.
+</p>
+
 <h2>Call and type hierarchy</h2>
 <p>
   <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> on a method opens its <strong>callers</strong>;
@@ -157,10 +221,33 @@
   appears once the index is warm.
 </p>
 <p>
-  A <strong>Javadoc</strong> is read rather than dumped: the prose comes first, then
-  <code>@param</code>, <code>@return</code> and <code>@throws</code> as a labelled list, with
-  <code>&lbrace;@link …&rbrace;</code> shown as what it names and <code>@deprecated</code>
-  highlighted.
+  A <strong>Javadoc is rendered, not printed</strong>. A doc comment is HTML — that is what the
+  language says it is — so its headings are headings, its <code>&lt;pre&gt;</code> examples are code
+  blocks that scroll sideways rather than wrap, its lists are lists, and
+  <code>&amp;#064;</code> is an <code>@</code>. The inline forms read as what they name:
+  <code>&lbrace;@link …&rbrace;</code> as the member it points at,
+  <code>&lbrace;@code …&rbrace;</code> as code.
+</p>
+<p>
+  <code>@param</code>, <code>@return</code> and <code>@throws</code> are lifted out of the prose
+  into a labelled list, because they are a table; <code>@deprecated</code> is highlighted, because
+  it is the one that changes what you do next. An <code>@Override</code> inside a code example
+  stays in the example.
+</p>
+<p>
+  Angle brackets that are not markup are left alone: <code>Vec&lt;T&gt;</code> and
+  <code>Map&lt;K, V&gt;</code> are type parameters, not elements, and a card that ate them would be
+  hiding the part you were reading for.
+</p>
+<p>
+  Code blocks are <strong>syntax-coloured</strong>, with the same grammars a fenced block in a
+  rendered <code>.md</code> gets: Java for a Javadoc, and whatever the file is for what a language
+  server documents.
+</p>
+<p>
+  A card longer than the space above the line <strong>scrolls</strong>, with the signature, the
+  package and the coordinate staying put at the top of it. Move the pointer onto the card to
+  scroll it.
 </p>
 <p>
   A <strong>library's</strong> documentation appears on the same card, from the same place its

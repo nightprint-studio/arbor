@@ -33,6 +33,8 @@
 pub mod blocks;
 // What is in the local repository, as a searchable list.
 pub mod catalog;
+// Maven Central's metadata — the one question the local repository cannot answer.
+pub mod central;
 // What is wrong with a pom.
 pub mod check;
 // What can be typed at the caret.

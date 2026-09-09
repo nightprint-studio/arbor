@@ -40,7 +40,9 @@ function card(dom: HoverCard): Tooltip {
         dom: hoverCardDom({
           signature: dom.title,
           container: dom.meta.length ? dom.meta.join('  ·  ') : null,
-          doc: dom.doc.length ? dom.doc.join('\n') : null,
+          // A blank line between facts, not a single newline: the card renders a doc body
+          // the way Javadoc is written, where one newline is a wrap and two are a paragraph.
+          doc: dom.doc.length ? dom.doc.join('\n\n') : null,
         }),
       };
     },

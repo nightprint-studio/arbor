@@ -192,6 +192,20 @@ fn java_file_offers(file: &str, source: &str, offset: usize) -> Vec<OfferWire> {
         }
     }
 
+    // The file's name and the type's name disagree — which for a `public` top-level type is not a
+    // matter of taste: JLS §7.6 ties the two, so the file does not compile until one of them moves.
+    //
+    // Two offers, because there is no way to know which name is the right one. `Foo.java` holding
+    // `public class Bar` happens both ways round — someone renamed the class in a text editor, and
+    // someone copied a file and renamed the class inside it — and an editor that picks for you gets
+    // it wrong half the time, silently, in the direction that loses the name you meant to keep.
+    //
+    // Neither is a plain edit. Renaming the type has to carry every use of it (a `replacement` in
+    // this buffer would leave the rest of the project calling a name that no longer exists), so it
+    // goes through the rename engine's preview. Renaming the file is a filesystem move, which the
+    // editor performs.
+    offers.extend(name_mismatch_offers(file, source));
+
     // "Import class": the caret is on a bare, unimported type name → offer to add its import, one
     // offer per candidate FQN (the Alt+Enter menu is the "which import?" picker the user asked for).
     if let Some(simple) = bennu_java::prelude::simple_type_needing_import(source, offset) {
@@ -216,6 +230,44 @@ fn java_file_offers(file: &str, source: &str, offset: usize) -> Vec<OfferWire> {
         });
     }
     offers
+}
+
+/// The two ways to settle a public type whose name disagrees with its file's — see the call site.
+///
+/// Silent for a file with no `.java` stem to compare against, and for the second and later
+/// mismatches in one file: two `public` top-level types is a different error, and offering to
+/// rename the file after each of them in turn would be offering to make the same file right for one
+/// of them and wrong for the other.
+fn name_mismatch_offers(file: &str, source: &str) -> Vec<OfferWire> {
+    let Some(stem) = std::path::Path::new(file).file_stem().and_then(|s| s.to_str()) else {
+        return Vec::new();
+    };
+    let Some(tree) = bennu_java::prelude::parse_java(source) else { return Vec::new() };
+    let found = bennu_check::prelude::type_file_mismatches(tree.root_node(), source, stem);
+    let [mismatch] = found.as_slice() else { return Vec::new() };
+
+    vec![
+        OfferWire {
+            id: "rename-type-to-file".to_string(),
+            label: format!("Rename {} `{}` to `{stem}` (match the file)", mismatch.keyword, mismatch.name),
+            start: mismatch.start,
+            end: mismatch.end,
+            // The payload the rename action plans with: the caret goes to `start`, the new name is
+            // the file's own stem.
+            replacement: stem.to_string(),
+            action: Some("rename-symbol-preview".to_string()),
+        },
+        OfferWire {
+            id: "rename-file-to-type".to_string(),
+            label: format!("Rename the file to `{}.java` (match the {})", mismatch.name, mismatch.keyword),
+            start: mismatch.start,
+            end: mismatch.end,
+            // The payload the file action moves to: a base name, never a path — the file stays in
+            // its package, and a package move is the OTHER intention.
+            replacement: format!("{}.java", mismatch.name),
+            action: Some("rename-file".to_string()),
+        },
+    ]
 }
 
 /// Build the "Import `<fqn>`" offers for the unimported simple type `simple` used in `source`: one per
@@ -299,7 +351,7 @@ fn bennu_import_edit(_ctx: &BennuState, args: ImportEditArgs) -> Result<Option<I
 
 #[cfg(test)]
 mod tests {
-    use super::import_edit_for;
+    use super::{import_edit_for, name_mismatch_offers};
 
     /// The applied source after inserting `fqn`'s import (or `None` when no import is needed).
     fn applied(source: &str, fqn: &str) -> Option<String> {
@@ -335,5 +387,63 @@ mod tests {
     fn no_import_when_already_imported() {
         let src = "package a;\nimport java.util.List;\nclass C { List x; }\n";
         assert!(import_edit_for(src, "java.util.List").is_none());
+    }
+    // ── the file name and the type name disagree ────────────────────────────────────────────
+
+    fn mismatch(file: &str, source: &str) -> Vec<(String, String, String)> {
+        name_mismatch_offers(file, source)
+            .into_iter()
+            .map(|o| (o.id, o.replacement, o.action.unwrap_or_default()))
+            .collect()
+    }
+
+    #[test]
+    fn both_directions_are_offered_and_neither_is_chosen() {
+        let got = mismatch("/p/src/main/java/a/Bar.java", "package a;\npublic class Foo {}\n");
+        assert_eq!(
+            got,
+            vec![
+                ("rename-type-to-file".into(), "Bar".into(), "rename-symbol-preview".into()),
+                ("rename-file-to-type".into(), "Foo.java".into(), "rename-file".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_file_that_already_agrees_offers_nothing() {
+        assert!(mismatch("/p/a/Foo.java", "package a;\npublic class Foo {}\n").is_empty());
+    }
+
+    #[test]
+    fn a_non_public_type_is_free_to_be_called_anything() {
+        assert!(mismatch("/p/a/Bar.java", "package a;\nclass Foo {}\n").is_empty());
+    }
+
+    #[test]
+    fn a_nested_type_is_named_after_nothing_in_particular() {
+        let src = "package a;\npublic class Bar { public class Foo {} }\n";
+        assert!(mismatch("/p/a/Bar.java", src).is_empty());
+    }
+
+    #[test]
+    fn the_label_calls_the_declaration_what_it_is() {
+        let offers = name_mismatch_offers("/p/a/Bar.java", "package a;\npublic enum Foo { A }\n");
+        assert!(offers[0].label.contains("enum `Foo`"), "{}", offers[0].label);
+        assert!(offers[1].label.contains("`Foo.java`"), "{}", offers[1].label);
+    }
+
+    #[test]
+    fn two_public_types_in_one_file_get_no_offer() {
+        // A second `public` top-level type is its own error, and "rename the file" would settle it
+        // for one of them by breaking it for the other.
+        let src = "package a;\npublic class Foo {}\npublic class Baz {}\n";
+        assert!(mismatch("/p/a/Bar.java", src).is_empty());
+    }
+
+    #[test]
+    fn the_file_offer_carries_a_base_name_and_never_a_path() {
+        let offers = name_mismatch_offers("/p/src/main/java/a/Bar.java", "public class Foo {}\n");
+        let rename_file = offers.iter().find(|o| o.id == "rename-file-to-type").unwrap();
+        assert!(!rename_file.replacement.contains('/'), "{}", rename_file.replacement);
     }
 }

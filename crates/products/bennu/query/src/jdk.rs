@@ -70,6 +70,16 @@ unsafe impl Sync for JdkMemberIndex {}
 unsafe impl Send for JdkMemberIndex {}
 
 impl JdkMemberIndex {
+    /// The archive `binary_name` came out of — see `ClassSource::origin`.
+    ///
+    /// Behind the same lock every other access takes, and it does no decoding: a hash probe per
+    /// jar against central directories already in memory. The memo is not consulted, because the
+    /// memo remembers *members* and this question is about *provenance*.
+    pub fn origin(&self, binary_name: &str) -> Option<std::path::PathBuf> {
+        let guard = self.inner.lock().ok()?;
+        guard.source.origin(binary_name)
+    }
+
     /// An **in-memory-only** index over a boxed classpath source (no persistence). Used by the
     /// empty and `project_only` resolvers, which never resolve the JDK.
     pub fn new(source: Box<dyn ClassSource>) -> Self {

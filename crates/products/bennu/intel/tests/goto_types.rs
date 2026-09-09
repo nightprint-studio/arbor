@@ -496,3 +496,88 @@ fn find_usages_of_type_across_files() {
         "Widget is referenced from A and B; use-site count should be positive (got {n})"
     );
 }
+
+// ── an annotation's name is a type, and the grammar does not say so ────────────────────────────
+//
+// A `marker_annotation`'s name field is a plain `identifier` — never a `type_identifier` — so it
+// fell through to the bare-identifier fallback and was resolved as a **field of the enclosing
+// class**. Hovering `@DynamicPropertySource` in a test class said `FIELD DynamicPropertySource`
+// of that class, and go-to and find-usages agreed, because all three ask one classifier.
+
+#[test]
+fn an_annotation_name_resolves_to_the_annotation_type() {
+    let p = Project::new(&[
+        (
+            "Marker.java",
+            "package app;\npublic @interface Marker { }\n",
+        ),
+        (
+            "Uses.java",
+            "package app;\npublic class Uses {\n    @Marker\n    void run() { }\n}\n",
+        ),
+    ]);
+    let s = p.source("Uses.java").to_string();
+    let label = p.goto_label("Uses.java", at(&s, "Marker\n    void")).expect("a target");
+    assert!(label.contains("app.Marker"), "expected the annotation type, got {label:?}");
+    assert!(!label.to_lowercase().contains("field"), "an annotation is never a field: {label:?}");
+}
+
+#[test]
+fn an_annotation_named_like_nothing_in_the_class_is_still_not_a_field() {
+    // The shape that produced the report: a Spring annotation on a test class, whose name matches
+    // no member of it. The old fallback resolved it against the enclosing type anyway.
+    let p = Project::new(&[
+        (
+            "DynamicPropertySource.java",
+            "package app;\npublic @interface DynamicPropertySource { }\n",
+        ),
+        (
+            "RoutersTest.java",
+            "package app;\npublic class RoutersTest {\n\
+             \x20   @DynamicPropertySource\n\
+             \x20   static void override_server_urls() { }\n}\n",
+        ),
+    ]);
+    let s = p.source("RoutersTest.java").to_string();
+    let label = p
+        .goto_label("RoutersTest.java", at(&s, "DynamicPropertySource\n"))
+        .expect("a target");
+    assert!(label.contains("DynamicPropertySource"), "{label:?}");
+    assert!(!label.to_lowercase().contains("field"), "{label:?}");
+}
+
+#[test]
+fn a_qualified_annotation_name_resolves_by_its_package() {
+    let p = Project::new(&[
+        ("Marker.java", "package app;\npublic @interface Marker { }\n"),
+        (
+            "Uses.java",
+            "package other;\npublic class Uses {\n    @app.Marker\n    void run() { }\n}\n",
+        ),
+    ]);
+    let s = p.source("Uses.java").to_string();
+    let label = p.goto_label("Uses.java", at(&s, "Marker\n    void")).expect("a target");
+    assert!(label.contains("app.Marker"), "{label:?}");
+}
+
+#[test]
+fn a_caret_inside_an_annotations_arguments_is_not_the_annotation() {
+    // `@Column(name = "total")` — the caret is on an element name, which is something else. Saying
+    // it is the annotation type would make go-to jump away from what was clicked.
+    let p = Project::new(&[
+        (
+            "Column.java",
+            "package app;\npublic @interface Column { String name(); }\n",
+        ),
+        (
+            "Row.java",
+            "package app;\npublic class Row {\n    @Column(name = \"total\")\n    int total;\n}\n",
+        ),
+    ]);
+    let s = p.source("Row.java").to_string();
+    let label = p.goto_label("Row.java", at(&s, "name = "));
+    assert!(
+        label.as_deref().is_none_or(|l| !l.contains("app.Column")),
+        "an element name is not the annotation type: {label:?}"
+    );
+}

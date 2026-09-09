@@ -14,6 +14,7 @@ pub use crate::infer::{
     InferCache,
     MethodResolution,
 };
+pub use crate::annotation_site::{annotation_site, target_admits, AnnotationSite, ElementTarget};
 pub use crate::symbols::{extract_symbols, extract_symbols_from_root};
 
 // The AST: the same parse read in Java's vocabulary, bodies included, typed where the resolver

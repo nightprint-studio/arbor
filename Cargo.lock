@@ -1128,6 +1128,7 @@ dependencies = [
  "bennu-proto",
  "bennu-query",
  "bennu-refactor",
+ "bennu-test",
  "bennu-web",
  "serde",
  "serde_json",

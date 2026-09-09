@@ -37,6 +37,18 @@ use crate::xml::parse_bean_xml;
 use crate::{java_intel, props_intel, xml_intel};
 
 /// The Spring framework extension.
+/// Where type names come from when this crate needs to offer some.
+///
+/// It cannot know them itself: a class name lives on the **classpath**, and this crate models
+/// Spring, not Java. The one place that has both is the layer that wires them together, so the
+/// lookup is handed in the way the library beans are — see [`SpringExtension::set_class_names`].
+pub trait ClassNameSource: Send + Sync {
+    /// Fully-qualified type names matching what has been typed so far, best first, at most
+    /// `limit` of them. Empty is a legitimate answer and means "nothing matches", never
+    /// "ask again later".
+    fn matching(&self, typed: &str, limit: usize) -> Vec<String>;
+}
+
 pub struct SpringExtension {
     model: RwLock<Arc<SpringModel>>,
     ready: AtomicBool,
@@ -44,6 +56,10 @@ pub struct SpringExtension {
     /// model so setting it does not require a reindex — it is a display choice, not new
     /// information about the project.
     active_property_file: RwLock<Option<String>>,
+    /// The classpath's type names, for completing a class written as a string. `None` until the
+    /// index that owns them exists, which is exactly when a completion could not be answered
+    /// anyway.
+    class_names: RwLock<Option<Arc<dyn ClassNameSource>>>,
 }
 
 impl Default for SpringExtension {
@@ -58,7 +74,17 @@ impl SpringExtension {
             model: RwLock::new(Arc::new(SpringModel::default())),
             ready: AtomicBool::new(false),
             active_property_file: RwLock::new(None),
+            class_names: RwLock::new(None),
         }
+    }
+
+    /// Hand this extension the classpath's type names. Called once the project index exists.
+    pub fn set_class_names(&self, source: Arc<dyn ClassNameSource>) {
+        *self.class_names.write().unwrap_or_else(|p| p.into_inner()) = Some(source);
+    }
+
+    fn class_names(&self) -> Option<Arc<dyn ClassNameSource>> {
+        self.class_names.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
     /// The current model. Cheap (`Arc` clone) and lock-free for the caller, so a query never holds
@@ -111,9 +137,41 @@ impl SpringExtension {
             xml_files: current.xml_files.clone(),
             types: current.types.clone(),
             simple_names: current.simple_names.clone(),
+            // Carried, never rebuilt here: they come from a jar scan on its own schedule, and a
+            // property-view change must not drop them.
+            library_beans: current.library_beans.clone(),
             config_bindings: current.config_bindings.clone(),
             property_usages: current.property_usages.clone(),
             metadata: current.metadata.clone(),
+        };
+        self.store(next);
+    }
+
+    /// Replace the beans the **allowlisted dependencies** contribute (Settings → Beans).
+    ///
+    /// Pushed by the host rather than read here, and that is the seam: which artifacts are
+    /// allowlisted is a setting, the scan that reads their jars is cached per artifact on disk,
+    /// and both live on the other side of the extension boundary. What this side owns is what the
+    /// beans then *mean* — that an injection point can be satisfied by one, on the terms its
+    /// `@ConditionalOn…` sets.
+    ///
+    /// Everything else is carried over untouched, for the same reason the property view carries
+    /// the beans: the two arrive on different schedules and either replacing the other wholesale
+    /// is how one of them ends up permanently empty.
+    pub fn set_library_beans(&self, beans: Vec<crate::model::BeanDef>) {
+        let current = self.model();
+        let next = SpringModel {
+            beans: current.beans.clone(),
+            endpoints: current.endpoints.clone(),
+            injections: current.injections.clone(),
+            props: current.props.clone(),
+            xml_files: current.xml_files.clone(),
+            types: current.types.clone(),
+            simple_names: current.simple_names.clone(),
+            config_bindings: current.config_bindings.clone(),
+            property_usages: current.property_usages.clone(),
+            metadata: current.metadata.clone(),
+            library_beans: beans,
         };
         self.store(next);
     }
@@ -188,6 +246,9 @@ impl FrameworkExtension for SpringExtension {
             xml_files,
             types,
             simple_names,
+            // Kept across a reindex of the project's sources: these came from a jar scan, which
+            // this pass did not run and must not undo.
+            library_beans: self.model().library_beans.clone(),
         };
         self.store(model);
         self.ready.store(true, Ordering::Release);
@@ -228,7 +289,13 @@ impl FrameworkExtension for SpringExtension {
         let model = self.model();
         let path = ctx.path_str();
         match ctx.extension().as_str() {
-            "java" => java_intel::completions(&model, &path, ctx.source, offset),
+            "java" => java_intel::completions(
+                &model,
+                self.class_names().as_deref(),
+                &path,
+                ctx.source,
+                offset,
+            ),
             "xml" if xml_intel::is_bean_xml(ctx.source) => {
                 xml_intel::completions(&model, ctx.source, offset)
             }

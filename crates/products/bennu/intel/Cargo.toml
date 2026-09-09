@@ -54,6 +54,11 @@ tree-sitter-java = "0.23"
 # `.aff`/`.dic` and checks declaration-name / comment sub-words. Memory-light, no C deps.
 spellbook        = "0.4"
 
+# The test-framework annotation tables — which methods JUnit / TestNG invoke themselves. Read by
+# the usage counts so a `@BeforeEach` is not reported as a method nothing calls. One list, shared
+# with test discovery, rather than a second copy that drifts.
+bennu-test = { path = "../test" }
+
 [dev-dependencies]
 # The refactoring transforms, for the `refactor_case` measurement harness ONLY. A dev-dependency
 # because nothing in the library uses them: the harness lives here for the resolver, which is what
@@ -61,3 +66,4 @@ spellbook        = "0.4"
 bennu-refactor = { path = "../refactor" }
 # The import inserter, so the harness adds the same edit the backend does.
 bennu-intentions = { path = "../intentions" }
+

@@ -82,6 +82,13 @@ pub struct BeanDef {
     pub supertypes: Vec<String>,
     /// The `@ConditionalOn…` annotations gating it. Empty for an unconditional bean.
     pub conditions: Vec<BeanCondition>,
+    /// The dependency that declares it, as `groupId:artifactId` — **empty for the project's own**.
+    ///
+    /// A bean out of a jar is not the same claim as one out of your source: it is what Spring
+    /// *may* register, `@ConditionalOn…` decides the rest, and whoever reads "injected with this"
+    /// deserves to be told where it came from and on what terms. Empty is the ordinary case and
+    /// reads as "yours".
+    pub artifact: String,
 }
 
 /// One parameter of a handler method, with what it binds to.
@@ -264,6 +271,14 @@ pub struct SpringModel {
     pub types: BTreeMap<String, TypeInfo>,
     /// Simple name → every FQCN declaring it (a name can be declared in two packages).
     pub simple_names: BTreeMap<String, Vec<String>>,
+    /// Beans declared by the **allowlisted dependencies** (Settings → Beans), which the project
+    /// itself does not declare.
+    ///
+    /// Its own list rather than mixed into [`Self::beans`], for the reason the property sources
+    /// have one: a different lifecycle. `beans` is rebuilt by every reindex of the project's
+    /// sources; these arrive from a jar scan on its own schedule, and folding them together would
+    /// mean each pass erasing the other's.
+    pub library_beans: Vec<BeanDef>,
     /// Every `@ConfigurationProperties`-bound field and the key it binds.
     pub config_bindings: Vec<ConfigBinding>,
     /// Every place a configuration key is read.
@@ -288,15 +303,34 @@ impl SpringModel {
     /// in different packages both match — and deliberately so: this drives navigation, a
     /// picker the user reads, not a diagnostic. Being too generous costs an extra row;
     /// being too strict costs the feature.
+    /// Whether the project itself declares the type an injection point asks for.
+    ///
+    /// The difference between *"nothing declares a bean of this"* and *"this engine has not looked
+    /// where the bean would be"*. A `SchemaAuthorizationManager` comes from a Spring jar, so the
+    /// project declares neither the type nor a bean of it — and the model holds only the project's
+    /// own beans, deliberately (a bean in a jar is what Spring *may* register; `@ConditionalOn…`
+    /// decides the rest, and deciding it faithfully means running Spring's evaluator).
+    ///
+    /// So for a library type, "no matching bean found" asserts something the engine is in no
+    /// position to assert. This is what lets the tooltip say the true thing instead.
+    pub fn declares_type(&self, type_text: &str) -> bool {
+        let wanted = injected_type(type_text);
+        !wanted.is_empty() && self.simple_names.contains_key(&wanted)
+    }
+
     pub fn candidates(&self, type_text: &str, qualifier: &str) -> Vec<&BeanDef> {
         let wanted_owned = injected_type(type_text);
         let wanted = wanted_owned.as_str();
         if wanted.is_empty() {
             return Vec::new();
         }
+        // The project's own beans **and** the ones an allowlisted dependency declares. Both are
+        // definitions an injection point can be satisfied by; what differs is how certain they
+        // are, which is what `BeanDef::artifact` and `conditions` carry to whoever draws them.
         let mut out: Vec<&BeanDef> = self
             .beans
             .iter()
+            .chain(self.library_beans.iter())
             .filter(|b| !b.is_abstract)
             .filter(|b| {
                 simple_name(&b.fqcn) == wanted
@@ -571,6 +605,7 @@ mod tests {
             is_abstract: false,
             supertypes: supers.iter().map(|s| s.to_string()).collect(),
             conditions: Vec::new(),
+            artifact: String::new(),
         }
     }
 
@@ -647,4 +682,22 @@ mod tests {
         let any = Endpoint { methods: vec![], ..e };
         assert_eq!(any.label(), "ANY /orders/{id}");
     }
+    #[test]
+    fn a_type_the_project_declares_is_told_from_one_it_does_not() {
+        // The distinction the injection tooltip rests on: "nothing declares a bean of this" is a
+        // finding about a project type, and a claim this engine has no standing to make about a
+        // type that lives in a jar.
+        let mut model = SpringModel::default();
+        model
+            .simple_names
+            .insert("OrderService".to_string(), vec!["com.acme.OrderService".to_string()]);
+
+        assert!(model.declares_type("OrderService"));
+        assert!(!model.declares_type("SchemaAuthorizationManager"));
+        // Through the wrappers an injection point is written with, since that is what arrives.
+        assert!(model.declares_type("List<OrderService>"));
+        assert!(model.declares_type("Optional<OrderService>"));
+        assert!(!model.declares_type(""));
+    }
+
 }

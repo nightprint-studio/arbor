@@ -39,6 +39,34 @@ pub struct LibraryBeanGroupDto {
     pub beans: Vec<LibraryBeanDto>,
 }
 
+/// One group's beans as **injection candidates** for the Spring model.
+///
+/// The DTO is this layer's mirror of `LibraryBean`, field for field — so it is turned back into
+/// one and the mapping onto a `BeanDef` stays in `bennu-spring`, where the meaning of a bean lives.
+/// Two copies of that mapping would drift, and the half that drifts is always the conditions.
+pub(crate) fn bean_defs_of_group(
+    group: &LibraryBeanGroupDto,
+) -> Vec<bennu_spring::prelude::BeanDef> {
+    let restored = bennu_spring::prelude::LibraryBeanGroup {
+        group_id: group.group_id.clone(),
+        artifact_id: group.artifact_id.clone(),
+        version: group.version.clone(),
+        beans: group
+            .beans
+            .iter()
+            .map(|b| bennu_spring::prelude::LibraryBean {
+                name: b.name.clone(),
+                fqcn: b.fqcn.clone(),
+                stereotype: b.stereotype.clone(),
+                declared_in: b.declared_in.clone(),
+                conditions: b.conditions.clone(),
+                primary: b.primary,
+            })
+            .collect(),
+    };
+    bennu_spring::prelude::bean_defs_of(&restored)
+}
+
 /// The wire shape of one bean.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryBeanDto {
@@ -278,11 +306,25 @@ fn groups_for(root: &str) -> Vec<LibraryBeanGroupDto> {
         return Vec::new();
     }
     if let Some(hit) = cached(root, &allow) {
+        publish_to_spring(root, &hit);
         return hit;
     }
     let groups = scan(&IndexService::global().dep_jars_of(root), &allow);
     remember(root, &allow, &groups);
+    publish_to_spring(root, &groups);
     groups
+}
+
+/// Hand the scanned beans to the Spring model, so an `@Autowired` field of a type only a
+/// dependency declares resolves instead of reporting nothing.
+///
+/// Here rather than in the scan itself: the cached path returns early, and a cache hit has to
+/// publish too — a project whose beans were scanned before the model was built would otherwise
+/// have them on disk and nowhere else. See `groups_for`, which calls this on both paths.
+fn publish_to_spring(root: &str, groups: &[LibraryBeanGroupDto]) {
+    let defs: Vec<bennu_spring::prelude::BeanDef> =
+        groups.iter().flat_map(bean_defs_of_group).collect();
+    crate::frameworks::set_spring_library_beans(root, defs);
 }
 
 /// Args for [`bennu_library_beans`].

@@ -66,11 +66,11 @@ export { createHighlightPlugin, makeByteToU16, makeU16ToByte, parserReady } from
 // Tab stops of an inserted completion — see `snippet-stops.ts` for why this is not CodeMirror's own
 // `snippet()`.
 export { insertWithStops, snippetStops } from './snippet-stops';
-// Layers a provider supplies and the buffer cannot — occurrences of the symbol under the caret, and
-// where the file folds.
+// Layers a provider supplies and the buffer cannot — occurrences of the symbol under the caret,
+// where the file folds, and which declarations nothing reaches.
 export {
-  documentHighlights, serverFolding, setDocumentHighlights, setFoldRanges,
-  type FoldRange, type HighlightRange,
+  documentHighlights, serverFolding, unusedDeclarations, setDocumentHighlights, setFoldRanges,
+  setUnusedRanges, type FoldRange, type HighlightRange, type UnusedRange,
 } from './server-layers';
 // The counts a provider draws above an item — a pushed layer like the two above, and the only one
 // that is a control rather than a decoration.

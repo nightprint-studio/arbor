@@ -196,3 +196,17 @@ fn hover_does_not_panic_on_broken_file() {
     let _ = p.hover("Broken.java", at(&s, "this.") + "this.".len());
     let _ = p.hover("Broken.java", 0);
 }
+
+// ── the kind is read off the class flags, so it needs a resolver that can read them ───────────
+
+#[test]
+fn hover_annotation_says_annotation() {
+    let p = Project::new(&[
+        ("Marker.java", "package ui;\npublic @interface Marker { }\n"),
+        ("Use.java", "package ui;\npublic class Use { Marker m; }\n"),
+    ]);
+    let s = p.source("Use.java").to_string();
+    let h = p.hover("Use.java", at(&s, "Marker m")).expect("hover on the annotation");
+    assert_eq!(h.kind, "annotation");
+    assert_eq!(h.signature, "annotation Marker");
+}

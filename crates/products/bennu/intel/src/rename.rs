@@ -2702,4 +2702,64 @@ mod subtype_map_tests {
         map.refresh_type("p/Root", &r);
         assert!(map.parents.is_empty());
     }
+    // ── the card's kind is read off the class flags ───────────────────────────────────────────
+
+    /// A resolver holding one type with the flags it was given, and nothing else — the axis the
+    /// hover card's kind is decided on.
+    struct FlagResolver {
+        binary: String,
+        members: Option<ClassMembers>,
+    }
+
+    impl TypeResolver for FlagResolver {
+        fn members_of(&self, binary: &str) -> Option<std::sync::Arc<ClassMembers>> {
+            (binary == self.binary)
+                .then(|| self.members.clone())
+                .flatten()
+                .map(std::sync::Arc::new)
+        }
+        fn resolve_simple_name(&self, _name: &str, _imports: &[Import]) -> Option<String> {
+            None
+        }
+    }
+
+    fn flagged(binary: &str, set: impl Fn(&mut bennu_java::prelude::ClassFlags)) -> FlagResolver {
+        let mut members = ClassMembers {
+            type_params: Vec::new(),
+            superclass: None,
+            interfaces: vec![],
+            methods: vec![],
+            fields: vec![],
+            flags: Default::default(),
+        };
+        set(&mut members.flags);
+        FlagResolver { binary: binary.to_string(), members: Some(members) }
+    }
+
+    fn kind_of(resolver: &dyn TypeResolver, binary: &str) -> String {
+        hover_for_key(&DeclKey::Type { binary: binary.to_string() }, resolver, None).kind
+    }
+
+    #[test]
+    fn a_type_is_reported_as_what_its_flags_say_it_is() {
+        let b = "org/springframework/context/annotation/Bean";
+        assert_eq!(kind_of(&flagged(b, |f| f.is_annotation = true), b), "annotation");
+        assert_eq!(kind_of(&flagged(b, |f| f.is_interface = true), b), "interface");
+        assert_eq!(kind_of(&flagged(b, |f| f.is_enum = true), b), "enum");
+        assert_eq!(kind_of(&flagged(b, |f| f.is_record = true), b), "record");
+        assert_eq!(kind_of(&flagged(b, |_| {}), b), "class");
+    }
+
+    #[test]
+    fn a_type_the_resolver_cannot_read_falls_back_to_class() {
+        // The failure this documents rather than prevents: the fallback is right — "class" is the
+        // commonest answer and the card must say something — but it is only ever reached when the
+        // resolver could not read the type at all. Hand `hover` the engine's project-only WALK
+        // resolver and every library type takes this path, so `@Bean` reports as a class. That is
+        // why `SemanticEngine::hover` uses the full-classpath policy resolver when there is one.
+        let b = "org/springframework/context/annotation/Bean";
+        let blind = FlagResolver { binary: b.to_string(), members: None };
+        assert_eq!(kind_of(&blind, b), "class");
+    }
+
 }

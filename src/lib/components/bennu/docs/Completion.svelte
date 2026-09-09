@@ -30,6 +30,36 @@
     that.</li>
 </ul>
 <p>
+  <strong>Type names get two ranking terms of their own</strong>, because a simple name usually
+  resolves to several types and nothing above can tell them apart — the typed letters are the same
+  for all of them.
+</p>
+<p>
+  The first is <strong>what this file has already said</strong>, and nothing outranks it: a type the
+  file imports is the one it means, then a package it wildcard-imports, then its own package, which
+  needs no import at all.
+</p>
+<p>
+  The second is <strong>what the project imports</strong> — every <code>import</code> statement in
+  the codebase is somebody choosing one of those candidates, and the aggregate of those choices is
+  the best predictor of the next one. It is weighed against <strong>distance</strong>: the nearest
+  package by shared prefix, so a sibling beats a cousin and both beat a stranger, with the JDK ahead
+  of the rest of the classpath — not because it is special, but because a name matching both a JDK
+  type and something in a jar you have never opened is almost always the JDK one.
+</p>
+<p>
+  The two are weighed rather than ordered, and the balance is the point. A
+  <code>java.util.List</code> written in four hundred files beats an
+  <code>it.acme.model.List</code> nobody has ever imported, even though the second one is nearer.
+  A type imported <em>once</em> somewhere does not beat anything: that is not evidence, it is a
+  coincidence.
+</p>
+<p>
+  <strong>Settings → Completion → Order type names by what this project imports</strong> turns the
+  second term off, and the counts then stop being consulted at once rather than at the next rebuild.
+  What the file itself imports still comes first — that was never a statistic.
+</p>
+<p>
   Keywords and words scraped out of the buffer are offered when nothing better matches, always
   below anything the index resolved. Beyond that, how well what you typed matches still decides
   between neighbours — the ordering is a starting point, not an override.
@@ -139,6 +169,45 @@
   inherited one appears once. Inherited members are included; a <code>private</code> member of
   another class is not.
 </p>
+<h2>Where the import counts come from</h2>
+<p>
+  They are counted during the <strong>index build</strong>, in the pass that already parses every
+  file — one hash lookup per <code>import</code> line, on a walk that was happening anyway. Nothing
+  is written to disk and nothing is asked of you: it is a fact about the project's own sources,
+  and a saved copy of it would be a copy that goes stale, which is worse than none. A project that
+  dropped a library would go on recommending it and nothing would say why.
+</p>
+<p>
+  It is <strong>not</strong> updated as you type, and that is deliberate too. Whether this is a
+  codebase that uses <code>java.util.List</code> is not a fact that changes because you saved a
+  file, and a completion order that visibly shifted under you would be worse than one a rebuild out
+  of date. It refreshes whenever the index does.
+</p>
+<p>
+  A count is used as a <strong>band</strong>, not as a number: each step is a doubling, and it stops
+  at 128. The difference between four imports and eight is real; the difference between four hundred
+  and eight hundred is not, and a ranking that pretended otherwise would let one ubiquitous type sit
+  at the top of every list it matches for ever. A wildcard import counts for the whole package, one
+  band weaker — <code>import java.util.*</code> is a file choosing the package, not the type.
+</p>
+
+<h2>Annotations</h2>
+<p>
+  Typing <strong><code>@</code></strong> opens the popup on its own, and it contains
+  <strong>annotation types only</strong>. That character narrows the legal names harder than
+  anything else in Java — from every type on the classpath to the few hundred annotations on it —
+  so the list at that moment is short and nearly always holds the answer.
+</p>
+<p>
+  It narrows again from where the caret is. An annotation declares what it may be attached to
+  (<code>@Target</code>), so above a field the ones that only go on a method sort below the ones
+  that belong there. They are ranked rather than hidden: an annotation from a jar whose bytes have
+  not been read reports no target at all, and reading that as a refusal would hide it entirely.
+</p>
+<p>
+  Accepting one adds its import, on the same terms as any other type name.
+</p>
+
 <h2>Generated members</h2>
 <p>
   Plenty of Java members exist at compile time and nowhere in the source. Bennu models them, so

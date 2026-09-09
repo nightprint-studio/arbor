@@ -13,6 +13,34 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **A Javadoc is rendered instead of printed.** A doc comment is HTML, and flattening it produced the worst of both — `<h3>Overview</h3>` and `&#064;Bean` sitting in the middle of a sentence. Headings are now headings, `<pre>` examples are code blocks, lists are lists, entities are the characters they name, and `{@link}` reads as what it points at. Angle brackets that are not markup — `Vec<T>`, `Map<K, V>` — are left exactly as written.
+
+- **Go to class now reaches the JDK.** Searching outside the project covered the dependency jars and stopped there, which left out the largest dependency every Java project has: `List`, `Optional`, `Path`, `Thread`. They open the way everything else does, on the real source from the JDK's own `src.zip`. Files are unchanged — from Java 9 the JDK is one image file, with nothing in it a reader would recognise as a file to open.
+
+- **A class written as a string is treated as the class it names.** `@ConditionalOnClass(name = "com.zaxxer.hikari.HikariDataSource")` writes a type as text because the type may be absent at compile time — so Java sees an opaque string, and a typo in it silently turns the condition off for ever. It is now coloured as a type, completed from the classpath as you type it, and Ctrl+B opens it: the project's own source when it declares it, the decompiled view otherwise. Same for `@ConditionalOnMissingClass`.
+
+- **A bean written as a plain string is coloured as a bean.** `@Qualifier("fast")`, `@DependsOn("audit")`, `@Resource(name = "ds")` — all three already followed to their declaration, and none of them looked like they would.
+
+- **A `@ConditionalOnProperty` key is coloured like a `@Value` placeholder.** It names a property outright, with no `${…}` around it, so it used to read as an ordinary string literal — while having the same hover, the same go-to and the same "declared in" answer behind it. The colour is the only thing on screen that says a name can be followed. `havingValue` stays uncoloured: it is what the key is compared to, not a key.
+
+- **Code blocks in a hover card are syntax-coloured**, with the same grammars a fenced block in a rendered `.md` gets — Java for a Javadoc, the file's own language for what a language server documents.
+
+- **A class-level Javadoc arrives whole.** The old 600-character limit existed because the card could not scroll; it can, so the cap is now only a bound against the pathological — no doc comment anybody has written reaches it. One that still would says it was cut instead of stopping mid-word.
+
+- **How many places use a class, method or field, drawn above it — and the name of one nothing reaches, drawn faint.** The whole-project reference index answering, so a count includes uses in files you have never opened; pressing one opens the same list Alt+F7 fills. **Settings → Editor → Usage counts.**
+
+- **Nothing at all is said about what a framework calls.** A `@Test`, a `@Bean`, a `@GetMapping`, a `@PrePersist`, `main`, an override — for each of these a count of zero is the wrong question, not a finding, so no row is drawn rather than a row that explains itself above every method of a test file. A type whose members a framework calls is one too, which is how a test class goes quiet without anybody guessing from its name. A count that exists is still shown: a `@Bean` another one calls says so. And an annotation that merely *describes* a member — `@Deprecated`, one of your own — keeps its count and only loses the fading, because a deprecated method nobody calls is what somebody was looking for.
+
+- **An `@` now completes annotations, and only annotations.** The one character in Java that narrows the legal names from every type on the classpath to a few hundred — and it used to open the same list as anywhere else, with the answer buried in it. Above a declaration it narrows again: an annotation whose `@Target` admits what you are annotating comes first.
+
+- **Type completion now prefers the types this file is likely to mean.** What the file already imports, then its own package, then the nearest package by shared prefix, then the JDK — so `Order` in a Spring project stops opening on a class from a jar nobody here has named.
+
+- **And the types this project actually imports.** Every `import` in the codebase is somebody choosing between candidates with the same simple name, and the count of those choices is weighed against how near a package is — so `java.util.List`, written in four hundred files, beats an `it.acme.model.List` nobody has ever imported, while one import somewhere beats nothing. Counted during the index build, held in memory only, never asked of you. **Settings → Completion → Order type names by what this project imports** turns it off, and the counts stop being consulted at once rather than at the next rebuild.
+
+- **A pom's dependencies say when a newer version exists**, above the one that is behind, and one press writes it. Only what the pom itself pins — a version inherited from a parent or written as a property is left alone, because the line the hint would sit above is not the line that would have to change. Cached on disk for a day per artifact, and **Settings → Java → Check Maven Central for newer versions** turns it off.
+
+- **An intention for a file whose name and class disagree**, offering both directions: rename the class to match the file, or rename the file to match the class. Neither is chosen for you — `Foo.java` holding `public class Bar` happens both ways round, and picking one gets it wrong half the time in the direction that loses the name you meant to keep.
+
 - **A dependency whose jar is missing is now downloaded rather than reported.** The resolve already ran Maven; it ran it offline, so a project whose dependency tree had been walked but never built showed nineteen unresolvable jars and a suggestion to go and build it. On by default, and **Settings → Java → Download missing dependencies** turns it off for a metered connection or a slow corporate repository.
 
 - **Five refactorings that move code between types.** *Introduce field* turns a local into a field of its class and leaves the initialisation where it ran, so the expression still runs where the method reaches it rather than at construction time. *Replace `if` chain with `switch`* converts a ladder testing one value against constants, writing the `break`s javac accepts and omitting the ones it would call unreachable. *Pull up*, *push down* and *move member* move a member to another type — the target read off `extends` for the first, one menu row per candidate for the other two — editing the other file when the target is in one, and carrying over the imports the member reads. *Move class* gives a nested type its own file beside the one it left. Measured over every valid application on Apache Commons Lang, each recompiled with javac: **4,063 of them, none broken**.
@@ -33,7 +61,57 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **A private member or a local that nothing reads is now reported.** Private and local only: those are the scopes one file can see all of. Annotated members, `serialVersionUID` and friends, and private constructors are left alone, because "no source mentions it" is not the same as "nothing uses it".
 
+### Fixed
+
+- **Back and Forward returned you to the top of the class.** Every tab remembers its cursor, its scroll and its undo history, and that snapshot was filed under *the file the editor is showing now* — but the last snapshot a tab produces is the one it emits as it is being torn down, and it is torn down precisely because the active file has already become the next one. So the tab you were leaving wrote its position over the tab you were entering, and returning to a file restored whatever stale entry it still had, usually the one from when it was first opened. The editor now says which document a snapshot belongs to.
+
+- **A navigation into a file whose text had not arrived yet landed at the top.** A tab becomes active before its content is fetched, so the jump scrolled an empty document, where every line clamps to line 1 — and nothing could tell that apart from a jump to line 1 that worked. The line asked for is now remembered until there is a buffer that can hold it.
+
+- **Replacing a buffer's text no longer sends the reader to the top of it.** A reload from disk, a format, or a file's text arriving late all swap the whole document, and a whole-document swap leaves CodeMirror nothing to map the caret onto. It keeps its place now.
+
+- **A remembered scroll could undo the jump that had just been made, and a navigation into a file left the caret on the right line with the view still at the top.** Both are the same frame: a tab's scroll is restored one frame after it mounts, while the jump that opened it scrolls immediately — against a view that has not been laid out yet, so it moves nothing. The frame now decides between the two: the remembered offset when nobody navigated, and the caret's own line when somebody did.
+
+- **A nested library class carried a name nothing had.** `Outer.Inner` was turned into a binary name by replacing every dot with a slash, but a class file joins an outer type to a nested one with `$`. Reading its members hid the mistake — that lookup retries the `$` form — while everything that passes the name onward got it wrong: the decompiled view declared `package …DefaultParts;` with the outer class as a package, and "Download sources" reported that no dependency jar contained the type. Both are right now, and the two spellings are decided in one place.
+
+- **A long hover card was cut off with no way to scroll it.** When there was less room above the line than the card needed, CodeMirror shortened the box and the card was cropped inside it — the scrollbar the card carried never appeared, because the card did not know it had been shortened. It now shrinks and scrolls, with the signature, package and dependency staying put at the top. Long diagnostic tooltips had the same shape and are fixed with it.
+
+- **An annotation's name read as a field of the class it was written in.** Hovering `@DynamicPropertySource` said `FIELD DynamicPropertySource`, with the test class as its container and no package — and go-to and find-usages agreed, because all three ask one classifier. A `marker_annotation`'s name is a plain identifier in the grammar, never a type identifier, so it fell through to the bare-name fallback that resolves `foo` as `this.foo`. It resolves to the annotation type now, which is also where the missing package went.
+
+- **More of what a framework calls is left alone.** `@DynamicPropertySource`, `@BeforeTransaction`, setter injection, Spring Retry's `@Recover`, the EJB timer callbacks — and, at class level, every Spring Test slice, `@ExtendWith` / `@RunWith` / `@Nested`, a MyBatis `@Mapper`, a `@FeignClient`, the CDI and EJB scopes. `@Transactional` and `@PreAuthorize` were removed from the list: they **wrap** a method something else calls, and wrapping is not calling.
+
+- **A hover card reports what a library type actually is.** `@Bean` said `class Bean`, and so did every interface from a jar: the kind is read off the class flags, and the card was asking the engine's **walk** resolver, which is project-only by design and answers nothing about a type it did not compile. It asks the full-classpath one now, which also gives a library member its real signature instead of a synthesized `name(…)`.
+
+- **A hover card says which dependency the type came out of** — `org.springframework:spring-security-core:6.3.4` under the package. Free by construction: the jars are opened once when the classpath is resolved and each holds its directory in memory from then on, so finding which one declares a class is a hash probe per jar and no I/O — cheaper than the Javadoc lookup the same card already does.
+
+- **The Beans tab of the index inspector was empty on any project without Struts or Spring XML.** The whole config resolver — which holds the map of `@Service` / `@Component` beans as well as the XML graph — was only built when the project had `struts.xml` or an `applicationContext.xml`. The annotation beans had been collected from the Java sources all along and were then thrown away, so a Spring Boot project got no bean listing, and resolving an `@Autowired` name found nothing there either. The beans decide it now, alongside the XML.
+
+- **A bean an allowlisted dependency declares now satisfies an injection point**, and says whose it is and on what terms: *Injected with `schema_authorization_manager` — from `it.acme:shared-security`, if @ConditionalOnMissingBean*. Turning an artifact on under Settings → Beans used to feed only a listing; the autowiring check ignored it, so an `@Autowired` field of a type your own starter declares stayed unexplained. The conditions travel with the bean rather than being dropped — a library bean is what Spring **may** register, and stating it flatly would be claiming a certainty nobody has.
+
+- **An `@Autowired` field of a library type gets no gutter mark at all.** The model holds the project's own beans by design — a bean inside a jar is what Spring *may* register, and `@ConditionalOnMissingBean` decides the rest — so "no matching bean found" about a Spring type asserted something the engine cannot know, and allowlisting the artifact under Settings → Beans could not change it. Nor is it worth a mark that says so honestly: a gutter mark whose whole content is *I cannot tell you*, beside every injected framework type, is the mark you learn to stop reading. Where the project **does** declare the type, "no matching bean found" is a finding and stays.
+
+- **Going back (Ctrl+Alt+←) landed at the top of the class instead of where you were.** Two causes, both about a cross-file jump being **two events** — open the file, then scroll to the line. The stop was recorded between them, filing the destination's line number against the file being *left*; and the arrival was not recognised as part of a navigation at all, so it got its own stop at line 1 of the file just opened and Back went there. Opening and scrolling are now one call, which is what lets the arrival be collapsed into its destination. The column is carried too, so returning lands where the caret was rather than at the start of that line.
+
+- **The Problems panel showed a closed project's problems.** Language-server diagnostics are grouped by project root and every group was displayed, so a Rust workspace closed an hour ago went on contributing its `cargo check` errors to the Java project still open — with its server outliving the project, they kept arriving.
+
+- **Spell-check asked to be turned on again for every project, and after every restart.** Which projects want it was kept in memory for the length of a session; it is written to the config now. The dictionaries were always global and downloaded once — it was only the asking that repeated.
+
+- **The index inspector's Beans tab was empty on any project written this century.** It listed the XML `<bean>` declarations only, so a codebase whose beans are `@Service` and `@Component` saw nothing. The resolver had them all along.
+
 ### Changed
+
+- **The index inspector draws the real kind of each row.** Every entry was a cube — the placeholder an icon set offers when it has nothing to say — so a class, an interface, a method, a field and a jar were five identical marks. They now use the same table the outline and the hierarchy do, with a jar, a bean, an action and a config edge added to it.
+
+- **The index inspector hides Actions and Relations on a project that has no web configuration.** Both are read off the Struts / Spring-XML / MyBatis graph, so on anything else they were permanently empty tabs — which reads as a broken inspector rather than as an absent subject.
+
+- **The Beans allowlist is four lists instead of four comma-separated fields.** Entries are added and removed one at a time, the add field offers the coordinates this project actually depends on — declared and transitive — and **each entry says how many artifacts it matched**, or that it matched none. That last one is the commonest mistake in any allowlist and was invisible: the only symptom of a typo was a panel that stayed empty. Nothing needs reloading afterwards; the scan is keyed by the allowlist itself, so the next read re-scans on its own.
+
+- **New Package opens on the package you were in, with every part of it editable.** It used to be able to create children of the selected package and nothing else, so a sibling or one a level up meant walking the tree first and opening the dialog somewhere else — for a dialog whose whole subject is a dotted name you could have typed. The folders are created from the source root, and the line underneath shows the package the name will make.
+
+- **Renaming a class with Shift+F6 now renames its file.** The preview dialog always did; the inline field — the one the shortcut actually opens — dropped that half, leaving the class renamed everywhere and the file still called after the old name, which does not compile.
+
+- **Editing a pom now re-resolves the classpath by itself.** The dependency watcher only ever asked whether a resolved jar's *contents* had changed, which adding a `<dependency>` does not do — so a new library stayed unresolvable for the rest of the session unless the project was reopened or the reload pressed. It now watches the poms as well, and waits for one to settle before acting so a save mid-edit does not start a rebuild.
+
+- **Maven ▸ Re-resolve dependencies now says it is doing something.** It registered no job and reported no outcome, so pressing it looked exactly like pressing a button that does nothing — and the natural next move is to press it again, on top of the walk already running. All three Maven actions now report whether they started.
 
 - **The tab strip's "N more" menu is the app's standard menu now.** It anchors to the chevron, takes arrow keys and Escape, checks the tab you are on, and lists the hidden tabs first — instead of a second, hand-written copy of a dropdown living inside the tab widget.
 

@@ -307,13 +307,40 @@ pub(crate) fn bennu_maven_reload(ctx: &BennuState, args: MavenRootArgs) -> Resul
     if !root.join("pom.xml").is_file() {
         return Err(format!("{} has no pom.xml — it is not a Maven project", args.root));
     }
+    let host = ctx.host_caller();
     let sink = ctx.event_sink();
     let root_str = args.root.clone();
     // Off the dispatcher: the catalogue walk is seconds on a cold repository and the reindex is a
     // whole-project read. Neither belongs on the thread the editor is waiting on.
     std::thread::spawn(move || {
+        // A job, like its two neighbours in this menu, and this is not decoration. Everything this
+        // does is invisible from the outside: no file changes, no window opens, and the reindex it
+        // ends with reports under a name of its own. Pressed, it used to look *exactly* like a
+        // button that does nothing — and the natural next move is to press it again, which starts
+        // a second catalogue walk over the first.
+        let job = host.as_ref().and_then(|host| {
+            crate::index_service::register_bennu_job(
+                host,
+                &sink,
+                "Re-resolve dependencies",
+                "drop the classpath cache · rescan ~/.m2 · reindex",
+                "Dependencies",
+                false,
+            )
+        });
         crate::dep_classpath::clear_list_cache(&root);
-        Catalog::scan(&LocalRepo::discover()).save();
+        let catalog = Catalog::scan(&LocalRepo::discover());
+        let artifacts = catalog.len();
+        catalog.save();
+        crate::index_service::finish_bennu_job(&sink, job, true, None);
+        crate::index_service::notify(
+            &sink,
+            "Dependencies re-resolved",
+            &format!("{artifacts} artifact(s) in the local repository. Rebuilding the index."),
+            "success",
+        );
+        // Last, and after the job is closed: the reindex reports as its own job, and nesting the
+        // two would leave the outer one open for the length of a whole-project read.
         crate::index_service::IndexService::global().reindex(&root_str, Arc::clone(&sink));
     });
     Ok("started".to_string())

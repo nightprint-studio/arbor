@@ -112,12 +112,37 @@ struct JarEntries {
     resources: Vec<String>,
 }
 
+/// The **JDK tier** of the index.
+///
+/// A dependency is a jar and the JDK is not — on Java 9+ it is a jimage, one file holding every
+/// module — so it cannot be a `JarEntries` and its classes cannot be read back by unzipping an
+/// entry. What it shares with a jar is the only thing this module needs: a list of binary names.
+///
+/// It belongs here for a plain reason. Half of what anyone wants to open by name is in it —
+/// `List`, `Optional`, `Path`, `Thread`, `HttpURLConnection` — Bennu already opens those (go-to on
+/// `Optional` lands in the JDK's own `src.zip`), and the search was the one door that did not
+/// admit them. "Dependencies" that excludes the largest dependency of every Java project is a
+/// scope nobody would have chosen.
+struct JdkTier {
+    /// What the row shows as its origin: `JDK 21`. Not a file name, because there is no file a
+    /// reader would recognise.
+    label: String,
+    /// Binary class names, slash form.
+    classes: Vec<String>,
+}
+
 /// Every dependency jar of one project, listed. Built once per jar set.
 struct LibraryIndex {
     /// The jar list this was built from. The cache key proper: a project whose dependencies
     /// changed gets a fresh index rather than yesterday's answer.
     jars: Vec<String>,
+    /// Part of the cache key with `jars`: a project retargeted at another Java level is a
+    /// different classpath, and half of it would otherwise still be the old JDK's.
+    jdk_version: String,
     entries: Vec<JarEntries>,
+    /// The JDK, when one resolved. Absent on a machine with none installed — which is already a
+    /// loud diagnostic elsewhere and needs no second voice here.
+    jdk: Option<JdkTier>,
     /// Binary name → kind slug, filled lazily for the classes a search actually returns.
     ///
     /// Not built with the index: the kind lives in the class file, and reading a few hundred
@@ -140,8 +165,9 @@ fn cache() -> &'static Mutex<HashMap<String, Arc<LibraryIndex>>> {
 /// one that happened to be first.
 fn index_for(root: &str) -> Arc<LibraryIndex> {
     let jars = IndexService::global().dep_jars_of(root);
+    let jdk_version = IndexService::global().jdk_version_of(root).unwrap_or_default();
     if let Some(hit) = cache().lock().unwrap_or_else(|p| p.into_inner()).get(root) {
-        if hit.jars == jars {
+        if hit.jars == jars && hit.jdk_version == jdk_version {
             return Arc::clone(hit);
         }
     }
@@ -160,12 +186,46 @@ fn index_for(root: &str) -> Arc<LibraryIndex> {
         })
         .collect();
 
-    let built = Arc::new(LibraryIndex { jars, entries, kinds: Mutex::new(HashMap::new()) });
+    let built = Arc::new(LibraryIndex {
+        jdk: jdk_tier(&jdk_version),
+        jars,
+        jdk_version,
+        entries,
+        kinds: Mutex::new(HashMap::new()),
+    });
     cache()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .insert(root.to_string(), Arc::clone(&built));
     built
+}
+
+/// Enumerate the JDK's classes, then **let the JDK source go**.
+///
+/// The index build already opens this same classpath and keeps it, for members and completion.
+/// Opening it a second time to list names would double a jimage index in memory for the life of
+/// the project, to answer a dialog. Listing and dropping costs the read once — the same order as
+/// the jar scan this module already documents as "a second or so, once" — and leaves behind only
+/// the names, which are the whole of what a search needs.
+///
+/// `None` when no JDK resolves. Nothing is reported here: a missing JDK is already a project
+/// diagnostic with a titlebar badge, and a search is not the place to learn it.
+fn jdk_tier(jdk_version: &str) -> Option<JdkTier> {
+    if jdk_version.is_empty() {
+        return None;
+    }
+    let source = bennu_classpath::prelude::resolve_jdk_classpath(jdk_version).ok()?;
+    let classes = source.class_names();
+    drop(source);
+    if classes.is_empty() {
+        return None;
+    }
+    let status = bennu_classpath::prelude::jdk_status(jdk_version);
+    let label = match status.resolved_major {
+        Some(major) => format!("JDK {major}"),
+        None => "JDK".to_string(),
+    };
+    Some(JdkTier { label, classes })
 }
 
 fn file_name_of(path: &Path) -> String {
@@ -352,8 +412,48 @@ fn bennu_library_classes(
             ));
         }
     }
-    Ok(with_kinds(&index, take_best(scored)))
+    // The JDK, last, so a project's own dependencies are the ones that survive the cap when a
+    // one-letter query matches everything. Same three tests in the same order, and the same
+    // reason for it: almost every class fails the first.
+    if let Some(jdk) = &index.jdk {
+        for binary in &jdk.classes {
+            let simple = simple_binary_of(binary);
+            let score = if subsequence(simple, &needle, lower) {
+                rank(simple, &needle, lower)
+            } else if subsequence(binary, &needle, lower_dotted) {
+                rank(binary, &needle, lower_dotted) + 100_000
+            } else {
+                continue;
+            };
+            if is_uninteresting(binary) {
+                continue;
+            }
+            let fqcn = dot_form(binary);
+            scored.push((
+                score,
+                (
+                    LibraryClass {
+                        simple: simple_of(&fqcn).to_string(),
+                        package: package_of(&fqcn).to_string(),
+                        fqcn,
+                        jar: jdk.label.clone(),
+                        kind: String::new(),
+                    },
+                    binary.clone(),
+                    JDK_TIER,
+                ),
+            ));
+        }
+    }
+    Ok(with_kinds(&index, &args.root, take_best(scored)))
 }
+
+/// The `jar_idx` of a candidate that came from the JDK rather than from a jar.
+///
+/// A sentinel and not an `Option`, because the tuple it rides in is built once per candidate in
+/// the hot loop; what it costs is one comparison in [`with_kinds`], which is where the difference
+/// actually matters — a JDK class has no archive to read its flags out of.
+const JDK_TIER: usize = usize::MAX;
 
 /// Fill in each candidate's type kind, reading the class files the memo does not already have.
 ///
@@ -366,6 +466,7 @@ fn bennu_library_classes(
 /// an ordinary class, which is what it would have drawn anyway.
 fn with_kinds(
     index: &LibraryIndex,
+    root: &str,
     ranked: Vec<(LibraryClass, String, usize)>,
 ) -> Vec<LibraryClass> {
     let mut wanted: HashMap<usize, Vec<String>> = HashMap::new();
@@ -378,6 +479,18 @@ fn with_kinds(
                     list.push(binary.clone());
                 }
             }
+        }
+    }
+
+    // The JDK's kinds come from the member index the project already has open — there is no
+    // archive entry to unzip on a modern JDK, and re-resolving the whole classpath to read five
+    // flag bits would be absurd next to a question that is already answered in memory.
+    if let Some(binaries) = wanted.remove(&JDK_TIER) {
+        let svc = IndexService::global();
+        let mut memo = index.kinds.lock().unwrap_or_else(|p| p.into_inner());
+        for binary in binaries {
+            let kind = svc.type_kind(root, &binary).unwrap_or_default();
+            memo.insert(binary, kind);
         }
     }
 

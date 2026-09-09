@@ -972,6 +972,11 @@ function createProjectStore() {
       const wasActive = project?.root === root;
       sessions.delete(root);
       workspaceRoots = workspaceRoots.filter((r) => r !== root);
+      // And what its language servers were reporting. The Problems panel groups server
+      // diagnostics by root and shows every group it holds, so without this a closed project kept
+      // contributing its problems to the one still open — a `cargo check` from a Rust workspace
+      // nobody has looked at since, listed under a Java project.
+      bennuDiagnosticsStore.forgetRoot(root);
       if (wasActive) {
         const next = workspaceRoots[0];
         if (next && sessions.has(next)) {

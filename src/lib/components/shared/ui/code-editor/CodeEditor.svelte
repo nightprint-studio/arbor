@@ -45,6 +45,7 @@
   import {
     setDocumentHighlights as cmSetDocumentHighlights,
     setFoldRanges as cmSetFoldRanges,
+    setUnusedRanges as cmSetUnusedRanges,
   } from './server-layers';
   import {
     setSemanticTokens as cmSetSemanticTokens,
@@ -69,6 +70,7 @@
     indentUnit,
     fontSize,
     initialState,
+    stateKey,
     placeholder,
     wrap = false,
     lineNumbers = true,
@@ -132,6 +134,21 @@
     fontSize?: number;
     /** Cursor + scroll to restore at mount (e.g. the tab's last-known position). */
     initialState?: EditorViewSnapshot;
+    /**
+     * An opaque token naming the document this editor holds — echoed back with every
+     * {@link onViewState}.
+     *
+     * It exists for one moment: the snapshot emitted on **teardown**. A host that keys tabs off
+     * its own "active file" reads that variable inside the callback, and by teardown time the
+     * active file is already the NEXT one — so the outgoing tab's cursor, scroll and undo history
+     * were filed under the incoming tab's name. Every returning tab then restored a stale entry
+     * (usually the one from when it was first opened, at the top of the file) and every arriving
+     * one had a foreign scroll offset applied a frame after it landed.
+     *
+     * Captured when the view is created, not read when it is destroyed — which is the whole
+     * difference, since a prop is a live read into the parent's scope.
+     */
+    stateKey?: string;
     /**
      * Grey text shown while the buffer is empty.
      *
@@ -258,8 +275,10 @@
     oninput?: (text: string) => void;
     /** Live caret position (1-based line/col) — drives a host footer Ln/Col. */
     oncaret?: (line: number, col: number) => void;
-    /** Cursor + scroll changed — the host can persist it for a later {@link initialState}. */
-    onViewState?: (s: EditorViewSnapshot) => void;
+    /** Cursor + scroll changed — the host can persist it for a later {@link initialState}.
+     *  `key` is the {@link stateKey} this view was MOUNTED with: file the snapshot under that, never
+     *  under whatever the host currently considers active. */
+    onViewState?: (s: EditorViewSnapshot, key?: string) => void;
     onfocus?: () => void;
     /** Ctrl/Cmd+Click on an identifier the descriptor didn't resolve locally — the word
      *  plus the clicked position as a UTF-8 byte offset (for a BE go-to-declaration). */
@@ -305,6 +324,8 @@
   // Scroll-listener teardown (emits `onViewState` so the host can persist scroll too).
   let detachScroll: (() => void) | null = null;
   let scrollRaf = 0;
+  /** The {@link stateKey} this view was created with. Captured, never re-read — see the prop. */
+  let heldKey: string | undefined;
 
   /** Report the current cursor + scroll to the host (for per-tab restore). */
   /**
@@ -317,14 +338,17 @@
   function emitViewState(withHistory = false) {
     if (!view || !onViewState) return;
     const sel = view.state.selection.main;
-    onViewState({
-      anchor: sel.anchor,
-      head: sel.head,
-      scrollTop: view.scrollDOM.scrollTop,
-      history: withHistory
-        ? (view.state.toJSON({ history: historyField }) as { history?: unknown }).history
-        : undefined,
-    });
+    onViewState(
+      {
+        anchor: sel.anchor,
+        head: sel.head,
+        scrollTop: view.scrollDOM.scrollTop,
+        history: withHistory
+          ? (view.state.toJSON({ history: historyField }) as { history?: unknown }).history
+          : undefined,
+      },
+      heldKey,
+    );
   }
 
   // ── Byte-span diagnostics → CM lint markers ───────────────────────────────────
@@ -695,6 +719,9 @@
       state = EditorState.create(stateConfig);
     }
     view = new EditorView({ state, parent: target });
+    // The document this view holds, fixed for its lifetime. Read once here so the teardown
+    // snapshot cannot be filed under whatever the host switched to.
+    heldKey = stateKey;
     pushDiagnostics();
     pushMarks();
     pushLineHighlights();
@@ -702,13 +729,41 @@
 
     // Restore the host-provided cursor + scroll (per-tab position). The scroll is set
     // after a frame so the layout the offset refers to exists.
-    if (initialState) {
+    const restored = (() => {
+      if (!initialState) return null;
       const len = view.state.doc.length;
       const anchor = Math.min(Math.max(0, initialState.anchor), len);
       const head = Math.min(Math.max(0, initialState.head), len);
       view.dispatch({ selection: { anchor, head } });
-      const top = initialState.scrollTop;
-      requestAnimationFrame(() => { if (view) view.scrollDOM.scrollTop = top; });
+      return { anchor, head, top: initialState.scrollTop };
+    })();
+    {
+      // ⚠️ The remembered scroll is a DEFAULT, and it must lose to anything that asked for a
+      // specific line. It is applied a frame late (the layout the offset refers to has to exist
+      // first), while a host's go-to relay runs on a microtask — so the restore always arrives
+      // last and used to win: the caret sat on the line Back had asked for and the viewport was
+      // dragged back to where the tab had been left. On a Back into a file whose remembered
+      // scroll was the top, that reads as "Back put me at line 1 of the class".
+      //
+      // The caret is the tell. If it is still exactly where this mount put it, nobody has
+      // navigated and the remembered scroll is the right answer. If it has moved, somebody
+      // named a destination and this must not undo it.
+      requestAnimationFrame(() => {
+        if (!view) return;
+        const sel = view.state.selection.main;
+        if (restored && sel.anchor === restored.anchor && sel.head === restored.head) {
+          view.scrollDOM.scrollTop = restored.top;
+          return;
+        }
+        // Somebody named a destination between the mount and this frame. Their own
+        // `scrollIntoView` ran against a view that had not been laid out yet, so it scrolled
+        // nothing — which is why the caret could sit on the right line with the viewport still at
+        // the top of the file. Reveal where the caret actually ended up; that is the whole of what
+        // they asked for, and it is the only thing here that knows the layout exists.
+        if (sel.head > 0) {
+          view.dispatch({ effects: EditorView.scrollIntoView(sel.head, { y: 'center' }) });
+        }
+      });
     }
 
     // Persist scroll changes too (selection changes come through the update listener).
@@ -778,12 +833,26 @@
   //   * the history must be EMPTIED. Whatever you typed in the file that was here a moment ago is
   //     still undoable otherwise, and undoing it applies changes at positions that belonged to a
   //     document no longer present — silent corruption rather than a visible refusal.
+  //   * and it must LEAVE THE READER WHERE THEY WERE. A swap replaces the whole document, so
+  //     CodeMirror has nothing to map the selection onto and the caret lands at the top with the
+  //     viewport behind it. That is not a tab switch — a tab switch remounts — it is *this same
+  //     file's text arriving or changing*: a reload from disk, a format, or the very common one,
+  //     a file opened by a jump whose text is fetched a beat after the tab becomes active. In that
+  //     last case the jump had already scrolled, against an empty document, where every line
+  //     clamps to line 1. Which is exactly "sometimes the navigation does not scroll".
   $effect(() => {
     const next = value;
     if (!view) return;
     if (next === lastEmitted) return;
     const current = view.state.doc.toString();
     if (current === next) return;
+    // Only worth preserving when there was something to be positioned IN. Coming from an empty
+    // document every offset is 0, and restoring that would pin the view to the top and fight
+    // whoever is about to reveal the line that was asked for.
+    const was = current.length > 0
+      ? { anchor: view.state.selection.main.anchor, head: view.state.selection.main.head,
+          top: view.scrollDOM.scrollTop }
+      : null;
     suppressEmit = true;
     try {
       view.dispatch({
@@ -791,6 +860,16 @@
         annotations: Transaction.addToHistory.of(false),
         effects: historyReset(),
       });
+      if (was) {
+        const len = view.state.doc.length;
+        view.dispatch({
+          selection: {
+            anchor: Math.min(was.anchor, len),
+            head: Math.min(was.head, len),
+          },
+        });
+        view.scrollDOM.scrollTop = was.top;
+      }
     } finally { suppressEmit = false; }
   });
 
@@ -999,6 +1078,21 @@
       effects: cmSetFoldRanges.of(
         ranges.map((r) => ({ from: b2u(r.start), to: b2u(r.end), placeholder: r.placeholder })),
       ),
+    });
+  }
+
+  /**
+   * Replace the **unused-declaration** layer — the names of members nothing in the project reaches.
+   *
+   * Byte ranges, converted here for the same reason the two above are: only this component knows
+   * which text the offsets have to agree with. An empty array clears it, which is what the host
+   * does when it leaves a language that can answer the question.
+   */
+  export function setUnusedRanges(spans: readonly { start: number; end: number }[]) {
+    if (!view) return;
+    const b2u = makeByteToU16(view.state.doc.toString());
+    view.dispatch({
+      effects: cmSetUnusedRanges.of(spans.map((s) => ({ from: b2u(s.start), to: b2u(s.end) }))),
     });
   }
 

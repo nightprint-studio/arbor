@@ -453,6 +453,24 @@ pub struct RenamePreview {
     pub file_rename: Option<RenameFileMove>,
 }
 
+/// Result of `bennu_rename_apply` — the flattened edits, **plus the file move they imply**.
+///
+/// A struct rather than the bare `Vec<RenameEdit>` this used to be, and the reason is the whole
+/// point of the type: the file move was only ever reachable through the *preview*, so the inline
+/// rename — the one Shift+F6 actually opens — renamed `Order` to `Invoice` across the project and
+/// left the class sitting in `Order.java`. The move is not extra information about the rename; for
+/// a public top-level type it is **part of** it, and a caller that applies one half writes code
+/// that does not compile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RenameApplyResult {
+    /// Every edit, across every file, in no particular order (each carries its own `file`).
+    pub edits: Vec<RenameEdit>,
+    /// The file this rename also has to move, if any. Applied **after** the edits, since the edits
+    /// are addressed to the old path.
+    #[serde(default)]
+    pub file_rename: Option<RenameFileMove>,
+}
+
 /// A source file that has to be renamed along with the type it declares.
 ///
 /// Java ties a public top-level type to its filename, so renaming the type without the file leaves
@@ -585,6 +603,16 @@ pub struct HoverInfo {
     /// it, markers stripped, capped ~600 chars). `None` for a JDK / dep-jar symbol or a
     /// declaration with no Javadoc.
     pub doc: Option<String>,
+    /// The dependency this came out of, as `groupId:artifactId:version` — `None` for the
+    /// project's own code and for the JDK, neither of which is an artifact.
+    ///
+    /// Worth carrying because a legacy classpath is the place the question is actually asked: two
+    /// jars declare the same simple name, or a class turns out to come from a starter nobody
+    /// remembers adding, and the package alone does not say which.
+    ///
+    /// `#[serde(default)]` so a payload from before this existed still deserializes.
+    #[serde(default)]
+    pub artifact: Option<String>,
 }
 
 // ── inherited members (Structure panel's "Inherited" bucket) ─────────────────
@@ -783,6 +811,16 @@ pub struct IndexEntry {
     pub file: Option<String>,
     /// 1-based line to jump to when `file` is `Some`; `None` otherwise.
     pub line: Option<i64>,
+    /// What the entry **is**, for the row's icon: a type kind (`class` / `interface` / `enum` /
+    /// `record` / `annotation`), a member kind (`method` / `field`), or one of the inspector's own
+    /// (`jar` / `module` / `bean` / `action` / `relation`).
+    ///
+    /// A list whose rows are of different kinds and all draw the same cube is a list you have to
+    /// read the text of to navigate, which is the job the icon was there to do. `#[serde(default)]`
+    /// so a payload from before this existed still deserializes — as the empty string, which the
+    /// caller draws as the neutral glyph.
+    #[serde(default)]
+    pub kind: String,
 }
 
 // ── class index (Go to Class) ────────────────────────────────────────────────

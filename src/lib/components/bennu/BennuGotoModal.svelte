@@ -379,20 +379,31 @@
    * scores the two together into a single ranked list, which is the shape the question actually
    * has: you want the `HttpServletRequest`, and whether it is yours or the container's is the
    * answer, not the search.
+   *
+   * For classes the outside half includes the **JDK**, which is where a good share of what anyone
+   * looks up by name actually lives — `List`, `Optional`, `Path`. Not for files: on Java 9+ the
+   * JDK is a jimage, one file holding every module, and there is nothing in it a reader would
+   * recognise as a resource to open.
    */
   function sourcesFor(
     project: NavigateSource['items'],
     classpath: NavigateSource['search'],
     what: string,
+    // Whether this category's classpath half reaches the JDK as well as the dependency jars.
+    // Classes do; resources do not — a jimage is not a zip of files anybody browses — and a label
+    // that said otherwise would be promising a scope the search does not have.
+    withJdk = false,
   ): NavigateSource[] {
+    const outside = withJdk ? 'dependencies & JDK' : 'dependencies';
+    const where = withJdk ? 'the dependency jars and the JDK' : 'the dependency jars';
     return [
       { id: 'project', label: 'Project', items: project },
-      { id: 'both', label: 'Project & dependencies', items: project, search: classpath },
+      { id: 'both', label: `Project & ${outside}`, items: project, search: classpath },
       {
         id: 'dependencies',
-        label: 'Dependencies',
+        label: outside.charAt(0).toUpperCase() + outside.slice(1),
         search: classpath,
-        emptyMessage: `Type to search the ${what} inside the dependency jars.`,
+        emptyMessage: `Type to search the ${what} inside ${where}.`,
       },
     ];
   }
@@ -529,7 +540,7 @@
           emptyMessage: 'No classes indexed yet.',
           facetLabel: 'Module',
           preview: previewOf,
-          sources: sourcesFor(projectClasses, classpathClasses, 'classes'),
+          sources: sourcesFor(projectClasses, classpathClasses, 'classes', true),
         },
     {
       id: 'files',

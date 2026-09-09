@@ -38,8 +38,16 @@ export interface BennuConfig {
   completion_delay_ms: number;
   /** Require a candidate to start with the typed prefix, matching case. */
   completion_case_sensitive: boolean;
+  /** Let the project's own `import` statements order type-name completion — how many files import
+   *  each candidate, as a ranking term. Read on every completion, so turning it off stops the
+   *  counts being used at once rather than at the next index build. */
+  completion_import_census: boolean;
   /** Directory names the Java indexer never walks into, on top of its own skips. */
   excluded_dirs: string[];
+  /** Absolute paths of the project roots spell-check is turned on for. A list rather than a
+   *  switch: it is worth it on a codebase somebody writes prose into and noise on a legacy one
+   *  full of abbreviations, and answering for one project says nothing about the next. */
+  spell_check_roots: string[];
   /** Absolute paths of HTML files whose own scripts may run in the editor's preview. */
   html_scripts_allowed: string[];
   /** Open `.md` files in the live-preview markdown editor rather than in the code editor. */
@@ -104,8 +112,10 @@ export interface BennuConfig {
   library_beans: LibraryBeansConfig;
   /** Language servers — which may run, where their binaries are, and any the user added. */
   lsp: LspConfigDto;
-  /** Cargo / crates.io — the one part of Bennu that reaches the network on its own. */
+  /** Cargo / crates.io — the Rust half of the only thing Bennu asks the network. */
   cargo: CargoConfigDto;
+  /** Maven Central — the Java half of the same. */
+  maven: MavenConfigDto;
 }
 
 /** Mirrors the BE `CargoConfig`. */
@@ -116,6 +126,17 @@ export interface CargoConfigDto {
   /** How long a cached version list stays fresh, in hours. A day by default; `0` reads as the
    *  default rather than as "always refetch". */
   index_ttl_hours: number;
+}
+
+/** Mirrors the BE `MavenConfig`. */
+export interface MavenConfigDto {
+  /** Whether Bennu may read `maven-metadata.xml` from Maven Central — which is what the "newer
+   *  version available" hints above a pom's dependencies are made of. `true` by default; off makes
+   *  the Java side entirely local again and changes nothing else. */
+  central: boolean;
+  /** How long cached artifact metadata stays fresh, in hours. A day by default; `0` reads as the
+   *  default rather than as "always refetch". */
+  metadata_ttl_hours: number;
 }
 
 /** Mirrors the BE `LspConfig`. */

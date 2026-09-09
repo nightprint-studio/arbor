@@ -36,6 +36,10 @@ const PATH_ANNOTATIONS: &[&str] = &[
 /// configuration — the only ones an unresolved-key warning is allowed to look at.
 const PROPERTY_ANNOTATIONS: &[&str] = &["Value", "Scheduled", "ConditionalOnProperty"];
 
+/// How many class names one completion inside an annotation string offers. A popup is scanned,
+/// not read, and a classpath can match thousands.
+const CLASS_NAME_LIMIT: usize = 120;
+
 /// Annotations whose string argument names a bean.
 const BEAN_NAME_ANNOTATIONS: &[&str] = &["Qualifier", "DependsOn", "Resource"];
 
@@ -81,6 +85,54 @@ pub fn highlights(path: &str, source: &str) -> Vec<ExtHighlight> {
         // catalogue here will ever list. What is gated is everything that *resolves* or
         // *reports* — see `diagnostics` and `caret_at`.
         let is_path = crate::known::is_any(ann, &u.facts, PATH_ANNOTATIONS).is_some();
+        // A `@ConditionalOnProperty` names its key OUTRIGHT — no `${…}` around it — so the
+        // placeholder pass below sees an ordinary string and colours nothing. But it is the same
+        // thing a `@Value("${…}")` key is: it resolves against the configuration, it has a hover
+        // and a go-to, and the colour is the only thing on screen that says so. Undistinguished, it
+        // read as a string literal, which is precisely the claim that is false about it.
+        //
+        // The same kind, therefore the same colour. Two ways of writing one concept must not look
+        // like two concepts.
+        if crate::known::is(ann, &u.facts, "ConditionalOnProperty") {
+            for s in &ann.strings {
+                // `name`, `value` and a bare positional are the key; `prefix` is the front of it.
+                // `havingValue` is what the key is COMPARED TO — a value, not a key, and colouring
+                // it would point a go-to at a property that does not exist.
+                let is_key =
+                    matches!(s.element.as_str(), "name" | "value" | "prefix") || s.element.is_empty();
+                if is_key && s.end > s.start {
+                    out.push(ExtHighlight {
+                        start: s.start,
+                        end: s.end,
+                        kind: "spring.placeholder.key".to_string(),
+                    });
+                }
+            }
+        }
+        // A bean written as a plain string — `@Qualifier("fast")`, `@DependsOn("audit")`,
+        // `@Resource(name = "ds")`. Exactly the set `caret_at` already answers a go-to and a hover
+        // for, which is the rule this colouring follows and not a second opinion: what is coloured
+        // is what can be followed. Same kind as a SpEL `@beanName`, because it is the same thing
+        // said another way.
+        if crate::known::is_any(ann, &u.facts, BEAN_NAME_ANNOTATIONS).is_some() {
+            for s in &ann.strings {
+                if s.end > s.start && !s.value.trim().is_empty() && s.value.trim() == s.value {
+                    out.push(ExtHighlight {
+                        start: s.start,
+                        end: s.end,
+                        kind: "spring.spel.bean".to_string(),
+                    });
+                }
+            }
+        }
+        // A type named as text — see `class_ref`.
+        for r in crate::class_ref::refs_of(ann, &u.facts) {
+            out.push(ExtHighlight {
+                start: r.start,
+                end: r.end,
+                kind: "spring.class-name".to_string(),
+            });
+        }
         for s in &ann.strings {
             crate::highlight::expression_highlights(&s.value, s.start, &mut out);
             if is_path {
@@ -204,6 +256,8 @@ enum Caret {
     /// A field bound by `@ConfigurationProperties` — the caret is on its name, and the
     /// interesting thing about it is the key it binds, which appears nowhere in the source.
     ConfigProperty { field: String, type_text: String, paths: Vec<String> },
+    /// A type named as a string — `@ConditionalOnClass(name = "…")`. See [`crate::class_ref`].
+    ClassName(crate::class_ref::ClassRef),
 }
 
 fn caret_at_with_model(model: &SpringModel, u: &JavaUnit, offset: usize) -> Option<Caret> {
@@ -233,6 +287,12 @@ fn caret_at_with_model(model: &SpringModel, u: &JavaUnit, offset: usize) -> Opti
 }
 
 fn caret_at(u: &JavaUnit, offset: usize) -> Option<Caret> {
+    let anns = all_annotations(&u.facts);
+    // A type named as text, first: its string would otherwise fall through to the bean-name branch
+    // below on any annotation that shares an element name, and a class is not a bean.
+    if let Some(r) = crate::class_ref::class_ref_at(&u.facts, &anns, offset) {
+        return Some(Caret::ClassName(r));
+    }
     for ann in all_annotations(&u.facts) {
         // A conditional names its key outright — no `${…}` to find, so the placeholder path
         // below would walk straight past the one string that matters here.
@@ -328,6 +388,21 @@ pub fn navigate(model: &SpringModel, path: &str, source: &str, offset: usize) ->
         Some(Caret::Injection { type_text, qualifier, .. }) => {
             model.candidates(&type_text, &qualifier).into_iter().map(bean_target).collect()
         }
+        // A class named as text. Only the PROJECT's own types can be answered from here — an
+        // `ExtTarget` is a file and an offset, and a class inside a jar has neither. The editor
+        // takes the library case from the same coloured span, through the decompiled view every
+        // other library go-to already uses.
+        Some(Caret::ClassName(r)) => model
+            .type_of(&r.fqcn)
+            .map(|t| {
+                vec![ExtTarget {
+                    file: t.file.clone(),
+                    offset: t.offset,
+                    label: simple_name(&t.fqcn).to_string(),
+                    detail: t.fqcn.clone(),
+                }]
+            })
+            .unwrap_or_default(),
         None => Vec::new(),
     }
 }
@@ -345,6 +420,26 @@ fn bean_target(b: &crate::model::BeanDef) -> ExtTarget {
 pub fn hover(model: &SpringModel, path: &str, source: &str, offset: usize) -> Option<ExtHover> {
     let u = unit(path, source)?;
     match caret_at_with_model(model, &u, offset)? {
+        // A type named as text. What a reader wants to know is whether the name is *right* — a
+        // typo here does not fail to compile, it silently turns the condition off for ever — so
+        // the card answers that and nothing else. It never says "not found": this crate cannot
+        // see the classpath, and a missing class is the ordinary, intended state of a
+        // `@ConditionalOnClass` anyway.
+        Caret::ClassName(r) => Some(match model.type_of(&r.fqcn) {
+            Some(t) => ExtHover {
+                title: simple_name(&t.fqcn).to_string(),
+                signature: t.fqcn.clone(),
+                doc: "Declared in this project — the condition tests for it at runtime."
+                    .to_string(),
+            },
+            None => ExtHover {
+                title: simple_name(&r.fqcn).to_string(),
+                signature: r.fqcn.clone(),
+                doc: "Read as a class name at runtime. Written as a string because the condition \
+                      exists for the case where it is absent."
+                    .to_string(),
+            },
+        }),
         Caret::ConfigProperty { field, type_text, paths } => {
             // The key comes first because it is the answer to the question you hovered with:
             // "what do I write in the yaml for this field".
@@ -437,11 +532,35 @@ fn describe_bean(b: &crate::model::BeanDef) -> String {
 /// inside a `@Qualifier`.
 pub fn completions(
     model: &SpringModel,
+    class_names: Option<&dyn crate::ext::ClassNameSource>,
     path: &str,
     source: &str,
     offset: usize,
 ) -> Vec<CompletionItem> {
     let Some(u) = unit(path, source) else { return Vec::new() };
+    // A type written as a string. Completed from the CLASSPATH and not from the project's own
+    // types: `@ConditionalOnClass(name = "…")` names somebody else's class almost by definition —
+    // it is written as a string precisely because the class may not be there to import.
+    {
+        let anns = all_annotations(&u.facts);
+        if let Some(r) = crate::class_ref::class_ref_at(&u.facts, &anns, offset) {
+            let Some(src) = class_names else { return Vec::new() };
+            // What has been typed is the text BEFORE the caret, not the whole string: completing
+            // `com.acme.Ord|erService` on the whole value would match nothing.
+            let typed = &r.fqcn[..(offset - r.start).min(r.fqcn.len())];
+            return src
+                .matching(typed, CLASS_NAME_LIMIT)
+                .into_iter()
+                .map(|fqcn| CompletionItem {
+                    detail: Some(fqcn.rsplit_once('.').map(|(pkg, _)| pkg.to_string()).unwrap_or_default()),
+                    label: fqcn,
+                    kind: "class".to_string(),
+                    auto_import: None,
+                    ..Default::default()
+                })
+                .collect();
+        }
+    }
     for ann in all_annotations(&u.facts) {
         for s in &ann.strings {
             if offset < s.start || offset > s.end {
@@ -508,6 +627,28 @@ fn in_open_placeholder(text: &str, offset: usize) -> bool {
 
 // ── Gutter ───────────────────────────────────────────────────────────────────
 
+/// What satisfies an injection point, said in full.
+///
+/// A bean out of the project is a fact and needs no qualification. One out of a **dependency** is
+/// two more things the reader has no other way to learn: **whose** it is, and **on what terms** —
+/// a library bean is what Spring *may* register, and its `@ConditionalOn…` is what decides. Saying
+/// only "Injected with `schemaAuthorizationManager`" about one of those states a certainty nobody
+/// has.
+fn injected_with(bean: &crate::model::BeanDef) -> String {
+    let mut out = format!("Injected with `{}`", bean.name);
+    if !bean.artifact.is_empty() {
+        out.push_str(&format!(" — from {}", bean.artifact));
+    }
+    match bean.conditions.len() {
+        0 => {}
+        // One condition reads as a sentence; several would make the tooltip a list, and the count
+        // is the honest summary — the panel is where they are enumerated.
+        1 => out.push_str(&format!(", if {}", bean.conditions[0].summary)),
+        n => out.push_str(&format!(", under {n} conditions")),
+    }
+    out
+}
+
 /// Gutter marks for a Java buffer: beans, injection points and endpoints.
 ///
 /// Positions come from the buffer (so a mark follows an edit), targets from the model
@@ -536,12 +677,40 @@ pub fn gutter(model: &SpringModel, path: &str, source: &str) -> Vec<ExtGutterMar
     // Injection points → the beans that could satisfy them.
     for p in crate::beans::injection_points(units) {
         let candidates = model.candidates(&p.type_text, &p.qualifier);
+        // Nothing found, and the type is not the project's: the beans that would satisfy it live
+        // in a jar, which this model does not read — a bean inside one is what Spring *may*
+        // register, and `@ConditionalOn…` decides the rest.
+        //
+        // So there is no mark. Not a mark that says "no matching bean found", which asserts what
+        // cannot be known; and not one that says so honestly either, because a gutter mark whose
+        // whole content is *I cannot tell you* costs a slot in the gutter and a hover to learn
+        // nothing. An `@Autowired` field of a framework type is the commonest shape there is, and
+        // one of these beside every single one of them is the mark you learn to stop reading.
+        //
+        // The same rule the usage counts follow: when the engine cannot see, it says nothing —
+        // and it keeps saying "no matching bean" where that IS a finding, on a project type.
+        if candidates.is_empty() && !model.declares_type(&p.type_text) {
+            continue;
+        }
         out.push(ExtGutterMark {
             line: line_at(source, p.offset),
             kind: "inject".to_string(),
             tooltip: match candidates.len() {
+                // Nothing found, and there are two very different reasons for that. When the
+                // project declares the type, the model has looked everywhere a bean of it could
+                // be declared and "none" is a finding. When it does NOT — the type comes from a
+                // jar — the model has not looked there at all and never will: it holds the
+                // project's own beans by design, because a bean inside a jar is what Spring *may*
+                // register and `@ConditionalOn…` decides the rest.
+                //
+                // Saying "no matching bean found" in the second case asserts something this engine
+                // cannot know, on the commonest shape there is — an `@Autowired` field of a
+                // framework type. Allowlisting the artifact under Settings → Beans does not change
+                // it either, because those beans are listed and navigable and take no part in
+                // autowiring. So it says what is actually true instead.
+                // Only ever reached for a type the project declares — see the `continue` above.
                 0 => format!("`{}` — no matching bean found", p.type_text),
-                1 => format!("Injected with `{}`", candidates[0].name),
+                1 => injected_with(candidates[0]),
                 n => format!("{n} candidate beans for `{}`", p.type_text),
             },
             targets: candidates.into_iter().map(bean_target).collect(),
@@ -589,6 +758,116 @@ pub fn mapping_path_variables(path: &str, source: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// A bean written as a plain string is coloured as a bean — the same colour a SpEL
+    /// `@beanName` gets, because it is the same thing said another way.
+    #[test]
+    fn a_qualifier_name_is_coloured_as_a_bean() {
+        let src = java("class C { @Qualifier(\"fast\") Engine e; }");
+        let hs = highlights(PATH, &src);
+        let beans: Vec<&str> = hs
+            .iter()
+            .filter(|h| h.kind == "spring.spel.bean")
+            .map(|h| &src[h.start..h.end])
+            .collect();
+        assert_eq!(beans, vec!["fast"], "{hs:?}");
+    }
+
+    /// A class named as a string gets its own kind — it is neither a property nor a bean, and
+    /// colouring it as either would point its go-to at the wrong index.
+    #[test]
+    fn a_conditional_on_class_name_is_coloured_as_a_class() {
+        let src = java("package p;\n@ConditionalOnClass(name = \"com.zaxxer.hikari.HikariDataSource\")\nclass C {}\n");
+        let hs = highlights(PATH, &src);
+        let types: Vec<&str> = hs
+            .iter()
+            .filter(|h| h.kind == "spring.class-name")
+            .map(|h| &src[h.start..h.end])
+            .collect();
+        assert_eq!(types, vec!["com.zaxxer.hikari.HikariDataSource"], "{hs:?}");
+    }
+
+    /// Go-to on one lands on the project's own class when it declares it.
+    #[test]
+    fn go_to_on_a_named_class_reaches_a_project_type() {
+        let m = model_with("package com.acme;\n@Service class OrderServiceImpl implements OrderService {}\n", "");
+        let src = java("package p;\n@ConditionalOnClass(name = \"com.acme.OrderServiceImpl\")\nclass C {}\n");
+        let at = src.find("com.acme.OrderServiceImpl").unwrap() + 12;
+        let t = navigate(&m, PATH, &src, at);
+        assert_eq!(t.len(), 1, "{t:?}");
+        assert_eq!(t[0].label, "OrderServiceImpl");
+    }
+
+    /// Completion inside one offers CLASSPATH names, filtered by what has been typed before the
+    /// caret rather than by the whole string.
+    #[test]
+    fn completing_a_named_class_offers_classpath_types() {
+        struct Fake;
+        impl crate::ext::ClassNameSource for Fake {
+            fn matching(&self, typed: &str, _limit: usize) -> Vec<String> {
+                assert_eq!(typed, "com.zax", "only what precedes the caret is typed");
+                vec!["com.zaxxer.hikari.HikariDataSource".to_string()]
+            }
+        }
+        let m = SpringModel::default();
+        let src = java("package p;\n@ConditionalOnClass(name = \"com.zaxxer.hikari.HikariDataSource\")\nclass C {}\n");
+        let at = src.find("com.zaxxer").unwrap() + "com.zax".len();
+        let items = completions(&m, Some(&Fake), PATH, &src, at);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].label, "com.zaxxer.hikari.HikariDataSource");
+        assert_eq!(items[0].kind, "class");
+    }
+
+    /// And offers nothing at all when no classpath has been handed over — an empty popup, never a
+    /// list of the project's own types pretending to be the answer.
+    #[test]
+    fn completing_a_named_class_without_a_classpath_offers_nothing() {
+        let m = SpringModel::default();
+        let src = java("package p;\n@ConditionalOnClass(name = \"com.zax\")\nclass C {}\n");
+        let at = src.find("com.zax").unwrap() + 3;
+        assert!(completions(&m, None, PATH, &src, at).is_empty());
+    }
+
+    /// The key of a `@ConditionalOnProperty` is a property key written without `${…}`, and it is
+    /// coloured as one — the placeholder scan alone sees a plain string and says nothing, which is
+    /// how a name with a go-to behind it ended up looking like a literal.
+    #[test]
+    fn a_conditional_on_property_key_is_coloured_like_a_placeholder_key() {
+        let src = java("package p;\n@ConditionalOnProperty(name = \"app.routing.mode\", havingValue = \"schema-driven\")\nclass C {}\n");
+        let hs = highlights(PATH, &src);
+        let key_spans: Vec<&str> = hs
+            .iter()
+            .filter(|h| h.kind == "spring.placeholder.key")
+            .map(|h| &src[h.start..h.end])
+            .collect();
+        assert_eq!(key_spans, vec!["app.routing.mode"], "{hs:?}");
+    }
+
+    /// `havingValue` is what the key is compared to. Colouring it would offer a go-to to a
+    /// property nobody declared.
+    #[test]
+    fn the_compared_value_is_not_coloured_as_a_key() {
+        let src = java("package p;\n@ConditionalOnProperty(name = \"a.b\", havingValue = \"on\")\nclass C {}\n");
+        let hs = highlights(PATH, &src);
+        assert!(
+            !hs.iter().any(|h| h.kind == "spring.placeholder.key" && &src[h.start..h.end] == "on"),
+            "{hs:?}"
+        );
+    }
+
+    /// A `prefix` is the front of the key, so it is part of it.
+    #[test]
+    fn a_prefix_is_part_of_the_key() {
+        let src = java("package p;\n@ConditionalOnProperty(prefix = \"app.feature\", name = \"enabled\")\nclass C {}\n");
+        let hs = highlights(PATH, &src);
+        let mut key_spans: Vec<&str> = hs
+            .iter()
+            .filter(|h| h.kind == "spring.placeholder.key")
+            .map(|h| &src[h.start..h.end])
+            .collect();
+        key_spans.sort_unstable();
+        assert_eq!(key_spans, vec!["app.feature", "enabled"], "{hs:?}");
+    }
     use super::*;
     use crate::props::{parse_property_file, PropertySources};
 
@@ -597,7 +876,11 @@ mod tests {
     /// The Spring imports a real file carries, on one line. `known` resolves every
     /// annotation through them — a fixture without them is declaring its own `@Service`,
     /// which is precisely what that check rejects.
-    const IMPORTS: &str = "import org.springframework.beans.factory.annotation.*; import org.springframework.web.bind.annotation.*; import org.springframework.stereotype.*; import org.springframework.boot.context.properties.*; import org.springframework.boot.autoconfigure.condition.*;";
+    ///
+    /// `context.annotation` is in here because `@Bean` and `@Configuration` live there, and
+    /// without it no fixture could express a **factory method** — the commonest shape a Spring
+    /// application declares a bean in, and one nothing here was able to test.
+    const IMPORTS: &str = "import org.springframework.beans.factory.annotation.*; import org.springframework.web.bind.annotation.*; import org.springframework.stereotype.*; import org.springframework.boot.context.properties.*; import org.springframework.boot.autoconfigure.condition.*; import org.springframework.context.annotation.*;";
 
     /// A buffer with those imports spliced onto the `package` line (or the front).
     fn java(src: &str) -> String {
@@ -616,11 +899,22 @@ mod tests {
             text: java.clone(),
         };
         let units = std::slice::from_ref(&u);
+        // The types the fixture declares, and their simple names — the way `ext.rs` builds the
+        // real model. Left out, `simple_names` was empty in every test while production always
+        // fills it, so a fixture answered "this project declares nothing" and any rule resting on
+        // that was being tested against a configuration that does not exist.
+        let types = crate::beans::type_index(units);
+        let mut simple_names: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for fqcn in types.keys() {
+            simple_names.entry(crate::model::simple_name(fqcn).to_string()).or_default().push(fqcn.clone());
+        }
         let mut m = SpringModel {
             beans: crate::beans::annotation_beans(units),
             injections: crate::beans::injection_points(units),
             endpoints: crate::endpoints::endpoints(units),
             config_bindings: crate::config_props::bindings(units),
+            types,
+            simple_names,
             ..SpringModel::default()
         };
         if !yaml.is_empty() {
@@ -882,12 +1176,12 @@ mod tests {
         let m = model_with("class B {}", "app:\n  timeout: 30\n  name: x\n");
         let src = "class C { @Value(\"${\") int t; }";
         let at = src.find("${").unwrap() + 2;
-        let items = completions(&m, PATH, src, at);
+        let items = completions(&m, None, PATH, src, at);
         assert_eq!(items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["app.name", "app.timeout"]);
         // Closed placeholder → the caret is in plain text again.
         let closed = "class C { @Value(\"${app.name} \") int t; }";
         let after = closed.find("} ").unwrap() + 2;
-        assert!(completions(&m, PATH, closed, after).is_empty());
+        assert!(completions(&m, None, PATH, closed, after).is_empty());
     }
 
     #[test]
@@ -895,7 +1189,7 @@ mod tests {
         let m = model_with("package com.acme;\n@Service class OrderService {}\n", "");
         let src = java("class C { @Qualifier(\"\") Object o; }");
         let at = src.find("\"\"").unwrap() + 1;
-        let items = completions(&m, PATH, &src, at);
+        let items = completions(&m, None, PATH, &src, at);
         assert_eq!(items[0].label, "orderService");
         assert_eq!(items[0].kind, "bean");
     }
@@ -929,4 +1223,135 @@ mod tests {
         assert_eq!(bean.targets[0].label, "C.svc");
         assert!(bean.tooltip.contains("1 injection point"));
     }
+    #[test]
+    fn nothing_is_marked_beside_an_injection_of_a_type_the_project_does_not_declare() {
+        // `SchemaAuthorizationManager` comes from a Spring jar. The model holds the project's own
+        // beans by design, so it can say neither that a bean exists nor that none does — and a
+        // gutter mark whose whole content is "I cannot tell you" beside every `@Autowired` field of
+        // a framework type is the mark you learn to stop reading.
+        let m = model_with("package com.acme;\n@Service class OrderServiceImpl implements OrderService {}\n", "");
+        let src = java(
+            "package com.acme;\n@Service class C {\n  @Autowired SchemaAuthorizationManager mgr;\n}\n",
+        );
+        assert!(
+            !gutter(&m, PATH, &src).iter().any(|g| g.kind == "inject"),
+            "a library type the model cannot see gets no mark at all"
+        );
+    }
+
+    #[test]
+    fn a_project_type_with_no_bean_is_still_reported() {
+        // The other half, and the one that must survive: here the model HAS looked everywhere a
+        // bean of this type could be declared, so "none" is a finding rather than a shrug.
+        let project = "package com.acme;\ninterface OrderService {}\n@Service class C { @Autowired OrderService svc; }\n";
+        let m = model_with(project, "");
+        let src = java("package com.acme;\n@Service class C {\n  @Autowired OrderService svc;\n}\n");
+        let inject = gutter(&m, PATH, &src)
+            .into_iter()
+            .find(|g| g.kind == "inject")
+            .expect("a project type with no bean is worth a mark");
+        assert!(inject.tooltip.contains("no matching bean found"), "{}", inject.tooltip);
+    }
+
+    #[test]
+    fn a_bean_factory_method_satisfies_an_injection_of_its_return_type() {
+        // The shape a Spring Boot configuration is written in: the TYPE comes from a jar, the
+        // BEAN is declared here by a `@Bean` method. The candidate check has to match on the
+        // method's return type, not on whether the project declares the type.
+        let project = "package com.acme;\n\
+             @AutoConfiguration class SecurityConfigurator {\n\
+             \x20 @Bean SchemaAuthorizationManager schema_authorization_manager() { return null; }\n\
+             }\n";
+        let m = model_with(project, "");
+        let src = java(
+            "package com.acme;\n@Service class C {\n  @Autowired SchemaAuthorizationManager mgr;\n}\n",
+        );
+        let inject = gutter(&m, PATH, &src)
+            .into_iter()
+            .find(|g| g.kind == "inject")
+            .expect("the `@Bean` method declares one");
+        assert!(
+            inject.tooltip.contains("schema_authorization_manager"),
+            "expected the factory method's bean, got {}",
+            inject.tooltip
+        );
+    }
+
+    // ── a bean an allowlisted dependency declares ─────────────────────────────────────────────
+
+    fn library_bean(name: &str, fqcn: &str, conditions: &[&str]) -> crate::model::BeanDef {
+        let group = crate::library_beans::LibraryBeanGroup {
+            group_id: "it.acme".into(),
+            artifact_id: "shared-security".into(),
+            version: "2.1.0".into(),
+            beans: vec![crate::library_beans::LibraryBean {
+                name: name.into(),
+                fqcn: fqcn.into(),
+                stereotype: "@Bean".into(),
+                declared_in: "it.acme.SecurityConfigurator".into(),
+                conditions: conditions.iter().map(|c| c.to_string()).collect(),
+                primary: false,
+            }],
+        };
+        crate::library_beans::bean_defs_of(&group).remove(0)
+    }
+
+    #[test]
+    fn a_bean_from_an_allowlisted_dependency_satisfies_an_injection() {
+        // The shape the whole feature exists for: the type comes from a jar AND so does the
+        // `@Bean` method that declares it, because the configuration class lives in a shared
+        // starter. Nothing in the project's own sources mentions either.
+        let mut m = model_with("package com.acme;\n@Service class C {}\n", "");
+        m.library_beans = vec![library_bean(
+            "schema_authorization_manager",
+            "it.acme.SchemaAuthorizationManager",
+            &[],
+        )];
+        let src = java(
+            "package com.acme;\n@Service class C {\n  @Autowired SchemaAuthorizationManager mgr;\n}\n",
+        );
+        let inject = gutter(&m, PATH, &src)
+            .into_iter()
+            .find(|g| g.kind == "inject")
+            .expect("an allowlisted dependency's bean is a candidate");
+        assert!(inject.tooltip.contains("schema_authorization_manager"), "{}", inject.tooltip);
+        assert!(
+            inject.tooltip.contains("it.acme:shared-security"),
+            "it has to say whose bean it is: {}",
+            inject.tooltip
+        );
+    }
+
+    #[test]
+    fn a_conditional_library_bean_says_on_what_terms() {
+        // A library bean is what Spring **may** register. Reporting it as a flat certainty is the
+        // one thing this must not do — `@ConditionalOnMissingBean` is precisely the case where
+        // your own bean wins instead.
+        let mut m = model_with("package com.acme;\n@Service class C {}\n", "");
+        m.library_beans = vec![library_bean(
+            "schema_authorization_manager",
+            "it.acme.SchemaAuthorizationManager",
+            &["@ConditionalOnMissingBean"],
+        )];
+        let src = java(
+            "package com.acme;\n@Service class C {\n  @Autowired SchemaAuthorizationManager mgr;\n}\n",
+        );
+        let inject = gutter(&m, PATH, &src)
+            .into_iter()
+            .find(|g| g.kind == "inject")
+            .expect("still a candidate");
+        assert!(inject.tooltip.contains("ConditionalOnMissingBean"), "{}", inject.tooltip);
+    }
+
+    #[test]
+    fn the_project_s_own_bean_is_not_labelled_with_an_artifact() {
+        // The label is for what came from somewhere else. On your own bean it would be noise on
+        // every injection in the codebase.
+        let project = "package com.acme;\ninterface OrderService {}\n@Service class OrderServiceImpl implements OrderService {}\n";
+        let m = model_with(project, "");
+        let src = java("package com.acme;\n@Service class C {\n  @Autowired OrderService svc;\n}\n");
+        let inject = gutter(&m, PATH, &src).into_iter().find(|g| g.kind == "inject").unwrap();
+        assert_eq!(inject.tooltip, "Injected with `orderServiceImpl`");
+    }
+
 }

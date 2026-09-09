@@ -353,6 +353,36 @@ fn nested_bytecode_name(binary: &str) -> Option<String> {
     }
 }
 
+impl<M: CpMemberIndex> IndexResolver<M> {
+    /// The name the **bytecode** holds for a type the name resolvers spelled with slashes.
+    ///
+    /// The two halves of the product spell a nested type differently, and both are right where they
+    /// live: the project index files `pkg/Outer/Inner` (it is a path into a source tree), a class
+    /// file is `pkg/Outer$Inner` (JVMS §4.2.1). [`members_of`] papers over the difference by
+    /// retrying the `$` form on a miss, which is enough for *reading members* and not enough for
+    /// anything that hands the name onward — a jar's central directory, a `package` line written
+    /// into a decompiled view, a Maven lookup. Those get a name nothing has, and say so.
+    ///
+    /// So the same rule is available as an answer rather than only as a retry. It only ever renames
+    /// a type the classpath **confirms** under the `$` form: an unrecognised name comes back exactly
+    /// as it went in, and a project type is never touched, because `pkg/Outer/Inner` is the spelling
+    /// the project index itself uses.
+    ///
+    /// [`members_of`]: TypeResolver::members_of
+    pub fn bytecode_name(&self, binary_name: &str) -> String {
+        if self.project_contains(binary_name) || self.project_only {
+            return binary_name.to_string();
+        }
+        if self.jdk.members_of(binary_name).is_some() {
+            return binary_name.to_string();
+        }
+        match nested_bytecode_name(binary_name) {
+            Some(alt) if self.jdk.members_of(&alt).is_some() => alt,
+            _ => binary_name.to_string(),
+        }
+    }
+}
+
 impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
     fn members_of(&self, binary_name: &str) -> Option<Arc<JClassMembers>> {
         // Record this file's dependency on the project type `binary_name` when a validation

@@ -1,6 +1,6 @@
 /**
- * Two layers a **provider** supplies and the buffer cannot: where the symbol under the caret occurs,
- * and where the file folds.
+ * Three layers a **provider** supplies and the buffer cannot: where the symbol under the caret
+ * occurs, where the file folds, and which of its declarations nothing reaches.
  *
  * Both are here rather than in a language descriptor because both are *pushed*. The host makes the
  * backend call — it owns the debounce, the caret, and the knowledge that the answer is still for the
@@ -158,6 +158,71 @@ export function serverFolding(): Extension {
         }
       }
       return null;
+    }),
+  ];
+}
+
+// ── unused declarations ──────────────────────────────────────────────────────
+
+/** One declaration nothing reaches, in document (UTF-16) positions — its NAME, not its body. */
+export interface UnusedRange {
+  from: number;
+  to: number;
+}
+
+/** Replace the unused-declaration layer. An empty array clears it. */
+export const setUnusedRanges = StateEffect.define<UnusedRange[]>();
+
+/**
+ * A dimmed name.
+ *
+ * A `mark` and not a `line`: what is being said is *this name is not used*, and dimming the whole
+ * declaration would dim the code inside it, which is used by the thing that is not.
+ */
+const unusedMark = Decoration.mark({ class: 'cm-unused-decl' });
+
+function unusedSet(ranges: UnusedRange[], docLength: number): DecorationSet {
+  const out: Range<Decoration>[] = [];
+  for (const r of ranges) {
+    if (r.to > r.from && r.from >= 0 && r.to <= docLength) out.push(unusedMark.range(r.from, r.to));
+  }
+  out.sort((a, b) => a.from - b.from || a.to - b.to);
+  return Decoration.set(out, true);
+}
+
+const unusedField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(value, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(setUnusedRanges)) return unusedSet(effect.value, tr.state.doc.length);
+    }
+    // Mapped, not cleared, like the other two: the answer is a beat behind the buffer, and a name
+    // that stops being grey on every keystroke and comes back a moment later is a flicker.
+    return tr.docChanged ? value.map(tr.changes) : value;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+/**
+ * The unused-declaration layer — the name of a member nothing in the project reaches, drawn faint.
+ *
+ * **Drained and faded, not recoloured.** A `color` here would lose: the syntax highlighting puts
+ * its own colour on a span *inside* this one, so the outer rule never lands — which is why setting
+ * one looks like the layer is not installed at all. `filter` and `opacity` compose instead of
+ * competing: the grayscale pulls the token's colour out whatever it was, and the fade says the
+ * rest. A field, a method and a type are three different colours and all three end up the same
+ * unmistakable grey.
+ *
+ * Deliberately **not** a strikethrough: nothing here is deprecated, and the claim is weaker than
+ * "do not use this". It is "nothing does".
+ */
+export function unusedDeclarations(): Extension {
+  return [
+    unusedField,
+    EditorView.baseTheme({
+      '.cm-unused-decl': { filter: 'grayscale(1)', opacity: '0.55' },
     }),
   ];
 }

@@ -36,7 +36,11 @@ use bennu_proto::prelude::Diagnostic;
 use crate::check_id::CheckId;
 
 /// The names a framework or the runtime reaches without any source file naming them.
-const RUNTIME_NAMES: &[&str] = &[
+///
+/// Public because the same question is asked twice: by this check, which sees one file, and by the
+/// usage counts, which see the whole index. Two lists would drift, and the drift would show up as a
+/// `serialVersionUID` that one of them greys out and the other does not.
+pub const RUNTIME_NAMES: &[&str] = &[
     "serialVersionUID",
     "readObject",
     "writeObject",

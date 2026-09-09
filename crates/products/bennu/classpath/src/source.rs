@@ -50,6 +50,19 @@ pub trait ClassSource {
     fn class_names(&self) -> Vec<String> {
         Vec::new()
     }
+
+    /// The **archive** `binary_name` came out of, when this source is one. `None` for a source
+    /// that is not a file with a coordinate — a directory of `.class` files, the JVM image — and
+    /// for a class it does not hold.
+    ///
+    /// Cheap by construction, which is the only reason it exists: a jar is opened once when the
+    /// classpath is resolved and its central directory is in memory from that moment, so answering
+    /// this is one hash probe per jar and no I/O at all. Nothing is indexed, nothing is cached and
+    /// nothing is held: a map from every class on the classpath to its jar would be tens of
+    /// thousands of entries kept alive to answer a question asked once per tooltip.
+    fn origin(&self, _binary_name: &str) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 // ── DirSource ────────────────────────────────────────────────────────────────
@@ -92,6 +105,10 @@ impl ClassSource for DirSource {
 /// single-threaded borrow is safe (per-source access is serialized by the caller).
 pub struct JarSource {
     archive: RefCell<zip::ZipArchive<File>>,
+    /// Where the jar is. Kept because the path IS the artifact's identity in a Maven repository —
+    /// `…/org/springframework/spring-core/6.1.14/spring-core-6.1.14.jar` — so a caller holding it
+    /// can say which dependency a class came from without opening anything.
+    path: std::path::PathBuf,
 }
 
 impl JarSource {
@@ -101,11 +118,24 @@ impl JarSource {
             .map_err(|e| format!("open jar {}: {e}", path.as_ref().display()))?;
         let archive = zip::ZipArchive::new(file)
             .map_err(|e| format!("read jar {}: {e}", path.as_ref().display()))?;
-        Ok(Self { archive: RefCell::new(archive) })
+        Ok(Self { archive: RefCell::new(archive), path: path.as_ref().to_path_buf() })
+    }
+}
+
+impl JarSource {
+    /// Whether this jar holds `binary_name` — one hash probe against the central directory the
+    /// archive already read when it was opened. No decode, no read.
+    fn holds(&self, binary_name: &str) -> bool {
+        let entry = format!("{binary_name}.class");
+        self.archive.borrow_mut().index_for_name(&entry).is_some()
     }
 }
 
 impl ClassSource for JarSource {
+    fn origin(&self, binary_name: &str) -> Option<std::path::PathBuf> {
+        self.holds(binary_name).then(|| self.path.clone())
+    }
+
     fn class_bytes(&self, binary_name: &str) -> Result<Option<Vec<u8>>, String> {
         let entry_name = format!("{binary_name}.class");
         let mut archive = self.archive.borrow_mut();

@@ -37,6 +37,15 @@
   <code>list.size() == 0</code> → <code>list.isEmpty()</code>, <code>flag == true</code> →
   <code>flag</code>, <code>!(a == b)</code> → <code>a != b</code>.
 </p>
+<p>
+  When a file's name and the <code>public</code> type inside it disagree — which Java does not allow,
+  so the file does not compile — the popup offers <strong>both ways out</strong>: rename the type to
+  match the file, or rename the file to match the type. Neither is chosen for you.
+  <code>Foo.java</code> holding <code>public class Bar</code> happens in both directions — somebody
+  renamed the class in a text editor, or somebody copied a file and renamed the class inside it —
+  and picking one for you gets it wrong half the time, in the direction that loses the name you
+  meant to keep. Renaming the type goes through the rename preview, so every use of it follows.
+</p>
 <h2>Extract and inline</h2>
 <p>
   One <kbd>Alt</kbd> + <kbd>Enter</kbd> list, offered from what you have selected: a run of
@@ -316,9 +325,11 @@
 <h2>Rename</h2>
 <p>
   Put the caret on a symbol and press <kbd>Shift</kbd> + <kbd>F6</kbd> to rename it across the
-  project. A <strong>preview</strong> lists every edit grouped by file before anything is written —
-  confirm to apply (through the editor, so a single <kbd>Ctrl</kbd> + <kbd>Z</kbd> undoes the whole
-  rename). What gets rewritten depends on what the caret is on:
+  project. A small field opens at the caret: <kbd>Enter</kbd> applies the rename,
+  <kbd>Shift</kbd> + <kbd>Enter</kbd> opens a <strong>preview</strong> listing every edit grouped by
+  file first. Either way it goes through the editor, so a single <kbd>Ctrl</kbd> + <kbd>Z</kbd>
+  undoes the whole rename — <strong>and either way the file moves when the rename requires it</strong>.
+  What gets rewritten depends on what the caret is on:
 </p>
 <ul>
   <li>a <strong>local variable</strong> or <strong>parameter</strong> — scope-exact, in that method only, never a same-named variable elsewhere or a field of the same name;</li>

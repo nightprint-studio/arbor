@@ -28,6 +28,11 @@ export interface IntentionOffer {
    *   sent for a declaration whose references cannot leave the file (a local, a parameter).
    * - `"rename-symbol-preview"` — the same rename, but through the preview modal, because it can
    *   reach other files.
+   * - `"rename-file"` — rename the open file to `replacement` (a base name, never a path). No edit
+   *   travels with it: this is the half of a file-name/type-name disagreement where the **type** is
+   *   the name being kept.
+   * - `"create-class"` — create the file for the type named in `replacement`, then open it.
+   * - `"override-methods"` — open the implement/override picker.
    */
   action?: string;
 }

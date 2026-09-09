@@ -20,7 +20,8 @@
    * typing never re-scans the raw set. Click an openable row (a type / bean / action
    * with a file+line) to open it. Read-only.
    */
-  import { Database, Box, RefreshCw, RotateCw, CircleCheckBig, Loader, ExternalLink } from 'lucide-svelte';
+  import { Database, RefreshCw, RotateCw, CircleCheckBig, Loader, ExternalLink } from 'lucide-svelte';
+  import { kindGlyph } from './symbol-kind-glyph';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
@@ -48,6 +49,8 @@
     line: number | null;
     k1: string; // primary, lowercased
     k2: string; // secondary, lowercased
+    /** What it is, for the icon — a type kind, a member kind, or an index kind. */
+    kind: string;
   }
 
   // ── Kind selector ───────────────────────────────────────────────────────────
@@ -60,7 +63,36 @@
     { id: 'actions', label: 'Actions' },
     { id: 'relations', label: 'Relations' },
   ];
-  const tabs: TabItem[] = KINDS.map((k) => ({ id: k.id, label: k.label }));
+  /**
+   * The kinds this project can actually have.
+   *
+   * `Actions` and `Relations` are read off the **web config graph** — Struts actions, their result
+   * views, Spring XML bean references, MyBatis statements. A project with none of that has neither,
+   * and an always-present tab that is always empty is a tab that teaches you the inspector is
+   * broken. So they appear when the project has the configuration that fills them, or when
+   * something is already in them — the second half matters while the graph is still building, and
+   * for a project whose capability detection missed something the entries prove is there.
+   *
+   * Every other kind is a fact about any Java project and is always offered.
+   */
+  const WEB_CONFIG_KINDS: IndexKind[] = ['actions', 'relations'];
+  const hasWebConfig = $derived.by(() => {
+    const c = projectStore.capabilities;
+    return !!c && (c.struts_xml_config || c.struts_convention || c.spring_xml_di || c.mybatis_mapper);
+  });
+  const kinds = $derived(
+    KINDS.filter((k) => {
+      if (!WEB_CONFIG_KINDS.includes(k.id)) return true;
+      if (hasWebConfig) return true;
+      return (k.id === 'actions' ? stats?.actions : stats?.relations) ? true : false;
+    }),
+  );
+  const tabs = $derived<TabItem[]>(kinds.map((k) => ({ id: k.id, label: k.label })));
+
+  // A tab that disappears under the selection would leave the list showing a kind with no tab lit.
+  $effect(() => {
+    if (!kinds.some((k) => k.id === kind)) kind = 'types';
+  });
   let kind = $state<IndexKind>('types');
   const kindLabel = $derived(KINDS.find((k) => k.id === kind)?.label ?? kind);
 
@@ -90,8 +122,14 @@
           { id: null, label: 'Type names', value: stats.type_names },
           { id: 'jdk', label: 'JDK', value: stats.jdk_version || '—' },
           { id: 'beans', label: 'Beans', value: stats.beans },
-          { id: 'actions', label: 'Actions', value: stats.actions },
-          { id: 'relations', label: 'Relations', value: stats.relations },
+          // Hidden on the same terms as their tabs — a card reading `Actions 0` on a project that
+          // has no actions to have is a number about nothing.
+          ...(kinds.some((k) => k.id === 'actions')
+            ? [{ id: 'actions' as const, label: 'Actions', value: stats.actions }]
+            : []),
+          ...(kinds.some((k) => k.id === 'relations')
+            ? [{ id: 'relations' as const, label: 'Relations', value: stats.relations }]
+            : []),
         ]
       : [],
   );
@@ -104,16 +142,20 @@
   let listLoading = $state(false);
   let unavailable = $state(false);
 
-  function mapClass(c: { simple: string; fqcn: string; file: string; line: number }): Row {
+  function mapClass(c: { simple: string; fqcn: string; file: string; line: number; kind?: string }): Row {
     return {
       primary: c.simple, secondary: c.fqcn, file: c.file, line: c.line,
       k1: c.simple.toLowerCase(), k2: c.fqcn.toLowerCase(),
+      // The class index has carried the real kind all along — this list was the one place still
+      // drawing every type as the same cube.
+      kind: c.kind || 'class',
     };
   }
-  function mapEntry(e: { primary: string; secondary: string; file: string | null; line: number | null }): Row {
+  function mapEntry(e: { primary: string; secondary: string; file: string | null; line: number | null; kind?: string }): Row {
     return {
       primary: e.primary, secondary: e.secondary, file: e.file, line: e.line,
       k1: e.primary.toLowerCase(), k2: e.secondary.toLowerCase(),
+      kind: e.kind ?? '',
     };
   }
 
@@ -346,6 +388,7 @@
           {#each visibleRows as r, i (startIdx + i)}
             {@const gi = startIdx + i}
             {@const openable = !!r.file}
+            {@const g = kindGlyph(r.kind)}
             <button
               class="row"
               class:active={gi === active}
@@ -359,7 +402,9 @@
               onclick={() => open(r)}
               use:tooltip={r.file ?? r.secondary}
             >
-              <Box size={12} />
+              <span class="r-icon" style="color:{g.color}">
+                <g.icon size={12} {...g.props ?? {}} />
+              </span>
               <span class="r-primary">{r.primary}</span>
               <span class="r-secondary">{r.secondary}</span>
               {#if openable}<ExternalLink class="r-go" size={11} />{/if}
@@ -374,6 +419,7 @@
 </Modal>
 
 <style>
+  .r-icon { display: inline-flex; flex: none; align-items: center; }
   .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .hdr-state { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-size-2xs); color: var(--text-muted); }
   .hdr-state.ready { color: var(--success); }

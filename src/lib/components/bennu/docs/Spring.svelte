@@ -29,6 +29,32 @@
   <code>@Qualifier("…")</code> and for a SpEL <code>@beanName</code>, which navigate to the bean.
 </p>
 <p>
+  A key written <em>without</em> the placeholder braces is coloured the same way —
+  <code>@ConditionalOnProperty(name = "app.routing.mode")</code> names a property as
+  directly as a <code>$&#123;…&#125;</code> does, and carries the same hover and the same
+  <kbd>Ctrl</kbd> + <kbd>B</kbd>. Two ways of writing one thing should not look like two things.
+  <code>havingValue</code> keeps the plain string colour: it is what the key is compared
+  <em>to</em>, and a go-to on it would point at a property nobody declared.
+</p>
+<p>
+  <strong>A bean written as a plain string</strong> — <code>@Qualifier("fast")</code>,
+  <code>@DependsOn("audit")</code>, <code>@Resource(name = "ds")</code> — is coloured like a SpEL
+  <code>@beanName</code>, which is the same thing said another way, and follows to the same
+  declaration.
+</p>
+<p>
+  <strong>A class written as a string.</strong>
+  <code>@ConditionalOnClass(name = "com.zaxxer.hikari.HikariDataSource")</code> names a type the
+  only way it can — the class may not be on the compile classpath at all, which is the whole point
+  of the condition — so Java sees an opaque string and a typo in it silently turns the condition off
+  for ever. Bennu reads it as the type it is: <strong>coloured</strong> as a type,
+  <strong>completed</strong> from the classpath as you type it (the same index behind “Import
+  class”, so the JDK and every dependency are in it), and <kbd>Ctrl</kbd> + <kbd>B</kbd> opens it —
+  the project's own source when it declares it, the decompiled view otherwise. The same works for
+  <code>@ConditionalOnMissingClass</code>. A <code>@ConditionalOnBean(name = "…")</code> is left
+  alone: that names a bean, not a type, however much the two look alike.
+</p>
+<p>
   <strong>Which <code>application.yml</code>?</strong> A project has several — a base file, one per
   profile, one per module — and which one runs is a launch argument, not something the sources
   reveal. So Bennu asks instead of guessing: open <strong>Spring configuration</strong> from the

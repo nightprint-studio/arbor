@@ -228,7 +228,7 @@ function createBennuUiStore() {
   let navigationToken = 0;
   let navigationTimer: ReturnType<typeof setTimeout> | null = null;
 
-  let gotoTarget = $state<{ line: number; nonce: number } | null>(null);
+  let gotoTarget = $state<{ line: number; col: number; nonce: number } | null>(null);
 
   // Goto-by-byte-offset relay — the Forms tool window (a sibling of the editor) asks the
   // editor to move the caret to a UTF-8 byte offset (a `<form>` tag / field-name span).
@@ -475,9 +475,14 @@ function createBennuUiStore() {
       navigatingTo = null;
     },
 
-    /** Ask the editor to scroll to a 1-based line (a panel → editor relay). */
-    requestGoto(line: number) {
-      gotoTarget = { line, nonce: (gotoTarget?.nonce ?? 0) + 1 };
+    /** Ask the editor to scroll to a 1-based line, and optionally a column (a panel → editor
+     *  relay).
+     *
+     *  The column defaults to 1 because that is what a panel knows: a usage, a test failure, a
+     *  TODO all name a line. What has a column is **going back to where you were**, and dropping
+     *  it there meant returning to the start of the line you left. */
+    requestGoto(line: number, col = 1) {
+      gotoTarget = { line, col, nonce: (gotoTarget?.nonce ?? 0) + 1 };
     },
 
     /** Ask the editor to move the caret to a **UTF-8 byte offset** and reveal it (the

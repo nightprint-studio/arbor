@@ -66,6 +66,14 @@
   shows what will exist before you press <kbd>Enter</kbd>.
 </p>
 <p>
+  <strong>A package is a name, not a place.</strong> In package territory the field opens already
+  filled with the package you were on, and every part of it can be edited — the folders are then
+  created from the <strong>source root</strong>. So a child is <kbd>Enter</kbd> after one word, a
+  sibling is a few <kbd>Backspace</kbd>s, and a package one level up is the same. Outside a source
+  root the field starts empty and the folders are created <em>inside</em> the folder you picked,
+  because there a directory chain really is a place.
+</p>
+<p>
   Levels that are <strong>already there</strong> are stepped through, not objected to: typing
   <code>src/main/resources</code> where <code>src/main</code> exists creates <code>resources</code>
   and nothing else, and the confirmation says exactly what was created.

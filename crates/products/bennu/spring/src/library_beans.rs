@@ -491,3 +491,52 @@ mod tests {
         assert_eq!(beans.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["alpha", "zeta"]);
     }
 }
+
+/// One dependency's beans as **definitions an injection point can be satisfied by**.
+///
+/// The conversion exists because the two shapes answer different questions and both are needed: a
+/// [`LibraryBean`] is a row in a panel — what a jar declares — and a [`BeanDef`] is a candidate.
+/// What crosses is the name, the type, and the terms.
+///
+/// `file`/`offset`/`line` stay empty: there is no source to open. The declaring class is kept as
+/// the stereotype's detail instead, which is the thing worth reading — for a `@Bean` method it is
+/// the configuration class, not the bean.
+///
+/// Every condition is carried through as written. A library bean is what Spring **may** register,
+/// and dropping the `@ConditionalOn…` that decides it would turn a maybe into a claim.
+pub fn bean_defs_of(group: &LibraryBeanGroup) -> Vec<crate::model::BeanDef> {
+    let artifact = format!("{}:{}", group.group_id, group.artifact_id);
+    group
+        .beans
+        .iter()
+        .map(|b| crate::model::BeanDef {
+            name: b.name.clone(),
+            fqcn: b.fqcn.clone(),
+            kind: crate::model::BeanKind::Stereotype,
+            stereotype: b.stereotype.clone(),
+            file: String::new(),
+            offset: 0,
+            line: 0,
+            scope: String::new(),
+            primary: b.primary,
+            profile: String::new(),
+            lazy: false,
+            is_abstract: false,
+            // Not read from a jar: the supertypes would need the classpath resolver, which this
+            // scan does not carry. An injection of an INTERFACE is therefore not matched to a
+            // library implementation of it — the direct type, which is what a `@Bean` method
+            // returns, is.
+            supertypes: Vec::new(),
+            conditions: b
+                .conditions
+                .iter()
+                .map(|c| crate::model::BeanCondition {
+                    name: c.trim_start_matches('@').split('(').next().unwrap_or(c).to_string(),
+                    summary: c.clone(),
+                    property_key: String::new(),
+                })
+                .collect(),
+            artifact: artifact.clone(),
+        })
+        .collect()
+}

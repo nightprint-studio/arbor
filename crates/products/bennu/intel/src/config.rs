@@ -554,6 +554,14 @@ impl ConfigResolver {
     pub fn annotation_bean_count(&self) -> usize {
         self.annotation_beans.len()
     }
+
+    /// Every annotation-declared bean, for a consumer that wants to LIST them rather than resolve
+    /// one — the index inspector, whose Beans tab read only the XML `<bean>` graph and therefore
+    /// showed nothing at all for a project whose beans are `@Service` and `@Component`, which is
+    /// most of them.
+    pub fn annotation_beans(&self) -> impl Iterator<Item = &AnnotationBean> {
+        self.annotation_beans.values()
+    }
     pub fn relation_count(&self) -> usize {
         self.relations.len()
     }

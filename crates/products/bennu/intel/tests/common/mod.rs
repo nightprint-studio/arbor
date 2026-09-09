@@ -256,6 +256,25 @@ impl Project {
             .unwrap_or(0)
     }
 
+    /// Every declaration in `file` with its use count — the counts drawn above a file's members.
+    pub fn usage_marks(&self, file: &str) -> Vec<bennu_intel::prelude::UsageMark> {
+        self.engine.usage_marks(self.source(file))
+    }
+
+    /// The mark for the declaration named `name` in `file`, or a panic naming what was found —
+    /// a test that silently matched nothing would pass for the wrong reason.
+    pub fn mark(&self, file: &str, name: &str) -> bennu_intel::prelude::UsageMark {
+        let marks = self.usage_marks(file);
+        marks
+            .iter()
+            .find(|m| m.name == name)
+            .cloned()
+            .unwrap_or_else(|| {
+                let found: Vec<&str> = marks.iter().map(|m| m.name.as_str()).collect();
+                panic!("no declaration named `{name}` in {file}; found {found:?}")
+            })
+    }
+
     /// Member-access completion at `file`:`offset` — the caret is expected to sit just after a
     /// `receiver.` (optionally with a partial prefix already typed). Returns the candidate items
     /// (sorted fields-then-methods, alpha within), exactly as the provider serves them.

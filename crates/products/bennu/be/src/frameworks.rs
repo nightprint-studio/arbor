@@ -909,6 +909,29 @@ fn with_file<T: Default>(
 /// The framework host is not the Java indexer and must not depend on its bookkeeping. Registered for
 /// every project kind, and never removed: a tab from a project you have switched away from is still
 /// open, and its file still has to resolve.
+/// Give a project's Spring model the beans its **allowlisted dependencies** declare.
+///
+/// A no-op when Spring is not among the project's extensions, which is the ordinary case for a
+/// project that has no Spring: the allowlist is a setting and nothing stops it being set.
+pub fn set_spring_library_beans(root: &str, beans: Vec<bennu_spring::prelude::BeanDef>) {
+    if let Some(ext) = FrameworkService::global().slot(root).and_then(|s| s.spring.clone()) {
+        ext.set_library_beans(beans);
+    }
+}
+
+/// Hand the Spring extension the project's classpath type names.
+///
+/// The seam exists because the two halves of the answer live on opposite sides of it: the
+/// extension knows that `@ConditionalOnClass(name = "…")` holds a type name, and only the index
+/// knows what type names there are. Installed once per root when its index comes up — and the
+/// lookup is the same one "Import class" uses, so a class completes here exactly when it would
+/// complete anywhere else.
+pub fn set_spring_class_names(root: &str, source: std::sync::Arc<dyn bennu_spring::prelude::ClassNameSource>) {
+    if let Some(ext) = FrameworkService::global().slot(root).and_then(|s| s.spring.clone()) {
+        ext.set_class_names(source);
+    }
+}
+
 pub fn register_root(root: &str) {
     let key = norm(root);
     if key.is_empty() {

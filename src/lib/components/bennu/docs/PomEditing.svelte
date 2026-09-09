@@ -108,6 +108,25 @@
   installed.
 </p>
 
+<h2>When a newer version exists</h2>
+<p>
+  Above a dependency that is behind, a line saying which version Maven Central has, and one press
+  writes it. This is the one thing on this page that reaches the network — the local repository
+  holds only what somebody here has already asked for, so by its measure a dependency nobody has
+  updated is permanently current. Turn it off in
+  <strong>Settings → Java → Check Maven Central for newer versions</strong>.
+</p>
+<p>
+  Only what <em>this</em> pom pins. A version inherited from a parent or a BOM, or written as a
+  <code>$&#123;property&#125;</code>, is left alone: the line the hint would sit above is not the
+  line that would have to change.
+</p>
+<p>
+  Answers are cached on disk for a day per artifact, and a failed lookup falls back to whatever is
+  cached however old — on a train, last week's answer is the right one. A milestone or a release
+  candidate is never offered as the newer version.
+</p>
+
 <h2>When something is missing</h2>
 <p>
   Nothing on this page downloads anything — that is what makes it instant and what makes it work

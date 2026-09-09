@@ -70,6 +70,10 @@ pub struct ProjectBuild {
     pub classes: Vec<ClassDecl>,
     /// simple name → binary name for the project's own declared types.
     pub type_map: BTreeMap<String, String>,
+    /// How often each type is imported across the project — the completion ranking term. Counted
+    /// here because this is the one place every file is already parsed; on its own it would be a
+    /// second full read of the project to answer a question about ordering a popup.
+    pub imports: crate::import_census::ImportCensus,
 }
 
 /// Build the whole index from **already-read** `(path, source)` pairs — the single-read
@@ -89,10 +93,12 @@ pub fn build_project_index_from_sources(
     // non-lossy set of project binaries — the simple→binary map keeps only ONE binary per simple name,
     // so it can't answer "is `com/x/Foo` a project type?" when several packages declare a `Foo`; the
     // set can, which is what lets a wildcard import (`import com.x.*;`) resolve to the right package.
+    let mut imports = crate::import_census::ImportCensus::default();
     let mut project_types: BTreeMap<String, String> = BTreeMap::new();
     let mut project_binaries: std::collections::BTreeSet<String> =
         std::collections::BTreeSet::new();
     for (_p, fs) in &parsed {
+        imports.add_file(fs);
         for td in &fs.types {
             let binary = td.fqn.replace('.', "/");
             project_types.insert(td.name.clone(), binary.clone());
@@ -140,6 +146,7 @@ pub fn build_project_index_from_sources(
         member_count,
         classes,
         type_map: project_types,
+        imports,
     }
 }
 

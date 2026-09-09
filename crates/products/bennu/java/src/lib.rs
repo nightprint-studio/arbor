@@ -20,6 +20,7 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_java::prelude::...`.
 
+pub mod annotation_site;
 pub mod ast;
 pub mod grammar;
 pub mod hierarchy;

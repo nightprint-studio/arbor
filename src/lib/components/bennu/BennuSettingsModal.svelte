@@ -53,8 +53,13 @@
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { dependenciesStore } from '$lib/stores/bennu/dependencies.svelte';
+  import TokenListInput, {
+    type TokenStatus, type TokenSuggestion,
+  } from '$lib/components/shared/ui/TokenListInput.svelte';
   import {
     getBennuConfig, setBennuConfig, type BennuConfig, type CargoConfigDto, type LspConfigDto,
+    type MavenConfigDto,
   } from '$lib/ipc/bennu/config';
   import { getStepExcludes } from '$lib/ipc/bennu/debug';
 
@@ -146,14 +151,44 @@
   }
 
   // ── Library beans: which dependencies are read ────────────────────────────────
-  // Four axes, each a list, edited as comma-separated text: the entries are coordinates
-  // people paste from a pom, and a chip editor would make pasting four of them slower than
-  // typing them. Committed on blur/Enter so a half-typed prefix never triggers a scan.
+  //
+  // Four axes, each a real list — see `TokenListInput`. They used to be comma-separated text
+  // fields, which is a list pretending to be a string: you could not remove one entry without
+  // re-reading the line, nothing could tell you the third one matched no dependency in the
+  // project, and it committed on blur, so while you typed an artifact id absolutely nothing
+  // happened and there was no way to tell that from broken.
+  //
+  // What answers all three is the project's own dependency report — the same one the Dependencies
+  // panel shows. It supplies the suggestions, and it is what each entry is checked against.
   const beanAxes = [
-    { key: 'group_id',           label: 'Group ids',           hint: 'com.acme.platform' },
-    { key: 'group_id_prefix',    label: 'Group id prefixes',   hint: 'com.acme.  — the trailing dot matters' },
-    { key: 'artifact_id',        label: 'Artifact ids',        hint: 'shared-security' },
-    { key: 'artifact_id_prefix', label: 'Artifact id prefixes', hint: 'acme-starter-' },
+    {
+      key: 'group_id',
+      label: 'Group ids',
+      hint: 'com.acme.platform',
+      axis: 'group' as const,
+      exact: true,
+    },
+    {
+      key: 'group_id_prefix',
+      label: 'Group id prefixes',
+      hint: 'com.acme.  — the trailing dot matters',
+      axis: 'group' as const,
+      exact: false,
+    },
+    {
+      key: 'artifact_id',
+      label: 'Artifact ids',
+      hint: 'shared-security',
+      axis: 'artifact' as const,
+      exact: true,
+    },
+    {
+      key: 'artifact_id_prefix',
+      label: 'Artifact id prefixes',
+      hint: 'acme-starter-',
+      axis: 'artifact' as const,
+      exact: false,
+    },
   ] as const;
 
   const libraryBeans = $derived(
@@ -163,15 +198,93 @@
     beanAxes.every((a) => (libraryBeans[a.key] ?? []).length === 0),
   );
 
-  /** Split a comma/newline-separated field into entries, dropping blanks — an empty prefix
-   *  would otherwise mean "every artifact", which is not a reasonable reading of a stray
-   *  comma. (The backend refuses an empty prefix too; this keeps the file tidy.) */
-  function parseAxis(text: string): string[] {
-    return text.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  /**
+   * Every `group:artifact` the project actually has — declared and transitive, deduplicated.
+   *
+   * The transitive ones matter as much as the declared: a starter you want the beans of is
+   * usually dragged in by something else, and offering only what a pom names would leave the
+   * commonest entry untypeable from the list.
+   */
+  const projectCoords = $derived.by(() => {
+    const report = dependenciesStore.report;
+    if (!report) return [] as { group: string; artifact: string }[];
+    const seen = new Set<string>();
+    const out: { group: string; artifact: string }[] = [];
+    const push = (group: string, artifact: string) => {
+      if (!artifact) return;
+      const key = `${group}:${artifact}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ group, artifact });
+    };
+    for (const m of report.modules) for (const d of m.dependencies) push(d.group, d.name);
+    for (const t of report.transitive) push(t.group, t.name);
+    return out;
+  });
+
+  /** What the add field offers for one axis: the distinct values the project has, each saying how
+   *  many artifacts carry it — so a group that covers twelve jars is visibly the useful entry. */
+  function beanSuggestions(axis: 'group' | 'artifact'): TokenSuggestion[] {
+    const counts = new Map<string, number>();
+    for (const c of projectCoords) {
+      const v = axis === 'group' ? c.group : c.artifact;
+      if (v) counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([value, n]) => ({
+        value,
+        detail: axis === 'group' ? `${n} artifact${n === 1 ? '' : 's'}` : '',
+      }));
   }
 
-  async function commitBeanAxis(key: (typeof beanAxes)[number]['key'], text: string) {
-    await saveConfigPatch({ library_beans: { ...libraryBeans, [key]: parseAxis(text) } });
+  /**
+   * What one entry turned out to mean — the thing a text field could never say.
+   *
+   * An allowlist entry that matches nothing is the commonest mistake there is (a typo, a
+   * coordinate that moved, a prefix missing its trailing dot), and until something says so the
+   * only symptom is a panel that stays empty for no visible reason.
+   *
+   * Silent while the report is still loading: "matches nothing" about a project whose
+   * dependencies have not been read yet would be a lie with a warning colour on it.
+   */
+  function beanStatus(entry: string, axis: 'group' | 'artifact', exact: boolean): TokenStatus | null {
+    if (!dependenciesStore.report) return null;
+    const n = projectCoords.filter((c) => {
+      const v = axis === 'group' ? c.group : c.artifact;
+      return exact ? v === entry : v.startsWith(entry);
+    }).length;
+    if (n === 0) {
+      return {
+        label: 'matches nothing',
+        tone: 'warning',
+        tooltip: `No dependency of this project has ${axis === 'group' ? 'a group id' : 'an artifact id'} ${exact ? 'equal to' : 'starting with'} “${entry}”.`,
+      };
+    }
+    return {
+      label: `${n} artifact${n === 1 ? '' : 's'}`,
+      tone: 'success',
+      tooltip: 'Matched against the project\'s declared and transitive dependencies.',
+    };
+  }
+
+  /** Refuse the entry that would mean "everything": an empty prefix admits every artifact in the
+   *  repository, which is never what a stray keystroke meant. The backend refuses it too. */
+  function normaliseBeanEntry(raw: string): string | null {
+    const t = raw.trim();
+    return t.length > 0 ? t : null;
+  }
+
+  /**
+   * Save one axis. That is the whole of it, and it is enough.
+   *
+   * The backend's scan cache is keyed **by the allowlist itself**, so the next read re-scans
+   * because the key no longer matches — no index rebuild, no invalidation call, nothing to
+   * remember to do. What was missing was never the reload; it was any sign that the entry had been
+   * accepted, which is what the rows and their verdicts are.
+   */
+  async function commitBeanAxis(key: (typeof beanAxes)[number]['key'], next: string[]) {
+    await saveConfigPatch({ library_beans: { ...libraryBeans, [key]: next } });
   }
 
   // ── Validate-project-on-open (real bennu config, default on) ──────────────────
@@ -238,6 +351,16 @@
   ]);
   let active = $state('editor');
 
+  // The Beans page checks every entry against the project's real dependencies and offers them in
+  // the add field, so it needs the report — and only it does, which is why this asks on the page
+  // rather than when the dialog opens. The store answers from cache when something else has
+  // already read it, so opening this page twice costs one round-trip.
+  $effect(() => {
+    if (active !== 'beans') return;
+    const root = projectStore.project?.root;
+    if (root) void dependenciesStore.load(root);
+  });
+
   // Something opened Settings *for a reason* (the status bar's "server not running" pill) and
   // asked for a page. Honoured once, then cleared, so ordinary re-opens stay where the user was.
   $effect(() => {
@@ -293,6 +416,17 @@
 
   async function setCratesIo(on: boolean) {
     await saveConfigPatch({ cargo: { ...cargoCfg, crates_io: on } });
+  }
+
+  /** The `[maven]` section, with a complete default for the same reason `[cargo]` has one: a config
+   *  written before this existed has to read as "on, a day" rather than as a half-populated object. */
+  const mavenCfg = $derived<MavenConfigDto>(
+    cfg?.maven ?? { central: true, metadata_ttl_hours: 24 },
+  );
+  const mavenCentral = $derived(mavenCfg.central);
+
+  async function setMavenCentral(on: boolean) {
+    await saveConfigPatch({ maven: { ...mavenCfg, central: on } });
   }
 
   async function setRustCheckCommand(command: string) {
@@ -518,6 +652,9 @@
           <FormRow label="Inlay hints" description="Draw the parameter name in front of each argument that doesn't already say what it is, and the type a `var` was inferred as. Not part of the file — they can't be selected or copied.">
             <Toggle checked={s.inlayHints} onchange={(v) => s.setInlayHints(v)} ariaLabel="Inlay hints" />
           </FormRow>
+          <FormRow label="Usage counts" description="Draw how many places use each class, method and field above it, and fade the name of one nothing reaches. Java only — it is the whole-project reference index answering, so it says nothing until the index is built. A member carrying an annotation, one that overrides something, and main are never faded: a framework can reach any of them by name, and an index cannot see that.">
+            <Toggle checked={s.usageCounts} onchange={(v) => s.setUsageCounts(v)} ariaLabel="Usage counts" />
+          </FormRow>
           <FormRow label="Word wrap" description="Wrap long lines to the viewport instead of scrolling horizontally.">
             <Toggle checked={s.wordWrap} onchange={(v) => s.setWordWrap(v)} ariaLabel="Word wrap" />
           </FormRow>
@@ -581,6 +718,12 @@
           </FormRow>
           <FormRow label="Auto-import on accept" description="Add the missing import when you accept a completion.">
             <Toggle checked={s.autoImport} onchange={(v) => s.setAutoImport(v)} ariaLabel="Auto-import on accept" />
+          </FormRow>
+          <FormRow
+            label="Order type names by what this project imports"
+            description="Counts how many files import each candidate and lets that decide between types with the same name — so List in a project that uses java.util.List everywhere stops offering the one from a jar nobody here has named. Java only, counted during the index build. Off stops the counts being consulted at once, not at the next rebuild; what the file itself imports, and its own package, come first either way."
+          >
+            <Toggle checked={s.importCensus} onchange={(v) => s.setImportCensus(v)} ariaLabel="Order type names by what this project imports" />
           </FormRow>
         </div>
 
@@ -877,6 +1020,15 @@ initialization_options = ""`}</pre>
           >
             <Toggle checked={s.mavenAutoDownload} onchange={(v) => s.setMavenAutoDownload(v)} ariaLabel="Download missing dependencies" />
           </FormRow>
+          <!-- The other thing on this side that reaches the network, and the only one that is about
+               versions rather than about jars. Beside the download toggle because both answer "may
+               Bennu talk to a repository", and because this is where someone comes looking. -->
+          <FormRow
+            label="Check Maven Central for newer versions"
+            description="Reads each dependency's maven-metadata.xml to mark a version in a pom that is behind, and offers the newer one in a click. Only versions the pom itself pins — one inherited from a parent or written as a property reference is left alone. Answers come from a cache on disk, refreshed at most once a day per artifact. Off keeps the Java side entirely local; nothing else changes."
+          >
+            <Toggle checked={mavenCentral} onchange={(on) => void setMavenCentral(on)} ariaLabel="Check Maven Central for newer versions" />
+          </FormRow>
           <FormRow label="Rebuild index on open" description="Re-scan symbols each time a project opens (slower open, fresher completion).">
             <Toggle checked={s.rebuildIndexOnOpen} onchange={(v) => s.setRebuildIndexOnOpen(v)} ariaLabel="Rebuild index on open" />
           </FormRow>
@@ -1060,7 +1212,9 @@ initialization_options = ""`}</pre>
           <h2>Beans</h2>
           <p>
             Which dependencies contribute their Spring beans to the <strong>Library beans</strong>
-            view. Nothing is read until you name something here.
+            view. Nothing is read until you name something here — and every entry is checked
+            against what this project actually depends on, so a coordinate that matches nothing
+            says so instead of quietly doing nothing.
           </p>
         </div>
         <div class="card">
@@ -1072,16 +1226,26 @@ initialization_options = ""`}</pre>
             but their beans are conditional and are shown as such.
           </p>
           {#each beanAxes as axis (axis.key)}
-            <div class="bs-field">
-              <label class="bs-k" for="beans-{axis.key}">{axis.label}</label>
-              <Input
-                id="beans-{axis.key}"
-                value={(libraryBeans[axis.key] ?? []).join(', ')}
+            <div class="bs-axis">
+              <div class="bs-axis-head">{axis.label}</div>
+              <TokenListInput
+                values={libraryBeans[axis.key] ?? []}
+                onchange={(next) => void commitBeanAxis(axis.key, next)}
                 placeholder={axis.hint}
-                onchange={(v: string) => void commitBeanAxis(axis.key, v)}
+                suggestions={beanSuggestions(axis.axis)}
+                status={(v) => beanStatus(v, axis.axis, axis.exact)}
+                normalise={normaliseBeanEntry}
+                emptyMessage="None."
+                ariaLabel={axis.label}
               />
             </div>
           {/each}
+          {#if !dependenciesStore.report}
+            <p class="bs-none">
+              The project's dependencies have not been read yet, so nothing here can be checked
+              against them — open the Dependencies panel, or wait for the index.
+            </p>
+          {/if}
           {#if beansAllowlistEmpty}
             <p class="bs-none">
               Empty — no dependency jar is opened, and the Library beans view stays empty.
@@ -1089,14 +1253,17 @@ initialization_options = ""`}</pre>
           {/if}
         </div>
         <div class="card">
-          <div class="card-section-title"><Boxes size={12} /> What this view is not</div>
+          <div class="card-section-title"><Boxes size={12} /> What these beans claim</div>
           <p class="bs-none">
             A bean declared inside a jar is what Spring <em>may</em> register:
             <code>@ConditionalOnMissingBean</code> and its family decide the rest, and deciding them
-            faithfully means running Spring's own evaluator. So these beans are listed and navigable,
-            each labelled with the conditions gating it — and they take no part in autowiring
-            candidates, completion, or any diagnostic. Your project's own beans remain the only
-            answer to “what does this application have”.
+            faithfully means running Spring's own evaluator. So they are offered as
+            <strong>candidates</strong> for an injection point — an <code>@Autowired</code> field of
+            a type only your starter declares resolves to one instead of going unexplained — and
+            every one of them arrives carrying <strong>the artifact it came from and the conditions
+            gating it</strong>, which is said wherever it is shown. What is never done is stating a
+            conditional bean as a flat certainty: the answer is “this one, from here, if…”, because
+            that is the whole of what can be known without running your application.
           </p>
         </div>
       {/if}
@@ -1214,6 +1381,13 @@ initialization_options = ""`}</pre>
   /* Same row shape as `.bs-kv`, but the value is an editable field that has to take the
      remaining width — a coordinate list is long and reading it half-clipped is useless. */
   .bs-field { display: flex; align-items: center; gap: 10px; padding: 6px 2px; font-size: var(--font-size-sm); }
+  /* An axis is a block and not a row: its list grows downward, so a label beside it would drift
+     away from what it names as soon as there were three entries. */
+  .bs-axis { padding: 6px 2px; }
+  .bs-axis-head {
+    font-size: 11px; font-weight: 600; color: var(--text-secondary);
+    margin-bottom: 4px; letter-spacing: 0.01em;
+  }
   .bs-field :global(.input-wrap) { flex: 1; min-width: 0; }
   .bs-k { width: 110px; flex-shrink: 0; color: var(--text-muted); }
   .bs-v { color: var(--text-primary); }

@@ -16,9 +16,26 @@ const TYPE_DECLS: [&str; 5] = [
     "annotation_type_declaration",
 ];
 
-/// Flag each `public` top-level type whose name differs from `file_stem` (the file name without its
-/// `.java` extension).
-pub fn class_name_matches_file(root: Node, source: &str, file_stem: &str) -> Vec<Diagnostic> {
+/// A `public` top-level type that disagrees with the name of the file holding it.
+///
+/// The shape both consumers of this rule need: the **diagnostic** says the file is wrong, and the
+/// **intention** offers the two ways out — rename the type, or rename the file. Neither can invent
+/// the other's half, so the finding is a value rather than a message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeFileMismatch {
+    /// The type's declared name.
+    pub name: String,
+    /// The keyword it was declared with (`class`, `interface`, `enum`, `record`, `@interface`) —
+    /// what a label calls it, so an offer does not say "class" about an enum.
+    pub keyword: &'static str,
+    /// Byte span of the NAME token, which is what a rename replaces.
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Every `public` top-level type in `root` whose name differs from `file_stem` (the file name
+/// without its `.java` extension). Empty when the caller has no file name to compare against.
+pub fn type_file_mismatches(root: Node, source: &str, file_stem: &str) -> Vec<TypeFileMismatch> {
     if file_stem.is_empty() {
         return Vec::new();
     }
@@ -32,16 +49,44 @@ pub fn class_name_matches_file(root: Node, source: &str, file_stem: &str) -> Vec
         let Some(name_node) = child.child_by_field_name("name") else { continue };
         let Ok(name) = name_node.utf8_text(bytes) else { continue };
         if name != file_stem {
-            out.push(Diagnostic {
-                message: format!("Public type `{name}` must be declared in a file named `{name}.java`"),
-                severity: crate::check_id::CheckId::TypeNameMismatchFile.severity().to_string(),
-                code: crate::check_id::CheckId::TypeNameMismatchFile.code().to_string(),
+            out.push(TypeFileMismatch {
+                name: name.to_string(),
+                keyword: keyword_of(child.kind()),
                 start: name_node.start_byte(),
                 end: name_node.end_byte(),
             });
         }
     }
     out
+}
+
+/// What the declaration is called in prose — the word an offer's label uses.
+fn keyword_of(kind: &str) -> &'static str {
+    match kind {
+        "interface_declaration" => "interface",
+        "enum_declaration" => "enum",
+        "record_declaration" => "record",
+        "annotation_type_declaration" => "@interface",
+        _ => "class",
+    }
+}
+
+/// Flag each `public` top-level type whose name differs from `file_stem` (the file name without its
+/// `.java` extension).
+pub fn class_name_matches_file(root: Node, source: &str, file_stem: &str) -> Vec<Diagnostic> {
+    type_file_mismatches(root, source, file_stem)
+        .into_iter()
+        .map(|m| Diagnostic {
+            message: format!(
+                "Public type `{}` must be declared in a file named `{}.java`",
+                m.name, m.name
+            ),
+            severity: crate::check_id::CheckId::TypeNameMismatchFile.severity().to_string(),
+            code: crate::check_id::CheckId::TypeNameMismatchFile.code().to_string(),
+            start: m.start,
+            end: m.end,
+        })
+        .collect()
 }
 
 /// Whether a top-level declaration carries the `public` modifier.
@@ -106,6 +151,32 @@ mod tests {
     #[test]
     fn empty_stem_skips_the_check() {
         assert!(check("public class Foo {}", "").is_empty());
+    }
+
+    #[test]
+    fn the_mismatch_carries_the_name_span_a_rename_would_replace() {
+        let src = "public class Foo {}";
+        let tree = parse(src);
+        let found = type_file_mismatches(tree.root_node(), src, "Bar");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name, "Foo");
+        assert_eq!(&src[found[0].start..found[0].end], "Foo");
+    }
+
+    #[test]
+    fn the_keyword_is_what_the_declaration_actually_said() {
+        // An offer that calls an enum a "class" is an offer that reads as a bug in the tool.
+        for (src, want) in [
+            ("public class Foo {}", "class"),
+            ("public interface Foo {}", "interface"),
+            ("public enum Foo { A }", "enum"),
+            ("public record Foo(int x) {}", "record"),
+            ("public @interface Foo {}", "@interface"),
+        ] {
+            let tree = parse(src);
+            let found = type_file_mismatches(tree.root_node(), src, "Bar");
+            assert_eq!(found.first().map(|m| m.keyword), Some(want), "{src}");
+        }
     }
 
     #[test]

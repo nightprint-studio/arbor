@@ -72,15 +72,44 @@ pub fn is_jdk_package(binary: &str) -> bool {
 /// `binary`, by probing each for the `.class`. `None` when no resolved jar owns it (e.g. a JDK type,
 /// or the deps aren't resolved). O(jars) opens — used only on the one-shot download click.
 pub fn find_owning_jar(dep_jars: &[String], binary: &str) -> Option<PathBuf> {
+    let forms = nested_forms(binary);
     for jar in dep_jars {
         let path = PathBuf::from(jar);
         if let Ok(src) = JarSource::open(&path) {
-            if matches!(src.class_bytes(binary), Ok(Some(_))) {
+            if forms.iter().any(|f| matches!(src.class_bytes(f), Ok(Some(_)))) {
                 return Some(path);
             }
         }
     }
     None
+}
+
+/// Every entry name a resolved type name could be, most-likely first.
+///
+/// A jar entry is the **binary** name, where the separator between an outer type and a nested one
+/// is `$` and not `/`: `DefaultParts.FluxContent` lives in the archive as
+/// `…/multipart/DefaultParts$FluxContent.class`. Upstream, a qualified name is turned into a
+/// binary one by replacing every `.` with `/`, which is right for a top-level type and wrong for
+/// every nested one — and the member lookup does not notice, because the class index it goes
+/// through resolves the name either way. This probe does not: it asks the archive's central
+/// directory for a literal entry, so a name with a `/` where the jar has a `$` simply is not there.
+///
+/// That is what "No resolved dependency jar contains this type" was reporting on a nested class —
+/// truthfully, about a name nothing had. Which segment starts the nesting is not knowable from the
+/// name alone (a package segment may be capitalised), so every split is offered rather than one
+/// guessed at; the jar answers, and it answers from memory.
+fn nested_forms(binary: &str) -> Vec<String> {
+    let mut out = vec![binary.to_string()];
+    let parts: Vec<&str> = binary.split('/').collect();
+    // From the deepest split (only the last segment nested) up to the shallowest, so a type that
+    // really is top-level is found by the first probe and nothing else is asked.
+    for cut in (1..parts.len()).rev() {
+        let form = format!("{}/{}", parts[..cut].join("/"), parts[cut..].join("$"));
+        if form != binary {
+            out.push(form);
+        }
+    }
+    out
 }
 
 /// Open every dependency `-sources.jar` that already exists on disk (siblings of the resolved dep
@@ -133,6 +162,41 @@ pub fn run_mvn_get_sources(
 
 #[cfg(test)]
 mod tests {
+
+    /// A top-level type is found by the FIRST probe — a nested-name search must cost nothing on
+    /// the ordinary case.
+    #[test]
+    fn a_top_level_name_is_offered_as_written_first() {
+        let forms = nested_forms("org/springframework/web/client/RestClient");
+        assert_eq!(forms[0], "org/springframework/web/client/RestClient");
+    }
+
+    /// The case that reported "No resolved dependency jar contains this type": the archive entry
+    /// is `DefaultParts$FluxContent.class`, and the name that reached the probe had a slash.
+    #[test]
+    fn a_nested_name_offers_the_dollar_form_the_jar_actually_holds() {
+        let forms = nested_forms("org/springframework/http/codec/multipart/DefaultParts/FluxContent");
+        assert!(
+            forms.contains(&"org/springframework/http/codec/multipart/DefaultParts$FluxContent".to_string()),
+            "{forms:?}"
+        );
+    }
+
+    /// Two levels of nesting, and every split offered — which segment starts the type cannot be
+    /// read off the name, so nothing here guesses at it.
+    #[test]
+    fn every_split_is_offered_deepest_first() {
+        assert_eq!(
+            nested_forms("a/b/C/D/E"),
+            vec!["a/b/C/D/E", "a/b/C/D$E", "a/b/C$D$E", "a/b$C$D$E"],
+        );
+    }
+
+    /// A bare name has no split to make, and must not produce a duplicate probe.
+    #[test]
+    fn a_name_with_no_package_is_one_form() {
+        assert_eq!(nested_forms("Foo"), vec!["Foo"]);
+    }
     use super::*;
 
     #[test]
