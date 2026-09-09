@@ -308,9 +308,19 @@ pub fn adapt_modifiers(member: &str, into_interface: bool, widen_private: bool) 
     // wrong there, but `protected` and `final` on a `default` method are.
     // Widening comes first, and only outside an interface: there, `private` is dropped along with
     // every other access keyword and the member is implicitly public, which is wider still.
-    if widen_private && !into_interface && has_modifier(&node, &wrapped, "private") {
-        let swapped = replace_keyword(member, &node, offset, "private", "protected")?;
-        return adapt_modifiers(&swapped, into_interface, false);
+    if widen_private && !into_interface {
+        if has_modifier(&node, &wrapped, "private") {
+            let swapped = replace_keyword(member, &node, offset, "private", "protected")?;
+            return adapt_modifiers(&swapped, into_interface, false);
+        }
+        // **No** access keyword at all is package-private, which one package over is as invisible
+        // as `private` — and unlike `private` there is no word to swap, so one is added.
+        let package_private = !["public", "protected"]
+            .iter()
+            .any(|word| has_modifier(&node, &wrapped, word));
+        if package_private {
+            return Some(format!("protected {}", member.trim_start()));
+        }
     }
     let (drop, add): (&[&str], Option<&str>) = match (into_interface, is_field, is_static, has_body) {
         (true, true, _, _) => (&["public", "protected", "private", "static", "final"], None),
@@ -410,6 +420,35 @@ pub fn transfer_into(
         return Err(format!("`{name}` reads `{missing}`, which stays behind"));
     }
 
+    // A different package is a different set of names in scope. What the member reached through
+    // its own package resolves to nothing here, and there is no import to bring along because
+    // there never was one — and a member it needs from the class it left is package-private as
+    // often as not. Same package, none of this applies, which is the great majority of pull ups.
+    let target_package = bennu_java::prelude::parse_java(target_source)
+        .and_then(|t| crate::body::package_of(t.root_node(), target_source))
+        .unwrap_or_default();
+    // Package-private, one package over, is invisible — to the class that was reading it and to
+    // every subclass of it. Widened the same way `private` is, and for the same reason: the change
+    // that lets the move happen is smaller than the move.
+    let cross_package = target_package != transfer.package;
+    if cross_package {
+        if let Some(name) = transfer.unimported_types.first() {
+            return Err(format!(
+                "`{}` is in package `{target_package}` and this member names `{name}`, which it \
+                 reaches through `{}` — one package over, that name means nothing",
+                transfer.target, transfer.package
+            ));
+        }
+        // Every bare name, not just the ones the owner declares: `SCHEME` inherited from a
+        // supertype reads the same and stops resolving just as hard.
+        if let Some(needed) = transfer.bare_names.first().or_else(|| transfer.requires.first()) {
+            return Err(format!(
+                "`{}` is in another package, and `{needed}` is reached from here in a way that \
+                 does not cross one",
+                transfer.target
+            ));
+        }
+    }
     let (at, terminator) = crate::body::append_into(&body, target_source)
         .ok_or_else(|| format!("`{}` has no place to put a member", transfer.target))?;
     let indent = member_indent(target_source, &body);
@@ -418,6 +457,16 @@ pub fn transfer_into(
     // here, where the target's source is. See [`adapt_modifiers`].
     let into_interface =
         matches!(target_decl.kind(), "interface_declaration" | "annotation_type_declaration");
+    // A `static` method of an interface is not inherited (JLS §8.4.8), so every unqualified call
+    // stops resolving. The in-file path checks this too; here is where a target in another file
+    // finally reveals which kind it is.
+    if into_interface && transfer.static_method && transfer.still_called {
+        return Err(format!(
+            "`{}` is an interface, and a `static` method of one is not inherited — the calls that \
+             reach `{name}` unqualified would stop finding it",
+            transfer.target
+        ));
+    }
     // The same rule the in-file path applies, read off the member's own text. The two used to check
     // different things, and this is the half that checked less.
     if into_interface {
@@ -433,8 +482,9 @@ pub fn transfer_into(
             }
         }
     }
-    let adapted = adapt_modifiers(&transfer.member, into_interface, transfer.widen_private)
-        .ok_or("the member's text does not stand on its own")?;
+    let adapted =
+        adapt_modifiers(&transfer.member, into_interface, transfer.widen_private || cross_package)
+            .ok_or("the member's text does not stand on its own")?;
     let mut edits = vec![RefactorEdit::new(
         at,
         at,
@@ -562,6 +612,28 @@ fn plan_move(
             format!("`{name}` is written in terms of `{taken}`, a type parameter of the class it is in"),
         )));
     }
+    // A `static` method of an **interface is not inherited** (JLS §8.4.8) — unlike a static field,
+    // which is. So a static method pulled into one stops answering to every unqualified call that
+    // reached it before: `cannot find symbol: method xtime(int)`, from a class that still calls it
+    // the only way it ever did. The only fix is to qualify every call site, which is a different
+    // refactoring.
+    if direction == "up"
+        && member.kind() == "method_declaration"
+        && has_modifier(member, source, "static")
+        && type_named(root, source, target)
+            .is_some_and(|t| matches!(t.kind(), "interface_declaration" | "annotation_type_declaration"))
+    {
+        if let Some(user) = still_used_by(root, member, source, name) {
+            return Some(Err(Refusal::new(
+                id,
+                label,
+                format!(
+                    "`{target}` is an interface, and a `static` method of one is not inherited — \
+                     `{user}` calls `{name}` unqualified and would stop finding it"
+                ),
+            )));
+        }
+    }
     // Something in this file OVERRIDES it. Moved anywhere but up, the member stops being the one
     // those subclasses override — their `@Override` has nothing left to point at, and the calls
     // that went through it stop being dispatched. `Strategy.isNumber()` with nine subclasses
@@ -627,6 +699,12 @@ fn plan_move(
             target_at,
             member: reindent(&moved, &own_indent, ""),
             widen_private: widening,
+            package: crate::body::package_of(root, source).unwrap_or_default(),
+            still_called: still_used_by(root, member, source, name).is_some(),
+            static_method: member.kind() == "method_declaration"
+                && has_modifier(member, source, "static"),
+            bare_names: bare_names(member, source),
+            unimported_types: unimported_types(root, member, source),
             requires,
             imports: imports_the_member_reads(root, member, source),
         })));
@@ -951,6 +1029,77 @@ fn names_a_declaration(identifier: &Node<'_>) -> bool {
         })
 }
 
+/// Bare names the member reads that it does not declare itself.
+///
+/// An identifier used with nothing in front of it and declared nowhere inside the member: a field
+/// of the class it is leaving, a method beside it, a constant it inherited. Inside the same package
+/// each of those may still resolve after a move; **one package over**, `protected` and
+/// package-private both stop answering, and which one it was is not readable from here.
+fn bare_names(member: &Node<'_>, source: &str) -> Vec<String> {
+    let mine: Vec<String> = crate::body::declared_names(*member, source);
+    let mut out: Vec<String> = Vec::new();
+    for node in crate::selection::identifiers(*member) {
+        let word = text(&node, source);
+        // Not a name at all where something stands in front of it: `x.foo()` and `a.b` are asked
+        // of the object, and the object is whatever it always was.
+        let qualified = node.parent().is_some_and(|p| {
+            matches!(p.kind(), "method_invocation" | "field_access")
+                && p.child_by_field_name("object").is_some()
+                && p.child_by_field_name("name").or_else(|| p.child_by_field_name("field"))
+                    .map(|n| n.id())
+                    == Some(node.id())
+        });
+        if qualified || names_a_declaration(&node) || mine.iter().any(|m| m == word) {
+            continue;
+        }
+        if !out.iter().any(|o| o == word) {
+            out.push(word.to_string());
+        }
+    }
+    out
+}
+
+/// Type names the member uses that no `import` accounts for.
+///
+/// What is left after the imports, `java.lang`, the primitives and the type parameters in scope:
+/// the types it was reaching **through its own package**, which is a thing that exists only while
+/// it stays in that package.
+fn unimported_types(root: Node<'_>, member: &Node<'_>, source: &str) -> Vec<String> {
+    let imported: Vec<String> = imports_of(root, source)
+        .into_iter()
+        .map(|(what, _)| what.rsplit('.').next().unwrap_or(&what).to_string())
+        .collect();
+    let mut in_scope = crate::body::type_parameters(member, source);
+    if let Some(owner) = enclosing_type(*member) {
+        in_scope.extend(crate::body::type_parameters(&owner, source));
+    }
+    let mut out: Vec<String> = Vec::new();
+    for node in crate::selection::descendants_any(*member, &["type_identifier"]) {
+        let name = text(&node, source);
+        let covered = imported.iter().any(|i| i == name || i == "*")
+            || in_scope.iter().any(|t| t == name)
+            || JAVA_LANG.contains(&name);
+        if !covered && !out.iter().any(|o| o == name) {
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
+/// The `java.lang` types every file sees without an import — the ones that actually turn up in
+/// code. A name missing from here is treated as package-local, which errs towards refusing a
+/// cross-package move: the cheap direction.
+const JAVA_LANG: &[&str] = &[
+    "Object", "String", "CharSequence", "StringBuilder", "StringBuffer", "Class", "Comparable",
+    "Iterable", "Runnable", "Thread", "Throwable", "Exception", "RuntimeException", "Error",
+    "Number", "Byte", "Short", "Integer", "Long", "Float", "Double", "Boolean", "Character",
+    "Math", "System", "Enum", "Record", "Void", "Cloneable", "AutoCloseable", "Appendable",
+    "Readable", "Process", "ClassLoader", "Package", "ThreadLocal", "IllegalArgumentException",
+    "IllegalStateException", "NullPointerException", "UnsupportedOperationException",
+    "IndexOutOfBoundsException", "ArithmeticException", "ClassCastException", "NumberFormatException",
+    "InterruptedException", "SecurityException", "StackTraceElement", "Iterable2",
+];
+
 /// The `import` lines of this file whose type the member's text actually mentions.
 ///
 /// By simple name, which is how an import is used and therefore how it is found. An import that
@@ -1205,7 +1354,70 @@ mod tests {
         whole.reorder();
         let out = whole.apply(target);
         assert!(out.contains("import java.util.List;"), "{out}");
-        assert!(out.contains("    void moved() {"), "{out}");
+        // The fixture leaves the default package for `p`, which is a package boundary — so the
+        // member is widened on the way, the same as a `private` one would be.
+        assert!(out.contains("    protected void moved() {"), "{out}");
+    }
+
+    /// A bare name the member did not declare — a field of the class it leaves, or one it
+    /// inherited — stops resolving one package over, whatever it resolved to before.
+    #[test]
+    fn a_cross_package_transfer_refuses_a_bare_name_the_member_did_not_declare() {
+        let src = "package p.sub;\n\nclass Impl extends Base {\n    void work() {\n        int n = SCHEME;\n    }\n}\n";
+        let Ok(plan) = by_id(src, "void work", "pull-up-member") else { panic!("expected a plan") };
+        let err = transfer_into(&plan, "package p;\n\nclass Base {\n}\n", "Base.java").unwrap_err();
+        assert!(err.contains("SCHEME"), "{err}");
+    }
+
+    /// …and a name it declares itself travels with it.
+    #[test]
+    fn a_cross_package_transfer_takes_a_member_that_only_reads_its_own() {
+        let src = "package p.sub;\n\nclass Impl extends Base {\n    void work(int n) {\n        int m = n + 1;\n    }\n}\n";
+        let Ok(plan) = by_id(src, "void work", "pull-up-member") else { panic!("expected a plan") };
+        assert!(transfer_into(&plan, "package p;\n\nclass Base {\n}\n", "Base.java").is_ok());
+    }
+
+    /// The interface rule reaches the cross-file path too, which is where the target finally says
+    /// what kind it is.
+    #[test]
+    fn a_static_method_transferred_into_an_interface_that_is_still_called_is_refused() {
+        let src = "package p;\n\nclass Impl implements Base {\n    static int two() {\n        return 2;\n    }\n\n    int f() {\n        return two();\n    }\n}\n";
+        let Ok(plan) = by_id(src, "static int two", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        let err = transfer_into(&plan, "package p;\n\ninterface Base {\n}\n", "Base.java")
+            .unwrap_err();
+        assert!(err.contains("not inherited"), "{err}");
+    }
+
+    /// A `static` method of an interface is not inherited, so every unqualified call to it stops
+    /// resolving the moment it lands there.
+    #[test]
+    fn a_static_method_pulled_into_an_interface_that_is_still_called_is_refused() {
+        let src = "interface Base {\n}\n\nclass Impl implements Base {\n    static int two() {\n        return 2;\n    }\n\n    int f() {\n        return two();\n    }\n}\n";
+        let Err(refusal) = by_id(src, "static int two", "pull-up-member") else {
+            panic!("expected a refusal")
+        };
+        assert!(refusal.reason.contains("not inherited"), "{}", refusal.reason);
+    }
+
+    /// …and into a class it is inherited, so it goes.
+    #[test]
+    fn a_static_method_pulled_into_a_class_is_still_inherited() {
+        let src = "class Base {\n}\n\nclass Impl extends Base {\n    static int two() {\n        return 2;\n    }\n\n    int f() {\n        return two();\n    }\n}\n";
+        assert!(matches!(by_id(src, "static int two", "pull-up-member"), Ok(_)));
+    }
+
+    /// Package-private is as invisible one package over as `private` is one level up.
+    #[test]
+    fn a_package_private_member_is_widened_across_a_package_boundary() {
+        let adapted = adapt_modifiers("void work() {\n}", false, true).unwrap();
+        assert_eq!(adapted, "protected void work() {\n}");
+        // …and `public` is already wide enough to be left alone.
+        assert_eq!(
+            adapt_modifiers("public void work() {\n}", false, true).unwrap(),
+            "public void work() {\n}"
+        );
     }
 
     /// A target that does not declare what the member reads is a refusal, not a half-applied move.
@@ -1587,6 +1799,38 @@ mod tests {
     fn a_subclass_that_calls_it_does_not_block_a_pull_up() {
         let src = "class Base {\n}\n\nclass Impl extends Base {\n    static int two() {\n        return 2;\n    }\n}\n\nclass Deeper extends Impl {\n    int f() {\n        return two();\n    }\n}\n";
         assert!(matches!(by_id(src, "static int two", "pull-up-member"), Ok(_)));
+    }
+
+    /// One package over, a type the member reached through its own package means nothing — and
+    /// there is no import to carry, because there never was one.
+    #[test]
+    fn a_cross_package_transfer_refuses_a_name_it_reached_through_its_package() {
+        let src = "package p.sub;\n\nclass Impl extends Base {\n    static Helper make() {\n        return null;\n    }\n}\n";
+        let Ok(plan) = by_id(src, "static Helper make", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        let err = transfer_into(&plan, "package p;\n\nclass Base {\n}\n", "Base.java").unwrap_err();
+        assert!(err.contains("`Helper`"), "{err}");
+    }
+
+    /// …and in the same package it goes, which is the great majority of pull ups.
+    #[test]
+    fn a_same_package_transfer_takes_it() {
+        let src = "package p;\n\nclass Impl extends Base {\n    static Helper make() {\n        return null;\n    }\n}\n";
+        let Ok(plan) = by_id(src, "static Helper make", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        assert!(transfer_into(&plan, "package p;\n\nclass Base {\n}\n", "Base.java").is_ok());
+    }
+
+    /// A `java.lang` name is in scope everywhere and is not a package-local reach.
+    #[test]
+    fn a_java_lang_name_does_not_block_a_cross_package_move() {
+        let src = "package p.sub;\n\nclass Impl extends Base {\n    static String name() {\n        return \"x\";\n    }\n}\n";
+        let Ok(plan) = by_id(src, "static String name", "pull-up-member") else {
+            panic!("expected a plan")
+        };
+        assert!(transfer_into(&plan, "package p;\n\nclass Base {\n}\n", "Base.java").is_ok());
     }
 
     /// A type argument is not something a move may invent.

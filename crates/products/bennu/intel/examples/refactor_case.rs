@@ -467,6 +467,19 @@ fn spread(
     level: u16,
 ) -> Result<Vec<Elsewhere>, String> {
     let mut out = Vec::new();
+    // Who else needs the member where it is. The backend asks the reference index; there is none
+    // here, so the same question goes to the text of the other files — stricter, never looser, so
+    // this measures a subset of what ships rather than something it does not do.
+    // The id prefix, NOT the direction: `MoveDirection::from_id` answers `Across` for anything it
+    // does not recognise, so asking it about `extract-constant` said "a sideways move" and this
+    // check refused eleven thousand extractions whose name another file happened to mention.
+    if plan.id.starts_with("move-member") || plan.id.starts_with("push-down-member") {
+        if let Some(name) = plan.name.clone() {
+            if let Some(other) = mentions_elsewhere(&name, file, types) {
+                return Err(format!("`{name}` is used by {other}"));
+            }
+        }
+    }
     // The same check the backend makes, against the level this harness actually **compiles** at —
     // which is the honest level to judge against here, since that compile is the oracle. A plan
     // needing more than that would be refused in the editor too.
@@ -896,6 +909,27 @@ fn fill(plan: &mut Plan, source: &str, resolver: &dyn TypeResolver) -> bool {
             if inferred != guard.written {
                 return false; // the backend refuses here; the harness has to do the same
             }
+        }
+    }
+    // The subject of a produced `switch`, judged exactly as the backend judges it — including the
+    // part that refuses when nothing could be worked out. The enum half is asked of the resolver:
+    // a bare `case POINT` is legal over an enum and nowhere else.
+    if let Some(guard) = plan.selector_guard.clone() {
+        match declarable_type_detail(source, guard.start, guard.end, resolver) {
+            Declarable::Writable(inferred, _) => {
+                let simple = inferred.split('<').next().unwrap_or(&inferred).trim().to_string();
+                let ok = if guard.enum_labels {
+                    resolver
+                        .members_of(&simple.replace('.', "/"))
+                        .is_some_and(|m| m.flags.is_enum)
+                } else {
+                    bennu_refactor::prelude::SWITCHABLE.contains(&simple.as_str())
+                };
+                if !ok {
+                    return false;
+                }
+            }
+            _ => return false,
         }
     }
     if let Some(slot) = plan.throws_slot.clone() {

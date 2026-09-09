@@ -43,7 +43,9 @@
 
 use tree_sitter::Node;
 
-use crate::body::{body_of, has_modifier, insertion_point, member_indent, members_of};
+use crate::body::{
+    body_of, has_modifier, insertion_point, member_containing, member_indent, members_of,
+};
 use crate::declaration::{declaration_at, sole_declarator};
 use crate::plan::{Outcome, Plan, RefactorEdit, Refusal, TypeNeed, TypeSlot};
 use crate::selection::{
@@ -127,7 +129,15 @@ pub fn introduce_field(root: Node<'_>, source: &str, start: usize, end: usize) -
     let nl = newline(source);
     let modifiers = if is_static { "private static " } else { "private " };
     let declaration = format!("{indent}{modifiers}{field_type} {name};{nl}");
-    let insert_at = insertion_point(&body, source)?;
+    // Above the member the local lives in, when it lives in one — an instance or `static`
+    // initialiser block. A field may only be read by an initialiser declared **after** it, so a
+    // field appended below the block that assigns it is an `illegal forward reference`: six of them
+    // on h2, from a refactoring that had never met an initialiser block on the first corpus.
+    // Inside a method there is nothing to sit above: a body reads a field declared anywhere.
+    let insert_at = match member_containing(&body, &decl) {
+        Some(member) => crate::body::line_start(source, member.start_byte()),
+        None => insertion_point(&body, source)?,
+    };
 
     // The statement keeps its place and loses everything before the name — modifiers and type
     // both: `final int total = a + b;` becomes `total = a + b;`, and a `final` carried over would
@@ -425,6 +435,25 @@ mod tests {
     fn a_class_type_parameter_is_fine() {
         let src = "class A<T> {\n    void f(T in) {\n        T held = in;\n        use(held);\n    }\n}";
         assert!(applied(src, "T held").contains("private T held;"));
+    }
+
+    /// A field may only be read by an initialiser declared after it, so one appended **below** the
+    /// block that assigns it is an illegal forward reference. It goes above that block instead.
+    #[test]
+    fn a_local_in_an_initialiser_block_puts_its_field_above_the_block() {
+        let src = "class A {\n    {\n        int n = 1;\n        use(n);\n    }\n\n    int other;\n}";
+        let out = parses(src, "int n = 1");
+        assert!(out.find("private int n;").unwrap() < out.find("        n = 1;").unwrap(), "{out}");
+    }
+
+    /// …and inside a method the field still goes with the other fields: a body may read a field
+    /// declared anywhere in the class.
+    #[test]
+    fn a_local_in_a_method_still_lands_with_the_fields() {
+        let src = "class A {\n    int a;\n\n    void f() {\n        int n = 1;\n        use(n);\n    }\n}";
+        let out = parses(src, "int n = 1");
+        assert!(out.find("private int n;").unwrap() > out.find("int a;").unwrap(), "{out}");
+        assert!(out.find("private int n;").unwrap() < out.find("void f()").unwrap(), "{out}");
     }
 
     #[test]

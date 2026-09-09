@@ -111,7 +111,10 @@
       field <code>private int total;</code> and the statement <code>total = a + b;</code>, in that
       place. Initialising the field at its own declaration instead would run the expression at
       construction time, which is a different program whenever it reads a parameter, throws, or costs
-      anything. A local of a <code>static</code> method makes a <code>static</code> field, the type
+      anything. The field goes with the other fields, except when the local lives in an
+      <strong>initialiser block</strong>: a field may only be read by an initialiser declared after
+      it, so there it goes above the block instead.
+      A local of a <code>static</code> method makes a <code>static</code> field, the type
       is resolved against the project so a <code>var</code> local still gets a written one, and a
       name the class already declares is refused rather than shadowed. A local declared with a type
       parameter of its own <em>method</em> stays too — that name exists only inside the method, and a
@@ -150,7 +153,17 @@
       filterable list of every candidate the <em>project index</em> knows — a superclass in another
       file, a subtype declared elsewhere, any type in the project for a sideways move. Whichever way
       the target is chosen, a target in another file means that file is edited too, with the imports
-      the member reads carried over. What it checks first is what it leaves behind, and each refusal names the thing that
+      the member reads carried over. What it checks first is <strong>who still needs the member where
+      it is</strong>, and across the whole project rather than just this file: one something else
+      calls, or a subclass overrides, does not go down or sideways. A target in <strong>another
+      package</strong> is its own question — a type the member reached through its own package
+      resolves to nothing there and has no import to carry, and a name it did not declare itself may
+      simply stop being visible, so a cross-package move takes only what is self-contained, and what
+      does travel is widened to <code>protected</code> if it was package-private. And a
+      <code>static</code> <em>method</em> pulled into an <strong>interface</strong> is refused while
+      anything still calls it: unlike a field, a static interface method is not inherited (JLS
+      §8.4.8), so every unqualified call would stop resolving. What is left is what it takes from
+      the type it leaves, and each refusal names the thing that
       keeps the member where it is: a method that reads <code>count</code> will not go to a type that
       has no <code>count</code>; one written in terms of the class's type parameter will not go
       anywhere that never declared it; one that names its own class — a factory returning it, a

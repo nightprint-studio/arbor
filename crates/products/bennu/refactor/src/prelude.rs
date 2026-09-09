@@ -10,7 +10,8 @@ pub use crate::offers::{plan_for, plans_at, refactorings_at};
 // What comes back.
 pub use crate::plan::{
     language_level, merge_throws, written_name, MemberTransfer, NeedsLevel, NewSource, Outcome,
-    Plan, RefactorEdit, Refusal, ThrowsSlot, TypeGuard, TypeNeed, TypeSlot,
+    Plan, RefactorEdit, Refusal, SelectorGuard, ThrowsSlot, TypeGuard, TypeNeed, TypeSlot,
+    SWITCHABLE,
 };
 
 // The individual transforms, for a caller that wants one rather than the list.

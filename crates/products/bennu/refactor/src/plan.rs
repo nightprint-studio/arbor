@@ -86,7 +86,58 @@ pub struct Plan {
     /// A Java language level the code this plan writes needs; see [`NeedsLevel`].
     #[serde(default)]
     pub needs_level: Option<NeedsLevel>,
+    /// The expression a `switch` will select on, and what its type has to be; see
+    /// [`SelectorGuard`].
+    #[serde(default)]
+    pub selector_guard: Option<SelectorGuard>,
 }
+
+/// The expression a produced `switch` selects on — and the fact that only a resolver can settle.
+///
+/// ## Why this one REFUSES on an unknown answer, where [`TypeGuard`] does not
+///
+/// A `switch` selector may be `char`, `byte`, `short`, `int`, their boxes, a `String`, or an enum —
+/// and **nothing else**. Not `long`, which is the one that catches you: `if (x == 1)` reads exactly
+/// the same whether `x` is an `int` or a `long`, and the `switch` written from it compiles in one
+/// case and not the other. Nor can the shape of a `case` label be decided from the text: a bare
+/// `POINT` is right when the labels are an enum's constants and wrong for a `static final int`,
+/// where the qualifier has to stay.
+///
+/// So this crate reads the chain and hands the caller a question. `TypeGuard` leans the other way —
+/// unknown leaves the plan standing — because there the cost of refusing on silence was twenty-two
+/// good extractions per breakage prevented. Here it is the reverse: the refactoring fired thirteen
+/// times on h2 and produced ten files that do not compile, every one of them a type nobody asked
+/// about. On a question this narrow, "I could not tell" is a reason not to write the code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectorGuard {
+    /// The subject, as a span to infer.
+    pub start: usize,
+    pub end: usize,
+    /// The subject as the source writes it, for the sentence when it is refused.
+    pub written: String,
+    /// Whether the arms are labelled with **bare constant names** — legal only when the selector is
+    /// the enum that declares them, and wrong for anything else.
+    pub enum_labels: bool,
+}
+
+/// The types a `switch` may select on, as a resolver would name them. An enum is the case this
+/// list cannot hold, and [`SelectorGuard::enum_labels`] is how it is asked about instead.
+pub const SWITCHABLE: &[&str] = &[
+    "char",
+    "byte",
+    "short",
+    "int",
+    "java.lang.Character",
+    "java.lang.Byte",
+    "java.lang.Short",
+    "java.lang.Integer",
+    "java.lang.String",
+    "Character",
+    "Byte",
+    "Short",
+    "Integer",
+    "String",
+];
 
 /// The Java version the code this plan writes will not compile below.
 ///
@@ -156,6 +207,25 @@ pub struct MemberTransfer {
     pub requires: Vec<String>,
     /// The whole `import` lines of the source file whose types the member mentions.
     pub imports: Vec<String>,
+    /// The package the member is **leaving**.
+    pub package: String,
+    /// Whether anything still calls the member where it is. Harmless for a pull up into a class —
+    /// inheritance carries it — and fatal into an **interface**, whose `static` methods are not
+    /// inherited (JLS §8.4.8). Only the caller knows which kind the target is.
+    #[serde(default)]
+    pub still_called: bool,
+    /// Whether the member is a `static` method, for that same rule.
+    #[serde(default)]
+    pub static_method: bool,
+    /// Bare names the member reads that it does not declare itself — a field of the class it is
+    /// leaving, a sibling method. Across a **package boundary** every one of them is a name that
+    /// may no longer be reachable, whatever it resolved to before.
+    pub bare_names: Vec<String>,
+    /// Type names the member uses that **no import covers** — the ones it was reaching through its
+    /// own package. In the same package they resolve; one package over they resolve to nothing, and
+    /// there is no import to carry because there never was one. Sixteen of h2's thirty broken pull
+    /// ups were this: `cannot find symbol: class FileMemData`.
+    pub unimported_types: Vec<String>,
 }
 
 /// A source file this plan needs written, named but not placed.
@@ -237,6 +307,7 @@ impl Plan {
             transfer: None,
             new_source: None,
             needs_level: None,
+            selector_guard: None,
         }
     }
 
@@ -275,6 +346,12 @@ impl Plan {
     /// Attach the file this plan needs written; see [`NewSource`].
     pub fn creating(mut self, source: NewSource) -> Self {
         self.new_source = Some(source);
+        self
+    }
+
+    /// Attach the question about the `switch`'s subject; see [`SelectorGuard`].
+    pub fn selecting_on(mut self, guard: SelectorGuard) -> Self {
+        self.selector_guard = Some(guard);
         self
     }
 

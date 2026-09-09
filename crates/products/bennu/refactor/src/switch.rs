@@ -43,7 +43,7 @@
 use tree_sitter::Node;
 
 use crate::body::reindent;
-use crate::plan::{Outcome, Plan, RefactorEdit, Refusal};
+use crate::plan::{Outcome, Plan, RefactorEdit, Refusal, SelectorGuard};
 use crate::selection::{enclosing, indent_at, is_block, newline, text};
 
 const ID: (&str, &str) = ("if-chain-to-switch", "Replace `if` chain with `switch`");
@@ -136,7 +136,17 @@ pub fn if_chain_to_switch(root: Node<'_>, source: &str, start: usize, end: usize
     out.push_str(&format!("{base}}}"));
 
     let edits = vec![RefactorEdit::new(head.start_byte(), head.end_byte(), out, "switch")];
-    let plan = Plan::new(id, label, edits).caret_at(head.start_byte());
+    // The one thing the text cannot settle: what the subject IS. A `switch` selects on `char`,
+    // `byte`, `short`, `int`, their boxes, a `String` or an enum, and on nothing else — `long`
+    // above all reads exactly like `int` from here. And a bare `POINT` label is right for an enum
+    // constant and wrong for a `static final int`. Both go to the caller. See `SelectorGuard`.
+    let subject_node = strip_parens(&rungs[0].test.subject_at);
+    let plan = Plan::new(id, label, edits).caret_at(head.start_byte()).selecting_on(SelectorGuard {
+        start: subject_node.start_byte(),
+        end: subject_node.end_byte(),
+        written: subject.clone(),
+        enum_labels: rungs.iter().any(|r| r.test.bare_constant),
+    });
     // A `switch` over a `String` is Java 7, and a chain of `s.equals("a")` is the one shape here
     // that produces one. The caller knows what the project targets; this knows what was written.
     Some(Ok(match kind {
@@ -150,17 +160,22 @@ pub fn if_chain_to_switch(root: Node<'_>, source: &str, start: usize, end: usize
 
 /// One rung of the chain: what it tests, and what it does.
 struct Rung<'t> {
-    test: Test,
+    test: Test<'t>,
     body: Node<'t>,
 }
 
 /// A rung's test, read into the two halves a `switch` needs.
-#[derive(PartialEq, Eq)]
-struct Test {
+struct Test<'t> {
     /// The expression the `switch` will stand on, as the source writes it.
     subject: String,
-    /// The `case` label, written the way a `switch` needs it — an enum constant loses its type.
+    /// …and where it is, so a caller with a resolver can be asked what it is.
+    subject_at: Node<'t>,
+    /// The `case` label, written the way a `switch` needs it — a constant read off a type loses
+    /// the type, which is right for an enum's constant and wrong for anything else.
     label: String,
+    /// Whether that label WAS such a constant, and therefore whether the plan is claiming the
+    /// subject is an enum. A literal claims nothing.
+    bare_constant: bool,
     kind: TestKind,
 }
 
@@ -195,7 +210,7 @@ fn chain_head<'t>(root: Node<'t>, start: usize, end: usize) -> Option<Node<'t>> 
 }
 
 /// Read a rung's condition into a subject and a `case` label, or `None` when it is not that shape.
-fn read_test(condition: &Node<'_>, source: &str) -> Option<Test> {
+fn read_test<'t>(condition: &Node<'t>, source: &str) -> Option<Test<'t>> {
     let expr = strip_parens(condition);
     match expr.kind() {
         "binary_expression" => {
@@ -206,12 +221,23 @@ fn read_test(condition: &Node<'_>, source: &str) -> Option<Test> {
             let left = expr.child_by_field_name("left")?;
             let right = expr.child_by_field_name("right")?;
             // Either side may hold the constant; the other is then the subject.
-            if let Some(label) = case_label(&right, source) {
-                return is_a_subject(&left, source)
-                    .map(|subject| Test { subject, label, kind: TestKind::Equality });
+            if let Some((label, bare)) = case_label(&right, source) {
+                return is_a_subject(&left, source).map(|subject| Test {
+                    subject,
+                    subject_at: left,
+                    label,
+                    bare_constant: bare,
+                    kind: TestKind::Equality,
+                });
             }
-            let label = case_label(&left, source)?;
-            is_a_subject(&right, source).map(|subject| Test { subject, label, kind: TestKind::Equality })
+            let (label, bare) = case_label(&left, source)?;
+            is_a_subject(&right, source).map(|subject| Test {
+                subject,
+                subject_at: right,
+                label,
+                bare_constant: bare,
+                kind: TestKind::Equality,
+            })
         }
         // `s.equals("a")` — and deliberately not `"a".equals(s)`; see the module docs.
         "method_invocation" => {
@@ -229,7 +255,9 @@ fn read_test(condition: &Node<'_>, source: &str) -> Option<Test> {
             let receiver = expr.child_by_field_name("object")?;
             is_a_subject(&receiver, source).map(|subject| Test {
                 subject,
+                subject_at: receiver,
                 label: text(only, source).to_string(),
+                bare_constant: false,
                 kind: TestKind::Equals,
             })
         }
@@ -256,7 +284,7 @@ fn is_a_subject(node: &Node<'_>, source: &str) -> Option<String> {
 }
 
 /// The `case` label an expression can be, written the way a `switch` needs it.
-fn case_label(node: &Node<'_>, source: &str) -> Option<String> {
+fn case_label(node: &Node<'_>, source: &str) -> Option<(String, bool)> {
     let node = strip_parens(node);
     match node.kind() {
         "decimal_integer_literal"
@@ -264,17 +292,20 @@ fn case_label(node: &Node<'_>, source: &str) -> Option<String> {
         | "octal_integer_literal"
         | "binary_integer_literal"
         | "character_literal"
-        | "string_literal" => Some(text(&node, source).to_string()),
-        // An enum constant, which inside its own `switch` must be written bare: `case BIG`, never
-        // `case Kind.BIG`. Recognised by shape — a constant read off a type — because the
-        // alternative is a resolver this crate does not have.
+        | "string_literal" => Some((text(&node, source).to_string(), false)),
+        // A constant read off a type. Inside a `switch` over an **enum** it must be written bare —
+        // `case BIG`, never `case Kind.BIG` — and for a `static final int` the qualifier has to
+        // stay. Nothing in the text tells the two apart, so the label is written the enum way and
+        // the plan SAYS so: `SelectorGuard::enum_labels`, for a caller that can check. Guessing
+        // here wrote `case POINT` for h2's `GeometryUtils.POINT`, and ten of thirteen conversions
+        // produced a file that does not compile.
         "field_access" => {
             let object = node.child_by_field_name("object")?;
             let field = node.child_by_field_name("field")?;
             let type_like = matches!(object.kind(), "identifier" | "scoped_identifier")
                 && text(&object, source).rsplit('.').next().is_some_and(starts_upper);
             let constant_like = is_screaming(text(&field, source));
-            (type_like && constant_like).then(|| text(&field, source).to_string())
+            (type_like && constant_like).then(|| (text(&field, source).to_string(), true))
         }
         _ => None,
     }
@@ -597,6 +628,28 @@ mod tests {
         let out = applied(src, "if (s.equals");
         assert!(out.contains("switch (s) {"), "{out}");
         assert!(out.contains("case \"a\": {"), "{out}");
+    }
+
+    /// The plan says which expression it is selecting on, so a caller with a resolver can check
+    /// that a `switch` may select on it at all — `long` reads exactly like `int` from here.
+    #[test]
+    fn the_plan_names_the_expression_it_selects_on() {
+        let src = "class A {\n    void f(long k) {\n        if (k == 1) {\n            a();\n        } else if (k == 2) {\n            b();\n        } else {\n            c();\n        }\n    }\n}";
+        let Some(Ok(plan)) = outcome(src, "if (k == 1)") else { panic!("expected a plan") };
+        let guard = plan.selector_guard.expect("a guard");
+        assert_eq!(&src[guard.start..guard.end], "k");
+        assert!(!guard.enum_labels, "int literals claim nothing about an enum");
+    }
+
+    /// …and it says when it wrote the labels the enum way, which is the claim that was silently
+    /// wrong on h2's `GeometryUtils.POINT` — a `static final int`, not an enum constant.
+    #[test]
+    fn a_bare_constant_label_is_declared_as_a_claim() {
+        let src = "class A {\n    void f(Kind kind) {\n        if (kind == Kind.BIG) {\n            a();\n        } else if (kind == Kind.SMALL) {\n            b();\n        } else {\n            c();\n        }\n    }\n}";
+        let Some(Ok(plan)) = outcome(src, "if (kind ==") else { panic!("expected a plan") };
+        let guard = plan.selector_guard.expect("a guard");
+        assert!(guard.enum_labels);
+        assert_eq!(guard.written, "kind");
     }
 
     /// A `switch` over a String is Java 7, and this editor exists for codebases that are not.

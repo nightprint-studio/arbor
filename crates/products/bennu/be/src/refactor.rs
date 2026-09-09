@@ -274,6 +274,15 @@ pub(crate) fn bennu_refactor_plan(
         }
     }
 
+    // What a produced `switch` will select on — the one thing the text could not settle. Unlike
+    // every other guard here this one refuses on **silence** too: see `SelectorGuard` for why the
+    // two lean opposite ways.
+    if let Some(guard) = plan.selector_guard.clone() {
+        if let Some(reason) = selector_refuses(&args, &guard) {
+            return Err(reason);
+        }
+    }
+
     // The Java the code this plan writes needs, against the Java the project targets. A `default`
     // method written into a Java 7 project compiles nowhere, and finding that out from the build is
     // the worst way to be told. Unknown on either side leaves the plan alone: a level nobody could
@@ -310,6 +319,26 @@ pub(crate) fn bennu_refactor_plan(
         }
     }
 
+    // Who else needs the member where it is — the half of the move family the buffer cannot see.
+    // Pushing a member down, or sideways, takes it out of reach of everything that was reaching it
+    // through the type it left; the pure crate checks the file it was given and this checks the
+    // rest of the project. Measured on h2: 104 broken moves and 4 broken push-downs, every one a
+    // use in another file — a `static` import above all.
+    //
+    // A pull UP needs none of this: inheritance keeps the member reachable under the same name, and
+    // a `static` member stays reachable through the subclass's own name too.
+    // The id PREFIX, not `MoveDirection::from_id`, which answers `Across` for anything it does not
+    // recognise — asked about `extract-constant` it says "a sideways move", and this would refuse
+    // an extraction because some other file mentions the name.
+    if args.id.starts_with("move-member") || args.id.starts_with("push-down-member") {
+        if let Some(elsewhere) = member_used_elsewhere(&args, args.start) {
+            return Err(format!(
+                "`{}` is used by {elsewhere}, which would not see it once it moves",
+                plan.name.clone().unwrap_or_default()
+            ));
+        }
+    }
+
     // The half of a member move that lands in ANOTHER file. The plan already carries the removal,
     // so a failure here has to be an error and not a warning: applying half of it would delete a
     // member and write it nowhere.
@@ -332,10 +361,70 @@ pub(crate) fn bennu_refactor_plan(
     Ok(RefactorPlanDto::of(plan, &args.file))
 }
 
+/// Why the subject of a produced `switch` is not one a `switch` may select on.
+///
+/// Three answers and only one of them is a plan that stands: a type in [`SWITCHABLE`]; an enum,
+/// when the arms were labelled with bare constants; and anything else — **including a type nobody
+/// could work out** — which refuses. `long` is the case that makes the strictness worth its cost:
+/// `if (x == 1)` reads identically whether `x` is an `int` or a `long`, and only one of them is a
+/// `switch`.
+///
+/// [`SWITCHABLE`]: bennu_refactor::prelude::SWITCHABLE
+fn selector_refuses(
+    args: &RefactorArgs,
+    guard: &bennu_refactor::prelude::SelectorGuard,
+) -> Option<String> {
+    use bennu_intel::prelude::Declarable;
+    let service = crate::index_service::IndexService::global();
+    let inferred =
+        match service.infer_type_detail(&args.file, &args.source, guard.start, guard.end) {
+            Declarable::Writable(written, _) => written,
+            _ => {
+                return Some(format!(
+                    "the type of `{}` could not be worked out, and a `switch` may only select on \
+                     `char`, `byte`, `short`, `int`, their boxes, a `String` or an enum — `long` \
+                     reads exactly like `int` here and is not one of them",
+                    guard.written
+                ))
+            }
+        };
+    let simple = inferred.split('<').next().unwrap_or(&inferred).trim();
+    if guard.enum_labels {
+        // The arms were written `case BIG`, which is legal only over the enum that declares them.
+        // A `static final int` read off a class — h2's `GeometryUtils.POINT` — is a constant and
+        // not an enum constant, and the qualifier it lost was load-bearing.
+        let is_enum = service
+            .type_shape(&args.file, simple)
+            .is_some_and(|shape| shape.members.flags.is_enum);
+        return (!is_enum).then(|| {
+            format!(
+                "the arms are labelled with bare constant names, which a `switch` accepts only over \
+                 an enum — and `{}` is a `{simple}`",
+                guard.written
+            )
+        });
+    }
+    (!bennu_refactor::prelude::SWITCHABLE.contains(&simple)).then(|| {
+        format!("a `switch` may not select on `{simple}`, which is what `{}` is", guard.written)
+    })
+}
+
 /// Where a transfer is going to land — the picker's answer when there was one, go-to-declaration's
 /// when there was not.
 struct TargetFile {
     file: String,
+}
+
+/// A file other than this one that uses the **member** whose header sits at `offset`.
+///
+/// `find_usages` wants the caret on the name, and a move's offset is the head of the declaration —
+/// which for `static int two()` is the `s` of `static`. So the name is found first and asked about
+/// there. `None` when the index cannot answer, for the same reason every other check here leans
+/// that way: a cold index is not evidence of anything.
+fn member_used_elsewhere(args: &RefactorArgs, offset: usize) -> Option<String> {
+    let site = bennu_refactor::prelude::move_site(&args.source, offset, offset)?;
+    let name_at = args.source.get(offset..)?.find(&site.member).map(|i| offset + i)?;
+    used_by_another_file(args, name_at)
 }
 
 /// A file other than this one that uses the symbol at `offset`, named for the sentence.
