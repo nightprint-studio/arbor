@@ -44,7 +44,7 @@
 //!
 //! ```sh
 //! cargo run -p bennu-refactor --release --example refactor_case -- <project-dir> \
-//!     [files=N] [stride=N] [only=<refactoring-id>] [cp=<classpath>] [show]
+//!     [files=N] [stride=N] [only=<refactoring-id>] [workers=N] [cp=<classpath>] [show]
 //! ```
 
 use std::cell::RefCell;
@@ -63,7 +63,9 @@ use bennu_intel::prelude::{build_project_index_from_sources, declarable_type_det
 use bennu_java::prelude::{parse_java, TypeResolver};
 use bennu_query::prelude::{IndexResolver, JdkMemberIndex};
 use bennu_intentions::prelude::insert_import_edit;
-use bennu_refactor::prelude::{merge_throws, refactorings_at, Plan, RefactorEdit, TypeNeed};
+use bennu_refactor::prelude::{
+    merge_throws, refactorings_at, transfer_into, Plan, RefactorEdit, TypeNeed,
+};
 use std::sync::Arc;
 use tree_sitter::{Node, Tree};
 
@@ -71,7 +73,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let Some(root) = args.next() else {
         eprintln!(
-            "usage: refactor_case <project-dir> [files=N] [stride=N] [only=<id>] [cp=<classpath>] [show]"
+            "usage: refactor_case <project-dir> [files=N] [stride=N] [only=<id>] [workers=N] [cp=<classpath>] [show]"
         );
         std::process::exit(2);
     };
@@ -103,8 +105,14 @@ fn main() {
     // rewrites the file it is judging and compiles it against its siblings on the `-sourcepath`;
     // share the tree and the siblings a second worker reads are whatever a third has half-applied.
     // A few megabytes of copies buys the machine's other nine cores.
-    let workers = std::thread::available_parallelism()
-        .map(|n| n.get())
+    // One JVM per worker, each holding a compiler open — on this machine about a gigabyte apiece.
+    // `available_parallelism()` is the right default on a machine nobody is using and the wrong one
+    // on the machine somebody is working at: eighteen of them took the desktop with them, and the
+    // workers the system reclaimed fell back to a fresh `javac` per compile, which is correct and
+    // several times slower. `workers=N` is the way to leave the machine usable.
+    let workers = opt("workers=")
+        .and_then(|s| s.parse::<usize>().ok())
+        .or_else(|| std::thread::available_parallelism().map(|n| n.get()).ok())
         .unwrap_or(4)
         .max(1);
     let mut mirrors: Vec<(PathBuf, Vec<PathBuf>)> = Vec::new();
@@ -157,6 +165,14 @@ fn main() {
             scope.spawn(move || {
                 let classes = dir.join("_classes");
                 fs::create_dir_all(&classes).ok();
+                // Simple type name → the file that declares it, which for a top-level type IS its
+                // file name. Per mirror, because a worker may only ever touch its own copies.
+                let types: BTreeMap<String, PathBuf> = files
+                    .iter()
+                    .filter_map(|p| {
+                        p.file_stem().and_then(|s| s.to_str()).map(|s| (s.to_string(), p.clone()))
+                    })
+                    .collect();
                 let cp = Compiler::new(
                     join_paths(&source_roots(files)),
                     classpath.clone(),
@@ -175,6 +191,7 @@ fn main() {
                         only.as_deref(),
                         show,
                         resolver.as_ref(),
+                        &types,
                         &mut local,
                     );
                     shared.lock().expect("aggregate").absorb(local);
@@ -225,12 +242,40 @@ fn main() {
         }
     }
 
+    // The member moves carry their target in the id — `move-member:Builder` — which is what makes
+    // the menu a choice and what turns this table into eighty rows of four applications each. The
+    // roll-up is the number a person is actually asking for.
+    let mut rolled: BTreeMap<String, Tally> = BTreeMap::new();
+    for (id, t) in &stats {
+        let family = id.split(':').next().unwrap_or(id).to_string();
+        let mine = rolled.entry(family).or_default();
+        mine.applied += t.applied;
+        mine.clean += t.clean;
+        mine.broken += t.broken;
+        mine.untypable += t.untypable;
+    }
+    println!("\n=== by refactoring ===");
+    for (family, t) in &rolled {
+        let rate = if t.applied > 0 { 100.0 * t.clean as f64 / t.applied as f64 } else { 100.0 };
+        println!(
+            "{family:<22} {:>8} {:>8} {:>8} {:>9}   {rate:.1}%",
+            t.applied, t.clean, t.broken, t.untypable
+        );
+    }
+
     if !reasons.is_empty() {
         println!("\n=== why they refused ===");
-        let mut rows: Vec<_> = reasons.iter().collect();
+        // By family, for the same reason the roll-up above exists: one refusal seen from eighty
+        // targets is one refusal.
+        let mut byfamily: BTreeMap<(String, String), usize> = BTreeMap::new();
+        for ((id, reason), n) in &reasons {
+            let family = id.split(':').next().unwrap_or(id).to_string();
+            *byfamily.entry((family, reason.clone())).or_default() += n;
+        }
+        let mut rows: Vec<_> = byfamily.iter().collect();
         rows.sort_by_key(|((id, _), n)| (id.clone(), std::cmp::Reverse(**n)));
         for ((id, reason), n) in rows {
-            println!("  {n:>4}  {id:<18} {reason}");
+            println!("  {n:>4}  {id:<22} {reason}");
         }
     }
 
@@ -244,7 +289,8 @@ fn main() {
             let first = f.javac.split(" | ").next().unwrap_or(&f.javac);
             // The variable's name is in the message and is not part of the kind.
             let kind = first.split(" for local variable ").next().unwrap_or(first);
-            *kinds.entry((f.id.clone(), kind.to_string())).or_default() += 1;
+            let family = f.id.split(':').next().unwrap_or(&f.id).to_string();
+            *kinds.entry((family, kind.to_string())).or_default() += 1;
         }
         let mut rows: Vec<_> = kinds.iter().collect();
         rows.sort_by_key(|((id, _), n)| (id.clone(), std::cmp::Reverse(**n)));
@@ -286,6 +332,7 @@ fn sweep_file(
     only: Option<&str>,
     show: bool,
     resolver: &dyn TypeResolver,
+    types: &BTreeMap<String, PathBuf>,
     out: &mut Aggregate,
 ) {
     let Ok(source) = fs::read_to_string(file) else {
@@ -321,14 +368,49 @@ fn sweep_file(
                 out.stats.entry(plan.id.clone()).or_default().untypable += 1;
                 continue;
             }
+            // A plan that reaches a SECOND file — a member pulled into a superclass, a nested
+            // type given its own — is applied to both and both are judged. Skipping them would
+            // score the half that stayed behind, which is the half that always compiles.
+            let elsewhere = match spread(&mut plan, file, types) {
+                Ok(spread) => spread,
+                Err(reason) => {
+                    let tally = out.stats.entry(plan.id.clone()).or_default();
+                    tally.untypable += 1;
+                    *out.reasons.entry((plan.id.clone(), reason)).or_default() += 1;
+                    continue;
+                }
+            };
             let tally = out.stats.entry(plan.id.clone()).or_default();
             tally.applied += 1;
 
             let applied = plan.apply(&source);
             fs::write(file, &applied).ok();
-            let errors = cp.errors(file);
-            let transcript = (errors > 0 || show).then(|| cp.transcript(file));
+            for other in &elsewhere {
+                fs::write(&other.path, &other.after).ok();
+            }
+            let mut errors = cp.errors(file);
+            let mut transcript = (errors > 0 || show).then(|| cp.transcript(file));
+            // Each file the plan touched is compiled on its own: an error introduced in the
+            // superclass is the whole point of measuring a move, and `-sourcepath` reports it only
+            // when something drags that file in.
+            for other in &elsewhere {
+                let theirs = cp.errors(&other.path);
+                if theirs > 0 && errors == 0 {
+                    transcript = Some(cp.transcript(&other.path));
+                }
+                errors += theirs;
+            }
             fs::write(file, &source).ok();
+            for other in &elsewhere {
+                match &other.before {
+                    Some(text) => {
+                        fs::write(&other.path, text).ok();
+                    }
+                    None => {
+                        fs::remove_file(&other.path).ok();
+                    }
+                }
+            }
 
             if errors > 0 {
                 tally.broken += 1;
@@ -354,6 +436,89 @@ fn sweep_file(
             }
         }
     }
+}
+
+/// A file the plan touches besides the one it was invoked in, with the text to put back after.
+struct Elsewhere {
+    path: PathBuf,
+    /// What was there before, or `None` when the plan created the file.
+    before: Option<String>,
+    after: String,
+}
+
+/// Resolve the halves of a plan that live in another file, and fold their edits into it.
+///
+/// This is where the harness has to do **exactly** what the backend does: the transfer is resolved
+/// with [`transfer_into`], which is the same function the backend calls, and the created file goes
+/// beside the one that lost the type, which is the same rule. A harness that wrote its own version
+/// of either would report on a product nobody ships.
+///
+/// `Err` is a refusal to measure, not a failure: a target this corpus does not hold is not
+/// something the refactoring got wrong.
+fn spread(
+    plan: &mut Plan,
+    file: &Path,
+    types: &BTreeMap<String, PathBuf>,
+) -> Result<Vec<Elsewhere>, String> {
+    let mut out = Vec::new();
+    if let Some(transfer) = plan.transfer.clone() {
+        let path = types
+            .get(&transfer.target)
+            .cloned()
+            .ok_or_else(|| format!("`{}` is not a type of this corpus", transfer.target))?;
+        let before = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let edits = transfer_into(plan, &before, &path.display().to_string())?;
+        let mut after = before.clone();
+        let mut edits = edits;
+        edits.sort_by(|a, b| b.start.cmp(&a.start).then(b.end.cmp(&a.end)));
+        for edit in &edits {
+            let (s, e) = (edit.start.min(after.len()), edit.end.min(after.len()));
+            after.replace_range(s..e, &edit.text);
+        }
+        out.push(Elsewhere { path, before: Some(before), after });
+    }
+    if let Some(created) = plan.new_source.clone() {
+        let path = file
+            .parent()
+            .ok_or("the file has no folder")?
+            .join(format!("{}.java", created.name));
+        if path.exists() {
+            return Err(format!("{}.java already exists in this package", created.name));
+        }
+        // The backend refuses a NESTED type that another file uses — it asks the reference index,
+        // which knows that `import a.b.Outer.Inner;` two packages away is a use. There is no index
+        // here, so the same question is asked of the text: does any other file write that name at
+        // all. Stricter than the backend, never looser, so what this measures is a subset of what
+        // ships rather than something it does not do. See `NewSource::was_nested`.
+        if created.was_nested {
+            if let Some(other) = mentions_elsewhere(&created.name, file, types) {
+                return Err(format!("`{}` is used by {other}", created.name));
+            }
+        }
+        out.push(Elsewhere { path, before: None, after: created.text });
+    }
+    Ok(out)
+}
+
+/// A file other than `mine` that writes `name` as a word, if any.
+fn mentions_elsewhere(
+    name: &str,
+    mine: &Path,
+    types: &BTreeMap<String, PathBuf>,
+) -> Option<String> {
+    let is_word = |line: &str| {
+        line.match_indices(name).any(|(at, _)| {
+            let before = line[..at].chars().next_back();
+            let after = line[at + name.len()..].chars().next();
+            !before.is_some_and(|c| c.is_alphanumeric() || c == '_')
+                && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+        })
+    };
+    types
+        .values()
+        .filter(|p| p.as_path() != mine)
+        .find(|p| fs::read_to_string(p).is_ok_and(|text| text.lines().any(is_word)))
+        .map(|p| p.display().to_string())
 }
 
 /// What one worker found, and what the run's totals are made of.
@@ -625,6 +790,15 @@ fn sites(tree: &Tree, source: &str, stride: usize) -> Vec<(usize, usize)> {
                 if let Some(name) = n.child_by_field_name("name") {
                     out.push((name.start_byte(), name.start_byte()));
                 }
+            }
+            // A caret on a member's or a type's own header: the member moves, and move class.
+            "method_declaration"
+            | "field_declaration"
+            | "class_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "record_declaration" => {
+                out.push((n.start_byte(), n.start_byte()));
             }
             // Runs of whole statements: extract method.
             "block" => {

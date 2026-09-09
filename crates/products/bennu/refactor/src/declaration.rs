@@ -216,7 +216,7 @@ pub fn from_var(root: Node<'_>, source: &str, start: usize, end: usize) -> Outco
 
 /// The local declaration the caret is on — through its type or its name, not from inside its
 /// initialiser, where the user is looking at an expression and not at the declaration.
-fn declaration_at<'t>(root: Node<'t>, source: &str, start: usize, end: usize) -> Option<Node<'t>> {
+pub(crate) fn declaration_at<'t>(root: Node<'t>, source: &str, start: usize, end: usize) -> Option<Node<'t>> {
     let at = crate::selection::node_covering(root, start, end)?;
     let decl = crate::selection::enclosing(at, &["local_variable_declaration"])?;
     // Only inside a block: a `for (int i = 0; …)` header declares a local too, and none of these
@@ -234,7 +234,7 @@ fn declaration_at<'t>(root: Node<'t>, source: &str, start: usize, end: usize) ->
 
 /// The one declarator this statement declares — `None` when it declares several, where a caret
 /// cannot say which one was meant.
-fn sole_declarator<'t>(decl: &Node<'t>) -> Option<Node<'t>> {
+pub(crate) fn sole_declarator<'t>(decl: &Node<'t>) -> Option<Node<'t>> {
     let mut cursor = decl.walk();
     let declarators: Vec<Node<'t>> = decl
         .named_children(&mut cursor)
@@ -246,7 +246,7 @@ fn sole_declarator<'t>(decl: &Node<'t>) -> Option<Node<'t>> {
     }
 }
 
-fn is_final(decl: &Node<'_>, source: &str) -> bool {
+pub(crate) fn is_final(decl: &Node<'_>, source: &str) -> bool {
     let mut cursor = decl.walk();
     let is_final = decl
         .named_children(&mut cursor)

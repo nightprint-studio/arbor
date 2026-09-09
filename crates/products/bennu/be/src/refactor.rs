@@ -22,7 +22,7 @@
 use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::UsageHit;
 use bennu_refactor::prelude::{
-    missing_type_at, new_type_source, plan_for, refactorings_at, Plan, RefactorEdit,
+    missing_type_at, new_type_source, plan_for, refactorings_at, transfer_into, Plan, RefactorEdit,
     TYPE_PLACEHOLDER,
 };
 use serde::{Deserialize, Serialize};
@@ -186,6 +186,32 @@ pub(crate) fn bennu_refactor_plan(
         }
     }
 
+    // A nested type given its own file leaves behind every `Outer.Inner` in the project — an
+    // `import a.b.Outer.Inner;` two packages away included. Nothing in the file the refactoring was
+    // invoked in can show that, so the pure crate says what it needs checked and this is where it
+    // is checked: see `NewSource::was_nested`.
+    if let Some(created) = plan.new_source.clone() {
+        if created.was_nested {
+            if let Some(elsewhere) = used_by_another_file(&args, created.name_at) {
+                return Err(format!(
+                    "`{}` is used by {elsewhere} — a nested type reached from another file is \
+                     written `Outer.{}` or imported as one, and both stop resolving once it is \
+                     top-level",
+                    created.name, created.name
+                ));
+            }
+        }
+    }
+
+    // The half of a member move that lands in ANOTHER file. The plan already carries the removal,
+    // so a failure here has to be an error and not a warning: applying half of it would delete a
+    // member and write it nowhere.
+    if plan.transfer.is_some() {
+        let edits = transfer_edits(&plan, &args)?;
+        plan.edits.extend(edits);
+        plan.transfer = None;
+    }
+
     // The import goes in as one more edit, so accepting the refactoring is a single undo.
     for fqn in imports {
         if let Some(edit) = bennu_intentions::prelude::insert_import_edit(&args.source, &fqn) {
@@ -196,7 +222,73 @@ pub(crate) fn bennu_refactor_plan(
     // through the crate's own rule rather than a second copy of the comparator.
     plan.reorder();
 
-    Ok(RefactorPlanDto::of(plan))
+    Ok(RefactorPlanDto::of(plan, &args.file))
+}
+
+/// A file other than this one that uses the symbol at `offset`, named for the sentence.
+///
+/// `None` also when the index cannot answer — it may still be building — and that is deliberate in
+/// the same direction every other check here leans: only a **positive** finding refuses. A move
+/// that goes ahead on a cold index is the outcome a user without an index would have had anyway.
+fn used_by_another_file(args: &RefactorArgs, offset: usize) -> Option<String> {
+    let found = crate::index_service::IndexService::global()
+        .find_usages(&args.file, &args.source, offset)?;
+    let mine = args.file.replace('\\', "/");
+    let other = found
+        .usages
+        .iter()
+        .find(|hit| hit.file.replace('\\', "/") != mine)?;
+    Some(
+        std::path::Path::new(&other.file)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| other.file.clone()),
+    )
+}
+
+/// Find the type a [`MemberTransfer`] targets and plan the member into it.
+///
+/// The target is found by **asking go-to-declaration about the very offset the name is written at**
+/// — the `extends` clause the pull-up read it off. That is not a shortcut around a name lookup: it
+/// is the only way to resolve it the way the compiler does, through this file's imports and this
+/// file's package, so a `Base` that names two different classes in two packages goes to the right
+/// one.
+///
+/// [`MemberTransfer`]: bennu_refactor::prelude::MemberTransfer
+fn transfer_edits(plan: &Plan, args: &RefactorArgs) -> Result<Vec<RefactorEdit>, String> {
+    let transfer = plan.transfer.as_ref().ok_or("this plan moves nothing between files")?;
+    let target = crate::index_service::IndexService::global()
+        .declaration(&args.file, &args.source, transfer.target_at)
+        .ok_or_else(|| {
+            format!(
+                "`{}` could not be resolved — either the index is still building, or it is a type \
+                 this project does not hold the source of",
+                transfer.target
+            )
+        })?;
+    if !is_java(&target.file) {
+        return Err(format!(
+            "`{}` is not a source file of this project, so the member cannot be written into it",
+            transfer.target
+        ));
+    }
+    // The buffer for the target when the editor already has it open would be better still, but the
+    // backend does not hold the editor's buffers — so the file on disk it is, decoded the way the
+    // index decodes it. A file whose bytes do not fit its declared encoding is refused rather than
+    // edited: the editor and the index would disagree about every offset after the first bad byte.
+    let encoding = crate::index_service::resolve_index_encoding(&target.file);
+    let bytes = std::fs::read(&target.file)
+        .map_err(|e| format!("could not read {}: {e}", target.file))?;
+    let decoded = bennu_project::prelude::decode_for_index(&bytes, &encoding);
+    if decoded.non_compliant {
+        return Err(format!(
+            "{} is not valid in the project's declared encoding, so an edit planned here would \
+             land on the wrong bytes",
+            target.file
+        ));
+    }
+    let source = bennu_project::prelude::normalize_newlines(&decoded.text);
+    transfer_into(plan, &source, &target.file)
 }
 
 /// Why a refactoring that needs a written type could not be applied.
@@ -225,18 +317,46 @@ pub struct RefactorPlanDto {
     /// True when a type could not be resolved and the plan still carries `var`. The editor says so
     /// rather than letting it land silently.
     pub unresolved_type: bool,
+    /// The file this refactoring also has to create, when it creates one — *move class* is the
+    /// only one that does. The path is beside the file the refactoring was invoked in, which is
+    /// what "the same package" means on a filesystem.
+    pub new_file: Option<NewFileDto>,
+    /// Every file this plan touches besides the one it was invoked in, so the editor can say so
+    /// before applying and can re-read them after.
+    pub other_files: Vec<String>,
+}
+
+/// A source file a plan needs written.
+#[derive(Serialize)]
+pub struct NewFileDto {
+    pub path: String,
+    pub text: String,
 }
 
 impl RefactorPlanDto {
-    fn of(plan: Plan) -> Self {
+    fn of(plan: Plan, file: &str) -> Self {
         let unresolved_type =
             plan.edits.iter().any(|e| e.reason == "declaration" && e.text.contains(TYPE_PLACEHOLDER));
+        // Beside the file that lost the type: the new type stays in the same package, and a package
+        // is a directory. The same rule `bennu_create_class` follows, and for the same reason — it
+        // is the one that cannot get a multi-module build wrong.
+        let new_file = plan.new_source.as_ref().and_then(|created| {
+            let folder = std::path::Path::new(file).parent()?;
+            let path = folder.join(format!("{}.java", created.name));
+            Some(NewFileDto { path: path.display().to_string(), text: created.text.clone() })
+        });
+        let mut other_files: Vec<String> =
+            plan.edits.iter().filter(|e| !e.file.is_empty()).map(|e| e.file.clone()).collect();
+        other_files.sort();
+        other_files.dedup();
         Self {
             id: plan.id,
             label: plan.label,
             name: plan.name.unwrap_or_default(),
             caret: plan.caret,
             unresolved_type,
+            new_file,
+            other_files,
             edits: plan
                 .edits
                 .into_iter()
@@ -245,6 +365,7 @@ impl RefactorPlanDto {
                     end: e.end,
                     text: e.text,
                     reason: e.reason,
+                    file: e.file,
                 })
                 .collect(),
         }
@@ -257,6 +378,9 @@ pub struct RefactorEditDto {
     pub end: usize,
     pub text: String,
     pub reason: String,
+    /// The file this edit lands in — **empty for the buffer the refactoring was invoked in**, which
+    /// is every edit of every refactoring but a member move that crosses a file.
+    pub file: String,
 }
 
 fn is_java(file: &str) -> bool {
@@ -491,7 +615,7 @@ mod tests {
             "Extract variable",
             vec![RefactorEdit::new(0, 0, "var name = x;", "declaration")],
         );
-        assert!(RefactorPlanDto::of(plan).unresolved_type);
+        assert!(RefactorPlanDto::of(plan, "A.java").unresolved_type);
     }
 
     #[test]
@@ -501,6 +625,6 @@ mod tests {
             "Extract variable",
             vec![RefactorEdit::new(0, 0, "List<String> name = x;", "declaration")],
         );
-        assert!(!RefactorPlanDto::of(plan).unresolved_type);
+        assert!(!RefactorPlanDto::of(plan, "A.java").unresolved_type);
     }
 }

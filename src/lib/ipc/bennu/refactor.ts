@@ -37,8 +37,19 @@ export interface RefactorEdit {
   start: number;
   end: number;
   text: string;
-  /** `call` · `declaration` · `body` · `use` · `import` — what the edit is for. */
+  /** `call` · `declaration` · `body` · `use` · `import` · `member` · `removal` — what it is for. */
   reason: string;
+  /** The file this edit lands in, **empty for the buffer the refactoring was invoked in**. Only a
+   *  member move that crosses a file ever fills it. */
+  file: string;
+}
+
+/** A source file a refactoring has to create — *move class* is the only one that does. */
+export interface NewRefactorFile {
+  /** Absolute path, beside the file the type left: the package does not change, and a package is a
+   *  directory. */
+  path: string;
+  text: string;
 }
 
 /** A planned refactoring. */
@@ -55,6 +66,11 @@ export interface RefactorPlan {
   /** True when no type could be resolved and the declaration still says `var`. Worth telling the
    *  user on a project targeting Java 8, where `var` does not compile. */
   unresolved_type: boolean;
+  /** The file to create, or `null`. */
+  new_file: NewRefactorFile | null;
+  /** Every other file this plan edits — a superclass a member was pulled into. Empty for all the
+   *  refactorings that act on one buffer, which is all but one of them. */
+  other_files: string[];
 }
 
 /** What can be refactored at the caret (`start === end`) or over the selection. Byte offsets.

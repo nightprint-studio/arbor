@@ -29,11 +29,27 @@ pub struct RefactorEdit {
     /// What this edit is for, so a preview can group and label them: `"call"`, `"declaration"`,
     /// `"body"`, `"use"`, `"import"`.
     pub reason: String,
+    /// The file this edit lands in, **empty for the one the refactoring was invoked in**.
+    ///
+    /// Empty by default and by far in the majority: every refactoring in this crate that acts on
+    /// one buffer produces edits with nothing here, and a consumer that never learned about the
+    /// field applies them exactly as it always did. It is filled in by the caller that resolves a
+    /// [`MemberTransfer`] — the only way a plan reaches a second file — so the descending order the
+    /// plan promises stays a promise **per file**, which is all a consumer applying them one file
+    /// at a time needs.
+    #[serde(default)]
+    pub file: String,
 }
 
 impl RefactorEdit {
     pub fn new(start: usize, end: usize, text: impl Into<String>, reason: &str) -> Self {
-        Self { start, end, text: text.into(), reason: reason.to_string() }
+        Self { start, end, text: text.into(), reason: reason.to_string(), file: String::new() }
+    }
+
+    /// The same edit, against another file.
+    pub fn in_file(mut self, file: impl Into<String>) -> Self {
+        self.file = file.into();
+        self
     }
 }
 
@@ -61,6 +77,76 @@ pub struct Plan {
     /// A claim about a type this plan depends on but cannot check; see [`TypeGuard`].
     #[serde(default)]
     pub type_guard: Option<TypeGuard>,
+    /// A member this plan lifts out for a type it could not find; see [`MemberTransfer`].
+    #[serde(default)]
+    pub transfer: Option<MemberTransfer>,
+    /// A source file this plan needs written; see [`NewSource`].
+    #[serde(default)]
+    pub new_source: Option<NewSource>,
+}
+
+/// A member this plan removed, and the type it has to land in — which is in another file.
+///
+/// The half of a move this crate cannot do. *Pull up* usually targets a superclass that lives
+/// somewhere else, and finding it means a project index, which is exactly what this crate does not
+/// have. So the plan carries the removal, which is complete and correct on its own, plus everything
+/// the caller needs to write the other half without parsing this file again.
+///
+/// The caller's contract: find `target`, check it declares each of `requires`, insert `member` at
+/// the end of its body re-indented for it, and add whichever of `imports` it does not already have.
+/// A target it cannot find is a **refusal**, not a plan applied halfway — a member removed from one
+/// file and written into none is the worst outcome available here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemberTransfer {
+    /// The type the member must land in, as the source names it.
+    pub target: String,
+    /// Where that name is **written in this file** — the `extends` clause it was read off.
+    ///
+    /// Not a convenience: it is how a caller finds the type without a name lookup of its own.
+    /// Go-to-declaration on that very offset already answers "which file declares this", through
+    /// the same imports and the same package this file has, so a `Base` that means two different
+    /// classes in two packages resolves the way the compiler resolves it rather than the way a
+    /// simple-name map guesses it.
+    pub target_at: usize,
+    /// The member's text, dedented to column zero — the caller re-indents it for the body it goes
+    /// into, which is the only place the right indentation is known.
+    pub member: String,
+    /// Names the member reads from the type it is leaving, and which the target must already
+    /// declare. A name missing there is a member that will not compile once it lands.
+    pub requires: Vec<String>,
+    /// The whole `import` lines of the source file whose types the member mentions.
+    pub imports: Vec<String>,
+}
+
+/// A source file this plan needs written, named but not placed.
+///
+/// This crate knows the type's name and its whole text and nothing about where a package sits on
+/// disk. The caller puts it **beside the file the refactoring was invoked in**, which is what "the
+/// same package" means on a filesystem — and refuses rather than overwrites when something of that
+/// name is already there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewSource {
+    /// The type's simple name. Java requires a public top-level type and its file to share it, so
+    /// the file is `<name>.java`.
+    pub name: String,
+    /// The whole file, `package` line included.
+    pub text: String,
+    /// Where that name is **written in this file**, so a caller with a reference index can ask who
+    /// else uses it — see `was_nested`.
+    pub name_at: usize,
+    /// Whether the type was **nested** in another.
+    ///
+    /// It decides whether a mention from another file survives the move, and the two answers could
+    /// not be further apart. A second top-level type moving to its own file stays in the same
+    /// package under the same name, so every reference to it anywhere keeps working. A **nested**
+    /// one does not: another file can only have reached it as `Outer.Inner` or through an
+    /// `import a.b.Outer.Inner;`, and both name a member of `Outer` that is about to stop existing.
+    ///
+    /// This crate can rule out the mentions in the file it is given and no others. A caller with the
+    /// reference index must refuse the plan when any **other** file mentions the type at all —
+    /// measured: `import org.apache.commons.lang3.ClassUtils.Interfaces;` in a file two packages
+    /// away, which nothing in `ClassUtils.java` could have shown.
+    pub was_nested: bool,
 }
 
 /// A fact the plan is only correct under, and can only assert from the text.
@@ -108,6 +194,8 @@ impl Plan {
             type_slot: None,
             type_guard: None,
             throws_slot: None,
+            transfer: None,
+            new_source: None,
         }
     }
 
@@ -137,11 +225,25 @@ impl Plan {
         self
     }
 
+    /// Attach the half of a move that lands in another file; see [`MemberTransfer`].
+    pub fn transferring(mut self, transfer: MemberTransfer) -> Self {
+        self.transfer = Some(transfer);
+        self
+    }
+
+    /// Attach the file this plan needs written; see [`NewSource`].
+    pub fn creating(mut self, source: NewSource) -> Self {
+        self.new_source = Some(source);
+        self
+    }
+
     /// Apply the plan to a source string. The reference implementation, and what the tests here
     /// check against — the editor applies the same edits through its own buffer.
+    /// Only the edits for the file the refactoring was invoked in — an edit carrying a
+    /// [`RefactorEdit::file`] belongs to another buffer and its offsets mean nothing here.
     pub fn apply(&self, source: &str) -> String {
         let mut out = source.to_string();
-        for edit in &self.edits {
+        for edit in self.edits.iter().filter(|e| e.file.is_empty()) {
             let (start, end) = (edit.start.min(out.len()), edit.end.min(out.len()));
             out.replace_range(start..end, &edit.text);
         }
@@ -160,14 +262,21 @@ impl Plan {
     /// Whether the edits hold the descending invariant. Cheap, and used by the tests that would
     /// otherwise only catch a violation as a corrupted string.
     pub fn sorted(&self) -> bool {
-        self.edits.windows(2).all(|w| w[0].start >= w[1].end || w[0].start == w[1].start)
+        self.edits
+            .windows(2)
+            .all(|w| w[0].file != w[1].file || w[0].start >= w[1].end || w[0].start == w[1].start)
     }
 }
 
 /// Descending by start, and by end within the same start — see [`Plan::new`] for why the second
 /// half is load-bearing rather than a tidy-up.
 fn reorder(edits: &mut [RefactorEdit]) {
-    edits.sort_by(|a, b| b.start.cmp(&a.start).then(b.end.cmp(&a.end)));
+    // By file first, so each file's run is contiguous and descending within itself: a consumer
+    // applies one file's edits back to front, which is the only order under which nothing it has
+    // yet to apply has moved. Across files the order says nothing and needs to say nothing.
+    edits.sort_by(|a, b| {
+        a.file.cmp(&b.file).then(b.start.cmp(&a.start)).then(b.end.cmp(&a.end))
+    });
 }
 
 /// A type the plan needs written into the source and could not name by reading the text.

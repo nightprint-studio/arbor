@@ -2683,9 +2683,53 @@
       return;
     }
     if (projectStore.activeFilePath !== path) return;
+    // The backend planned those edits against the file **on disk**, because it does not hold the
+    // editor's buffers. An unsaved buffer for that file is different text, so every offset after
+    // the first difference is wrong — and the apply path would drop the edits with "did not match"
+    // and no way to say why. Saying it here, before anything moves, is the whole difference.
+    const unsaved = plan.other_files.filter((f) => projectStore.isDirty(f));
+    if (unsaved.length) {
+      toastStore.show(
+        `Save ${unsaved.map((f) => baseName(f)).join(', ')} first — this refactoring edits it, and the plan was made against what is on disk`,
+        'warning',
+      );
+      return;
+    }
+    // A refactoring that also writes ANOTHER file — a member pulled up into its superclass, a
+    // nested class given its own file — lands there first. The buffer edit is the one the user can
+    // undo with a keystroke; doing it last means an interrupted apply leaves the code it came from
+    // intact rather than a member deleted and written nowhere.
+    if (plan.new_file) {
+      const written = await projectStore.saveText(plan.new_file.path, plan.new_file.text);
+      if (!written) {
+        toastStore.show(`Couldn't create ${baseName(plan.new_file.path)}`, 'error');
+        return;
+      }
+    }
+    const elsewhere = plan.edits.filter((e) => e.file);
+    if (elsewhere.length) {
+      const failed = await projectStore.applyEdits(
+        elsewhere.map((e) => ({ file: e.file, start: e.start, end: e.end, new_text: e.text })),
+      );
+      if (failed) {
+        toastStore.show(`Could not apply the change in ${failed} file(s)`, 'error');
+        return;
+      }
+    }
     editorComp?.replaceByteRanges(
-      plan.edits.map((e) => ({ startByte: e.start, endByte: e.end, text: e.text })),
+      plan.edits
+        .filter((e) => !e.file)
+        .map((e) => ({ startByte: e.start, endByte: e.end, text: e.text })),
     );
+    if (plan.new_file) {
+      toastStore.show(`Created ${baseName(plan.new_file.path)}`, 'success');
+    }
+    if (plan.other_files.length) {
+      toastStore.show(
+        `Also changed ${plan.other_files.map((f) => baseName(f)).join(', ')}`,
+        'info',
+      );
+    }
     // The introduced name is the one thing worth typing over, so the caret goes there. Nothing is
     // pre-selected: a rename is a separate, undoable gesture, and doing it for the user is how a
     // refactoring becomes something you have to undo twice.

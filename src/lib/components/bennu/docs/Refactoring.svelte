@@ -39,10 +39,10 @@
 </p>
 <h2>Extract and inline</h2>
 <p>
-  Five refactorings on the same <kbd>Alt</kbd> + <kbd>Enter</kbd> list, offered from what you have
-  selected: a run of statements means <em>extract method</em>, a caret in an expression means
-  <em>extract variable</em>, a caret on a name means one of the inlines. All of them arrive as a
-  single undo.
+  One <kbd>Alt</kbd> + <kbd>Enter</kbd> list, offered from what you have selected: a run of
+  statements means <em>extract method</em>, a caret in an expression means <em>extract variable</em>,
+  a caret on a name means one of the inlines, a caret on a member's own header means one of the
+  moves. All of them arrive as a single undo.
 </p>
 <div class="fc-list">
   <div class="fc-item">
@@ -101,6 +101,91 @@
       Splitting a <code>final</code> local is refused: Java allows that shape only where it can prove
       the variable is still unset. The four things <code>var</code> cannot read — a lambda, a method
       reference, a bare <code>&#123;…&#125;</code> and <code>null</code> — each say so by name.
+    </div>
+  </div>
+  <div class="fc-item">
+    <div class="fc-title">Introduce field</div>
+    <div class="fc-desc">
+      A local becomes a field of the class it was written in, and its
+      <strong>initialisation stays where it ran</strong> — <code>int total = a + b;</code> becomes a
+      field <code>private int total;</code> and the statement <code>total = a + b;</code>, in that
+      place. Initialising the field at its own declaration instead would run the expression at
+      construction time, which is a different program whenever it reads a parameter, throws, or costs
+      anything. A local of a <code>static</code> method makes a <code>static</code> field, the type
+      is resolved against the project so a <code>var</code> local still gets a written one, and a
+      name the class already declares is refused rather than shadowed. A local declared with a type
+      parameter of its own <em>method</em> stays too — that name exists only inside the method, and a
+      field of the class cannot be declared with it. So do the places a field cannot go at all: an
+      interface, whose fields are <code>public static final</code> and must be initialised where they
+      are declared, a record, which may not have an instance field, and a local inside an anonymous
+      class, where the field would land on the class around it.
+    </div>
+  </div>
+  <div class="fc-item">
+    <div class="fc-title">Replace <code>if</code> chain with <code>switch</code></div>
+    <div class="fc-desc">
+      An <code>if</code> / <code>else if</code> ladder testing one value against constants becomes a
+      <code>switch</code>, with <code>case</code> labels and the <code>break</code>s the compiler
+      will accept — an arm that already returns or throws gets none, because a <code>break</code>
+      after it is an unreachable statement. Enum constants lose their type, which is how a
+      <code>switch</code> over an enum has to write them. The subject has to be something re-reading
+      cannot change, so a chain testing <code>kind()</code> is left alone: it ran the call once per
+      rung and a <code>switch</code> would run it once. So is
+      <code>"a".equals(s)</code> — the null-safe form, which falls through on a null <code>s</code>
+      where <code>switch (s)</code> throws. When an arm ends in a <code>try</code> or a nested
+      <code>switch</code>, where whether a <code>break</code> would be reachable cannot be read off
+      the text, the whole conversion is refused rather than guessed.
+    </div>
+  </div>
+  <div class="fc-item">
+    <div class="fc-title">Pull up · Push down · Move member</div>
+    <div class="fc-desc">
+      A member changes the type it belongs to. What differs between the three is only which type,
+      and the menu is where you choose: <em>pull up</em> reads the target off the
+      <code>extends</code> or <code>implements</code> clause — there is nothing to ask — while
+      <em>push down</em> and <em>move</em> put one row per candidate type in the list. The target may
+      be in another file, and then that file is edited too, with the imports the member reads carried
+      over. What it checks first is what it leaves behind, and each refusal names the thing that
+      keeps the member where it is: a method that reads <code>count</code> will not go to a type that
+      has no <code>count</code>; one written in terms of the class's type parameter will not go
+      anywhere that never declared it; one that names its own class — a factory returning it, a
+      <code>new</code> of it — means the same class wherever it lands, so it stays. So do a
+      <code>super</code> call, which means a different method once it moves; an
+      <code>@Override</code>, which is a promise about the type the member is declared in; a method
+      with no body, which is a contract rather than code; a <code>private</code> member pulled up,
+      which the class it came from could no longer see; a name the target already declares; a member
+      that anything still calls or that a subclass overrides, moved anywhere but up; a call to one of
+      its own <strong>overloads</strong>, which reads as recursion and is not — the overload stays
+      behind, and the call meets a class where only the moved one exists; and a pull up into a
+      generic supertype whose type arguments this class fixes, where the member would meet the type
+      variable in place of the concrete type it was written for. Moving <em>sideways</em>, to a class
+      that is neither above nor below, is for <code>static</code> members that need nothing from
+      where they were: an instance member would find <code>this</code> pointing at a different
+      object, and a name it reads would mean something else. What arrives is written the way its new
+      home requires — a method landing in an interface becomes <code>default</code> and drops the
+      modifiers one may not carry, one landing back in a class loses that <code>default</code> and
+      keeps the <code>public</code> the interface gave it, and an <code>enum</code> whose constants
+      had no <code>;</code> gets one.
+    </div>
+  </div>
+  <div class="fc-item">
+    <div class="fc-title">Move class</div>
+    <div class="fc-desc">
+      A type written inside another one gets its own file, beside the one it left — the same folder,
+      which is what "the same package" means, so every unqualified mention of it in the package still
+      resolves. It travels with the package line, the imports it actually reads, and without the
+      modifiers a top-level type may not carry: <code>static</code>, because nothing encloses it any
+      more, and <code>private</code> or <code>protected</code>, which are not top-level modifiers. An
+      <strong>inner</strong> class — a nested <code>class</code> without <code>static</code> — stays:
+      it holds a reference to an instance of the class around it, and a top-level type has nowhere to
+      keep one. So does one that reads the outer class's own members, or names a <em>sibling</em>
+      nested type: that sibling is still nested afterwards, and the bare name it was written with
+      resolves to nothing from outside. And so does one this file spells <code>Outer.Inner</code>
+      anywhere, which stops meaning anything the moment <code>Inner</code> is top-level — as does one
+      any <em>other</em> file mentions, which it can only have reached as <code>Outer.Inner</code> or
+      through an import of it. Its own <code>private</code> members are the last check: those are
+      visible to the class around it and to nothing else, so a nested type whose privates that class
+      reads — a private constructor included — stays where it is.
     </div>
   </div>
   <div class="fc-item">

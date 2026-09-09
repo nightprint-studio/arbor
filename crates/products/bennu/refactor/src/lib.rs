@@ -13,6 +13,10 @@
 //! | [`extract_var`] | an expression gets a name: a local, or a `private static final` when it is constant to read |
 //! | [`inline_var`] | a local goes back into its uses, parenthesised where the context binds tighter, refused where the value would move |
 //! | [`inline_method`] | a one-expression method goes back into its call, with its parameters substituted structurally |
+//! | [`field`] | a local becomes a field, with its initialisation left where it ran |
+//! | [`switch`] | an `if` chain on one value becomes a `switch`, with the `break`s javac will accept |
+//! | [`move_member`] | a member changes type — pulled up, pushed down, or moved across |
+//! | [`move_class`] | a nested type gets its own file, beside the one it left |
 //!
 //! ## Planning is the safety story
 //!
@@ -33,6 +37,8 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_refactor::prelude::...`.
 
+// Where a member lives, and where a new one goes.
+pub mod body;
 // A run of statements becomes a method.
 pub mod create;
 pub mod extract_method;
@@ -40,10 +46,16 @@ pub mod extract_method;
 pub mod extract_var;
 // A one-expression method goes back into its call.
 pub mod declaration;
+// A local becomes a field.
+pub mod field;
 pub mod if_statement;
 pub mod inline_method;
 // A local goes back into its uses.
 pub mod inline_var;
+// A nested type gets its own file.
+pub mod move_class;
+// A member changes the type it belongs to.
+pub mod move_member;
 // The one call the editor makes.
 pub mod offers;
 // What a refactoring produces, and what it says when it will not.
@@ -51,3 +63,5 @@ pub mod plan;
 pub mod prelude;
 // Finding the thing a refactoring is about.
 pub mod selection;
+// An `if` chain becomes a `switch`.
+pub mod switch;

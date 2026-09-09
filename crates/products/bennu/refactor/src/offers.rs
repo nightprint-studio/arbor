@@ -40,9 +40,17 @@ pub fn refactorings_at(source: &str, start: usize, end: usize) -> Vec<Result<Pla
         crate::declaration::join_declaration(root, source, start, end),
         crate::declaration::to_var(root, source, start, end),
         crate::declaration::from_var(root, source, start, end),
+        crate::field::introduce_field(root, source, start, end),
+        crate::switch::if_chain_to_switch(root, source, start, end),
+        crate::move_class::move_class(root, source, start, end),
     ]
     .into_iter()
     .flatten()
+    // The member moves are a LIST rather than one answer: their targets are what tells them apart,
+    // so each target is its own row and the menu is where the user picks one. Last, because a
+    // caret on a member's header is also a caret on whatever else is offered there, and moving a
+    // whole method is the biggest thing in the list — the least likely to be what was meant.
+    .chain(crate::move_member::member_moves(root, source, start, end))
     .collect()
 }
 
