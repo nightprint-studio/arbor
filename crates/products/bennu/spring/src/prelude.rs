@@ -76,3 +76,21 @@ pub use crate::props_intel::{env_var_at, is_property_source};
 pub use crate::library_beans::{bean_defs_of, 
     beans_of_class, beans_of_classes, LibraryBean, LibraryBeanAllowlist, LibraryBeanGroup,
 };
+
+// When a Spring annotation on a method does nothing — the three ways to miss the proxy.
+pub use crate::proxy::{
+    declares_aspectj, issues_in as proxy_issues, ProxyIssue, ProxyMode, CODE_FINAL,
+    CODE_NOT_PUBLIC, CODE_SELF_INVOCATION,
+};
+
+// A transaction held open across something that is not the database.
+pub use crate::transaction::{
+    issues_in as transaction_issues, mentions_transaction, HeldTransaction,
+    CODE_REMOTE_IN_TRANSACTION, CODE_SLEEP_IN_TRANSACTION,
+};
+
+// The endpoints checked against each other, and against their own signatures.
+pub use crate::endpoint_check::{
+    issues as endpoint_issues, EndpointIssue, CODE_AMBIGUOUS, CODE_DUPLICATE_VARIABLE,
+    CODE_UNBOUND_VARIABLE, CODE_UNMATCHED_VARIABLE,
+};

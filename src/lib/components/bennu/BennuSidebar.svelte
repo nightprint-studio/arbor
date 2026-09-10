@@ -22,7 +22,7 @@
     FolderOpen, Folder, FileCode2, FolderTree, Plus, Crosshair,
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight, FileText, FlaskConical, FileType2,
-    History, Tag, Trash2, ExternalLink, FolderPlus, FolderInput, Package,
+    History, Tag, Trash2, ExternalLink, FolderPlus, FolderInput, Package, Boxes, ClipboardPaste,
   } from 'lucide-svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { tick, untrack } from 'svelte';
@@ -34,11 +34,14 @@
   import BennuFilterBar from './BennuFilterBar.svelte';
   import BennuNewFileModal from './BennuNewFileModal.svelte';
   import BennuNewFolderModal from './BennuNewFolderModal.svelte';
+  import BennuNewModuleModal from './BennuNewModuleModal.svelte';
+  import BennuPasteModal from './BennuPasteModal.svelte';
   import BennuRenameFileModal from './BennuRenameFileModal.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { openFolder, revealFile } from '$lib/utils/reveal';
   import { copyToClipboard } from '$lib/utils/clipboard';
+  import { treeClipboardStore } from '$lib/stores/bennu/tree-clipboard.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -415,6 +418,15 @@
       isPackageDir(dir)
         ? { id: 'new-folder', label: 'Package',   icon: Package }
         : { id: 'new-folder', label: 'Directory', icon: FolderPlus },
+      // Maven only, and unconditional there: a module can go under any pom in the reactor, and
+      // WHICH one is the dialog's first question rather than something the click has to settle.
+      // Absent on Cargo, where a new member crate is a different operation with a different shape.
+      ...(projectStore.isCargo
+        ? []
+        : [
+            { separator: true, id: 'sep-new-module', label: '' } as MenuItem,
+            { id: 'new-module', label: 'Module', icon: Boxes } as MenuItem,
+          ]),
     ];
   }
 
@@ -432,6 +444,7 @@
    *  through is the entry nobody trusts. */
   function runNew(id: string, dir: string) {
     if (id === 'new-folder') { openNewFolder(dir); return; }
+    if (id === 'new-module') { newModuleFrom = dir; return; }
     newFileKind = id === 'new-file' ? 'file' : defaultKind();
     newFileDir = dir;
   }
@@ -540,6 +553,9 @@
           { separator: true, id: 'sep-del-dir', label: '' },
           { id: 'history', label: 'Local History', icon: History, children: HISTORY_SUBMENU },
           { separator: true, id: 'sep-hist-dir', label: '' },
+          { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V',
+            disabled: treeClipboardStore.isEmpty },
+          { separator: true, id: 'sep-paste-dir', label: '' },
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
           { id: 'reveal-fs',     label: 'Reveal in File Explorer', icon: ExternalLink },
@@ -562,6 +578,11 @@
           { id: 'move',          label: 'Move to folder…',    icon: FolderInput },
           { id: 'delete',        label: 'Delete…',            icon: Trash2, shortcut: 'Del', danger: true },
           { separator: true, id: 'sep-rename', label: '' },
+          // Copy the FILE, not its path — the pair that makes duplicating a class one gesture.
+          { id: 'copy-node', label: 'Copy', icon: Copy, shortcut: 'Ctrl+C' },
+          { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V',
+            disabled: treeClipboardStore.isEmpty },
+          { separator: true, id: 'sep-paste-file', label: '' },
           ...runItem,
           { id: 'history', label: 'Local History', icon: History, children: HISTORY_SUBMENU },
           { separator: true, id: 'sep-hist-file', label: '' },
@@ -576,12 +597,15 @@
         // kind list, a plain file that only wants a name, or a directory.
         case 'new-class':
         case 'new-file':
-        case 'new-folder': runNew(id, newDir); break;
+        case 'new-folder':
+        case 'new-module': runNew(id, newDir); break;
         case 'run-tests': runTestsFor(node); break;
         case 'rename':    renamePath = node.path; break;
         case 'move':      movePicker = node; break;
         case 'delete':    deleting = node; break;
         case 'open':      void projectStore.openFile(node.path); break;
+        case 'copy-node': copyToTreeClipboard(node); break;
+        case 'paste':     pasteInto(node); break;
         case 'copy-path': void copyToClipboard(node.path); break;
         case 'copy-rel':  void copyToClipboard(projectStore.relativePath(node.path)); break;
         case 'reveal':    void revealPath(node.path); break;
@@ -820,6 +844,20 @@
    * is files-only.
    */
   function onRowKeydown(node: TreeNode, e: KeyboardEvent) {
+    // Copy and paste, the pair every file manager binds. Copy puts the FILE on the tree's own
+    // clipboard, not its path on the system one: Ctrl+C on a class means "I want another of
+    // these", and a path pasted into the editor is nobody's idea of that. `Copy path` is still
+    // in the menu for the times the text is what you wanted.
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
+      e.preventDefault();
+      copyToTreeClipboard(node);
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'v' || e.key === 'V')) {
+      e.preventDefault();
+      pasteInto(node);
+      return;
+    }
     // Delete on the focused row — the key every file manager binds, and the one the
     // context menu advertises. Backspace too, because that is what deletes on a Mac.
     if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -843,6 +881,24 @@
     renamePath = node.path;
   }
 
+  /** Put a row on the tree's clipboard. Directories are not offered: pasting one means rewriting
+   *  the package of every file inside it, which is a different operation. */
+  function copyToTreeClipboard(node: TreeNode) {
+    if (node.is_dir) return;
+    treeClipboardStore.copy([node.path]);
+    toastStore.show(`Copied ${node.name}`, 'info');
+  }
+
+  /** Open the paste dialog, landing in `node` when it is a folder and beside it when it is a file
+   *  — which is how every file manager reads a paste on a row. */
+  function pasteInto(node: TreeNode) {
+    if (treeClipboardStore.isEmpty) return;
+    pasteTarget = node.is_dir ? node.path : parentDir(node.path);
+  }
+
+  /** The directory a Paste dialog is open for (null = closed). */
+  let pasteTarget = $state<string | null>(null);
+
   /** The file a Rename dialog is open for (null = closed). */
   let renamePath = $state<string | null>(null);
 
@@ -858,6 +914,10 @@
   function defaultKind(): NewFileKind {
     return projectStore.isCargo ? 'rust_struct' : 'class';
   }
+
+  /** The directory a New-module dialog was opened from (null = closed). Only a hint: the dialog
+   *  picks the *parent pom* nearest it, and lets that be changed. */
+  let newModuleFrom = $state<string | null>(null);
 
   /** The directory a New-folder modal is open for (null = closed), and whether that
    *  directory is package territory — resolved when it opens, like the file kinds above. */
@@ -882,6 +942,7 @@
     if (!projectStore.project) return;
     const dir = defaultNewDir();
     if (what === 'folder') { openNewFolder(dir); return; }
+    if (what === 'module') { newModuleFrom = dir; return; }
     newFileKind = defaultKind();
     newFileDir = dir;
   });
@@ -1022,6 +1083,21 @@
     dir={newFileDir}
     initialKind={newFileKind}
     onClose={() => (newFileDir = null)}
+  />
+{/if}
+
+{#if pasteTarget !== null}
+  <BennuPasteModal
+    sources={treeClipboardStore.paths}
+    targetDir={pasteTarget}
+    onClose={() => (pasteTarget = null)}
+  />
+{/if}
+
+{#if newModuleFrom !== null}
+  <BennuNewModuleModal
+    fromDir={newModuleFrom}
+    onClose={() => (newModuleFrom = null)}
   />
 {/if}
 

@@ -13,6 +13,34 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **Those two files are gated on the version the project actually resolves.** The keys offered are the ones your Lombok or JUnit has — on JUnit 5.2 there is no parallel-execution block, because it arrived in 5.3 — and a key already in the file that your version silently ignores is flagged where it is written. When the version cannot be resolved, everything is offered.
 
+- **A Spring annotation that does nothing is reported where it does nothing.** `@Transactional` reached by a call from inside the same class does not go through the proxy, so the transaction never opens — the line that is wrong is the *call*, which carries no annotation and draws no eye. Same for `@Async`, `@Cacheable` and the authorization annotations, and for the two other ways to miss the proxy: a non-public method, and a final method or class. Silent on a project that weaves with AspectJ, where all three work.
+
+- **Endpoints are checked against each other.** A route two handlers both claim is an error where you wrote it, instead of a startup failure found by deploying — and a mapping with no HTTP method is recognised as colliding with every verb, which is the legacy `@RequestMapping` beside a new `@GetMapping`. A `@PathVariable` naming a variable the path does not have is flagged too: it is a 500 on every call, and no test that mocks the controller can see it. Plus a template variable nothing binds, on a handler that binds the others.
+
+- **A transaction held open across a network call.** An HTTP call inside a `@Transactional` method keeps its database connection for as long as the other server takes to answer — so under load the pool empties and every dashboard reports a slow database while the database sits idle. Recognised by the declared type of the receiver, so the project's own repositories and services are never mistaken for one; `Thread.sleep` inside a transaction is flagged as the same defect.
+
+- **A `@JsonCreator` whose arguments Jackson cannot name.** A multi-argument creator needs the compiler's `-parameters`, or deserialisation fails with "Argument #0 of constructor has no property name". The defect lives in two files that nobody reads together — the constructor and the pom — and neither is wrong on its own. Delegating creators, records, `@ConstructorProperties` and Spring Boot's parent are all recognised as fine.
+
+- **Test classes that are never run are named before you press Run.** A project on the JUnit Platform without `junit-vintage-engine` compiles its JUnit 4 tests and skips them in silence — the build stays green because Surefire reports on what it ran. The Tests panel now says how many classes that is, and which artifact would run them. The reverse case is reported too.
+
+- **Scheduled jobs, in words.** A Scheduled panel listing every `@Scheduled` method, and hover that reads a cron expression out loud — `0 0 2 * * ?` is *every day at 02:00*. Plus the two ways a job silently never runs: an expression Spring will refuse (a five-field crontab line is named for what it is), and a project where nothing ever switched scheduling on — `@SpringBootApplication` alone does not.
+
+- **What a DTO actually puts in its JSON.** Two members claiming one JSON name, a field with no way out of the class, and `@JsonIgnore` sitting next to `@JsonProperty` — checked from the class instead of discovered from a payload that came out wrong. Quiet on any class whose visibility rules Bennu cannot see: one configuring its own, or one whose accessors Lombok writes.
+
+- **Bean Validation is understood, and its messages are checked against the bundle the validator actually reads.** Which is not the application's message bundle: the spec says `ValidationMessages`, and a project can redirect it to another one named in a `@Bean`, which Bennu goes and finds. A `{key}` no validation bundle declares is flagged where it is written — it renders as itself in the user's form — while a `{min}` on a `@Size` is recognised as the constraint's own attribute and left alone. Completion, hover and go-to-declaration on message keys, plus a Constraints panel listing what the project validates and which messages will not resolve.
+
+- **A constraint on a type its engine cannot validate is an error.** `@NotBlank` on an `int` is not a wrong message — Hibernate Validator refuses it at startup, so the application does not come up. Reported only where the answer is certain: a project type or a custom `ConstraintValidator` is never contradicted.
+
+- **New modules, from the tree.** *New › Module* on a Maven project creates the folder, its pom, its source roots — and the `<module>` line in the parent that is what separates a module from a directory that looks like one. Group and version are shown as what the parent gives and left unwritten unless you change them; a parent that was not an aggregator becomes one, and says so first.
+
+- **Copy and paste a class in the project tree.** Ctrl+C on a file, Ctrl+V on the package it should land in. A Java copy has its `package` rewritten to where it actually lands, its type renamed along with the file, and the neighbours it referred to by simple name turned into imports when the copy leaves their package — the part that silently breaks when a class is duplicated by hand. Nothing is ever overwritten.
+
+- **A pom is coloured by what it says.** An artifactId, a version, a scope and a property each read as what they are, where an XML mode had nothing to say about the text between two tags. The tags themselves keep the colour they had, and sections gain weight instead.
+
+- **A dependency's own pom is a first-class pom.** Following a coordinate into `~/.m2` used to be a dead end — colour, hover and go-to all stopped there. Now the same jumps work from it, so what a dependency drags in can be followed as far as it goes; its checks stay off, since nobody can edit a file in the repository.
+
+- **A pom that pins the test selector can be fixed from the warning that reports it.** *Convert to a property* rewrites Surefire's literal `<test>` as a reference to a property defaulted to the same value: a plain `mvn test` still runs the suite, and running one class or one case works again — from Bennu, from a terminal, and from any other tool. The pom to be written is shown first, and only that value changes.
+
 ### Fixed
 
 - **Debugging a test showed no debugger.** The session started, the breakpoint was hit and the JVM stopped — but the Run panel's test tab had no transport controls and no frames or variables, because it looked up the debug session by the *program* run in front of it and a test run is not one. It now shows the stack, the variables and the step buttons in the same places a debugged program does, and the tab comes forward when a test stops.

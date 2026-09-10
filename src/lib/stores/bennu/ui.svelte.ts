@@ -253,7 +253,7 @@ function createBennuUiStore() {
   // A relay and not a piece of shared state, for the same reason as the one above: WHERE a new
   // file or folder is created is the tree's own question — the directory it is sitting on — and
   // the palette has no business answering it. It only says which of the two dialogs to open.
-  let newTarget = $state<{ what: 'file' | 'folder'; nonce: number }>({ what: 'file', nonce: 0 });
+  let newTarget = $state<{ what: 'file' | 'folder' | 'module'; nonce: number }>({ what: 'file', nonce: 0 });
 
   return {
     get caretLine() { return caretLine; },
@@ -513,9 +513,10 @@ function createBennuUiStore() {
       revealTarget = { path, nonce: revealTarget.nonce + 1 };
     },
 
-    /** Open the Project tree's New-file / New-folder dialog (ensures Project is open + bumps
-     *  the relay the sidebar watches). The tree decides which directory it creates in. */
-    newInTree(what: 'file' | 'folder') {
+    /** Open one of the Project tree's New dialogs (ensures Project is open + bumps the relay the
+     *  sidebar watches). The tree decides which directory it creates in — and for a module, which
+     *  pom in the reactor that directory sits under. */
+    newInTree(what: 'file' | 'folder' | 'module') {
       leftPanel = 'project';
       newTarget = { what, nonce: newTarget.nonce + 1 };
     },

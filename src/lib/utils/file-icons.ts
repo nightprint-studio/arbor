@@ -294,6 +294,10 @@ const EXT_ICONS: Record<string, IconifyIcon> = {
   yaml: yamlIcon, yml: yamlIcon,
   json: jsonIcon, json5: jsonIcon, jsonc: jsonIcon,
   xml: xmlIcon, plist: xmlIcon,
+  // A `*.pom` is a `pom.xml` under the name the repository files it as — the file you land
+  // in by following a dependency. By extension here, because in `~/.m2` the name is the
+  // coordinate and no name rule could ever match it.
+  pom: mavenIcon,
   html: htmlIcon, htm: htmlIcon,
   css: cssIcon,
   scss: scssIcon,

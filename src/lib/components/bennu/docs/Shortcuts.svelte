@@ -81,6 +81,9 @@
 <h2>Files</h2>
 <ul>
   <li><kbd>F2</kbd> — <strong>rename</strong> the file selected in the Project tree. On a Rust project the rename also rewrites the <code>mod</code> declaration that names the file and every <code>use</code> path through it; the dialog says how many files it will touch before you commit to it</li>
+  <li><kbd>Ctrl</kbd> + <kbd>C</kbd> — <strong>copy</strong> the file selected in the Project tree. The file itself, not its path: <strong>Copy path</strong> in the right-click menu is still what puts the text on the system clipboard</li>
+  <li><kbd>Ctrl</kbd> + <kbd>V</kbd> — <strong>paste</strong> it into the folder or package you are on (beside the file you are on). A Java copy has its <code>package</code> rewritten to where it lands, its type renamed with the file, and the neighbours it can no longer see by simple name turned into imports</li>
+  <li><kbd>Delete</kbd> — <strong>delete</strong> the selected file, recorded in Local History first so it can be brought back</li>
 </ul>
 
 <h2>Build &amp; run</h2>

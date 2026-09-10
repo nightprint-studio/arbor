@@ -31,3 +31,6 @@ pub use crate::intel::{completions, diagnostics, hover, inline_hint, navigate};
 
 // The tolerant scan.
 pub use crate::scan::{local_name, scan, Attr, Doctype, Scan, Tag, TagKind};
+
+// The element tree over it — what anything reading (or rewriting) a configuration file addresses.
+pub use crate::doc::Doc;

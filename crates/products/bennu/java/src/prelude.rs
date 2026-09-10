@@ -81,3 +81,10 @@ pub use crate::hierarchy::{
     declaring, declaring_field, declaring_method, seen_as, substitute, supertype_names, walk,
     walk_up, Ancestor, Walk, MAX_HIER_NODES,
 };
+
+// Reading a declaration the way a framework rule needs to: its annotations, its modifiers as
+// tokens rather than as text, and the literals inside them.
+pub use crate::decl::{
+    annotation_named, annotation_string, annotation_value_text, annotations_of, has_modifier,
+    modifier_words, named_child_of, node_text, simple_name, string_literal, type_declarations,
+};

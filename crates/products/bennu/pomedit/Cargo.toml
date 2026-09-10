@@ -1,0 +1,13 @@
+[package]
+name         = "bennu-pomedit"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Writing into a pom.xml the way a person would: a value replaced in place, an element added under the one that should hold it, a new module's pom generated from its parent's. Surgical byte edits over the element tree, so a file keeps its own indentation, comments and ordering — a reformatted pom is a diff nobody can review."
+
+[dependencies]
+# The element tree over the tolerant scanner. The same walk that READS a pom locates what a write
+# has to replace — two walks would put an edit one space to the left of what was read.
+bennu-xml = { path = "../xml" }

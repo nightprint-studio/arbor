@@ -187,6 +187,51 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
         src.lombok_import.then_some("import lombok.* / @Data / @Getter"),
     );
 
+    // ── BeanValidation ───────────────────────────────────────────────────────
+    // The API is what makes constraints mean anything; the engine (`hibernate-validator`) and
+    // Spring's starter each drag it in, and a project regularly declares only one of the three.
+    let bval_a = ["jakarta.validation-api", "validation-api", "hibernate-validator",
+                  "spring-boot-starter-validation"]
+        .iter()
+        .find(|c| pom.has_dependency(c))
+        .copied();
+    activate(
+        &mut set.bean_validation,
+        &mut hits,
+        "bean_validation",
+        bval_a,
+        files.validation_signal(),
+        src.bean_validation.then_some("import jakarta/javax.validation / @NotNull / @Valid"),
+    );
+
+    // ── Scheduling ───────────────────────────────────────────────────────────
+    let sched_a = ["quartz", "spring-boot-starter-quartz", "spring-context-support"]
+        .iter()
+        .find(|c| pom.has_dependency(c))
+        .copied();
+    activate(
+        &mut set.scheduling,
+        &mut hits,
+        "scheduling",
+        sched_a,
+        None,
+        src.scheduled.then_some("@Scheduled / @EnableScheduling in source"),
+    );
+
+    // ── Jackson ──────────────────────────────────────────────────────────────
+    let jackson_a = ["jackson-databind", "jackson-core", "spring-boot-starter-web"]
+        .iter()
+        .find(|c| pom.has_dependency(c))
+        .copied();
+    activate(
+        &mut set.jackson,
+        &mut hits,
+        "jackson",
+        jackson_a,
+        None,
+        src.jackson.then_some("com.fasterxml.jackson import / @Json* in source"),
+    );
+
     // ── EntandoJaps ──────────────────────────────────────────────────────────
     let entando_a = pom.dependencies.iter().any(|d| {
         d.contains("org.entando") || d.contains("com.agiletec") || d.contains("entando")
@@ -378,9 +423,26 @@ struct ConfigFiles {
     has_tld: bool,
     japs_struts_plugin: bool,
     aps_core_tld: bool,
+    /// `META-INF/validation.xml` — the file that can replace the message interpolator, and
+    /// therefore the file that decides which bundle a constraint message is read from.
+    validation_xml: bool,
+    /// A `ValidationMessages.properties` on a resource root — the bundle the spec names, and the
+    /// one whose presence says somebody has written custom constraint messages.
+    validation_messages: bool,
 }
 
 impl ConfigFiles {
+    /// The tier-B evidence for Bean Validation, named so the hit says which file was found.
+    fn validation_signal(&self) -> Option<&'static str> {
+        if self.validation_xml {
+            Some("META-INF/validation.xml")
+        } else if self.validation_messages {
+            Some("ValidationMessages.properties")
+        } else {
+            None
+        }
+    }
+
     fn scan(root: &Path) -> Self {
         let mut f = ConfigFiles::default();
         // struts.xml lives on the classpath: src/main/resources or WEB-INF/classes.
@@ -418,6 +480,14 @@ impl ConfigFiles {
                 }
                 if lname == "persistence.xml" {
                     f.persistence_xml = true;
+                }
+                if lname == "validation.xml" {
+                    f.validation_xml = true;
+                }
+                // The bundle the Bean Validation spec names, in every locale it is written in:
+                // `ValidationMessages.properties`, `ValidationMessages_it.properties`.
+                if lname.starts_with("validationmessages") && lname.ends_with(".properties") {
+                    f.validation_messages = true;
                 }
                 if lname.ends_with(".hbm.xml") {
                     f.hbm_xml = true;
@@ -464,6 +534,13 @@ struct SourceSignals {
     mybatis_annotation: bool,
     jdbc_usage: bool,
     lombok_import: bool,
+    /// A source declares a constraint or asks for one to be checked — the corroborating half of
+    /// the Bean Validation signal.
+    bean_validation: bool,
+    /// A source schedules work, or switches scheduling on.
+    scheduled: bool,
+    /// A source annotates something for Jackson, or imports it.
+    jackson: bool,
     entando_showlet: bool,
     /// A Rust source declares an ECS item or registers a system — the corroborating half of the
     /// Bevy signal.
@@ -510,6 +587,20 @@ impl SourceSignals {
                 s.jdbc_usage |= text.contains("JdbcTemplate")
                     || text.contains("import java.sql.")
                     || text.contains("AbstractDAO");
+                // `@Valid` and `@NotNull` are the two that appear in essentially every project
+                // that validates anything, and the imports are what tell a constraint from a
+                // same-named annotation out of some other library.
+                s.bean_validation |= text.contains("import jakarta.validation.")
+                    || text.contains("import javax.validation.")
+                    || text.contains("@Valid")
+                    || text.contains("@NotNull");
+                s.scheduled |= text.contains("@Scheduled")
+                    || text.contains("@EnableScheduling")
+                    || text.contains("org.quartz");
+                s.jackson |= text.contains("com.fasterxml.jackson")
+                    || text.contains("@JsonProperty")
+                    || text.contains("@JsonIgnore")
+                    || text.contains("ObjectMapper");
                 s.lombok_import |= text.contains("import lombok.")
                     || text.contains("@Data")
                     || text.contains("@Getter");

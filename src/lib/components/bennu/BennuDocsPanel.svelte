@@ -57,6 +57,9 @@
   import Jpa               from './docs/Jpa.svelte';
   import FormAnalysis      from './docs/FormAnalysis.svelte';
   import MessageBundles    from './docs/MessageBundles.svelte';
+  import BeanValidation    from './docs/BeanValidation.svelte';
+  import Scheduled         from './docs/Scheduled.svelte';
+  import JsonTypes         from './docs/JsonTypes.svelte';
   import I18n              from './docs/I18n.svelte';
   import XmlSchemas        from './docs/XmlSchemas.svelte';
   import Tomcat            from './docs/Tomcat.svelte';
@@ -121,6 +124,9 @@
       { id: 'spring',           label: 'Spring',            icon: Layers    },
       { id: 'jpa',              label: 'JPA',               icon: Database  },
       { id: 'forms',            label: 'Form analysis',     icon: ScrollText },
+      { id: 'bean-validation',  label: 'Bean Validation',   icon: ShieldCheck },
+      { id: 'scheduled',        label: 'Scheduled jobs',    icon: History   },
+      { id: 'json-types',       label: 'JSON types',        icon: Braces    },
       { id: 'message-bundles',  label: 'Message bundles',   icon: Languages },
       { id: 'i18n',             label: 'i18n labels',       icon: Languages },
       { id: 'xml-schemas',      label: 'XML schemas',       icon: FileCode2 },
@@ -175,6 +181,9 @@
     'spring':            Spring,
     'jpa':               Jpa,
     'forms':             FormAnalysis,
+    'bean-validation':   BeanValidation,
+    'scheduled':         Scheduled,
+    'json-types':        JsonTypes,
     'message-bundles':   MessageBundles,
     'i18n':              I18n,
     'xml-schemas':       XmlSchemas,

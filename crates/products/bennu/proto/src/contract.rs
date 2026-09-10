@@ -51,6 +51,29 @@ pub struct CapabilitySet {
     pub jdbc_dao: bool,
     /// Project Lombok (`org.projectlombok:lombok`, `@Data`).
     pub lombok: bool,
+    /// **Jakarta / Java Bean Validation** — `jakarta.validation` or `javax.validation` on the
+    /// classpath, a `META-INF/validation.xml`, a `ValidationMessages.properties`, or constraint
+    /// annotations in the sources.
+    ///
+    /// Its own capability rather than a corner of Spring or JPA because the thing that goes wrong
+    /// is its own: a constraint's `message` is resolved against a bundle **the validator chooses**,
+    /// which is not the bundle the rest of the application reads, and a key it cannot find is
+    /// rendered to the user verbatim. Neither Spring nor JPA has an opinion about that file.
+    #[serde(default)]
+    pub bean_validation: bool,
+    /// **Scheduled work** — `@Scheduled` / `@EnableScheduling` in the sources, a Quartz dependency,
+    /// or `<task:annotation-driven>`.
+    ///
+    /// Its own capability because its failure mode is its own: a job that never runs raises
+    /// nothing, logs nothing and looks exactly like a job that ran and had nothing to do.
+    #[serde(default)]
+    pub scheduling: bool,
+    /// **Jackson** — `com.fasterxml.jackson` on the classpath, or `@Json*` in the sources.
+    ///
+    /// What goes wrong here is absence: a field with no accessor is simply missing from the
+    /// payload, and the first person to notice is on the other side of an HTTP call.
+    #[serde(default)]
+    pub jackson: bool,
     /// Entando / jAPS platform (`org.entando.*` / `com.agiletec.*`, `<wp:*>`).
     pub entando_japs: bool,
     /// The **fulcrum engine's i18n convention**: an `i18n/` directory holding a `languages.toml`,

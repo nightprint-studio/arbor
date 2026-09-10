@@ -1,0 +1,17 @@
+[package]
+name         = "bennu-jackson"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "What a DTO will and will not put in its JSON, read from the class rather than discovered from a payload that came out wrong: a property two members both claim, a field nothing can reach, and annotations that contradict each other on the same element."
+
+[dependencies]
+bennu-ext   = { path = "../ext" }
+bennu-proto = { path = "../proto" }
+bennu-java  = { path = "../java" }
+# Reading the pom. Whether a `@JsonCreator` works at all depends on the compiler's `-parameters`,
+# which is written in the build file and nowhere near the constructor it breaks.
+bennu-xml   = { path = "../xml" }
+tree-sitter = "0.25"

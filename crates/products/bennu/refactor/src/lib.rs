@@ -40,6 +40,9 @@
 // Where a member lives, and where a new one goes.
 pub mod body;
 // A run of statements becomes a method.
+// Copying a type into another package — the safe sibling of a move: nothing points at the copy
+// yet, so nothing outside the new file has to be rewritten.
+pub mod copy_class;
 pub mod create;
 pub mod extract_method;
 // An expression gets a name.

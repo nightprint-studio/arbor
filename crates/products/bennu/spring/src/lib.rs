@@ -50,6 +50,8 @@ pub mod class_ref;
 // `@ConfigurationProperties` → the full key each bound field binds (nesting, maps, lists, renames).
 pub mod config_props;
 pub mod endpoints;
+// The endpoints checked against each other, and against their own signatures.
+pub mod endpoint_check;
 // A configuration key → the environment variable that overrides it.
 pub mod env;
 pub mod ext;
@@ -65,6 +67,10 @@ pub mod library_beans;
 pub mod metadata;
 pub mod model;
 pub mod prelude;
+// When a Spring annotation on a method does nothing: the three ways to miss the proxy.
+pub mod proxy;
+// A transaction held open across a network call — the defect whose symptom is a slow database.
+pub mod transaction;
 pub mod props;
 // The editor's answers for a property file — who reads each key.
 pub mod props_intel;

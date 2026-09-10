@@ -157,6 +157,16 @@ mod new_file;
 // (`assets/icons`), or a package (`it.acme.web`) under a Java source root. Only the levels that
 // are missing get created.
 mod new_folder;
+// New-module creation: `bennu_new_module_context` (which poms a module could be added under, and
+// what a child of each inherits) + `bennu_new_module`, which writes the folder, the pom, the source
+// roots AND the parent's `<modules>` — the last of which is what separates a module from a
+// directory that looks like one.
+mod new_module;
+// Copy/paste in the project tree: `bennu_paste_plan` (where each file would land, and what is in
+// the way) + `bennu_paste_files`. A Java file has its `package` rewritten to where it lands — and,
+// when the copy leaves its old package behind, the neighbours it referred to by simple name become
+// imports, which is the half only the index can answer.
+mod copy_paste;
 // Index inspector: `bennu_index_stats` — a cheap snapshot of the per-project index (symbol
 // + config counts, JDK level, build-ready flag) for an inspector panel.
 mod index_stats;
@@ -370,6 +380,16 @@ mod tomcat;
 // per-class results as Surefire writes its reports). Shares the build's single-run lock —
 // two Maven processes on one tree fight over `target/`.
 mod tests;
+// What the reactor's poms say about running tests, and the one edit that changes it:
+// `bennu_test_selection_pinned` (does this pom make selecting a test impossible?) plus
+// `bennu_plan_suite_property` / `bennu_apply_suite_property`, the button that rewrites a pinned
+// `<test>` into a property defaulted to it. Reading and writing in one module on purpose — a fix
+// that found a different element from the warning would be worse than no fix.
+mod surefire_pom;
+// The test classes this project will NOT run: `bennu_test_engine_gap` — JUnit 4 sources with no
+// vintage engine on the classpath (or the reverse). They compile, Surefire never executes them,
+// and the build is green, so nothing anywhere says a hundred classes were skipped.
+mod test_engines;
 // The same three verbs for a Cargo workspace: `bennu_discover_cargo_tests` (every `#[test]`, placed
 // in its crate and target) + `bennu_run_cargo_tests`, which reads a live `cargo test` off its two
 // output streams. Stop is still `bennu_cancel_tests` — one registry, one verb.

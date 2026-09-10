@@ -29,6 +29,8 @@ export type FrameworkCatalogId =
   | 'springconfig'
   | 'springbindings'
   | 'springdocumented'
+  | 'constraints'
+  | 'jobs'
   | 'jpaentities'
   | 'jparepositories'
   | 'taglibs'

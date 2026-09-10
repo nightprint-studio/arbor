@@ -948,6 +948,8 @@ dependencies = [
  "bennu-index",
  "bennu-intel",
  "bennu-intentions",
+ "bennu-jackson",
+ "bennu-jakarta",
  "bennu-java",
  "bennu-jdwp",
  "bennu-jpa",
@@ -958,10 +960,12 @@ dependencies = [
  "bennu-naming",
  "bennu-npm",
  "bennu-plugin",
+ "bennu-pomedit",
  "bennu-project",
  "bennu-proto",
  "bennu-query",
  "bennu-refactor",
+ "bennu-scheduling",
  "bennu-spring",
  "bennu-ssr",
  "bennu-test",
@@ -1145,6 +1149,29 @@ name = "bennu-intentions"
 version = "0.3.0"
 
 [[package]]
+name = "bennu-jackson"
+version = "0.3.0"
+dependencies = [
+ "bennu-ext",
+ "bennu-java",
+ "bennu-proto",
+ "bennu-xml",
+ "tree-sitter",
+]
+
+[[package]]
+name = "bennu-jakarta"
+version = "0.3.0"
+dependencies = [
+ "bennu-complete",
+ "bennu-ext",
+ "bennu-i18n",
+ "bennu-java",
+ "bennu-proto",
+ "tree-sitter",
+]
+
+[[package]]
 name = "bennu-java"
 version = "0.3.0"
 dependencies = [
@@ -1247,6 +1274,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-pomedit"
+version = "0.3.0"
+dependencies = [
+ "bennu-xml",
+]
+
+[[package]]
 name = "bennu-project"
 version = "0.3.0"
 dependencies = [
@@ -1289,6 +1323,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-scheduling"
+version = "0.3.0"
+dependencies = [
+ "bennu-ext",
+ "bennu-java",
+ "bennu-proto",
+ "tree-sitter",
+]
+
+[[package]]
 name = "bennu-spel"
 version = "0.3.0"
 
@@ -1300,11 +1344,13 @@ dependencies = [
  "bennu-complete",
  "bennu-ext",
  "bennu-facts",
+ "bennu-java",
  "bennu-proto",
  "bennu-spel",
  "roxmltree",
  "serde",
  "serde_json",
+ "tree-sitter",
 ]
 
 [[package]]

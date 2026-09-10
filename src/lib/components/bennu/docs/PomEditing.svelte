@@ -6,6 +6,25 @@
   and marking the ones that are not.
 </p>
 
+<h2>Colour</h2>
+<p>
+  An XML mode has one colour for tag names and none at all for the text between them — and a pom is
+  almost nothing but text between tags. Here it is coloured by what it <em>is</em>: an artifactId
+  and a module read as names, a version as a literal, a scope or a packaging or a lifecycle phase as
+  the fixed words they come from, and a property in the same colour where it is declared and where
+  it is used.
+</p>
+<p>
+  Nothing is ever dimmed. Every tag keeps the colour it has everywhere else; sections and the
+  blocks inside them get <em>weight</em> in that same colour, so the file can be scrolled by shape
+  without any of it becoming harder to read.
+</p>
+<p>
+  A <code>$&#123;property&#125;</code> is never coloured as the value it will become. It is tinted
+  as a substitution, with its name in the colour a property has everywhere else — the only mistake
+  possible there is the two ends not matching, and one colour is what makes that visible.
+</p>
+
 <h2>The local repository</h2>
 <p>
   Every answer on this page comes from the repository your build would use — not from
@@ -106,6 +125,21 @@
   Hover says the same thing without moving: what the coordinate resolves to on disk, what the
   version expands to and who decided it, the scope, and every version of that artifact you have
   installed.
+</p>
+
+<h2>A dependency's own pom</h2>
+<p>
+  The <code>.pom</code> you land in from a coordinate is not part of your project — it lives in the
+  local repository — and it is still a pom. Everything on this page works there: the colour, the
+  hover, and the same <kbd>Ctrl</kbd> + <kbd>B</kbd> on <em>its</em> dependencies and on its
+  <code>&lt;parent&gt;</code>. So "what does this actually drag in" is followed as far as it goes,
+  rather than one step.
+</p>
+<p>
+  With one deliberate exception: a pom in the repository is never <strong>marked</strong>. The
+  checks are written against a file you can fix, and an artifact was built against dependencies your
+  machine had no reason to download — so there, the very check that finds a real problem in your own
+  pom would underline the ordinary state of a repository, on a line nobody can edit.
 </p>
 
 <h2>When a newer version exists</h2>

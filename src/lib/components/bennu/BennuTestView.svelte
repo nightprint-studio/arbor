@@ -33,7 +33,7 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
   import { formatDuration, type TestRow } from '$lib/stores/bennu/test-tree';
-  import BennuPinnedTestsWarning from './BennuPinnedTestsWarning.svelte';
+  import BennuTestSetupWarnings from './BennuTestSetupWarnings.svelte';
 
   /** The runner for the open project — Maven's or cargo's. This view never learns which: a row
    *  runs itself (`runRow`), because what a row means is the runner's business and this one draws
@@ -108,7 +108,7 @@
     <div class="tp-left">
       <!-- Pinned above the tree and OUTSIDE its scroll: it is a fact about every ▷ in the panel,
            so it must not be something you scroll past and forget. -->
-      <BennuPinnedTestsWarning {root} />
+      <BennuTestSetupWarnings {root} />
       <div class="tp-tree">
       {#if store.discovering && !rows.length}
         <div class="tp-mid"><Spinner size={16} /><span>Looking for tests…</span></div>

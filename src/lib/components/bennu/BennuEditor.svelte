@@ -5024,6 +5024,75 @@
   :global(.cm-content .cm-fw-jpa-query-number),
   :global(.cm-content .cm-fw-jpa-query-number span) { color: var(--syntax-number, #6897bb); }
 
+  /*
+   * ── A pom, read rather than parsed ──────────────────────────────────────────────────────────
+   *
+   * An XML mode has one colour for tag names and none for element text. A pom is almost nothing
+   * but element text, so every coordinate, every scope and every version arrives the same grey as
+   * the four hundred words around it — which is why looking for `<scope>test</scope>` in a real
+   * pom means reading it rather than scanning it.
+   *
+   * ⚠️ **Add, never subtract.** Every tag keeps the colour the mode gave it; the sections and the
+   * repeated blocks get WEIGHT in that same colour and nothing else. An earlier version dimmed the
+   * coordinate labels so their values would carry the line — sound on paper, horrible on screen:
+   * the eye reads dimmed text as *disabled*, and half a pom looked switched off. Which is also why
+   * the two rules below set `font-weight` and no `color` at all: the tag colour then comes from
+   * the theme's own `tagName` and the two can never drift apart.
+   *
+   * The colours go where the mode was silent — on the values:
+   *   • gold   — a name you would follow: an artifactId, a module, a goal;
+   *   • blue   — a version, which is a literal;
+   *   • green  — a word from a closed vocabulary: a scope, a packaging, a lifecycle phase. Its own
+   *              hue rather than the keyword one, because the keyword colour IS the tag colour and
+   *              `<packaging>pom</packaging>` in it reads as three tags in a row;
+   *   • violet — a property, both where it is DECLARED and where it is referenced. One colour on
+   *              purpose: the only mistake a `${…}` admits is the two ends not matching;
+   *   • plain  — the groupId. It is the qualifier of the name beside it, and plain text is what
+   *              says so; marked all the same, so a theme can decide otherwise.
+   *
+   * (`:global` + the `span` descendant + `.cm-content` in front: the documented arrangement above
+   * — CodeMirror owns these elements, and a mark covering part of a token nests inside it.)
+   */
+  :global(.cm-content .cm-fw-maven-tag-section),
+  :global(.cm-content .cm-fw-maven-tag-section span) { font-weight: 700; }
+  :global(.cm-content .cm-fw-maven-tag-item),
+  :global(.cm-content .cm-fw-maven-tag-item span) { font-weight: 600; }
+  :global(.cm-content .cm-fw-maven-property),
+  :global(.cm-content .cm-fw-maven-property span) {
+    color: var(--syntax-field, #9876aa); font-weight: 600;
+  }
+
+  :global(.cm-content .cm-fw-maven-group),
+  :global(.cm-content .cm-fw-maven-group span) { color: var(--text-primary); }
+  :global(.cm-content .cm-fw-maven-artifact),
+  :global(.cm-content .cm-fw-maven-artifact span),
+  :global(.cm-content .cm-fw-maven-module),
+  :global(.cm-content .cm-fw-maven-module span),
+  :global(.cm-content .cm-fw-maven-goal),
+  :global(.cm-content .cm-fw-maven-goal span) {
+    color: var(--syntax-function, #ffc66d); font-weight: 600;
+  }
+  :global(.cm-content .cm-fw-maven-version),
+  :global(.cm-content .cm-fw-maven-version span) { color: var(--syntax-number, #6897bb); }
+  :global(.cm-content .cm-fw-maven-scope),
+  :global(.cm-content .cm-fw-maven-scope span),
+  :global(.cm-content .cm-fw-maven-packaging),
+  :global(.cm-content .cm-fw-maven-packaging span),
+  :global(.cm-content .cm-fw-maven-phase),
+  :global(.cm-content .cm-fw-maven-phase span) {
+    color: var(--syntax-string, #6a8759); font-weight: 600;
+  }
+  /* The tint marks the whole substitution, the colour marks the name inside it — the same
+     arrangement, and the same violet, a Spring `${…}` gets above. It is the same idea. */
+  :global(.cm-content .cm-fw-maven-placeholder) {
+    background: color-mix(in srgb, var(--syntax-field, #9876aa) 12%, transparent);
+    border-radius: 2px;
+  }
+  :global(.cm-content .cm-fw-maven-placeholder-name),
+  :global(.cm-content .cm-fw-maven-placeholder-name span) {
+    color: var(--syntax-field, #9876aa); font-weight: 600;
+  }
+
   /* The run arrow. Green and clearly larger than the framework glyphs, because it is the one
      gutter mark that DOES something rather than pointing somewhere — and because a green ▶ is
      what a hand trained on IntelliJ looks for.

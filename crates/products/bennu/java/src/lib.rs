@@ -24,6 +24,9 @@ pub mod annotation_site;
 pub mod ast;
 // The type a position wants — the constraint on the hole rather than on the candidate.
 pub mod expected;
+// The four questions every framework rule asks of a declaration — annotations, modifiers,
+// literals — read as nodes rather than as text.
+pub mod decl;
 pub mod grammar;
 pub mod hierarchy;
 pub mod import_hint;

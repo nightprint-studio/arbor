@@ -258,3 +258,91 @@
   invitation to open an empty list. They appear as the project index finishes, and again after a
   rebuild that finds the first route.
 </p>
+
+<h2>When an annotation on a method does nothing</h2>
+<p>
+  <code>@Transactional</code>, <code>@Async</code>, <code>@Cacheable</code> and the authorization
+  annotations are not implemented by the method they are written on. They are implemented by a
+  <strong>proxy</strong> in front of the bean, and anything that reaches the bean without going
+  through that proxy gets the bare method.
+</p>
+<p>
+  Three ways to miss it, all silent: a <strong>self-invocation</strong> (a call from another method
+  of the same class — the reference is <code>this</code>, not the proxy), a <strong>non-public
+  method</strong>, which proxy-based AOP ignores outright, and a <strong>final method or
+  class</strong>, which the proxy cannot override. A self-invocation is reported on the
+  <em>call</em>, because that is the line that is wrong — and it is the line carrying no annotation,
+  so nothing else draws the eye to it.
+</p>
+<p>
+  All of this goes quiet on a project that weaves with AspectJ
+  (<code>mode = AdviceMode.ASPECTJ</code>, or <code>mode="aspectj"</code> in the XML), where all
+  three work correctly. Recursion is not reported either — the first call already went through the
+  proxy — nor is a bare call inside a nested class, which resolves to the nested class's own member.
+</p>
+
+<h2>A transaction held open across a network call</h2>
+<p>
+  A <code>@Transactional</code> method borrows a connection from the pool for its whole duration.
+  What it is not for is waiting on somebody else's server: a <code>RestTemplate</code> call inside
+  one keeps the connection for as long as the other end takes to answer.
+</p>
+<p>
+  On a quiet afternoon this is fine. Under load, ten concurrent calls to a four-second endpoint hold
+  every connection in the application while doing no database work at all — and
+  <strong>what you are shown is a slow database</strong>. Connection wait time up, queries queueing,
+  pool saturated, database idle. The cause is one line that looks like an ordinary call to a
+  collaborator.
+</p>
+<p>
+  A remote call is recognised by the <strong>declared type of the receiver</strong> — never by the
+  method name, since <code>execute</code>, <code>send</code> and <code>get</code> are on everything.
+  So the project's own repositories, mappers and services are never mistaken for one, and a Feign
+  client or a generated stub is a remote call Bennu stays quiet about rather than guesses at.
+  <code>Thread.sleep</code> inside a transaction is the same defect without a server at the other
+  end. A propagation that <em>suspends</em> the transaction
+  (<code>NOT_SUPPORTED</code>, <code>NEVER</code>) holds nothing, and is left alone — it is the fix.
+</p>
+
+<h2>Endpoints checked against each other</h2>
+<p>
+  Two questions, and only one of them fits in a file. <em>Does this handler's
+  <code>@PathVariable</code> match its path?</em> is answerable from the method. <em>Does another
+  controller already claim this route?</em> is not — that controller is in another package, quite
+  possibly written by somebody else three years ago.
+</p>
+<ul>
+  <li>
+    <strong>A route two handlers both claim.</strong> Spring refuses to start:
+    <em>"Ambiguous mapping … there is already … mapped"</em>. It is a startup failure, so nobody
+    ships it — but it is found by <em>running</em> the application, which on a legacy reactor is a
+    build plus a deploy plus a wait, and the message names two classes without saying which one is
+    new. Both sites are marked, each in its own buffer. A mapping with no HTTP method accepts them
+    all, so it collides with every verb — which is the shape that actually turns up: a legacy
+    <code>@RequestMapping</code> beside a new <code>@GetMapping</code>. Two handlers separated by
+    <code>produces</code> are a deliberate pair, and are left alone.
+  </li>
+  <li>
+    <strong>A <code>@PathVariable</code> the path does not have.</strong> Not a startup failure — a
+    <strong>500 on every single call</strong>, with <code>MissingPathVariableException</code>,
+    found by the first person to use the feature. The compiler cannot see it, a test that mocks the
+    controller cannot see it, and the two halves sit fifteen characters apart on one line, which is
+    exactly the distance at which a typo survives review. The name the annotation gives wins over
+    the parameter's own, so <code>@PathVariable("ordineId") String id</code> against
+    <code>/&#123;ordineId&#125;</code> is correct and silent.
+  </li>
+  <li>
+    <strong>A template variable nothing binds</strong>, reported only on a handler that binds some
+    of the others — that is the shape of a misspelling. A handler that binds none is a deliberate
+    "I do not need it", and reporting it would fire on every <code>/&#123;version&#125;/</code>
+    prefix in the project.
+  </li>
+  <li><strong>Two parameters binding one variable</strong>, which both receive the same value.</li>
+</ul>
+<p>
+  A path assembled from a property (<code>@GetMapping("&#36;&#123;api.base&#125;/&#123;id&#125;")</code>)
+  has a template Bennu cannot resolve, so nothing is claimed about it in either direction. And the
+  file in front of you is always re-read from the <strong>buffer</strong> rather than taken from the
+  last scan — a squiggle placed at an offset from before your last three edits lands on the wrong
+  line.
+</p>

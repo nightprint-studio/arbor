@@ -36,3 +36,5 @@ pub use crate::complete::completions as pom_completions;
 pub use crate::doc::Doc as PomDoc;
 pub use crate::env::PomEnv;
 pub use crate::explain::{hover as pom_hover, navigate as pom_navigate};
+pub use crate::ext::is_pom;
+pub use crate::paint::highlights as pom_highlights;

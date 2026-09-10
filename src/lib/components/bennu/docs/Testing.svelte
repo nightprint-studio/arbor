@@ -139,6 +139,25 @@
   listener accepts one connection.
 </p>
 
+<h2>Test classes that are never run</h2>
+<p>
+  The JUnit Platform runs <em>engines</em>, one per dialect: <code>junit-jupiter-engine</code> for
+  JUnit 5's <code>@Test</code>, <code>junit-vintage-engine</code> for JUnit 4's. A project migrated
+  to Jupiter that forgot the vintage engine still <strong>compiles</strong> every JUnit 4 test it
+  has — the annotations resolve, the assertions resolve — and Surefire simply never executes them.
+</p>
+<p>
+  What you see is a build that passes. What is true is that a hundred test classes did not run, and
+  nothing reports it, because Surefire reports on what it <em>ran</em>. The Tests panel says so above
+  the tree, with the count and one of the class names. It goes the other way too, and is just as
+  quiet: only the vintage engine means the JUnit 5 tests are the ones being skipped.
+</p>
+<p>
+  Nothing is claimed before the classpath has resolved — an empty jar list means we have not looked
+  yet, not that an engine is missing — and nothing at all on a plain JUnit 4 build, which never loads
+  the Platform and runs its tests exactly as it always did.
+</p>
+
 <h2>A pom that pins which tests run</h2>
 <p>
   A Surefire plugin configured with a <strong>literal</strong> <code>&lt;test&gt;</code> makes a
@@ -155,6 +174,14 @@
   a run started from here sets that same property and gets the one class or case you picked. Any
   property name does — Bennu reads the one your pom uses. <code>&#36;&#123;test&#125;</code> is the special case
   of that where the name happens to be Surefire's own.
+</p>
+<p>
+  <strong>Convert to a property</strong> on that warning makes the change for you: the pom declares
+  the pinned value as a property and its <code>&lt;test&gt;</code> becomes a reference to it. It
+  names the property <code>test</code> whenever the pom leaves that name free, so the project is
+  steerable from a bare terminal and from any other tool as well as from here. You are shown which
+  pom will be written before anything is, and only that one line of it changes — comments, ordering
+  and indentation are left exactly as they were.
 </p>
 
 <h2>Reading the results</h2>

@@ -26,6 +26,7 @@ pub use crate::if_statement::{invert_if, merge_nested_if};
 pub use crate::inline_method::inline_method;
 pub use crate::field::introduce_field;
 pub use crate::inline_var::inline_variable;
+pub use crate::copy_class::{copy_class, CopyPlan};
 pub use crate::move_class::move_class;
 pub use crate::move_member::{
     adapt_modifiers, member_moves, move_member_plan, move_member_to, move_site, transfer_into,

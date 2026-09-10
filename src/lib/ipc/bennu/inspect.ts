@@ -198,3 +198,58 @@ export function buildUnits(dirs: string[]): Promise<BuildUnit[]> {
 export function testSelectionPinned(root: string): Promise<string | null> {
   return bennu('bennu_test_selection_pinned', { args: { root } });
 }
+
+/** One pom the suite→property conversion would rewrite. */
+export interface SuiteConversionFile {
+  /** Absolute path of the pom, forward-slashed. */
+  pom: string;
+  /** The literal pinned today, which becomes the property's default. */
+  suite: string;
+  /** The property that will steer the selection from now on. */
+  property: string;
+  /** The pom's text after the rewrite — shown before anything is written. */
+  preview: string;
+}
+
+/** Which poms pin a Surefire `<test>` to a literal, and what unpinning them would come to.
+ *
+ *  Writes nothing: a change to a build file is one the user has to be able to look at first.
+ *  Empty for the projects that pin nothing, which is nearly all of them.
+ *
+ *  Wire: `bennu_plan_suite_property` — `RootArgs { root }`. */
+export function planSuiteProperty(root: string): Promise<{ files: SuiteConversionFile[] }> {
+  return bennu('bennu_plan_suite_property', { args: { root } });
+}
+
+/** Apply that conversion, returning the poms actually rewritten.
+ *
+ *  Re-plans server-side rather than taking the preview back, so a pom edited between the two
+ *  calls is not silently reverted to the text this side was shown.
+ *
+ *  Wire: `bennu_apply_suite_property` — `RootArgs { root }`. */
+export function applySuiteProperty(root: string): Promise<{ written: string[] }> {
+  return bennu('bennu_apply_suite_property', { args: { root } });
+}
+
+/** A dialect of test the project has, and has no engine to run. */
+export interface EngineGap {
+  /** `"JUnit 4"` / `"JUnit 5"` — how the classes are written. */
+  framework: string;
+  /** The artifact that would run them (`junit-vintage-engine`). */
+  missing: string;
+  /** How many test classes are affected. */
+  classes: number;
+  /** One of them, so the sentence names something real. */
+  sample: string;
+}
+
+/** Which of this project's test dialects have no engine on the classpath to run them.
+ *
+ *  Empty for the overwhelming majority of projects — and deliberately empty whenever the answer
+ *  would be a guess: before the classpath resolves, and on a build that does not use the JUnit
+ *  Platform at all.
+ *
+ *  Wire: `bennu_test_engine_gap` — `RootArgs { root }`. */
+export function testEngineGap(root: string): Promise<EngineGap[]> {
+  return bennu('bennu_test_engine_gap', { args: { root } });
+}

@@ -25,7 +25,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
-use bennu_ext::prelude::{ExtEntry, ExtHover, ExtStat, ExtTarget, FileCtx, FrameworkExtension, ProjectScan};
+use bennu_ext::prelude::{
+    ExtEntry, ExtHighlight, ExtHover, ExtStat, ExtTarget, FileCtx, FrameworkExtension, ProjectScan,
+};
 use bennu_proto::prelude::{CapabilitySet, CompletionItem, Diagnostic};
 
 use crate::catalog::Catalog;
@@ -72,8 +74,18 @@ impl Default for MavenExtension {
 
 impl MavenExtension {
     pub fn new() -> Self {
+        Self::with_repo(LocalRepo::discover())
+    }
+
+    /// The extension against a repository the caller names.
+    ///
+    /// Discovery is right for a host — `settings.xml` and `-Dmaven.repo.local` are the only
+    /// answer that can be right on somebody else's machine. This is for the caller that already
+    /// knows: a test that built one, and anything that has to reason about a repository other
+    /// than the ambient one.
+    pub fn with_repo(repo: LocalRepo) -> Self {
         Self {
-            repo: LocalRepo::discover(),
+            repo,
             catalog: Arc::new(RwLock::new(Arc::new(Catalog::default()))),
             scanning: Arc::new(AtomicBool::new(false)),
             project: RwLock::new(Arc::new(Project::default())),
@@ -86,6 +98,17 @@ impl MavenExtension {
     /// looking", which is otherwise invisible on a machine with a relocated one.
     pub fn repo(&self) -> &LocalRepo {
         &self.repo
+    }
+
+    /// Whether this path is a pom **in the local repository** — one followed into from a
+    /// dependency, rather than one this project builds.
+    ///
+    /// The distinction the read-only half of the crate needs: everything that *describes* a pom
+    /// answers the same for both, and everything that *judges* one only makes sense for a file
+    /// somebody can edit.
+    pub fn is_library_pom(&self, path: &str) -> bool {
+        let root = self.repo.root();
+        !root.as_os_str().is_empty() && Path::new(path).starts_with(root)
     }
 
     /// The repository's coordinates, as scanned. Named for what it holds rather than `catalog`,
@@ -166,7 +189,7 @@ impl MavenExtension {
 /// Whether this file is a pom. `pom.xml` is the name Maven itself insists on; a `*.pom` is the same
 /// document under the name the repository stores it as, and jumping into one is an ordinary thing
 /// to do from a dependency.
-fn is_pom(file_name: &str) -> bool {
+pub fn is_pom(file_name: &str) -> bool {
     file_name.eq_ignore_ascii_case("pom.xml") || file_name.to_ascii_lowercase().ends_with(".pom")
 }
 
@@ -223,8 +246,30 @@ impl FrameworkExtension for MavenExtension {
         self.ready.load(Ordering::Acquire)
     }
 
+    /// What is wrong with this pom — for a pom that is **yours**.
+    ///
+    /// A pom in the local repository is silent, and the difference is not a technicality. Every
+    /// check here is written against a file somebody can fix: a coordinate that is not installed,
+    /// a version nothing pins. A released artifact's pom names the dependencies *it* was built
+    /// against, and a machine that never needed one of them never downloaded it — so on a library
+    /// pom the very check that finds a real problem in your own file produces a red underline
+    /// under the ordinary, correct state of a repository, on a line nobody can edit.
     fn diagnostics(&self, ctx: &FileCtx<'_>) -> Vec<Diagnostic> {
+        if self.is_library_pom(&ctx.path_str()) {
+            return Vec::new();
+        }
         self.with_env(ctx, crate::check::diagnostics).unwrap_or_default()
+    }
+
+    /// The pom's own vocabulary, coloured by role — see [`crate::paint`].
+    ///
+    /// Answered from the document alone, so it is the one contribution here that does not wait for
+    /// the repository scan and does not care whose project the file is in.
+    fn highlights(&self, ctx: &FileCtx<'_>) -> Vec<ExtHighlight> {
+        if !is_pom(&ctx.file_name()) {
+            return Vec::new();
+        }
+        crate::paint::highlights(&Doc::new(ctx.source))
     }
 
     fn completions(&self, ctx: &FileCtx<'_>, offset: usize) -> Vec<CompletionItem> {
@@ -311,6 +356,32 @@ mod tests {
         assert!(ext.installed().is_empty());
         assert!(ext.stats().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A pom in the local repository — the file you land in by following a dependency.
+    ///
+    /// Described in full, judged not at all. The two halves are the point: the colouring, the
+    /// hover and the jump are what you went there for, and a red underline on a line you cannot
+    /// edit is noise you cannot clear.
+    #[test]
+    fn a_pom_in_the_repository_is_described_but_not_judged() {
+        // `${nope}` is reported by a check that needs no repository at all, so the contrast below
+        // is the gate and not an empty catalog.
+        const SOURCE: &str = "<project><groupId>org.x</groupId><artifactId>a</artifactId>\
+            <version>1.0</version><dependencies><dependency><groupId>org.y</groupId>\
+            <artifactId>b</artifactId><version>${nope}</version></dependency></dependencies></project>";
+        let m2 = std::env::temp_dir().join("bennu-mvn-lib-gate").join("repository");
+        let ext = MavenExtension::with_repo(LocalRepo::at(&m2));
+
+        let library = m2.join("org/y/b/1.0/b-1.0.pom");
+        let there = FileCtx { path: &library, source: SOURCE };
+        assert!(ext.diagnostics(&there).is_empty(), "a library pom is not judged");
+        assert!(!ext.highlights(&there).is_empty(), "…but it is still coloured");
+
+        // The same text as a file of your own: judged, because you can fix it.
+        let mine = Path::new("/p/proj/pom.xml");
+        let here = FileCtx { path: mine, source: SOURCE };
+        assert!(!ext.diagnostics(&here).is_empty(), "your own pom is still checked");
     }
 
     /// The gate that keeps the extension free on every other file in the project.

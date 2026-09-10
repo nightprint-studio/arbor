@@ -51,6 +51,8 @@ pub mod ext;
 pub mod explain;
 // The coordinates every Java project reaches for, for the machine that has none of them yet.
 pub mod known;
+// The pom's own vocabulary, as spans to colour.
+pub mod paint;
 pub mod prelude;
 // Where the local repository is, and what a coordinate is called inside it.
 pub mod repo;

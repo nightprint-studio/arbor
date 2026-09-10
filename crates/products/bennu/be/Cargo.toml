@@ -103,6 +103,14 @@ bennu-spring = { path = "../spring" }
 # query names Spring Data compiles at startup) + its generators. Registered beside Spring in the
 # same vector — which is the whole claim the extension seam was built on.
 bennu-jpa = { path = "../jpa" }
+# Bean Validation. Its own crate rather than a corner of Spring or JPA because what goes wrong is
+# its own: a constraint message is read from a bundle the validator picks, which may be named in a
+# `@Bean` and is almost never the bundle the rest of the application uses.
+bennu-jakarta = { path = "../jakarta" }
+# Scheduled work, and the two ways a job silently never runs.
+bennu-scheduling = { path = "../scheduling" }
+# What a DTO actually serialises to.
+bennu-jackson = { path = "../jackson" }
 # The third extension: XML schemas (DTD + XSD → completion, ghost text, hover, go-to, checks).
 # Unlike the other two it is not capability-gated — the resolved grammar is its gate, and a
 # document nothing describes costs one scan and one map lookup.
@@ -140,6 +148,9 @@ bennu-dap = { path = "../dap" }
 # index service already resolved. Not an extension — it answers about the build, not about a
 # buffer — so it hangs off its own domain rather than the registry.
 bennu-deps = { path = "../deps" }
+# Writing back into a pom: the module a "New module" creates, and the rewrite that turns a Surefire
+# `<test>` pinned to a literal into a property, so selecting one test stops being silently inert.
+bennu-pomedit = { path = "../pomedit" }
 # The local Maven repository as a source of answers: where it is, what is in it, what the project
 # resolves to against it without running Maven — the dependency tier's fallback and its diagnosis —
 # and the pom.xml editor answers that follow from the same reading.

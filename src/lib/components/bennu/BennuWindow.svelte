@@ -1502,6 +1502,11 @@
         action: () => run(() => bennuUiStore.newInTree('file')), when: !!projectStore.project },
       { id: 'newfolder', title: 'New folder or package…', icon: 'folder-plus',
         action: () => run(() => bennuUiStore.newInTree('folder')), when: !!projectStore.project },
+      // Maven only — on a Cargo workspace a new member crate is a different operation, and an
+      // entry that opens a dialog with nothing to put in it is worse than no entry.
+      { id: 'newmodule', title: 'New module…', icon: 'folder-plus',
+        action: () => run(() => bennuUiStore.newInTree('module')),
+        when: !!projectStore.project && !projectStore.isCargo },
       { id: 'generate', title: 'Generate…', icon: 'wand', shortcut: 'Alt+Insert',
         action: () => run(() => bennuUiStore.openGenerate()), when: isJava },
       { id: 'override', title: 'Implement / override methods…', icon: 'wand', shortcut: 'Ctrl+I',

@@ -54,6 +54,8 @@ pub mod builtin;
 pub mod caret;
 // Which schema a document is written against, and the sources one can be found in.
 pub mod catalog;
+// The element tree over a scan — addressing a document by structure instead of by tag name.
+pub mod doc;
 pub mod ext;
 // One model behind both DTD and XSD, plus the two adapters.
 pub mod grammar;

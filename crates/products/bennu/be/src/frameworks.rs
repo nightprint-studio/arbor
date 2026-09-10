@@ -44,6 +44,9 @@ use bennu_jpa::prelude::JpaExtension;
 use bennu_jsp::prelude::JspExtension;
 use bennu_spring::prelude::SpringExtension;
 use bennu_maven::prelude::MavenExtension;
+use bennu_jackson::prelude::JacksonExtension;
+use bennu_jakarta::prelude::ValidationExtension;
+use bennu_scheduling::prelude::SchedulingExtension;
 use bennu_toolconf::prelude::ToolConfExtension;
 use bennu_xml::prelude::XmlExtension;
 use serde::{Deserialize, Serialize};
@@ -181,8 +184,29 @@ impl FrameworkService {
     }
 
     fn slot_for_file(&self, file: &str) -> Option<Arc<Slot>> {
-        let root = self.root_for_file(file)?;
+        let root = match self.root_for_file(file) {
+            Some(root) => root,
+            None => self.vantage_root(file)?,
+        };
         self.slot(&root)
+    }
+
+    /// The project whose extensions answer for a file **no project owns**.
+    ///
+    /// There is exactly one file you reach that way on purpose: a pom in the local repository,
+    /// arrived at by following a dependency out of your own. Until now it fell off the end of
+    /// [`Self::root_for_file`] and every framework question about it answered nothing — so the
+    /// jump landed you in a buffer where the coordinates were grey text, nothing hovered, and the
+    /// dependency *it* declares could not be followed any further. One step in, and the tooling
+    /// stopped.
+    ///
+    /// The honest vantage point is the project you came from: it is the one whose local
+    /// repository, whose reactor and whose settings decide what those coordinates mean. So the
+    /// answer is the project on screen, and the rule is narrow on purpose — a pom, and nothing
+    /// else. A `.java` from a jar has its own path (`library_nav`), and a stray file outside every
+    /// project is not a thing to guess a project for.
+    fn vantage_root(&self, file: &str) -> Option<String> {
+        vantage_of(file, crate::project::active_root())
     }
 
     /// Drop and rebuild `root`'s slot — the escape hatch behind `bennu_spring_refresh`.
@@ -288,6 +312,17 @@ impl FrameworkService {
                 // `junit-platform.properties` have a published vocabulary, and a version that
                 // decides which half of it exists.
                 Arc::new(ToolConfExtension::new()) as Arc<dyn FrameworkExtension>,
+                // Bean Validation, which is a framework in its own right for one reason: a
+                // constraint's message is resolved against a bundle the VALIDATOR chooses, not
+                // the one the rest of the application reads — and the choice is regularly a
+                // string literal inside a `@Bean`.
+                Arc::new(ValidationExtension::new()) as Arc<dyn FrameworkExtension>,
+                // What the application does on its own, at times nobody is watching — and the two
+                // ways a job silently never runs.
+                Arc::new(SchedulingExtension::new()) as Arc<dyn FrameworkExtension>,
+                // What a DTO actually puts in its JSON. The failure mode here is absence, and the
+                // first person to see it is on the other side of an HTTP call.
+                Arc::new(JacksonExtension::new()) as Arc<dyn FrameworkExtension>,
                 Arc::clone(&jsp) as Arc<dyn FrameworkExtension>,
                 Arc::new(MessagesExtension::new()) as Arc<dyn FrameworkExtension>,
                 // The fifth framework, and the first that is not Java's: a Cargo root with an
@@ -936,6 +971,18 @@ pub fn set_spring_class_names(root: &str, source: std::sync::Arc<dyn bennu_sprin
     if let Some(ext) = FrameworkService::global().slot(root).and_then(|s| s.spring.clone()) {
         ext.set_class_names(source);
     }
+}
+
+/// The rule behind [`FrameworkService::vantage_root`], with the project on screen passed in.
+///
+/// Pure so it can be tested without moving the backend's idea of which project is open — a global
+/// a test sets is a global every other test in the binary then races.
+fn vantage_of(file: &str, active: Option<String>) -> Option<String> {
+    let name = Path::new(file).file_name()?.to_string_lossy().to_string();
+    if !bennu_maven::prelude::is_pom(&name) {
+        return None;
+    }
+    active.map(|root| norm(&root))
 }
 
 pub fn register_root(root: &str) {
@@ -1815,6 +1862,30 @@ mod tests {
         // as owning `/reg-test/workspace-other`.
         assert!(svc.root_for_file("/reg-test/workspace-other/src/lib.rs").is_none());
         assert!(svc.root_for_file("/reg-test/elsewhere/a.toml").is_none());
+    }
+
+    /// Following a dependency lands you in `~/.m2`, which is under no project — and until the
+    /// vantage rule that meant the Maven extension answered nothing there, so the jump worked once
+    /// and then the trail went cold.
+    #[test]
+    fn a_pom_outside_every_project_is_answered_from_the_project_on_screen() {
+        let here = Some("/p/orders".to_string());
+        let library = "/home/me/.m2/repository/org/springframework/spring-core/5.3.20/spring-core-5.3.20.pom";
+        assert_eq!(vantage_of(library, here.clone()).as_deref(), Some("/p/orders"));
+        // A pom by its real name too — a checkout somebody opened a file from, not a repository.
+        assert_eq!(vantage_of("/elsewhere/pom.xml", here.clone()).as_deref(), Some("/p/orders"));
+    }
+
+    #[test]
+    fn nothing_else_outside_a_project_gets_a_vantage() {
+        let here = Some("/p/orders".to_string());
+        // A source file from a jar has its own path, and a stray file is not worth guessing about.
+        assert!(vantage_of("/elsewhere/src/Main.java", here.clone()).is_none());
+        assert!(vantage_of("/elsewhere/notes.txt", here.clone()).is_none());
+        // The name has to BE a pom, not merely mention one.
+        assert!(vantage_of("/elsewhere/pom.xml.bak", here).is_none());
+        // And with no project open there is no vantage to lend.
+        assert!(vantage_of("/elsewhere/pom.xml", None).is_none());
     }
 
     #[test]

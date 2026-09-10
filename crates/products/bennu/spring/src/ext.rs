@@ -52,6 +52,10 @@ pub trait ClassNameSource: Send + Sync {
 pub struct SpringExtension {
     model: RwLock<Arc<SpringModel>>,
     ready: AtomicBool,
+    /// Whether this project weaves its advice instead of proxying it. A project-wide fact that
+    /// changes what is true about every file, so it is read once with the model rather than
+    /// re-derived per buffer — and an AspectJ project silences the proxy checks entirely.
+    aspectj: AtomicBool,
     /// The property file the user pinned as the one to resolve against. Kept outside the
     /// model so setting it does not require a reindex — it is a display choice, not new
     /// information about the project.
@@ -73,6 +77,7 @@ impl SpringExtension {
         Self {
             model: RwLock::new(Arc::new(SpringModel::default())),
             ready: AtomicBool::new(false),
+            aspectj: AtomicBool::new(false),
             active_property_file: RwLock::new(None),
             class_names: RwLock::new(None),
         }
@@ -100,6 +105,54 @@ impl SpringExtension {
     ///
     /// Recovering is sound here because of what is behind the lock: an `Arc` that is only ever
     /// *replaced whole*. A reader that panicked cannot have left it half-written.
+    /// How this project weaves its advice — read once per reindex.
+    ///
+    /// Defaults to `Proxy` before a scan has run, which is the right way round: proxying is
+    /// Spring's default, and an AspectJ project is told nothing once the scan lands.
+    pub fn proxy_mode(&self) -> crate::proxy::ProxyMode {
+        if self.aspectj.load(Ordering::Acquire) {
+            crate::proxy::ProxyMode::AspectJ
+        } else {
+            crate::proxy::ProxyMode::Proxy
+        }
+    }
+
+    /// What is wrong with this file's endpoints — its own signatures, and the routes it shares
+    /// with the rest of the project.
+    ///
+    /// The file's endpoints are re-read from the **buffer**, not taken from the model: the model is
+    /// as old as the last scan, and a diagnostic placed at an offset from before the last three
+    /// edits lands on the wrong line. The rest of the project comes from the model, because that
+    /// half genuinely cannot be re-read per keystroke — and a route claimed twice does not stop
+    /// being claimed twice while you type.
+    fn endpoint_issues(
+        &self,
+        model: &SpringModel,
+        path: &str,
+        source: &str,
+    ) -> Vec<Diagnostic> {
+        let Some(facts) = bennu_facts::prelude::scan_java(path, source) else { return Vec::new() };
+        let unit = crate::beans::JavaUnit { facts, text: source.to_string() };
+        let own = crate::endpoints::endpoints(std::slice::from_ref(&unit));
+        if own.is_empty() {
+            return Vec::new();
+        }
+        let mut all = own;
+        all.extend(model.endpoints.iter().filter(|e| e.file != path).cloned());
+
+        crate::endpoint_check::issues(&all)
+            .into_iter()
+            .filter(|i| i.file == path)
+            .map(|i| Diagnostic {
+                message: i.message,
+                severity: i.severity.to_string(),
+                code: i.code.to_string(),
+                start: i.start,
+                end: i.end,
+            })
+            .collect()
+    }
+
     pub fn model(&self) -> Arc<SpringModel> {
         match self.model.read() {
             Ok(m) => Arc::clone(&m),
@@ -196,6 +249,15 @@ impl FrameworkExtension for SpringExtension {
     }
 
     fn reindex(&self, scan: &ProjectScan<'_>) {
+        // Which weaving mode the project uses, before anything else — it is what decides whether
+        // the proxy checks may speak at all, and it is written in one place for the whole project.
+        let aspectj = scan
+            .java
+            .iter()
+            .chain(scan.xml.iter())
+            .any(|f| crate::proxy::declares_aspectj(&f.text));
+        self.aspectj.store(aspectj, Ordering::Release);
+
         // XML first: it decides which extra Java files are worth parsing.
         let xml_files: Vec<_> = scan
             .xml
@@ -261,7 +323,34 @@ impl FrameworkExtension for SpringExtension {
     fn diagnostics(&self, ctx: &FileCtx<'_>) -> Vec<Diagnostic> {
         let model = self.model();
         match ctx.extension().as_str() {
-            "java" => java_intel::diagnostics(&model, &ctx.path_str(), ctx.source),
+            "java" => {
+                let mut out = java_intel::diagnostics(&model, &ctx.path_str(), ctx.source);
+                // The three ways an annotation on a method can do nothing. Appended rather than
+                // folded into `java_intel`: those are questions about the bean MODEL, these are
+                // about the shape of one file, and they answer even before a model has been built.
+                out.extend(crate::proxy::issues_in(ctx.source, self.proxy_mode()).into_iter().map(
+                    |i| Diagnostic {
+                        message: i.message,
+                        severity: i.severity.to_string(),
+                        code: i.code.to_string(),
+                        start: i.start,
+                        end: i.end,
+                    },
+                ));
+                // And what a transaction is left holding: a connection borrowed for the length of
+                // somebody else's HTTP call, which every dashboard reports as a slow database.
+                out.extend(crate::transaction::issues_in(ctx.source).into_iter().map(|i| {
+                    Diagnostic {
+                        message: i.message,
+                        severity: "warning".to_string(),
+                        code: i.code.to_string(),
+                        start: i.start,
+                        end: i.end,
+                    }
+                }));
+                out.extend(self.endpoint_issues(&model, &ctx.path_str(), ctx.source));
+                out
+            }
             "xml" if xml_intel::is_bean_xml(ctx.source) => {
                 xml_intel::diagnostics(&model, &ctx.path_str(), ctx.source)
             }
@@ -821,6 +910,73 @@ mod tests {
         assert!(ext.applies(&spring_caps()));
         assert!(ext.applies(&CapabilitySet { spring_xml_di: true, ..CapabilitySet::default() }));
         assert!(!ext.applies(&CapabilitySet { struts_xml_config: true, ..CapabilitySet::default() }));
+    }
+
+    /// The whole path, from a buffer to a squiggle: the check reads the file in front of it, the
+    /// span lands on the handler's name, and the two halves of the defect are fifteen characters
+    /// apart on one line.
+    #[test]
+    fn a_path_variable_the_path_does_not_have_is_reported_on_the_handler() {
+        // The imports are load-bearing: a mapping annotation counts as Spring's only when it
+        // RESOLVES to Spring's, so that a project's own `@GetMapping` declares no route.
+        let source = concat!(
+            "package com.acme;\n",
+            "import org.springframework.web.bind.annotation.*;\n",
+            "@RestController\n",
+            "class C {\n",
+            "  @GetMapping(\"/ordini/{ordineId}\") String uno(@PathVariable(\"id\") String id) { return null; }\n",
+            "}\n"
+        );
+        let ext = indexed(vec![java_file("/p/src/main/java/com/acme/C.java", source)], vec![], vec![]);
+        let ctx = FileCtx { path: std::path::Path::new("/p/src/main/java/com/acme/C.java"), source };
+        let found = ext.diagnostics(&ctx);
+        let issue = found
+            .iter()
+            .find(|d| d.code == crate::endpoint_check::CODE_UNMATCHED_VARIABLE)
+            .unwrap_or_else(|| panic!("the mismatch, got {found:?}"));
+        assert_eq!(&source[issue.start..issue.end], "uno", "underlines the handler");
+        assert_eq!(issue.severity, "error");
+    }
+
+    /// And a route two controllers both claim — the half that needs the rest of the project.
+    #[test]
+    fn a_route_claimed_by_another_controller_is_reported_here() {
+        // The imports are load-bearing: a mapping annotation counts as Spring's only when it
+        // RESOLVES to Spring's, so that a project's own `@GetMapping` declares no route.
+        let mine = concat!(
+            "package com.acme;\n",
+            "import org.springframework.web.bind.annotation.*;\n",
+            "@RestController\n",
+            "class Nuovo {\n",
+            "  @GetMapping(\"/ordini\") String elenco() { return null; }\n",
+            "}\n"
+        );
+        let theirs = concat!(
+            "package com.acme;\n",
+            "import org.springframework.web.bind.annotation.*;\n",
+            "@RestController\n",
+            "class Legacy {\n",
+            "  @RequestMapping(\"/ordini\") String vecchio() { return null; }\n",
+            "}\n"
+        );
+        let ext = indexed(
+            vec![
+                java_file("/p/src/main/java/com/acme/Nuovo.java", mine),
+                java_file("/p/src/main/java/com/acme/Legacy.java", theirs),
+            ],
+            vec![],
+            vec![],
+        );
+        let ctx =
+            FileCtx { path: std::path::Path::new("/p/src/main/java/com/acme/Nuovo.java"), source: mine };
+        let found = ext.diagnostics(&ctx);
+        let issue = found
+            .iter()
+            .find(|d| d.code == crate::endpoint_check::CODE_AMBIGUOUS)
+            .unwrap_or_else(|| panic!("the collision, got {found:?}"));
+        assert!(issue.message.contains("Legacy"), "{}", issue.message);
+        // And only about THIS file — the other controller gets its own squiggle in its own buffer.
+        assert_eq!(&mine[issue.start..issue.end], "elenco");
     }
 
     #[test]

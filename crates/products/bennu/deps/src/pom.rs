@@ -20,7 +20,7 @@
 //! of which an editor knows. Profile dependencies are reported *and labelled* rather than silently
 //! included or silently dropped.
 
-use bennu_xml::prelude::{scan, Scan, TagKind};
+use bennu_xml::prelude::Doc;
 
 /// A pom's `<parent>`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -148,7 +148,7 @@ impl Pom {
 /// Parse a pom. Never fails: a pom this cannot make sense of yields empty fields, which every
 /// consumer already has to handle (a module with no dependencies is an ordinary thing).
 pub fn parse(source: &str) -> Pom {
-    let doc = Doc { source, scan: scan(source) };
+    let doc = Doc::new(source);
     let Some(project) = doc.root() else { return Pom::default() };
 
     let mut pom = Pom {
@@ -188,11 +188,11 @@ pub fn parse(source: &str) -> Pom {
     }
 
     if let Some(deps) = doc.child(project, "dependencies") {
-        pom.dependencies = doc.dependencies_in(deps, "");
+        pom.dependencies = dependencies_in(&doc, deps, "");
     }
     if let Some(dm) = doc.child(project, "dependencyManagement") {
         if let Some(deps) = doc.child(dm, "dependencies") {
-            pom.managed = doc.dependencies_in(deps, "");
+            pom.managed = dependencies_in(&doc, deps, "");
         }
     }
     if let Some(dm) = doc.child(project, "distributionManagement") {
@@ -210,7 +210,7 @@ pub fn parse(source: &str) -> Pom {
             let id = doc.child_text(profile, "id");
             let label = if id.is_empty() { "profile".to_string() } else { id };
             if let Some(deps) = doc.child(profile, "dependencies") {
-                pom.dependencies.extend(doc.dependencies_in(deps, &label));
+                pom.dependencies.extend(dependencies_in(&doc, deps, &label));
             }
         }
     }
@@ -218,171 +218,49 @@ pub fn parse(source: &str) -> Pom {
     pom
 }
 
-// ── The element walk ─────────────────────────────────────────────────────────
+// ── The pom-specific reads ───────────────────────────────────────────────────
+//
+// The generic element walk lives in `bennu_xml::prelude::Doc` — it is the same walk anything that
+// reads (or rewrites) a configuration file needs, and a second copy of it here would be a second
+// place for "what counts as this element's text" to be decided.
 
-/// A scanned document, addressed by tag index.
-///
-/// Elements are identified by the index of their opening tag, which is all a caller ever needs:
-/// from it come the children, the text and the byte span, and it is stable for the life of the
-/// scan.
-struct Doc<'a> {
-    source: &'a str,
-    scan: Scan,
+/// Every `<dependency>` directly inside the `<dependencies>` opened at `i`.
+fn dependencies_in(doc: &Doc<'_>, i: usize, profile: &str) -> Vec<RawDependency> {
+    doc.children(i)
+        .into_iter()
+        .filter(|c| doc.name(*c) == "dependency")
+        .map(|c| dependency(doc, c, profile))
+        .filter(|d| !d.artifact_id.is_empty())
+        .collect()
 }
 
-impl<'a> Doc<'a> {
-    /// The document element, when there is one.
-    fn root(&self) -> Option<usize> {
-        self.scan.tags.iter().position(|t| t.kind == TagKind::Open)
-    }
-
-    fn name(&self, i: usize) -> &str {
-        self.scan.tags[i].local()
-    }
-
-    /// The direct children of the element opened at `i`, in document order.
-    ///
-    /// Depth-counted rather than name-matched, so a `<dependencies>` inside a
-    /// `<dependencyManagement>` is never mistaken for the project's own — which is the entire
-    /// reason this module walks structure instead of scanning for tags.
-    fn children(&self, i: usize) -> Vec<usize> {
-        let mut out = Vec::new();
-        let mut depth = 0usize;
-        for (j, t) in self.scan.tags.iter().enumerate().skip(i + 1) {
-            match t.kind {
-                TagKind::Open => {
-                    if depth == 0 {
-                        out.push(j);
-                    }
-                    depth += 1;
-                }
-                TagKind::SelfClose => {
-                    if depth == 0 {
-                        out.push(j);
-                    }
-                }
-                TagKind::Close => {
-                    if depth == 0 {
-                        break;
-                    }
-                    depth -= 1;
-                }
-            }
-        }
-        out
-    }
-
-    fn child(&self, i: usize, name: &str) -> Option<usize> {
-        self.children(i).into_iter().find(|c| self.name(*c) == name)
-    }
-
-    /// The text content of the element opened at `i`, trimmed. Empty for a self-closing element or
-    /// one that holds other elements.
-    fn text(&self, i: usize) -> String {
-        let Some(close) = self.close_of(i) else { return String::new() };
-        let (start, end) = (self.scan.tags[i].end, self.scan.tags[close].start);
-        if start > end || end > self.source.len() {
-            return String::new();
-        }
-        let text = self.source[start..end].trim();
-        if text.contains('<') {
-            return String::new();
-        }
-        text.to_string()
-    }
-
-    fn child_text(&self, i: usize, name: &str) -> String {
-        self.child(i, name).map(|c| self.text(c)).unwrap_or_default()
-    }
-
-    /// The byte span of the trimmed text content of the element opened at `i`, or `None` when it
-    /// has none — the writable half of [`text`](Self::text), for a caller that wants to replace a
-    /// value rather than read it.
-    ///
-    /// Same trimming, deliberately: two functions that disagree about where a value starts is how a
-    /// replacement lands one space to the left of what was read.
-    fn text_span(&self, i: usize) -> Option<(usize, usize)> {
-        let close = self.close_of(i)?;
-        let (start, end) = (self.scan.tags[i].end, self.scan.tags[close].start);
-        if start > end || end > self.source.len() {
-            return None;
-        }
-        let raw = &self.source[start..end];
-        if raw.contains('<') {
-            return None;
-        }
-        let lead = raw.len() - raw.trim_start().len();
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        Some((start + lead, start + lead + trimmed.len()))
-    }
-
-    /// The index of the close tag that ends the element opened at `i`.
-    fn close_of(&self, i: usize) -> Option<usize> {
-        if self.scan.tags[i].kind != TagKind::Open {
-            return None;
-        }
-        let mut depth = 0usize;
-        for (j, t) in self.scan.tags.iter().enumerate().skip(i + 1) {
-            match t.kind {
-                TagKind::Open => depth += 1,
-                TagKind::Close => {
-                    if depth == 0 {
-                        return Some(j);
-                    }
-                    depth -= 1;
-                }
-                TagKind::SelfClose => {}
-            }
-        }
-        None
-    }
-
-    /// Every `<dependency>` directly inside the `<dependencies>` opened at `i`.
-    fn dependencies_in(&self, i: usize, profile: &str) -> Vec<RawDependency> {
-        self.children(i)
-            .into_iter()
-            .filter(|c| self.name(*c) == "dependency")
-            .map(|c| self.dependency(c, profile))
-            .filter(|d| !d.artifact_id.is_empty())
-            .collect()
-    }
-
-    fn dependency(&self, i: usize, profile: &str) -> RawDependency {
-        let tag = &self.scan.tags[i];
-        RawDependency {
-            group_id: self.child_text(i, "groupId"),
-            artifact_id: self.child_text(i, "artifactId"),
-            version: self.child_text(i, "version"),
-            scope: self.child_text(i, "scope"),
-            packaging: self.child_text(i, "type"),
-            classifier: self.child_text(i, "classifier"),
-            optional: self.child_text(i, "optional") == "true",
-            exclusions: self.exclusions_of(i),
-            profile: profile.to_string(),
-            offset: tag.start,
-            line: line_at(self.source, tag.start),
-            version_span: self.child(i, "version").and_then(|c| self.text_span(c)),
-        }
-    }
-
-    /// The `<exclusions>` of the dependency opened at `i`.
-    fn exclusions_of(&self, i: usize) -> Vec<(String, String)> {
-        let Some(list) = self.child(i, "exclusions") else { return Vec::new() };
-        self.children(list)
-            .into_iter()
-            .filter(|c| self.name(*c) == "exclusion")
-            .map(|c| (self.child_text(c, "groupId"), self.child_text(c, "artifactId")))
-            .filter(|(_, a)| !a.is_empty())
-            .collect()
+fn dependency(doc: &Doc<'_>, i: usize, profile: &str) -> RawDependency {
+    let start = doc.scan().tags[i].start;
+    RawDependency {
+        group_id: doc.child_text(i, "groupId"),
+        artifact_id: doc.child_text(i, "artifactId"),
+        version: doc.child_text(i, "version"),
+        scope: doc.child_text(i, "scope"),
+        packaging: doc.child_text(i, "type"),
+        classifier: doc.child_text(i, "classifier"),
+        optional: doc.child_text(i, "optional") == "true",
+        exclusions: exclusions_of(doc, i),
+        profile: profile.to_string(),
+        offset: start,
+        line: doc.line_at(start),
+        version_span: doc.child(i, "version").and_then(|c| doc.text_span(c)),
     }
 }
 
-/// 1-based line of a byte offset.
-fn line_at(source: &str, offset: usize) -> u32 {
-    source[..offset.min(source.len())].bytes().filter(|&b| b == b'\n').count() as u32 + 1
+/// The `<exclusions>` of the dependency opened at `i`.
+fn exclusions_of(doc: &Doc<'_>, i: usize) -> Vec<(String, String)> {
+    let Some(list) = doc.child(i, "exclusions") else { return Vec::new() };
+    doc.children(list)
+        .into_iter()
+        .filter(|c| doc.name(*c) == "exclusion")
+        .map(|c| (doc.child_text(c, "groupId"), doc.child_text(c, "artifactId")))
+        .filter(|(_, a)| !a.is_empty())
+        .collect()
 }
 
 #[cfg(test)]

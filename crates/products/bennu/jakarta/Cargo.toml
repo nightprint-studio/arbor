@@ -1,0 +1,27 @@
+[package]
+name         = "bennu-jakarta"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Jakarta / Java Bean Validation as an editor understands it: which bundle a constraint's message is actually resolved against — including one named in a @Bean rather than in any config file — which `{…}` in a message is a bundle key and which is the constraint's own attribute, and the constraints a project declares, with the ones whose message will render as its own key."
+
+[dependencies]
+# The extension seam this crate implements.
+bennu-ext     = { path = "../ext" }
+# The wire types a contribution is made of (Diagnostic / CompletionItem / CapabilitySet).
+bennu-proto   = { path = "../proto" }
+# The completion mechanics — the caret's token, the prefix rule, the capped candidate list.
+bennu-complete = { path = "../complete" }
+# The Java parser. An annotation's `message` is a string that regularly contains braces and
+# commas, and its target's type is a sibling node — both are questions for a parser, not for a
+# regular expression that has to guess where the argument list ended.
+bennu-java    = { path = "../java" }
+# Reading a `.properties` bundle. The same reader the message-bundle tooling uses, so a key that
+# exists for one of them exists for the other.
+bennu-i18n    = { path = "../i18n" }
+# The tree-sitter runtime, pinned to the workspace-shared 0.25 like every other crate that walks a
+# CST. Native `links` library: exactly one version can be linked, so a crate picking its own is not
+# a different choice, it is a build failure.
+tree-sitter   = "0.25"

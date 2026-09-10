@@ -1,0 +1,16 @@
+[package]
+name         = "bennu-scheduling"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Scheduled work, read rather than guessed at: every @Scheduled method and Quartz trigger a project declares, what its cron expression means in words, and the two ways a job silently never runs — an expression that is not one, and a project that never switched scheduling on."
+
+[dependencies]
+bennu-ext   = { path = "../ext" }
+bennu-proto = { path = "../proto" }
+# The Java parser. A cron lives inside an annotation argument, and the method it is attached to is
+# a sibling node — both are questions for a parser.
+bennu-java  = { path = "../java" }
+tree-sitter = "0.25"

@@ -50,6 +50,34 @@
   kind that creates a directory (<code>atlas_player/mod.rs</code>), because <code>foo.rs</code> and
   <code>foo/mod.rs</code> are two different decisions about how the module will grow.
 </p>
+<h2>New modules</h2>
+<p>
+  <strong>New › Module</strong> in the tree's right-click menu, or <strong>New module…</strong> in
+  the Command Palette. Maven projects only.
+</p>
+<p>
+  A module is not a folder — it is a folder <em>its parent knows about</em>. So the dialog's first
+  question is which pom in the reactor will list it, preselected to the one nearest the row you
+  opened the menu on, and creating the module writes that <code>&lt;module&gt;</code> line as well
+  as the folder, the pom and the source roots. A parent that was not an aggregator becomes one
+  (<code>&lt;packaging&gt;pom&lt;/packaging&gt;</code>), and the dialog says so before you press
+  Create.
+</p>
+<p>
+  <strong>Group and version are placeholders, not values.</strong> What you see greyed is what the
+  parent gives, and leaving them alone writes nothing into the new pom — which is the right pom
+  almost every time. A module that repeats its parent's version is the reason a release ends up
+  needing eleven files edited. Type over the placeholder to say you meant otherwise.
+</p>
+<p>
+  The packaging decides the folders: a <code>jar</code> and a <code>war</code> get their
+  <code>src/main/java</code> and <code>src/test/resources</code> (a war also gets
+  <code>src/main/webapp/WEB-INF</code>), and a <code>pom</code> aggregator gets none, because
+  sources in one would never be compiled. Nothing is written until every refusal has been
+  checked — an occupied directory, a name that is not a folder name, or a parent that builds
+  sources of its own and so cannot also aggregate.
+</p>
+
 <h2>New folders and packages</h2>
 <p>
   <strong>New › Directory</strong> — from a row's right-click menu, from the header's
@@ -77,6 +105,32 @@
   Levels that are <strong>already there</strong> are stepped through, not objected to: typing
   <code>src/main/resources</code> where <code>src/main</code> exists creates <code>resources</code>
   and nothing else, and the confirmation says exactly what was created.
+</p>
+
+<h2>Copying a class</h2>
+<p>
+  <kbd>Ctrl</kbd> + <kbd>C</kbd> on a file in the tree, then <kbd>Ctrl</kbd> + <kbd>V</kbd> on the
+  package or folder it should land in — or <strong>Copy</strong> and <strong>Paste</strong> from the
+  right-click menu. The dialog opens with the name selected and the extension left out of the
+  selection, so renaming is one word and <kbd>Enter</kbd>.
+</p>
+<p>
+  For a <code>.java</code> file the copy is not a file copy. Its <code>package</code> declaration is
+  rewritten to where it actually lands, and if you renamed it, the type is renamed with it —
+  declaration, constructors and every mention of it as a type in the file. A field that happens to
+  share the name is left alone: the rename walks what the parser calls type names, not the text.
+</p>
+<p>
+  When the copy leaves its old package behind, the classes it referred to by <strong>simple
+  name</strong> — its neighbours, which needed no import while they shared a package — become
+  imports in the copy. That is the part that silently breaks when a class is duplicated by hand.
+  Where both the old and the new package declare the same simple name nothing is written: the copy
+  resolves to its new neighbour, and picking the other one for you would be a guess.
+</p>
+<p>
+  Nothing is ever overwritten. A paste that would land on an existing file says so and waits for a
+  different name. Folders are not pasted — every file inside one would need its own package rewrite
+  and its own collision check, and half of that would be worse than none.
 </p>
 
 <h2>Renaming a file</h2>

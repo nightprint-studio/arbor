@@ -22,6 +22,12 @@ bennu-proto = { path = "../proto" }
 # this crate is the policy — the relevance markers (`scan.rs`) and the package table
 # (`known.rs`).
 bennu-facts = { path = "../facts" }
+# The Java parser. What Spring's proxy semantics turn on — whether a call goes through the proxy —
+# is a question about a *call site*, which the flattened fact model deliberately does not carry.
+bennu-java  = { path = "../java" }
+# The tree-sitter runtime, pinned to the workspace-shared 0.25. Native `links` library: exactly one
+# version can be linked, so a crate picking its own is not a different choice, it is a build failure.
+tree-sitter = "0.25"
 # Runtime-visible annotations off a `.class`. A bean declared inside a dependency has no
 # source on disk, so the only place its `@Service` / `@Bean` is written is the bytecode —
 # same framework facts this crate already reads from Java text and bean XML, third container.

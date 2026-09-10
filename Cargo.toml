@@ -106,6 +106,16 @@ members = [
     "crates/products/bennu/ext",
     "crates/products/bennu/spring",
     "crates/products/bennu/jpa",
+    # Bean Validation: which bundle a constraint message is really resolved against (the spec's
+    # `ValidationMessages`, or one named in a `@Bean`), and which `{…}` in a message is a bundle
+    # key rather than the constraint's own attribute.
+    "crates/products/bennu/jakarta",
+    # Scheduled work: every `@Scheduled` method and Quartz trigger, what its cron says in words,
+    # and the two ways a job silently never runs.
+    "crates/products/bennu/scheduling",
+    # Jackson: what a DTO will and will not put in its JSON, read from the annotations and the
+    # accessors rather than discovered from a payload that came out wrong.
+    "crates/products/bennu/jackson",
     # Bevy ECS, read from the source shape: the fourth framework extension, and the second that
     # is not Java's.
     "crates/products/bennu/bevy",
@@ -113,6 +123,10 @@ members = [
     "crates/products/bennu/xsd",
     "crates/products/bennu/xml",
     "crates/products/bennu/deps",
+    # Writing back into a pom.xml — the half `bennu-deps` deliberately does not do. A leaf over
+    # the XML element tree: no filesystem policy, no Maven invocation, just "here is the text and
+    # here is what it should say".
+    "crates/products/bennu/pomedit",
     "crates/products/bennu/maven",
     "crates/products/bennu/toolconf",
     "crates/products/bennu/refactor",

@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use bennu_maven::prelude::{
-    effective_of_buffer, pom_completions, pom_diagnostics, Catalog, LocalRepo, PomDoc, PomEnv,
+    effective_of_buffer, pom_completions, pom_diagnostics, pom_navigate, Catalog, LocalRepo,
+    PomDoc, PomEnv,
 };
 
 /// A temporary local repository plus a project directory.
@@ -90,14 +91,26 @@ impl Drop for Fixture {
 
 /// Run `f` with a `PomEnv` over `source`, as the extension builds one.
 fn with_env<T>(f: &Fixture, source: &str, body: impl FnOnce(&PomEnv<'_>, &PomDoc<'_>) -> T) -> T {
+    with_env_at(f, &f.pom_path(), source, body)
+}
+
+/// The same, for a buffer that is **not** the project's own pom — a dependency's, opened out of
+/// the repository. Everything an answer needs is keyed on that path, so it is the one thing that
+/// changes.
+fn with_env_at<T>(
+    f: &Fixture,
+    at: &Path,
+    source: &str,
+    body: impl FnOnce(&PomEnv<'_>, &PomDoc<'_>) -> T,
+) -> T {
     let repo = f.repo();
     let catalog = Catalog::scan(&repo);
-    let effective = effective_of_buffer(&repo, &f.pom_path(), source);
+    let effective = effective_of_buffer(&repo, at, source);
     let reactor: HashMap<String, String> = HashMap::from([(
         "com.acme:app".to_string(),
         f.pom_path().to_string_lossy().replace('\\', "/"),
     )]);
-    let path = f.pom_path().to_string_lossy().replace('\\', "/");
+    let path = at.to_string_lossy().replace('\\', "/");
     let env = PomEnv {
         repo: &repo,
         catalog: &catalog,
@@ -354,4 +367,32 @@ fn a_relocated_dependency_says_where_it_went() {
         pom_diagnostics(env, doc).iter().any(|d| d.code == "maven-unresolved-dependency")
     });
     assert!(!missing, "must not also report it as unresolved");
+}
+
+/// The trail out of your own project, which is the whole reason to follow a dependency at all.
+///
+/// You jump from your pom into `spring-core`'s, in `~/.m2`. That file is not in any project — and
+/// it is still a pom, so the same jump has to work again from there. One step used to be the
+/// limit: the first landed you somewhere the tooling did not answer about, and the coordinates in
+/// front of you were text.
+#[test]
+fn a_dependencys_pom_leads_on_to_its_own_dependencies() {
+    let f = Fixture::new("library-trail");
+    f.install("org.slf4j", "slf4j-api", "1.7.36");
+    let source = "<project><groupId>org.springframework</groupId>\
+        <artifactId>spring-core</artifactId><version>5.3.20</version>\
+        <dependencies><dependency><groupId>org.slf4j</groupId>\
+        <artifactId>slf4j-api</artifactId><version>1.7.36</version></dependency></dependencies>\
+        </project>";
+    let at = f
+        .dir
+        .join("m2/org/springframework/spring-core/5.3.20/spring-core-5.3.20.pom");
+    let offset = source.find("slf4j-api").unwrap() + 2;
+
+    let targets = with_env_at(&f, &at, source, |env, doc| pom_navigate(env, doc, offset));
+    let files: Vec<String> = targets.iter().map(|t| t.file.clone()).collect();
+    assert!(
+        files.iter().any(|file| file.ends_with("org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.pom")),
+        "{files:?}"
+    );
 }
