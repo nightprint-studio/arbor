@@ -39,6 +39,13 @@
     <strong>An annotation counts</strong>: <code>&#64;SpringBootApplication</code> with no import
     above it is the same "cannot find symbol", and it is the easiest one to leave behind, because
     the code around an annotation still reads correctly without it.
+    <strong>A nested type written through its outer counts too</strong> —
+    <code>Cfg.MyProva</code> where <code>Cfg</code> declares no <code>MyProva</code>. The whole
+    thing is one name in the parse, and a name written with dots in it used to be left alone
+    wholesale: right for <code>com.acme.Foo</code>, where the segments are packages, and wrong for
+    the ordinary way of naming a nested class from outside. It is judged only when the qualifier
+    resolves to a type <em>this project declares</em>, so a package-qualified name and a library's
+    <code>Map.Entry</code> are still left exactly as written.
     <kbd>Alt</kbd> + <kbd>Enter</kbd> on the name offers the import.</li>
   <li><strong>Type incompatibility</strong> — an impossible cast (<code>(String) anInteger</code>),
     and an assignment or <code>return</code> whose value isn't of the declared type — including
@@ -142,6 +149,24 @@
   javac said about them — the symbol it could not find, the type it required against the one it
   found. They describe the file as the compiler read it, so editing it clears them and live
   validation covers the file until the next build.
+</p>
+
+<h2>While a member doesn't parse</h2>
+<p>
+  A file being typed usually has exactly one member that doesn't parse yet, and the rest of it is
+  checked normally. The error is charged to the <strong>member it landed in</strong> — the method,
+  the constructor, the field, the initialiser — and everything outside that member is validated as
+  if the file were whole, including the nested classes below it.
+</p>
+<p>
+  Inside that member you get the syntax error and nothing else. Recovery reads whatever it can as
+  code, so a diagnostic from in there would be about a nesting nobody wrote: a half-closed string
+  literal turns its own contents into a page of undefined symbols.
+</p>
+<p>
+  When no member can be blamed — an unbalanced brace at class level, which changes what every
+  member below it is nested in — the whole file falls back to its syntax error alone. There is
+  nothing smaller to give up.
 </p>
 
 <h2>Data flow</h2>

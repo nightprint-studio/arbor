@@ -96,7 +96,7 @@ const oracleMode: StreamParser<unknown> = sql({
  * there it decides where completion and diagnostics may act, and being off by one
  * literal there would be visible. Here it would buy nothing that can be seen.
  */
-const MODES: Record<SqlDialect, Extension> = {
+const MODES: Record<SqlDialect, StreamLanguage<unknown>> = {
   oracle: StreamLanguage.define(oracleMode),
   postgres: StreamLanguage.define(pgSQL),
   portable: StreamLanguage.define(pgSQL),
@@ -111,5 +111,18 @@ const MODES: Record<SqlDialect, Extension> = {
  * ends up highlighted by the dialect it is written to avoid.
  */
 export function sqlHighlight(dialect: SqlDialect | null | undefined): Extension {
+  return sqlLanguage(dialect);
+}
+
+/**
+ * The same mode as a {@link Language} rather than as an opaque `Extension` — for a caller that has
+ * to *wrap* it rather than install it, which today means a ```sql fence inside a Markdown document
+ * (`markdown()` takes `LanguageDescription`s, and one of those is built around a `LanguageSupport`
+ * around a `Language`).
+ *
+ * Same objects as {@link sqlHighlight}, deliberately: two entry points onto one table, so the
+ * dialect rules above cannot come out different in a fence than in a `.sql` file.
+ */
+export function sqlLanguage(dialect: SqlDialect | null | undefined): StreamLanguage<unknown> {
   return MODES[dialect ?? 'portable'] ?? MODES.portable;
 }

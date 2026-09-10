@@ -75,6 +75,9 @@ function createBennuTestStore() {
   let running = $state(false);
   let label = $state('');
   let widened = $state<string | null>(null);
+  /** Whether the live run is under the debugger — the panel says a different verb, and Stop ends a
+   *  session as well as a process. */
+  let debugging = $state(false);
   let runningClass = $state<string | null>(null);
   let exitCode = $state<number | null>(null);
   let cancelled = $state(false);
@@ -85,8 +88,14 @@ function createBennuTestStore() {
   /** Reports as they land, keyed by the class's DOTTED name so they line up with discovery. */
   const results = new SvelteMap<string, TestClassResult>();
 
-  // Not reactive — only the event handlers and `stop()` read it.
-  let runId: string | null = null;
+  /** The backend's id for the live run.
+   *
+   *  Reactive, and it has to be: it is also the **debug session's** id — the backend starts the
+   *  session under the run id — so the Run panel reads it to decide which session belongs to the
+   *  tab in front. While it was a plain `let`, a test started under the debugger paused with the
+   *  stack sitting in a session nothing on screen was pointed at: no transport controls, no frames,
+   *  no variables. */
+  let runId = $state<string | null>(null);
   let lastScope: TestScope | null = null;
   let lastRoot = '';
   let ticker: ReturnType<typeof setInterval> | null = null;
@@ -186,6 +195,10 @@ function createBennuTestStore() {
         if (!mine(e.payload.run_id)) return;
         running = false;
         runId = null;
+        // The session went with the process — the backend closes its end when a run is cancelled,
+        // and the socket closes on its own when the JVM exits. Leaving this true would keep the
+        // panel calling a finished run a debug session.
+        debugging = false;
         runningClass = null;
         exitCode = e.payload.code;
         cancelled = e.payload.cancelled;
@@ -232,7 +245,7 @@ function createBennuTestStore() {
    * No-op while a run is in flight — the backend refuses a second Maven on the same tree
    * anyway, and asking only to be told no is worse than not asking.
    */
-  async function run(root: string, scope: TestScope): Promise<void> {
+  async function run(root: string, scope: TestScope, debug = false): Promise<void> {
     if (running || !root) return;
     running = true;
     lastScope = scope;
@@ -251,15 +264,17 @@ function createBennuTestStore() {
     // The Run console, on its Tests tab — starting a run brings the thing you started forward.
     bennuUiStore.showTestRun();
     try {
-      const handle = await runTests(root, scope);
+      const handle = await runTests(root, scope, debug);
       runId = handle.run_id;
       label = handle.label;
       widened = handle.widened;
-      push(`Running ${handle.label}…`, 'meta');
+      debugging = handle.debugging ?? false;
+      push(`${debugging ? 'Debugging' : 'Running'} ${handle.label}…`, 'meta');
       if (handle.widened) push(handle.widened, 'err');
     } catch (e) {
       running = false;
       runId = null;
+      debugging = false;
       stopTicker();
       push(`Could not start the tests: ${e instanceof Error ? e.message : String(e)}`, 'err');
     }
@@ -470,6 +485,10 @@ function createBennuTestStore() {
     get running() { return running; },
     get label() { return label; },
     get widened() { return widened; },
+    /** Whether the live run is under the debugger. */
+    get debugging() { return debugging; },
+    /** The run's id, which is also its debug session's. `null` between runs. */
+    get runId() { return runId; },
     get runningClass() { return runningClass; },
     get exitCode() { return exitCode; },
     get cancelled() { return cancelled; },
@@ -520,22 +539,22 @@ function createBennuTestStore() {
 
     /** Run whatever a row stands for — the panel's one verb, so it never has to know that a
      *  Maven class is addressed by a selector name. */
-    runRow(root: string, row: TestRow) {
+    runRow(root: string, row: TestRow, debug = false) {
       const selector = row.selector ?? '';
       if (!selector) return Promise.resolve();
       return row.kind === 'case'
-        ? run(root, { kind: 'cases', cases: [{ class: selector, method: baseMethodName(row.method ?? row.label) }] })
-        : run(root, { kind: 'classes', classes: [selector] });
+        ? run(root, { kind: 'cases', cases: [{ class: selector, method: baseMethodName(row.method ?? row.label) }] }, debug)
+        : run(root, { kind: 'classes', classes: [selector] }, debug);
     },
     /** Every test in the project. */
     runAll(root: string) { return run(root, { kind: 'all' }); },
     /** Every test in one class (by its Surefire selector name). */
-    runClass(root: string, selector: string) {
-      return run(root, { kind: 'classes', classes: [selector] });
+    runClass(root: string, selector: string, debug = false) {
+      return run(root, { kind: 'classes', classes: [selector] }, debug);
     },
     /** One method. */
-    runCase(root: string, selector: string, method: string) {
-      return run(root, { kind: 'cases', cases: [{ class: selector, method }] });
+    runCase(root: string, selector: string, method: string, debug = false) {
+      return run(root, { kind: 'cases', cases: [{ class: selector, method }] }, debug);
     },
     /** A set of classes — how a package, a folder or a multi-selection arrives. */
     runClasses(root: string, selectors: string[]) {

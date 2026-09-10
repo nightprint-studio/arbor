@@ -32,8 +32,11 @@
    * tree, filters and counters are singletons. When it grows a history the strip grows with it
    * and nothing here changes.
    *
-   * Debugging a test is the thing this makes possible rather than the thing it does — but that
-   * is the point of putting them in one panel, and where it will land.
+   * **Debugging a test lands here too**, which is what putting them in one panel was for: the
+   * transport controls appear on the test run's status row and the stopped JVM's frames and
+   * variables take the two columns to the left of the tree — the same places, the same widths, the
+   * same collapse strips as beside a program's transcript. Nothing about the debugger knows that
+   * the run it is looking at is a test.
    *
    * What makes it a console rather than a log view:
    *   • the **command that actually ran** is its first line — the resolved `java`, the VM
@@ -191,6 +194,35 @@
     testsWereRunning = now;
   });
 
+  /**
+   * While the Tests tab is in front, the debugger shows the **test run's** session.
+   *
+   * A run tab points the store itself, inside `bennuRunStore.focusTab` — the one place that knows
+   * which run a tab stands for. The test tab is not one of its tabs, so the pointing has to happen
+   * here, and here is also the only place that knows the test tab exists at all.
+   *
+   * `view` is a no-op when the id has not changed, so this settles after one pass.
+   */
+  $effect(() => {
+    if (onTests) bennuDebugStore.view(testStore.runId);
+  });
+
+  /**
+   * A test that stops at a breakpoint brings its tab forward — the same rule programs already
+   * have, where `bennuRunStore` focuses the tab the paused session belongs to.
+   *
+   * Edge-detected on the session id rather than on `paused`: stepping pauses again and again, and
+   * re-forcing the tab on every step would drag you back from a file you had gone to read.
+   */
+  let surfaced = '';
+  $effect(() => {
+    const id = bennuDebugStore.sessionId;
+    const testRun = testStore.runId;
+    if (!bennuDebugStore.paused || !id || id !== testRun || id === surfaced) return;
+    surfaced = id;
+    bennuUiStore.showRunTab(TESTS);
+  });
+
   /** A finished run's verdict. `null` while nothing has finished. Keyed off "did it finish"
    *  and not off the exit code, because a killed process has no code of its own. */
   const verdict = $derived.by(() => {
@@ -208,10 +240,21 @@
   });
 
   // ── the debugger, when this run is one ────────────────────────────────────────
+  /**
+   * The run behind whichever tab is in front — a program's, or the test run's.
+   *
+   * The test tab has to be asked separately because it is not one of `bennuRunStore`'s: it stands
+   * for the test runner's own run, which has its own id. Reading only the run store here is what
+   * left a debugged test with no transport controls and no stack — the session existed, was
+   * paused, and had nothing on screen pointed at it.
+   */
+  const viewedRunId = $derived(
+    onTests ? testStore.runId : (bennuRunStore.activeTab?.runId ?? null),
+  );
   /** Whether the tab you are LOOKING at is the debugged one. A session belongs to a run, and
    *  its id is that run's — so an old transcript never wears another run's controls. */
   const debugging = $derived(
-    bennuDebugStore.live && bennuDebugStore.sessionId === bennuRunStore.activeTab?.runId,
+    bennuDebugStore.live && bennuDebugStore.sessionId === viewedRunId,
   );
   /** Stopped somewhere, with a stack to show. What turns the two columns on. */
   const atBreakpoint = $derived(debugging && bennuDebugStore.paused);
@@ -295,14 +338,51 @@
   }
 </script>
 
+<!-- The stopped program's two columns, in front of whatever the tab's body is — a transcript for a
+     program, the test tree for a run of tests. A snippet rather than two copies: the columns
+     remember their widths in one store, and a second spelling of them is a second place for a
+     collapsed strip to be forgotten. -->
+{#snippet debugColumns()}
+  <!-- Collapsed leaves a labelled strip rather than nothing: a column dragged to zero is
+       indistinguishable from a broken layout, and there is nothing left to grab. -->
+  {#if bennuDebugLayout.framesOpen}
+    <ResizablePanel
+      initialSize={bennuDebugLayout.framesWidth}
+      minSize={140}
+      maxSize={640}
+      onResize={(w) => bennuDebugLayout.setFramesWidth(w)}
+    >
+      <BennuDebugFrames />
+    </ResizablePanel>
+  {:else}
+    <button class="rp-strip" type="button" onclick={() => bennuDebugLayout.toggleFrames()}>
+      Frames
+    </button>
+  {/if}
+  {#if bennuDebugLayout.valuesOpen}
+    <ResizablePanel
+      initialSize={bennuDebugLayout.valuesWidth}
+      minSize={180}
+      maxSize={720}
+      onResize={(w) => bennuDebugLayout.setValuesWidth(w)}
+    >
+      <BennuDebugValues />
+    </ResizablePanel>
+  {:else}
+    <button class="rp-strip" type="button" onclick={() => bennuDebugLayout.toggleValues()}>
+      Variables
+    </button>
+  {/if}
+{/snippet}
+
 <div class="rp">
   <BottomPanelHeader title="Run" onClose={() => bennuUiStore.closeBottom()}>
     <!-- Green, the way every IDE marks the thing that starts a program — and red while a
          debugger is attached, which is the panel saying what it currently is. -->
     {#snippet icon()}
       <span class="rp-run-icon" class:debugging class:testing={onTests}>
-        {#if onTests}{@const TestIcon = testIcon()}<TestIcon size={13} />
-        {:else if debugging}<Bug size={13} />
+        {#if debugging}<Bug size={13} />
+        {:else if onTests}{@const TestIcon = testIcon()}<TestIcon size={13} />
         {:else}<Play size={13} />{/if}
       </span>
     {/snippet}
@@ -330,13 +410,32 @@
   </BottomPanelHeader>
 
   {#if onTests}
-    <!-- The test run's own status row, in the same place a program's is: what it is doing on
-         the right, nothing on the left yet — the debugger's transport lands there the day a
-         test can be debugged. -->
+    <!-- The test run's own status row, in the same place a program's is: the debugger's transport
+         on the left while a test is stopped, the tally on the right. That day arrived — a test can
+         be debugged now, and the controls belong here rather than in a panel of their own for
+         exactly the reason the whole module note gives. -->
     <div class="rp-status">
-      <span class="rp-status-right"><BennuTestSummary /></span>
+      {#if debugging}<BennuDebugControls />{/if}
+      <span class="rp-status-right">
+        {#if atBreakpoint}
+          <!-- In front of the tally, not instead of it: how many tests have passed is still true
+               while one of them is standing still, and it is what you come back to. -->
+          <span class="rp-dot paused"></span>
+          <span class="rp-text">{status.text}</span>
+        {/if}
+        <BennuTestSummary />
+      </span>
     </div>
-    <BennuTestView />
+    <!-- Stopped: the stack and the variables take the two columns to the left of the tree, the
+         same places they take beside a program's transcript. -->
+    {#if atBreakpoint}
+      <div class="rp-body">
+        {@render debugColumns()}
+        <BennuTestView />
+      </div>
+    {:else}
+      <BennuTestView />
+    {/if}
   {:else if !bennuRunStore.tabs.length}
     <div class="rp-empty">
       <Play size={20} />
@@ -367,38 +466,7 @@
     <!-- Stopped: the stack on the left, what is in scope beside it, the transcript keeping the
          rest. Running: the transcript is all of it. -->
     <div class="rp-body">
-      {#if atBreakpoint}
-        <!-- Collapsed leaves a labelled strip rather than nothing: a column dragged to zero is
-             indistinguishable from a broken layout, and there is nothing left to grab. -->
-        {#if bennuDebugLayout.framesOpen}
-          <ResizablePanel
-            initialSize={bennuDebugLayout.framesWidth}
-            minSize={140}
-            maxSize={640}
-            onResize={(w) => bennuDebugLayout.setFramesWidth(w)}
-          >
-            <BennuDebugFrames />
-          </ResizablePanel>
-        {:else}
-          <button class="rp-strip" type="button" onclick={() => bennuDebugLayout.toggleFrames()}>
-            Frames
-          </button>
-        {/if}
-        {#if bennuDebugLayout.valuesOpen}
-          <ResizablePanel
-            initialSize={bennuDebugLayout.valuesWidth}
-            minSize={180}
-            maxSize={720}
-            onResize={(w) => bennuDebugLayout.setValuesWidth(w)}
-          >
-            <BennuDebugValues />
-          </ResizablePanel>
-        {:else}
-          <button class="rp-strip" type="button" onclick={() => bennuDebugLayout.toggleValues()}>
-            Variables
-          </button>
-        {/if}
-      {/if}
+      {#if atBreakpoint}{@render debugColumns()}{/if}
       <BennuConsole {lines} emptyMessage="No output yet." />
     </div>
 
@@ -456,10 +524,12 @@
 <style>
   .rp { display: flex; flex-direction: column; height: 100%; width: 100%; min-height: 0; background: var(--bg-base); overflow: hidden; }
   .rp-run-icon { display: inline-flex; color: var(--success); }
-  .rp-run-icon.debugging { color: var(--error); }
-  /* Tests wins over debugging: the icon says which TAB you are on, not what is happening
-     somewhere else in the panel. */
+  /* Tests is the tab you are on; debugging is what is happening on it. The blue comes first so
+     the red wins when both are true — a test stopped at a breakpoint is a debug session, and the
+     icon beside the title is already a bug by then. `debugging` is scoped to the tab in front, so
+     this cannot pick up a session running somewhere else in the panel. */
   .rp-run-icon.testing { color: var(--info); }
+  .rp-run-icon.debugging { color: var(--error); }
 
   /* One tab per run, in the header beside the title. Capped so a run with a long name cannot
      push the header's actions off the end. */

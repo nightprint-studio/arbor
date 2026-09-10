@@ -15,7 +15,10 @@ pub use crate::plan::{
 };
 
 // The individual transforms, for a caller that wants one rather than the list.
-pub use crate::create::{create_method, missing_type_at, new_type_source, MissingType};
+pub use crate::create::{
+    create_method, foreign_call_at, missing_type_at, new_type_source, undeclared_calls, ForeignCall,
+    LocalCall, MissingType,
+};
 pub use crate::extract_method::extract_method;
 pub use crate::extract_var::{extract_constant, extract_variable, TYPE_PLACEHOLDER};
 pub use crate::declaration::{from_var, join_declaration, split_declaration, to_var};

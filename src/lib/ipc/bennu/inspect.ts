@@ -143,3 +143,58 @@ export interface JdkStatus {
 export function jdkStatus(root: string): Promise<JdkStatus | null> {
   return bennu('bennu_jdk_status', { args: { root } });
 }
+
+/** The Java level of the MODULE a file belongs to. */
+export interface ModuleJdk {
+  /** The module's directory relative to the project root (`"."` for the root itself). */
+  module: string;
+  /** The level as declared — `"1.8"`, `"21"`. */
+  version: string;
+  /** Which key declared it — `maven.compiler.release`, `java.version`, … */
+  source: string;
+  /** The level as a number, for the decisions that gate on it. */
+  major: number | null;
+}
+
+/** The level of the module `file` is in, or `null` when no pom above it declares one — then the
+ *  project's own answer stands.
+ *
+ *  A reactor part-way through a migration has one module on 21 and another still on 8. The index
+ *  and the classpath are one JDK by construction, but whether a syntax exists yet is a question
+ *  about the file in front of you, so it is answered per module.
+ *
+ *  Wire: `bennu_module_jdk` — `ModuleJdkArgs { file }`. */
+export function moduleJdk(file: string): Promise<ModuleJdk | null> {
+  return bennu('bennu_module_jdk', { args: { file } });
+}
+
+/** What a build unit — a Maven module, a Cargo crate — says on its own row. */
+export interface BuildUnit {
+  /** The directory asked about, echoed so the caller can key by it. */
+  dir: string;
+  /** What the unit is called to the build — the Maven artifactId, the crate name — elided in the
+   *  middle when long, and empty when it only repeats the folder the row already shows. */
+  artifact: string;
+  /** The short line beside the name — `JDK 21`, `JDK 21 · war`, `Rust 2024 · bin`. */
+  label: string;
+  /** The whole of it, for the tooltip. */
+  detail: string;
+}
+
+/** Describe each directory that declares a build target. Directories that declare none are absent
+ *  from the answer rather than reported empty.
+ *
+ *  Wire: `bennu_build_units` — `BuildUnitsArgs { dirs }`. */
+export function buildUnits(dirs: string[]): Promise<BuildUnit[]> {
+  return bennu('bennu_build_units', { args: { dirs } });
+}
+
+/** The literal `<test>` this project's pom pins on the Surefire plugin, or `null`.
+ *
+ *  `null` for every project that does not pin one — and for the property spellings, which are
+ *  steerable and so are not a problem to warn about.
+ *
+ *  Wire: `bennu_test_selection_pinned` — `PinnedArgs { root }`. */
+export function testSelectionPinned(root: string): Promise<string | null> {
+  return bennu('bennu_test_selection_pinned', { args: { root } });
+}

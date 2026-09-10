@@ -1,12 +1,14 @@
 /**
- * The editor language for a Spring **property file** — `application*.yml`,
- * `application*.properties` and their `bootstrap*` siblings.
+ * The editor language for a **configuration file with a documented vocabulary** — a `.properties`
+ * or `.yml` whose keys are not free-form but come from somewhere: Spring's own catalogue and the
+ * project's `@ConfigurationProperties`, Lombok's `ConfigurationKeys`, the JUnit Platform's
+ * configuration parameters.
  *
- * Colouring is the stock CodeMirror mode; everything else here is the part a plain YAML mode
+ * Colouring is the stock CodeMirror mode; everything else here is the part a plain properties mode
  * cannot do, because it comes from outside the file:
  *
- * - **completion** over the keys Spring and the project's libraries document (read out of the
- *   dependency jars) *plus* the project's own `@ConfigurationProperties` paths — the second
+ * - **completion** over the keys the tool documents — for Spring, that includes the ones read out
+ *   of the dependency jars *plus* the project's own `@ConfigurationProperties` paths, the second
  *   half being the one that matters on a legacy tree, where nobody wrote documentation for
  *   `gestionale.application.*` and everybody misspells it;
  * - **value completion** where the set is closed (an enum, a boolean);
@@ -14,26 +16,28 @@
  *   empty, or a prefix exactly one key can continue;
  * - **hover** with the type, the default, the prose, and who reads it.
  *
- * All four are backend calls; nothing about the vocabulary lives here. That is deliberate —
- * the backend knows the classpath, and a property file is exactly the kind of file where a
- * frontend heuristic would be confidently wrong.
+ * All four are backend calls; **nothing about any vocabulary lives here**. That is deliberate, and
+ * it is what makes this module one module rather than one per tool: the backend routes by path and
+ * answers with whichever extension owns the file, so a second config format is a table in an
+ * extension, not a second copy of everything below.
  *
  * ## The one thing this file decides
  *
  * Where the token being completed **starts**. The backend decides what the candidates are;
  * CodeMirror needs a `from` to replace, and that is a question about the buffer rather than
- * about Spring. The rule is the same one the backend classifies with — before the separator
+ * about any framework. The rule is the same one the backend classifies with — before the separator
  * you are typing a key, after it a value — kept deliberately shallow so the two cannot drift
  * in any way that matters: get it wrong and a completion is inserted at a slightly wrong
  * offset, never that the wrong candidates are offered.
  */
 
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
-import { makeU16ToByte } from '$lib/components/shared/ui/code-editor';
+import { makeU16ToByte, makeByteToU16 } from '$lib/components/shared/ui/code-editor';
 import { StreamLanguage, type StreamParser } from '@codemirror/language';
 import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 import type { EditorView } from '@codemirror/view';
 import { extCompletion, extHover, extInlineHint } from '$lib/ipc/bennu/ext';
+import { applyOf } from './markup-intel';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
 import { makeHoverSource } from './bennu-hover';
 
@@ -81,6 +85,7 @@ const propertyCompletionSource = async (
   const byteOffset = makeU16ToByte(src)(ctx.pos);
   const items = await extCompletion(path, src, byteOffset).catch(() => []);
   if (items.length === 0) return null;
+  const b2u = makeByteToU16(src);
 
   return {
     from,
@@ -88,6 +93,11 @@ const propertyCompletionSource = async (
       label: it.label,
       type: it.kind === 'value' ? 'constant' : 'property',
       detail: it.detail ?? undefined,
+      // When the backend sends a range it wins over `from` above, and it is not advisory: it is the
+      // answer for the cases the shallow rule cannot see — a `clear <key>` statement, whose key
+      // starts after the verb, and a caret in the middle of a key that is already written, whose
+      // tail has to go with it.
+      apply: applyOf(it, b2u),
     })),
     // The backend already filtered by what was typed; letting CodeMirror re-filter against a
     // dotted label would drop `spring.datasource.url` the moment the typed text spans a dot.
@@ -118,10 +128,13 @@ const intel = {
   inlineCompletion: propertyInlineSource,
 };
 
-/** Build the descriptor for one property syntax. Called once per syntax at module load — the
- *  identity has to be stable, because `CodeEditor` rebuilds its extensions when the descriptor
- *  changes and a fresh object per read would remount the editor on every keystroke. */
-function springPropsLang(id: string, parser: StreamParser<unknown>): LanguageDescriptor {
+/** Build the descriptor for one config-file syntax. Called once per **kind of file** at module
+ *  load — the identity has to be stable, because `CodeEditor` rebuilds its extensions when the
+ *  descriptor changes and a fresh object per read would remount the editor on every keystroke.
+ *
+ *  `id` names the file kind rather than the syntax (`lombok-config`, not `properties`), because it
+ *  is what the editor reports and what a bug report quotes back. */
+function configPropsLang(id: string, parser: StreamParser<unknown>): LanguageDescriptor {
   return {
     id,
     createParser: () => Promise.reject(new Error(`cm-language:${id} has no tree-sitter parser`)),
@@ -131,4 +144,4 @@ function springPropsLang(id: string, parser: StreamParser<unknown>): LanguageDes
   };
 }
 
-export { springPropsLang };
+export { configPropsLang };

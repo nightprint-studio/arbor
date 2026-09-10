@@ -343,6 +343,17 @@ pub struct CompletionItem {
     /// fetch.
     #[serde(default)]
     pub resolve_id: Option<usize>,
+    /// The binary name of the type this item **comes from** — the declaring type for a member,
+    /// the type itself for a type name. `None` when the item has no owner to speak of (a
+    /// keyword, a local variable, a snippet).
+    ///
+    /// It answers two questions with one field, which is why it is worth the wire. The popup
+    /// draws it as the item's origin — the thing that tells `List.of` from `Set.of`, and an
+    /// inherited method from your own. And it is the handle the documentation is fetched by
+    /// (`bennu_completion_doc`): resolving the Javadoc of four hundred candidates eagerly is
+    /// four hundred archive reads for the one row that gets highlighted.
+    #[serde(default)]
+    pub owner: Option<String>,
 }
 
 /// The severities a [`Diagnostic`] may carry, as the strings that ride on the wire.

@@ -131,6 +131,21 @@ export interface TestTreeStore {
     errored: number;
     skipped: number;
   };
+  /**
+   * The backend's id for the live run, `null` between runs.
+   *
+   * In the interface because it is also the **debug session's** id — the backend starts a session
+   * under the run id — and the Run panel needs it to decide which session belongs to the tab in
+   * front. A runner with no debugger still answers, so the panel never branches on the ecosystem.
+   */
+  readonly runId: string | null;
+  /**
+   * Whether the live run was started under the debugger.
+   *
+   * Always `false` for a runner that has none, rather than absent: the panel offers Run and Debug
+   * for both languages and asks this of whichever store it got.
+   */
+  readonly debugging: boolean;
   readonly hasResults: boolean;
   readonly hasFailures: boolean;
   readonly onlyFailed: boolean;
@@ -159,8 +174,13 @@ export interface TestTreeStore {
   setSortByTime(v: boolean): void;
 
   discover(root: string, force?: boolean): Promise<void>;
-  /** Run whatever this row stands for. */
-  runRow(root: string, row: TestRow): Promise<void>;
+  /** Run whatever this row stands for.
+   *
+   *  `debug` starts it under the debugger where the runner has one — the Maven runner forks a JVM
+   *  that dials back and suspends. A runner without one ignores the flag rather than refusing:
+   *  the panel offers the same two buttons for both languages, and `cargo test` under a debugger
+   *  is a different problem. */
+  runRow(root: string, row: TestRow, debug?: boolean): Promise<void>;
   runAll(root: string): Promise<void>;
   rerun(): Promise<void>;
   rerunFailed(): Promise<void>;

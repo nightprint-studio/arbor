@@ -1,26 +1,58 @@
 //! Killing a spawned child **and everything it started**.
 //!
-//! One function, shared by the two domains that launch long-lived children (`build`'s
-//! `java` run and `tests`' `mvn test`), because the Windows half of it is the kind of
-//! detail that is right in the place someone remembered it and wrong everywhere else.
+//! Two functions that only work as a pair, shared by the domains that launch long-lived children
+//! (`build`'s `java` run, `tests`' `mvn test`, `cargo_tests`' `cargo test`): [`own_group`] at spawn
+//! time makes the child the root of something killable, and [`kill_tree`] kills it. Split across
+//! two files they would drift, and the drift is silent — a child that outlives its Stop button
+//! looks exactly like a child that stopped.
 
-use std::process::Child;
-#[cfg(windows)]
-use std::process::Command;
+use std::process::{Child, Command};
 
 #[cfg(windows)]
 use arbor_process_ext::prelude::NoWindowExt;
 
+/// Put a child at the head of its own process group, so [`kill_tree`] can take its descendants
+/// with it. Call it on every `Command` whose output the console streams, **before** `spawn`.
+///
+/// ## Why a group and not just the handle
+///
+/// Because the handle is regularly not the process that matters. `mvn test` forks a **second** JVM
+/// to run the tests in (Surefire's `forkCount`), and that JVM is a grandchild: killing Maven leaves
+/// it running — holding `target/`, and, when the run was started under the debugger, sitting
+/// suspended at a breakpoint with its JDWP socket still open. The editor then showed a debug
+/// session that could not be ended: the current line stayed highlighted, the activity bar kept its
+/// paused dot, and Stop had visibly done nothing.
+///
+/// Windows needs no equivalent — `taskkill /T` walks the real parent-child tree — so this is a
+/// no-op there rather than a second mechanism to keep in step.
+///
+/// The cost is that the child no longer shares our process group, so a `SIGINT` sent to ours does
+/// not reach it. Nothing here relies on that: every child is stopped explicitly, by id.
+pub(crate) fn own_group(cmd: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // 0 = "a new group, led by the child" — so its pgid is its own pid, which is what
+        // `kill_tree` checks before signalling a group.
+        cmd.process_group(0);
+    }
+    #[cfg(not(unix))]
+    let _ = cmd;
+}
+
 /// Kill `child` and its whole process tree.
 ///
-/// `Child::kill` kills exactly the handle we hold, and on Windows that handle is usually a
-/// **launcher**: `mvn.cmd` for a test run, and for anything started through a shell the real
-/// work is a grandchild. Killing the launcher leaves the JVM running — still holding
-/// `target/`, still writing to files, still listening on the port — while the UI says the run
-/// has stopped. `taskkill /T` takes the tree.
+/// `Child::kill` kills exactly the handle we hold, and that handle is regularly a **launcher** or a
+/// parent: `mvn.cmd` on Windows, and on every platform the Maven JVM whose forked test JVM is where
+/// the tests actually run. Killing it alone leaves the real process going — still holding
+/// `target/`, still writing to files, still listening on the port — while the UI says the run has
+/// stopped.
 ///
-/// `kill` follows in both cases: on Unix it is the whole mechanism, and everywhere it reaps
-/// the handle so the waiting thread's `wait()` returns.
+/// Two mechanisms, one per platform, because the platforms give different handles on the same
+/// thing: `taskkill /T` walks the tree on Windows, and on Unix the child was made a **group leader**
+/// by [`own_group`] so one `killpg` reaches every descendant that has not left the group.
+///
+/// `kill` follows in both cases: it reaps the handle so the waiting thread's `wait()` returns.
 pub(crate) fn kill_tree(child: &mut Child) {
     #[cfg(windows)]
     {
@@ -28,6 +60,17 @@ pub(crate) fn kill_tree(child: &mut Child) {
         tk.arg("/PID").arg(child.id().to_string()).arg("/T").arg("/F");
         tk.no_window();
         let _ = tk.output();
+    }
+    #[cfg(unix)]
+    {
+        // Only when the child really leads a group of its own. A child spawned without
+        // `own_group` shares OUR group, and its pid names either nothing or — one chance in a very
+        // large number — somebody else's group: signalling that would kill an unrelated tree.
+        // `getpgid(pid) == pid` is exactly the "we set this up" test, and it costs a syscall.
+        let pid = child.id() as libc::pid_t;
+        if pid > 0 && unsafe { libc::getpgid(pid) } == pid {
+            unsafe { libc::killpg(pid, libc::SIGKILL) };
+        }
     }
     let _ = child.kill();
 }

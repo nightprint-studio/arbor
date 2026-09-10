@@ -30,9 +30,20 @@ export function discoverTests(
 }
 
 /** Launch `mvn test` for `scope`. Resolves once the child is up — everything after that
- *  arrives as events. Wire: `bennu_run_tests` — `RunTestsArgs { root, scope }`. */
-export function runTests(root: string, scope: TestScope): Promise<TestRunHandle> {
-  return bennu('bennu_run_tests', { args: { root, scope } });
+ *  arrives as events.
+ *
+ *  `debug` runs it under the debugger: the forked test JVM dials back to a listener the backend
+ *  opened and suspends until it does, so a breakpoint set before pressing ▷ is honoured. Refused
+ *  with an explanation on a project whose pom sets `forkCount=0`, where the tests run inside
+ *  Maven's own JVM and there is no fork to attach to.
+ *
+ *  Wire: `bennu_run_tests` — `RunTestsArgs { root, scope, debug }`. */
+export function runTests(
+  root: string,
+  scope: TestScope,
+  debug = false,
+): Promise<TestRunHandle> {
+  return bennu('bennu_run_tests', { args: { root, scope, debug } });
 }
 
 /** Kill a live test run and everything it started. `false` when the id is unknown or the

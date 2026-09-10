@@ -556,6 +556,43 @@ pub fn env_var_at(path: &str, source: &str, offset: usize) -> Option<crate::env:
 
 #[cfg(test)]
 mod tests {
+
+    /// A bound field is already a usage — `property_usages` turns every binding into one. Counting
+    /// it a second time is what showed **two** readers for one class on a line only one field
+    /// binds, and it is the reason this test names the count rather than merely asserting "some".
+    #[test]
+    fn a_bound_field_is_counted_exactly_once() {
+        let mut m = SpringModel::default();
+        m.property_usages.push(crate::model::PropertyUsage {
+            key: "app.http.read-timeout".to_string(),
+            file: "/p/HttpProps.java".to_string(),
+            offset: 120,
+            kind: "@ConfigurationProperties".to_string(),
+            label: "HttpProps.readTimeout".to_string(),
+            type_text: "Duration".to_string(),
+        });
+        let readers = m.usages_of("app.http.read-timeout");
+        assert_eq!(readers.len(), 1, "{readers:?}");
+        assert_eq!(readers[0].label, "HttpProps.readTimeout");
+    }
+
+    /// A map's keys cannot be known to the binder, so it records ONE usage with a wildcard in it —
+    /// and an exact comparison reported no reader for exactly the lines a map exists to hold.
+    #[test]
+    fn a_map_entry_is_read_by_the_usage_that_stands_for_the_map() {
+        let mut m = SpringModel::default();
+        m.property_usages.push(crate::model::PropertyUsage {
+            key: "app.clients.<key>.url".to_string(),
+            file: "/p/Clients.java".to_string(),
+            offset: 10,
+            kind: "@ConfigurationProperties".to_string(),
+            label: "Clients.url".to_string(),
+            type_text: "String".to_string(),
+        });
+        assert_eq!(m.usages_of("app.clients.acme.url").len(), 1);
+        assert!(m.usages_of("app.clients.acme.timeout").is_empty(), "a different leaf");
+        assert!(m.usages_of("app.clients.url").is_empty(), "a segment short");
+    }
     use super::*;
     use crate::beans::JavaUnit;
     use crate::model::SpringModel;

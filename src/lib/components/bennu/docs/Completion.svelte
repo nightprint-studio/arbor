@@ -11,6 +11,24 @@
   of what completion feels like. Five things count, strongest first:
 </p>
 <ul>
+  <li><strong>What the position wants.</strong> The strongest of the lot, and the only one that is
+    about the <em>hole</em> rather than about the candidate. In <code>String name = order.</code>
+    there are forty members on <code>order</code> and a handful that can be written there at all —
+    and nothing about <code>order</code> says which, because the constraint is on the left of the
+    <code>=</code>. It is read from four places: a declaration with a written type, an assignment
+    to something already typed, a <code>return</code>, and a condition (which wants a
+    <code>boolean</code>, and turns a member list into the predicates on it). A method returning
+    <code>void</code> sinks where a value is wanted. It <em>ranks</em>, it does not filter: the
+    match is by name, so a genuine subtype is a miss, and hiding on a miss would hide the right
+    answer.</li>
+  <li><strong>What you picked last time.</strong> Every other term is a fact about the code; this
+    one is a fact about you — that on a <code>List</code> you reach for <code>stream</code> and not
+    for <code>listIterator</code>. It is kept per <em>declaring type</em>, so what is learned is
+    "reaching into <code>java.util.List</code>, you pick this", and it transfers to every receiver
+    that inherits it. Frequency and recency both count: a fresh choice can overtake an old habit,
+    and one stray acceptance cannot bury a name you use constantly. It lives for the session and is
+    never written to disk — a persisted ranking that had drifted would be invisible, and nobody
+    would think to clear a cache to fix a completion order.</li>
   <li><strong>What the receiver is.</strong> After a <em>type</em> name — <code>Color.</code> — the
     static members are the answer and the instance ones are not a program at all, so they go to the
     bottom; a constant, which is what a type is most often reached for, goes to the very top.
@@ -60,9 +78,209 @@
   What the file itself imports still comes first — that was never a statistic.
 </p>
 <p>
-  Keywords and words scraped out of the buffer are offered when nothing better matches, always
-  below anything the index resolved. Beyond that, how well what you typed matches still decides
-  between neighbours — the ordering is a starting point, not an override.
+  Keywords are offered below anything the index resolved. Words <em>scraped out of the buffer</em>
+  are offered only when the index answered nothing at all — before it has finished building, or in
+  a file no project owns. They are a regular expression over the text, which is the answer an
+  editor with no index gives, and offering them beside resolved names buries the resolved ones
+  under look-alikes. Beyond that, how well what you typed matches still decides between
+  neighbours — the ordering is a starting point, not an override.
+</p>
+
+<h2>How a name is matched</h2>
+<p>
+  <strong>The name does not have to be spelled the way it is declared.</strong> What you type is
+  matched three ways, best first, and which one matched is part of the ordering — a name that
+  starts with what you typed is offered above one that merely spells its humps that way:
+</p>
+<ol>
+  <li><strong>An exact prefix</strong> — <code>toLo</code> → <code>toLowerCase</code>.</li>
+  <li><strong>A prefix ignoring case</strong> — <code>TOLO</code>, or a shift key held one letter
+    too long.</li>
+  <li><strong>The camel humps</strong> — <code>tolc</code> → <code>toLowerCase</code>,
+    <code>aAE</code> → <code>addAllElements</code>, <code>SBA</code> →
+    <code>SpringBootApplication</code>. This is how anyone who already knows a name reaches for it.
+    An underscore starts a word too, so <code>MAXV</code> reaches <code>MAX_VALUE</code>.</li>
+</ol>
+<p>
+  It is <strong>one rule for every kind of candidate</strong>: a member, a local, a static import, a
+  class name. That is worth saying because it used to be two — the humps existed for class names
+  only, and everything else was matched by a literal, case-sensitive prefix.
+</p>
+<p>
+  <strong>Settings → Completion → Popup</strong> decides when the popup arrives and how forgiving
+  it is: whether it opens on its own while you type (and after how long a pause), or only on the
+  chord; and <em>case-sensitive matching</em>. That last one is about <em>case</em> and not about
+  the humps: off, only the first letter has to agree — which in Java is the letter that carries
+  information, since a capital means a type; on, every typed letter does, so <code>aAE</code> still
+  reaches <code>addAllElements</code> and <code>aae</code> no longer does.
+</p>
+
+<h2>A name with nothing to its left</h2>
+<p>
+  A bare identifier is not a mystery: Java says exactly what it can mean, and the popup offers
+  those things in order of how near they are to the caret.
+</p>
+<ul>
+  <li><strong>What the scope binds</strong> — locals, method and lambda parameters (typed or not),
+    the <code>for</code> variable, a try-with-resources, a <code>catch</code> parameter, a pattern
+    variable from <code>o instanceof Foo f</code>. The nearest wins: a variable declared in this
+    block beats a parameter of the method around it, and among names declared in the same block,
+    the one on the line above beats the one twenty lines up. A name that shadows another is offered
+    once, and it is the inner one — the same rule that decides what the name would resolve to.</li>
+  <li><strong>The enclosing type's own members</strong>, and everything it inherits, written without
+    <code>this.</code>.</li>
+  <li><strong>Whatever an <code>import static</code> brought in</strong>, with the type it came from
+    on the row — the one case where nothing else on screen says where a bare name is from.</li>
+  <li><strong>Class names</strong>, from the type-name index described below.</li>
+</ul>
+<p>
+  A local is not in scope inside its own declaration, so <code>int counted = coun</code> offers
+  <code>counter</code> and not <code>counted</code>. And in a <code>static</code> method an
+  instance member is not offered at all: <code>count</code> inside <code>static void main</code>
+  does not compile, however visible the field is from elsewhere.
+</p>
+<p>
+  Whether the class names come before or after the rest is decided by Java's own naming convention
+  rather than by a score, because the two lists are not comparable — <code>Str</code> is a type
+  being written and <code>str</code> is a variable, and no amount of ranking makes one the other.
+  A capitalised name with a lowercase letter in it leads with types; anything else leads with what
+  is in scope, which is where a <code>SCREAMING_CASE</code> constant of your own class lives. Both
+  lists are always offered, so a prefix read the "wrong" way costs a scroll, not an answer.
+</p>
+
+<h2>What accepting one writes</h2>
+<p>
+  A method is a call, so accepting one writes <code>size()</code> and not <code>size</code>. When
+  it takes something, the caret lands <strong>between the parentheses</strong> — which is also
+  where the parameter hints strip is about to describe what goes there. When it takes nothing, the
+  caret lands after them and the call is finished.
+</p>
+<p>
+  The parameter <em>names</em> are not written. Filling in <code>put(key, value)</code> as
+  placeholders to be tabbed through and deleted is slower than typing the arguments, and a class
+  file carries no parameter names to fill in with anyway.
+</p>
+<p>
+  When the call is <strong>already written</strong> — <code>t.si()</code> with the caret after
+  <code>si</code>, which is how you correct the name of an existing call — the parentheses are left
+  alone rather than doubled.
+</p>
+
+<h2>Members that do not exist yet</h2>
+<p>
+  Two families, and they are the same gesture: you are in a class body, you start typing a name,
+  and the thing you mean has not been written.
+</p>
+
+<h3>The method this class calls and does not declare</h3>
+<p>
+  You wrote <code>randomico()</code> inside a method; now <code>rand</code> in the class body offers
+  to declare it. The <strong>call site is the specification</strong>: the arguments' declared types
+  and names become the signature, what the result is used as becomes the return type, and a call
+  from a <code>static</code> method asks for a <code>static</code> one. It is the same reading the
+  <em>Create method</em> quick fix makes, so the popup and Alt+Enter cannot describe one member two
+  ways.
+</p>
+<p>
+  Read from the <strong>tree</strong>, not from the diagnostic — which is what makes it survive
+  being typed. A half-written name in a class body is a syntax error, and the member it is in stops
+  being validated while it stays one, so the red mark under <code>randomico()</code> disappears at
+  exactly the keystroke where the offer is wanted. The call is still in the tree, though, beside
+  the ERROR node the half-written name recovered as.
+</p>
+<p>
+  It also reads the calls made on this class from <strong>elsewhere in the file</strong> — which is
+  what a <strong>nested</strong> class needs: <code>c.randomico("ciao")</code> is written in the
+  outer class, on an instance of the inner one, so the call that describes the method lives outside
+  the inner class entirely. Standing in the inner class, <code>ra</code> offers it, as a
+  <code>public</code> method since another class is calling it. Only a receiver whose type actually
+  resolves to the class you are standing in counts.
+</p>
+<p>
+  A method the class <strong>inherits</strong> is not missing, and offering to write one is offering
+  to break the build — so the supertypes are walked first, with the same conservatism the
+  unknown-member check applies: an unreadable hierarchy means silence.
+</p>
+
+<h3>The accessors a field is missing</h3>
+<p>
+  Typing <code>getCust</code> in a class body offers <strong><code>getCustomer()</code></strong>,
+  and accepting it writes the whole method. Three accessors per field:
+</p>
+<ul>
+  <li><strong><code>getX</code></strong> — or <code>isX</code> for a primitive
+    <code>boolean</code>, which is what JavaBeans says and what every framework that reflects over
+    accessors looks for.</li>
+  <li><strong><code>setX</code></strong>, with <code>this.</code> on the assignment: the parameter
+    shadows the field, and without it the assignment is the parameter to itself.</li>
+  <li><strong><code>withX</code></strong> — the builder-style setter, which assigns and returns the
+    object so calls chain. The same member <strong>Generate</strong> writes under "With".</li>
+</ul>
+<p>
+  A <code>final</code> field is assigned once, at construction: it is offered a getter and nothing
+  else. A <code>static</code> one is offered no <code>withX</code> — there is no <code>this</code>
+  to return. A field named <code>isActive</code> keeps the prefix it has and is set and chained by
+  its <em>property</em>: <code>setActive</code>, <code>withActive</code>.
+</p>
+<p>
+  It is not a guess. A field with no getter is a fact about the text, the accessor's name is Java's
+  own convention, and its body is the only body it could have. When exactly one candidate matches,
+  the same answer is also available as <strong>ghost text</strong> ahead of the caret —
+  <code>→ public String getCustomer() &lbrace; … &rbrace;</code>, written with <kbd>Tab</kbd>. Two
+  candidates produce nothing, however close the second is: ghost text sits where it reads like text
+  that is already there, so being wrong there costs trust rather than a keystroke.
+</p>
+<p>
+  <strong>While the popup is open, the grey text previews the highlighted row.</strong> A row
+  labelled <code>getCustomer</code> whose insertion is four lines of code tells you almost nothing
+  about what <kbd>Enter</kbd> will do, so what that row would write is drawn at the caret — and it
+  follows the arrow keys. It is the popup's own selection rendered, not a second proposal:
+  <kbd>Tab</kbd> still belongs to the popup, and accepting the preview is refused outright, so the
+  two can never both insert.
+</p>
+<p>
+  There it is <strong>one line</strong> — <code>public String getCustomer() &lbrace; … &rbrace;</code>
+  — because the popup opens directly under the caret, and a four-line preview drawn there is a
+  four-line preview with a list on top of it. The signature is the half that carries the
+  information; the body of a generated member is implied by its name. The whole text is still what
+  accepting writes, and it is what the panel beside the list shows.
+</p>
+<p>
+  With the popup closed — after <kbd>Esc</kbd>, or with the auto-popup off in
+  <strong>Settings → Completion</strong> — the proposal stands on its own and is drawn in full,
+  because nothing is competing for the space. <kbd>Tab</kbd> writes it.
+</p>
+<p>
+  Three things keep it quiet where it is not wanted: it is offered <strong>only at a member
+  position</strong> — not inside a method body, where <code>getCustomer</code> is a call, and not
+  after a dot; only for a field that <strong>has no accessor already</strong>; and never on an
+  empty prefix, which would open a three-field class on six generated members ahead of everything
+  real. A <code>final</code> field is offered no setter.
+</p>
+<p>
+  <strong>Generate</strong> (<kbd>Alt</kbd> + <kbd>Insert</kbd>) is still the place for the whole
+  set at once, and it is the one that carries the style options — fluent accessors, snake_case
+  naming, <code>final</code> parameters. A completion candidate has no conversation, so it takes
+  the conventional form: <code>public</code>, the field's own type, <code>this.</code> on the
+  assignment.
+</p>
+
+<h2>Reading a row</h2>
+<p>
+  Each row is four columns rather than a run-on line: what it <strong>is</strong> (the kind icon),
+  what it is <strong>called</strong> (with the letters you typed marked), its
+  <strong>shape</strong> — <code>(String, int) : void</code> — and, pushed to the right edge,
+  where it <strong>comes from</strong>. That last one is what tells <code>List.of</code> from
+  <code>Set.of</code>, and a method you inherited from one your own class declares. A deprecated
+  candidate is struck through; it is still offered, since it exists and you may be reading old
+  code.
+</p>
+<p>
+  The <strong>documentation</strong> of the highlighted row appears beside the list — the same card
+  the hover tooltip draws, from the same answer, so the two cannot describe one member two ways.
+  It is fetched for the row you actually highlight and not for the four hundred in the list: a
+  library's documentation is read out of its sources archive on disk, and resolving all of them
+  would put an archive read per candidate on the keystroke that opened the popup.
 </p>
 
 <h2>Completions</h2>
@@ -112,18 +330,9 @@
   inserted; press <kbd>Alt</kbd> + <kbd>Enter</kbd> → <strong>Import '…'</strong> to pick the package.
 </p>
 <p>
-  <strong>The name does not have to be spelled the way the class is.</strong> The first letter is
-  taken as written — a type is capitalised — and everything after it is matched three ways, best
-  first: what you typed as a prefix, the same ignoring case, then the <strong>camel humps</strong>.
-  So <code>SBA</code> reaches <code>SpringBootApplication</code> and <code>SprBoot</code> reaches
-  it too. Within each of those, a type <em>your project</em> declares comes before one out of a jar,
-  and the shorter name before the longer.
-</p>
-<p>
-  <strong>Settings → Completion → Popup</strong> decides when the popup arrives and how forgiving
-  it is: whether it opens on its own while you type (and after how long a pause), or only on the
-  chord; and <em>case-sensitive matching</em>, which drops every candidate that does not start with
-  what you typed, spelled the way you typed it — the three ways above stop applying.
+  Within each tier of the match described under <em>How a name is matched</em>, a type
+  <em>your project</em> declares comes before one out of a jar, and the shorter name before the
+  longer.
 </p>
 <p>
   <strong>A qualified name completes one segment at a time</strong> — in an <code>import</code>, and
@@ -145,6 +354,15 @@
   This holds for a library type as well — <code>Map.</code> offers <code>Entry</code>.
 </p>
 <p>
+  <strong>A nested type completed by its simple name is written through its outer.</strong>
+  <code>Inner</code> alone is not a name Java resolves — a nested type is reached through the class
+  that declares it, or through an import that names it exactly — so accepting <code>MyProva</code>
+  writes <code>ConfigurazioneCors.MyProva</code> and imports <code>ConfigurazioneCors</code>. One
+  import serves every nested type of that class, and it is the form people write by hand. Where the
+  simple name is already in scope nothing is added: inside the outer class itself (or a sibling
+  nested in it), and in a file that imports the nested type outright.
+</p>
+<p>
   In <strong>TypeScript</strong> and <strong>JavaScript</strong> — and in a <code>.svelte</code>
   file, and in an Angular project's templates — the popup is the language server's:
   <code>typescript-language-server</code> for the JS family, <code>svelteserver</code>,
@@ -164,10 +382,15 @@
   <code>$</code> is offered as a name, but <code>$(…).</code> has no object to read.
 </p>
 <p>
-  An <strong>overloaded</strong> method is offered <em>once per signature</em> — each entry showing
-  its own parameters and return type — while a method that merely <strong>overrides</strong> an
-  inherited one appears once. Inherited members are included; a <code>private</code> member of
-  another class is not.
+  An <strong>overloaded</strong> method is offered as <em>one row</em>, whose shape says
+  <em>+2 overloads</em>. Accepting a completion writes the method's name and its parentheses, not
+  its arguments, so three rows would be three chances to choose with one outcome — and they would
+  push the members you were looking for off the popup. Nothing is hidden by the fold: the
+  <strong>parameter hints</strong> strip shows the whole set the moment you type inside the
+  parentheses, which is when knowing them starts to matter and when they can be shown properly,
+  one at a time, with the argument you are on marked. A method that merely
+  <strong>overrides</strong> an inherited one appears once. Inherited members are included; a
+  <code>private</code> member of another class is not.
 </p>
 <h2>Where the import counts come from</h2>
 <p>
@@ -205,7 +428,18 @@
   not been read reports no target at all, and reading that as a refusal would hide it entirely.
 </p>
 <p>
-  Accepting one adds its import, on the same terms as any other type name.
+  The list is complete from the <strong>first letter</strong>, and that is worth saying because the
+  sweep it comes from is bounded: what is capped is how many annotations are offered, not how many
+  names are looked at on the way to them. <code>@S</code> reaches
+  <code>SuppressWarnings</code> past the several hundred ordinary classes that also begin with
+  <code>S</code>.
+</p>
+<p>
+  Accepting one adds its import, on the same terms as any other type name — and the ones you
+  accept are offered ahead of the ones you don't, for as long as the project stays open. That is
+  the same short-term memory member completion has, keyed here to the <code>@</code> rather than
+  to a declaring type; it is never written to disk, and nothing about it outranks an import the
+  file has already made.
 </p>
 
 <h2>Generated members</h2>

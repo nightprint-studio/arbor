@@ -79,6 +79,10 @@ pub struct InlayWire {
     pub label: String,
     /// `true` when the hint belongs in front of what is at `offset` rather than behind it.
     pub before: bool,
+    /// What the hint says on hover — the parameter's declared type. Omitted when there is nothing
+    /// more to say than the label already does.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub tooltip: String,
 }
 
 /// Every inlay hint for the buffer (empty when there are none, or the file is not Java).
@@ -90,7 +94,12 @@ fn bennu_inlay_hints(_ctx: &BennuState, args: InlayArgs) -> Result<Vec<InlayWire
     Ok(IndexService::global()
         .inlay_hints(&args.file, &args.source)
         .into_iter()
-        .map(|h| InlayWire { offset: h.offset, label: h.label, before: h.before })
+        .map(|h| InlayWire {
+            offset: h.offset,
+            label: h.label,
+            before: h.before,
+            tooltip: h.tooltip,
+        })
         .collect())
 }
 

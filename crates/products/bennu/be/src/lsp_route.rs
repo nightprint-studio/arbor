@@ -672,6 +672,10 @@ fn completion_wire(e: bennu_lsp::prelude::CompletionEntry) -> CompletionItem {
         deprecated: e.deprecated,
         preselect: e.preselect,
         resolve_id: Some(e.id),
+        // A language server names no owning type on a completion item, and it does not need to:
+        // `resolve_id` is the handle it fills documentation in by. This field is the native
+        // engine's equivalent handle.
+        owner: None,
     }
 }
 

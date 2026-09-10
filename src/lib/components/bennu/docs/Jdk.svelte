@@ -12,6 +12,26 @@
   can't be inferred the footer reads <code>JDK —</code>.
 </p>
 <p>
+  In a <strong>multi-module</strong> project the whole reactor is read, not only its root: an
+  aggregator pom usually declares no level at all — it exists to list <code>&lt;modules&gt;</code> —
+  and the highest level any module declares becomes the project's. The index has one language level
+  and the choice is not symmetric: too low invents errors in the module that legitimately uses newer
+  syntax, while too high can only stay silent about an older one.
+</p>
+<p>
+  And the level in force <strong>follows the module you are in</strong>. A reactor part-way through
+  a migration has one module on 21 and another still on 8, which is an ordinary state: the
+  validator's version checks and the postfix templates ask the open file's own module, and the
+  footer names it beside the level. Only that question is answered per module — the index and the
+  dependency classpath are one JDK by construction, since there is one standard library in an
+  index.
+</p>
+<p>
+  The project tree says the same thing on every module and crate row: <code>JDK 21</code>,
+  <code>JDK 21 · war</code>, <code>Rust 2024 · bin</code>. The tooltip carries the artifact id, the
+  packaging and which key declared the level.
+</p>
+<p>
   The <em>install</em> Bennu resolves the standard library against is looked for in the extra JDK
   directories from Settings first, then <code>JAVA_HOME</code>, then each platform's usual
   locations: the <code>JavaVirtualMachines</code> bundles on macOS, the Program Files vendor

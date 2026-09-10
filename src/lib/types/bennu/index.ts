@@ -197,6 +197,14 @@ export interface CompletionItem {
   preselect?: boolean;
   /** A handle for fetching this item's documentation lazily (`bennu_lsp_resolve_completion`). */
   resolve_id?: number;
+  /** The binary name of the type this item COMES FROM — the declaring type for a member, the type
+   *  itself for a type name. Absent for a keyword, a local variable or a snippet.
+   *
+   *  Two jobs, one field. The popup draws it as the item's origin — what tells `List.of` from
+   *  `Set.of`, and an inherited method from your own — and it is the handle both the
+   *  documentation panel (`bennu_completion_doc`) and the acceptance memory
+   *  (`bennu_completion_accepted`) are keyed by. */
+  owner?: string;
 }
 
 /** A plain text edit: replace `[start, end)` of `file` with `new_text`. Byte offsets, applied

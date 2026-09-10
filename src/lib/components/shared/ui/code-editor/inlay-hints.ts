@@ -38,6 +38,16 @@ export interface InlayHint {
    * when a hint of each kind lands on the same offset.
    */
   side?: 'before' | 'after';
+  /**
+   * What the hint says when the pointer rests on it — a parameter-name hint carries the parameter's
+   * declared type.
+   *
+   * The label answers *which argument is this*; the tooltip answers *what does it want*, which is
+   * the next question and the one that otherwise costs a jump to the declaration. It is a hover and
+   * not more label text because the label is drawn inside the line: a hint that grew to
+   * `method: String` would push the code around to say something most reads do not need.
+   */
+  tooltip?: string;
 }
 
 /** Replace the whole hint set. */
@@ -47,12 +57,15 @@ class HintWidget extends WidgetType {
   constructor(
     readonly label: string,
     readonly side: 'before' | 'after',
+    readonly tooltip: string,
   ) {
     super();
   }
 
   eq(other: HintWidget) {
-    return other.label === this.label && other.side === this.side;
+    return (
+      other.label === this.label && other.side === this.side && other.tooltip === this.tooltip
+    );
   }
 
   toDOM() {
@@ -61,6 +74,10 @@ class HintWidget extends WidgetType {
     span.textContent = this.label;
     // Out of the accessibility tree and out of any text the user asks for: it is not in the file.
     span.setAttribute('aria-hidden', 'true');
+    if (this.tooltip) {
+      span.title = this.tooltip;
+      span.classList.add('cm-inlay-hoverable');
+    }
     return span;
   }
 
@@ -76,7 +93,7 @@ function decorationsFor(hints: readonly InlayHint[], docLength: number): Decorat
     .map((h) => {
       const side = h.side ?? 'before';
       return Decoration.widget({
-        widget: new HintWidget(h.label, side),
+        widget: new HintWidget(h.label, side, h.tooltip ?? ''),
         // A `before` hint belongs to what follows it, so it must sit on the left of anything else
         // at the same offset (and of the caret); an `after` hint on the right.
         side: side === 'before' ? -1 : 1,
@@ -115,6 +132,14 @@ const hintTheme = EditorView.baseTheme({
     userSelect: 'none',
     pointerEvents: 'none',
     verticalAlign: 'baseline',
+  },
+  // A hint that carries a tooltip has to be reachable by the pointer, which the rule above turns
+  // off for every hint. It is safe to turn back on only here: `HintWidget.ignoreEvent` already
+  // refuses every event, so the caret still cannot land inside one — what changes is that the
+  // pointer can rest on it. `help` says so before the tooltip appears.
+  '.cm-inlay-hoverable': {
+    pointerEvents: 'auto',
+    cursor: 'help',
   },
 });
 

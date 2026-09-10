@@ -60,6 +60,16 @@ static SEEN: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
 /// The newest pom mtime each root was last seen at — the same memory, for the other question.
 static SEEN_POMS: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
 
+/// The jar epoch seen but **not yet acted on** — one tick's worth of patience.
+///
+/// A `mvn clean install` writes a module's jar into the local repository, then the next module's,
+/// over tens of seconds. Every tick that lands inside that window sees a different epoch, and
+/// without this each one was a full classpath reload and a toast: the reported "two popups for one
+/// build" is that, and the popups were the cheap half of it. Acting only once the epoch has held
+/// still for an interval collapses the whole install into one reload — the same settle rule the
+/// pom path already applies, for the same reason.
+static PENDING: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
+
 /// Record `value` for `root` in one of the watcher's memories, returning what was there before.
 /// `None` means this is the first sight of the project, which is a baseline and not a change.
 fn remember(memory: &Mutex<Option<HashMap<String, u64>>>, root: &str, value: u64) -> Option<u64> {
@@ -135,6 +145,7 @@ fn tick() {
                     // The jar epoch it is about to be indexed against is not the one this loop
                     // recorded a moment ago, so forget it and let the next tick take the baseline.
                     remove_seen(&root);
+                    forget_pending(&root);
                     sink.emit(EVT_CLASSPATH_CHANGED, json!({ "root": root }));
                     continue;
                 }
@@ -146,15 +157,26 @@ fn tick() {
             continue;
         }
         let epoch = classpath_epoch(&jdk, &jars);
-        let previous = remember(&SEEN, &root, epoch);
 
         // First sight of a project is the baseline, not a change: it was just indexed
         // against exactly these jars, and reloading here would rebuild every project once
         // for nothing on the first tick after opening.
-        let Some(previous) = previous else { continue };
+        let Some(previous) = peek(&SEEN, &root) else {
+            remember(&SEEN, &root, epoch);
+            continue;
+        };
         if previous == epoch {
+            forget_pending(&root);
             continue;
         }
+        // Changed — but a build still running changes it again next tick. Act only once it has
+        // held still for a whole interval; see [`PENDING`].
+        if peek(&PENDING, &root) != Some(epoch) {
+            remember(&PENDING, &root, epoch);
+            continue;
+        }
+        remember(&SEEN, &root, epoch);
+        forget_pending(&root);
 
         let Some(sink) = service.sink() else { continue };
         eprintln!("bennu: dependency jars changed under {root} — rebuilding the index");
@@ -175,6 +197,17 @@ fn settled(stamp: u64) -> bool {
         .map(|d| d.as_secs())
         .unwrap_or(stamp);
     now.saturating_sub(stamp) >= INTERVAL.as_secs()
+}
+
+/// Drop the "seen but not acted on" epoch for `root`.
+fn forget_pending(root: &str) {
+    let mut guard = match PENDING.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(map) = guard.as_mut() {
+        map.remove(root);
+    }
 }
 
 /// Drop the jar baseline for `root`, so the next tick takes a fresh one instead of comparing

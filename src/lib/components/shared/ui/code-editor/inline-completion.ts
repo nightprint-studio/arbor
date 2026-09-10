@@ -57,7 +57,7 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import { Facet, StateEffect, StateField, type Extension } from '@codemirror/state';
-import { completionStatus } from '@codemirror/autocomplete';
+import { completionStatus, selectedCompletion } from '@codemirror/autocomplete';
 
 /**
  * A proposal that is more than a continuation.
@@ -92,6 +92,21 @@ export type InlineCompletionSource = (
   pos: number,
 ) => string | InlineCompletion | null | Promise<string | InlineCompletion | null>;
 
+/**
+ * What a completion OPTION may declare to be previewed inline while it is selected.
+ *
+ * A row whose label is `getCustomer` and whose insertion is a four-line method tells you almost
+ * nothing about what pressing Enter will do. Declaring the text here draws it at the caret, in
+ * grey, while that row is highlighted — so the list stays a list and the outcome is still visible.
+ *
+ * It is **not** a competing proposal, which is the whole reason it is allowed to coexist with the
+ * popup: it is the popup's own selection, rendered. Tab still belongs to the popup, and accepting
+ * the ghost is refused outright (see `preview` on {@link Suggestion}).
+ */
+export interface PreviewingCompletion {
+  ghost?: string;
+}
+
 /** The suggestion currently on screen, normalised. */
 interface Suggestion {
   /** What is drawn. */
@@ -103,6 +118,12 @@ interface Suggestion {
   to: number;
   /** What accepting writes. */
   insert: string;
+  /**
+   * Display only — the rendering of a completion row that is currently selected, not a proposal of
+   * this module's own. Tab belongs to the popup, so accepting is refused and Esc is left to close
+   * the popup rather than the preview.
+   */
+  preview?: boolean;
 }
 
 /** A source's answer, in the one shape the rest of the module handles. */
@@ -178,7 +199,10 @@ const suggestionField = StateField.define<Suggestion | null>({
  *  *is* an insertion, so there is no second path to keep in step with this one. */
 export const acceptInlineCompletion: Command = (view) => {
   const current = view.state.field(suggestionField, false);
-  if (!current) return false;
+  // A preview is the popup's selection drawn inline. The popup owns Tab; accepting here would be
+  // two things doing the same insertion, and only one of them would tell the completion machinery
+  // that a row was chosen.
+  if (!current || current.preview) return false;
   view.dispatch({
     changes: { from: current.from, to: current.to, insert: current.insert },
     selection: { anchor: current.from + current.insert.length },
@@ -193,7 +217,8 @@ export const acceptInlineCompletion: Command = (view) => {
  *  meanings (closing a panel, clearing a selection). */
 export const dismissInlineCompletion: Command = (view) => {
   const current = view.state.field(suggestionField, false);
-  if (!current) return false;
+  // Esc over a preview means "close the popup", which is what the preview belongs to.
+  if (!current || current.preview) return false;
   view.dispatch({ effects: setSuggestion.of(null) });
   view.plugin(inlineCompletionPlugin)?.dismiss(current.pos);
   return true;
@@ -241,6 +266,16 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
      */
     private popupWasOpen = false;
 
+    /**
+     * The label of the popup row previewed last time we looked.
+     *
+     * Arrowing through the popup changes neither the document nor the selection, so without this
+     * the preview would be drawn for whichever row happened to be selected when the popup opened
+     * and never follow the arrows — which is worse than not drawing it, because it would be
+     * showing one row's outcome under another row's highlight.
+     */
+    private previewedLabel: string | null = null;
+
     constructor(private readonly view: EditorView) {}
 
     update(update: ViewUpdate) {
@@ -250,7 +285,11 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
       const popupChanged = popupOpen !== this.popupWasOpen;
       this.popupWasOpen = popupOpen;
 
-      if (!update.docChanged && !update.selectionSet && !popupChanged) return;
+      const label = selectedCompletion(update.state)?.label ?? null;
+      const selectionMoved = label !== this.previewedLabel;
+      this.previewedLabel = label;
+
+      if (!update.docChanged && !update.selectionSet && !popupChanged && !selectionMoved) return;
       // Typing means the situation changed, so a previous dismissal no longer
       // applies. Moving the caret elsewhere is handled by the position check.
       if (update.docChanged) this.dismissedAt = -1;
@@ -297,7 +336,22 @@ const inlineCompletionPlugin = ViewPlugin.fromClass(
       // plugin watches the popup's status and asks again the instant it closes.
       // `pending` counts as open, because a source that is still thinking is about
       // to own the key.
-      if (completionStatus(state) !== null) return;
+      //
+      // What DOES appear there is the selected row's own preview: not a proposal of ours, so it
+      // competes for nothing — see `PreviewingCompletion`.
+      if (completionStatus(state) !== null) {
+        const ghost = (selectedCompletion(state) as PreviewingCompletion | null)?.ghost ?? null;
+        const shown = state.field(suggestionField, false);
+        const next: Suggestion | null = ghost
+          ? { text: ghost, pos: cursor.head, from: cursor.head, to: cursor.head, insert: '', preview: true }
+          : null;
+        // Only when something actually changes: this runs on every popup transaction, and a
+        // dispatch per keystroke that redraws the same widget is work for nothing.
+        if ((shown?.text ?? null) !== (next?.text ?? null)) {
+          this.view.dispatch({ effects: setSuggestion.of(next) });
+        }
+        return;
+      }
       if (cursor.head === this.dismissedAt) return;
 
       const seq = ++this.seq;

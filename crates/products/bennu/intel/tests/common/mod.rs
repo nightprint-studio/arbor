@@ -290,6 +290,50 @@ impl Project {
             .collect()
     }
 
+    /// The BARE-identifier completions offered at `file`:`offset` — what the lexical scope binds,
+    /// the enclosing type's own members, and the static imports. The other half of completion:
+    /// [`Self::complete`] answers `receiver.`, this answers a name with nothing to its left.
+    pub fn scope_complete(&self, file: &str, offset: usize) -> Vec<CompletionItem> {
+        bennu_query::prelude::scope_completion(
+            self.source(file),
+            offset,
+            &self.completion_resolver,
+            Default::default(),
+        )
+    }
+
+    /// Just the labels of [`Self::scope_complete`], in the order offered.
+    pub fn scope_labels(&self, file: &str, offset: usize) -> Vec<String> {
+        self.scope_complete(file, offset)
+            .into_iter()
+            .map(|c| c.label)
+            .collect()
+    }
+
+    /// The members that do NOT exist yet, offered at `file`:`offset` — the accessors the class
+    /// around the caret is missing.
+    ///
+    /// Asked directly rather than through the provider because it needs no resolver: everything it
+    /// reads is in the buffer, which is what lets the accessor say the field's type *as written*.
+    pub fn generated(&self, file: &str, offset: usize) -> Vec<CompletionItem> {
+        bennu_intel::prelude::generated_members(
+            self.source(file),
+            offset,
+            Default::default(),
+            Some(&self.completion_resolver),
+        )
+    }
+
+    /// The GHOST TEXT at `file`:`offset` — the member the caret is certainly writing, or `None`.
+    pub fn hint(&self, file: &str, offset: usize) -> Option<bennu_intel::prelude::AccessorHint> {
+        bennu_intel::prelude::generated_hint(
+            self.source(file),
+            offset,
+            Default::default(),
+            Some(&self.completion_resolver),
+        )
+    }
+
     /// `true` if a completion candidate named `name` is offered at `file`:`offset`.
     pub fn completes_with(&self, file: &str, offset: usize, name: &str) -> bool {
         self.complete_labels(file, offset).iter().any(|l| l == name)
@@ -360,6 +404,15 @@ impl Project {
             &self.completion_resolver,
             true,
         )
+    }
+
+    /// The inlay hints of `file`, as `(byte offset, label)` — the parameter-name prefixes and the
+    /// inferred types of `var` locals.
+    pub fn hints(&self, file: &str) -> Vec<(usize, String)> {
+        bennu_query::prelude::inlay_hints(self.source(file), &self.completion_resolver)
+            .into_iter()
+            .map(|h| (h.offset, h.label))
+            .collect()
     }
 
     /// The `code`s of the ERROR-severity diagnostics on `file` — what a false-positive test asserts

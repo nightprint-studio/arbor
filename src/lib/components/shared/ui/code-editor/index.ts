@@ -28,6 +28,7 @@ export type {
 } from './types';
 export {
   inlineCompletion,
+  type PreviewingCompletion,
   acceptInlineCompletion,
   dismissInlineCompletion,
   inlineCompletionActive,
@@ -51,7 +52,7 @@ export {
 // Static code rendered OUTSIDE an editor instance — a search result's context, the sticky-scroll
 // header. Emits the editor's own `cm-tok-*` classes, so it takes the theme for free.
 export { highlightToHtml } from './mini-highlight';
-export { sqlHighlight, type SqlDialect } from './sql-modes';
+export { sqlHighlight, sqlLanguage, type SqlDialect } from './sql-modes';
 export { dtdLanguage, dtdMode } from './dtd-mode';
 export { ronLanguageExtension, ronMode } from './ron-mode';
 export { mermaidLanguageExtension, mermaidMode } from './mermaid-mode';
@@ -75,7 +76,7 @@ export {
 // The counts a provider draws above an item — a pushed layer like the two above, and the only one
 // that is a control rather than a decoration.
 export { codeLensLayer, setCodeLenses, type LensEntry } from './code-lens';
-export { hoverCardDom, parseDoc, type HoverCard } from './hover-card';
+export { hoverCardDom, parseDoc, renderDoc, type HoverCard } from './hover-card';
 export {
   pasteIntoLiteral,
   type LiteralPasteRenderer,

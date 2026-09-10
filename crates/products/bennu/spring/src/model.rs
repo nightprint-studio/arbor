@@ -375,7 +375,42 @@ impl SpringModel {
     /// same key to Spring, so both spellings are normalised to the canonical one when the index
     /// is built — comparing them here would be the wrong place to do it.
     pub fn usages_of(&self, key: &str) -> Vec<&PropertyUsage> {
-        self.property_usages.iter().filter(|u| u.key == key).collect()
+        self.property_usages
+            .iter()
+            .filter(|u| u.key == key || pattern_matches(&u.key, key))
+            .collect()
+    }
+
+    /// Every property file that declares at least one key under `prefix`, with the byte offset of
+    /// the **first** such key in it — where a go-to on a `@ConfigurationProperties(prefix = …)`
+    /// lands.
+    ///
+    /// The first key and not the prefix node itself, because in a yaml the prefix is not an entry:
+    /// `app.http.client.timeout` is written as four nested mappings and only the leaf carries a
+    /// value. Landing on the first leaf under it puts the caret inside the block the prefix names,
+    /// which is the honest answer to "where is this configured".
+    pub fn prefix_sites(&self, prefix: &str) -> Vec<(&crate::props::PropertyFile, &crate::props::PropertyEntry)> {
+        // Both sides canonical, and that is not tidiness: relaxed binding means the annotation may
+        // say `app.httpClient` while the yaml says `http-client`, and the two ARE the same prefix
+        // to Spring. Comparing one spelling against the other finds nothing and reads as "this
+        // prefix is configured nowhere", which is the one thing this must not say wrongly.
+        let canon = crate::usages::canonical_key(prefix.trim_end_matches('.'));
+        let under = format!("{canon}.");
+        let mut out = Vec::new();
+        for f in self.props.files() {
+            let first = f
+                .entries
+                .iter()
+                .filter(|e| {
+                    let k = crate::usages::canonical_key(&e.key);
+                    k == canon || k.starts_with(&under)
+                })
+                .min_by_key(|e| e.key_start);
+            if let Some(e) = first {
+                out.push((f, e));
+            }
+        }
+        out
     }
 
     /// Every endpoint whose path or verb matches `query` loosely — the URL navigator.
@@ -385,6 +420,29 @@ impl SpringModel {
             return self.endpoints.iter().collect();
         }
         self.endpoints.iter().filter(|e| e.label().to_ascii_lowercase().contains(&q)).collect()
+    }
+}
+
+/// Whether a **wildcard** usage key denotes `key`, treating `<key>` as "any one segment".
+///
+/// The binder cannot know a map's keys — a `Map<String, Client>` under `app.clients` records
+/// `app.clients.<key>.url`, one usage standing for every client — so an exact comparison reports
+/// no reader for exactly the lines a map exists to hold.
+///
+/// Guarded on the marker so the ordinary key pays one `contains` and not a split: this runs once
+/// per usage per line of every property file.
+fn pattern_matches(pattern: &str, key: &str) -> bool {
+    if !pattern.contains("<key>") {
+        return false;
+    }
+    let mut p = pattern.split('.');
+    let mut k = key.split('.');
+    loop {
+        match (p.next(), k.next()) {
+            (None, None) => return true,
+            (Some(a), Some(b)) if a == "<key>" || a == b => {}
+            _ => return false,
+        }
     }
 }
 

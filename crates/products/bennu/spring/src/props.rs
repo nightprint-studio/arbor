@@ -30,10 +30,17 @@
 //!
 //! ## Parsing, deliberately shallow
 //!
-//! The YAML reader handles nested mappings and scalars, and **skips sequences entirely**.
-//! `servers:\n  - url: a` would flatten to a key (`servers.url`) that does not exist in
-//! Spring's relaxed binding, and a wrong key is worse than a missing one everywhere in
-//! this crate. Anchors, multi-document files and block scalars are likewise left alone.
+//! The YAML reader handles nested mappings and scalars, and reads a **sequence as a value**:
+//! the key above it is a real key — Spring binds it to a `List`, a `Set` or an array — while the
+//! items are not keys of their own. `servers:\n  - url: a` yields `servers` and never
+//! `servers.url`, which does not exist in Spring's relaxed binding, and a wrong key is worse than
+//! a missing one everywhere in this crate.
+//!
+//! It used to skip the sequence **and its key**, and that was a hole with a very ordinary shape in
+//! it: `cors:\n  allowed-origins:\n    - "…"` produced no entry at all, so the line that a
+//! `List<String> allowedOrigins` binds had no hover, no usage count and nothing for a go-to to
+//! land on — while every scalar beside it worked. Anchors, multi-document files and block scalars
+//! are still left alone.
 
 use std::collections::BTreeSet;
 
@@ -255,8 +262,17 @@ fn parse_properties(path: &str, name: &str, text: &str) -> PropertyFile {
 /// module docs.
 fn parse_yaml(path: &str, name: &str, text: &str) -> PropertyFile {
     let mut entries = Vec::new();
-    // (indent, key) for each open level.
-    let mut stack: Vec<(usize, String)> = Vec::new();
+    // One open level: its indent, its key, and where the key is written — the last part so a
+    // sequence-valued key can be emitted when its first item is seen, which is the only moment
+    // anything reveals that the key HAS a value.
+    struct Level {
+        indent: usize,
+        key: String,
+        key_start: usize,
+        line: u32,
+        emitted: bool,
+    }
+    let mut stack: Vec<Level> = Vec::new();
     // Indent of the sequence currently being skipped, if any: everything indented deeper
     // than the `-` belongs to it.
     let mut skip_deeper_than: Option<usize> = None;
@@ -279,7 +295,30 @@ fn parse_yaml(path: &str, name: &str, text: &str) -> PropertyFile {
             skip_deeper_than = None;
         }
         if trimmed.starts_with('-') {
-            // A sequence item: skip it and everything nested under it.
+            // A sequence item. The items are not keys — `servers[0].url` is not written that way
+            // and inventing `servers.url` would be a claim Spring does not make — but the key
+            // ABOVE them is one, and this is the first line that says so. Emitted once.
+            if let Some(parent) = stack.last_mut().filter(|p| p.indent < indent && !p.emitted) {
+                parent.emitted = true;
+                let mut full = String::new();
+                for l in &stack[..stack.len() - 1] {
+                    full.push_str(&l.key);
+                    full.push('.');
+                }
+                let last = stack.last().expect("checked above");
+                full.push_str(&last.key);
+                entries.push(PropertyEntry {
+                    key: full,
+                    // The value is a list, and this reader does not read lists. Saying nothing is
+                    // the honest answer: `(empty)` on a hover is wrong, and so is a made-up count.
+                    value: String::new(),
+                    key_start: last.key_start,
+                    key_end: last.key_start + last.key.len(),
+                    value_start: last.key_start + last.key.len(),
+                    value_end: last.key_start + last.key.len(),
+                    line: last.line,
+                });
+            }
             skip_deeper_than = Some(indent);
             continue;
         }
@@ -288,18 +327,24 @@ fn parse_yaml(path: &str, name: &str, text: &str) -> PropertyFile {
         if key.is_empty() {
             continue;
         }
-        while stack.last().is_some_and(|(ind, _)| *ind >= indent) {
+        while stack.last().is_some_and(|l| l.indent >= indent) {
             stack.pop();
         }
         let after = &trimmed[colon + 1..];
         let rest = after.trim();
         if rest.is_empty() {
-            stack.push((indent, key.to_string()));
+            stack.push(Level {
+                indent,
+                key: key.to_string(),
+                key_start: line_start + indent,
+                line: i as u32 + 1,
+                emitted: false,
+            });
             continue;
         }
         let mut full = String::new();
-        for (_, k) in &stack {
-            full.push_str(k);
+        for l in &stack {
+            full.push_str(&l.key);
             full.push('.');
         }
         full.push_str(key);
@@ -435,12 +480,40 @@ mod tests {
         assert_eq!(e.line, 3);
     }
 
+    /// The items of a sequence are not keys — `servers.url` is NOT a Spring key, and inventing it
+    /// would be worse than missing it — but the key ABOVE them is one: `servers` binds to a
+    /// `List<Server>`.
     #[test]
-    fn yaml_sequences_are_skipped_whole() {
-        // `servers.url` is NOT a Spring key — inventing it would be worse than missing it.
+    fn a_sequence_is_a_value_and_its_key_is_a_key() {
         let f = yaml("servers:\n  - url: a\n    name: x\n  - url: b\napp:\n  ok: 1\n");
         let keys: Vec<_> = f.entries.iter().map(|e| e.key.as_str()).collect();
-        assert_eq!(keys, ["app.ok"]);
+        assert_eq!(keys, ["servers", "app.ok"]);
+    }
+
+    /// The reported shape, and the reason this changed: a `List<String>` written under a nested
+    /// prefix produced **no entry at all**, so the one line a `@ConfigurationProperties` record
+    /// actually binds had no hover, no usage count and nothing for a go-to to land on — while
+    /// every scalar beside it worked.
+    #[test]
+    fn a_list_of_scalars_under_a_prefix_is_a_key() {
+        let f = yaml(
+            "app:\n  pa-gateway:\n    cors:\n      allowed-origins:\n        - \"http://a\"\n        - \"http://b\"\n      max-age: 3600\n",
+        );
+        let keys: Vec<_> = f.entries.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(keys, ["app.pa-gateway.cors.allowed-origins", "app.pa-gateway.cors.max-age"]);
+    }
+
+    /// Its span points at the key, so the gutter mark and the go-to land on the right line rather
+    /// than on the block above it.
+    #[test]
+    fn a_sequence_key_span_is_the_key_itself() {
+        let text = "app:\n  origins:\n    - a\n";
+        let f = yaml(text);
+        let e = f.get("app.origins").expect("the key exists");
+        assert_eq!(&text[e.key_start..e.key_end], "origins");
+        assert_eq!(e.line, 2);
+        // A list is a value this reader does not read. Saying nothing is honest; `(empty)` is not.
+        assert_eq!(e.value, "");
     }
 
     #[test]

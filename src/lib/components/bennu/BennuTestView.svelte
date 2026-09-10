@@ -21,7 +21,7 @@
    * Data and lifecycle live in {@link bennuTestStore}; this is presentation plus the keyboard
    * map. The header's buttons are {@link BennuTestActions}, its verdict {@link BennuTestSummary}.
    */
-  import { Play } from 'lucide-svelte';
+  import { Bug, Play } from 'lucide-svelte';
   import ResizablePanel from '$lib/components/shared/ui/ResizablePanel.svelte';
   import Tree, { type RowSnippetCtx } from '$lib/components/shared/ui/Tree.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
@@ -33,6 +33,7 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
   import { formatDuration, type TestRow } from '$lib/stores/bennu/test-tree';
+  import BennuPinnedTestsWarning from './BennuPinnedTestsWarning.svelte';
 
   /** The runner for the open project — Maven's or cargo's. This view never learns which: a row
    *  runs itself (`runRow`), because what a row means is the runner's business and this one draws
@@ -50,10 +51,13 @@
 
   // ── running things ─────────────────────────────────────────────────────────
 
-  /** Run whatever a row stands for — a crate, a target, a module, a class, one test. */
-  function runRow(row: TestRow) {
+  /** Run whatever a row stands for — a crate, a target, a module, a class, one test.
+   *
+   *  `debug` starts it under the debugger: the forked test JVM dials back and suspends, so the
+   *  breakpoints already in the buffer are honoured without anything having to be attached. */
+  function runRow(row: TestRow, debug = false) {
     if (!root) return;
-    void store.runRow(root, row);
+    void store.runRow(root, row, debug);
   }
 
   /** What ▷ on this row would run, in words. */
@@ -96,11 +100,16 @@
   // Discovery is kicked off at the window level (the project tree's context menu needs it before
   // this view has ever been shown), and `discover` is a no-op once a project has been scanned —
   // so there is nothing to do here.
+
 </script>
 
 <div class="tp-body">
   <ResizablePanel direction="horizontal" initialSize={380} minSize={240} maxSize={760}>
-    <div class="tp-tree">
+    <div class="tp-left">
+      <!-- Pinned above the tree and OUTSIDE its scroll: it is a fact about every ▷ in the panel,
+           so it must not be something you scroll past and forget. -->
+      <BennuPinnedTestsWarning {root} />
+      <div class="tp-tree">
       {#if store.discovering && !rows.length}
         <div class="tp-mid"><Spinner size={16} /><span>Looking for tests…</span></div>
       {:else if !rows.length}
@@ -159,9 +168,24 @@
             >
               <Play size={11} />
             </button>
+            <!-- The same gesture with the debugger attached. Beside ▷ rather than behind a menu:
+                 "run this" and "debug this" are the two things you do to a test, and one of them
+                 being a right-click away is the difference between using it and forgetting it. -->
+            <button
+              class="tr-run tr-debug"
+              type="button"
+              tabindex="-1"
+              disabled={store.running || !root}
+              use:tooltip={`Debug ${runTip(node).replace(/^Run /, '')}`}
+              aria-label="Debug"
+              onclick={(e) => { e.stopPropagation(); runRow(node, true); }}
+            >
+              <Bug size={11} />
+            </button>
           {/snippet}
         </Tree>
       {/if}
+      </div>
     </div>
   </ResizablePanel>
 
@@ -200,7 +224,10 @@
      — it walks up for the first scrollable ancestor and measures its virtualisation window against
      that. Without one here it would find the document, take the whole window as its viewport, and
      mount all 2 000 rows. */
-  .tp-tree { height: 100%; min-height: 0; overflow: auto; }
+  /* The banner and the tree, stacked: the banner keeps its height and the tree takes the rest, so
+     a warning about every run in the panel cannot be scrolled out of sight. */
+  .tp-left { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+  .tp-tree { flex: 1; min-height: 0; overflow: auto; }
   .tp-mid {
     height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 8px; color: var(--text-disabled); font-size: var(--font-size-xs);
@@ -245,6 +272,9 @@
   .tr-run:focus-visible { opacity: 1; }
   .tr-run:hover:not(:disabled) { color: var(--success); background: var(--bg-hover); }
   .tr-run:disabled { opacity: 0; }
+  /* The debug twin sits beside ▷ and reads as the same control in a different mood: the accent on
+     hover is the debugger's, not the runner's, so the two are told apart before they are clicked. */
+  .tr-debug:hover:not(:disabled) { color: var(--info); }
 
   /* Detail / log pane */
   /* No border of its own: ResizablePanel's handle already draws the divider between the two,

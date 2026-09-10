@@ -27,6 +27,16 @@ bennu-classpath = { path = "../classpath" }
 # The code-intel query engine (extracted): `IndexResolver` + member-access `completion`. intel's
 # provider / rename / hover / find-usages all resolve against it (one-way dependency).
 bennu-query = { path = "../query" }
+# Whether a name answers what was typed — the shared prefix/case/camel-hump rule.
+bennu-complete = { path = "../complete" }
+# What a member looks like as text — the accessor a completion candidate inserts, and the import
+# the measurement harness adds. A pure string crate with no resolver, which is why it can be the
+# one writer of both.
+bennu-intentions = { path = "../intentions" }
+# The refactoring transforms. `ForeignCall` — what a call on another object is asking for — is read
+# by the pure transform and completed here, where the resolver says which class it belongs to.
+# (Also what the `refactor_case` measurement harness runs, which is why it lives in this crate.)
+bennu-refactor = { path = "../refactor" }
 # AST + resolver-backed validation (syntax/statements/declarations/unknown-members): the provider's
 # `validate` runs it against its own resolver.
 bennu-check = { path = "../check" }
@@ -60,10 +70,5 @@ spellbook        = "0.4"
 bennu-test = { path = "../test" }
 
 [dev-dependencies]
-# The refactoring transforms, for the `refactor_case` measurement harness ONLY. A dev-dependency
-# because nothing in the library uses them: the harness lives here for the resolver, which is what
-# makes it measure the product rather than a resolver-free approximation of it.
-bennu-refactor = { path = "../refactor" }
-# The import inserter, so the harness adds the same edit the backend does.
-bennu-intentions = { path = "../intentions" }
+
 

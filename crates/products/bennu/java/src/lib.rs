@@ -22,6 +22,8 @@
 
 pub mod annotation_site;
 pub mod ast;
+// The type a position wants — the constraint on the hole rather than on the candidate.
+pub mod expected;
 pub mod grammar;
 pub mod hierarchy;
 pub mod import_hint;
@@ -29,6 +31,8 @@ pub mod infer;
 // The `/** … */` block above a declaration, for one offset or for a whole file.
 pub mod javadoc;
 pub mod prelude;
+// What the lexical scope at a caret binds — the names a bare identifier there could mean.
+pub mod scope;
 pub mod scaffold;
 pub mod seam;
 pub mod spans;

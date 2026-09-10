@@ -196,27 +196,41 @@ pub fn check_file_resolved(
     if let Some(t) = t_pure {
         times.push(("pure-AST", t.elapsed()));
     }
-    // A file that did not PARSE gets its syntax error and nothing else.
+    // What a parse error costs. Everything below reads the tree as if it meant something, and a
+    // broken parse does not: on one real file — a fuzzer test whose payload is a 16 KB string
+    // literal — recovery ended the literal early, so its CONTENTS were read as code and the checks
+    // reported 199 undefined symbols with names like `t` and `Ë`. Reporting on a tree we do not
+    // believe is the one way to produce a page of errors about code that compiles.
     //
-    // Everything below reads the tree as if it meant something, and a broken parse does not: on one
-    // real file — a fuzzer test whose payload is a 16 KB string literal — recovery ended the literal
-    // early, so its CONTENTS were read as code and the checks reported 199 undefined symbols with
-    // names like `t` and `Ë`. That is what javac does too: a parse error stops attribution, because
-    // there is nothing left to attribute. Reporting on a tree we do not believe is the one way to
-    // produce a page of errors about code that compiles.
-    if root.has_error() {
+    // What was wrong was giving up the FILE for it. A file is edited one member at a time, and for
+    // most of the time it spends being edited exactly one member does not parse — which is when
+    // the checks are worth the most, and when they all went quiet. So the error is charged to the
+    // member it landed in, that member is left unread, and the rest of the file is checked
+    // normally. An error no member contains is the shape of the file not being understood, and
+    // there `Quarantine::WholeFile` keeps the old behaviour. See `crate::quarantine`.
+    let quarantine = crate::quarantine::quarantine(root);
+    if quarantine == crate::quarantine::Quarantine::WholeFile {
         if let Some(t) = t_total {
             log_profile(ctx, t.elapsed(), &times);
         }
         return out;
     }
+    // The nodes the checks may read. Filtering here rather than only filtering the diagnostics
+    // afterwards is what stops the cascade: the 199 names above were read out of a region that
+    // never has to be visited.
+    let nodes: Vec<tree_sitter::Node> = match &quarantine {
+        crate::quarantine::Quarantine::Clean => nodes,
+        _ => nodes.into_iter().filter(|n| !quarantine.hides_node(n)).collect(),
+    };
     // Declarations nothing reads. Private members and locals only — the scope this file can see all
     // of; the wider question needs the reference index and belongs with safe delete.
     //
-    // BELOW the gate and not with the other pure-AST checks, because "no identifier in this tree
-    // names it" is a claim about the tree, and a half-parsed one is not the program: a file being
-    // typed would report every name in it as unread.
-    out.extend(crate::unused_member::unused_member_errors(root, source));
+    // Only on a tree that parsed WHOLE, and unlike everything else below that is not fussiness:
+    // "no identifier in this tree names it" is a claim about the whole tree, and the one region
+    // this file admits it cannot read is exactly where the missing reference would be.
+    if quarantine == crate::quarantine::Quarantine::Clean {
+        out.extend(crate::unused_member::unused_member_errors(root, source));
+    }
     if jdk_available {
         // ONE symbol extraction + ONE shared inference cache for every resolver-backed check. The
         // cache memoizes each site's inferred type (so the unknown-member / arity / argument / cast
@@ -280,6 +294,19 @@ pub fn check_file_resolved(
     if let Some(t) = t_total {
         log_profile(ctx, t.elapsed(), &times);
     }
+    // The backstop. A check handed `root` walks the tree itself rather than the filtered slice, so
+    // the node filter above cannot be the only thing standing between a broken member and a page
+    // of diagnostics about it.
+    //
+    // The syntax errors themselves are exempt, and they are the whole reason this is a filter and
+    // not a second pass: they live INSIDE the quarantined member by construction — the member is
+    // quarantined because they are there — and dropping them would answer a file that does not
+    // parse with silence.
+    let syntax = [
+        crate::check_id::CheckId::SyntaxError.code(),
+        crate::check_id::CheckId::MissingToken.code(),
+    ];
+    out.retain(|d| syntax.contains(&d.code.as_str()) || !quarantine.hides(d.start, d.end));
     finish(out)
 }
 

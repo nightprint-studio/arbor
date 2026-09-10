@@ -252,8 +252,23 @@
       (nothing at all means <code>void</code>, a condition means <code>boolean</code>), and a call
       from a <code>static</code> method reaches a <code>static</code> one. The body throws, so it
       compiles whatever it returns and fails loudly rather than returning a plausible
-      <code>null</code>. A call on another object says so instead: that method belongs in that
-      object's file.
+      <code>null</code>.
+    </div>
+  </div>
+  <div class="fc-item">
+    <div class="fc-title">Create method in the receiver's class</div>
+    <div class="fc-desc">
+      A call on <em>another</em> object — <code>order.total(label)</code> where <code>Order</code>
+      declares no <code>total</code> — writes the method into <strong>that class's own file</strong>,
+      at the end of its body, with the imports it needs for the parameter and return types. The
+      signature is read from the call site exactly as above; the member is <code>public</code>,
+      because it is being called from another class. The target file opens, since a method that was
+      just created is one you are about to fill in.
+      <br /><br />
+      It declines rather than guessing: a receiver whose type comes from a <strong>jar</strong> has
+      no source to write into, a class that <strong>already declares</strong> that name at any arity
+      is a different problem, and a receiver whose type does not resolve would send the method
+      somewhere guessed at.
     </div>
   </div>
   <div class="fc-item">

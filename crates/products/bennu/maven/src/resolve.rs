@@ -247,6 +247,25 @@ pub fn resolve(root: &Path, repo: &LocalRepo) -> Resolution {
                 }
             }
             None => {
+                // No jar — but that is not the same as "not downloaded". The artifact's own pom
+                // may be sitting right there saying it never had one.
+                match no_jar_reason(&mut reader, &node.coord) {
+                    // Renamed. The artifact keeps publishing at its old coordinates as a jarless
+                    // pom whose only content is where to go instead, and Maven follows it. Anything
+                    // that does not reports as missing a jar that is on disk under its new name —
+                    // measured on `org.hibernate.orm:hibernate-jpamodelgen`, which ORM 7 renamed to
+                    // `hibernate-processor`.
+                    Some(NoJar::MovedTo(coord)) => {
+                        queue.push_back(Node { coord, ..node });
+                        continue;
+                    }
+                    // `<packaging>pom</packaging>` on the artifact ITSELF, whatever the dependency
+                    // that named it wrote as its `<type>`. A pom has no jar and never will, so
+                    // looking for one and reporting its absence is a false positive by
+                    // construction.
+                    Some(NoJar::ByPackaging) => continue,
+                    None => {}
+                }
                 // A profile's dependency is only fetched by a build that runs that profile, so its
                 // absence is a fact about this machine rather than a broken project. Its jar is used
                 // when it happens to be there, and its absence is not reported — otherwise a legacy
@@ -333,6 +352,48 @@ struct Node {
     module: Rc<str>,
     /// The artifact that declares this one, `None` for a module's own declaration.
     via: Option<Rc<str>>,
+}
+
+/// Why an artifact with no jar on disk is not, in fact, missing.
+enum NoJar {
+    /// It was renamed; this is where it went. Every part the relocation leaves out means "the same
+    /// as before", which is how Maven reads an artifact that only changed its groupId.
+    MovedTo(Coord),
+    /// Its own pom says `<packaging>pom</packaging>` — a BOM, a parent, an aggregator. There is no
+    /// jar to look for.
+    ByPackaging,
+}
+
+/// Read the artifact's OWN pom to tell "never had a jar" from "not downloaded".
+///
+/// `None` when the pom is not there either, which is the genuine miss: nothing on disk claims to
+/// know anything about this coordinate.
+fn no_jar_reason(reader: &mut PomReader<'_>, coord: &Coord) -> Option<NoJar> {
+    let pom = reader.pom(coord)?;
+    if let Some(reloc) = pom.relocation.clone() {
+        let moved = Coord {
+            group_id: pick(&reloc.group_id, &coord.group_id),
+            artifact_id: pick(&reloc.artifact_id, &coord.artifact_id),
+            version: pick(&reloc.version, &coord.version),
+            classifier: coord.classifier.clone(),
+            // The relocation target is a real artifact, whatever `<type>` the dependency that
+            // reached here wrote — and the old coordinate's own `pom` packaging is about the
+            // redirect, not about what it redirects to.
+            packaging: String::new(),
+        };
+        // A relocation that changes nothing would be an infinite loop, and one that points at
+        // itself is a broken pom rather than a redirect.
+        if moved.key() != coord.key() || moved.version != coord.version {
+            return Some(NoJar::MovedTo(moved));
+        }
+    }
+    (pom.packaging == "pom").then_some(NoJar::ByPackaging)
+}
+
+/// The relocation's value when it names one, else the coordinate's own — Maven's reading of an
+/// omitted part.
+fn pick(moved: &str, current: &str) -> String {
+    if moved.is_empty() { current.to_string() } else { moved.to_string() }
 }
 
 fn push_once(out: &mut Vec<Coord>, seen: &mut HashSet<String>, coord: Coord, tag: &str) {
@@ -520,6 +581,15 @@ mod tests {
 
         fn resolve(&self) -> Resolution {
             resolve(&self.project(), &LocalRepo::at(self.repo_root()))
+        }
+    }
+
+    impl Fixture {
+        /// Install a **pom only** — a BOM, a parent, or a relocation. There is no jar, by design.
+        fn install_pom_only(&self, group: &str, artifact: &str, version: &str, pom: &str) {
+            let d = self.repo_root().join(group.replace('.', "/")).join(artifact).join(version);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(format!("{artifact}-{version}.pom")), pom).unwrap();
         }
     }
 
@@ -868,4 +938,106 @@ mod tests {
         assert_eq!(r.missing.len(), 1);
         assert_eq!(r.describe(&r.missing[0]), "com.acme:absent:2.4.0 (in app)");
     }
+
+    /// The reported case, in miniature. `org.hibernate.orm:hibernate-jpamodelgen:7.4.5.Final` is a
+    /// **relocation**: ORM 7 renamed it `hibernate-processor`, and the old coordinates keep
+    /// publishing a jarless pom whose only content is where to go instead. Maven follows it. Not
+    /// following it reported as missing a jar that is on disk under its new name — and the report
+    /// named an artifact that will never exist, so no amount of downloading could have fixed it.
+    #[test]
+    fn a_relocated_artifact_resolves_to_where_it_moved() {
+        let f = Fixture::new("reloc");
+        f.install_pom_only(
+            "org.hibernate.orm",
+            "hibernate-jpamodelgen",
+            "7.4.5.Final",
+            "<project><groupId>org.hibernate.orm</groupId>\
+             <artifactId>hibernate-jpamodelgen</artifactId><version>7.4.5.Final</version>\
+             <packaging>pom</packaging><distributionManagement><relocation>\
+             <groupId>org.hibernate.orm</groupId><artifactId>hibernate-processor</artifactId>\
+             <version>7.4.5.Final</version></relocation></distributionManagement></project>",
+        );
+        f.install(
+            "org.hibernate.orm",
+            "hibernate-processor",
+            "7.4.5.Final",
+            &lib("org.hibernate.orm", "hibernate-processor", "7.4.5.Final", ""),
+        );
+        f.write_pom(
+            "",
+            &lib(
+                "it.acme",
+                "service",
+                "1.0",
+                &dep("org.hibernate.orm", "hibernate-jpamodelgen", "7.4.5.Final"),
+            ),
+        );
+        let out = f.resolve();
+        assert!(out.missing.is_empty(), "nothing is missing: {:?}", out.missing);
+        assert!(
+            out.jars.iter().any(|j| j.to_string_lossy().contains("hibernate-processor-7.4.5.Final.jar")),
+            "the relocated jar must be on the classpath: {:?}",
+            out.jars
+        );
+    }
+
+    /// A relocation that only changes the groupId leaves the other parts out, and Maven reads an
+    /// omitted part as "the same as before".
+    #[test]
+    fn a_relocation_that_omits_a_part_keeps_the_old_one() {
+        let f = Fixture::new("reloc-partial");
+        f.install_pom_only(
+            "old.group",
+            "widget",
+            "2.0",
+            "<project><groupId>old.group</groupId><artifactId>widget</artifactId>\
+             <version>2.0</version><packaging>pom</packaging><distributionManagement>\
+             <relocation><groupId>new.group</groupId></relocation>\
+             </distributionManagement></project>",
+        );
+        f.install("new.group", "widget", "2.0", &lib("new.group", "widget", "2.0", ""));
+        f.write_pom("", &lib("it.acme", "service", "1.0", &dep("old.group", "widget", "2.0")));
+        let out = f.resolve();
+        assert!(out.missing.is_empty(), "{:?}", out.missing);
+        // The group's dots are directories in a repository path, so this is `new/group`.
+        assert!(
+            out.jars.iter().any(|j| j.to_string_lossy().contains("new/group")),
+            "{:?}",
+            out.jars
+        );
+    }
+
+    /// An artifact whose OWN pom is `<packaging>pom</packaging>` has no jar, whatever `<type>` the
+    /// dependency that named it wrote. Looking for one and reporting its absence is a false
+    /// positive by construction.
+    #[test]
+    fn a_pom_packaged_artifact_named_without_a_type_is_not_missing() {
+        let f = Fixture::new("pom-packaging");
+        f.install_pom_only(
+            "it.acme",
+            "platform",
+            "1.0",
+            "<project><groupId>it.acme</groupId><artifactId>platform</artifactId>\
+             <version>1.0</version><packaging>pom</packaging></project>",
+        );
+        // Declared with no `<type>`, so the dependency reads as a jar.
+        f.write_pom("", &lib("it.acme", "service", "1.0", &dep("it.acme", "platform", "1.0")));
+        let out = f.resolve();
+        assert!(out.missing.is_empty(), "a pom-packaged artifact has no jar: {:?}", out.missing);
+        assert!(
+            !out.jars.iter().any(|j| j.to_string_lossy().ends_with(".pom")),
+            "and its pom is not a classpath entry: {:?}",
+            out.jars
+        );
+    }
+
+    /// The genuine miss still reports. Nothing on disk claims to know the coordinate at all.
+    #[test]
+    fn an_artifact_with_no_pom_either_is_still_missing() {
+        let f = Fixture::new("really-missing");
+        f.write_pom("", &lib("it.acme", "service", "1.0", &dep("nowhere", "ghost", "9.9")));
+        let out = f.resolve();
+        assert!(out.missing.iter().any(|c| c.artifact_id == "ghost"), "{:?}", out.missing);
+    }
+
 }

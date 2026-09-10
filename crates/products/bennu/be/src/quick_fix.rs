@@ -29,8 +29,54 @@ pub(crate) fn resolver_fixes(
     match code {
         "unhandled-checked-exception" => unhandled_exception_fixes(source, start, end, resolver),
         "non-exhaustive-enum-switch" => enum_switch_fixes(source, start, end, resolver),
+        // `order.total()` where `Order` declares no `total`. The pure transform refuses this — it
+        // edits one buffer and cannot say which file the method belongs in — and the resolver can.
+        "unknown-member" => create_in_receiver_fixes(source, start, end, resolver),
         _ => Vec::new(),
     }
+}
+
+/// "Create method 'total' in Order" — for a call on another object.
+///
+/// The offer only. Whether the class already declares the name, whether its file can be read and
+/// what imports the member needs are answered when it is RUN
+/// (`bennu_create_method_in`), against the target file — which this does not have.
+///
+/// Offered only for a **project** type: a dependency's class has no source to write into, and a
+/// decompiled stub is not a file anyone can edit.
+fn create_in_receiver_fixes(
+    source: &str,
+    start: usize,
+    end: usize,
+    resolver: &dyn TypeResolver,
+) -> Vec<OfferWire> {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else { return Vec::new() };
+    let Some(call) = bennu_refactor::prelude::foreign_call_at(tree.root_node(), source, start, end)
+    else {
+        return Vec::new();
+    };
+    // `start` is the called name's first byte, which is one past the `.` — the position the
+    // receiver inference expects.
+    let Some(recv) = bennu_java::prelude::infer_receiver_type(source, start, resolver) else {
+        return Vec::new();
+    };
+    if !resolver.is_project_type(&recv.binary_name) {
+        return Vec::new();
+    }
+    let simple = recv
+        .binary_name
+        .rsplit(['/', '$'])
+        .next()
+        .unwrap_or(&recv.binary_name);
+    vec![OfferWire {
+        id: "create-method-in".to_string(),
+        label: format!("Create method '{}' in {simple}", call.name),
+        start,
+        end,
+        // The name, for a caller that wants to say what it wrote. The edits come from the handler.
+        replacement: call.name,
+        action: Some("create-method-in".to_string()),
+    }]
 }
 
 /// The fixes that need only the **tree** — no resolver, because the resolver has already spoken.

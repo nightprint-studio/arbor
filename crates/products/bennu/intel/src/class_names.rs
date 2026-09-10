@@ -19,6 +19,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use bennu_complete::prelude::{match_tier, MatchCase};
+
 /// Simple name (`List`) → sorted, de-duplicated dotted FQNs (`["java.awt.List", "java.util.List"]`).
 /// `Clone` so a provider built over the same JDK can start from another's enumeration instead of
 /// walking the JVM image again — see `NativeJavaProvider::with_dependency_tier`. Re-running
@@ -136,13 +138,14 @@ impl ClassNameIndex {
 
     /// Up to `limit` simple names matching what has been typed, **best first**.
     ///
-    /// Three tiers, in order, because a Java type is looked for in three ways and only the first
-    /// of them is a prefix in the string sense:
+    /// The tiers are [`bennu_complete`]'s — exact prefix, prefix ignoring case, camel humps —
+    /// which is the same rule every other kind of candidate is now matched by. It started here,
+    /// as a type-name-only search, and members were matched with a literal `starts_with` until
+    /// the two were made one.
     ///
-    /// 1. the name starts with exactly what was typed — `Spring` → `SpringApplication`;
-    /// 2. it starts with it ignoring case — `SPRING`, or a shift key held one letter too long;
-    /// 3. the typed letters are its **camel humps** — `SBA` → `SpringBootApplication`, which is
-    ///    how anyone who knows the class name actually reaches for it.
+    /// The case mode is deliberately [`MatchCase::Ignore`] and not the user's setting: this is
+    /// also the index behind "Import class" and Go-to-class, where the whole point is to find a
+    /// name you half-remember. Completion applies the setting to what comes back.
     ///
     /// Within a tier a type the **project** declares comes first, then the shorter name, then
     /// alphabetical. The old search was a plain sorted prefix scan truncated at fifty, which on a
@@ -151,6 +154,48 @@ impl ClassNameIndex {
     /// Only names sharing the typed first letter are examined — true of all three tiers — so this
     /// touches a slice of the axis rather than all of it.
     pub fn matches_for_prefix(&self, typed: &str, limit: usize) -> Vec<&str> {
+        let mut ranked = self.ranked_matches(typed);
+        ranked.truncate(limit);
+        ranked
+    }
+
+    /// Like [`matches_for_prefix`](Self::matches_for_prefix), but `limit` counts only the names the
+    /// caller **keeps**.
+    ///
+    /// The distinction is invisible until the caller's filter is narrow, and then it is the whole
+    /// answer. Annotation completion wants the annotation types under a prefix, and annotations are
+    /// a thin slice of any classpath: sweeping a fixed three hundred names first and filtering
+    /// after meant `@S` looked at three hundred names beginning with `S` — the JDK alone has more
+    /// than that — and `SuppressWarnings` was never among them. The popup was empty until the third
+    /// letter narrowed the sweep enough for the answer to fall inside it, which reads as
+    /// "completion starts at three characters" and is really "the answer was cut before anyone
+    /// looked at it".
+    ///
+    /// The ordering is the same one [`matches_for_prefix`](Self::matches_for_prefix) uses; only the
+    /// point at which the cap applies moves. `keep` is called in that order and at most once per
+    /// name, so a caller that pays per name (a bytecode decode, say) should memoize across calls —
+    /// nothing here caches for it.
+    pub fn matches_for_prefix_where<'a>(
+        &'a self,
+        typed: &str,
+        limit: usize,
+        keep: &mut dyn FnMut(&'a str) -> bool,
+    ) -> Vec<&'a str> {
+        let mut out = Vec::new();
+        for name in self.ranked_matches(typed) {
+            if out.len() >= limit {
+                break;
+            }
+            if keep(name) {
+                out.push(name);
+            }
+        }
+        out
+    }
+
+    /// Every simple name matching `typed`, best first and uncapped — the shared ordering behind
+    /// both public searches.
+    fn ranked_matches(&self, typed: &str) -> Vec<&str> {
         let Some(first) = typed.as_bytes().first().copied() else { return Vec::new() };
         // Both spellings of the first letter — a class is capitalised, but the caret may not be.
         // A byte that is not a letter yields one range, not the same one twice.
@@ -159,12 +204,11 @@ impl ClassNameIndex {
         let mut scored: Vec<(u8, bool, usize, &str)> = Vec::new();
         for &start in starts {
             for name in self.names_starting_with(start) {
-                let Some(tier) = match_tier(name, typed) else { continue };
+                let Some(tier) = match_tier(name, typed, MatchCase::Ignore) else { continue };
                 scored.push((tier, !self.project.contains(name), name.len(), name.as_str()));
             }
         }
         scored.sort_unstable();
-        scored.truncate(limit);
         scored.into_iter().map(|(_, _, _, n)| n).collect()
     }
 
@@ -253,55 +297,7 @@ pub struct Segment {
     pub fqn: Option<String>,
 }
 
-/// How well `name` answers what was typed, lower being better, or `None` for no match at all.
-/// See [`ClassNameIndex::matches_for_prefix`] for what the three tiers are and why.
-fn match_tier(name: &str, typed: &str) -> Option<u8> {
-    if name.starts_with(typed) {
-        return Some(0);
-    }
-    if name.len() >= typed.len() && name.as_bytes()[..typed.len()].eq_ignore_ascii_case(typed.as_bytes())
-    {
-        return Some(1);
-    }
-    // Hump-jumping only when the typed text SIGNALS humps — an uppercase letter after the first.
-    // `SBA` and `SprBoot` are somebody spelling out the capitals of a name they know; `springapp`
-    // is somebody typing a prefix in lower case, and letting that jump humps matches half the
-    // classpath (`springapp` reaches `SpringBootApplication`, and `strb` would reach anything).
-    // The first letter does not count: it is capitalised in every class name and says nothing.
-    let signals_humps = typed.bytes().skip(1).any(|c| c.is_ascii_uppercase());
-    (signals_humps && camel_humps_match(name.as_bytes(), typed.as_bytes())).then_some(2)
-}
 
-/// Whether the typed letters walk `name`'s camel humps: after the first character, each one either
-/// continues the word it is in or jumps to the next capital that matches it.
-///
-/// Greedy, and deliberately so — it is the last tier, reached only when neither prefix test did,
-/// and a rare miss on a pathological name costs a suggestion rather than producing a wrong one.
-/// ASCII, because a Java type name that is not is a name this will simply not reach.
-fn camel_humps_match(name: &[u8], typed: &[u8]) -> bool {
-    let mut at = 0usize;
-    for (k, want) in typed.iter().enumerate() {
-        if k == 0 {
-            match name.first() {
-                Some(c) if c.eq_ignore_ascii_case(want) => at = 1,
-                _ => return false,
-            }
-            continue;
-        }
-        if name.get(at).is_some_and(|c| c.eq_ignore_ascii_case(want)) {
-            at += 1;
-            continue;
-        }
-        match name[at..]
-            .iter()
-            .position(|c| c.is_ascii_uppercase() && c.eq_ignore_ascii_case(want))
-        {
-            Some(j) => at += j + 1,
-            None => return false,
-        }
-    }
-    true
-}
 
 /// A binary class name → `(simple, dotted_fqn)`, or `None` for a name that isn't an importable
 /// top-level type (inner class, `module-info`/`package-info`, or a default-package class).
@@ -385,8 +381,16 @@ mod tests {
             ["SpringApplication", "SpringBootApplication"],
             "shorter first within the tier",
         );
-        // Tier 1 — the case is not what anyone remembers about a class name.
-        assert_eq!(idx.matches_for_prefix("springapp", 10), ["SpringApplication"]);
+        // Tier 1 — the case is not what anyone remembers about a class name. `SpringBootApplication`
+        // comes too, on the humps, and BELOW it: the humps used to be gated on the typed text
+        // containing a capital, which was a workable proxy for "spelling out a name I know" while
+        // this matcher only ever saw type names. It cannot be one now that the same rule matches
+        // MEMBERS — `tolc` reaching `toLowerCase` is all lowercase and is exactly the gesture. The
+        // tier ordering is what keeps the looser match from displacing the tighter one.
+        assert_eq!(
+            idx.matches_for_prefix("springapp", 10),
+            ["SpringApplication", "SpringBootApplication"],
+        );
         // Tier 2 — the humps, which is how you reach for a name you already know.
         assert_eq!(idx.matches_for_prefix("SBA", 10), ["SpringBootApplication"]);
         assert_eq!(idx.matches_for_prefix("SprBoot", 10), ["SpringBootApplication"]);

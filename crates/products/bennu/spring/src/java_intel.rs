@@ -125,6 +125,19 @@ pub fn highlights(path: &str, source: &str) -> Vec<ExtHighlight> {
                 }
             }
         }
+        // The prefix of a `@ConfigurationProperties` — the same colour a property key gets,
+        // because that is what it is: the front of every key the annotated class binds.
+        if crate::known::is(ann, &u.facts, "ConfigurationProperties") {
+            for s in &ann.strings {
+                if s.end > s.start && !s.value.trim().is_empty() {
+                    out.push(ExtHighlight {
+                        start: s.start,
+                        end: s.end,
+                        kind: "spring.placeholder.key".to_string(),
+                    });
+                }
+            }
+        }
         // A type named as text — see `class_ref`.
         for r in crate::class_ref::refs_of(ann, &u.facts) {
             out.push(ExtHighlight {
@@ -258,6 +271,10 @@ enum Caret {
     ConfigProperty { field: String, type_text: String, paths: Vec<String> },
     /// A type named as a string — `@ConditionalOnClass(name = "…")`. See [`crate::class_ref`].
     ClassName(crate::class_ref::ClassRef),
+    /// The `prefix` of a `@ConfigurationProperties` — not a key but the front of a family of
+    /// them, which is why it needs its own answer: `props.lookup` finds nothing for it, because
+    /// in a yaml a prefix is a block and only its leaves are entries.
+    PropertyPrefix(String),
 }
 
 fn caret_at_with_model(model: &SpringModel, u: &JavaUnit, offset: usize) -> Option<Caret> {
@@ -305,6 +322,16 @@ fn caret_at(u: &JavaUnit, offset: usize) -> Option<Caret> {
                 let key = crate::beans::conditional_property_key(ann);
                 if !key.is_empty() {
                     return Some(Caret::PropertyKey(key));
+                }
+            }
+        }
+        // The prefix of a `@ConfigurationProperties`. It names configuration as directly as a
+        // `@Value` key does — it is the front of every key the class binds — and it was the one
+        // configuration string in Java with no colour, no hover and nowhere to go.
+        if crate::known::is(ann, &u.facts, "ConfigurationProperties") {
+            for s in &ann.strings {
+                if offset >= s.start && offset <= s.end && !s.value.trim().is_empty() {
+                    return Some(Caret::PropertyPrefix(crate::usages::canonical_key(s.value.trim())));
                 }
             }
         }
@@ -388,6 +415,20 @@ pub fn navigate(model: &SpringModel, path: &str, source: &str, offset: usize) ->
         Some(Caret::Injection { type_text, qualifier, .. }) => {
             model.candidates(&type_text, &qualifier).into_iter().map(bean_target).collect()
         }
+        // A prefix names a BLOCK, not a line — so the target is the first key declared under it
+        // in each property file, which puts the caret inside the block rather than at a leaf
+        // nobody asked about. One row per file, because "which application.yml" is exactly the
+        // question a project with profiles makes you ask.
+        Some(Caret::PropertyPrefix(prefix)) => model
+            .prefix_sites(&prefix)
+            .into_iter()
+            .map(|(f, e)| ExtTarget {
+                file: f.path.clone(),
+                offset: e.key_start,
+                label: e.key.clone(),
+                detail: f.name.clone(),
+            })
+            .collect(),
         // A class named as text. Only the PROJECT's own types can be answered from here — an
         // `ExtTarget` is a file and an offset, and a class inside a jar has neither. The editor
         // takes the library case from the same coloured span, through the decompiled view every
@@ -420,6 +461,21 @@ fn bean_target(b: &crate::model::BeanDef) -> ExtTarget {
 pub fn hover(model: &SpringModel, path: &str, source: &str, offset: usize) -> Option<ExtHover> {
     let u = unit(path, source)?;
     match caret_at_with_model(model, &u, offset)? {
+        // A prefix. The useful answer is whether anything actually declares it and where — a
+        // prefix that matches nothing is a class binding defaults for ever, and it looks exactly
+        // like one that works.
+        Caret::PropertyPrefix(prefix) => {
+            let sites = model.prefix_sites(&prefix);
+            let doc = match sites.len() {
+                0 => "No property file declares anything under this prefix.".to_string(),
+                1 => format!("Declared in {}", sites[0].0.name),
+                n => format!(
+                    "Declared in {n}: {}",
+                    sites.iter().map(|(f, _)| f.name.as_str()).collect::<Vec<_>>().join(", ")
+                ),
+            };
+            Some(ExtHover { title: prefix.clone(), signature: "prefix".to_string(), doc })
+        }
         // A type named as text. What a reader wants to know is whether the name is *right* — a
         // typo here does not fail to compile, it silently turns the condition off for ever — so
         // the card answers that and nothing else. It never says "not found": this crate cannot
@@ -758,6 +814,77 @@ pub fn mapping_path_variables(path: &str, source: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    /// A `record` carrying `@ConfigurationProperties` — the ordinary shape in modern Spring Boot.
+    #[test]
+    fn a_record_prefix_is_seen() {
+        let src = java("package p;\n@ConfigurationProperties(prefix = \"app.pa-gateway.cors\")\npublic record CorsProps(java.util.List<String> allowedOrigins) {}\n");
+        let hs = highlights(PATH, &src);
+        let keys: Vec<&str> = hs.iter().filter(|h| h.kind == "spring.placeholder.key").map(|h| &src[h.start..h.end]).collect();
+        assert_eq!(keys, vec!["app.pa-gateway.cors"], "{hs:?}");
+    }
+
+    /// The prefix of a `@ConfigurationProperties` is configuration, so it is coloured as
+    /// configuration — it was the one such string in Java that read as a plain literal.
+    #[test]
+    fn a_configuration_properties_prefix_is_coloured_as_a_key() {
+        let src = java("package p;\n@ConfigurationProperties(prefix = \"app.http.client\")\nclass C {}\n");
+        let hs = highlights(PATH, &src);
+        let keys: Vec<&str> = hs
+            .iter()
+            .filter(|h| h.kind == "spring.placeholder.key")
+            .map(|h| &src[h.start..h.end])
+            .collect();
+        assert_eq!(keys, vec!["app.http.client"], "{hs:?}");
+    }
+
+    /// And go-to on it lands inside the block it names — the FIRST key declared under it, because
+    /// in a yaml the prefix itself is not an entry and `lookup` finds nothing for it.
+    #[test]
+    fn go_to_on_a_prefix_lands_on_the_first_key_under_it() {
+        let m = model_with("", "app:\n  http:\n    client:\n      read-timeout: 5s\n      connect-timeout: 2s\n");
+        let src = java("package p;\n@ConfigurationProperties(prefix = \"app.http.client\")\nclass C {}\n");
+        let at = src.find("app.http.client").unwrap() + 4;
+        let t = navigate(&m, PATH, &src, at);
+        assert_eq!(t.len(), 1, "{t:?}");
+        assert_eq!(t[0].label, "app.http.client.read-timeout");
+    }
+
+    /// The reported case end to end: a record whose only bound key is a **list**, under a nested
+    /// prefix. Every part of it used to fail together and for one reason — the yaml reader threw
+    /// the key away with the sequence — so the prefix looked configured nowhere.
+    #[test]
+    fn go_to_on_a_prefix_finds_a_list_valued_key() {
+        let m = model_with(
+            "",
+            "appaltiecontratti:\n  application:\n    pa-gateway:\n      cors:\n        allowed-origins:\n          - \"http://a\"\n",
+        );
+        let src = java("package p;\n@ConfigurationProperties(prefix = \"appaltiecontratti.application.pa-gateway.cors\")\npublic record CorsProps(java.util.List<String> allowedOrigins) {}\n");
+        let at = src.find("appaltiecontratti.application").unwrap() + 5;
+        let t = navigate(&m, PATH, &src, at);
+        assert_eq!(t.len(), 1, "{t:?}");
+        assert_eq!(t[0].label, "appaltiecontratti.application.pa-gateway.cors.allowed-origins");
+    }
+
+    /// Relaxed binding, both ways round: the annotation may say `httpClient` where the yaml says
+    /// `http-client`, and they are the same prefix to Spring.
+    #[test]
+    fn a_prefix_matches_across_relaxed_spellings() {
+        let m = model_with("", "app:\n  http-client:\n    read-timeout: 5s\n");
+        let src = java("package p;\n@ConfigurationProperties(prefix = \"app.httpClient\")\nclass C {}\n");
+        let at = src.find("app.httpClient").unwrap() + 2;
+        assert_eq!(navigate(&m, PATH, &src, at).len(), 1);
+    }
+
+    /// A prefix nothing declares says so, rather than looking like one that works — a class
+    /// binding defaults for ever is invisible otherwise.
+    #[test]
+    fn a_prefix_nothing_declares_says_so() {
+        let m = model_with("", "other:\n  thing: 1\n");
+        let src = java("package p;\n@ConfigurationProperties(prefix = \"app.absent\")\nclass C {}\n");
+        let at = src.find("app.absent").unwrap() + 2;
+        let h = hover(&m, PATH, &src, at).expect("a prefix has a card");
+        assert!(h.doc.contains("No property file declares"), "{}", h.doc);
+    }
 
     /// A bean written as a plain string is coloured as a bean — the same colour a SpEL
     /// `@beanName` gets, because it is the same thing said another way.

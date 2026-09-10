@@ -267,6 +267,9 @@ pub(crate) fn start_cargo_run(ctx: &BennuState, args: &RunArgs) -> Result<CargoR
     // and an escape sequence inside a `Running` line is a target the panel cannot name.
     cmd.env("CARGO_TERM_COLOR", "never");
     cmd.no_window();
+    // Its own process group: `cargo test` runs the test binaries as children, and Stop has to
+    // reach those rather than only cargo. See `child::own_group`.
+    crate::child::own_group(&mut cmd);
 
     let mut child = cmd.spawn().map_err(|e| {
         // Name what was actually tried: "not on PATH" sends the reader to their shell config,

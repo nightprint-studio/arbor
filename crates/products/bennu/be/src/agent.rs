@@ -2543,7 +2543,13 @@ fn bennu_test_run(
     let (scope, widened) = maven_scope(&args.tests, args.module.as_deref());
     let run = crate::tests::start_maven_run(
         ctx,
-        &crate::tests::RunTestsArgs { root: args.root.clone(), scope },
+        &crate::tests::RunTestsArgs {
+            root: args.root.clone(),
+            scope,
+            // Never: a model driving a run to completion has nothing to attach a debugger with,
+            // and a suspended fork waiting for one would hang the call.
+            debug: false,
+        },
     )?;
     // The plan's own widening (a selection too long for one command line) matters more than
     // ours, and both must reach the caller: a run that quietly ran more than it was asked to

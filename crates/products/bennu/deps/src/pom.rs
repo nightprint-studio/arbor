@@ -87,6 +87,28 @@ pub struct Pom {
     pub dependencies: Vec<RawDependency>,
     /// `<project><dependencyManagement><dependencies>` — versions and scopes for *other* poms.
     pub managed: Vec<RawDependency>,
+    /// `<distributionManagement><relocation>` — the coordinates this artifact **moved to**.
+    ///
+    /// An artifact that has been renamed keeps publishing at its old coordinates, as a pom with
+    /// `<packaging>pom</packaging>` and no jar, whose only content is where to go instead. Maven
+    /// follows it; anything that does not sees an artifact that resolves and then has no jar, and
+    /// reports as missing something that is sitting on disk under its new name. Measured on
+    /// `org.hibernate.orm:hibernate-jpamodelgen:7.4.5.Final`, which is a relocation to
+    /// `hibernate-processor` — a rename Hibernate made in ORM 7.
+    ///
+    /// A field of its own rather than a `Coord`: this crate's `Coord` lives in `repo`, and a pom
+    /// carries the three parts as written, any of which the relocation may leave out (an artifact
+    /// that only changed groupId writes only the groupId).
+    pub relocation: Option<Relocation>,
+}
+
+/// Where an artifact moved to. Each part is empty when the relocation does not change it — Maven
+/// reads an omitted part as "the same as before".
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Relocation {
+    pub group_id: String,
+    pub artifact_id: String,
+    pub version: String,
 }
 
 impl Pom {
@@ -171,6 +193,15 @@ pub fn parse(source: &str) -> Pom {
     if let Some(dm) = doc.child(project, "dependencyManagement") {
         if let Some(deps) = doc.child(dm, "dependencies") {
             pom.managed = doc.dependencies_in(deps, "");
+        }
+    }
+    if let Some(dm) = doc.child(project, "distributionManagement") {
+        if let Some(reloc) = doc.child(dm, "relocation") {
+            pom.relocation = Some(Relocation {
+                group_id: doc.child_text(reloc, "groupId"),
+                artifact_id: doc.child_text(reloc, "artifactId"),
+                version: doc.child_text(reloc, "version"),
+            });
         }
     }
     // Profile dependencies, each carrying the id of the profile that would switch it on.

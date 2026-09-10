@@ -94,6 +94,10 @@ mod rename;
 mod references;
 // Hover (editor hover card): `bennu_hover` — classifies the symbol under the caret off the
 // per-project semantic engine and returns its signature / kind / owning type.
+mod completion_doc;
+mod completion_picked;
+mod create_method_in;
+mod generate_hint;
 mod hover;
 // What the editor draws AROUND a call rather than in it: `bennu_signature_help` (the parameter
 // strip for the call the caret is inside) and `bennu_inlay_hints` (argument names, inferred `var`
@@ -161,8 +165,13 @@ mod index_stats;
 // a future "non-compliant files" UI.
 mod encoding_report;
 // JDK status: `bennu_jdk_status` — how the project's JDK resolved (exact / fallback / none),
-// for the titlebar warning (no JDK) + Problems entry (wrong-version JDK).
+// for the titlebar warning (no JDK) + Problems entry (wrong-version JDK); and
+// `bennu_module_jdk` — the level of the MODULE the open file is in, for a reactor whose modules
+// do not all target the same one.
 mod jdk_status;
+// Build units: `bennu_build_units` — the line beside a module / crate row in the project tree
+// (the language level it compiles at, and its packaging when that is not the default).
+mod build_units;
 // Index inspector entries: `bennu_index_entries` — the per-kind entry lists (members / jars
 // / jdk / beans / actions / relations) behind each headline stat, off the built index.
 mod inspect;

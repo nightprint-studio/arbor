@@ -175,6 +175,31 @@ pub(crate) fn forget_discovery(root: &str) {
 
 // ── bennu_run_tests ────────────────────────────────────────────────────────────
 
+/// Args for [`bennu_test_selection_pinned`].
+#[derive(Deserialize)]
+pub struct PinnedArgs {
+    /// Absolute path to the project root.
+    pub root: String,
+}
+
+/// The literal `<test>` this project's pom pins on the Surefire plugin, when it pins one — the
+/// answer to "will running one test actually run one test here".
+///
+/// `None` for every project that does not, which is nearly all of them, and also for the property
+/// spellings: those are steerable, and a warning about them would be a warning about the case that
+/// works. Read before anything is run, because the whole point is to say it before the click
+/// rather than after the wrong run.
+#[arbor_rpc::handler]
+fn bennu_test_selection_pinned(
+    _ctx: &BennuState,
+    args: PinnedArgs,
+) -> Result<Option<String>, String> {
+    Ok(match surefire_pinned_test(Path::new(&args.root)) {
+        Some(SurefireTest::Literal(pinned)) => Some(pinned),
+        _ => None,
+    })
+}
+
 /// Args for [`bennu_run_tests`].
 #[derive(Deserialize)]
 pub struct RunTestsArgs {
@@ -182,6 +207,10 @@ pub struct RunTestsArgs {
     pub root: String,
     /// What to run: everything, a module, a set of classes, or individual cases.
     pub scope: TestScope,
+    /// Run under the **debugger**: the forked test JVM connects back to a listener opened here and
+    /// suspends until it does, so a breakpoint set before the run is honoured.
+    #[serde(default)]
+    pub debug: bool,
 }
 
 /// The handle correlating a live run with its event stream.
@@ -190,6 +219,10 @@ pub struct TestRunHandle {
     pub run_id: String,
     /// What is being run, in words (`OrderTest.computesTotal`, `12 classes`, `all tests`).
     pub label: String,
+    /// Whether the run is under the debugger — the panel shows a different verb, and Stop has a
+    /// session to end as well as a process.
+    #[serde(default)]
+    pub debugging: bool,
     /// Set when the selection was too large to express on one command line and the run was
     /// widened. The panel must show it — the user asked for a subset and is getting a
     /// superset.
@@ -219,13 +252,216 @@ pub(crate) struct MavenRun {
 }
 
 /// Spawn `mvn test` for `scope` and register it, without waiting for anything.
+/// What a pom writes for Surefire's `<test>`, when it writes anything.
+///
+/// The difference decides whether a selection can be honoured at all. Measured on Surefire 3.5.6:
+///
+/// | written as | `-Dtest=X` on the command line | what the mojo runs |
+/// |---|---|---|
+/// | `<test>TestSuite</test>` | passed | `TestSuite` — the selection is discarded |
+/// | `<test>${test}</test>` | passed | `X` |
+/// | `<test>${suite}</test>` + `-Dsuite=X` | passed | `X` |
+///
+/// Maven gives a value written in the pom precedence over the user property that names it, so a
+/// literal cannot be overridden from a command line at all. A property expression can — by setting
+/// **that** property, whatever it is called.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SurefireTest {
+    /// A literal. Nothing on a command line can move it.
+    Literal(String),
+    /// A single `${name}`. Setting `name` steers the run, and leaving it alone keeps whatever the
+    /// pom defaults it to — so a plain `mvn test` still does what the team meant.
+    Property(String),
+}
+
+/// What the poms under `root` write for Surefire's `<test>`.
+///
+/// Read from the module poms rather than from an effective pom: a `<configuration>` inherited
+/// through `<pluginManagement>` is the same problem, and both spellings live in the text.
+fn surefire_pinned_test(root: &Path) -> Option<SurefireTest> {
+    /// Matches the reactor depth the rest of the classpath work walks.
+    const MAX_DEPTH: usize = 6;
+    fn walk(dir: &Path, depth_left: usize) -> Option<SurefireTest> {
+        if let Ok(xml) = std::fs::read_to_string(dir.join("pom.xml")) {
+            if let Some(pinned) = pinned_in(&xml) {
+                return Some(pinned);
+            }
+        }
+        if depth_left == 0 {
+            return None;
+        }
+        let entries = std::fs::read_dir(dir).ok()?;
+        for entry in entries.flatten() {
+            if !entry.file_type().ok()?.is_dir() {
+                continue;
+            }
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            // `target/` holds a copy of nothing anybody configures, and a dot-directory is not a
+            // module.
+            if name == "target" || name.starts_with('.') || name == "node_modules" {
+                continue;
+            }
+            if let Some(pinned) = walk(&entry.path(), depth_left - 1) {
+                return Some(pinned);
+            }
+        }
+        None
+    }
+    walk(root, MAX_DEPTH)
+}
+
+/// The `<test>` inside a `maven-surefire-plugin` block of this pom's text.
+fn pinned_in(xml: &str) -> Option<SurefireTest> {
+    let at = xml.find("maven-surefire-plugin")?;
+    // Bounded to the plugin's own element: a `<test>` further down the file belongs to something
+    // else, and the plugin block is never megabytes long.
+    let rest = &xml[at..];
+    let end = rest.find("</plugin>").unwrap_or(rest.len());
+    let block = &rest[..end];
+    let open = block.find("<test>")?;
+    let close = block[open..].find("</test>")? + open;
+    let value = block[open + "<test>".len()..close].trim();
+    if value.is_empty() {
+        return None;
+    }
+    if let Some(name) = single_property(value) {
+        return Some(SurefireTest::Property(name));
+    }
+    // Anything else containing a `${` is a value built from several parts, and no single property
+    // steers it. Nothing is claimed about it in either direction: saying it is pinned would be a
+    // guess, and so would saying it is not.
+    if value.contains("${") {
+        return None;
+    }
+    Some(SurefireTest::Literal(value.to_string()))
+}
+
+/// Whether any pom under `root` pins Surefire's `<forkCount>` to zero — tests in Maven's own JVM.
+fn forkcount_zero(root: &Path) -> bool {
+    const MAX_DEPTH: usize = 6;
+    fn walk(dir: &Path, depth_left: usize) -> bool {
+        if let Ok(xml) = std::fs::read_to_string(dir.join("pom.xml")) {
+            if forkcount_zero_in(&xml) {
+                return true;
+            }
+        }
+        if depth_left == 0 {
+            return false;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else { return false };
+        for entry in entries.flatten() {
+            let Ok(ft) = entry.file_type() else { continue };
+            if !ft.is_dir() {
+                continue;
+            }
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == "target" || name.starts_with('.') || name == "node_modules" {
+                continue;
+            }
+            if walk(&entry.path(), depth_left - 1) {
+                return true;
+            }
+        }
+        false
+    }
+    walk(root, MAX_DEPTH)
+}
+
+/// `<forkCount>0</forkCount>` inside a `maven-surefire-plugin` block of this pom's text.
+fn forkcount_zero_in(xml: &str) -> bool {
+    let Some(at) = xml.find("maven-surefire-plugin") else { return false };
+    let rest = &xml[at..];
+    let end = rest.find("</plugin>").unwrap_or(rest.len());
+    let block = &rest[..end];
+    let Some(open) = block.find("<forkCount>") else { return false };
+    let Some(close) = block[open..].find("</forkCount>").map(|i| i + open) else { return false };
+    block[open + "<forkCount>".len()..close].trim() == "0"
+}
+
+/// `"${suite}"` → `Some("suite")`. `None` for anything that is not exactly one property
+/// expression.
+fn single_property(value: &str) -> Option<String> {
+    let inner = value.strip_prefix("${")?.strip_suffix('}')?;
+    // One expression, not two run together (`${a}${b}`) — and not an empty `${}`.
+    if inner.is_empty() || inner.contains('$') || inner.contains('{') || inner.contains('}') {
+        return None;
+    }
+    Some(inner.to_string())
+}
+
 pub(crate) fn start_maven_run(ctx: &BennuState, args: &RunTestsArgs) -> Result<MavenRun, String> {
     // Same lock as the build: two Maven processes on one tree fight over `target/`.
     let guard = BuildGuard::acquire().ok_or_else(|| BUSY_MSG.to_string())?;
 
     let root = PathBuf::from(&args.root);
     // Online, not `-o` — see the module doc.
-    let plan = plan(&args.scope, false);
+    let mut plan = plan(&args.scope, false);
+    // A pom that pins Surefire's `<test>` makes the selection we just built inert. Maven gives a
+    // plugin parameter written in the POM precedence over the user property that names it, so the
+    // `-Dtest=…` in the plan is read and discarded, and the run does whatever the POM said — the
+    // whole suite, usually. Measured on Surefire 3.5.6: with `<test>TestSuite</test>` the mojo's
+    // effective `test` is `TestSuite` however the command line is written; with `<test>${test}</test>`
+    // the command line reaches it. There is no CLI lever for the first, so the only honest thing is
+    // to say what will actually run rather than run it silently and look broken.
+    if let Some(filter) =
+        plan.args.iter().find_map(|a| a.strip_prefix("-Dtest=")).map(str::to_string)
+    {
+        match surefire_pinned_test(&root) {
+            // Steerable after all: the pom names a property, so set THAT one. Left alone it keeps
+            // whatever the pom defaults it to, which is why a plain `mvn test` still runs what the
+            // team meant — the selection only exists while something is asking for one.
+            Some(SurefireTest::Property(name)) if name != "test" => {
+                plan.args.push(format!("-D{name}={filter}"));
+            }
+            Some(SurefireTest::Property(_)) => {}
+            // Not steerable at all. Maven gives a value written in the pom precedence over the user
+            // property that names it, and there is no command line that changes that — so the only
+            // honest thing is to say what will actually run.
+            Some(SurefireTest::Literal(pinned)) => {
+                plan.widened = Some(format!(
+                    "This project's pom pins the Surefire plugin to <test>{pinned}</test>, so the \
+                     selection cannot take effect — Maven gives a value written in the pom \
+                     precedence over the -Dtest it is named by, and no command line changes that. \
+                     Write it as <test>${{test}}</test>, or as <test>${{any.property}}</test> with \
+                     the suite as that property's default: either spelling keeps a plain `mvn test` \
+                     running the suite and lets one class or one case be chosen here."
+                ));
+            }
+            None => {}
+        }
+    }
+    // Under the debugger, the port has to be listening BEFORE the fork exists: the agent dials out
+    // during VM initialization and aborts the launch if nothing answers. A port that cannot be
+    // bound degrades to an ordinary run — tests that run without the debugger beat tests that do
+    // not run. The same shape the application's Run/Debug uses (`crate::build`), for the same
+    // reason: `server=n` means the JVM calls US, so there is no fixed port to collide on and no
+    // race between the process starting and something attaching to it.
+    if args.debug {
+        // `forkCount=0` runs the tests inside Maven's OWN JVM, so there is no fork to put an agent
+        // on and `maven.surefire.debug` does nothing at all. Refused rather than run: a debug run
+        // that silently is not debugging wastes the whole run before you find out.
+        if forkcount_zero(&root) {
+            return Err(
+                "This project sets <forkCount>0</forkCount> on the Surefire plugin, so the tests \
+                 run inside Maven's own JVM and there is no forked process to attach to. Set it to \
+                 1 to debug from here, or debug Maven itself with mvnDebug."
+                    .to_string(),
+            );
+        }
+    }
+    let launch = args.debug.then(crate::debug::prepare).flatten();
+    if let Some(l) = &launch {
+        // Surefire hands this to the forked JVM verbatim, and it is a plain `${maven.surefire.debug}`
+        // — a property expression, so the command line always reaches it. (Unlike `<test>`, which is
+        // the trap this same file works around above.)
+        plan.args.push(format!("-Dmaven.surefire.debug={}", crate::debug::agent_arg(l.port, true)));
+        // One fork, because one listener accepts one connection. Surefire's own default is 1, but a
+        // project that raised it would otherwise start several JVMs all dialling the same port and
+        // debug whichever won the race.
+        plan.args.push("-DforkCount=1".to_string());
+    }
     let java_home = crate::build::resolve_java_home(&args.root);
     // The resolved launcher, not the bare `"mvn"`: on Windows Maven ships `mvn.cmd` and a
     // bare spawn only ever finds `mvn.exe`.
@@ -241,6 +477,9 @@ pub(crate) fn start_maven_run(ctx: &BennuState, args: &RunTestsArgs) -> Result<M
         cmd.env("JAVA_HOME", jh);
     }
     cmd.no_window();
+    // Its own process group, so Stop reaches the JVM Surefire forks to run the tests in — a
+    // grandchild, and the process that actually matters. See `child::own_group`.
+    crate::child::own_group(&mut cmd);
 
     // Name the launcher that was actually tried: "mvn not found" is unactionable when the
     // user can run `mvn` in a terminal — what they need to know is which path we looked at.
@@ -261,11 +500,19 @@ pub(crate) fn start_maven_run(ctx: &BennuState, args: &RunTestsArgs) -> Result<M
         LiveRun { child: child.clone(), cancelled: Arc::new(Mutex::new(false)) },
     );
 
+    // Keyed by the RUN id, so the console tab, the debugger and Stop are the same thing to
+    // everything that has to correlate them — which is why it can only start once the id exists.
+    let debugging = launch.is_some();
+    if let Some(launch) = launch {
+        crate::debug::start(run_id.clone(), args.root.clone(), launch, sink.clone());
+    }
+
     Ok(MavenRun {
         handle: TestRunHandle {
             run_id: run_id.clone(),
             label: plan.label,
             widened: plan.widened,
+            debugging,
         },
         command: format!("{mvn} {}", plan.args.join(" ")),
         guard,
@@ -410,8 +657,24 @@ pub(crate) fn cancel_run(run_id: &str) -> bool {
     };
     let Some((child, cancelled)) = live else { return false };
     *cancelled.lock().unwrap_or_else(|p| p.into_inner()) = true;
-    let mut child = child.lock().unwrap_or_else(|p| p.into_inner());
-    crate::child::kill_tree(&mut child);
+    {
+        let mut child = child.lock().unwrap_or_else(|p| p.into_inner());
+        crate::child::kill_tree(&mut child);
+    }
+    // A debugged run holds a second thing: the JDWP session, keyed by this same id. The socket
+    // closing would end it on its own — the forked JVM is dead — but "would" is doing a lot of
+    // work there, and until the reader thread notices, the editor is showing a stopped run whose
+    // debugger is still paused at a breakpoint. Closing this end says so now, and is a no-op when
+    // the run was not being debugged.
+    if let Ok(session) = crate::debug_backend::get(run_id) {
+        // On a thread of its own, because `detach` is a *polite* ending — it asks the VM to let go
+        // and waits for the answer, and we have just killed that VM. The wait unblocks the moment
+        // the socket teardown reaches the reader thread, which is immediate in practice and is
+        // still not something the Stop button should be able to sit behind.
+        std::thread::spawn(move || {
+            let _ = session.detach();
+        });
+    }
     true
 }
 
@@ -662,6 +925,88 @@ fn sweep_reports(
             );
             sink.emit(EVT_TEST_CLASS, json!({ "run_id": run_id, "result": result }));
         }
+    }
+}
+
+#[cfg(test)]
+mod surefire_pin_tests {
+    use super::{forkcount_zero_in, pinned_in, SurefireTest};
+
+    const PINNED: &str = r#"<project><build><plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.5.6</version>
+          <configuration><test>TestSuite</test></configuration>
+        </plugin>
+      </plugins></build></project>"#;
+
+    /// The reported case: the pom pins the selector, so `-Dtest=` is read and discarded and the
+    /// whole suite runs whatever you clicked. Nothing on a command line can move it.
+    #[test]
+    fn a_literal_test_selector_is_a_literal() {
+        assert_eq!(pinned_in(PINNED), Some(SurefireTest::Literal("TestSuite".into())));
+    }
+
+    /// The spelling that works out of the box: `${test}` is the property `-Dtest` already sets.
+    #[test]
+    fn the_test_property_is_recognised_as_a_property() {
+        let xml = PINNED.replace("<test>TestSuite</test>", "<test>${test}</test>");
+        assert_eq!(pinned_in(&xml), Some(SurefireTest::Property("test".into())));
+    }
+
+    /// And ANY property works, which is the answer to "can we keep the suite as the default?" —
+    /// yes: the pom defaults it, so a plain `mvn test` runs the suite, and setting that property
+    /// steers a single run. Measured on Surefire 3.5.6.
+    #[test]
+    fn any_property_name_is_recognised_and_can_be_driven() {
+        let xml = PINNED.replace("<test>TestSuite</test>", "<test>${suite}</test>");
+        assert_eq!(pinned_in(&xml), Some(SurefireTest::Property("suite".into())));
+    }
+
+    /// A value built from several parts is steered by no single property, and claiming it is
+    /// pinned would be as much a guess as claiming it is not.
+    #[test]
+    fn a_composed_value_claims_nothing() {
+        let xml = PINNED.replace("<test>TestSuite</test>", "<test>${a}${b}</test>");
+        assert_eq!(pinned_in(&xml), None);
+        let xml = PINNED.replace("<test>TestSuite</test>", "<test>Pre${a}</test>");
+        assert_eq!(pinned_in(&xml), None);
+    }
+
+    /// `forkCount=0` means the tests run in Maven's own JVM, so there is no fork to put an agent
+    /// on — a debug run is refused rather than run without one.
+    #[test]
+    fn a_zero_fork_count_is_recognised() {
+        let xml = PINNED.replace(
+            "<configuration>",
+            "<configuration><forkCount>0</forkCount>",
+        );
+        assert!(forkcount_zero_in(&xml));
+    }
+
+    #[test]
+    fn an_ordinary_fork_count_is_not_zero() {
+        let xml = PINNED.replace(
+            "<configuration>",
+            "<configuration><forkCount>1</forkCount>",
+        );
+        assert!(!forkcount_zero_in(&xml));
+        assert!(!forkcount_zero_in(PINNED));
+    }
+
+    #[test]
+    fn a_pom_that_does_not_configure_surefire_pins_nothing() {
+        assert_eq!(pinned_in("<project><build><plugins></plugins></build></project>"), None);
+    }
+
+    /// A `<test>` outside the plugin's own element is not Surefire's — the scan stops at
+    /// `</plugin>`.
+    #[test]
+    fn a_test_element_belonging_to_something_else_is_ignored() {
+        let xml = PINNED.replace("<configuration><test>TestSuite</test></configuration>", "")
+            + "<other><test>Nope</test></other>";
+        assert_eq!(pinned_in(&xml), None);
     }
 }
 

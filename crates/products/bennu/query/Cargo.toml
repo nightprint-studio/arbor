@@ -16,6 +16,9 @@ bennu-classpath = { path = "../classpath" }
 bennu-java = { path = "../java" }
 # The wire CompletionItem the completion query returns.
 bennu-proto = { path = "../proto" }
+# Whether a name answers what was typed — prefix, case and camel humps, one rule shared with every
+# other provider that offers a completion.
+bennu-complete = { path = "../complete" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 # The parse tree, for the queries that are about a POSITION in the file rather than about a type:

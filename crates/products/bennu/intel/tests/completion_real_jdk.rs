@@ -106,6 +106,28 @@ impl RealJdkProject {
         &self.sources.iter().find(|(p, _)| p == file).expect("no such file").1
     }
 
+    /// The ERROR diagnostics of `file`, resolved against the real JDK.
+    ///
+    /// The rest of the suite validates against the hand-written stub, which carries a handful of
+    /// methods per type — so `String.valueOf` is "missing" there for a reason that has nothing to
+    /// do with the check. A check that reads a receiver as a TYPE has to be measured where the
+    /// types are real.
+    fn errors(&self, file: &str) -> Vec<String> {
+        let ctx = bennu_check::prelude::FileContext {
+            file_stem: std::path::Path::new(file)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string()),
+            expected_package: None,
+            java_major: Some(21),
+            classpath_complete: false,
+        };
+        bennu_check::prelude::check_file_resolved(self.source(file), &ctx, &self.resolver, true)
+            .into_iter()
+            .filter(|d| d.severity == "error")
+            .map(|d| format!("{}: {}", d.code, d.message))
+            .collect()
+    }
+
     /// The completion labels offered at the caret just after `needle` in `file`.
     fn labels_after(&self, file: &str, needle: &str) -> Vec<String> {
         let src = self.source(file);
@@ -115,6 +137,7 @@ impl RealJdkProject {
             at + needle.len(),
             &self.resolver,
             Some(&self.catalog as &dyn TypeNameCatalog),
+            Default::default(),
         )
         .into_iter()
         .map(|c| c.label)
@@ -427,4 +450,65 @@ fn a_library_type_offers_its_nested_types() {
     )]);
     let labels = p.labels_after("p/Use.java", "{ Map.");
     assert_offers(&labels, &["Entry", "of", "entry"], "Map's nested Entry beside its statics");
+}
+
+// ── A call on a TYPE, against the real JDK ───────────────────────────────────────────────────
+//
+// The unknown-member check used to look only at a receiver it could infer as a value, so
+// `Files.copy(…)` — and every other static call — was checked by nothing. Widening it is where
+// false positives come from, and the JDK is where they would come from first: generic signatures,
+// members inherited a dozen links up, `Outer$Inner` spellings. The stub resolver cannot see any of
+// that, which is why these live here.
+
+#[test]
+fn a_jdk_static_call_is_silent() {
+    let p = project_or_skip!(&[(
+        "p/Use.java",
+        "package p;\n\
+         import java.util.Arrays;\n\
+         import java.util.List;\n\
+         public class Use {\n\
+         \x20 void run() {\n\
+         \x20   String s = String.valueOf(1);\n\
+         \x20   List<String> l = Arrays.asList(\"a\", \"b\");\n\
+         \x20   long t = System.currentTimeMillis();\n\
+         \x20   long u = java.lang.System.nanoTime();\n\
+         \x20   int m = Math.max(1, 2);\n\
+         \x20   System.out.println(s + l + t + u + m);\n\
+         \x20 }\n\
+         }\n",
+    )]);
+    assert_eq!(p.errors("p/Use.java"), Vec::<String>::new());
+}
+
+/// A nested JDK type is `Outer$Inner` in bytecode and `Outer.Inner` in source — the one shape a
+/// name-resolving check gets wrong most easily.
+#[test]
+fn a_static_on_a_nested_jdk_type_is_silent() {
+    let p = project_or_skip!(&[(
+        "p/Use.java",
+        "package p;\n\
+         import java.util.Map;\n\
+         public class Use {\n\
+         \x20 void run() {\n\
+         \x20   Map.Entry<String, String> e = Map.entry(\"a\", \"b\");\n\
+         \x20   System.out.println(e);\n\
+         \x20 }\n\
+         }\n",
+    )]);
+    assert_eq!(p.errors("p/Use.java"), Vec::<String>::new());
+}
+
+/// And the miss itself, on a type whose members are as real as they get.
+#[test]
+fn a_jdk_static_that_does_not_exist_is_flagged() {
+    let p = project_or_skip!(&[(
+        "p/Use.java",
+        "package p;\npublic class Use {\n  void run() { String s = String.nopeAtAll(1); }\n}\n",
+    )]);
+    let errors = p.errors("p/Use.java");
+    assert!(
+        errors.iter().any(|e| e.starts_with("unknown-member")),
+        "{errors:?}"
+    );
 }

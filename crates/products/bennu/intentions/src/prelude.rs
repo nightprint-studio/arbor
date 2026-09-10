@@ -23,3 +23,6 @@ pub use crate::quick_fix::{fixes_for, Fix};
 
 // The Java formatter — re-indentation and whitespace tidying, as line-range edits.
 pub use crate::format::{format_edits, format_source, FormatStyle};
+
+// The accessor a field does not have yet — the text a completion candidate inserts.
+pub use crate::accessor_stub::{accessor_name, offers, render_accessor, Accessor, FieldSpec};

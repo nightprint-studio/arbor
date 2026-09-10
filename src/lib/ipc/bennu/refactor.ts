@@ -20,6 +20,7 @@
 
 import { bennu } from '../rpc';
 import type { UsageHit } from './nav';
+import type { SourceEdit } from '$lib/types/bennu';
 
 /** One row of the refactoring list. */
 export interface RefactorOffer {
@@ -147,6 +148,27 @@ export function createClass(
   end: number,
 ): Promise<string> {
   return bennu('bennu_create_class', { args: { file, source, start, end } });
+}
+
+/**
+ * Write the method a call on another object is asking for, into that object's own class.
+ *
+ * The half of "create method" that crosses a file: `order.total()` says which method, which
+ * arguments and which return type, and says nothing about which file — that is a question about
+ * the classpath, and the backend answers it. Returns edits addressed **by file** (the member, plus
+ * an import per type the target is missing), which `projectStore.applyEdits` writes.
+ *
+ * Empty whenever the answer would be a guess: a receiver typed by a jar, a class that already
+ * declares the name, a type that does not resolve.
+ *
+ * Wire: `bennu_create_method_in` — `{ file, source, start, end }`. */
+export function createMethodIn(
+  file: string,
+  source: string,
+  start: number,
+  end: number,
+): Promise<SourceEdit[]> {
+  return bennu('bennu_create_method_in', { args: { file, source, start, end } });
 }
 
 // ── safe delete ───────────────────────────────────────────────────────────────

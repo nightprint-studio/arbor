@@ -12,7 +12,8 @@
  *    merula's `.merula` ({@link merulaLanguage}: highlight + folding, sharing the very
  *    grammar wasm the Merula window parses with).
  * 2. **Lezer languages** — HTML (`@codemirror/lang-html`, with embedded JS/CSS and tag
- *    folding), JSON, Markdown.
+ *    folding), JSON, Markdown — the last of which hands its fenced code blocks to the languages in
+ *    `markdown-fences.ts`, so a README's `mvn` invocation is coloured like the shell script it is.
  * 3. **language-server backed** — **Rust**, **C**, **C++**, **Python**, **Lua** and **Go**
  *    ({@link lspLanguage}), plus **TypeScript**, **JavaScript**, **Svelte** and **HTML**
  *    ({@link lspLanguageFrom}): a base highlighter for
@@ -31,10 +32,12 @@
  *    completion and hover worked, and the symptom ("the server is running but there is no
  *    highlight") names neither file. A server added to `catalogue.rs` needs its `case` here in
  *    the same turn.
- * 4. **legacy stream modes** — XML, YAML, `.properties`, CSS/SCSS/LESS, shell and
- *    **TOML**, plus SQL through the shared per-dialect modes. Colour only — except a
- *    `Cargo.toml`, which gets the manifest schema's completion and diagnostics on top
- *    ({@link cargoTomlLang}).
+ * 4. **legacy stream modes** — XML, YAML, `.properties`, CSS/SCSS/LESS, shell, **Dockerfile** and
+ *    **TOML**, plus SQL through the shared per-dialect modes. Colour only — except the files in
+ *    this tier that have a vocabulary somebody published: a `Cargo.toml` gets the manifest schema's
+ *    completion and diagnostics ({@link cargoTomlLang}), and a `lombok.config` or
+ *    `junit-platform.properties` gets its tool's documented keys, gated on the version the project
+ *    resolves ({@link configPropsLang}, answered by the backend's `toolconf` extension).
  *
  * Unknown types get a plain (no-highlight) descriptor so they're still fully editable.
  *
@@ -62,13 +65,15 @@ import { lua } from '@codemirror/legacy-modes/mode/lua';
 import { go } from '@codemirror/legacy-modes/mode/go';
 import { json as jsonLang } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
+import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 import { html } from '@codemirror/lang-html';
 import { javascript } from '@codemirror/lang-javascript';
 import { javaLanguage } from './java-lang';
 import {
   lspLanguage, lspLanguageFrom, backendCompletionSource, backendHoverSource,
 } from './lsp-lang';
-import { isSpringPropertyFile, springPropsLang } from './spring-props-lang';
+import { isSpringPropertyFile, configPropsLang } from './config-props-lang';
+import { isToolConfigFile } from './file-kind';
 import { cargoTomlLang, isCargoManifest } from './cargo-toml-lang';
 import { packageJsonLanguage, isPackageManifest } from './package-json-lang';
 import { xmlSchemaLang } from './xml-schema-lang';
@@ -76,6 +81,8 @@ import { jspLanguage } from './jsp-lang';
 import { digLanguage } from './dig/dig-lang';
 import { devLanguage } from './dig/dev-lang';
 import { merulaLanguage } from './merula-lang';
+import { MARKDOWN_FENCE_LANGUAGES } from './markdown-fences';
+import { isDockerfile } from '$lib/utils/file-names';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
 
 /** A CM-language descriptor: no tree-sitter parser, highlight from `cmExtension`.
@@ -193,8 +200,22 @@ const yamlLang = streamLang('yaml', yaml);
 // Same colouring, plus the intelligence a Spring config file can have and a generic one
 // cannot: key/value completion, ghost text, and a hover that knows the type. Built once —
 // the identity has to be stable or the editor remounts on every keystroke.
-const springYamlLang = springPropsLang('spring-yaml', yaml);
-const springPropertiesLang = springPropsLang('spring-properties', properties);
+const springYamlLang = configPropsLang('spring-yaml', yaml);
+const springPropertiesLang = configPropsLang('spring-properties', properties);
+/**
+ * `lombok.config` and `junit-platform.properties` — properties files with a **closed, documented,
+ * version-dependent** vocabulary, which is what separates them from the `messages.properties`
+ * beside them and is the whole reason they get a descriptor of their own.
+ *
+ * Same shape as the Spring pair above and the same four backend hooks; which keys exist, what they
+ * mean and which of them your Lombok / JUnit version actually understands is the `toolconf`
+ * extension's knowledge, never this file's.
+ *
+ * By NAME, not by extension: `lombok.config` is the only `.config` in a Java tree that means
+ * anything, and a `junit-platform.properties` is one file among a hundred `.properties`.
+ */
+const lombokConfigLang = configPropsLang('lombok-config', properties);
+const junitPlatformLang = configPropsLang('junit-platform', properties);
 const shellLang = streamLang('shell', shell);
 /**
  * C, C++ and Python — coloured **whether or not a server is running**.
@@ -282,7 +303,26 @@ const tomlLang = streamLang('toml', toml);
 // on every keystroke.
 const cargoManifestLang = cargoTomlLang(toml);
 const jsonDesc = cmLang('json', jsonLang());
-const markdownDesc = cmLang('markdown', markdown());
+/**
+ * Markdown, with its fenced code blocks coloured by the languages they name.
+ *
+ * The fence list is `markdown-fences.ts`, and it is the whole difference between a README that
+ * reads like documentation and one where the `mvn` invocation, the `docker run` and the snippet of
+ * `pom.xml` are all the same flat grey as the prose around them. `lang-markdown` parses the fence
+ * and its info string on its own; it simply has nothing to hand the body to unless it is given
+ * languages.
+ */
+const markdownDesc = cmLang('markdown', markdown({ codeLanguages: [...MARKDOWN_FENCE_LANGUAGES] }));
+/**
+ * Dockerfile — matched by NAME, because that is how the file is written: `Dockerfile`, and then
+ * `Dockerfile.dev` / `Dockerfile.jvm` once a project has more than one. `.dockerfile` as a suffix
+ * exists too (it is what an editor needs to recognise `api.dockerfile`), so both spellings resolve
+ * here, along with Podman's `Containerfile`.
+ *
+ * It had an icon and no colouring, which is the worst of the two states to be in: the file tree
+ * says the editor knows what this is, and then the editor renders it as plain text.
+ */
+const dockerLang = streamLang('dockerfile', dockerFile);
 const plainLang = cmLang('text', []);
 
 /**
@@ -322,6 +362,13 @@ export function languageForPath(path: string | null): LanguageDescriptor {
   if (name === '.gitignore' || name === '.gitattributes' || name === '.editorconfig') return propsLang;
   // `Cargo.lock` is TOML; `.lock` in general is not (`yarn.lock` isn't), so match the name.
   if (name === 'Cargo.lock') return tomlLang;
+  // Lombok and the JUnit Platform: properties syntax, a documented vocabulary behind it. Through
+  // the shared predicate, because the editor asks the same question when it decides whether the
+  // file has diagnostics — and the two answers have to be the same file set.
+  if (isToolConfigFile(name)) {
+    return name === 'lombok.config' ? lombokConfigLang : junitPlatformLang;
+  }
+  if (isDockerfile(name)) return dockerLang;
   // The manifest, by NAME: `rustfmt.toml` and `.cargo/config.toml` are not manifests, and applying
   // the manifest schema to one would flag every key in it.
   if (isCargoManifest(name)) return cargoManifestLang;

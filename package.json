@@ -1,7 +1,7 @@
 {
   "name": "arbor",
   "version": "0.3.0",
-  "description": "Arbor — Git GUI Client",
+  "description": "Arbor \u2014 Git GUI Client",
   "author": "Nightprint Studio",
   "license": "GPL-3.0-only",
   "private": true,
@@ -23,7 +23,9 @@
     "tauri:dev": "yarn backends:dev && tauri dev",
     "tauri:dev:signed": "yarn backends:dev && cargo build -p arbor && yarn sign:mac && tauri dev",
     "tauri:build": "yarn backends:release && yarn backends:stage && tauri build",
-    "tauri:release": "yarn tauri:build"
+    "tauri:release": "yarn tauri:build",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",
@@ -67,7 +69,8 @@
     "svelte": "^5.55.8",
     "svelte-check": "^4",
     "typescript": "~5.6.2",
-    "vite": "^6"
+    "vite": "^6",
+    "vitest": "^5.0.0"
   },
   "resolutions": {
     "cookie": "^1.1.1"

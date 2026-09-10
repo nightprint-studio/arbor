@@ -6,6 +6,16 @@
 // Member-access completion (the SEAM's `completion(pos)`).
 pub use crate::completion::{completion, completion_in, TypeNameCatalog};
 
+// Completion for a BARE identifier — what the lexical scope at the caret binds, the members of
+// the enclosing type, and the static imports. The half of completion that is not after a dot.
+pub use crate::scope_completion::scope_completion;
+
+// The completion memory: what was accepted where, so the same reach is offered first next time.
+pub use crate::picked::{record as record_pick, weight as pick_weight, ANNOTATION_CONTEXT};
+// Where the identifier under a caret starts and what has been typed of it — the one reading of
+// "the prefix", shared so the popup filters on the same token the query answered for.
+pub use crate::completion::split_prefix as split_completion_prefix;
+
 // The resolver + the `Send + Sync` JDK member-index wrapper it composes, plus the two-tier
 // classpath index (JDK + optional per-project dependency tier) the completion/validation resolver
 // runs over.

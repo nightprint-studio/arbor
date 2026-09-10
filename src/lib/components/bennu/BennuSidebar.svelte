@@ -43,6 +43,8 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
+  import { buildUnits as ipcBuildUnits } from '$lib/ipc/bennu/inspect';
+  import { isTestSource } from './file-kind';
   import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
   import { bennuCargoTestStore } from '$lib/stores/bennu/cargo-tests.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
@@ -139,10 +141,11 @@
   function folderColor(path: string): string {
     const p = path.replace(/\\/g, '/');
     if (/\/src\/(main|test)\/resources(\/|$)/.test(p)) return damped('var(--warning)');
-    if (/\/src\/test(\/|$)/.test(p)) return damped('var(--success)');
+    // Resources first, then the shared test predicate — `src/test/resources` is resources, and
+    // `isTestSource` is deliberately not that fussy because the tab strip has no such distinction.
+    if (isTestSource(p)) return damped('var(--success)');
     if (/\/src\/main\/webapp(\/|$)/.test(p)) return damped('var(--color-tag, #c792ea)');
     if (/\/src\/main(\/|$)/.test(p)) return damped('var(--info)');
-    if (/\/(tests|benches)(\/|$)/.test(p)) return damped('var(--success)');
     if (/\/(examples|content)(\/|$)/.test(p)) return damped('var(--warning)');
     if (/\/(crates|src)(\/|$)/.test(p)) return damped('var(--info)');
     return 'var(--text-muted)';
@@ -181,6 +184,50 @@
   function isBuildUnit(node: TreeNode): boolean {
     return node.children.some((c) => !c.is_dir && MANIFESTS.includes(c.name));
   }
+
+  // ── What a build unit says on its row ────────────────────────────────────────
+  //
+  // The language level it compiles at, which is the same question in both ecosystems — Java's `21`
+  // and Rust's `2024` edition — and the one property that varies between siblings of the same
+  // reactor while nothing else on screen shows it. A project part-way through a migration is the
+  // case that earns it: two modules on 21, one still on 8, and no way to tell which without
+  // opening three poms. The packaging follows only when it is not the default, and the rest —
+  // artifact id, crate name, how many modules are under it — is the tooltip's.
+  let unitInfo = $state<
+    Record<string, { artifact: string; label: string; detail: string }>
+  >({});
+
+  /** Every build-unit directory in the tree, so the whole set is described in one round-trip. */
+  function buildUnitDirs(nodes: readonly TreeNode[], out: string[] = []): string[] {
+    for (const node of nodes) {
+      if (!node.is_dir) continue;
+      if (isBuildUnit(node)) out.push(node.path);
+      buildUnitDirs(node.children, out);
+    }
+    return out;
+  }
+
+  $effect(() => {
+    const dirs = buildUnitDirs(rootChildren);
+    if (dirs.length === 0) {
+      unitInfo = {};
+      return;
+    }
+    let cancelled = false;
+    void ipcBuildUnits(dirs)
+      .then((units) => {
+        if (cancelled) return;
+        const next: Record<string, { artifact: string; label: string; detail: string }> = {};
+        for (const u of units) {
+          next[u.dir] = { artifact: u.artifact, label: u.label, detail: u.detail };
+        }
+        unitInfo = next;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  });
 
   function iconFor(node: TreeNode): RowIcon {
     if (node.is_dir) {
@@ -935,6 +982,18 @@
             class="tree-label {faint}"
             use:tooltip={ctx.node.ignored ? 'Ignored by git' : ''}
           >{ctx.node.name}</span>
+          <!-- The build unit's own line. Right of the name and dimmed: it describes the row, it is
+               not part of it, and a module you are not asking about should read as a folder. -->
+          {#if unitInfo[ctx.node.path]}
+            {@const unit = unitInfo[ctx.node.path]}
+            <span class="tree-unit {faint}" use:tooltip={unit.detail}>
+              <!-- The artifactId first and fainter: it names the same thing the folder does, so it
+                   is context rather than news — and it is dropped entirely when it only repeats the
+                   folder name. The level is the part that differs between siblings. -->
+              {#if unit.artifact}<span class="tree-unit-artifact">{unit.artifact}</span>{/if}
+              {#if unit.label}<span class="tree-unit-level">{unit.label}</span>{/if}
+            </span>
+          {/if}
         {/snippet}
       </Tree>
     </div>
@@ -1051,6 +1110,37 @@
   }
   .tree-icon :global(svg) { width: 1em; height: 1em; }
   .tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The build unit's line: pushed to the far end, never able to squeeze the name it describes,
+     and the first thing to go when the panel is narrow. */
+  .tree-unit {
+    margin-left: auto;
+    padding-left: 8px;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  /* The artifactId gives way first: it names the same thing the folder does, and on a narrow panel
+     the level is the part worth keeping. */
+  .tree-unit-artifact {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 9px;
+    color: var(--text-faint);
+    opacity: 0.75;
+  }
+  .tree-unit-level {
+    flex: 0 0 auto;
+    font-size: 10px;
+    color: var(--text-faint);
+  }
 
   /* Hidden and gitignored rows. Opacity rather than a colour so the icon's own palette (a
      `.gitignore`'s brand mark, a package's tint) fades with the text instead of being

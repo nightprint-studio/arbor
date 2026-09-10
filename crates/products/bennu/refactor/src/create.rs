@@ -53,9 +53,10 @@ pub fn create_method(root: Node<'_>, source: &str, start: usize, end: usize) -> 
     }
     let name = text(&name_node, source).to_string();
 
-    // A call on another object belongs in that object's class, which is another file — a bigger
-    // action than an edit to this one, and saying so is better than writing the method in the
-    // wrong place.
+    // A call on another object belongs in that object's class, which is another file. This
+    // transform edits one buffer and has no resolver, so it cannot say WHICH file — but the
+    // question is answerable, and `foreign_call_at` is the half of it that reads the call site.
+    // The refusal stays for a caller that has no resolver to finish the job with.
     if let Some(receiver) = call.child_by_field_name("object") {
         if text(&receiver, source) != "this" {
             return Some(Err(Refusal::new(
@@ -81,7 +82,7 @@ pub fn create_method(root: Node<'_>, source: &str, start: usize, end: usize) -> 
 
     let indent = indent_at(source, method.start_byte());
     let nl = newline(source);
-    let signature = format!("private {statics}{returns} {name}({})", parameters.join(", "));
+    let signature = format!("private {statics}{returns} {name}({})", render_params(&parameters));
     let stub = format!(
         "{nl}{nl}{indent}{signature} {{{nl}{indent}    throw new UnsupportedOperationException(\"TODO: {name}\");{nl}{indent}}}"
     );
@@ -104,13 +105,166 @@ fn has_method(type_decl: &Node<'_>, name: &str, source: &str) -> bool {
     })
 }
 
+/// A method **this class calls and does not declare**.
+///
+/// The same reading of a call site [`create_method`] makes, handed back instead of applied — so
+/// the completion popup can offer to declare it where a member goes, rather than waiting for the
+/// diagnostic and an Alt+Enter. Writing `randomico()` in a method and then `rand` in the class
+/// body is a sequence anybody types, and the second half had no answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalCall {
+    pub name: String,
+    /// `(type text, parameter name)` per argument, read off the call site.
+    pub params: Vec<(String, String)>,
+    /// What the call's result is used as: `void` when nothing.
+    pub returns: String,
+    /// A call from a `static` method must reach a `static` one, or the stub does not compile at
+    /// the only site that asked for it.
+    pub is_static: bool,
+}
+
+impl LocalCall {
+    /// The member as source. `private`, because nothing outside this class has asked for it yet —
+    /// which is also the narrowest thing that compiles, and the easiest to widen later.
+    pub fn render(&self, indent: &str, newline: &str) -> String {
+        let statics = if self.is_static { "static " } else { "" };
+        let params = render_params(&self.params);
+        format!(
+            "private {statics}{} {}({params}) {{{newline}{indent}    throw new UnsupportedOperationException(\"TODO: {}\");{newline}{indent}}}",
+            self.returns, self.name, self.name
+        )
+    }
+
+    /// `(String, int) : void` — the shape a completion row shows beside the name.
+    pub fn detail(&self) -> String {
+        let types: Vec<&str> = self.params.iter().map(|(t, _)| t.as_str()).collect();
+        format!("({}) : {}", types.join(", "), self.returns)
+    }
+}
+
+/// Every method `type_decl` calls on ITSELF and does not declare, one entry per name.
+///
+/// Only a bare `name(…)` or `this.name(…)`: a call on anything else belongs to another class, and
+/// [`foreign_call_at`] is that question. One entry per name because the popup offers a name — two
+/// call sites of the same undeclared method are one member to write, and the first is the one
+/// whose arguments describe it.
+///
+/// Says nothing about whether the name is INHERITED — that is a question about the whole
+/// classpath, and this crate has no resolver. The caller filters.
+pub fn undeclared_calls(source: &str, type_decl: Node<'_>) -> Vec<LocalCall> {
+    let mut seen: Vec<String> = Vec::new();
+    let mut out = Vec::new();
+    for call in descendants(type_decl, "method_invocation") {
+        // A call on another object — not ours.
+        if let Some(receiver) = call.child_by_field_name("object") {
+            if text(&receiver, source) != "this" {
+                continue;
+            }
+        }
+        let Some(name_node) = call.child_by_field_name("name") else { continue };
+        let name = text(&name_node, source).to_string();
+        if seen.contains(&name) || has_method(&type_decl, &name, source) {
+            continue;
+        }
+        let Some(method) = enclosing_callable(call) else { continue };
+        seen.push(name.clone());
+        out.push(LocalCall {
+            params: parameters_for(&call, &method, &type_decl, source),
+            returns: return_type_for(&call, &method, source),
+            is_static: is_static(&method, source),
+            name,
+        });
+    }
+    out
+}
+
+/// What a call on **another object** is asking that object's class for.
+///
+/// The half of "create method" that the call site can answer: the name, the parameter types and
+/// names read off the arguments, and the return type read off what the result is used as. What it
+/// cannot answer is *which class* — the receiver's type is a question about the whole classpath,
+/// and this crate has no resolver. The caller that does resolves it, finds the file, and writes
+/// the member there.
+///
+/// `None` when the span is not the name of a call on a named receiver — a bare call, or
+/// `this.foo()`, is [`create_method`]'s, and it writes into the file it is already editing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForeignCall {
+    /// The method being called.
+    pub name: String,
+    /// The receiver **as written** — for the label, so the offer says whose class it goes in.
+    pub receiver: String,
+    /// `(type text, parameter name)` per argument, in order. The type is written the way the call
+    /// site writes it, which is a simple name — so the target file may need an import for it.
+    pub params: Vec<(String, String)>,
+    /// What the call's result is used as: `void` when nothing, else a declared type.
+    pub returns: String,
+}
+
+impl ForeignCall {
+    /// The member as source: `public`, because it is called from another class. The body is
+    /// `throw new UnsupportedOperationException`, which compiles for every return type — `void`
+    /// included — and fails loudly rather than returning a plausible `null`.
+    pub fn render(&self, indent: &str, newline: &str) -> String {
+        let params = render_params(&self.params);
+        format!(
+            "public {} {}({params}) {{{newline}{indent}    throw new UnsupportedOperationException(\"TODO: {}\");{newline}{indent}}}",
+            self.returns, self.name, self.name
+        )
+    }
+
+    /// Every type the member names, so the caller can import what the target file is missing.
+    /// `(String, int) : void` — the shape a completion row shows beside the name, the same one
+    /// [`LocalCall::detail`] renders.
+    pub fn detail(&self) -> String {
+        let types: Vec<&str> = self.params.iter().map(|(t, _)| t.as_str()).collect();
+        format!("({}) : {}", types.join(", "), self.returns)
+    }
+
+    pub fn type_names(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = self.params.iter().map(|(t, _)| t.as_str()).collect();
+        out.push(&self.returns);
+        out
+    }
+}
+
+/// Read the call at `[start, end)` as a request to **another** class — see [`ForeignCall`].
+pub fn foreign_call_at(
+    root: Node<'_>,
+    source: &str,
+    start: usize,
+    end: usize,
+) -> Option<ForeignCall> {
+    let at = node_at(root, start)?;
+    let call = crate::selection::enclosing(at, &["method_invocation"])?;
+    let name_node = call.child_by_field_name("name")?;
+    if end > start && (name_node.start_byte() > start || name_node.end_byte() < end) {
+        return None;
+    }
+    // A receiver, and not `this`: `this.foo()` and a bare `foo()` are calls on the class being
+    // edited, which `create_method` writes into directly.
+    let receiver = call.child_by_field_name("object")?;
+    let receiver_text = text(&receiver, source).to_string();
+    if receiver_text == "this" {
+        return None;
+    }
+    let method = enclosing_callable(call)?;
+    let type_decl = enclosing_type(call)?;
+    Some(ForeignCall {
+        name: text(&name_node, source).to_string(),
+        receiver: receiver_text,
+        params: parameters_for(&call, &method, &type_decl, source),
+        returns: return_type_for(&call, &method, source),
+    })
+}
+
 /// `Type name` for every argument of the call.
 fn parameters_for(
     call: &Node<'_>,
     method: &Node<'_>,
     type_decl: &Node<'_>,
     source: &str,
-) -> Vec<String> {
+) -> Vec<(String, String)> {
     let Some(arguments) = call.child_by_field_name("arguments") else { return Vec::new() };
     let mut cursor = arguments.walk();
     let mut taken: Vec<String> = Vec::new();
@@ -122,9 +276,18 @@ fn parameters_for(
             name = format!("{name}{}", i + 1);
         }
         taken.push(name.clone());
-        out.push(format!("{type_text} {name}"));
+        out.push((type_text, name));
     }
     out
+}
+
+/// The parameter list as written in a signature.
+fn render_params(params: &[(String, String)]) -> String {
+    params
+        .iter()
+        .map(|(t, n)| format!("{t} {n}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The declared type of an argument, or `Object` when the text does not say.
@@ -452,5 +615,61 @@ mod tests {
         let applied = plan.apply(source);
         let stub = applied.find("private void report").unwrap();
         assert!(stub < applied.find("void z()").unwrap(), "{applied}");
+    }
+
+    // ── The call on another object ───────────────────────────────────────────────────────────
+
+    fn foreign(source: &str, call: &str) -> Option<ForeignCall> {
+        let tree = parse_java(source).unwrap();
+        // The span is the NAME, which is what the diagnostic underlines.
+        let name = call.split('(').next().unwrap().rsplit('.').next().unwrap();
+        let at = source.find(call).unwrap() + call.find(name).unwrap();
+        foreign_call_at(tree.root_node(), source, at, at + name.len())
+    }
+
+    /// The call site is the specification, and it is a complete one for everything except which
+    /// file the method goes in.
+    #[test]
+    fn a_call_on_another_object_reads_as_a_request_to_its_class() {
+        let source = "class A {\n    void f(Order order, String label) {\n        order.total(label, 3);\n    }\n}";
+        let call = foreign(source, "order.total(label").expect("a foreign call");
+        assert_eq!(call.name, "total");
+        assert_eq!(call.receiver, "order");
+        assert_eq!(
+            call.params,
+            vec![("String".to_string(), "label".to_string()), ("int".to_string(), "arg2".to_string())],
+        );
+        assert_eq!(call.returns, "void");
+    }
+
+    /// `public`, because it is called from another class — and the same loud body every other
+    /// generated stub gets.
+    #[test]
+    fn the_member_is_public_and_throws() {
+        let source = "class A {\n    void f(Order order) {\n        String s = order.title();\n    }\n}";
+        let call = foreign(source, "order.title()").expect("a foreign call");
+        let member = call.render("    ", "\n");
+        assert!(member.starts_with("public String title() {"), "{member}");
+        assert!(member.contains("throw new UnsupportedOperationException(\"TODO: title\");"), "{member}");
+    }
+
+    /// A bare call and `this.foo()` are calls on the class being edited, which `create_method`
+    /// writes into directly — reading them as foreign would send the member to the wrong file.
+    #[test]
+    fn a_call_on_this_class_is_not_foreign() {
+        assert!(foreign("class A {\n    void f() {\n        report();\n    }\n}", "report()").is_none());
+        assert!(
+            foreign("class A {\n    void f() {\n        this.report();\n    }\n}", "this.report()").is_none()
+        );
+    }
+
+    /// The types the member names, so the caller can import what the target file is missing.
+    #[test]
+    fn the_member_reports_the_types_it_names() {
+        let source = "class A {\n    void f(Order order, Customer c) {\n        Invoice i = order.bill(c);\n    }\n}";
+        let call = foreign(source, "order.bill(c").expect("a foreign call");
+        let names = call.type_names();
+        assert!(names.contains(&"Customer"), "{names:?}");
+        assert!(names.contains(&"Invoice"), "{names:?}");
     }
 }

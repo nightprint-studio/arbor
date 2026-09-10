@@ -690,6 +690,38 @@ impl SemanticEngine {
         };
         // How many arguments the call under the caret passes — what tells two overloads apart.
         let argc = bennu_java::prelude::call_arity_at(source, offset);
+        Some(self.card_for_key(&key, argc))
+    }
+
+    /// The hover card for a symbol named **directly**, rather than found under a caret.
+    ///
+    /// What the completion popup's documentation panel asks (`bennu_completion_doc`). The
+    /// candidate list already resolved which type declares each item, so there is no caret left
+    /// to classify — only the key, which the item carries as its `owner`.
+    ///
+    /// `member` is the field or method name, or `None` for the type itself. `is_field` tells the
+    /// two apart, because Java lets one name be both — and the caller knows: the completion item
+    /// whose documentation this is came out of the same member walk that decided its kind.
+    pub fn member_card(
+        &self,
+        owner: &str,
+        member: Option<&str>,
+        is_field: bool,
+    ) -> Option<HoverInfo> {
+        let key = match member {
+            None => DeclKey::Type { binary: owner.to_string() },
+            Some(name) if is_field => {
+                DeclKey::Field { owner: owner.to_string(), name: name.to_string() }
+            }
+            Some(name) => DeclKey::Method { owner: owner.to_string(), name: name.to_string() },
+        };
+        Some(self.card_for_key(&key, None))
+    }
+
+    /// The card for a resolved [`DeclKey`] — the half of [`Self::hover`] after the caret has been
+    /// classified, shared so a card asked for by name says exactly what a card asked for by
+    /// position says.
+    fn card_for_key(&self, key: &DeclKey, argc: Option<usize>) -> HoverInfo {
         // The FULL resolver when there is one, and not the walk's.
         //
         // The walk resolver is project-only by design (see `for_project`), so `members_of` on
@@ -706,11 +738,11 @@ impl SemanticEngine {
             Some(full) => full,
             None => &*self.resolver,
         };
-        let mut info = hover_for_key(&key, resolver, argc);
+        let mut info = hover_for_key(key, resolver, argc);
         // Best-effort: attach the leading Javadoc of the PROJECT declaration this key
         // resolves to (None for a classpath-only / JDK symbol we can't read the source of).
-        info.doc = self.project_doc_for_key(&key);
-        Some(info)
+        info.doc = self.project_doc_for_key(key);
+        info
     }
 
     /// Extract the leading Javadoc (`/** … */`) of the project declaration `key` names. `None` when

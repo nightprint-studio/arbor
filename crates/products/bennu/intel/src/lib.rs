@@ -19,7 +19,11 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_intel::prelude::...`.
 
+// Completions for members that do not exist yet — the accessors a field is missing.
+pub mod accessor_completion;
 pub mod class_names;
+// Where the method a call asks for goes in the OTHER file, and what it says.
+pub mod create_in;
 pub mod config;
 pub mod conflict;
 pub mod diag_cache;

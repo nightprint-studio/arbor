@@ -37,6 +37,12 @@
   <em>to</em>, and a go-to on it would point at a property nobody declared.
 </p>
 <p>
+  <strong>A <code>@ConfigurationProperties(prefix = "…")</code></strong> is coloured as a key too.
+  Hovering says which property files declare anything under it — a prefix that matches nothing is a
+  class binding its defaults for ever, and it looks exactly like one that works — and
+  <kbd>Ctrl</kbd> + <kbd>B</kbd> opens the block it names, one entry per file.
+</p>
+<p>
   <strong>A bean written as a plain string</strong> — <code>@Qualifier("fast")</code>,
   <code>@DependsOn("audit")</code>, <code>@Resource(name = "ds")</code> — is coloured like a SpEL
   <code>@beanName</code>, which is the same thing said another way, and follows to the same
@@ -113,6 +119,12 @@
   <code>read-timeout</code>) count as one. The counts follow the code: saving a file that changes
   what reads a key refreshes them shortly afterwards, and a rename touching hundreds of files
   refreshes them once.
+</p>
+<p>
+  A key whose value is a <strong>list</strong> counts like any other: <code>allowed-origins:</code>
+  with entries under it is the key a <code>List&lt;String&gt;</code> binds, and it carries its
+  usages and its go-to. The list <em>items</em> are not keys — <code>servers[0].url</code> is not
+  written <code>servers.url</code>, and Bennu will not invent it.
 </p>
 <p>
   <strong>Writing a property file.</strong> An <code>application*.yml</code> or

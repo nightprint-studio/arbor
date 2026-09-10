@@ -26,6 +26,7 @@
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { javaLevelStore } from '$lib/stores/bennu/java-level.svelte';
   import type { Snippet } from 'svelte';
 
   let { footerExtra }: { footerExtra?: Snippet } = $props();
@@ -45,6 +46,11 @@
 
   const isCargo = $derived(projectStore.isCargo);
   const jdk = $derived(projectStore.project?.jdk ?? null);
+  /** The open file's own module, when its pom declares a level of its own. A reactor part-way
+   *  through a migration has one module on 21 and another still on 8, and the number that governs
+   *  the checks on the file in front of you is that module's, not the project's. `null` — every
+   *  single-module project — leaves the project's answer showing, exactly as before. */
+  const moduleJdk = $derived(javaLevelStore.module);
   /** Crates in a Cargo workspace: the expanded `members`, plus the root crate itself when
    *  the manifest declares a `[package]` (a virtual workspace manifest has none, and then
    *  the members ARE the whole project). */
@@ -83,6 +89,16 @@
       <span class="bf-sep"></span>
       <span class="bf-item" use:tooltip={'Crates in this workspace (Cargo.toml members)'}>
         <Boxes size={12} /> {crateCount} crate{crateCount === 1 ? '' : 's'}
+      </span>
+    {:else if moduleJdk}
+      <span
+        class="bf-item"
+        use:tooltip={`JDK ${moduleJdk.version} in module ${moduleJdk.module} · ${
+          jdkSourceLabel[moduleJdk.source] ?? moduleJdk.source
+        }${jdk && jdk.version !== moduleJdk.version ? ` — the project as a whole reads as JDK ${jdk.version}` : ''}`}
+      >
+        <Coffee size={12} /> JDK {moduleJdk.version}
+        <span class="bf-sub">{moduleJdk.module}</span>
       </span>
     {:else if jdk}
       <span class="bf-item" use:tooltip={`JDK ${jdk.version} · ${jdkSourceLabel[jdk.source] ?? jdk.source}`}>

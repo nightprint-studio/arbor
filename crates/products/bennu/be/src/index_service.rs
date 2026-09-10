@@ -43,10 +43,12 @@ use arbor_ipc::prelude::{EventSink, HostCaller};
 use bennu_index::prelude::Symbol;
 
 use crate::jobs::JobHandle;
+use bennu_complete::prelude::MatchCase;
+use bennu_proto::prelude::SourceEdit;
 use bennu_intel::prelude::{
     build_project_index_from_sources, collect_annotation_beans, file_records_from_source,
     ingest_config_graph, read_java_sources, ActionVerdict, AnnotationBean, CompletionItem,
-    ConfigResolver,
+    CompletionOptions, ConfigResolver,
     DeclarationLocation, HoverInfo as IntelHoverInfo, IntelProvider, NativeJavaProvider,
     NonCompliantSource, Position, ProjectSources, ReferencesResult, RenamePlan, SemanticEngine,
 };
@@ -552,6 +554,91 @@ fn gc_old_gens(base: &Path, keep: u64) {
             // its Arc lingers) — leave it; the next open cleans it up.
         }
     }
+}
+
+/// The Java level of the MODULE `file` belongs to, or `None` when no pom above it declares one.
+///
+/// Walks up from the file's directory to `root`, taking the first pom that declares a level — which
+/// is Maven's own inheritance read in the direction a file makes available. A reactor mid-migration
+/// with one module on 21 and another still on 8 is an ordinary state, and it is the only part of
+/// "which Java is this" that can be answered per file honestly: the index and the classpath are one
+/// JDK by construction, but whether a syntax exists yet is a question about the file in front of you.
+///
+/// Memoized per directory against the pom's mtime, because validation runs on every idle and this
+/// would otherwise be a handful of file reads per keystroke burst.
+pub fn module_jdk(root: &Path, file: &Path) -> Option<ModuleJdk> {
+    type Cached = (Option<std::time::SystemTime>, Option<bennu_proto::prelude::JdkInfo>);
+    static CACHE: std::sync::LazyLock<Mutex<HashMap<PathBuf, Cached>>> =
+        std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    let mut dir = file.parent()?;
+    loop {
+        let pom = dir.join("pom.xml");
+        if pom.is_file() {
+            let stamp = std::fs::metadata(&pom).and_then(|m| m.modified()).ok();
+            let hit = {
+                let cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());
+                cache.get(dir).cloned()
+            };
+            let declared = match hit {
+                Some((cached_stamp, info)) if cached_stamp == stamp => info,
+                _ => {
+                    let info = bennu_project::prelude::module_level(dir);
+                    let mut cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());
+                    cache.insert(dir.to_path_buf(), (stamp, info.clone()));
+                    info
+                }
+            };
+            if let Some(info) = declared.filter(|i| major_of(&i.version).is_some()) {
+                return Some(ModuleJdk {
+                    module: dir
+                        .strip_prefix(root)
+                        .ok()
+                        .map(|rel| rel.display().to_string())
+                        .filter(|rel| !rel.is_empty())
+                        .unwrap_or_else(|| ".".to_string()),
+                    major: major_of(&info.version),
+                    version: info.version,
+                    source: info.source,
+                });
+            }
+            // A pom that declares nothing inherits from the one above it — keep walking.
+        }
+        if dir == root {
+            return None;
+        }
+        dir = dir.parent()?;
+    }
+}
+
+/// The level in force for a build-unit DIRECTORY, asked without an owning project.
+///
+/// The sidebar describes rows before (and without) an index: a project whose build is still
+/// starting still draws its modules. So the walk stops at the filesystem root rather than at a
+/// slot's root — a pom that declares a level is the answer wherever it is found, and there is
+/// nothing above a reactor that would wrongly claim one.
+pub fn module_jdk_for(dir: &Path) -> Option<ModuleJdk> {
+    // A path under the directory, since the walk starts from a file's parent.
+    module_jdk(Path::new("/"), &dir.join("pom.xml"))
+}
+
+/// The level of the module a file belongs to — see [`module_jdk`].
+#[derive(Debug, Clone)]
+pub struct ModuleJdk {
+    /// The module's directory relative to the project root (`"."` for the root itself).
+    pub module: String,
+    /// The level as declared (`"1.8"`, `"21"`).
+    pub version: String,
+    /// Which key declared it, for the tooltip.
+    pub source: String,
+    /// The level as a number, for the checks.
+    pub major: Option<u32>,
+}
+
+/// `"1.8"` → 8, `"21"` → 21. `None` for anything that is not a number — a `${...}` never expanded,
+/// or the `"toolchains"` placeholder, neither of which names a level.
+fn major_of(version: &str) -> Option<u32> {
+    version.strip_prefix("1.").unwrap_or(version).trim().parse().ok()
 }
 
 /// One project's slot in the cache: the paths + JDK level it was opened with, plus the
@@ -1331,6 +1418,13 @@ impl IndexService {
     /// This is the single answer to "which Java is this project": the index, the titlebar badge
     /// and the build/test shell-out all read it here, so a project cannot be analysed at one
     /// level and compiled at another.
+    /// The level of the module `file` belongs to — see [`module_jdk`]. `None` when no project owns
+    /// the file, or when no pom above it declares a level (the project's own answer stands).
+    pub fn module_jdk_of(&self, file: &str) -> Option<ModuleJdk> {
+        let slot = self.slot_for_file(file)?;
+        module_jdk(&slot.root, Path::new(file))
+    }
+
     pub fn jdk_version_of(&self, root: &str) -> Option<String> {
         let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
         let v = slots.get(&PathBuf::from(root)).map(|s| s.jdk_version.clone());
@@ -1340,7 +1434,17 @@ impl IndexService {
     /// Serve completion at `file`:`offset` from the owning project's provider (matched
     /// by longest root prefix). Returns `[]` when no project owns the file, or its
     /// index is still building.
-    pub fn completion(&self, file: &str, offset: usize, source: Option<&str>) -> Vec<CompletionItem> {
+    ///
+    /// `case` is the editor's "match case" setting, which travels with the REQUEST rather than
+    /// being read from config here: it is a property of the popup that is open, the editor already
+    /// holds it, and a second reader of the same setting is a second thing to keep in step.
+    pub fn completion(
+        &self,
+        file: &str,
+        offset: usize,
+        source: Option<&str>,
+        case: MatchCase,
+    ) -> Vec<CompletionItem> {
         if !understands(file) {
             return Vec::new();
         }
@@ -1352,7 +1456,13 @@ impl IndexService {
             Arc::clone(&g)
         };
         let at = Position { file: file.to_string(), offset };
-        provider.complete_at(&at, source, import_census_enabled()).unwrap_or_default()
+        provider
+            .complete_at(
+                &at,
+                source,
+                CompletionOptions { census: import_census_enabled(), case },
+            )
+            .unwrap_or_default()
     }
 
     /// Every method the class enclosing `offset` in `source` could override — the
@@ -1518,7 +1628,15 @@ impl IndexService {
         let ctx = bennu_check::prelude::FileContext {
             file_stem,
             expected_package,
-            java_major: status.requested_major,
+            // The MODULE's level, when its own pom declares one. A reactor whose modules target
+            // different levels is ordinary, and the version checks are the one thing that can be
+            // answered per module honestly: the index and the classpath are one JDK by
+            // construction, but "does this syntax exist yet" is a question about the file in front
+            // of you. Reading the project's level for every file reported records as a syntax error
+            // in the module that legitimately has them. Falls back to the project's.
+            java_major: module_jdk(&slot.root, path)
+                .and_then(|m| m.major)
+                .or(status.requested_major),
             // Asked of the RESOLVER, not of the resolved-jar list. The two disagree for as long as
             // it takes to build the dependency tier — and for good when that build fails — and in
             // that window "complete" makes the unresolved-import check adjudicate every
@@ -2364,6 +2482,119 @@ impl IndexService {
         //    local) shows what it is. Runs on the provider, not the semantic engine (which is
         //    project-only and can't type a JDK `var`).
         provider.var_hover(source, offset).map(hover_info_of)
+    }
+
+    /// Write the method a call on another object is asking for, into that object's own class.
+    ///
+    /// See [`crate::create_method_in`] for the whole shape. Returns edits addressed by file — the
+    /// member, plus an import per parameter or return type the target file does not already have.
+    /// Empty whenever the answer would be a guess.
+    pub fn create_method_in(
+        &self,
+        file: &str,
+        source: &str,
+        start: usize,
+        end: usize,
+    ) -> Vec<SourceEdit> {
+        let Some(slot) = self.slot_for_file(file) else {
+            return Vec::new();
+        };
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        let Some(tree) = bennu_java::prelude::parse_java(source) else {
+            return Vec::new();
+        };
+        let Some(call) =
+            bennu_refactor::prelude::foreign_call_at(tree.root_node(), source, start, end)
+        else {
+            return Vec::new();
+        };
+        // The receiver's type. `start` is the called name's first byte, which is exactly one past
+        // the `.` — the position the inference expects.
+        let Some(binary) = provider.receiver_type_at(source, start) else {
+            return Vec::new();
+        };
+        // A dependency's class has no source to write into, and a decompiled stub is not a file
+        // anyone can edit.
+        let Some(engine) = slot.semantics() else {
+            return Vec::new();
+        };
+        let Some(target) = engine.file_declaring(&binary) else {
+            return Vec::new();
+        };
+        let root = norm_path(&slot.root);
+        let Some(target_source) = read_project_source(&root, &target) else {
+            return Vec::new();
+        };
+        let simple = binary.rsplit(['/', '$']).next().unwrap_or(&binary);
+        // Where in that file the member goes, what it says, and which imports it needs — a
+        // function of two strings, and tested as one (`bennu_intel::create_in`). What is left
+        // here is the three things a test cannot do: resolve, look up, and read.
+        //
+        // An unambiguous simple name only: one several packages declare would be a guess about
+        // which the CALL SITE meant, and a wrong import compiles against the wrong type.
+        let fqn_of = |written: &str| {
+            let candidates = provider.import_candidates(written);
+            (candidates.len() == 1).then(|| candidates[0].clone())
+        };
+        bennu_intel::prelude::foreign_member_edits(
+            &target_source,
+            simple,
+            &call,
+            &fqn_of,
+            &|source, fqn| crate::intentions::import_edit_for(source, fqn),
+        )
+        .into_iter()
+        .map(|e| SourceEdit {
+            file: target.clone(),
+            start: e.start,
+            end: e.end,
+            new_text: e.text,
+        })
+        .collect()
+    }
+
+    /// The documentation card for a **completion candidate**, named directly rather than found
+    /// under a caret — what `bennu_completion_doc` answers for the row the popup has highlighted.
+    ///
+    /// Deliberately the same path as [`Self::hover`] past the classifier: project Javadoc from the
+    /// engine, the library's own from its `-sources.jar` / `src.zip`, and the artifact it came out
+    /// of. A popup that documented a method differently from the tooltip on the same method would
+    /// be two answers to one question, and the difference would be invisible until it mattered.
+    ///
+    /// `file` locates the project, not the symbol: the candidate may be declared anywhere on the
+    /// classpath, but which project's index and dependencies to resolve it against is decided by
+    /// the buffer the completion was asked from.
+    pub fn completion_doc(
+        &self,
+        file: &str,
+        owner: &str,
+        member: Option<&str>,
+        is_field: bool,
+    ) -> Option<HoverInfo> {
+        if !understands(file) {
+            return None;
+        }
+        let slot = self.slot_for_file(file)?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        let engine = slot.semantics()?;
+        let mut info = engine.member_card(owner, member, is_field)?;
+        if info.doc.is_none() {
+            info.doc = self.library_doc(&provider, &norm_path(&slot.root), &info);
+        }
+        let artifact = info
+            .owner
+            .as_deref()
+            .and_then(|o| provider.origin_jar(o))
+            .and_then(|jar| artifact_of_jar(&jar));
+        let mut wire = hover_info_of(info);
+        wire.artifact = artifact;
+        Some(wire)
     }
 
     /// What the **library's own source** documents about what a hover card resolved to.
@@ -5261,3 +5492,13 @@ fn nav_log(args: std::fmt::Arguments) {
         eprintln!("[bennu-goto] {args}");
     }
 }
+
+/// Read a project source in the project's declared encoding — a legacy tree is frequently Cp1252,
+/// and an edit computed against a mis-decoded buffer lands at the wrong offset.
+fn read_project_source(root: &str, path: &str) -> Option<String> {
+    let encoding = encoding_plan(root);
+    bennu_intel::prelude::read_source_for_index(std::path::Path::new(path), &encoding)
+        .map(|d| d.text)
+}
+
+

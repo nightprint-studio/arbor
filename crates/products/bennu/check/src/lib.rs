@@ -79,6 +79,7 @@ pub mod override_access;
 pub mod override_return;
 pub mod packaging;
 pub mod prelude;
+pub mod quarantine;
 pub mod reachable;
 pub mod record_ctor;
 pub mod redeclaration;

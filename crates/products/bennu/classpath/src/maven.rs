@@ -369,7 +369,17 @@ fn maven_failure_reason(stdout: &str, stderr: &str) -> String {
         .take(KEEP)
         .collect();
     if !errors.is_empty() {
-        return format!("Maven said: {}", errors.join(" | "));
+        let said = errors.join(" | ");
+        // A model-building failure is not a missing jar, and reporting it as one sends the reader
+        // to look for an artifact that was never the problem. Maven never got as far as resolving
+        // anything: it could not read the POMs, so NOTHING resolved, and the remedy is about the
+        // parent it could not find rather than about the dependency the message happens to name.
+        if is_model_failure(&said) {
+            return format!(
+                "Maven could not read this project's POMs, so it resolved nothing at all — this is                  not about a single artifact. {said}"
+            );
+        }
+        return format!("Maven said: {said}");
     }
 
     // No tagged error at all — a launcher that printed a shell error, a JVM that refused to
@@ -386,6 +396,23 @@ fn maven_failure_reason(stdout: &str, stderr: &str) -> String {
     }
     "Maven printed nothing — run `mvn dependency:build-classpath` in the project to see why."
         .to_string()
+}
+
+/// Whether Maven failed while **building the project model** rather than while resolving.
+///
+/// The distinction is the whole of what a reader needs: a resolution failure names an artifact and
+/// is fixed by fetching it, while a model failure means Maven never read the project at all. The
+/// commonest cause by far is a parent POM that is not in the local repository and cannot be
+/// downloaded — which is exactly what an offline resolve produces on a project whose parent has
+/// only ever been fetched by another tool.
+fn is_model_failure(said: &str) -> bool {
+    const MARKERS: [&str; 4] = [
+        "while processing the POMs",
+        "Non-resolvable parent POM",
+        "Non-readable POM",
+        "Non-resolvable import POM",
+    ];
+    MARKERS.iter().any(|m| said.contains(m))
 }
 
 /// The lines every Maven failure ends with, which say nothing about this one.
@@ -611,6 +638,27 @@ impl MavenClasspathCache {
 
 #[cfg(test)]
 mod tests {
+    /// The reported case: an offline resolve on a project whose parent POM is not in `~/.m2`.
+    /// Maven never reached resolution, so reporting it as a missing dependency sent the reader
+    /// after an artifact that was never the problem.
+    #[test]
+    fn a_parent_pom_failure_says_nothing_resolved_rather_than_naming_a_jar() {
+        let stderr = "[ERROR] Some problems were encountered while processing the POMs:\n                      [ERROR] Non-resolvable parent POM for it.acme:service:1.0: Could not find artifact\n                      [ERROR] -> [Help 2]\n";
+        let reason = super::maven_failure_reason("", stderr);
+        assert!(reason.contains("could not read this project's POMs"), "{reason}");
+        assert!(reason.contains("resolved nothing at all"), "{reason}");
+        // And it still carries Maven's own words — the parent's coordinates are the fix.
+        assert!(reason.contains("Non-resolvable parent POM"), "{reason}");
+    }
+
+    /// An ordinary goal failure is untouched: it really is about the thing it names.
+    #[test]
+    fn a_goal_failure_is_reported_as_maven_said_it() {
+        let stderr = "[ERROR] Failed to execute goal on project api: Could not resolve dependencies\n";
+        let reason = super::maven_failure_reason("", stderr);
+        assert!(reason.starts_with("Maven said:"), "{reason}");
+    }
+
     use super::*;
     use crate::members::MemberIndex;
 

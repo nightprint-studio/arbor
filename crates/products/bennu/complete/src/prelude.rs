@@ -17,3 +17,6 @@ pub use crate::collect::{Proposal, Proposals, DEFAULT_CAP};
 pub use crate::prefix::{
     common_prefix, continuation, ghost, matches, matches_ignore_case, unique_continuation,
 };
+
+// Whether a name answers what was typed — the tiers, and the case rule that gates them.
+pub use crate::name_match::{tier as match_tier, MatchCase, Typed};

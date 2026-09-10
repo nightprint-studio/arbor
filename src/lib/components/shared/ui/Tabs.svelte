@@ -43,8 +43,14 @@
      *  from outside this workspace (a dependency's source, a vendored file). It is tinted
      *  differently in both states, selected and not: a badge alone is read once and then
      *  stops being noticed, while the thing it warns about — that edits here go nowhere —
-     *  matters every time you look up at the strip. */
-    tone?:       'default' | 'external';
+     *  matters every time you look up at the strip.
+     *
+     *  `'test'` marks a tab holding a **test source**. Same idea, different fact and a much
+     *  quieter one: nothing is wrong and nothing is read-only, it is simply a different kind of
+     *  code, and a strip of eight tabs where three are tests reads better when you can see which
+     *  three without reading eight filenames. Green, the colour the project tree already gives a
+     *  test root. */
+    tone?:       'default' | 'external' | 'test';
     /** Props handed to {@link icon}, for an icon component that needs more than a size —
      *  a file-type or symbol-kind icon is chosen by what it is *of*, not by which component
      *  it is. Without this a caller with one icon component and N variants has to bypass the
@@ -375,6 +381,7 @@
       <div
         class="tabs-tab"
         class:tab-external={item.tone === 'external'}
+        class:tab-test={item.tone === 'test'}
         class:tab-active={active}
         class:tab-hidden={hiddenIds.has(item.id)}
         class:tab-dragging={dragFromIndex === i}
@@ -588,6 +595,21 @@
   }
   .tabs-tab.tab-external:hover:not(.tab-disabled):not(.tab-active) {
     background: color-mix(in srgb, var(--warning) 12%, transparent);
+  }
+
+  /* A test source. The same left edge as `external` and the same reason for it — the label is a
+     filename and must stay as readable as any other, so the signal goes around it — but weaker
+     throughout: `external` warns, this only tells you which kind of code a tab holds. No tint at
+     rest, so a strip of tests does not read as a strip of warnings; the edge alone carries it. */
+  .tabs-tab.tab-test {
+    box-shadow: inset 2px 0 0 color-mix(in srgb, var(--success) 55%, transparent);
+  }
+  .tabs-tab.tab-test.tab-active {
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    box-shadow: inset 2px 0 0 var(--success);
+  }
+  .tabs-tab.tab-test:hover:not(.tab-disabled):not(.tab-active) {
+    background: color-mix(in srgb, var(--success) 9%, transparent);
   }
 
   /* ── Variant: pill ─────────────────────────────────────────────────────── */

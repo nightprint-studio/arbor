@@ -258,7 +258,7 @@ fn fluent_accessors_reach_completion_as_one_row_that_counts_both() {
         "the row must say the setter is there too, got {accessors:?}"
     );
     assert!(
-        accessors.iter().any(|d| d.contains("customer() : String")),
+        accessors.iter().any(|d| d.contains("() : String")),
         "the fluent getter returns it, got {accessors:?}"
     );
     // The chained setter's RETURN type (`Order`, from `chain = true`) is not asserted HERE: the

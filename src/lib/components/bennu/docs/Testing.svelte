@@ -94,9 +94,15 @@
   <li><strong>The Tests tool window</strong> (<kbd>Alt</kbd> + <kbd>5</kbd>) — every row has a ▷,
     and expanding one gives a ▷ per child. An abstract or disabled Java class is listed but has no
     ▷: Surefire cannot instantiate the first, and the second would report as skipped.</li>
+  <li><strong>The editor's gutter</strong> — a ▶ beside every test class and every test case in a
+    Java file. Pressing it (or right-clicking it) opens <em>Run</em> and <em>Debug</em> for that
+    one thing. A disabled test keeps its arrow and says so: Surefire runs what it is told and
+    reports it skipped, which is occasionally what you want to confirm. The arrows come from the
+    file <strong>on disk</strong> — a <code>@Test</code> you have typed but not saved is one the
+    runner cannot see, so it gets no arrow until the save.</li>
   <li><strong>The editor</strong> — <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> runs the test
-    the caret is inside. Above the first test it runs the whole class (Java) or the file's target
-    (Rust).</li>
+    the caret is inside, without the menu. Above the first test it runs the whole class (Java) or
+    the file's target (Rust).</li>
   <li><strong>The project tree</strong> — right-click a folder or a file and pick <em>Run tests</em>.
     The entry appears only where there is something to run, and the count tells you how much.</li>
   <li><strong>The ▷ menu and the command palette</strong> — <em>Run all tests</em>,
@@ -104,6 +110,52 @@
     <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F5</kbd> to run everything and
     <kbd>Ctrl</kbd> + <kbd>F5</kbd> to rerun the last run.</li>
 </ul>
+
+<h2>Debugging a test</h2>
+<p>
+  Every ▷ in the Tests panel has a <strong>bug icon</strong> beside it that runs the same thing
+  under the debugger. There is nothing to attach and no port to choose: the forked test JVM dials
+  back to Bennu and suspends until it arrives, so the breakpoints already in your buffer are hit on
+  the first run.
+</p>
+<p>
+  When one is hit, the <strong>Run</strong> panel's test tab becomes the debugger: the transport
+  controls — resume, step over, step into, step out, detach — appear on its status row, and the
+  stopped JVM's <strong>frames</strong> and <strong>variables</strong> take the two columns to the
+  left of the tree, in the same places and with the same collapse strips they have beside a
+  program's transcript. The tab comes forward on its own when a test stops, the way the window
+  does.
+</p>
+<p>
+  <strong>Stop ends the session as well as the run.</strong> The forked JVM is a child of Maven
+  rather than Maven itself, so stopping takes the whole process group — otherwise a test suspended
+  at a breakpoint would outlive the run that started it, and the editor would keep showing a
+  current line in a program nothing could resume.
+</p>
+<p>
+  A project that sets <code>&lt;forkCount&gt;0&lt;/forkCount&gt;</code> on Surefire runs its tests
+  inside Maven's own JVM, where there is no forked process to debug — that run is refused with the
+  reason rather than started without a debugger. A debug run is forced to a single fork, since one
+  listener accepts one connection.
+</p>
+
+<h2>A pom that pins which tests run</h2>
+<p>
+  A Surefire plugin configured with a <strong>literal</strong> <code>&lt;test&gt;</code> makes a
+  selection impossible: Maven gives a value written in the pom precedence over the
+  <code>-Dtest</code> that names it, so running one class or one case is read and discarded and the
+  run does whatever the pom said. The Tests panel says so above the tree, before anything is run —
+  it is a fact about every ▷ in the panel, not about one click — and a run that went ahead anyway
+  is marked <em>widened</em>.
+</p>
+<p>
+  Written as a <strong>property</strong> it works, and the default is kept:
+  <code>&lt;test&gt;&#36;&#123;suite&#125;&lt;/test&gt;</code> with <code>&lt;suite&gt;TestSuite&lt;/suite&gt;</code>
+  in <code>&lt;properties&gt;</code> means a plain <code>mvn test</code> still runs the suite, while
+  a run started from here sets that same property and gets the one class or case you picked. Any
+  property name does — Bennu reads the one your pom uses. <code>&#36;&#123;test&#125;</code> is the special case
+  of that where the name happens to be Surefire's own.
+</p>
 
 <h2>Reading the results</h2>
 <p>

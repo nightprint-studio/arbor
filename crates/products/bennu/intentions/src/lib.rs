@@ -28,6 +28,8 @@ pub mod import_class;
 pub mod intentions;
 pub mod log_param;
 pub mod np_equals;
+// The accessor a field does not have yet, as text.
+pub mod accessor_stub;
 pub mod override_stub;
 pub mod prelude;
 pub mod quick_fix;

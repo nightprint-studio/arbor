@@ -84,6 +84,7 @@
     lineHighlights = [],
     gutterMarks = [],
     onGutterClick,
+    onGutterContext,
     flagMarks,
     canFlag,
     onFlagClick,
@@ -233,6 +234,10 @@
     /** A gutter icon was clicked: its 1-based line, plus the event — so a host that has more
      *  than one thing to offer can anchor a menu where the pointer is instead of guessing. */
     onGutterClick?: (line: number, event: MouseEvent) => void;
+    /** Right-click on a gutter icon. A host that opens a menu on the press wants the same menu
+     *  here — the two gestures mean the same thing on a control that offers a choice, and a
+     *  right-click that fell through to the browser's own menu would look like a dead icon. */
+    onGutterContext?: (line: number, event: MouseEvent) => void;
     /**
      * A second gutter, for a per-line **toggle** the host owns: breakpoints, bookmarks.
      *
@@ -525,7 +530,17 @@
       class: 'cm-host-gutter',
       markers: (v) => v.state.field(gutterField, false) ?? RangeSet.empty,
       domEventHandlers: {
+        contextmenu(v, line, event) {
+          if (!onGutterContext) return false;
+          const e = event as MouseEvent;
+          e.preventDefault();
+          onGutterContext(v.state.doc.lineAt(line.from).number, e);
+          return true;
+        },
         mousedown(v, line, event) {
+          // The right button is the context menu's; letting it through here would fire the press
+          // and the menu for one gesture.
+          if ((event as MouseEvent).button !== 0) return false;
           onGutterClick?.(v.state.doc.lineAt(line.from).number, event as MouseEvent);
           return true;
         },
@@ -990,6 +1005,40 @@
     return changes.length;
   }
 
+  /**
+   * The {@link stateKey} the mounted view was created with — which document is actually on screen.
+   *
+   * Not the same question as "which file does the host consider active": a tab switch changes the
+   * second immediately and the first only after the view is rebuilt, and in that gap a caller that
+   * scrolls is scrolling the outgoing file's editor.
+   */
+  export function documentKey(): string | undefined {
+    return heldKey;
+  }
+
+  /**
+   * Whether `line` is **visible right now** — not merely requested.
+   *
+   * A scroll request is not a scroll. A view that has just been created has not been measured, so
+   * its scroll container has no height and `scrollIntoView` computes against a viewport that does
+   * not exist: the caret moves, being a document position, and nothing scrolls. That is the whole
+   * of "the cursor is in the right place and the view did not move", and it is invisible to
+   * anything that asks about the caret.
+   *
+   * `false` while there is no layout at all (`clientHeight === 0`), deliberately: unknown is the
+   * state a caller is waiting out, and answering `true` there would end the wait on a guess.
+   */
+  export function isLineVisible(line: number): boolean {
+    if (!view) return false;
+    const height = view.scrollDOM.clientHeight;
+    if (height <= 0) return false;
+    const doc = view.state.doc;
+    const ln = Math.max(1, Math.min(line, doc.lines));
+    const block = view.lineBlockAt(doc.line(ln).from);
+    const top = view.scrollDOM.scrollTop;
+    return block.top >= top && block.bottom <= top + height;
+  }
+
   export function scrollToLineCol(line: number, col = 1) {
     if (!view) return;
     const doc = view.state.doc;
@@ -1135,7 +1184,7 @@
    * setting without reconfiguring the view.
    */
   export function setInlayHints(
-    hints: readonly { offset: number; label: string; before?: boolean }[],
+    hints: readonly { offset: number; label: string; before?: boolean; tooltip?: string }[],
   ) {
     if (!view) return;
     const b2u = makeByteToU16(view.state.doc.toString());
@@ -1145,6 +1194,7 @@
           pos: b2u(h.offset),
           label: h.label,
           side: h.before === false ? ('after' as const) : ('before' as const),
+          tooltip: h.tooltip,
         })),
       ),
     });

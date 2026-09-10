@@ -42,6 +42,15 @@ pub struct CompletionArgs {
     /// stale on-disk file. Absent → the BE falls back to reading the file from disk.
     #[serde(default)]
     pub source: Option<String>,
+    /// The editor's **match case** setting: `true` = every typed letter must agree with the
+    /// candidate's, `false` (the default) = only the first one, which is where a Java name carries
+    /// real information and the rest does not.
+    ///
+    /// Honoured where the candidates are matched rather than by filtering the answer afterwards —
+    /// a strict filter applied on top of a lenient match is how `aah` stopped reaching
+    /// `addAllowedHeader` the moment the setting was turned on.
+    #[serde(default)]
+    pub case_sensitive: bool,
 }
 
 /// Completion candidates at a position.
@@ -80,7 +89,12 @@ fn bennu_completion(_ctx: &BennuState, args: CompletionArgs) -> Result<Vec<Compl
     {
         return Ok(items);
     }
-    Ok(IndexService::global().completion(&args.file, args.offset, args.source.as_deref()))
+    Ok(IndexService::global().completion(
+        &args.file,
+        args.offset,
+        args.source.as_deref(),
+        bennu_complete::prelude::MatchCase::from_flag(args.case_sensitive),
+    ))
 }
 
 /// One JSP action reference to check for existence: its qualified name plus the byte

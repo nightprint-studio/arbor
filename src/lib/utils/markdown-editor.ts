@@ -1706,9 +1706,19 @@ function getTokenMark(classes: string): Decoration {
 // Common short aliases that map to Prism grammar names. Anything not listed
 // falls through to the exact `lang` string — Prism handles e.g. `bash`,
 // `rust`, `yaml`, `kotlin` etc. directly.
+//
+// This is the RENDERED view's vocabulary. The **source** view of the same file colours its fences
+// through `bennu/markdown-fences.ts`, because one paints a string and the other a buffer — see the
+// note there. The two lists are separate mechanisms and should stay in step: a tag that colours in
+// one view and not the other reads as a bug in whichever one you looked at second.
 const PRISM_LANG_ALIAS: Record<string, string> = {
   js: 'javascript', ts: 'typescript', py: 'python',
-  sh: 'bash', shell: 'bash', zsh: 'bash',
+  // Every name a README calls a terminal block. `console` and `shell-session` are what a copied
+  // transcript is usually tagged with, and without them the most-quoted block in the file was the
+  // one paragraph of the document with no colour in it.
+  sh: 'bash', shell: 'bash', zsh: 'bash', ksh: 'bash',
+  console: 'bash', 'shell-session': 'bash', 'sh-session': 'bash', terminal: 'bash',
+  containerfile: 'dockerfile',
   yml: 'yaml', md: 'markdown', rs: 'rust',
   cpp: 'cpp', 'c++': 'cpp', 'c#': 'csharp', cs: 'csharp',
   html: 'markup', xml: 'markup', svg: 'markup',

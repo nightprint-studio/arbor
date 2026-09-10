@@ -24,7 +24,11 @@ pub mod inherited;
 pub mod jdk;
 pub mod member_text;
 pub mod overridable;
+// What you picked last time — the session-scoped completion memory ("frecency").
+pub mod picked;
 pub mod prelude;
 pub mod rank;
 pub mod resolver;
+// Completion for a bare identifier: what the scope at the caret binds.
+pub mod scope_completion;
 pub mod source;

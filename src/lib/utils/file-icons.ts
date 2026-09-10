@@ -6,6 +6,7 @@
  * (one bundle entry per icon) so there's no CDN dependency at runtime.
  */
 import type { IconifyIcon } from '@iconify/svelte';
+import { isDockerfile } from './file-names';
 
 // ── File-type icons ──────────────────────────────────────────────────────────
 import rustIcon        from '@iconify-icons/vscode-icons/file-type-rust';
@@ -58,6 +59,9 @@ import jarIcon         from '@iconify-icons/vscode-icons/file-type-jar';
 import gitlabIcon      from '@iconify-icons/vscode-icons/file-type-gitlab';
 import jenkinsIcon     from '@iconify-icons/vscode-icons/file-type-jenkins';
 import editorconfigIcon from '@iconify-icons/vscode-icons/file-type-editorconfig';
+// JUnit ships a real glyph in simple-icons, which vscode-icons has no entry for. It is
+// monochrome (`currentColor`), and the file tree around it is not — see `junitIcon` below.
+import junit5Glyph    from '@iconify-icons/simple-icons/junit5';
 import helmIcon        from '@iconify-icons/vscode-icons/file-type-helm';
 import logIcon         from '@iconify-icons/vscode-icons/file-type-log';
 import keyIcon         from '@iconify-icons/vscode-icons/file-type-key';
@@ -178,6 +182,46 @@ const devIcon: IconifyIcon = {
 };
 
 /**
+ * `lombok.config` — le regole con cui Lombok genera codice che nel sorgente non c'è.
+ *
+ * Un **peperoncino**, e non è una scelta decorativa: *lombok* in giavanese vuol dire peperoncino,
+ * ed è da lì che il progetto prende sia il nome sia il proprio marchio. Disegnato qui invece che
+ * importato perché nessuno dei due set di icone installati (vscode-icons, simple-icons) ne ha uno:
+ * è un marchio nostro che cita il loro, non una copia del loro.
+ *
+ * Il rosso scende dall'alto verso la punta come in un peperoncino vero, e il picciolo verde è
+ * l'unica cosa che a 16 px lo distingue da una goccia — quindi è tenuto spesso.
+ */
+const lombokIcon: IconifyIcon = {
+  width: 32,
+  height: 32,
+  body:
+    // Il picciolo: due tratti, perché uno solo a questa dimensione legge come un gambo di ciliegia.
+    '<path d="M15.5 7.5c0-2.6 1.4-4.3 3.6-4.9" stroke="#4f9b3a" stroke-width="2.6" '
+    + 'stroke-linecap="round" fill="none"/>'
+    + '<path d="M15.6 8.2c-1.7-1.2-3.6-1.3-5.2-.4" stroke="#3f8330" stroke-width="2.2" '
+    + 'stroke-linecap="round" fill="none"/>'
+    // Il baccello.
+    + '<path d="M15.4 7.4c3.6 0 6.4 2.7 6.4 6.6 0 6.2-4.6 11.6-10.6 13.4-1.5.5-2.6-1.2-1.5-2.3 '
+    + '3.6-3.5 5.2-7.4 5.2-11.6 0-2.3-1.1-3.6-1.1-4.6 0-1 .7-1.5 1.6-1.5z" fill="#d1352b"/>'
+    // La luce sul lato interno della curva, come su un peperoncino lucido.
+    + '<path d="M15.4 9.6c1.9.2 3.2 1.7 3.2 4.4 0 4.1-2 7.9-5 10.8 2.3-3.4 3.4-6.9 3.4-10.4 '
+    + '0-2.4-1-3.7-1.6-4.8z" fill="#ee6a52"/>',
+};
+
+/**
+ * `junit-platform.properties` — i parametri con cui la piattaforma JUnit lancia i test.
+ *
+ * Il glifo vero di JUnit 5 (simple-icons), tinto del verde del progetto invece che lasciato a
+ * `currentColor`: nell'albero dei file sta in mezzo a icone a colori, e un'unica icona che assume
+ * il colore del testo lì legge come disabilitata, non come monocromatica.
+ */
+const junitIcon: IconifyIcon = {
+  ...junit5Glyph,
+  body: junit5Glyph.body.replace(/currentColor/g, '#25a162'),
+};
+
+/**
  * `.merula` — un **pattern** della DAW live-coding.
  *
  * Non un uccello, anche se il nome è quello del merlo: il marchio del prodotto
@@ -290,7 +334,6 @@ const FILENAME_ICONS: Record<string, IconifyIcon> = {
   'yarn.lock': yarnIcon,
   '.yarnrc': yarnIcon,
   '.yarnrc.yml': yarnIcon,
-  'dockerfile': dockerIcon,
   '.dockerignore': gitFileIcon,
   '.gitignore': gitFileIcon,
   '.gitattributes': gitFileIcon,
@@ -316,6 +359,10 @@ const FILENAME_ICONS: Record<string, IconifyIcon> = {
   'settings.gradle': gradleIcon,
   'settings.gradle.kts': gradleIcon,
   'gradle.properties': gradleIcon,
+  // Lombok e la piattaforma JUnit: due file `.properties`-simili con un vocabolario documentato
+  // dietro, e per questo con un'icona propria invece di quella generica dei `.properties`.
+  'lombok.config': lombokIcon,
+  'junit-platform.properties': junitIcon,
   'gradlew': gradleIcon,
   'gradlew.bat': gradleIcon,
   // ── CI / tooling ─────────────────────────────────────────────────────────
@@ -328,7 +375,6 @@ const FILENAME_ICONS: Record<string, IconifyIcon> = {
   'docker-compose.yaml': dockerIcon,
   'compose.yml': dockerIcon,
   'compose.yaml': dockerIcon,
-  '.dockerfile': dockerIcon,
 };
 
 /** Folder name → [closed icon, open icon]. */
@@ -407,6 +453,9 @@ const FOLDER_ICONS: Record<string, [IconifyIcon, IconifyIcon]> = {
 export function getFileIcon(name: string): IconifyIcon {
   const lower = name.toLowerCase();
   if (FILENAME_ICONS[lower]) return FILENAME_ICONS[lower];
+  // Before the extension split, and that ordering is the point: `Dockerfile.dev` read by extension
+  // is a `.dev`, which here is geode's playtest format.
+  if (isDockerfile(lower)) return dockerIcon;
   if (lower.startsWith('.env')) return dotenvIcon;
   if (lower.endsWith('.d.ts')) return tsDefIcon;
   const ext = lower.split('.').pop() ?? '';

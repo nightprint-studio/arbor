@@ -514,6 +514,15 @@
     }
   });
 
+  // And the level of the MODULE the open file is in, which is what actually governs it: a reactor
+  // part-way through a migration has one module on 21 and another still on 8. Re-asked on every tab
+  // switch; the answer is a memoized pom read behind the seam, not a resolve.
+  $effect(() => {
+    const path = projectStore.activeFilePath;
+    if (projectStore.isDemo || projectStore.isCargo) return;
+    void javaLevelStore.loadFile(path && isJavaFile(path) ? path : null);
+  });
+
   // The Cargo workspace, on opening a Rust project. Read here rather than only by the Cargo panel
   // because three other surfaces want it before that panel is ever opened: the run-configuration
   // editor's crate and target pickers, ▶ looking for the sole binary, and the palette. Cheap — it

@@ -20,7 +20,7 @@
     BookOpen, Rocket, Boxes, PenLine, Keyboard, FolderGit2, FlaskConical, Play, Replace,
     ServerCog, Cog, Languages, Network, Gamepad2, Search, Coffee, FileCode2, Bug, History,
     FileText, Compass, ListTree, Sparkles, ShieldCheck, Wrench, Download, Package, Braces,
-    Database, Layers, Palette, Flame, ScrollText, FileType2,
+    Database, Layers, Palette, Flame, ScrollText, FileType2, SlidersHorizontal,
   } from 'lucide-svelte';
   import DocsShell, { type DocsNavItem, type DocsNavGroup } from '$lib/components/shared/DocsShell.svelte';
 
@@ -43,6 +43,7 @@
   import Validation        from './docs/Validation.svelte';
   import LocalHistory      from './docs/LocalHistory.svelte';
   import FileTypes         from './docs/FileTypes.svelte';
+  import ToolConfig        from './docs/ToolConfig.svelte';
   // Search
   import Structural        from './docs/Structural.svelte';
   import StructuralPages   from './docs/StructuralPages.svelte';
@@ -104,6 +105,7 @@
       { id: 'refactoring',   label: 'Refactoring & intentions', icon: Wrench     },
       { id: 'validation',    label: 'Validation & problems',   icon: ShieldCheck },
       { id: 'local-history', label: 'Local history',           icon: History     },
+      { id: 'tool-config',   label: 'Tool configuration files', icon: SlidersHorizontal },
       { id: 'file-types',    label: 'Other file types',        icon: FileText    },
     ] },
     { id: 'search', label: 'Structural search', icon: Replace, items: [
@@ -161,6 +163,7 @@
     'refactoring':       Refactoring,
     'validation':        Validation,
     'local-history':     LocalHistory,
+    'tool-config':       ToolConfig,
     'file-types':        FileTypes,
     'structural':        Structural,
     'structural-pages':  StructuralPages,

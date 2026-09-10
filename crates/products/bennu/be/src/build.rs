@@ -431,6 +431,9 @@ pub(crate) fn spawn_streamed<F: FnOnce(&str)>(
     sink: Arc<dyn EventSink>,
     after_register: F,
 ) -> Result<RunHandle, String> {
+    // Its own process group, so Stop reaches whatever this child starts rather than only the
+    // handle we hold. See `child::own_group`.
+    crate::child::own_group(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
 
     let run_id = next_run_id();

@@ -14,7 +14,7 @@ pub use crate::encoding::{
 };
 pub use crate::error::ProjectError;
 pub use crate::ignored::IgnoreStack;
-pub use crate::jdk::detect as detect_jdk;
+pub use crate::jdk::{detect as detect_jdk, module_level};
 pub use crate::model::{
     file_stamp, open_project, read_file, rename_path, write_file, OpenOptions,
 };

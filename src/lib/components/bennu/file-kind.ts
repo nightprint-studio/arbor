@@ -153,6 +153,26 @@ export function isWgslFile(path: string | null | undefined): boolean {
 }
 
 /**
+ * A **build-tool configuration file with a documented vocabulary** — `lombok.config` and
+ * `junit-platform.properties`.
+ *
+ * By name and not by extension, because that is the only thing that separates them from the
+ * hundred other `.properties` in a legacy tree. The backend's `toolconf` extension keys on exactly
+ * these two names, and this predicate has to stay in step with it: a name here that the backend
+ * does not own costs a round trip per keystroke for an empty answer, and one it owns that is
+ * missing here means the squiggles never arrive.
+ *
+ * Its own predicate rather than a clause inside {@link supportsDiagnostics}, because the editor
+ * asks the same question twice — *does this file have diagnostics* and *does the request need the
+ * live buffer* — and the answer is yes to both for the same reason: the check is computed from the
+ * text, so sending the file from disk would squiggle the version you already fixed.
+ */
+export function isToolConfigFile(path: string | null | undefined): boolean {
+  const name = (path ?? '').split(/[\\/]/).pop()?.toLowerCase() ?? '';
+  return name === 'lombok.config' || name === 'junit-platform.properties';
+}
+
+/**
  * True when it is worth asking `bennu_diagnostics` about the file.
  *
  * Nearly the same set as {@link supportsCodeNav}, and named separately because the *reason* differs:
@@ -164,7 +184,8 @@ export function isWgslFile(path: string | null | undefined): boolean {
  * nothing to say about going to a declaration in it.
  */
 export function supportsDiagnostics(path: string | null | undefined): boolean {
-  return isAnalyzedFile(path) || isLspFile(path) || isCargoManifest(path) || isWgslFile(path);
+  return isAnalyzedFile(path) || isLspFile(path) || isCargoManifest(path) || isWgslFile(path)
+    || isToolConfigFile(path);
 }
 
 /**
@@ -182,4 +203,21 @@ export function hasPushedDiagnostics(path: string | null | undefined): boolean {
   // A shader is computed on demand too, unless a server took it over — and when one has,
   // `isLspFile` is already true, so this needs no second clause.
   return !isAnalyzedFile(path) && !isCargoManifest(path) && isLspFile(path);
+}
+
+/**
+ * Whether `path` is a **test source** — Maven's `src/test`, Cargo's `tests` / `benches`.
+ *
+ * One definition, because two surfaces answer the same question about the same file: the project
+ * tree tints a test root green, and the editor's tab strip marks a tab holding one. A second copy
+ * of these patterns is a second place for `src/test/kotlin` to be forgotten.
+ *
+ * Deliberately about the PATH and not about the file's contents: a class under `src/test` is a test
+ * source whether or not it declares a single `@Test` — fixtures, builders and base classes are test
+ * code too, and they are exactly what you want to see marked when you are reading a failure.
+ */
+export function isTestSource(path: string | null | undefined): boolean {
+  if (!path) return false;
+  const p = path.replace(/\\/g, '/');
+  return /\/src\/test(\/|$)/.test(p) || /\/(tests|benches)(\/|$)/.test(p);
 }

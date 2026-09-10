@@ -298,6 +298,24 @@ fn check_exists(env: &PomEnv<'_>, block: &Block, out: &mut Vec<Diagnostic>) {
     }
 
     let (start, end) = target_span(block);
+    // Moved, not missing. An artifact that has been renamed keeps publishing at its old
+    // coordinates as a jarless pom whose only content is where to go instead — so there is no jar
+    // to find, there never will be, and every message below would send the reader to look for one.
+    // Maven follows the redirect, which is why the build works: this is worth knowing, not worth
+    // an error.
+    if let Some(moved) = relocated_to(env, &coord) {
+        out.push(Diagnostic {
+            message: format!(
+                "`{}` has moved to `{moved}`. The old coordinates publish a pom with no jar that                  redirects to the new ones — Maven follows it, so this builds; updating the                  dependency removes the indirection.",
+                coord.gav()
+            ),
+            severity: severity::WARNING.to_string(),
+            code: "maven-relocated-dependency".to_string(),
+            start,
+            end,
+        });
+        return;
+    }
     let level = match (block.kind, block.profile.is_empty()) {
         // A plugin is fetched when its goal first runs, and a profile's dependency when that
         // profile is first built — neither absence means the code in front of you cannot compile.
@@ -339,6 +357,31 @@ fn check_exists(env: &PomEnv<'_>, block: &Block, out: &mut Vec<Diagnostic>) {
         start,
         end,
     });
+}
+
+/// Where this coordinate says it moved to, as a readable `group:artifact:version`.
+///
+/// Read from the artifact's OWN pom in the local repository: the relocation lives in the thing
+/// being depended on, not in the pom depending on it, so nothing in the file under the caret can
+/// answer this. `None` when the pom is not there, or does not redirect.
+fn relocated_to(env: &PomEnv<'_>, coord: &Coord) -> Option<String> {
+    let path = env.repo.pom_file(coord);
+    let text = std::fs::read_to_string(path).ok()?;
+    let reloc = bennu_deps::prelude::parse_pom(&text).relocation?;
+    // Every part the relocation leaves out means "the same as before" — Maven's own reading.
+    let pick = |moved: &str, current: &str| {
+        if moved.is_empty() { current.to_string() } else { moved.to_string() }
+    };
+    let group = pick(&reloc.group_id, &coord.group_id);
+    let artifact = pick(&reloc.artifact_id, &coord.artifact_id);
+    let version = pick(&reloc.version, &coord.version);
+    // A redirect to itself is a broken pom, not a rename.
+    if (group.as_str(), artifact.as_str(), version.as_str())
+        == (coord.group_id.as_str(), coord.artifact_id.as_str(), coord.version.as_str())
+    {
+        return None;
+    }
+    Some(format!("{group}:{artifact}:{version}"))
 }
 
 /// A newer version of a dependency that is **already on this machine** — so acting on it costs

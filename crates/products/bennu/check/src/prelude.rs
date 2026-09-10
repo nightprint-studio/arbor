@@ -13,6 +13,7 @@ pub use crate::check::{
     check_file, check_file_resolved, FileContext, MAX_DIAGNOSTICS, MAX_MESSAGE_CHARS,
 };
 pub use crate::check_id::CheckId;
+pub use crate::quarantine::{quarantine, Quarantine};
 
 // The javac diagnostic catalog: every error javac can raise, and whether Bennu answers it. Lets a
 // Bennu diagnostic name the javac error it stands for.

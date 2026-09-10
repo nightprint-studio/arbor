@@ -25,12 +25,13 @@
 
 import type { LanguageDescriptor, CompletionSource } from '$lib/components/shared/ui/code-editor';
 import {
-  hoverCardDom, insertWithStops, makeByteToU16, makeU16ToByte,
+  hoverCardDom, makeU16ToByte,
 } from '$lib/components/shared/ui/code-editor';
 import { boostForRank, RESOLVED } from '$lib/components/shared/ui/code-editor/completion-rank';
+import { toCompletion } from './completion-item';
 import { StreamLanguage, type StreamParser } from '@codemirror/language';
 import type { Extension } from '@codemirror/state';
-import { insertCompletionText, type Completion, type CompletionContext, type CompletionResult }
+import { type Completion, type CompletionContext, type CompletionResult }
   from '@codemirror/autocomplete';
 import type { EditorView, Tooltip } from '@codemirror/view';
 import { getLanguage as prismLanguage } from '$lib/utils/diff-formatter';
@@ -41,34 +42,7 @@ import { hover as ipcHover } from '$lib/ipc/bennu/nav';
 import {
   lspResolveCompletion,
 } from '$lib/ipc/bennu/lsp';
-import type { CompletionItem, SourceEdit } from '$lib/types/bennu';
-
-/** Map a provider `kind` to a CodeMirror completion `type` (drives the popup's kind icon).
- *
- *  Broader than the Java map because a language server's vocabulary is: it distinguishes a
- *  struct from a class, an enum member from a constant, a module from a namespace. */
-function kindToType(kind: string): string {
-  switch (kind) {
-    case 'method':
-    case 'function':
-    case 'constructor':   return 'method';
-    case 'field':
-    case 'property':      return 'property';
-    case 'class':
-    case 'struct':
-    case 'interface':
-    case 'enum':
-    case 'event':         return 'class';
-    case 'type-parameter': return 'type';
-    case 'variable':       return 'variable';
-    case 'keyword':        return 'keyword';
-    case 'constant':
-    case 'enum-member':    return 'constant';
-    case 'module':         return 'namespace';
-    case 'snippet':        return 'text';
-    default:               return 'text';
-  }
-}
+import type { CompletionItem } from '$lib/types/bennu';
 
 /**
  * Only the latest keystroke's answer is allowed to open a popup.
@@ -79,75 +53,29 @@ function kindToType(kind: string): string {
  */
 let completionSeq = 0;
 
-/** Apply a provider's extra edits (for Rust, the `use` line an auto-imported item needs).
- *
- *  Dispatched as a **second** transaction, after the insertion. Both are byte-offset edits
- *  computed against the pre-insertion buffer, and an import sits above the caret — so applying
- *  the insertion first leaves the import's offsets untouched, whereas one combined transaction
- *  would have to reason about which of the two shifts the other. */
-function applyAdditionalEdits(view: EditorView, edits: SourceEdit[], preInsertSource: string) {
-  if (!edits.length) return;
-  const b2u = makeByteToU16(preInsertSource);
-  // Descending, so an earlier edit's offsets are still valid after a later one is applied.
-  const mapped = edits
-    .map((e) => ({ from: b2u(e.start), to: b2u(e.end), insert: e.new_text }))
-    .sort((a, b) => b.from - a.from);
-  view.dispatch({ changes: mapped });
-}
-
 /**
- * Turn one provider item into a CodeMirror completion.
+ * Turn one server item into a CodeMirror completion.
+ *
+ * The conversion itself is shared (`completion-item`) — one wire shape, one converter, so a field
+ * the backend can send cannot quietly do nothing on one path and work on the other. What is
+ * server-specific is the documentation: a language server answers a completion list WITHOUT docs
+ * and fills them in one item at a time, so the panel is a second round-trip made only for the row
+ * the user actually highlights.
  *
  * `rank` is the item's position in the provider's own ordering, and it becomes a `boost` through
  * the shared curve — see `completion-rank`. Without the nudge, typing `it` in Rust puts `zip`
  * above `iter`, while rust-analyzer's own ordering already knew which one you meant.
  */
-function toCompletion(item: CompletionItem, rank: number, file: string): Completion {
-  const completion: Completion = {
-    label: item.label,
-    detail: item.detail ?? undefined,
-    type: kindToType(item.kind),
-    boost: boostForRank(rank, RESOLVED, item.preselect),
-  };
-
-  // `label` is a display string — a server may send `push(…)`. What goes in the buffer is
-  // `insert_text`, and inserting the label verbatim is how an accepted completion produces
-  // code that does not compile.
-  const insert = item.insert_text ?? item.label;
-  const extras = item.edits ?? [];
-  const needsCustomApply =
-    insert !== item.label || extras.length > 0 || (item.snippet_stops?.length ?? 0) > 0;
-
-  if (needsCustomApply) {
-    completion.apply = (view, _c, from, to) => {
-      const pre = view.state.doc.toString();
-      // `insert_text` is plain text either way — the backend parsed the placeholder syntax away and
-      // left the stops as byte ranges into it (see `bennu-lsp`'s `snippet.rs`). So a snippet differs
-      // from a plain completion only in what happens *after* the text lands.
-      const stops = item.snippet_stops ?? [];
-      if (stops.length > 0) {
-        insertWithStops(view, from, to, insert, stops, makeByteToU16(insert));
-      } else {
-        view.dispatch(insertCompletionText(view.state, insert, from, to));
-      }
-      applyAdditionalEdits(view, extras, pre);
-    };
-  }
-
-  // Documentation, fetched only for the item the user actually highlights — a server answers a
-  // completion list without docs, and resolving all four hundred eagerly would be four hundred
-  // round-trips.
-  if (item.doc) {
-    completion.info = () => docDom(item.doc!);
-  } else if (item.resolve_id != null) {
-    const id = item.resolve_id;
-    completion.info = async () => {
-      const resolved = await lspResolveCompletion(file, id).catch(() => null);
+function toServerCompletion(item: CompletionItem, rank: number, file: string): Completion {
+  return toCompletion(item, boostForRank(rank, RESOLVED, item.preselect), {
+    info: async () => {
+      if (item.doc) return docDom(item.doc);
+      if (item.resolve_id == null) return null;
+      const resolved = await lspResolveCompletion(file, item.resolve_id).catch(() => null);
       const text = resolved?.doc ?? resolved?.detail;
       return text ? docDom(text) : null;
-    };
-  }
-  return completion;
+    },
+  });
 }
 
 /** A completion item's documentation, as the popup's info panel. */
@@ -265,7 +193,7 @@ function makeBackendCompletionSource(opts: BackendCompletionOptions = {}): Compl
 
     return {
       from,
-      options: sorted.map((it, rank) => toCompletion(it, rank, path)),
+      options: sorted.map((it, rank) => toServerCompletion(it, rank, path)),
       // Keep the popup open while the user keeps typing identifier characters. A server that
       // marked its list incomplete would want a re-request per keystroke; treating every list as
       // filterable is the cheaper default and is right for the languages here.

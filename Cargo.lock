@@ -938,6 +938,7 @@ dependencies = [
  "bennu-cargo",
  "bennu-check",
  "bennu-classpath",
+ "bennu-complete",
  "bennu-core",
  "bennu-dap",
  "bennu-deps",
@@ -964,6 +965,7 @@ dependencies = [
  "bennu-spring",
  "bennu-ssr",
  "bennu-test",
+ "bennu-toolconf",
  "bennu-web",
  "bennu-wgsl",
  "bennu-xml",
@@ -1119,6 +1121,7 @@ version = "0.3.0"
 dependencies = [
  "bennu-check",
  "bennu-classpath",
+ "bennu-complete",
  "bennu-index",
  "bennu-intentions",
  "bennu-java",
@@ -1267,6 +1270,7 @@ name = "bennu-query"
 version = "0.3.0"
 dependencies = [
  "bennu-classpath",
+ "bennu-complete",
  "bennu-index",
  "bennu-java",
  "bennu-proto",
@@ -1326,6 +1330,16 @@ dependencies = [
 [[package]]
 name = "bennu-toml"
 version = "0.3.0"
+
+[[package]]
+name = "bennu-toolconf"
+version = "0.3.0"
+dependencies = [
+ "bennu-complete",
+ "bennu-ext",
+ "bennu-maven",
+ "bennu-proto",
+]
 
 [[package]]
 name = "bennu-web"

@@ -55,5 +55,8 @@
 pub mod caret;
 // Collecting candidates: de-duplicated, capped, in the order the provider offered them.
 pub mod collect;
+// Whether a name answers what was typed — prefix, case, camel humps. One rule for every kind
+// of candidate.
+pub mod name_match;
 pub mod prefix;
 pub mod prelude;

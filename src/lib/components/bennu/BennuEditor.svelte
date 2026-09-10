@@ -36,9 +36,10 @@
   import PluginIcon from '$lib/components/plugins/PluginIcon.svelte';
   import { languageForPath } from './languages';
   import {
-    isImageFile, isJavaFile as isJavaFileOf, isJspFile as isJspFileOf,
+    isImageFile, isJavaFile as isJavaFileOf, isJspFile as isJspFileOf, isTestSource,
     isLspFile as isLspFileOf, isRustFile as isRustFileOf, isMarkdownFile,
     isRunnableScript, isHtmlFile, hasPushedDiagnostics, supportsCodeNav, supportsDiagnostics,
+    isToolConfigFile,
   } from './file-kind';
   import BennuHtmlPreview from './BennuHtmlPreview.svelte';
   import BennuTableInsert from './BennuTableInsert.svelte';
@@ -70,6 +71,9 @@
   import SymbolKindIcon from './SymbolKindIcon.svelte';
   import { javaKindStore } from '$lib/stores/bennu/java-kinds.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
+  import { discoverTests as ipcDiscoverTests } from '$lib/ipc/bennu/tests';
+  import type { DiscoveredTest } from '$lib/types/bennu';
   import { completionNoteStore } from '$lib/stores/bennu/completion-note.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuMainClassStore } from '$lib/stores/bennu/main-classes.svelte';
@@ -104,7 +108,7 @@
     extNavigate, extHighlights, extGutter, extActions, extRefresh, springEnvVar, xmlFetchSchema,
     type ExtHighlight, type ExtGutterMark, type ExtTarget, type ExtAction, type EnvVarView,
   } from '$lib/ipc/bennu/ext';
-  import { isSpringPropertyFile } from './spring-props-lang';
+  import { isSpringPropertyFile } from './config-props-lang';
   import { isCargoManifest } from './cargo-toml-lang';
   import { cargoVersionHints, type CargoVersionHint } from '$lib/ipc/bennu/cargo';
   import {
@@ -131,7 +135,7 @@
     intentionsAt as ipcIntentionsAt, type IntentionOffer, type DiagRef,
   } from '$lib/ipc/bennu/intentions';
   import {
-    createClass, moveTargets, refactorings, refactorPlan,
+    createClass, createMethodIn, moveTargets, refactorings, refactorPlan,
     type MoveTarget, type RefactorPlan,
   } from '$lib/ipc/bennu/refactor';
   import BennuMoveTargetPicker from './BennuMoveTargetPicker.svelte';
@@ -147,6 +151,7 @@
   import { bennuHierarchyStore } from '$lib/stores/bennu/hierarchy.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuNavStore, type NavPlace } from '$lib/stores/bennu/nav-history.svelte';
+  import { NavFlow } from './nav-flow';
   import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { collectIntentions, type GenerateMode, type IntentionItem } from './bennu-intentions';
@@ -178,6 +183,10 @@
     getSelectionText: () => string;
     openSearch: () => void;
     scrollToLineCol: (line: number, col?: number) => void;
+    /** Which document the mounted view actually holds — see `nav-flow`'s `ready`. */
+    documentKey: () => string | undefined;
+    /** Whether a line is visible right now, as opposed to having been asked for. */
+    isLineVisible: (line: number) => boolean;
     scrollToByteOffset: (byteOffset: number) => void;
     replaceByteRange: (startByte: number, endByte: number, text: string) => void;
     coordsAtCaret: () => { x: number; y: number } | null;
@@ -210,7 +219,7 @@
     setUnusedRanges: (spans: readonly { start: number; end: number }[]) => void;
     /** Replace the inlay hints — the text drawn between the code, never in it. */
     setInlayHints: (
-      hints: readonly { offset: number; label: string; before?: boolean }[],
+      hints: readonly { offset: number; label: string; before?: boolean; tooltip?: string }[],
     ) => void;
     /** Show the parameter-hint strip for the call the caret is inside, or clear it with `null`. */
     setSignatureHint: (
@@ -346,7 +355,15 @@
         // Not your file: a dependency's source or a file owned by another project. Tinted in
         // both states — the badge is read once and then stops being noticed, while "edits
         // here go nowhere" is true every time you glance at the strip.
-        tone: foreign ? ('external' as const) : undefined,
+        //
+        // A test source gets a quieter mark of the same kind, in the green the project tree
+        // already gives a test root. `external` outranks it: "edits here go nowhere" is a
+        // warning, and which kind of code a tab holds is not.
+        tone: foreign
+          ? ('external' as const)
+          : isTestSource(p)
+            ? ('test' as const)
+            : undefined,
         title: conflicted
           ? `${p}${from}  ·  changed on disk — autosave paused until you choose a version`
           : `${p}${from}`,
@@ -363,133 +380,78 @@
   //
   // **A stop is an ACTION, not a caret movement.** Go to declaration, a usage, a structure or
   // find hit, a diagnostic, a switch to another tab — those navigate. Arrow keys, a click and
-  // page-down are reading, and while they pushed stops (anything over three lines did) the ring
-  // filled with places nobody chose to go to, which is what Back then walked through.
+  // page-down are reading, and while they pushed stops the ring filled with places nobody chose
+  // to go to, which is what Back then walked through.
   //
   // The other half of feeling like IntelliJ's is that **the stop you are sitting on follows your
   // caret** (`refine`). Nothing is pushed by reading, but the entry for the file you are in always
   // says where you are — so the moment you jump away it is already the place you left, and coming
-  // back lands there rather than on the line you first arrived at. That one property removes all
-  // the origin bookkeeping: the previous entry IS the origin, kept current for free.
+  // back lands there rather than on the line you first arrived at.
   //
-  // What is left is that **one navigation is several events**: a cross-file jump is `openFile(…)`
-  // and then `requestGoto(line)`, so the buffer arrives at the top of the file before the scroll
-  // says which line was wanted. That arrival is provisional — and provisional is not a guess: the
-  // request is issued before the buffer swap, so at arrival time we can simply ask whether a go-to
-  // is already waiting to be consumed. If one is, the open belongs to it; if none is, the file was
-  // opened on its own (a tab switch, the project tree) and its stop is final.
-  /** The caret's last known place, updated by every caret event. */
-  let lastPlace: NavPlace | null = null;
-  /** The landing of a programmatic Back/Forward, with a budget of events to ignore before giving
-   *  up on it — so a jump that can never land (a shorter file, a navigation the user superseded)
-   *  cannot wedge the history shut. */
-  let pendingJump: { file: string; line: number; budget: number } | null = null;
-  /** The file we have just ARRIVED in as part of a jump, whose stop the jump's own scroll still
-   *  has to name. */
-  let provisionalIn: string | null = null;
-  const NAV_SETTLE_EVENTS = 4; // events a pending jump may swallow before it gives up
-
-  /** Whether a go-to has been requested and not yet consumed — i.e. whether the file that is
-   *  arriving was opened *by* a jump. */
-  function jumpPending(): boolean {
-    // Untracked: this is reached from the caret callback, which CodeMirror fires synchronously
-    // from inside whichever `$effect` caused the scroll. A tracked read there would make the
-    // go-to relay a dependency of that effect, and the next request would re-run it — the same
-    // self-invalidation the history store's mutators are untracked for.
-    return untrack(() => {
-      const t = bennuUiStore.gotoTarget;
-      return !!t && t.nonce !== consumedGotoNonce;
-    });
-  }
-
-  /** Swallow an event that belongs to a Back/Forward we are executing: its landing is already IN
-   *  the ring at the index we stepped to, and recording it again would truncate the branch we just
-   *  moved into — which is why Forward used to stop working after any Back that crossed a file.
-   *  Returns whether the event was consumed. */
-  function settlingJump(place: NavPlace): boolean {
-    if (!pendingJump) return false;
-    const arrived =
-      isSamePath(pendingJump.file, place.file) && Math.abs(pendingJump.line - place.line) <= 1;
-    if (arrived) {
-      pendingJump = null;
-      return true;
-    }
-    if (pendingJump.budget > 0) {
-      pendingJump.budget -= 1;
-      return true;
-    }
-    // Never landed, or the user went elsewhere meanwhile: stop blocking the history.
-    pendingJump = null;
-    return false;
-  }
+  // ⚠️ The mechanism itself lives in `nav-flow.ts` and is **unit-tested** (`nav-flow.test.ts`).
+  // It is there and not here because every failure this had was a question about ORDER — a tab is
+  // active before its text arrives, a scroll runs before a layout exists, a second jump starts
+  // before the first lands — and order is precisely what cannot be asked cleanly of a component
+  // wrapped around CodeMirror. What this file owns is the wiring: what "ready" means, what a
+  // scroll is, where the caret is. What the flow owns is when.
+  const navFlow = new NavFlow({
+    activeFile: () => projectStore.activeFilePath,
+    openFile: (file) => projectStore.openFile(file),
+    // The three conditions that make a line number mean something. The second is the one the old
+    // design could not ask at all: the editor **on screen** is the one for this file. A tab switch
+    // changes `activeFilePath` at once and rebuilds the view a beat later, and in that gap a
+    // scroll goes to the OUTGOING file's editor — which is then destroyed, taking the scroll with
+    // it. The third is the empty-buffer case: line 400 of no text is line 1, and afterwards
+    // nothing can tell that apart from a jump to line 1 that worked.
+    ready: (file) => {
+      if (!isSamePath(file, projectStore.activeFilePath)) return false;
+      const held = editorComp?.documentKey();
+      if (!held || !isSamePath(held, file)) return false;
+      return (projectStore.sourceOf(file)?.length ?? 0) > 0;
+    },
+    scrollTo: (line, col) => editorComp?.scrollToLineCol(line, col),
+    inView: (line) => editorComp?.isLineVisible(line) ?? false,
+    // A frame, not a microtask: what is being waited for is a buffer arriving and an editor
+    // mounting, both of which the browser only finishes between frames.
+    settle: () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    caret: () => {
+      const file = projectStore.activeFilePath;
+      return file ? { file, line: caretLine, col: caretCol } : null;
+    },
+    ring: {
+      push: (p) => bennuNavStore.push(p),
+      refine: (p) => bennuNavStore.refine(p),
+    },
+  });
 
   /**
-   * The file a navigation is opening RIGHT NOW, from the moment it asks for it to the moment its
-   * scroll is consumed.
+   * Every navigation this editor performs, of any kind, goes through here.
    *
-   * The thing `jumpPending()` was supposed to answer and structurally could not. A cross-file
-   * go-to is `await openFile(f)` and then `requestGoto(line)`, so at the instant the buffer lands
-   * — which is when `arriveIn` runs — **nothing has been requested yet**: the arrival looked like
-   * a tab switch, got its own stop at line 1 of the file, and the real destination was pushed on
-   * top a moment later. Two stops for one navigation, and Back went to the first: line 1 of the
-   * class you had just jumped into.
-   *
-   * Set before the open rather than inferred after it, because "was this arrival part of a jump"
-   * is a fact the caller has and nothing downstream can recover.
+   * The one thing it adds over the flow is the **claim**: a navigation names the place, so the
+   * "restore the caret a restart lost" effect below must not fire for that tab and drag the view
+   * to yesterday's line. Claiming it in one place is what stops a new go-to path from forgetting.
    */
-  let openingFor: string | null = null;
+  function goTo(place: NavPlace, record: boolean) {
+    restoredCaretFor = place.file;
+    return navFlow.go(place, { record });
+  }
 
   /**
-   * Open `file` and land on `line` — the one way the editor navigates across files.
+   * Open `file` and land on `line` — the one way the editor navigates, across files or inside one.
    *
-   * Every caller used to write the two steps out, and the pair is not two steps: it is one
-   * navigation whose halves the history has to be told about together. Centralised so a new
-   * go-to cannot get it wrong by writing the obvious thing.
+   * Every caller used to write the steps out, and they are not steps: they are one navigation
+   * whose halves the history has to be told about together.
    */
   async function openAt(file: string, line: number, col = 1) {
-    openingFor = file;
-    await projectStore.openFile(file);
-    bennuUiStore.requestGoto(line, col);
-  }
-
-  /** A file arrived under the caret — a tab switch, a file opened from the tree, or the buffer of
-   *  a cross-file jump. */
-  function arriveIn(place: NavPlace) {
-    if (settlingJump(place)) return;
-    // Both orders happen: the scroll relay may run before the buffer swap or after it. If the stop
-    // we are on is already in this file, the jump recorded its destination first and THIS is the
-    // buffer landing underneath it — not a second stop at the top of the file. Leave the ring
-    // alone; the scroll's own caret event refines it.
-    const cur = bennuNavStore.current;
-    if (cur && isSamePath(cur.file, place.file)) return;
-    bennuNavStore.push(place);
-    // Provisional when a navigation is bringing this file in: either a Back/Forward whose scroll
-    // is already queued, or an `openAt` that has not asked for its line yet. The second is the
-    // ordinary go-to, and it was the half that was missing.
-    const navigating = jumpPending() || (!!openingFor && isSamePath(openingFor, place.file));
-    provisionalIn = navigating ? place.file : null;
-  }
-
-  /** A navigation landed on `dest`. The origin needs no argument: the entry below is the place we
-   *  were, kept current by `refine`. */
-  function recordJump(dest: NavPlace) {
-    if (settlingJump(dest)) return;
-    if (provisionalIn && isSamePath(provisionalIn, dest.file)) {
-      provisionalIn = null;
-      bennuNavStore.replace(dest); // the scroll that the opening was for — one stop, not two
-      return;
-    }
-    provisionalIn = null;
-    bennuNavStore.push(dest);
+    await goTo({ file, line, col }, true);
   }
 
   /** A navigation the editor performs itself (go-to-declaration inside one file, Ctrl+G, a marker
    *  jump). The panels do not need this: they all go through `requestGoto`, which the relay
-   *  records. Called BEFORE the scroll, so the entry it pushes is the destination while the one
-   *  below it is still where the caret is. */
+   *  records. */
   function noteNavigation(line: number, col = 1) {
     const file = activePath;
-    if (file) recordJump({ file, line, col });
+    if (file) void goTo({ file, line, col }, true);
   }
 
   function onCaret(line: number, col: number) {
@@ -515,55 +477,29 @@
     const path = activePath;
     if (!path) return;
 
-    // Where this tab was last left, read BEFORE the line below overwrites it with the event being
-    // handled. On an arrival that event is the top of the file — the buffer lands there and the
-    // view state is restored afterwards — so recording it would make Back land on line 1 of a file
-    // you had been reading halfway down. The refinement cannot be left to the restoring scroll:
-    // whether that produces a caret event at all is CodeMirror's business, not ours, and a history
-    // that depends on it is a history that is wrong whenever it does not.
-    const arriving = !lastPlace || !isSamePath(lastPlace.file, path);
-    const left_at = arriving ? projectStore.caretOf(path) : null;
-
     // Remembered across restarts (debounced hard in the store — this runs on every arrow key).
-    // The live `viewStates` snapshot below is finer while the window is open; this is the part
-    // that survives closing it.
+    // The live `viewStates` snapshot is finer while the window is open; this is the part that
+    // survives closing it.
     projectStore.rememberCaret(path, line, col);
 
-    const place = { file: path, line, col };
-    // A DIFFERENT file under the caret is a navigation whoever caused it: a tab switch, a file
-    // opened from the tree, or the buffer of a cross-file jump.
-    if (arriving) {
-      lastPlace = place;
-      arriveIn(left_at ? { file: path, line: left_at.line, col: left_at.col } : place);
-      return;
-    }
-    lastPlace = place;
-    // Ordinary movement inside the file we are already in. It pushes nothing — this is reading —
-    // but the stop we are sitting on follows the caret, so leaving this file remembers where we
-    // were. Not while a Back/Forward is still landing: that would rewrite the entry it is aiming
-    // at with a position on the way to it.
-    if (!settlingJump(place)) bennuNavStore.refine(place);
+    // And the history. Whether this event is a stop, a refinement or transit is the flow's
+    // question, not this one's — see `nav-flow.ts`.
+    navFlow.onCaret({ file: path, line, col });
   }
 
-  /** Navigate to a recorded place (cross-file via the goto relay so the remounted editor
-   *  picks it up on mount; same-file directly). `pendingJump` keeps every caret event this
-   *  causes — the opening as much as the landing — out of the history. */
-  async function navGo(place: { file: string; line: number; col: number } | null) {
-    if (!place) return;
-    pendingJump = { file: place.file, line: place.line, budget: NAV_SETTLE_EVENTS };
-    if (!isSamePath(place.file, projectStore.activeFilePath)) {
-      // The column too. The ring remembers one — the whole point of a stop following your caret is
-      // that coming back lands where you left, and a relay that only carried the line put you at
-      // the start of it.
-      await openAt(place.file, place.line, place.col);
-    } else {
-      editorComp?.scrollToLineCol(place.line, place.col);
-    }
-  }
   /** Ctrl+Alt+← — jump back to the previous place in the navigation history. */
-  export function navBack() { void navGo(bennuNavStore.back()); }
+  export function navBack() {
+    const place = bennuNavStore.back();
+    // `record: false` — the ring has already moved to this entry, and pushing the destination on
+    // top of it truncates the forward branch. That is why Forward used to stop working after any
+    // Back that crossed a file.
+    if (place) void goTo(place, false);
+  }
   /** Ctrl+Alt+→ — jump forward again after a Back. */
-  export function navForward() { void navGo(bennuNavStore.forward()); }
+  export function navForward() {
+    const place = bennuNavStore.forward();
+    if (place) void goTo(place, false);
+  }
 
   /** Ctrl+Shift+Backspace — back to where you were last TYPING.
    *
@@ -573,16 +509,13 @@
   export function navLastEdit() {
     const place = bennuNavStore.stepEdit();
     if (!place) return;
-    // An edit place is not in the jump ring, so going there IS a navigation — and the entry we are
-    // on is already where we are, so pushing the destination is the whole of it.
-    bennuNavStore.push(place);
-    void navGo(place);
+    // An edit place is not in the jump ring, so going there IS a navigation.
+    void goTo(place, true);
   }
 
   /** Ctrl+Shift+E — go to a place picked from Recent Locations. */
   export function navToPlace(place: NavPlace) {
-    bennuNavStore.push(place);
-    void navGo(place);
+    void goTo(place, true);
   }
 
   // ── Restore the caret a restart lost ─────────────────────────────────────────
@@ -631,57 +564,28 @@
   // editor may still be the OLD file's. After the flush, `editorComp` is the one for the file the
   // jump was asked about.
   /**
-   * A jump whose line the buffer could not yet hold.
+   * The panels' door into the editor: a nonce ticks, and the editor navigates.
    *
-   * `openFile` makes a tab active and its TEXT arrives afterwards, so the relay below can run
-   * against an empty (or still-previous) document — where `scrollToLineCol(400)` clamps to line 1
-   * and the navigation silently lands at the top. Nothing downstream can tell that apart from a
-   * jump to line 1 that worked, which is why the intent is kept here rather than inferred there.
+   * Every panel navigation arrives here — usages, dependencies, tests, structure, the catalog,
+   * TODOs, find-in-files, build diagnostics — so one call covers all of them. What it does NOT do
+   * any more is any of the settling: it hands the destination to the flow, which owns waiting for
+   * a buffer, scrolling once there is one, and recording the stop where the caret actually landed.
    *
-   * A plain `let`, deliberately: the effect that consumes it re-runs on the BUFFER arriving, which
-   * is the event being waited for. Making it `$state` would add a dependency and buy nothing.
+   * The `tick()` is still load-bearing and for the same reason as before: a cross-file jump is
+   * `openFile(f)` and then `requestGoto(line)`, so at the instant this effect runs
+   * `activeFilePath` may still be the file being LEFT. Reading it before the flush filed the
+   * destination's line number against the origin's path.
    */
-  let pendingReveal: { file: string; line: number; col: number } | null = null;
-  $effect(() => {
-    const path = activePath;
-    const source = path ? projectStore.sourceOf(path) : '';
-    const want = pendingReveal;
-    if (!path || !source || !want || !isSamePath(want.file, path)) return;
-    pendingReveal = null;
-    void tick().then(() => {
-      if (projectStore.activeFilePath !== path) return;
-      editorComp?.scrollToLineCol(want.line, want.col);
-    });
-  });
-
   let consumedGotoNonce = 0;
   $effect(() => {
     const t = bennuUiStore.gotoTarget;
     if (!t || t.nonce === consumedGotoNonce) return;
     consumedGotoNonce = t.nonce;
     void tick().then(() => {
-      // ⚠️ AFTER the flush, and this is the whole of a real bug rather than tidiness. A CROSS-FILE
-      // go-to is `openFile(f)` then `requestGoto(line)`, so at the instant this effect runs
-      // `activeFilePath` may still be the file being LEFT — as the comment above already said
-      // about `editorComp`. Recording the stop before the flush therefore filed the DESTINATION's
-      // line number against the ORIGIN's path, and Back then returned to that line in the wrong
-      // file: a small line number in a big class is the top of it, which is exactly what going
-      // back felt like.
       const file = projectStore.activeFilePath;
+      if (!file) return;
       // A go-to names the place; the remembered caret must not overrule it when the buffer lands.
-      restoredCaretFor = file;
-      // THE place every panel's navigation is recorded: usages, dependencies, tests, structure,
-      // catalog, TODOs, find-in-files, build diagnostics and the editor's own go-to all reach the
-      // editor through this one relay, so one call here covers every one of them.
-      if (file) recordJump({ file, line: t.line, col: t.col });
-      // The navigation is over: its arrival has been collapsed into its destination.
-      openingFor = null;
-      // Asked for now, and asked for again if the text is not here yet — see `pendingReveal`.
-      // Both, rather than one or the other: when the buffer is already loaded this is the whole
-      // of it, and the effect above never fires; when it is not, this scrolls an empty document
-      // and the effect does the real work the moment there is a line 400 to go to.
-      if (file) pendingReveal = { file, line: t.line, col: t.col };
-      editorComp?.scrollToLineCol(t.line, t.col);
+      void goTo({ file, line: t.line, col: t.col }, true);
     });
   });
 
@@ -698,8 +602,14 @@
     // push below lands on top of the right origin.
     void tick().then(() => {
       editorComp?.scrollToByteOffset(t.offset);
+      // Recorded AFTER the move, and by line rather than by offset: a byte offset says nothing
+      // about which line it is until the editor has resolved it, and the ring holds lines. The
+      // flow is told about the resulting place as a same-file navigation, so it records the stop
+      // and swallows the caret event the scroll above already produced.
       const file = projectStore.activeFilePath;
-      if (file && editorComp) recordJump({ file, line: caretLine, col: caretCol });
+      if (file && editorComp) {
+        void goTo({ file, line: caretLine, col: caretCol }, true);
+      }
     });
   });
 
@@ -979,7 +889,9 @@
     // diagnostics are computed from the text, so reading the stale file from disk would
     // squiggle the version you already fixed. JSP checks resolve against the project
     // config on the backend and genuinely don't need it.
-    const src = isJava || /\.xml$/i.test(path) ? projectStore.sourceOf(path) : undefined;
+    const src = isJava || /\.xml$/i.test(path) || isToolConfigFile(path)
+      ? projectStore.sourceOf(path)
+      : undefined;
     let cancelled = false;
     let fullDone = false;
     // The FULL (resolver-backed) pass — the authoritative set: drives the editor squiggles AND the
@@ -2085,6 +1997,79 @@
     return first.startsWith('#!') ? 1 : 1;
   });
 
+  // ── The test arrows ──────────────────────────────────────────────────────────
+  //
+  // A ▶ beside every test class and every test case in the open file — the affordance you reach
+  // for first, and the one Bennu had nowhere except a shortcut you had to know about
+  // (Ctrl+Shift+F10) and a panel you had to open.
+  //
+  // Deliberately NOT a second glyph for Debug. The column is already shared by the run arrow and
+  // the framework marks, and a test file would grow two icons per method — twice the width for a
+  // choice that is made once in twenty presses. The arrow opens the same Run/Debug menu the entry
+  // point's arrow already opens, so it is one vocabulary rather than a new gesture.
+  //
+  // Discovered from the file on DISK, which is what `bennu_discover_tests` reads and what Maven
+  // would run: an arrow beside a `@Test` you have typed but not saved would offer to run something
+  // the runner cannot see. Re-asked on the document revision, debounced with the other per-file
+  // work, so it catches up a moment after a save.
+  let fileTests = $state<DiscoveredTest[]>([]);
+  $effect(() => {
+    const path = activePath;
+    const root = projectStore.project?.root;
+    void docRevision;
+    if (!path || !root || !isJavaFileOf(path)) {
+      fileTests = [];
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void ipcDiscoverTests(root, { file: path })
+        .then((found) => {
+          if (!cancelled && projectStore.activeFilePath === path) fileTests = found;
+        })
+        .catch(() => {});
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  /** What a test arrow on a given line runs. */
+  type TestTarget = { selector: string; method?: string; label: string; disabled: boolean };
+
+  /** Line → what its arrow runs. A class line runs the class, a case line runs the case. */
+  const testTargets = $derived.by(() => {
+    const out = new Map<number, TestTarget>();
+    for (const t of fileTests) {
+      const simple = t.selector.split('$').pop() ?? t.selector;
+      // An abstract base holds shared cases and cannot be instantiated — Surefire would refuse it,
+      // so there is nothing to press. Its METHODS are not offered either: they run as part of
+      // whatever concrete class inherits them, which is a different class from this file.
+      if (!t.is_abstract && t.methods.length > 0) {
+        out.set(t.line, { selector: t.selector, label: simple, disabled: t.disabled });
+        for (const m of t.methods) {
+          out.set(m.line, {
+            selector: t.selector,
+            method: m.name,
+            label: `${simple}.${m.name}`,
+            disabled: t.disabled || m.disabled,
+          });
+        }
+      }
+    }
+    return out;
+  });
+
+  const testGutterMarks = $derived(
+    [...testTargets.entries()].map(([line, target]) => ({
+      line,
+      glyph: '▶',
+      // A disabled test still gets an arrow, and the tooltip says why pressing it is unusual:
+      // Surefire runs what it is told and reports it skipped, which is occasionally exactly what
+      // you want to confirm. An arrow that vanished would look like the test had.
+      tooltip: target.disabled ? `Run ${target.label} (disabled — will report as skipped)` : `Run ${target.label}`,
+      className: 'cm-run-gutter',
+    })),
+  );
+
   const runGutterMarks = $derived(
     scriptRunLine
       ? [{
@@ -2109,11 +2094,14 @@
    * project marks a `main` line today; the order is stated so that the day something does, the
    * answer is decided rather than incidental.
    */
-  /** The lines the ▶ owns — a script's one line, or every `main` in a Java file. */
-  const runLines = $derived(runGutterMarks.map((m) => m.line));
+  /** The lines the ▶ owns — a script's one line, every `main`, and every test in a Java file. */
+  const runLines = $derived([...runGutterMarks, ...testGutterMarks].map((m) => m.line));
 
   const allGutterMarks = $derived([
     ...runGutterMarks,
+    // A test's arrow after an entry point's, on the rare line that is both — pressing ▶ on a
+    // `main` means run the program.
+    ...testGutterMarks.filter((m) => !runGutterMarks.some((r) => r.line === m.line)),
     ...springGutterMarks.filter((g) => !runLines.includes(g.line)),
   ]);
 
@@ -2128,6 +2116,13 @@
   function onRunGutterClick(line: number, event: MouseEvent) {
     const root = projectStore.project?.root;
     if (!root) return;
+    // A test line first: it is the more specific claim about the line, and a class that happens to
+    // declare a `main` beside its cases is still a test class when you press the arrow on a case.
+    const test = testTargets.get(line);
+    if (test) {
+      showTestRunMenu(root, test, event);
+      return;
+    }
     // A script has one way to be run and no debugger behind it, so the arrow just runs it —
     // a menu with a single entry is a click spent on nothing.
     if (activePath && isRunnableScript(activePath)) {
@@ -2166,6 +2161,28 @@
         label: simple(entry.fqcn),
         debug: what === 'debug',
       });
+    });
+  }
+
+  /**
+   * The two things you do to a test, in the menu the entry point's arrow already opens.
+   *
+   * A menu on the press rather than a second icon in the column: Debug is chosen once in twenty
+   * presses, and paying for it with a permanent second glyph beside every case in the file is the
+   * wrong trade. Right-click lands here too, so the habit works either way.
+   */
+  function showTestRunMenu(root: string, target: TestTarget, event: MouseEvent) {
+    const items: MenuItem[] = [
+      { id: 'run', label: `Run ${target.label}`, icon: Play, shortcut: 'Ctrl+Shift+F10' },
+      { id: 'debug', label: `Debug ${target.label}`, icon: Bug },
+    ];
+    bennuContextMenuStore.show(event.clientX, event.clientY, items, (id) => {
+      const debug = id === 'debug';
+      if (target.method) {
+        void bennuTestStore.runCase(root, target.selector, target.method, debug);
+      } else {
+        void bennuTestStore.runClass(root, target.selector, debug);
+      }
     });
   }
 
@@ -2700,6 +2717,7 @@
   async function runIntentionAction(o: IntentionOffer, path: string) {
     if (o.action === 'move-to-package') { await moveFileToPackage(path); return; }
     if (o.action === 'create-class') { await createMissingClass(path, o); return; }
+    if (o.action === 'create-method-in') { await createMethodInReceiver(path, o); return; }
     if (o.action === 'override-methods') { onOverride?.(); return; }
     if (o.action === 'rename-file') { await renameFileTo(path, o.replacement); return; }
     if (o.action !== 'rename-symbol' && o.action !== 'rename-symbol-preview') return;
@@ -2773,6 +2791,50 @@
       toastStore.show(`Created ${created.split('/').pop() ?? created}`, 'success');
     } catch (e) {
       toastStore.show(`Couldn't create the class: ${e}`, 'error');
+    }
+  }
+
+  /**
+   * Write a method into the class of the object it was called on (the `create-method-in`
+   * intention).
+   *
+   * The edits are addressed by file — the member, plus an import per type the target was missing —
+   * so the same `applyEdits` a rename uses writes them. The target is then opened: a method that
+   * was just created is one you are about to fill in, and leaving it invisible in another file is
+   * the half of the gesture that would have to be done by hand.
+   */
+  async function createMethodInReceiver(path: string, offer: IntentionOffer) {
+    if (!editorComp) return;
+    const source = editorComp.getValue();
+    try {
+      const edits = await createMethodIn(path, source, offer.start, offer.end);
+      if (!edits.length) {
+        toastStore.show('Nothing to create there', 'info');
+        return;
+      }
+      // An edit addressed to the file that is OPEN goes through the editor, not through the file
+      // writer — which is the same file often enough to matter: a nested class lives in its outer's
+      // source, so calling into one from the class around it targets the buffer you are standing
+      // in. Written past the editor, the document is rewritten and saved while CodeMirror's undo
+      // history knows nothing about it, so the next Ctrl+Z replays an older transaction against
+      // text that has moved underneath — which does not undo the insertion, it shreds the file.
+      const here = edits.filter((e) => isSamePath(e.file, path));
+      const elsewhere = edits.filter((e) => !isSamePath(e.file, path));
+      applyGeneratedEdits(
+        here.map((e) => ({ start: e.start, end: e.end, replacement: e.new_text })),
+      );
+      const failed = elsewhere.length ? await projectStore.applyEdits(elsewhere) : 0;
+      if (failed) {
+        toastStore.show(`Created, but ${failed} file(s) could not be written`, 'error');
+        return;
+      }
+      const target = edits[0].file;
+      // Only when it is somewhere else: opening the file you are already in would scroll you away
+      // from the call you were writing.
+      if (!isSamePath(target, path)) await projectStore.openFile(target).catch(() => {});
+      toastStore.show(`Created ${offer.replacement}() in ${baseName(target)}`, 'success');
+    } catch (e) {
+      toastStore.show(`Couldn't create the method: ${e}`, 'error');
     }
   }
 
@@ -3783,7 +3845,6 @@
     if (!isSamePath(t.file, path)) {
       // A byte offset takes its own relay, which the history does not watch — so the arrival is
       // announced the same way and the line is what the ring records.
-      openingFor = t.file;
       await projectStore.openFile(t.file);
       if (t.offset > 0) bennuUiStore.requestGotoOffset(t.offset);
       else bennuUiStore.requestGoto(t.line);
@@ -4443,6 +4504,7 @@
           lineHighlights={pausedLine}
           gutterMarks={allGutterMarks}
           onGutterClick={onGutterClick}
+          onGutterContext={onGutterClick}
           flagMarks={canBreak ? breakpointMarks : undefined}
           canFlag={canFlagLine}
           onFlagClick={onBreakpointClick}

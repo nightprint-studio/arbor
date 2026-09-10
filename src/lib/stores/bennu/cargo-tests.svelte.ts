@@ -140,8 +140,13 @@ function createCargoTestStore() {
   const pendingMessages = new Map<string, string>();
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** The backend's id for the live run. Reactive for the reason the Maven runner's is: the Run
+   *  panel asks which debug session belongs to the tab in front, and a session's id is its run's.
+   *  `cargo test` has no debugger here yet, so today the answer is always "no session" — but the
+   *  panel asks both runners the same question, and a stale `null` would be a wrong answer rather
+   *  than an absent one. */
+  let runId = $state<string | null>(null);
   // Not reactive — only the event handlers and `stop()` read these.
-  let runId: string | null = null;
   let lastScope: CargoTestScope | null = null;
   let lastRoot = '';
   let includeIgnored = false;
@@ -788,6 +793,10 @@ function createCargoTestStore() {
     get discovering() { return discovering; },
     get running() { return running; },
     get label() { return label; },
+    /** The run's id, which for a runner with a debugger is also its session's. */
+    get runId() { return runId; },
+    /** `cargo test` is not started under a debugger here — see {@link TestTreeStore.debugging}. */
+    get debugging() { return false; },
     get command() { return command; },
     get widened() { return widened; },
     /** The crate cargo is compiling right now, when it is. */

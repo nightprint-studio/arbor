@@ -4,8 +4,9 @@
 //! and flags only when the type is KNOWN and the method genuinely absent.
 //!
 //! Conservative — no false positives:
-//!   * only `receiver.method(...)` (a call with an explicit receiver) is checked; a bare `foo()` or
-//!     a static `Type.method()` (where inference yields no value type) is skipped;
+//!   * only `receiver.method(...)` (a call with an explicit receiver) is checked; a bare `foo()`
+//!     is `bare_call`'s. A **static** `Type.method()` IS checked: the receiver is read as a type
+//!     name when inference declines, which is what `Files.copy(…)` is — see `receiver_type`;
 //!   * we flag only when inference returns a type AND that type's members are known; if inference
 //!     fails or the type (or any supertype in the walk) is unknown, we stay silent;
 //!   * the member walk treats an unknown supertype as "might declare it" (returns `true`), so an
@@ -58,6 +59,45 @@ pub fn unknown_members_in(
     out
 }
 
+/// What is before the dot: the receiver as a **value**, else the written name read as a **TYPE**.
+///
+/// `files.copy(…)` and `Files.copy(…)` are the same shape and different programs. Inference
+/// answers only the first — a type name is not an expression, so it declines — and until this was
+/// shared, only the method-REFERENCE check asked the second question. A call
+/// `Type.method(…)` was therefore checked by nothing at all: a static method that does not exist
+/// was silent, and so was everything typed from its result, because a `var` bound to an
+/// unresolvable call has no type to check anything against. One missing call took a whole
+/// statement chain with it.
+///
+/// Stays conservative in the type branch the same way the rest of the module does: the name has to
+/// resolve to a type whose members are actually READABLE. A type from an un-indexed jar answers
+/// `None` and nothing is said about it.
+#[allow(clippy::too_many_arguments)]
+fn receiver_type(
+    root: &Node,
+    source: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+    receiver: &Node,
+) -> Option<bennu_java::prelude::TypeRef> {
+    if let Some(ty) = infer_node_type_cached(root, source, symbols, receiver, resolver, cache) {
+        return Some(ty);
+    }
+    let text = receiver.utf8_text(bytes).ok()?;
+    let scope = crate::resolve::enclosing_scope(*receiver, bytes, symbols);
+    let binary = bennu_java::prelude::resolve_written_type(
+        text,
+        &crate::type_scope::FileScope { symbols, resolver, scope },
+    )
+    .resolved()?;
+    resolver
+        .members_of(&binary)
+        .is_some()
+        .then(|| bennu_java::prelude::TypeRef::simple(binary))
+}
+
 /// `Qualifier::member` — flag when the qualifier's type is KNOWN and declares no such method.
 ///
 /// As conservative as [`check_call`]: an unresolved qualifier, an unknown type, or an unknown
@@ -83,21 +123,9 @@ fn check_reference(
     }
     let Ok(method) = name.utf8_text(bytes) else { return };
     // The qualifier as a VALUE (`obj::run`), else as a TYPE (`Util::create`).
-    let inferred = infer_node_type_cached(root, source, symbols, qualifier, resolver, cache)
-        .or_else(|| {
-            let text = qualifier.utf8_text(bytes).ok()?;
-            let scope = crate::resolve::enclosing_scope(*qualifier, bytes, symbols);
-            let binary = bennu_java::prelude::resolve_written_type(
-                text,
-                &crate::type_scope::FileScope { symbols, resolver, scope },
-            )
-            .resolved()?;
-            resolver
-                .members_of(&binary)
-                .is_some()
-                .then(|| bennu_java::prelude::TypeRef::simple(binary))
-        });
-    let Some(ty) = inferred else { return };
+    let Some(ty) = receiver_type(root, source, bytes, symbols, resolver, cache, qualifier) else {
+        return;
+    };
     if resolver.members_of(&ty.binary_name).is_none() {
         return;
     }
@@ -134,8 +162,8 @@ fn check_call(
     }
     let Ok(method) = name.utf8_text(bytes) else { return };
 
-    // Infer the receiver's static type from the already-located `object` node (no descendant search).
-    let Some(ty) = infer_node_type_cached(root, source, symbols, &obj, resolver, cache) else {
+    // The receiver as a VALUE, else as a TYPE — see `receiver_type`.
+    let Some(ty) = receiver_type(root, source, bytes, symbols, resolver, cache, &obj) else {
         return;
     };
     if ty.binary_name.is_empty() {

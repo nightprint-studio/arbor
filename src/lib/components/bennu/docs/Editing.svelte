@@ -23,9 +23,13 @@
     a JNI library reads as code with no server installed at all — and gains completion, hover and
     semantic colour the moment clangd, pyright, lua-language-server or gopls is.</li>
   <li><strong>TOML</strong>, <strong>RON</strong>, XML, YAML,
-    <code>.properties</code>, CSS/SCSS/LESS, JavaScript/TypeScript, shell and SQL highlight.
+    <code>.properties</code>, CSS/SCSS/LESS, JavaScript/TypeScript, shell,
+    <strong>Dockerfile</strong> and SQL highlight.
     Colour only: navigation and completion want a language server, and until one is wired those
     actions are hidden rather than offered and silent.</li>
+  <li>A <strong>Dockerfile</strong> is matched by <em>name</em>, so <code>Dockerfile</code>,
+    the <code>Dockerfile.dev</code> a project ends up with once it builds more than one image,
+    <code>api.dockerfile</code> and Podman's <code>Containerfile</code> all read the same.</li>
   <li><strong>DTD</strong> (<code>.dtd</code>, and the <code>.ent</code> / <code>.mod</code>
     fragments a large one is split into) has a mode of its own: a DTD is not XML —
     <code>&lt;!ELEMENT</code> is a malformed tag to an XML highlighter — and it is what the
@@ -57,6 +61,10 @@
   around and no markdown renderer has ever heard of: <code>dig</code>, <code>merula</code>,
   <code>wgsl</code>, <code>ron</code>. It is still the file and still an editor —
   put the caret on a line and that line shows its markup, so a typo is fixed where you found it.
+  The <strong>source</strong> view colours its fences too, from the same vocabulary — a
+  <code>bash</code>, <code>sh</code>, <code>zsh</code> or <code>console</code> block reads as
+  shell in either view, and so do <code>java</code>, <code>xml</code>, <code>yaml</code>,
+  <code>dockerfile</code> and the rest of what a project's README quotes.
   The button in the toolbar (or <em>Markdown: edit the source</em> in the Command Palette)
   switches to the code editor for when the markup itself is the work; the choice is remembered.
 </p>
@@ -249,6 +257,18 @@
   <code>rows.forEach(row: String -&gt; …)</code>. They are not part of the file: the caret can't land in one, they aren't copied with a
   selection, and no offset shifts. An argument that already says the name, a lambda, or a long
   expression is left alone.
+</p>
+<p>
+  <strong>Rest the pointer on a parameter name</strong> and it shows the type that parameter is
+  declared with — the next question after which argument this is, and the one that otherwise costs a
+  jump to the declaration.
+</p>
+<p>
+  An <strong>overloaded</strong> method still gets its names when the arguments settle which
+  overload it is: <code>addAllowedMethod("*")</code> against <code>(HttpMethod)</code> and
+  <code>(String)</code> is decided by the literal. When they do not settle it — an argument whose
+  type doesn't resolve, or a <code>null</code> that fits both — the call is left without names,
+  because a name from the wrong overload is a claim about the code that isn't true.
 </p>
 <p>
   <strong>Parameter names for a library's methods</strong> appear once that library's

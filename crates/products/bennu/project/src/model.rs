@@ -58,7 +58,7 @@ fn open_maven(root: &Path, opts: &OpenOptions) -> Result<ProjectInfo, ProjectErr
     let pom = pom::parse(&xml);
 
     let capabilities = capability::detect(root, &pom);
-    let jdk = jdk::detect(&pom, opts.jdk_override);
+    let jdk = jdk::detect(root, &pom, opts.jdk_override);
 
     Ok(ProjectInfo {
         root: root.display().to_string(),

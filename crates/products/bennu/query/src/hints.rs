@@ -26,7 +26,7 @@
 
 use bennu_java::prelude::{
     infer_node_type_cached, extract_symbols, parse_java, FileSymbols, InferCache, Member,
-    MemberKind, TypeResolver,
+    MemberKind, TypeRef, TypeResolver,
 };
 use tree_sitter::Node;
 
@@ -56,6 +56,15 @@ pub struct InlayHint {
     pub label: String,
     /// `true` when the hint belongs in front of what is at `offset` rather than behind it.
     pub before: bool,
+    /// What the hint says when the pointer rests on it — the parameter's declared type, for a
+    /// parameter-name hint. Empty when there is nothing more to say than the label already does.
+    ///
+    /// The name answers *which argument is this*; the type answers *what does it want*, which is
+    /// the next question and the one the reader currently has to open the declaration for. It is a
+    /// tooltip rather than more label text because the label is drawn inside the line: a hint that
+    /// grew to `method: String` would push the code around to say something most reads do not
+    /// need.
+    pub tooltip: String,
 }
 
 /// Where a **library** method's parameter names come from, when they can be known at all.
@@ -420,7 +429,20 @@ fn parameter_name_hints(
     // names could come from either, and a name from the wrong one is a lie about the code.
     let admitting: Vec<&Member> =
         candidates.iter().filter(|m| arity_admits(m, arg_nodes.len())).collect();
-    let [picked] = admitting.as_slice() else { return };
+    let picked = match admitting.as_slice() {
+        [only] => *only,
+        // Arity alone leaves a real gap, and it is not a rare one: `addAllowedMethod(HttpMethod)`
+        // and `addAllowedMethod(String)` both take one argument, so a whole line lost its names
+        // beside four that kept theirs — which reads as the feature being unreliable rather than
+        // careful. The arguments say which overload it is, so ask them. See [`disambiguate`].
+        many if !many.is_empty() => {
+            match disambiguate(many, &arg_nodes, root, source, symbols, resolver, cache) {
+                Some(m) => m,
+                None => return,
+            }
+        }
+        _ => return,
+    };
     let params = named_parameters(picked);
     if params.len() != arg_nodes.len() {
         return; // a varargs call, whose tail has no one name
@@ -455,8 +477,80 @@ fn parameter_name_hints(
             offset: arg.start_byte(),
             label: format!("{name}:"),
             before: true,
+            tooltip: picked
+                .params
+                .get(i)
+                .map(|p| format!("{name}: {}", render_type(p)))
+                .unwrap_or_default(),
         });
     }
+}
+
+/// The one overload of `candidates` whose parameters the written arguments fit, or `None`.
+///
+/// Only ever narrows on evidence. A parameter position rules a candidate out when the argument's
+/// type is **known**, the parameter's type is **known**, and the first is not the second nor
+/// anything below it — everything else (an argument that would not infer, a primitive, a type
+/// variable, a type the resolver cannot read) leaves the position silent, which means it neither
+/// keeps nor drops anybody. So the answer is a hint only where the code itself settles the
+/// question; two overloads that a reader would also have to think about still get nothing.
+#[allow(clippy::too_many_arguments)]
+fn disambiguate<'m>(
+    candidates: &[&'m Member],
+    args: &[Node],
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> Option<&'m Member> {
+    // Inferred once and shared: the candidates are asked about the same arguments, and inference
+    // is the expensive half.
+    let written: Vec<Option<TypeRef>> = args
+        .iter()
+        .map(|a| infer_node_type_cached(root, source, symbols, a, resolver, cache))
+        .collect();
+    if written.iter().all(Option::is_none) {
+        return None; // nothing to narrow WITH
+    }
+    let mut fitting = candidates.iter().filter(|m| {
+        m.params.len() == args.len()
+            && m.params
+                .iter()
+                .zip(written.iter())
+                .all(|(param, arg)| !rules_out(param, arg.as_ref(), resolver))
+    });
+    let first = fitting.next()?;
+    fitting.next().is_none().then_some(*first)
+}
+
+/// Whether this parameter position proves the candidate is NOT the call — see [`disambiguate`].
+fn rules_out(param: &TypeRef, arg: Option<&TypeRef>, resolver: &dyn TypeResolver) -> bool {
+    let Some(arg) = arg else { return false };
+    if param.binary_name == arg.binary_name && param.dims == arg.dims {
+        return false;
+    }
+    if param.dims != arg.dims {
+        // An array against a non-array is as clear as this gets — except against a varargs tail,
+        // which `arity_admits` may have let through, and which is not this function's to judge.
+        return param.dims > 0 && arg.dims > 0;
+    }
+    // A name with no slash is a primitive or a type variable. Boxing, widening and inference all
+    // live there, and none of them is worth reimplementing to order a tooltip.
+    if !param.binary_name.contains('/') || !arg.binary_name.contains('/') {
+        return false;
+    }
+    if param.binary_name == "java/lang/Object" {
+        return false;
+    }
+    // Only a type the resolver could actually READ can rule anything out: an unreadable one has an
+    // empty supertype chain, which is indistinguishable from having none.
+    if resolver.members_of(&arg.binary_name).is_none() {
+        return false;
+    }
+    !bennu_java::prelude::supertype_names(resolver, &arg.binary_name)
+        .iter()
+        .any(|s| *s == param.binary_name)
 }
 
 /// Whether an argument written as `text` is worth prefixing with the parameter name `name`.
@@ -535,6 +629,8 @@ fn var_type_hint(
             offset: name.end_byte(),
             label: format!(": {}", render_type(&inferred)),
             before: false,
+            // The label IS the type. A tooltip repeating it would be a hover that says nothing.
+            tooltip: String::new(),
         });
     }
 }
@@ -591,6 +687,8 @@ fn lambda_param_hints(
             offset: name.end_byte(),
             label: format!(": {}", render_type(&inferred)),
             before: false,
+            // The label IS the type.
+            tooltip: String::new(),
         });
     }
 }

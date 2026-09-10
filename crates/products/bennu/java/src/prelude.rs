@@ -45,6 +45,14 @@ pub use crate::typename::{
 
 pub use crate::import_hint::simple_type_needing_import;
 
+// What the lexical scope at a caret binds — locals, parameters, pattern variables. The other
+// direction of the inference walk: what names are there, rather than what type does this one have.
+pub use crate::scope::{caret_is_static, visible_bindings, Binding};
+
+// The type a position wants — the strongest completion signal there is, and the one that is
+// about the hole rather than about the candidate.
+pub use crate::expected::{expected_type, expected_type_at};
+
 // Static-import targets — `import static …` parsed into (owner, member) for inference + undefined-var.
 pub use crate::static_import::{static_import_targets, StaticImportTarget};
 

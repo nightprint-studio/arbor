@@ -55,6 +55,24 @@ impl Fixture {
         .unwrap();
     }
 
+    /// A **relocation**: the old coordinates publish a jarless pom whose only content is where to
+    /// go instead. Hibernate ORM 7 renamed `hibernate-jpamodelgen` to `hibernate-processor` this
+    /// way, and it read as "the jar was never downloaded" — a jar that will never exist.
+    fn install_relocation(&self, group: &str, artifact: &str, version: &str, to: &str) {
+        let d = self.dir.join("m2").join(group.replace('.', "/")).join(artifact).join(version);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join(format!("{artifact}-{version}.pom")),
+            format!(
+                "<project><groupId>{group}</groupId><artifactId>{artifact}</artifactId>\
+                 <version>{version}</version><packaging>pom</packaging>\
+                 <distributionManagement><relocation><artifactId>{to}</artifactId>\
+                 </relocation></distributionManagement></project>"
+            ),
+        )
+        .unwrap();
+    }
+
     fn repo(&self) -> LocalRepo {
         LocalRepo::at(self.dir.join("m2"))
     }
@@ -302,4 +320,38 @@ fn the_repository_layout_is_the_coordinate() {
     let resolved = repo.resolve(&coord).expect("installed");
     assert!(resolved.ends_with(Path::new("spring-web-5.3.27.jar")));
     assert_eq!(repo.latest("org.springframework", "spring-web").as_deref(), Some("5.3.27"));
+}
+
+/// The reported case: the pom still underlined `hibernate-jpamodelgen` as if its jar were missing,
+/// on a project that builds. It has not moved *away* — it has been renamed, and Maven follows the
+/// redirect. Saying "the jar was never downloaded" sends the reader to look for a file that will
+/// never exist.
+#[test]
+fn a_relocated_dependency_says_where_it_went() {
+    let f = Fixture::new("relocated");
+    f.install_relocation(
+        "org.hibernate.orm",
+        "hibernate-jpamodelgen",
+        "7.4.5.Final",
+        "hibernate-processor",
+    );
+    let source = project(&format!(
+        "<dependencies>{}</dependencies>",
+        dependency("org.hibernate.orm", "hibernate-jpamodelgen", "7.4.5.Final")
+    ));
+    let found = with_env(&f, &source, |env, doc| {
+        pom_diagnostics(env, doc)
+            .iter()
+            .find(|d| d.code == "maven-relocated-dependency")
+            .map(|d| (d.message.clone(), d.severity.clone()))
+    });
+    let (message, severity) = found.expect("reported as moved");
+    assert!(message.contains("hibernate-processor"), "names where it went: {message}");
+    // A warning, not an error: Maven follows the redirect, so this builds.
+    assert_eq!(severity, "warning", "{message}");
+    // And nothing pretends a jar is missing.
+    let missing = with_env(&f, &source, |env, doc| {
+        pom_diagnostics(env, doc).iter().any(|d| d.code == "maven-unresolved-dependency")
+    });
+    assert!(!missing, "must not also report it as unresolved");
 }

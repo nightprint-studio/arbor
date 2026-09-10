@@ -36,6 +36,9 @@ pub struct Pom {
     pub compiler_target: Option<String>,
     /// Whether a `<toolchains>` / `maven-toolchains-plugin` element is present.
     pub has_toolchains: bool,
+    /// `<packaging>` as declared — `"war"`, `"pom"`, `"ear"`. `None` means the Maven default,
+    /// `jar`, which is worth saying nothing about: it is what a module is unless it says otherwise.
+    pub packaging: Option<String>,
 }
 
 /// The trimmed text of a **direct child** of the document's root element.
@@ -178,6 +181,14 @@ pub fn parse(xml: &str) -> Pom {
 
     pom.has_toolchains =
         xml.contains("<toolchains>") || xml.contains("maven-toolchains-plugin");
+
+    // A DIRECT child of `<project>`: `<packaging>` also appears inside a dependency and inside
+    // half the plugin configurations in the wild, and reading the first one in the file would
+    // report a module as a `war` because it depends on one.
+    pom.packaging = root_child_text(xml, "packaging")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string);
 
     pom
 }

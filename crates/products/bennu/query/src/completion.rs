@@ -14,9 +14,11 @@ use bennu_java::prelude::{
     enclosing_type_binary, extract_symbols, infer_receiver_type, ClassMembers, Member, MemberKind,
     TypeRef, TypeResolver, Visibility,
 };
-use bennu_proto::prelude::CompletionItem;
+use bennu_complete::prelude::{MatchCase, Typed};
+use bennu_proto::prelude::{CompletionItem, SnippetStop};
 
 use crate::access::{same_package, same_top_level};
+use crate::member_text::render_type;
 use crate::rank;
 use crate::resolver::IndexResolver;
 
@@ -64,16 +66,23 @@ pub fn completion<M: CpMemberIndex>(
     byte_offset: usize,
     resolver: &IndexResolver<M>,
 ) -> Vec<CompletionItem> {
-    completion_in(source, byte_offset, resolver, None)
+    completion_in(source, byte_offset, resolver, None, MatchCase::default())
 }
 
 /// [`completion`], with the classpath's type-name catalog — see [`TypeNameCatalog`] for why only
 /// this entry point gets one. `None` behaves exactly like [`completion`].
+///
+/// `case` is the user's "match case" setting, which decides how strictly the typed letters have to
+/// agree with the name's — see [`MatchCase`]. It is honoured HERE rather than by filtering the
+/// answer afterwards: the humps and the case rule are one question, and a strict filter applied on
+/// top of a lenient match is how `aah` stopped reaching `addAllowedHeader` the moment the setting
+/// was turned on.
 pub fn completion_in<M: CpMemberIndex>(
     source: &str,
     byte_offset: usize,
     resolver: &IndexResolver<M>,
     catalog: Option<&dyn TypeNameCatalog>,
+    case: MatchCase,
 ) -> Vec<CompletionItem> {
     // Guard the caret before any `&source[..]` slicing below: a stale/out-of-range offset, or one
     // that (defensively) isn't a char boundary, would panic. Clamp to len, then back off to the
@@ -83,6 +92,7 @@ pub fn completion_in<M: CpMemberIndex>(
         byte_offset -= 1;
     }
     let (dot_offset, prefix) = split_prefix(source, byte_offset);
+    let typed = Typed::new(&prefix, case);
 
     // `infer_receiver_type` wants the caret immediately after the `.` (it splices a
     // parse-repair stub only when the byte there is whitespace/`}`/`)`/`;`). With a
@@ -94,6 +104,14 @@ pub fn completion_in<M: CpMemberIndex>(
     } else {
         let mut s = String::with_capacity(source.len().saturating_sub(prefix.len()));
         s.push_str(&source[..dot_offset]);
+        // `recv.pre|(args)` — correcting the name of a call that is already written, which is one
+        // of the ordinary reasons to open the popup at all. Excising the prefix outright leaves
+        // `recv.(args)`, and that is not Java: the parse fails, the receiver is never inferred,
+        // and completing an existing call came back with nothing whatsoever. A placeholder keeps
+        // the call well-formed; the receiver being read is to the LEFT of the dot either way.
+        if source[byte_offset..].starts_with('(') {
+            s.push_str(SITE_PLACEHOLDER);
+        }
         s.push_str(&source[byte_offset..]);
         s
     };
@@ -148,14 +166,18 @@ pub fn completion_in<M: CpMemberIndex>(
 
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    let ctx = rank::Context::new(source, receiver_is_type);
-    collect_members(resolver, &recv, &prefix, site.as_deref(), &ctx, &mut out, &mut seen);
+    // What the POSITION wants, read off the same repaired buffer the site came from — a caret in
+    // the middle of `String s = order.|` sits inside a declarator whose type is three words to
+    // the left, and no amount of looking at `order` finds it.
+    let expected = bennu_java::prelude::expected_type(source, byte_offset, resolver);
+    let ctx = rank::Context::new(source, receiver_is_type).expecting(expected);
+    collect_members(resolver, &recv, typed, site.as_deref(), false, &ctx, &mut out, &mut seen);
     // A nested type is a member of its outer, named `Outer.Inner` with no import — so `Outer.`
     // offers it alongside the statics. Only when the receiver IS a type: `instance.Inner` is not
     // Java. The resolver answers for PROJECT types (the index keys them by binary name); a library
     // type reports none, which the seam reads as "not read" rather than "declares none".
     if receiver_is_type {
-        collect_nested_types(resolver, catalog, &recv.binary_name, &prefix, &ctx, &mut out, &mut seen);
+        collect_nested_types(resolver, catalog, &recv.binary_name, typed, &ctx, &mut out, &mut seen);
     }
     collapse_overloads(&mut out);
     // Most relevant first (see `rank`), and — because relevance ties are common and a popup that
@@ -167,12 +189,15 @@ pub fn completion_in<M: CpMemberIndex>(
             .then(a.item.kind.cmp(&b.item.kind))
             .then(a.item.label.cmp(&b.item.label))
     });
-    out.into_iter()
+    let mut items: Vec<CompletionItem> = out
+        .into_iter()
         .map(|r| match &needs_import {
             Some(fqn) => CompletionItem { auto_import: Some(fqn.clone()), ..r.item },
             None => r.item,
         })
-        .collect()
+        .collect();
+    drop_call_syntax_if_written(&mut items, source, byte_offset);
+    items
 }
 
 /// The receiver read as a type name the file has NOT imported: `Arrays.` with no
@@ -207,7 +232,7 @@ fn collect_nested_types<M: CpMemberIndex>(
     resolver: &IndexResolver<M>,
     catalog: Option<&dyn TypeNameCatalog>,
     owner: &str,
-    prefix: &str,
+    typed: Typed<'_>,
     ctx: &rank::Context,
     out: &mut Vec<Ranked>,
     seen: &mut HashSet<String>,
@@ -217,13 +242,14 @@ fn collect_nested_types<M: CpMemberIndex>(
     let library = catalog.map(|c| c.nested_types(owner)).unwrap_or_default();
     for binary in resolver.nested_types(owner).into_iter().chain(library) {
         let Some(simple) = binary.rsplit(['/', '$']).next() else { continue };
-        if !simple.starts_with(prefix) || !seen.insert(format!("type:{simple}")) {
+        if !typed.matches(simple) || !seen.insert(format!("type:{simple}")) {
             continue;
         }
         let item = CompletionItem {
             label: simple.to_string(),
             kind: "class".to_string(),
             detail: Some(binary.replace('/', ".")),
+            owner: Some(binary.clone()),
             ..Default::default()
         };
         let score = ctx.score_nested_type(simple);
@@ -245,7 +271,7 @@ fn collect_nested_types<M: CpMemberIndex>(
 ///
 /// (This is why the fluent-accessor case the per-parameter dedup exists for is safe: a Lombok
 /// `name()` and its `name(String)` still both reach here, and the row says there are two.)
-fn collapse_overloads(out: &mut Vec<Ranked>) {
+pub(crate) fn collapse_overloads(out: &mut Vec<Ranked>) {
     let mut kept: Vec<Ranked> = Vec::with_capacity(out.len());
     // `(kind, label)` → where its row is in `kept`, and how many have folded into it so far.
     let mut at: HashMap<(String, String), (usize, usize)> = HashMap::new();
@@ -285,9 +311,9 @@ fn collapse_overloads(out: &mut Vec<Ranked>) {
 }
 
 /// A candidate and how relevant it is here, before the sort turns the pair back into a list.
-struct Ranked {
-    score: i32,
-    item: CompletionItem,
+pub(crate) struct Ranked {
+    pub(crate) score: i32,
+    pub(crate) item: CompletionItem,
 }
 
 /// The receiver read as a TYPE name — the other half of "what is before this dot".
@@ -345,7 +371,7 @@ fn written_receiver_name(source: &str, dot_offset: usize) -> Option<String> {
 
 /// Split the caret into `(dot_offset, typed_prefix)`: scan back over identifier chars;
 /// `dot_offset` is just past the `.` (or, absent a receiver, the identifier start).
-fn split_prefix(source: &str, caret: usize) -> (usize, String) {
+pub fn split_prefix(source: &str, caret: usize) -> (usize, String) {
     let bytes = source.as_bytes();
     let mut start = caret.min(source.len());
     while start > 0 {
@@ -368,11 +394,12 @@ fn split_prefix(source: &str, caret: usize) -> (usize, String) {
 /// own type — comes from the walk, which is the only thing that knows it. It is what puts a class's
 /// own methods above the ones it inherited.
 #[allow(clippy::too_many_arguments)]
-fn collect_members<M: CpMemberIndex>(
+pub(crate) fn collect_members<M: CpMemberIndex>(
     resolver: &IndexResolver<M>,
     recv: &TypeRef,
-    prefix: &str,
+    typed: Typed<'_>,
     site: Option<&str>,
+    statics_only: bool,
     ctx: &rank::Context,
     out: &mut Vec<Ranked>,
     seen: &mut HashSet<String>,
@@ -385,7 +412,9 @@ fn collect_members<M: CpMemberIndex>(
         // top-level class (a private is never inherited, so a supertype level's privates are simply
         // never shown).
         let allow_private = same_top_level(bn, site);
-        add_matching(&a.members, bn, prefix, allow_private, site, a.depth, ctx, out, seen);
+        add_matching(
+            &a.members, bn, typed, allow_private, statics_only, site, a.depth, ctx, out, seen,
+        );
         None
     });
 }
@@ -394,8 +423,9 @@ fn collect_members<M: CpMemberIndex>(
 fn add_matching(
     cm: &ClassMembers,
     declaring: &str,
-    prefix: &str,
+    typed: Typed<'_>,
     allow_private: bool,
+    statics_only: bool,
     site: Option<&str>,
     depth: usize,
     ctx: &rank::Context,
@@ -403,13 +433,19 @@ fn add_matching(
     seen: &mut HashSet<String>,
 ) {
     for m in cm.methods.iter().chain(cm.fields.iter()) {
-        if !m.name.starts_with(prefix) {
+        let Some(tier) = typed.tier(&m.name) else {
             continue;
-        }
+        };
         // A constructor and a static initialiser are members of the class file, not things you can
         // reach through a dot. `s.` used to open on eight `<init>` entries — they sort before every
         // letter, so they were the first thing the popup showed on any String.
         if m.name == "<init>" || m.name == "<clinit>" {
+            continue;
+        }
+        // A bare name written in a static context can only be a static member: `count` inside
+        // `static void main` does not compile, however visible the field is. The receiver paths
+        // never set this — through a receiver an instance member is exactly what is wanted.
+        if statics_only && !m.is_static {
             continue;
         }
         // Hide a private member from an external / cross-class receiver (the common case: a field
@@ -428,20 +464,78 @@ fn add_matching(
         if !seen.insert(dedup_key(m)) {
             continue;
         }
+        let (insert, stops) = call_syntax(m);
         out.push(Ranked {
-            score: rank::score(m, declaring, depth, ctx),
+            score: rank::score(m, declaring, depth, ctx) - rank::tier_penalty(tier),
             item: CompletionItem {
                 label: m.name.clone(),
                 kind: kind_tag(m.kind).to_string(),
                 detail: Some(render_detail(m)),
+                insert_text: insert,
+                snippet_stops: stops,
                 auto_import: None, // a member has no import to add
                 // Carried on the wire for whoever draws it (the Java popup does not yet); the
                 // ranking is what puts it last today. One answer, asked once, so the two can
                 // never disagree about which member is meant.
                 deprecated: rank::is_deprecated(m),
+                owner: Some(declaring.to_string()),
                 ..Default::default()
             },
         });
+    }
+}
+
+/// What accepting a method actually writes: `name()`, with the caret between the parentheses when
+/// there is something to pass.
+///
+/// A method is a call, and every completion that inserted only its name left the user to type the
+/// two characters that make it one — every time, on every method, which is most of what typing in
+/// an IDE is. The parentheses are the IntelliJ shape and not the LSP one on purpose: a template
+/// that fills in `name(${1:arg0}, ${2:arg1})` writes parameter names a class file does not carry,
+/// and tabbing through placeholders to delete them is slower than typing the argument.
+///
+/// A field gets nothing — `(None, empty)` means "insert the label", which is what it was.
+fn call_syntax(m: &Member) -> (Option<String>, Vec<SnippetStop>) {
+    if m.kind != MemberKind::Method {
+        return (None, Vec::new());
+    }
+    let insert = format!("{}()", m.name);
+    // One stop, between the parens, and only when there is an argument to write there. A no-arg
+    // call is finished the moment it lands, and a stop inside `()` would park the caret where
+    // nothing may be typed.
+    let stops = if m.params.is_empty() {
+        Vec::new()
+    } else {
+        let at = m.name.len() + 1;
+        vec![SnippetStop { start: at, end: at }]
+    };
+    (Some(insert), stops)
+}
+
+/// Undo [`call_syntax`] for the candidates at a caret that **already has** a call around it.
+///
+/// `list.ad|()` and `list.ad|(x, y)` are the ordinary shape of adding an argument to a call you
+/// already wrote, or of correcting the name of one. Inserting `add()` there produces `add()()`,
+/// which is the completion breaking working code — so the parentheses come off, and the item goes
+/// back to inserting its own name.
+///
+/// The test is the buffer to the right of the identifier being replaced, not of the caret: with
+/// `ad|d()` the caret is mid-word and the `(` is three characters further on. And it stops at the
+/// end of the LINE — a `(` on the next line opens a different expression, and reading across the
+/// newline would leave the parentheses off every candidate whose statement happens to be followed
+/// by a parenthesised one.
+pub(crate) fn drop_call_syntax_if_written(items: &mut [CompletionItem], source: &str, caret: usize) {
+    let rest = &source[caret.min(source.len())..];
+    let line = rest.split('\n').next().unwrap_or(rest);
+    let after = line.trim_start_matches(|c: char| c.is_alphanumeric() || c == '_' || c == '$');
+    if !after.trim_start().starts_with('(') {
+        return;
+    }
+    for item in items.iter_mut() {
+        if item.kind == "method" {
+            item.insert_text = None;
+            item.snippet_stops.clear();
+        }
     }
 }
 
@@ -467,7 +561,7 @@ fn dedup_key(m: &Member) -> String {
     key
 }
 
-fn kind_tag(k: MemberKind) -> &'static str {
+pub(crate) fn kind_tag(k: MemberKind) -> &'static str {
     match k {
         MemberKind::Method => "method",
         MemberKind::Field => "field",
@@ -475,31 +569,23 @@ fn kind_tag(k: MemberKind) -> &'static str {
 }
 
 /// A readable signature line for the completion `detail`.
-fn render_detail(m: &Member) -> String {
+/// What the popup shows to the RIGHT of a candidate's name: `(String, int) : void` for a method,
+/// the type for a field.
+///
+/// The name is deliberately not repeated. The row already opens with it — the label is the first
+/// thing on the line — so a detail that began with it again rendered as
+/// `addAllowedHeader  addAllowedHeader(String) : void`, which spends the width that the
+/// parameters and the return type were the point of showing.
+pub(crate) fn render_detail(m: &Member) -> String {
     match m.kind {
         MemberKind::Field => render_type(&m.return_type),
         MemberKind::Method => {
             let params: Vec<String> = m.params.iter().map(render_type).collect();
-            format!(
-                "{}({}) : {}",
-                m.name,
-                params.join(", "),
-                render_type(&m.return_type)
-            )
+            format!("({}) : {}", params.join(", "), render_type(&m.return_type))
         }
     }
 }
 
-/// Render a `TypeRef` to a readable simple form: `java/util/List<Foo>` → `List<Foo>`.
-fn render_type(t: &TypeRef) -> String {
-    let simple = t.binary_name.rsplit('/').next().unwrap_or(&t.binary_name);
-    if t.type_args.is_empty() {
-        simple.to_string()
-    } else {
-        let args: Vec<String> = t.type_args.iter().map(render_type).collect();
-        format!("{}<{}>", simple, args.join(", "))
-    }
-}
 
 
 #[cfg(test)]

@@ -6,7 +6,8 @@
 
 pub use crate::provider::{
     declarable_type_at, declarable_type_detail, render_type_for_source, render_type_for_source_with, Declarable, DocumentSymbol, IntelError, IntelProvider, LibraryMember, LibraryTarget,
-    Location, LspClientProvider, NativeJavaProvider, Position, ProjectMember, TextEdit,
+    CompletionOptions, Location, LspClientProvider, NativeJavaProvider, Position, ProjectMember,
+    TextEdit,
 };
 
 // The class-name index behind the "Import class" intention (simple name → importable FQNs).
@@ -103,3 +104,13 @@ pub use crate::safe_delete::{safe_delete_plan, SafeDelete};
 pub use crate::framework_entry::{entry_for_method, entry_for_type};
 pub use crate::import_census::{ImportCensus, MAX_BAND, SATURATE_AT};
 pub use crate::usage_marks::{usage_marks, UsageMark};
+
+// The accessors a class is missing, offered where they are reached for.
+pub use crate::accessor_completion::{
+    accessor_completions, generated_hint, generated_members, missing_method_completions,
+    AccessorHint,
+};
+
+// Writing a method into the class of the object it was called on — the half that is a function
+// of two strings, so it can be tested without a project.
+pub use crate::create_in::{declares_method, foreign_member_edits, TargetEdit};

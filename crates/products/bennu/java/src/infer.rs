@@ -123,6 +123,256 @@ impl InferCache {
     }
 }
 
+/// Visit every formal parameter of `scope`'s parameter list, as `(name, declared type)`.
+///
+/// One loop for the two questions a parameter list is ever asked: *what type does this one name
+/// have* ([`Ctx::param_type`], on the hot inference path) and *what names are there at all* (the
+/// scope enumeration behind [`crate::scope::visible_bindings`]). Written as a visitor rather than
+/// as a `Vec` because the first caller runs per identifier in a file and must not allocate.
+///
+/// The declared type is `Option` because a lambda may bind names without one — `(a, b) -> …` and
+/// `a -> …` are real bindings with nothing written to resolve, and a walk that skipped them would
+/// omit exactly the names the lambda introduced.
+fn each_parameter<'t>(
+    scope: &Node<'t>,
+    bytes: &[u8],
+    mut f: impl FnMut(String, Option<(Node<'t>, bool)>),
+) {
+    let Some(params) = scope.child_by_field_name("parameters") else {
+        return;
+    };
+    // `a -> …`: the single untyped parameter IS the `parameters` field, not a list holding it.
+    if params.kind() == "identifier" {
+        if let Some(name) = node_text(&params, bytes) {
+            f(name, None);
+        }
+        return;
+    }
+    let mut pw = params.walk();
+    for p in params.named_children(&mut pw) {
+        match p.kind() {
+            // A varargs parameter exposes neither a `name` nor a `type` field — see
+            // `parameter_name_node`. Asking for them returned `None`, so `OPTION... options` was
+            // invisible here and the name fell through to whatever ELSE carried it: on
+            // `NumericEntityUnescaper` that is the field `EnumSet<OPTION> options`, and every type
+            // read off the parameter was the field's.
+            "formal_parameter" | "spread_parameter" => {
+                if let Some(name) =
+                    crate::symbols::parameter_name_node(&p).and_then(|n| node_text(&n, bytes))
+                {
+                    f(name, crate::symbols::parameter_type_node(&p));
+                }
+            }
+            // `(a, b) -> …` — the children of `inferred_parameters`.
+            "identifier" => {
+                if let Some(name) = node_text(&p, bytes) {
+                    f(name, None);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The type the position at `byte_offset` **wants** — the implementation behind
+/// [`crate::expected::expected_type_at`], which is its documented public shape.
+pub(crate) fn expected_at(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    byte_offset: usize,
+    resolver: &dyn TypeResolver,
+) -> Option<TypeRef> {
+    let bytes = source.as_bytes();
+    let cache = InferCache::new();
+    let ctx = Ctx {
+        root: *root,
+        bytes,
+        resolver,
+        symbols,
+        cache: &cache,
+        depth: Cell::new(0),
+    };
+    let at = byte_offset.min(source.len());
+    // The range is one byte wide, not zero: a caret sitting exactly on a token boundary is
+    // ambiguous, and the descendant tree-sitter picks for a zero-width range there may be the
+    // token that ENDS at it rather than the one being written.
+    let node = root
+        .named_descendant_for_byte_range(at, (at + 1).min(source.len()))
+        .or_else(|| root.named_descendant_for_byte_range(at, at))?;
+
+    // Walked with the child we came from in hand, so "is the caret in the VALUE half" is a node
+    // identity rather than a range test — `x = x.foo()` has the caret in a subtree of `right`,
+    // and a range test on `left` would have to guess which side an overlapping span belongs to.
+    let mut child = node;
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        match n.kind() {
+            // `Foo f = <caret>` — the declared type, and nothing when it was written `var`: an
+            // inferred declaration wants whatever it is given, which is not a constraint.
+            "variable_declarator" => {
+                if n.child_by_field_name("value").map(|v| v.id()) == Some(child.id()) {
+                    let decl = n.parent()?;
+                    let t = decl.child_by_field_name("type")?;
+                    let text = node_text(&t, bytes)?;
+                    if is_inferred_type(&text) {
+                        return None;
+                    }
+                    return ctx.resolve_type_text(&text);
+                }
+            }
+            // `f = <caret>` — whatever the left-hand side already is.
+            "assignment_expression" => {
+                if n.child_by_field_name("right").map(|v| v.id()) == Some(child.id()) {
+                    let left = n.child_by_field_name("left")?;
+                    let enclosing = enclosing_type_fqn(&left, bytes, symbols);
+                    return ctx.infer_expr(&left, enclosing.as_deref());
+                }
+            }
+            // `return <caret>;` — the enclosing method's declared return type. A constructor and
+            // a lambda both stop the walk: neither declares one to read.
+            "return_statement" => {
+                let mut up = n.parent();
+                while let Some(m) = up {
+                    match m.kind() {
+                        "method_declaration" => {
+                            let t = m.child_by_field_name("type")?;
+                            let text = node_text(&t, bytes)?;
+                            return ctx.resolve_type_text(&text);
+                        }
+                        "lambda_expression" | "constructor_declaration" => return None,
+                        _ => {}
+                    }
+                    up = m.parent();
+                }
+                return None;
+            }
+            // A condition is a `boolean`, which is the one expected type that needs no resolving —
+            // and the one that turns a list of forty members into the four predicates on it.
+            "if_statement" | "while_statement" | "do_statement" => {
+                if n.child_by_field_name("condition").map(|v| v.id()) == Some(child.id()) {
+                    return Some(TypeRef::simple("boolean"));
+                }
+            }
+            // A method body, a lambda body or a block statement ends the search: past it the
+            // question is about a different expression entirely.
+            "block" | "method_declaration" | "class_body" => return None,
+            _ => {}
+        }
+        child = n;
+        cur = n.parent();
+    }
+    None
+}
+
+/// Every name the lexical scope at `byte_offset` binds — the enumeration behind
+/// [`crate::scope::visible_bindings`], which is its documented public shape.
+///
+/// It lives here, next to [`Ctx::resolve_local`], because the two are the same walk asked in
+/// opposite directions: one matches a name against the scope chain, the other lists what the
+/// chain holds. Sharing [`Ctx::scope_locals`] means shadowing, the enhanced-`for` variable,
+/// try-with-resources and the pattern variables are decided **once** — a second walk outside
+/// `Ctx` would be a second opinion about which of two same-named things is visible, and the one
+/// nobody tests is the one that is wrong.
+pub(crate) fn bindings_at(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    byte_offset: usize,
+    resolver: &dyn TypeResolver,
+) -> Vec<crate::scope::Binding> {
+    let bytes = source.as_bytes();
+    let cache = InferCache::new();
+    let ctx = Ctx {
+        root: *root,
+        bytes,
+        resolver,
+        symbols,
+        cache: &cache,
+        depth: Cell::new(0),
+    };
+    let at = byte_offset.min(source.len());
+    let Some(start) = root.named_descendant_for_byte_range(at, at) else {
+        return Vec::new();
+    };
+
+    // The declaration the caret is INSIDE, if any. A local is not in scope within its own
+    // initializer — `int counted = coun|` must not offer `counted` — and the scope map anchors a
+    // local at the start of its declaring STATEMENT, which is before the caret and so passes the
+    // "declared already" test. Resolution has the same anchor and wants it: `int x = x;` is an
+    // error to REPORT, not a name to hide. Only the enumeration needs this.
+    let own_decl = {
+        let mut cur = Some(start);
+        let mut found = None;
+        while let Some(n) = cur {
+            if n.kind() == "local_variable_declaration" {
+                found = Some(n.start_byte());
+                break;
+            }
+            cur = n.parent();
+        }
+        found
+    };
+
+    let mut out: Vec<crate::scope::Binding> = Vec::new();
+    // A name bound nearer the caret SHADOWS one bound further out, so the first spelling reached
+    // is the only one that is visible. Walking outwards and refusing a repeat is the shadowing
+    // rule, not a de-duplication.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut scope = Some(start);
+    let mut depth = 0usize;
+    while let Some(s) = scope {
+        if matches!(
+            s.kind(),
+            "method_declaration" | "constructor_declaration" | "lambda_expression"
+        ) {
+            let mut names: Vec<String> = Vec::new();
+            each_parameter(&s, bytes, |name, _| names.push(name));
+            // The parameter list, not the parameter: a list is short, and the distinction would
+            // only order two parameters of one method against each other.
+            let decl = s
+                .child_by_field_name("parameters")
+                .map_or_else(|| s.start_byte(), |p| p.start_byte());
+            for name in names {
+                if !seen.insert(name.clone()) {
+                    continue;
+                }
+                let ty = ctx.param_type(&s, &name);
+                out.push(crate::scope::Binding { name, is_parameter: true, depth, decl, ty });
+            }
+        }
+        // Sorted, because the map behind this is a `HashMap` and a completion list that reorders
+        // itself between two keystrokes is unusable. The caller ranks; this only has to be stable.
+        let locals = ctx.scope_locals(&s);
+        let mut names: Vec<&String> = locals.keys().collect();
+        names.sort_unstable();
+        for name in names {
+            // Declared BEFORE the caret. A local is not in scope on the line that declares it,
+            // and offering it there is offering the name being typed as a completion of itself.
+            let Some(decl) = locals[name]
+                .iter()
+                .rev()
+                .find(|d| d.start < at && Some(d.start) != own_decl)
+            else {
+                continue;
+            };
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            out.push(crate::scope::Binding {
+                name: name.clone(),
+                is_parameter: false,
+                depth,
+                decl: decl.start,
+                ty: ctx.resolve_local_ty(&decl.ty),
+            });
+        }
+        scope = s.parent();
+        depth += 1;
+    }
+    out
+}
+
 /// The methods named `name` reachable from a type's hierarchy, plus whether that hierarchy was fully
 /// known. Returned (memoized) by [`InferCache::resolve_methods`] and consumed by the resolver-backed
 /// checks — see its docs.
@@ -1736,35 +1986,24 @@ impl Ctx<'_> {
     }
 
     /// A parameter of `scope` named `name`, resolved to its declared type (`None` if `scope` has no
-    /// parameter list, or none matches). Parameters are few, so this stays a direct scan.
+    /// parameter list, none matches, or the parameter was written without a type). Parameters are
+    /// few, so this stays a direct scan.
     fn param_type(&self, scope: &Node, name: &str) -> Option<TypeRef> {
-        let params = scope.child_by_field_name("parameters")?;
-        let mut pw = params.walk();
-        for p in params.named_children(&mut pw) {
-            if !matches!(p.kind(), "formal_parameter" | "spread_parameter") {
-                continue;
+        let mut found = None;
+        each_parameter(scope, self.bytes, |pn, ty| {
+            if found.is_none() && pn == name {
+                found = Some(ty);
             }
-            // A varargs parameter exposes neither a `name` nor a `type` field — see
-            // `parameter_name_node`. Asking for them returned `None`, so `OPTION... options` was
-            // invisible here and the name fell through to whatever ELSE carried it: on
-            // `NumericEntityUnescaper` that is the field `EnumSet<OPTION> options`, and every type
-            // read off the parameter was the field's.
-            let matches = crate::symbols::parameter_name_node(&p)
-                .and_then(|n| node_text(&n, self.bytes))
-                .is_some_and(|pn| pn == name);
-            if matches {
-                let (type_node, varargs) = crate::symbols::parameter_type_node(&p)?;
-                let text = node_text(&type_node, self.bytes)?;
-                let resolved = self.resolve_type_text(&text)?;
-                // `T... xs` IS a `T[]` inside the body — the one place the written text and the
-                // parameter's real type differ.
-                return Some(match varargs {
-                    true => resolved.clone().arrayed(resolved.dims.saturating_add(1)),
-                    false => resolved,
-                });
-            }
-        }
-        None
+        });
+        let (type_node, varargs) = found??;
+        let text = node_text(&type_node, self.bytes)?;
+        let resolved = self.resolve_type_text(&text)?;
+        // `T... xs` IS a `T[]` inside the body — the one place the written text and the
+        // parameter's real type differ.
+        Some(match varargs {
+            true => resolved.clone().arrayed(resolved.dims.saturating_add(1)),
+            false => resolved,
+        })
     }
 
     /// The local declarations directly in `scope` (name → its declarations in source order), built

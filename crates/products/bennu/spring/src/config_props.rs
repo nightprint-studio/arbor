@@ -236,6 +236,17 @@ mod tests {
         p
     }
 
+    /// A `record` is how a modern Spring Boot project writes a properties class, and its
+    /// components ARE its fields. A `List<String>` component binds the whole list under one key.
+    #[test]
+    fn a_record_component_binds_a_key() {
+        let u = unit(
+            "CorsProps",
+            "package p;\n@ConfigurationProperties(prefix = \"app.pa-gateway.cors\")\npublic record CorsProps(java.util.List<String> allowedOrigins) {}\n",
+        );
+        assert_eq!(paths(&[u]), vec!["app.pa-gateway.cors.allowed-origins"]);
+    }
+
     #[test]
     fn a_flat_root_prefixes_its_fields() {
         let p = paths(&[unit(

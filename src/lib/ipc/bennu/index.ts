@@ -21,6 +21,7 @@ import type {
   BuildResult, ProjectValidationResult, RunHandle, WriteResult, ClassEntry, TodoItem, IndexStats,
   FileDiagnostics, FileStamp, MainClassEntry, RunConfigSetDto, SourceEdit,
 } from '$lib/types/bennu';
+import type { HoverInfo } from './nav';
 
 /** Open a Java project folder: resolve the build model (modules / JDK) + capabilities.
  *
@@ -133,10 +134,86 @@ export function capabilities(root: string): Promise<CapabilitySet> {
 
 /** Completion candidates at a source offset (UTF-8 byte offset). Pass the live buffer `source`: the
  *  `offset` is in its coordinates and the just-typed `.` that triggers member completion is unsaved,
- *  so the backend must parse this text, not the stale on-disk file. Wire: `bennu_completion` —
- *  `CompletionArgs { file, offset, source }`. Returns `[]` until the language service is ready. */
-export function completion(file: string, offset: number, source: string): Promise<CompletionItem[]> {
-  return bennu('bennu_completion', { args: { file, offset, source } });
+ *  so the backend must parse this text, not the stale on-disk file.
+ *
+ *  `caseSensitive` is the editor's match-case setting, sent with the request rather than applied to
+ *  the answer: the case rule and the camel humps are one question, and a strict filter over a
+ *  lenient match is how `aah` stopped reaching `addAllowedHeader` the moment it was turned on.
+ *
+ *  Wire: `bennu_completion` — `CompletionArgs { file, offset, source, case_sensitive }`. Returns
+ *  `[]` until the language service is ready. */
+export function completion(
+  file: string,
+  offset: number,
+  source: string,
+  caseSensitive = false,
+): Promise<CompletionItem[]> {
+  return bennu('bennu_completion', { args: { file, offset, source, case_sensitive: caseSensitive } });
+}
+
+/** The documentation card for ONE completion candidate — what the popup's info panel shows for the
+ *  row the user has highlighted.
+ *
+ *  Lazy on purpose: a member list for a busy receiver is hundreds of candidates and a library's
+ *  Javadoc is read out of a `-sources.jar` on disk, so resolving all of them to draw one panel
+ *  would put an archive read per candidate on the keystroke that opened the popup. `file` locates
+ *  the PROJECT (which index, which dependency jars), not the symbol.
+ *
+ *  Wire: `bennu_completion_doc` — `{ file, owner, member, is_field }`. */
+export function completionDoc(
+  file: string,
+  owner: string,
+  member: string | null,
+  isField: boolean,
+): Promise<HoverInfo | null> {
+  return bennu('bennu_completion_doc', { args: { file, owner, member, is_field: isField } });
+}
+
+/** Tell the backend which candidate was accepted, so the next list in the same place offers it
+ *  first ("frecency" — see `bennu-query`'s `picked` module). Fire-and-forget: a ranking hint that
+ *  fails is a list in a slightly worse order, and nothing about accepting a completion should be
+ *  able to fail visibly because of it.
+ *
+ *  `kind` rides along because a candidate that is not a member has no declaring type to be
+ *  remembered under, and `owner` for a type name is the type ITSELF — a context nothing ever asks
+ *  about again. The backend files those under the kind of hole they came out of instead.
+ *
+ *  Wire: `bennu_completion_accepted` — `{ owner, label, kind }`. */
+export function completionAccepted(
+  owner: string | null,
+  label: string,
+  kind: string | null = null,
+): Promise<void> {
+  return bennu('bennu_completion_accepted', { args: { owner, label, kind } });
+}
+
+/** The member the caret is certainly writing — the ghost text drawn ahead of it. */
+export interface GenerateHint {
+  /** The greyed text. Shown, never necessarily written. */
+  preview: string;
+  /** The member accepting writes. */
+  insert: string;
+  /** The byte range accepting replaces — the half-written name. */
+  replace_start: number;
+  replace_end: number;
+}
+
+/** The accessor the caret is certainly writing, or `null` — which is the ordinary answer.
+ *
+ *  Answers only when EXACTLY one candidate matches: ghost text sits inline, where it reads like
+ *  text that is already there, so being wrong costs trust rather than a keystroke. Needs no index
+ *  — everything it reads is in the buffer — so it works while a project is still building.
+ *
+ *  Wire: `bennu_generate_hint` — `{ file, source, offset, case_sensitive }`. */
+export function generateHint(
+  file: string,
+  source: string,
+  offset: number,
+  caseSensitive = false,
+): Promise<GenerateHint | null> {
+  return bennu('bennu_generate_hint', {
+    args: { file, source, offset, case_sensitive: caseSensitive },
+  });
 }
 
 /** A ready import edit (byte range + replacement) for auto-import on completion accept. */

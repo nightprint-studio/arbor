@@ -102,6 +102,8 @@ export interface TestRunHandle {
   label: string;
   /** Set when the selection was too big for one command line and the run was widened. */
   widened: string | null;
+  /** Whether the run is under the debugger — the forked test JVM dialled back and suspended. */
+  debugging?: boolean;
 }
 
 /** Maven's own tally, read off the console — a cross-check against the reports. */

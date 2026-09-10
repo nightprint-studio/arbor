@@ -119,8 +119,14 @@ export const markupCompletionSource = async (
  *  what every name completion wants. A candidate that carries its own range gets an explicit edit
  *  instead, because the range is the answer: it may start before `from` (filling in an empty
  *  `<groupId>` above the `<artifactId>` being typed) or end after the caret (replacing the rest of
- *  a value that was already there). */
-function applyOf(
+ *  a value that was already there).
+ *
+ *  Exported because the rule is about the **contract**, not about markup: any `ExtCompletionItem`
+ *  may carry a range, and a second copy of this would be a second place for a backend that starts
+ *  sending one to be quietly ignored. `config-props-lang.ts` uses it for exactly that reason —
+ *  a `clear lombok.accessors.prefix` line has its key starting after the verb, which no generic
+ *  token rule would find. */
+export function applyOf(
   it: ExtCompletionItem,
   b2u: (byte: number) => number,
 ): ((view: EditorView, completion: unknown, from: number, to: number) => void) | undefined {

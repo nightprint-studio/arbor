@@ -7,17 +7,99 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- **`lombok.config` and `junit-platform.properties` are understood, not just displayed.** Completion over the documented keys with their types and defaults, hover with the prose and the release each one arrived in, ghost text where the answer is certain, and squiggles for a deprecated key or a value outside a closed set. Both files get an icon of their own in the project tree.
+
+- **Those two files are gated on the version the project actually resolves.** The keys offered are the ones your Lombok or JUnit has — on JUnit 5.2 there is no parallel-execution block, because it arrived in 5.3 — and a key already in the file that your version silently ignores is flagged where it is written. When the version cannot be resolved, everything is offered.
+
+### Fixed
+
+- **Debugging a test showed no debugger.** The session started, the breakpoint was hit and the JVM stopped — but the Run panel's test tab had no transport controls and no frames or variables, because it looked up the debug session by the *program* run in front of it and a test run is not one. It now shows the stack, the variables and the step buttons in the same places a debugged program does, and the tab comes forward when a test stops.
+
+- **Stopping a debugged test left the debugger running.** The tests run in a JVM Maven *forks*, so killing Maven left it alive and suspended: the current line stayed highlighted, the activity bar kept its paused dot, and Stop had visibly done nothing. Stopping now takes the whole process group, on every platform.
+
+- **A Dockerfile had an icon and no colouring.** `Dockerfile`, `Dockerfile.dev`, `api.dockerfile` and Podman's `Containerfile` now highlight; `Dockerfile.dev` also stops borrowing the icon of an unrelated `.dev` format.
+
+- **Fenced code in a Markdown source view was plain grey.** A README read as source now colours its `bash`, `java`, `xml`, `yaml`, `dockerfile` and `sql` blocks like the rendered view does — and both views now recognise `console`, `shell-session` and `terminal` as shell.
+
+- **A ▶ beside every test class and every test case in the editor.** Pressing it opens the same Run / Debug menu the entry-point arrow already opens — one glyph, not two, because Debug is chosen once in twenty presses and a second permanent icon beside every method is the wrong trade for that. Right-click on the arrow does the same. Java files; discovered from the file on disk, which is what the runner would actually run.
+
+- **Tests can be run under the debugger.** A bug icon beside every ▷ in the Tests panel: the forked test JVM dials back to Bennu and suspends until it arrives, so the breakpoints already in the buffer are honoured with nothing to attach and no port to pick. Refused with an explanation on a project that sets `forkCount=0`, where the tests run inside Maven's own JVM and there is no fork to debug.
+
+- **A renamed dependency read as a missing one.** `org.hibernate.orm:hibernate-jpamodelgen` was reported as absent from the local repository on a project that builds: ORM 7 renamed it `hibernate-processor`, and the old coordinates publish a jarless *relocation* pom saying so. Maven follows that; Bennu looked for a jar that will never exist and named an artifact no download could have fixed. Relocations are followed now, and an artifact whose own pom is `<packaging>pom</packaging>` is no longer expected to have a jar at all. In the pom editor the dependency is marked as **moved**, naming the new coordinates, instead of as missing.
+
+- **One build, two "dependencies changed" popups.** A `mvn clean install` writes each module's jar into the local repository over tens of seconds, and every watcher tick inside that window counted as a change — a full classpath reload each time, with the popup as the visible half. The jar stamp now has to hold still for one interval before anything reacts, which is the settle rule the pom watcher already used.
+
+- **Running one test could run the whole suite.** A pom that pins `<test>` on the Surefire plugin makes the selection inert: Maven gives a value written in the pom precedence over the `-Dtest` that names it, so the choice was read and discarded in silence. When the pom writes it as a property — any property, not only `${test}` — that property is now set instead, so the pom keeps the suite as the default for a plain `mvn test` and a run started here still gets the class or case you picked. A literal value cannot be steered by any command line: the Tests panel now carries a fixed warning above the tree saying every ▷ in it will run the pinned value, rather than leaving you to find that out from a run.
+
+- **A multi-module project took its Java level from the aggregator alone.** An aggregator pom usually declares no level — it exists to list `<modules>` — so a reactor whose modules all say 21 read as *unknown*, the backend fell back to Java 8, and records were reported as a syntax error on code that compiles. The modules are read now, and the highest level any of them declares is the project's.
+
+- **The Java level follows the module you're in.** A reactor part-way through a migration has one module on 21 and another still on 8; the validator and the postfix templates now ask the open file's own module, and the status bar names it. The index and the classpath are still one JDK — there is one `rt.jar` in an index — but whether a syntax exists yet is a question about the file in front of you.
+
+- **A Maven POM that can't be read is no longer reported as a missing jar.** "Non-resolvable parent POM" means Maven never got as far as resolving anything, so naming one artifact sent you after something that was never the problem. It now says so, and still carries Maven's own words.
+
+- **The annotation popup only had real answers from the third character.** `@S` and `@Su` offered nothing — so the editor fell back to scanning the buffer for similar-looking words — and `@Sup` finally offered `SuppressWarnings`. The sweep behind the `@` looked at a fixed number of names and filtered *those* down to the annotations, and the JDK alone has more classes beginning with `S` than the sweep ever reached. What is capped is now how many annotations are offered, not how many names are looked at on the way to them.
+
+- **A member that doesn't parse no longer silences the whole file.** One half-typed method used to take every check in the file with it — including the nested classes below it — which is exactly the keystroke where the checks are worth the most. The error is now charged to the member it landed in: that member reports its syntax error and nothing else, and the rest of the file is validated as if it were whole. An error no member can be blamed for (an unbalanced brace at class level) still gives up the file.
+
+- **Undo after "create method" could shred the file.** When the method landed in the file you were already editing — which is what happens for a nested class, since it lives in its outer's source — the edit was written past the editor and saved, leaving CodeMirror's undo history describing text that had moved underneath it. The edit now goes through the editor, so Ctrl+Z undoes it like anything else.
+
+- **Completing the name of a call that was already written answered nothing.** `list.ad|(x)` — correcting a method name in place — left the receiver unparseable, so no candidates were offered at all.
+
 ### Removed
 
 - **Cloud storage is no longer part of Arbor.** The panel is a plugin and the stores are reached by sandboxed provider packages, so the built-in implementation — object-storage operators, transfers, the Google sign-in, twenty-two internal handlers — is gone, along with the browser-side chunk-order and download-progress dialogs. Installing the `cloud-storage` package (with a provider, e.g. `cloud-gcs`) restores the panel, in any product that hosts plugins.
 
 ### Added
 
+- **Test files are marked in the editor's tab strip**, in the green the project tree already gives a test root — a quiet left edge, so a strip of tests does not read as a strip of warnings.
+
+- **A module or crate row in the project tree says what it compiles at.** `JDK 21`, `JDK 21 · war`, `Rust 2024 · bin`, with the artifactId beside it when it differs from the folder name — the language level is the one property that varies between siblings of the same reactor and that nothing else on screen showed. The tooltip carries the artifact id, the packaging and where the level came from.
+
+- **A method a nested class is asked for from outside is offered inside it.** `c.randomico("ciao")` written in the outer class, on an instance of the inner one, now offers `randomico` when you type `ra` in the inner class's body — public, with the signature the call specified. Only calls whose receiver actually resolves to the class you're standing in count.
+
+- **Parameter-name hints survive an overloaded method.** `addAllowedMethod("*")` lost its name because a second `addAllowedMethod(HttpMethod)` also takes one argument, leaving four sibling calls hinted and that one bare. The written arguments now settle which overload it is; when they genuinely don't — an argument whose type doesn't resolve, a `null` that fits both — the call is still left alone.
+
+- **Resting the pointer on a parameter-name hint shows the parameter's declared type.**
+
+- **The annotations you pick are offered ahead of the ones you don't.** The same short-term memory member completion has, keyed to the `@`: package distance and the project's import counts cannot tell an annotation you write every day from one you have never written, because both are equally far away. Session-scoped, and never able to outrank an import the file has already made.
+
+- **The camel humps reach everything, not only class names.** `s.tolc` finds `toLowerCase`, `list.aAE` finds `addAllElements`, `MAXV` finds `MAX_VALUE` — one matching rule for members, locals, static imports and types, applied where the candidates are found rather than to the answer afterwards. *Case-sensitive matching* now means what it says: every typed letter has to agree, humps included, instead of switching the humps off.
+
+- **The method a class calls and does not declare is offered where it goes.** Write `randomico()` in a method, type `rand` in the class body, and the popup offers to declare it — with the signature the call already specified. Read from the parse tree rather than from the diagnostic, so it survives being typed: a half-written name stops the file validating, which is exactly the keystroke where the offer is wanted.
+
+- **A nested type that does not exist is now reported.** `Cfg.MyProva` where `Cfg` declares no `MyProva` was silent: the whole dotted name is one node in the parse, and such a name was left alone wholesale — right for `com.acme.Foo`, wrong for the ordinary way of naming a nested class from outside. Judged only when the qualifier is a type this project declares, so package-qualified names and a library's `Map.Entry` are untouched.
+
+- **A static call to a method that does not exist is now reported.** `Tipo.metodo()` was checked by nothing at all — the unknown-member check only ever looked at a receiver it could infer as a *value* — and because a `var` bound to an unresolvable call has no type, every call made on the result went unchecked after it. One missing method took a whole statement chain with it. Measured at zero false positives over 629 files of Apache Commons Lang, as was the nested-type check above.
+
+- **A nested type completed by its simple name is written through its outer.** Accepting `MyProva` writes `ConfigurazioneCors.MyProva` and imports the outer class; `MyProva` alone does not compile, and the import offered beside it named something not importable by that name. Nothing is added where the simple name is already in scope.
+
+- **The accessors a class is missing are offered where they are reached for.** Typing `getCust` in a class body offers `getCustomer()` and writes the whole method — getter, setter, and the chaining `withCustomer(…)`. Offered only at a member position, only for a field that has no accessor already; a `final` field gets a getter and nothing else. While the popup is open the grey text at the caret previews the highlighted row's signature on one line, following the arrow keys; with the popup closed the proposal stands on its own, drawn in full, and Tab writes it.
+
+- **Create method now crosses a file.** `order.total(label)` where `Order` has no `total` writes it into `Order.java`, with the imports the signature needs, and opens it. It used to refuse and tell you to go and write it yourself.
+
+- **A name with nothing to its left now completes.** Typing `ord` meaning the local `order` reached no index at all — what appeared came from scanning the buffer for similar-looking words. The popup now offers what the scope actually binds (locals, parameters, lambda and `catch` bindings, pattern variables), the enclosing type's own and inherited members, and whatever an `import static` brought in, ordered by how near each is to the caret. An instance member is not offered inside a `static` method, and a local is not offered inside its own declaration.
+
+- **Completion ranks by the type the position wants.** `String name = order.` puts the members that return a `String` first and sinks the ones returning `void`; a condition puts the predicates first. Read from a declaration, an assignment, a `return` and an `if`/`while` — the strongest signal there is, and the only one about the hole rather than the candidate.
+
+- **Completion remembers what you picked.** Accepting a candidate makes it come first the next time you reach into the same type — frequency and recency both counting, so a fresh choice can overtake an old habit and one stray pick cannot bury a name you use constantly. Session-scoped; nothing is written to disk.
+
+- **Accepting a method writes the call.** `size()`, not `size`, with the caret between the parentheses when there is an argument to pass — which is where the parameter hints strip then describes it. A call that is already written keeps its own parentheses instead of getting a second pair.
+
+- **The completion popup says where each candidate comes from, and documents the one you are on.** The row is now four columns — kind, name, signature, and the declaring type at the right edge, which is what tells `List.of` from `Set.of`. The highlighted row's Javadoc appears beside the list, rendered by the same card the hover tooltip uses.
+
 - **A Javadoc is rendered instead of printed.** A doc comment is HTML, and flattening it produced the worst of both — `<h3>Overview</h3>` and `&#064;Bean` sitting in the middle of a sentence. Headings are now headings, `<pre>` examples are code blocks, lists are lists, entities are the characters they name, and `{@link}` reads as what it points at. Angle brackets that are not markup — `Vec<T>`, `Map<K, V>` — are left exactly as written.
 
 - **Go to class now reaches the JDK.** Searching outside the project covered the dependency jars and stopped there, which left out the largest dependency every Java project has: `List`, `Optional`, `Path`, `Thread`. They open the way everything else does, on the real source from the JDK's own `src.zip`. Files are unchanged — from Java 9 the JDK is one image file, with nothing in it a reader would recognise as a file to open.
 
 - **A class written as a string is treated as the class it names.** `@ConditionalOnClass(name = "com.zaxxer.hikari.HikariDataSource")` writes a type as text because the type may be absent at compile time — so Java sees an opaque string, and a typo in it silently turns the condition off for ever. It is now coloured as a type, completed from the classpath as you type it, and Ctrl+B opens it: the project's own source when it declares it, the decompiled view otherwise. Same for `@ConditionalOnMissingClass`.
+
+- **A yaml key whose value is a list did not exist at all.** The reader skipped a sequence *and the key above it*, so `cors:` → `allowed-origins:` → a list of scalars produced no entry: no hover, no usage count, and nothing for a go-to to land on — while every scalar beside it worked. A sequence is now read as a **value**, and the key above it is a key, which is what Spring binds a `List`, a `Set` or an array to. The items are still not keys of their own: `servers[0].url` is not written `servers.url`, and inventing it would be worse than missing it.
+
+- **A map's entries showed no reader.** A `Map<String, Client>` under `app.clients` records one usage standing for every client — `app.clients.<key>.url` — and an exact key comparison matched none of the real lines, which are exactly the lines a map exists to hold. `app.clients.acme.url` now finds it.
+
+- **A `@ConfigurationProperties(prefix = "…")` is configuration, and now looks and behaves like it.** Coloured as a key, hovering says which property files declare anything under it — a prefix that matches nothing is a class binding defaults for ever, and it used to look exactly like one that works — and Ctrl+B opens the block it names, one entry per file. Relaxed binding is honoured in both directions, so a `prefix = "app.httpClient"` finds an `http-client:` in the yaml.
 
 - **A bean written as a plain string is coloured as a bean.** `@Qualifier("fast")`, `@DependsOn("audit")`, `@Resource(name = "ds")` — all three already followed to their declaration, and none of them looked like they would.
 
@@ -64,6 +146,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ### Fixed
 
 - **Back and Forward returned you to the top of the class.** Every tab remembers its cursor, its scroll and its undo history, and that snapshot was filed under *the file the editor is showing now* — but the last snapshot a tab produces is the one it emits as it is being torn down, and it is torn down precisely because the active file has already become the next one. So the tab you were leaving wrote its position over the tab you were entering, and returning to a file restored whatever stale entry it still had, usually the one from when it was first opened. The editor now says which document a snapshot belongs to.
+
+- **Ctrl+click navigated away from a place it never marked.** The click is prevented — it has to be, or the browser starts a selection — so the caret never moved to the token you clicked, and the place the history recorded as "where you were" was wherever the caret happened to be: the last line you typed on, or the top of the file if you had only scrolled. Ctrl+click now puts the caret on the token first, and a navigation marks where it is leaving from as its own first act, rather than relying on a caret event having happened at some point.
+
+- **A navigation could set the caret without moving the view, or move the view without keeping the caret.** A request is not a result, and it is not one twice over: an editor that has just been created has not been measured, so a scroll computes against a viewport with no height and moves nothing; and a selection dispatched afterwards by anything else — a view state restored on mount, a remembered caret placed a tick late — silently wins. Neither is visible from the other, so a landing is now confirmed on **both** and asked for again until they agree.
+
+- **Back and Forward were rebuilt as one operation instead of five pieces of state guessing at each other.** A jump is a tab becoming active, a text arriving, an editor mounting, a layout, a scroll — and the history has to record one stop out of that. It used to work out afterwards which caret events belonged to the navigation, which is why every fix produced the next failure: Back landing at the top of the class, the caret right with the viewport wrong, a forward branch vanishing. A navigation now has an identity and owns its own transit: it waits for a buffer that can hold the line, scrolls once, and records where the caret actually landed. The mechanism is a module of its own with unit tests, one per failure.
 
 - **A navigation into a file whose text had not arrived yet landed at the top.** A tab becomes active before its content is fetched, so the jump scrolled an empty document, where every line clamps to line 1 — and nothing could tell that apart from a jump to line 1 that worked. The line asked for is now remembered until there is a buffer that can hold it.
 

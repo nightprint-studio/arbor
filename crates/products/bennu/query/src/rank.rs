@@ -46,7 +46,7 @@
 
 use std::collections::HashMap;
 
-use bennu_java::prelude::{Member, MemberKind, Visibility};
+use bennu_java::prelude::{Member, MemberKind, TypeRef, Visibility};
 
 /// The binary name whose members match everything and are wanted almost never.
 const OBJECT: &str = "java/lang/Object";
@@ -63,6 +63,14 @@ pub struct Context {
     pub receiver_is_type: bool,
     /// Identifier → how many times it appears in the buffer being edited. See the module docs.
     pub uses: HashMap<String, usize>,
+    /// The type this position **wants** — the binary name of what an assignment target, a
+    /// `return` or a condition constrains the hole to. `None` when the position constrains
+    /// nothing, which is most of them.
+    ///
+    /// The strongest signal there is, and the only one that is about the hole rather than about
+    /// the candidate: `String name = order.|` has forty members to offer and a handful that can
+    /// be written there at all.
+    pub expected: Option<TypeRef>,
 }
 
 impl Context {
@@ -92,8 +100,52 @@ impl Context {
                 i += 1;
             }
         }
-        Self { receiver_is_type, uses }
+        Self { receiver_is_type, uses, expected: None }
     }
+
+    /// Tell the ranking what type the position wants — see [`Context::expected`].
+    ///
+    /// Builder-style because it arrives from a different question than the buffer does: the
+    /// expected type is a walk up the tree from the caret, and half the call sites have nothing
+    /// to say. `None` is not a neutral value to thread through them, it is the answer.
+    pub fn expecting(mut self, expected: Option<TypeRef>) -> Self {
+        self.expected = expected;
+        self
+    }
+
+    /// Whether `produced` is what the position wants.
+    ///
+    /// Compared by **name**, with the primitive/boxed pairs treated as one — Java's own
+    /// autoboxing, and the difference between `int n = order.getCount()` ranking the `Integer`
+    /// getter first or not at all.
+    ///
+    /// Not assignability: a method returning `ArrayList` does not match an expected `List`. The
+    /// real rule is a hierarchy walk *per candidate*, on every keystroke, for a term that only
+    /// moves an item up a list. A missed match costs a place, never an answer.
+    fn wants(&self, produced: &TypeRef) -> bool {
+        let Some(expected) = &self.expected else {
+            return false;
+        };
+        expected.dims == produced.dims && boxes_to(&expected.binary_name, &produced.binary_name)
+    }
+}
+
+/// Whether two type names are the same type, counting a primitive and its box as one.
+fn boxes_to(a: &str, b: &str) -> bool {
+    const PAIRS: &[(&str, &str)] = &[
+        ("int", "java/lang/Integer"),
+        ("long", "java/lang/Long"),
+        ("double", "java/lang/Double"),
+        ("float", "java/lang/Float"),
+        ("boolean", "java/lang/Boolean"),
+        ("char", "java/lang/Character"),
+        ("byte", "java/lang/Byte"),
+        ("short", "java/lang/Short"),
+    ];
+    a == b || PAIRS.iter().any(|(p, boxed)| (a == *p && b == *boxed) || (a == *boxed && b == *p))
+}
+
+impl Context {
 
     /// How relevant a NESTED TYPE of the receiver is — `Outer.Inner`.
     ///
@@ -108,6 +160,66 @@ impl Context {
         }
         s
     }
+}
+
+/// What a weaker match costs.
+///
+/// The tier is a ranking input as much as a filter: `s.to` should offer `toString` above
+/// `toLowerCase` even though the humps reach both, because one of them is what was literally
+/// typed. Weighted below the position's expected type — being *possible here* matters more than
+/// being spelled the way you started — and above everything that is merely a habit.
+pub fn tier_penalty(tier: u8) -> i32 {
+    i32::from(tier) * 14
+}
+
+/// The relevance **bands** a bare-identifier completion is ordered in.
+///
+/// A member list is one kind of thing ranked against itself, and [`score`] is enough. A bare name
+/// is not: the local declared two lines up, an inherited method, a statically-imported constant
+/// and a class on the classpath are four different categories, and they do not compete on any
+/// shared axis. What actually decides between them is how far the name is from the caret — so the
+/// category is ranked first and [`score`] orders within it.
+///
+/// The gaps are wide enough that nothing inside a band can climb out of it. That is the point: a
+/// field used forty times in this file must not outrank the variable you just declared.
+pub mod band {
+    /// A local, a parameter, a pattern variable — bound by the scope the caret is standing in.
+    pub const BINDING: i32 = 400;
+    /// A field or method of the enclosing type, its supertypes included.
+    pub const OWN_MEMBER: i32 = 200;
+    /// A member reached through an `import static`.
+    pub const STATIC_IMPORT: i32 = 100;
+}
+
+/// How relevant a lexically-bound name is at the caret — see [`band::BINDING`].
+///
+/// `depth` and `distance` say the same thing at two scales and both are needed. Depth separates
+/// the scopes: a variable in this `if` block beats a parameter of the method around it. Distance
+/// separates names *within* one scope, where depth cannot tell them apart at all — three locals
+/// declared in the same block are equally deep, and the one on the line above is the one being
+/// reached for.
+pub fn score_binding(
+    name: &str,
+    is_parameter: bool,
+    depth: usize,
+    distance: usize,
+    ctx: &Context,
+) -> i32 {
+    let mut s = band::BINDING;
+    s -= (depth as i32 * 4).min(60);
+    // Bounded, and coarse on purpose: this is meant to order the locals of one block, not to make
+    // the top of a long method unreachable.
+    s -= (distance / 160).min(20) as i32;
+    // What the method was handed. At the top of a body, before anything has been declared, it is
+    // almost always what is being reached for — and the depth term alone puts it below every
+    // local, however far above the caret that local was declared.
+    if is_parameter {
+        s += 6;
+    }
+    if let Some(n) = ctx.uses.get(name) {
+        s += 6 * (*n).min(MAX_COUNTED_USES) as i32;
+    }
+    s
 }
 
 /// How relevant `m` is, where `declaring` is the binary that declares it and `depth` is how many
@@ -151,10 +263,26 @@ pub fn score(m: &Member, declaring: &str, depth: usize, ctx: &Context) -> i32 {
         s -= 8;
     }
 
+    // What the POSITION wants. The strongest term here, and deliberately so: after `String s =`
+    // the members that return a `String` are not merely more likely, they are the only ones that
+    // can be written. Still a ranking term and not a filter — the match is by name, so a genuine
+    // subtype is a miss, and hiding on a miss would hide the right answer.
+    if ctx.wants(&m.return_type) {
+        s += 40;
+    } else if ctx.expected.is_some() && m.return_type.binary_name == "void" {
+        // `String s = list.clear()` does not compile. Nothing else about `clear` says so.
+        s -= 20;
+    }
+
     // Something this file already says. Weak on its own, decisive between equals.
     if let Some(n) = ctx.uses.get(&m.name) {
         s += 6 * (*n).min(MAX_COUNTED_USES) as i32;
     }
+
+    // What you picked here last time. Deliberately weaker than the expected type — the position
+    // constrains what compiles, and a habit only says what is likely — and stronger than the
+    // buffer's own use count, which is the same signal read off a worse source.
+    s += crate::picked::weight(declaring, &m.name);
 
     // A member you cannot see from anywhere else is, where it IS offered, usually your own.
     if m.visibility == Visibility::Private {
@@ -179,14 +307,13 @@ pub fn is_deprecated(m: &Member) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bennu_java::prelude::TypeRef;
 
     fn method(name: &str) -> Member {
         Member::method(name, TypeRef::simple("void"), Vec::new())
     }
 
     fn ctx(receiver_is_type: bool) -> Context {
-        Context { receiver_is_type, uses: HashMap::new() }
+        Context { receiver_is_type, uses: HashMap::new(), expected: None }
     }
 
     /// The headline case: `list.` should not open on `clone`, `equals` and `getClass`.

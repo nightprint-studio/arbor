@@ -29,9 +29,10 @@ import { lintGutter, lintKeymap } from '@codemirror/lint';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import {
   autocompletion, completionKeymap, startCompletion, acceptCompletion,
-  closeBrackets, closeBracketsKeymap, type CompletionSource,
+  closeBrackets, closeBracketsKeymap, type Completion, type CompletionSource,
 } from '@codemirror/autocomplete';
 
+import { matchesName } from './name-match';
 import { documentHighlights, serverFolding, unusedDeclarations } from './server-layers';
 import { inlayHints } from './inlay-hints';
 import { signatureHints } from './signature-hint';
@@ -257,6 +258,17 @@ function completionExtension(
       defaultKeymap: false,
       activateOnTyping: autoPopup,
       ...(prefs?.delayMs !== undefined ? { activateOnTypingDelay: Math.max(0, prefs.delayMs) } : {}),
+      // A third column, after the label and the detail: where the candidate comes FROM. It is
+      // what tells `List.of` from `Set.of`, and a method you inherited from one you declared —
+      // and it is the one thing a member list of forty rows cannot say any other way.
+      //
+      // Position 90 puts it after CodeMirror's own detail slot (80); the theme pushes it to the
+      // right edge with `margin-left: auto`.
+      addToOptions: [{ render: renderOrigin, position: 90 }],
+      // Deprecated is a property of the WHOLE row — the label is struck through, not the detail —
+      // so it is a class on the `li` rather than another rendered element.
+      optionClass: (option) =>
+        (option as RichOption).isDeprecated ? 'cm-completion-deprecated' : '',
     }),
     // Member-access trigger: CodeMirror's `activateOnTyping` only auto-opens the popup on
     // identifier characters, so a bare `receiver.` never queries the source. Fire completion
@@ -276,14 +288,50 @@ function completionExtension(
   ];
 }
 
-/** Wrap a completion source so only candidates matching the typed prefix's CASE survive. */
+/**
+ * A completion carrying the origin column and the deprecated mark.
+ *
+ * Structurally the same shape `components/bennu/completion-item` produces. Declared again here
+ * rather than imported because this module is the app-agnostic editor core and must not reach
+ * into a product's folder — and what crosses between them is two optional properties on a
+ * CodeMirror type, not a dependency.
+ */
+interface RichOption extends Completion {
+  origin?: string;
+  isDeprecated?: boolean;
+}
+
+/** The right-hand column: where a candidate comes from. `null` for a candidate that has no
+ *  origin to name — a keyword, a local variable, a snippet — which leaves the row's width to
+ *  the ones that do. */
+function renderOrigin(option: Completion): HTMLElement | null {
+  const origin = (option as RichOption).origin;
+  if (!origin) return null;
+  const el = document.createElement('span');
+  el.className = 'cm-completionOrigin';
+  el.textContent = origin;
+  return el;
+}
+
+/**
+ * Wrap a completion source so only candidates matching the typed prefix's CASE survive.
+ *
+ * The engine already applied the setting when it built the list. This is the same rule applied to
+ * the *re-filtering* CodeMirror does locally on every further keystroke, which never reaches the
+ * engine — one round trip and then a client-side filter is what makes the popup feel instant, and
+ * it is also why the rule has to exist on both sides.
+ *
+ * It used to be a bare `label.startsWith(typed)`, which is the case rule and the *prefix* rule at
+ * once — so turning case-sensitivity on also turned the camel humps off, and `aAH` stopped
+ * reaching `addAllowedHeader`. The setting is about case; the humps are a different question.
+ */
 function caseSensitiveSource(source: CompletionSource): CompletionSource {
   return async (context) => {
     const result = await source(context);
     if (!result) return result;
     const typed = context.state.sliceDoc(result.from, context.pos);
     if (!typed) return result;
-    const options = result.options.filter((o) => o.label.startsWith(typed));
+    const options = result.options.filter((o) => matchesName(o.label, typed, 'all'));
     return { ...result, options };
   };
 }
@@ -545,6 +593,19 @@ export function createCodeEditorExtensions(
   // otherwise report the identifier under the cursor to the host.
   if (opts.onGoto) {
     const { onGoto } = opts;
+    /**
+     * Put the caret on the token that was Ctrl-clicked, **before** navigating away from it.
+     *
+     * The click is `preventDefault`ed — it has to be, or the browser starts a selection — so
+     * without this the caret never moves and the place you navigated FROM is wherever it happened
+     * to be: the last line you typed on, or the top of the file if you had only scrolled. That is
+     * the place the history then records as the stop to come back to, so Back returned somewhere
+     * you had not been looking at. Where you clicked is where you were.
+     */
+    const placeCaret = (view: EditorView, pos: number) => {
+      if (view.state.selection.main.empty && view.state.selection.main.head === pos) return;
+      view.dispatch({ selection: { anchor: pos } });
+    };
     exts.push(EditorView.domEventHandlers({
       mousedown(event, view) {
         if (!(event.ctrlKey || event.metaKey)) return false;
@@ -562,6 +623,9 @@ export function createCodeEditorExtensions(
             const target = lang.resolveGoto(tree, pos);
             if (target) {
               event.preventDefault();
+              // The origin first, as its own transaction, so the host's caret handler sees the
+              // place being left before it sees the place being gone to.
+              placeCaret(view, pos);
               view.dispatch({
                 selection: { anchor: target.offset },
                 effects: EditorView.scrollIntoView(target.offset, { y: 'center' }),
@@ -574,6 +638,7 @@ export function createCodeEditorExtensions(
           const word = identifierTextAt(tree, pos);
           if (word) {
             event.preventDefault();
+            placeCaret(view, pos);
             onGoto(word, view, byteOffset);
             return true;
           }
@@ -584,6 +649,7 @@ export function createCodeEditorExtensions(
         const ref = refTextAt(view.state.doc, pos);
         if (ref) {
           event.preventDefault();
+          placeCaret(view, pos);
           onGoto(ref, view, byteOffset);
           return true;
         }

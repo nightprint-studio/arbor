@@ -48,6 +48,8 @@ arbor-history = { path = "../../../foundation/history" }
 # The code-intel seam: completion + the config-graph resolver (C1 chain + view chain +
 # conservative action diagnostic) the native provider ingests and serves.
 bennu-intel = { path = "../intel" }
+# The shared prefix/case/camel-hump rule the completion request carries.
+bennu-complete = { path = "../complete" }
 # The code-intel query engine: the resolver + completion + inherited-members domain types the
 # index service maps to the wire (`InheritedMember`).
 bennu-query = { path = "../query" }
@@ -142,6 +144,9 @@ bennu-deps = { path = "../deps" }
 # resolves to against it without running Maven — the dependency tier's fallback and its diagnosis —
 # and the pom.xml editor answers that follow from the same reading.
 bennu-maven = { path = "../maven" }
+# The build-tool config files with a documented vocabulary behind them — `lombok.config` and
+# `junit-platform.properties`. An extension, registered below with the rest.
+bennu-toolconf = { path = "../toolconf" }
 # The refactorings that are pure source transforms — extract method / variable / constant, inline
 # variable / method. Its own crate for the reason `bennu-intentions` is: there is no test runner in
 # front of the editor, so a transform that cannot be unit-tested cannot be trusted.

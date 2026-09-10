@@ -93,6 +93,60 @@ pub fn unresolved_types_in(
                 }
                 n
             }
+            // `Outer.Inner` — a nested type written through the class that declares it.
+            //
+            // Its segments are skipped above, and rightly: in `com.acme.Foo` neither `com` nor
+            // `acme` is a type, and flagging them would report a package. But the whole thing IS a
+            // type use, and skipping the segments meant nothing judged it — so a nested type that
+            // does not exist was silent wherever it was written qualified, which is the ordinary
+            // way to write one from outside.
+            //
+            // Two conditions, and both are needed to stay at zero false positives.
+            //
+            // The qualifier must resolve to a **project** type. That is what tells `Outer.Inner`
+            // from `com.acme.Foo` — a package qualifier resolves to nothing — and it keeps every
+            // library nested type out of this: `Map.Entry` is spelled `Map$Entry` in bytecode, and
+            // asking the classpath about the source spelling is how a check invents a finding.
+            //
+            // And existence is asked of the INDEX, not of the name resolver. Resolving a written
+            // type answers what the name would MEAN — it happily builds `p/Cfg/MyProva` out of a
+            // qualifier that resolves and a segment nobody declared — where the question here is
+            // whether anything is there.
+            "scoped_type_identifier" => {
+                let Some(qualifier) = n.named_child(0) else { continue };
+                let Some(last) = n.named_child(n.named_child_count().saturating_sub(1)) else {
+                    continue;
+                };
+                if qualifier.id() == last.id() || last.kind() != "type_identifier" {
+                    continue;
+                }
+                let (Ok(qtext), Ok(simple)) = (qualifier.utf8_text(bytes), last.utf8_text(bytes))
+                else {
+                    continue;
+                };
+                let Some(owner) =
+                    crate::resolve::type_binary_at(qtext, qualifier, bytes, symbols, resolver)
+                else {
+                    continue; // a package, or a type we cannot read: not ours to judge
+                };
+                if !resolver.is_project_type(&owner) {
+                    continue;
+                }
+                if resolver.is_project_type(&format!("{owner}/{simple}")) {
+                    continue;
+                }
+                // A member type INHERITED from a supertype is named through the subclass too
+                // (JLS §8.1.5): `class Sub extends Base` writes `Sub.Inner` for `Base.Inner`.
+                if bennu_java::prelude::inherited_member_type_of(resolver, &owner, simple).is_some()
+                {
+                    continue;
+                }
+                out.push(
+                    crate::check_id::CheckId::UnresolvedType
+                        .at(last, format!("Cannot resolve symbol `{simple}`")),
+                );
+                continue;
+            }
             "marker_annotation" | "annotation" => {
                 let Some(name) = n.child_by_field_name("name") else { continue };
                 // `@org.junit.Test` is a written FQN — left alone for the same reason a

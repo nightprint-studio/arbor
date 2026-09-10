@@ -30,6 +30,9 @@ export interface InlayHint {
   label: string;
   /** `true` when the hint belongs in front of what is at `offset`. */
   before: boolean;
+  /** What the hint says on hover — a parameter-name hint carries the parameter's declared type.
+   *  Absent when the label already says everything there is to say. */
+  tooltip?: string;
 }
 
 /** The signature of the call at `offset`, or `null` when there isn't one to show.

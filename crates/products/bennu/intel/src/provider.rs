@@ -5,9 +5,11 @@
 //! so `bennu-be` can wire the seam now and later waves fill the native engine in
 //! (and, post-MVP, the LSP client).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
+use bennu_complete::prelude::MatchCase;
 use bennu_index::prelude::SymbolKind;
 use bennu_java::prelude::{AnnotationSite, ElementTarget, TypeResolver};
 
@@ -563,6 +565,16 @@ pub struct NativeJavaProvider {
     /// simple name that resolves to several types, and the only one this index can supply.
     /// Empty for the pre-index provider, and empty is simply "no opinion". See [`ImportCensus`].
     imports: Arc<ImportCensus>,
+    /// Simple type name → the **annotation types** among its candidates, decided once and kept.
+    ///
+    /// Deciding costs a bytecode decode per candidate, and the sweep behind an `@` visits names in
+    /// ranked order until it has enough annotations — on a first letter that most of the classpath
+    /// shares, that is thousands of decodes. Paying it once per name, rather than once per
+    /// keystroke, is what makes the sweep affordable: `@S`, `@Se`, `@Ser` walk the same head of the
+    /// same list, and after the first one every answer in it is already known.
+    ///
+    /// Emptied whenever the class-name axis is replaced, since a name's candidates changed with it.
+    annotation_memo: RwLock<HashMap<String, Arc<Vec<String>>>>,
 }
 
 impl std::fmt::Debug for NativeJavaProvider {
@@ -667,6 +679,19 @@ impl NativeJavaProvider {
         out
     }
 
+    /// The binary name of the type of the expression immediately **left of the `.`** at `offset`.
+    ///
+    /// The one question "create this method in the receiver's class" turns on, and the reason that
+    /// transform cannot live in the pure refactoring crate: `order.total()` says which method and
+    /// which arguments, and says nothing whatsoever about which file. Resolved against the FULL
+    /// resolver, so a receiver typed by a JDK or dependency class answers too — the caller then
+    /// declines for a different reason (there is no source to write into), which is a better
+    /// message than "could not resolve".
+    pub fn receiver_type_at(&self, source: &str, offset: usize) -> Option<String> {
+        let resolver = self.resolver.as_deref()?;
+        bennu_java::prelude::infer_receiver_type(source, offset, resolver).map(|t| t.binary_name)
+    }
+
     /// Whether `binary` names a PROJECT source type (not the JDK / a dependency). Used by the
     /// incremental re-index to resolve a wildcard-imported supertype/return/parameter to the exact
     /// package when a simple name collides across packages. `false` for the pre-index provider.
@@ -680,7 +705,13 @@ impl NativeJavaProvider {
     /// Type-name completion candidates at `offset` in `text`: distinct simple type names from the
     /// class-name index whose name starts with the capitalised prefix under the caret. Empty unless
     /// the caret is on a bare identifier (NOT after a `.`) whose first char is uppercase.
-    fn type_completions(&self, text: &str, offset: usize, census: bool) -> Vec<CompletionItem> {
+    fn type_completions(
+        &self,
+        text: &str,
+        offset: usize,
+        census: bool,
+        case: MatchCase,
+    ) -> Vec<CompletionItem> {
         const MAX: usize = 50;
         let (ident_start, prefix) = ident_prefix(text, offset);
         // A type reference starts with an uppercase letter; requiring it keeps the list focused and
@@ -704,24 +735,79 @@ impl NativeJavaProvider {
         // A stable sort, so the index's match tiers survive intact and this only reorders inside
         // them. It is a tie-break, not a second opinion about the prefix.
         let here = Proximity::of(text, census.then_some(&*self.imports));
-        let mut ranked: Vec<&str> = self.class_names.matches_for_prefix(&prefix, MAX);
+        // What the file can already reach by simple name, read once rather than per candidate.
+        let symbols = bennu_java::prelude::extract_symbols(text);
+        let site = bennu_java::prelude::enclosing_type_binary(text, offset);
+        // The index searches case-insensitively — it is also what "Import class" and Go-to-class
+        // read, where finding a name you half-remember is the whole point. The user's setting
+        // applies to COMPLETION's answer, which is here.
+        let mut ranked: Vec<&str> = self
+            .class_names
+            .matches_for_prefix(&prefix, MAX)
+            .into_iter()
+            .filter(|name| bennu_complete::prelude::match_tier(name, &prefix, case).is_some())
+            .collect();
         ranked.sort_by_key(|simple| here.rank(self.class_names.candidates(simple)));
         ranked
             .into_iter()
             .map(|simple| {
                 let candidates = self.class_names.candidates(simple);
+                // A NESTED type written by its simple name does not compile on its own. See
+                // `nested_form`: it answers the qualified spelling and the import that makes it
+                // work, and `None` for everything that is already fine.
+                let nested = match candidates {
+                    [only] => self.nested_form(only, &symbols, site.as_deref()),
+                    _ => None,
+                };
                 CompletionItem {
                     label: simple.to_string(),
                     kind: "class".to_string(),
                     detail: type_detail(candidates),
+                    insert_text: nested.as_ref().map(|(written, _)| written.clone()),
                     // Auto-import ONLY when unambiguous — a single candidate that isn't `java.lang`
                     // (which needs no import). Ambiguous names (several packages) are left to the
                     // Alt+Enter picker, so we never silently import the wrong `List`.
-                    auto_import: single_import_candidate(candidates),
+                    //
+                    // For a nested type it is the OUTER that gets imported: one import serves every
+                    // nested type of that class, and it is the form people write by hand.
+                    auto_import: match &nested {
+                        Some((_, outer)) => Some(outer.clone()),
+                        None => single_import_candidate(candidates),
+                    },
+                    // An ambiguous simple name owns nothing in particular: `List` is two classes,
+                    // and documenting one of them would document the wrong one half the time.
+                    owner: (candidates.len() == 1)
+                        .then(|| candidates[0].replace('.', "/")),
                     ..Default::default()
                 }
             })
             .collect()
+    }
+
+    /// The annotation types among the candidates for a simple name, decided once and remembered.
+    ///
+    /// Deciding is a bytecode decode per candidate ([`is_annotation_type`]), and the sweep behind
+    /// an `@` asks about names in ranked order until it has enough annotations — which on a common
+    /// first letter means thousands of questions. Asked once per name instead of once per
+    /// keystroke, so the letters that follow walk a list whose head is already answered.
+    fn annotations_named(&self, simple: &str, resolver: &dyn TypeResolver) -> Arc<Vec<String>> {
+        if let Ok(memo) = self.annotation_memo.read() {
+            if let Some(hit) = memo.get(simple) {
+                return Arc::clone(hit);
+            }
+        }
+        let annotations: Arc<Vec<String>> = Arc::new(
+            self.class_names
+                .candidates(simple)
+                .iter()
+                .filter(|fqn| is_annotation_type(resolver, fqn))
+                .cloned()
+                .collect(),
+        );
+        if let Ok(mut memo) = self.annotation_memo.write() {
+            memo.insert(simple.to_string(), Arc::clone(&annotations));
+        }
+        annotations
     }
 
     /// The **annotation types** whose name starts with what has been typed after an `@`.
@@ -741,11 +827,9 @@ impl NativeJavaProvider {
         text: &str,
         site: &AnnotationSite,
         census: bool,
+        case: MatchCase,
     ) -> Vec<CompletionItem> {
         const MAX: usize = 40;
-        // A wider sweep than is offered, because most of what a prefix matches is an ordinary class
-        // and will be dropped. Bounded all the same: the filter costs a resolver lookup per name.
-        const CONSIDERED: usize = 300;
         let Some(resolver) = self.resolver.as_deref() else { return Vec::new() };
         if site.prefix.is_empty() && site.target == ElementTarget::Unknown {
             // A bare `@` with nothing else written is every annotation in the world, in no order
@@ -753,14 +837,26 @@ impl NativeJavaProvider {
             return Vec::new();
         }
         let here = Proximity::of(text, census.then_some(&*self.imports));
+        // The cap counts annotations, not names looked at. Capping the sweep instead — three
+        // hundred names, filtered afterwards — is what made this list start at the third letter:
+        // the JDK alone has more than three hundred classes beginning with `S`, so the sweep behind
+        // `@S` ended long before `SuppressWarnings`, and the popup fell through to the buffer's own
+        // words. See [`ClassNameIndex::matches_for_prefix_where`].
+        let mut kept: HashMap<&str, Arc<Vec<String>>> = HashMap::new();
+        let matched = self.class_names.matches_for_prefix_where(&site.prefix, MAX, &mut |simple| {
+            if bennu_complete::prelude::match_tier(simple, &site.prefix, case).is_none() {
+                return false;
+            }
+            let annotations = self.annotations_named(simple, resolver);
+            if annotations.is_empty() {
+                return false;
+            }
+            kept.insert(simple, annotations);
+            true
+        });
         let mut scored: Vec<(u8, Rank, String, Option<String>)> = Vec::new();
-        for simple in self.class_names.matches_for_prefix(&site.prefix, CONSIDERED) {
-            let candidates = self.class_names.candidates(simple);
-            let annotations: Vec<String> = candidates
-                .iter()
-                .filter(|fqn| is_annotation_type(resolver, fqn))
-                .cloned()
-                .collect();
+        for simple in matched {
+            let annotations = &kept[simple];
             let Some(first) = annotations.first() else { continue };
             // Legal here, by its own `@Target`. Ranked ahead rather than kept alone — see above.
             let fits = annotations.iter().any(|fqn| {
@@ -773,11 +869,22 @@ impl NativeJavaProvider {
                     .unwrap_or_default();
                 bennu_java::prelude::target_admits(&target, site.target)
             });
+            // What you have actually picked, this session, above an `@`. The rest of the ranking
+            // reads the project — this file's imports, the census's counts — and none of it can
+            // tell an annotation you write every day from one you have never written, because
+            // both are equally far away in package terms. It is subtracted from the weighed score
+            // rather than given its own band: evidence, weighed with the other evidence, and never
+            // able to outrank the file having already named the type it means.
+            let (certainty, mut score) = here.rank(annotations);
+            score -= bennu_query::prelude::pick_weight(
+                bennu_query::prelude::ANNOTATION_CONTEXT,
+                simple,
+            );
             scored.push((
                 u8::from(!fits),
-                here.rank(&annotations),
+                (certainty, score),
                 simple.to_string(),
-                single_import_candidate(&annotations).or_else(|| Some(first.clone())),
+                single_import_candidate(annotations).or_else(|| Some(first.clone())),
             ));
         }
         scored.sort();
@@ -788,6 +895,7 @@ impl NativeJavaProvider {
                 label: simple,
                 kind: "annotation".to_string(),
                 detail: import.clone(),
+                owner: import.as_ref().map(|fqn| fqn.replace('.', "/")),
                 auto_import: import.filter(|fqn| !fqn.starts_with("java.lang.")),
                 ..Default::default()
             })
@@ -828,6 +936,7 @@ impl NativeJavaProvider {
                 kind: if seg.is_class { "class" } else { "package" }.to_string(),
                 // The full name a class row lands on. A package row says nothing extra: its own
                 // label plus the qualifier already on screen is the whole of what it is.
+                owner: seg.fqn.as_deref().map(|f| f.replace('.', "/")),
                 detail: seg.fqn,
                 // Never an auto-import: the name being written IS the import, or is already
                 // qualified at the point of use.
@@ -932,6 +1041,7 @@ impl NativeJavaProvider {
             // Empty until the caller hands one over — see `with_imports`. Empty is "no opinion",
             // which ranks exactly as the census being switched off does.
             imports: Arc::default(),
+            annotation_memo: RwLock::default(),
         })
     }
 
@@ -1001,6 +1111,10 @@ impl NativeJavaProvider {
                 // the dependency tier changes what is on the classpath rather than what the
                 // project imports. Rebuilding it here would mean re-reading every file.
                 imports: Arc::clone(&self.imports),
+                // NOT carried: the dependency tier adds classes, so a name that had no annotation
+                // among its candidates may have one now. A memo built against the narrower
+                // classpath would answer for a question that is no longer the same one.
+                annotation_memo: RwLock::default(),
             })
         })())
     }
@@ -1767,6 +1881,142 @@ fn single_import_candidate(fqns: &[String]) -> Option<String> {
     (pkg != "java.lang").then(|| only.clone())
 }
 
+impl NativeJavaProvider {
+    /// How a **nested** type has to be written here, and the import that makes it work.
+    ///
+    /// `Inner` alone is not a name Java resolves: a nested type is reached through its outer, or
+    /// through an `import pkg.Outer.Inner;` that names it exactly. So completing `MyProva` and
+    /// inserting `MyProva` produced code that does not compile — the one thing a completion must
+    /// never do — and the auto-import beside it named a class that is not importable by that name.
+    ///
+    /// The answer is `Outer.Inner` plus `import pkg.Outer`. It is what people write by hand, one
+    /// import serves every nested type of that class, and it reads as what it is.
+    ///
+    /// `None` — meaning "the simple name is fine" — when the type is not nested, when the file
+    /// already imports it outright, or when the caret is inside the outer class (where its own
+    /// member types are in scope, JLS §6.5.5.1). That last case is the common one: a nested class
+    /// used by the class that declares it.
+    fn nested_form(
+        &self,
+        fqn: &str,
+        symbols: &bennu_java::prelude::FileSymbols,
+        site: Option<&str>,
+    ) -> Option<(String, String)> {
+        nested_form_of(fqn, symbols, site, &|b| self.is_project_type(b))
+    }
+}
+
+/// [`NativeJavaProvider::nested_form`], with "is this a project type" passed in — so the rule can
+/// be tested without an index behind it.
+fn nested_form_of(
+    fqn: &str,
+    symbols: &bennu_java::prelude::FileSymbols,
+    site: Option<&str>,
+    is_project: &dyn Fn(&str) -> bool,
+) -> Option<(String, String)> {
+    {
+        let binary = fqn.replace('.', "/");
+        let (outer, inner) = binary.rsplit_once('/')?;
+        // The segment before the last is a TYPE, not a package — which is what makes this nested.
+        // Asked of the index rather than guessed from the capital letter, because a package
+        // segment may be capitalised and a legacy tree has some.
+        if !is_project(outer) {
+            return None;
+        }
+        if symbols
+            .imports
+            .iter()
+            .any(|i| !i.static_ && !i.star && i.path == fqn)
+        {
+            return None;
+        }
+        // Inside the outer, or inside something nested within it.
+        if let Some(site) = site {
+            if site == outer || site.starts_with(&format!("{outer}/")) {
+                return None;
+            }
+        }
+        let outer_simple = outer.rsplit('/').next()?;
+        Some((format!("{outer_simple}.{inner}"), outer.replace('/', ".")))
+    }
+}
+
+#[cfg(test)]
+mod nested_form_tests {
+    use super::nested_form_of;
+
+    fn symbols(src: &str) -> bennu_java::prelude::FileSymbols {
+        bennu_java::prelude::extract_symbols(src)
+    }
+
+    /// The reported case: a nested class completed from another file. `MyProva` alone does not
+    /// compile, and the import beside it named a class that is not importable by that name.
+    #[test]
+    fn a_nested_type_is_written_through_its_outer() {
+        let s = symbols("package other;\npublic class Use {}\n");
+        let got = nested_form_of(
+            "cfg.ConfigurazioneCors.MyProva",
+            &s,
+            Some("other/Use"),
+            &|b| b == "cfg/ConfigurazioneCors",
+        );
+        assert_eq!(
+            got,
+            Some(("ConfigurazioneCors.MyProva".to_string(), "cfg.ConfigurazioneCors".to_string()))
+        );
+    }
+
+    /// A top-level type is already a name Java resolves. The segment before it is a package, and
+    /// asking the index is what tells the two apart — a package segment may be capitalised.
+    #[test]
+    fn a_top_level_type_needs_nothing() {
+        let s = symbols("package other;\npublic class Use {}\n");
+        assert_eq!(nested_form_of("cfg.Order", &s, None, &|_| false), None);
+    }
+
+    /// `import cfg.ConfigurazioneCors.MyProva;` names it exactly — the simple name is in scope and
+    /// qualifying it would be noise.
+    #[test]
+    fn an_outright_import_leaves_the_simple_name_alone() {
+        let s = symbols("package other;\nimport cfg.ConfigurazioneCors.MyProva;\npublic class Use {}\n");
+        assert_eq!(
+            nested_form_of("cfg.ConfigurazioneCors.MyProva", &s, None, &|b| b == "cfg/ConfigurazioneCors"),
+            None
+        );
+    }
+
+    /// The common case: a nested class used by the class that declares it. Its own member types
+    /// are in scope (JLS §6.5.5.1).
+    #[test]
+    fn inside_the_outer_the_simple_name_is_in_scope() {
+        let s = symbols("package cfg;\npublic class ConfigurazioneCors {}\n");
+        assert_eq!(
+            nested_form_of(
+                "cfg.ConfigurazioneCors.MyProva",
+                &s,
+                Some("cfg/ConfigurazioneCors"),
+                &|b| b == "cfg/ConfigurazioneCors",
+            ),
+            None
+        );
+    }
+
+    /// …and from a SIBLING nested class, which is inside the outer too.
+    #[test]
+    fn inside_a_sibling_nested_class_the_simple_name_is_in_scope() {
+        let s = symbols("package cfg;\npublic class ConfigurazioneCors {}\n");
+        assert_eq!(
+            nested_form_of(
+                "cfg.ConfigurazioneCors.MyProva",
+                &s,
+                Some("cfg/ConfigurazioneCors/Altra"),
+                &|b| b == "cfg/ConfigurazioneCors",
+            ),
+            None
+        );
+    }
+}
+
 /// The `detail` line for a type completion: its FQN (preferring `java`/`javax`), plus a `(+N more)`
 /// hint when the simple name is declared in several packages.
 fn type_detail(fqns: &[String]) -> Option<String> {
@@ -1918,8 +2168,9 @@ impl NativeJavaProvider {
         &self,
         at: &Position,
         source: Option<&str>,
-        census: bool,
+        opts: CompletionOptions,
     ) -> Result<Vec<CompletionItem>, IntelError> {
+        let CompletionOptions { census, case } = opts;
         // No index yet (pre-open / still building) → benign empty, not an error.
         let Some(resolver) = self.resolver.as_deref() else {
             return Ok(Vec::new());
@@ -1952,7 +2203,7 @@ impl NativeJavaProvider {
         // (`Arrays.`) is one you are in the middle of writing, and refusing it is refusing the very
         // gesture that adds the import. See `TypeNameCatalog`.
         let member =
-            bennu_query::prelude::completion_in(text, offset, resolver, Some(&self.class_names));
+            bennu_query::prelude::completion_in(text, offset, resolver, Some(&self.class_names), case);
         if !member.is_empty() {
             return Ok(member);
         }
@@ -1968,13 +2219,76 @@ impl NativeJavaProvider {
         // left to the general type-name path, which offered every class in the project above an
         // `@`. See `annotation_completions`.
         if let Some(site) = bennu_java::prelude::annotation_site(text, offset) {
-            return Ok(self.annotation_completions(text, &site, census));
+            return Ok(self.annotation_completions(text, &site, census, case));
         }
-        // Otherwise TYPE-NAME completion, when the caret sits on a bare, capitalised identifier
-        // prefix (not a member access after a `.`). Selecting a name inserts it; the "Import class"
-        // intention (Alt+Enter) then adds the import.
-        Ok(self.type_completions(text, offset, census))
+        // Otherwise the caret is on a BARE identifier, and two indexes can answer it: the scope
+        // around the caret (locals, parameters, the enclosing type's own members, static imports)
+        // and the class-name index (the JDK, the dependency jars and the project's own types).
+        //
+        // Which goes first is decided by Java's own naming law rather than by a score, because the
+        // two lists are not comparable: `Str` is a type being written and `str` is a variable, and
+        // no amount of ranking makes one of those the other. A SCREAMING_CASE prefix is a
+        // constant, so it stays with the scope — that is where a constant of your own class is.
+        let mut out = bennu_query::prelude::scope_completion(text, offset, resolver, case);
+        // The members this class does not have YET — the accessors a field is missing, and the
+        // methods the class calls without declaring. Offered first, and only at a member position:
+        // there, `getNa` is a declaration being written, not a call — and a call is what every
+        // other candidate in the list would be.
+        let generated = crate::accessor_completion::generated_members(
+            text,
+            offset,
+            case,
+            Some(resolver as &dyn TypeResolver),
+        );
+        if !generated.is_empty() {
+            let mut merged = generated;
+            merged.extend(out);
+            out = merged;
+        }
+        let types = self.type_completions(text, offset, census, case);
+        let (_, prefix) = bennu_query::prelude::split_completion_prefix(text, offset);
+        if looks_like_a_type_name(&prefix) {
+            let mut typed = types;
+            typed.extend(out);
+            return Ok(typed);
+        }
+        out.extend(types);
+        Ok(out)
     }
+}
+
+/// What a completion request was asked with, beyond where the caret is.
+///
+/// A struct rather than two more positional arguments, because that is what the second one would
+/// have made it: `complete_at(at, source, true, MatchCase::All)` says nothing about which `true`
+/// is which, and the next setting would say even less.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompletionOptions {
+    /// Whether to rank type names by how often the PROJECT imports each candidate. A user setting
+    /// (Settings → Completion), off meaning "do not consult the counts".
+    pub census: bool,
+    /// How strictly the typed letters must agree with a candidate's — see [`MatchCase`].
+    pub case: MatchCase,
+}
+
+impl CompletionOptions {
+    /// The defaults a programmatic caller gets: the census on, the case rule at its sensible
+    /// middle. What the seam's own `completion` uses.
+    pub fn with_census(census: bool) -> Self {
+        Self { census, ..Self::default() }
+    }
+}
+
+/// Whether a written prefix reads as a TYPE name rather than a value — PascalCase, an initial
+/// capital with at least one lowercase letter after it.
+///
+/// The same test the editor's postfix templates use to decide whether `Foo.` is a type receiver,
+/// and Java's own convention rather than a guess: `Order` is a class, `ORDER` is a constant and
+/// `order` is a variable. It decides ORDER, never membership — both lists are always offered, so
+/// a prefix read the "wrong" way costs a scroll, not an answer.
+fn looks_like_a_type_name(prefix: &str) -> bool {
+    let mut chars = prefix.chars();
+    chars.next().is_some_and(|c| c.is_uppercase()) && chars.any(|c| c.is_lowercase())
 }
 
 impl IntelProvider for NativeJavaProvider {
@@ -1985,7 +2299,7 @@ impl IntelProvider for NativeJavaProvider {
         at: &Position,
         source: Option<&str>,
     ) -> Result<Vec<CompletionItem>, IntelError> {
-        self.complete_at(at, source, true)
+        self.complete_at(at, source, CompletionOptions::with_census(true))
     }
 
     fn hover(&self, _at: &Position) -> Result<Option<String>, IntelError> {

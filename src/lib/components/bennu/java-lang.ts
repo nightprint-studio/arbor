@@ -27,9 +27,11 @@
 
 import { Parser, Language, type Node } from 'web-tree-sitter';
 import {
-  makeU16ToByte, makeByteToU16,
+  makeU16ToByte, makeByteToU16, renderDoc,
   type LanguageDescriptor, type TokenClass, type CompletionSource,
+  type InlineCompletionSource,
 } from '$lib/components/shared/ui/code-editor';
+import { toCompletion } from './completion-item';
 import {
   boostForRank, FALLBACK, RESOLVED,
 } from '$lib/components/shared/ui/code-editor/completion-rank';
@@ -37,11 +39,16 @@ import { expressionStart, postfixCompletion } from '$lib/components/shared/ui/co
 import { javaPostfixTemplates } from './java-postfix';
 import { javaLevelStore } from '$lib/stores/bennu/java-level.svelte';
 import {
-  insertCompletionText,
   type Completion, type CompletionContext, type CompletionResult,
 } from '@codemirror/autocomplete';
 import type { EditorView } from '@codemirror/view';
-import { completion as ipcCompletion, importEdit as ipcImportEdit } from '$lib/ipc/bennu';
+import {
+  completion as ipcCompletion,
+  generateHint,
+  completionAccepted as ipcCompletionAccepted,
+  completionDoc as ipcCompletionDoc,
+  importEdit as ipcImportEdit,
+} from '$lib/ipc/bennu';
 import { hover as ipcHover, libraryHover as ipcLibraryHover } from '$lib/ipc/bennu/nav';
 import { extHover, extCompletion } from '$lib/ipc/bennu/ext';
 import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
@@ -50,6 +57,7 @@ import { sayNoSuggestions } from './lsp-lang';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
 import { makeHoverSource } from './bennu-hover';
 import { javaStringPaste } from './java-string-paste';
+import type { CompletionItem } from '$lib/types/bennu';
 
 const RUNTIME_WASM = '/bennu/tree-sitter.wasm';
 const GRAMMAR_WASM = '/bennu/tree-sitter-java.wasm';
@@ -238,29 +246,66 @@ function foldNode(node: Node): { from: number; to: number } | null {
 // buffer. Until the BE index is warm it returns [] → the popup just doesn't show,
 // which is the desired graceful degradation (the mock returns none too).
 
-/** Map a CompletionItem `kind` string to a CodeMirror completion `type` (drives
- *  the little kind icon in the popup). */
-function kindToType(kind: string): string {
-  switch (kind) {
-    case 'method':
-    case 'function':   return 'method';
-    case 'field':
-    case 'property':   return 'property';
-    case 'class':
-    case 'interface':
-    case 'enum':
-    case 'type':       return 'class';
-    case 'variable':
-    case 'parameter':  return 'variable';
-    case 'keyword':    return 'keyword';
-    case 'constant':   return 'constant';
-    // Its own icon, not `class`: after an `@` the popup is nothing but annotations, and the point
-    // of the glyph there is to say at a glance that the filter took — that this is a list of the
-    // right kind of thing, and not the whole classpath again.
-    case 'annotation': return 'annotation';
-    case 'package':    return 'namespace';
-    default:           return 'text';
+/** After accepting a completion, tell the backend which one it was.
+ *
+ *  Fire-and-forget, and deliberately not awaited: the ranking memory it feeds only decides the
+ *  ORDER of a future list, so a failure here is a list in a slightly worse order — nothing about
+ *  accepting a completion should be able to fail visibly because of it. See `bennu-query`'s
+ *  `picked` module for what is remembered and why it is not persisted. */
+function reportAccepted(item: CompletionItem): void {
+  void ipcCompletionAccepted(item.owner ?? null, item.label, item.kind ?? null).catch(() => {});
+}
+
+/** The documentation panel for the highlighted row — the same card the hover tooltip draws, from
+ *  the same backend answer, so the popup and the tooltip cannot describe one member two ways.
+ *
+ *  `null` when the item has no owner to ask about (a local, a keyword) or the backend has nothing
+ *  documented. CodeMirror renders no panel at all for `null`, which is the right outcome: an empty
+ *  box beside the list reads as a failure. */
+// `HTMLElement`, not `Node`: this module imports tree-sitter's `Node`, and the DOM one is not it.
+async function completionInfo(item: CompletionItem): Promise<HTMLElement | null> {
+  // A member that does not exist yet has nothing to document — but it does have something to
+  // SHOW, which is the text accepting it will write. That is the whole of what the reader wants
+  // to know before pressing Enter on a row that generates code.
+  if (item.kind === 'generate' && item.insert_text) {
+    const dom = document.createElement('div');
+    dom.className = 'cm-hc-info';
+    const pre = document.createElement('pre');
+    pre.className = 'cm-hc-generate';
+    pre.textContent = item.insert_text;
+    dom.appendChild(pre);
+    return dom;
   }
+  if (!item.owner) return null;
+  const path = projectStore.activeFilePath;
+  if (!path) return null;
+  const isType = item.kind === 'class' || item.kind === 'annotation' || item.kind === 'package';
+  const info = await ipcCompletionDoc(path, item.owner, isType ? null : item.label, item.kind === 'field')
+    .catch(() => null);
+  if (!info || (!info.doc && !info.signature)) return null;
+
+  const dom = document.createElement('div');
+  dom.className = 'cm-hc-info';
+  if (info.signature) {
+    const sig = document.createElement('div');
+    sig.className = 'cm-hc-info-sig';
+    sig.textContent = info.signature;
+    dom.appendChild(sig);
+  }
+  if (info.container) {
+    const meta = document.createElement('div');
+    meta.className = 'cm-hc-info-meta';
+    meta.textContent = info.container;
+    dom.appendChild(meta);
+  }
+  if (info.doc) {
+    const body = document.createElement('div');
+    body.className = 'cm-hc-doc';
+    // A Javadoc's `<pre>` blocks are Java — that is what the comment documents.
+    renderDoc(body, info.doc, 'java');
+    dom.appendChild(body);
+  }
+  return dom;
 }
 
 /** After accepting a type-name completion, add its import (gated by the auto-import setting). Runs
@@ -298,7 +343,12 @@ const MAX_FALLBACK = 400;
  *  match `prefix` — the FE fallback so completion is useful even when the BE (member-
  *  access only, for now) returns nothing. Dedupes against `seen` (the BE labels). */
 function appendFallbackCompletions(
-  ctx: CompletionContext, prefix: string, seen: Set<string>, out: Completion[],
+  ctx: CompletionContext,
+  prefix: string,
+  seen: Set<string>,
+  out: Completion[],
+  /** Whether to scan the buffer for look-alike words too — only when nothing was resolved. */
+  includeBufferWords: boolean,
 ): void {
   // Everything added here is a guess — a language keyword, or a word that happens to be somewhere
   // in this buffer. It belongs entirely below anything the backend resolved, however well it
@@ -310,6 +360,7 @@ function appendFallbackCompletions(
     seen.add(k);
     out.push({ label: k, type: 'keyword', boost: boostForRank(rank++, FALLBACK) });
   }
+  if (!includeBufferWords) return;
   const src = ctx.state.doc.toString();
   BUFFER_WORD_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -380,7 +431,7 @@ const javaCompletionSource: CompletionSource = async (
   const seq = ++completionSeq;
   let items: Awaited<ReturnType<typeof ipcCompletion>>;
   try {
-    items = await ipcCompletion(path, byteOffset, src);
+    items = await ipcCompletion(path, byteOffset, src, bennuSettingsStore.caseSensitive);
   } catch {
     items = []; // BE absent / not indexed yet — fall back to keywords + buffer words.
   }
@@ -417,32 +468,34 @@ const javaCompletionSource: CompletionSource = async (
   // hierarchy the member was found, whether it is deprecated, whether this file already uses it.
   // CodeMirror re-scores by fuzzy match and would throw all of that away, so the position in the
   // list is carried across as a `boost` (see `completion-rank`).
-  const options: Completion[] = (items ?? []).map((it, rank) => {
-    const c: Completion = {
-      label: it.label,
-      detail: it.detail,
-      type: kindToType(it.kind),
-      boost: boostForRank(rank, RESOLVED, it.preselect),
-    };
-    // A type-name completion with a single importable class carries its FQN — on accept, insert the
-    // name AND (when auto-import is on) add its import in the same gesture ("IntelliJ-style").
-    if (it.auto_import) {
-      const fqn = it.auto_import;
-      const label = it.label;
-      c.apply = (view, _completion, from, to) => {
-        view.dispatch(insertCompletionText(view.state, label, from, to));
-        void applyAutoImport(view, fqn);
-      };
-    }
-    return c;
-  });
+  const resolved = items ?? [];
+  const options: Completion[] = resolved.map((it, rank) =>
+    toCompletion(it, boostForRank(rank, RESOLVED, it.preselect), {
+      info: completionInfo,
+      after: (view, item) => {
+        reportAccepted(item);
+        // A type-name completion with a single importable class carries its FQN — accepting it
+        // inserts the name AND (when auto-import is on) adds its import in the same gesture.
+        if (item.auto_import) void applyAutoImport(view, item.auto_import);
+      },
+    }),
+  );
 
-  // After a `.` only the BE's member list makes sense; elsewhere (identifier typing or
-  // explicit Ctrl+Space) enrich with Java keywords + buffer identifiers so completion
-  // is useful even while the BE member-access index is cold or the caret isn't after a
-  // dot.
+  // After a `.` only the BE's member list makes sense; elsewhere the language's own keywords are
+  // worth adding, since no index is needed to know them and the backend does not send them.
+  //
+  // The buffer's own words come LAST and only when the backend answered nothing at all. They are
+  // a regex over the text — the answer an editor with no index gives — and they belong on screen
+  // exactly while there is no index: before it has finished building, or in a file no project
+  // owns. Offering them beside resolved names buries the resolved ones under look-alikes.
   if (!dotTrigger) {
-    appendFallbackCompletions(ctx, word ? word.text : '', new Set(options.map((o) => o.label)), options);
+    appendFallbackCompletions(
+      ctx,
+      word ? word.text : '',
+      new Set(options.map((o) => o.label)),
+      options,
+      resolved.length === 0,
+    );
   }
 
   appendPostfixCompletions(ctx, from, options);
@@ -523,6 +576,37 @@ const javaHoverSource = makeHoverSource(async (path, src, byteOffset) => {
   return ext ? { signature: ext.signature, kind: ext.title, container: null, doc: ext.doc || null } : null;
 });
 
+// ── Ghost text (a member being written) ─────────────────────────────────────────
+//
+// Typing `getCust` in a class body has, most of the time, exactly one thing it can mean — and the
+// backend knows what, from the buffer alone. Drawn ahead of the caret, Tab writes it.
+//
+// Not a guess, and it must not become one: the backend answers only when a single accessor
+// matches. What arrives here is either the member or nothing.
+
+/**
+ * The ghost-text source for Java.
+ *
+ * Previewed as `→ <the member>` rather than as the member alone, because accepting **replaces**
+ * the half-written name rather than continuing it — the convention the shared module documents and
+ * that Picus's abbreviation expansion already uses.
+ */
+const javaInlineSource: InlineCompletionSource = async (view, pos) => {
+  const path = projectStore.activeFilePath;
+  if (!path) return null;
+  const src = view.state.doc.toString();
+  const u2b = makeU16ToByte(src);
+  const hint = await generateHint(path, src, u2b(pos), bennuSettingsStore.caseSensitive)
+    .catch(() => null);
+  if (!hint) return null;
+  const b2u = makeByteToU16(src);
+  return {
+    text: hint.preview,
+    insert: hint.insert,
+    replace: { from: b2u(hint.replace_start), to: b2u(hint.replace_end) },
+  };
+};
+
 /** The Java {@link LanguageDescriptor} handed to the shared `CodeEditor`. */
 export const javaLanguage: LanguageDescriptor = {
   id: 'java',
@@ -533,6 +617,10 @@ export const javaLanguage: LanguageDescriptor = {
   // A paste into a string literal is escaped, and one that spans lines becomes
   // concatenated literals — Java has no syntax for a `"…"` across two lines.
   editing: javaStringPaste,
-  intel: { completion: javaCompletionSource, hover: javaHoverSource },
+  intel: {
+    completion: javaCompletionSource,
+    hover: javaHoverSource,
+    inlineCompletion: javaInlineSource,
+  },
   // resolveGoto: reserved for when the symbol index / language service lands.
 };

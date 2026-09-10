@@ -28,6 +28,7 @@
     ArrowDownAZ, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Play, RefreshCw,
   } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
+  import BennuPinnedTestsWarning from './BennuPinnedTestsWarning.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
@@ -173,6 +174,10 @@
       <ChevronsUpDown size={13} />
     </button>
   {/snippet}
+
+  <!-- Above everything, including the empty states: it is a fact about every ▷ in this panel, and
+       the panel that has not discovered anything yet is exactly where you are about to press one. -->
+  <BennuPinnedTestsWarning root={root || null} />
 
   {#if !root}
     <EmptyState message="Open a project to see its tests." />
