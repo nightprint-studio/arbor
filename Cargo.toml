@@ -25,6 +25,7 @@ members = [
     "crates/foundation/syntax",
     "crates/foundation/logscan",
     "crates/products/bennu/plugin",
+    "crates/products/bennu/sheet",
     "crates/products/bennu/wgsl",
     "crates/products/corvus/core",
     "crates/products/corvus/plugin",

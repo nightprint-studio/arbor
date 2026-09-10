@@ -65,6 +65,9 @@ import {
 import {
   cargoDebug as ipcCargoDebug, cargoRun as ipcCargoRun, cargoWorkspace, type CargoInvocation,
 } from '$lib/ipc/bennu/cargo';
+// The Maven tool window's press. It lands in this console for the same reason a cargo command
+// does: what a build prints is the whole of what it produced, and there is one place to read it.
+import { mavenGoal as ipcMavenGoal } from '$lib/ipc/bennu/maven-build';
 // A `junit` configuration is launched by the TEST runner, not by this one — see `runConfig`.
 // (`tests` imports only a TYPE from here, so the edge is erased at build and there is no
 // runtime cycle.)
@@ -135,7 +138,24 @@ interface ScriptRunSpec {
   label: string;
 }
 
-type RunSpec = JvmRunSpec | CargoRunSpec | ScriptRunSpec;
+/** A `mvn <goals>` launch, from the Maven tool window. */
+interface MavenRunSpec {
+  kind: 'maven';
+  root: string;
+  /** The module directory it runs in, relative to the root. Empty = the root, i.e. the reactor. */
+  module: string;
+  /** Phases and plugin goals, in order, exactly as they go on the command line. */
+  goals: string[];
+  /** The profiles that were ticked when it was pressed. Held on the spec rather than re-read from
+   *  the panel, so ⟳ repeats the build that ran and not the one the panel is set up for now. */
+  profiles: string[];
+  skipTests: boolean;
+  offline: boolean;
+  /** The console tab's label. */
+  label: string;
+}
+
+type RunSpec = JvmRunSpec | CargoRunSpec | ScriptRunSpec | MavenRunSpec;
 
 /** A `java` launch. */
 interface JvmRunSpec {
@@ -798,6 +818,33 @@ function createBennuRunStore() {
   }
 
   /**
+   * Launch Maven goals, streaming into the Run console.
+   *
+   * No compile step, for the same reason a cargo command has none: this *is* the build. What the
+   * console adds over a terminal is that the tab is the run — Stop kills the tree, ⟳ repeats it
+   * with the profiles it had, and the log is annotated like every other.
+   */
+  async function launchMaven(spec: MavenRunSpec): Promise<void> {
+    const id = openTab(spec, spec.label, spec.goals.join(' '));
+    patchTab(id, { live: true, startedAt: Date.now() });
+    try {
+      const handle = await ipcMavenGoal(spec.root, spec.goals, {
+        module: spec.module,
+        profiles: spec.profiles,
+        skipTests: spec.skipTests,
+        offline: spec.offline,
+      });
+      claimRun(id, handle.run_id, { command: handle.command, workingDir: handle.working_dir });
+    } catch (e) {
+      patchTab(id, { live: false, finished: true });
+      // Printed into the tab rather than swallowed into a toast: when the reason is "no Maven
+      // launcher was found", it is the sentence that says what to install, and it belongs next to
+      // the goal that did not run.
+      pushTo(id, `Could not start: ${e instanceof Error ? e.message : String(e)}`, 'err');
+    }
+  }
+
+  /**
    * Launch a named run configuration — every field of it, which is the difference between a
    * run configuration and a main class.
    *
@@ -1026,6 +1073,10 @@ function createBennuRunStore() {
       await launchScript(from.spec);
       return;
     }
+    if (from.spec.kind === 'maven') {
+      await launchMaven(from.spec);
+      return;
+    }
     await launch(from.spec);
   }
 
@@ -1209,6 +1260,42 @@ function createBennuRunStore() {
         workingDir: '',
         env: {},
         label: file.split(/[\\/]/).pop() ?? file,
+      });
+    },
+
+    /**
+     * Run Maven goals that are not a saved configuration — what the Maven tool window's rows do.
+     *
+     * Ad-hoc for the same reason {@link runCargoCommand} is: pressing `install` on a module means
+     * "install it, now", and leaving a configuration behind for every phase anyone has pressed
+     * would turn the configuration list into a click history.
+     *
+     * The options travel WITH the run — the tab holds the profiles and the toggles that were set
+     * when it was pressed, so ⟳ repeats the build that happened rather than the one the panel is
+     * configured for by then.
+     */
+    async runMavenGoals(
+      root: string,
+      goals: string[],
+      opts: {
+        module?: string;
+        profiles?: string[];
+        skipTests?: boolean;
+        offline?: boolean;
+        label?: string;
+      } = {},
+    ): Promise<void> {
+      const module = opts.module ?? '';
+      const leaf = module ? module.split('/').filter(Boolean).pop() ?? module : '';
+      await launchMaven({
+        kind: 'maven',
+        root,
+        module,
+        goals,
+        profiles: opts.profiles ?? [],
+        skipTests: !!opts.skipTests,
+        offline: !!opts.offline,
+        label: opts.label ?? (leaf ? `${goals.join(' ')} · ${leaf}` : goals.join(' ')),
       });
     },
 

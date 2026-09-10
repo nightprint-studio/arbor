@@ -1,0 +1,26 @@
+[package]
+name         = "bennu-sheet"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Spreadsheets a project tree contains, read into a grid: the OOXML `.xlsx` and the compound-file `.xls` that a legacy Java tree is actually full of. Reads only — nothing here writes a spreadsheet."
+
+[dependencies]
+# The reader for every spreadsheet container, and the one dependency in this crate that earns its
+# place by what it makes IMPOSSIBLE rather than by what it saves. Reading `.xls` by hand means the
+# compound-file sector chains, the BIFF record stream, and the shared-string table whose Unicode
+# strings straddle CONTINUE boundaries with the flags byte repeating at each one — and that last
+# one fails as mojibake in a column nobody checks rather than as an error. This is tested against
+# real files, which is the thing a fixture-less reader can never be.
+#
+# Version pinned below 0.36 on purpose: 0.36 wants Rust 1.88 and the workspace declares 1.80, so
+# MSRV-aware resolution would refuse it. Bump both together or neither.
+#
+# No `dates` feature. It brings chrono in to turn a serial into a date, and its conversion is worse
+# here for the two cases a VIEWER meets: a time-only cell comes back as a bogus date in 1899, and
+# the phantom 1900-02-29 collides with the 28th. `model::serial_to_date` handles both and is tested
+# on them. What we give up by not taking it is the 1904 date system — see `reader`.
+calamine = "0.30"
+serde    = { workspace = true }

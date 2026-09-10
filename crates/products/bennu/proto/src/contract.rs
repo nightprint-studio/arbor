@@ -210,6 +210,19 @@ pub struct TreeNode {
     /// still being picked up".
     #[serde(default, skip_serializing_if = "is_false")]
     pub ignored: bool,
+    /// For an XML file, the name of its **root element** — `Context`, `struts`, `beans`. Empty
+    /// for everything else, and for an XML that could not be read.
+    ///
+    /// It is here because a name is not evidence. Tomcat's per-application context file is
+    /// `context.xml` in a `.war` and `<appname>.xml` under `conf/Catalina/localhost`; a Struts
+    /// module configuration is called whatever the `struts.configuration.files` constant says. The
+    /// root element is what the file says it is, and it is the only thing that is true of both
+    /// spellings.
+    ///
+    /// Skipped when empty like the two flags above: a tree is thousands of nodes and almost none
+    /// of them are XML.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub root_tag: String,
 }
 
 /// `skip_serializing_if` for the two status flags: a tree is thousands of nodes and

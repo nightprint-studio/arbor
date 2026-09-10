@@ -32,8 +32,7 @@
    * resolved. Nothing here runs Maven or Cargo, so refreshing is cheap and the panel opens
    * instantly.
    */
-  import { Library, Package, GitFork, Layers, LocateFixed, Network, RefreshCw, CircleSlash,
-    HardDriveDownload, FileCode2, RotateCw, Download } from 'lucide-svelte';
+  import { Library, Package, GitFork, Layers, LocateFixed, CircleSlash } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
@@ -41,18 +40,15 @@
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
-  import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
-  import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
-  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { buildUnitDir, openBuildUnitMenu } from './build-unit-menu';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { dependenciesStore } from '$lib/stores/bennu/dependencies.svelte';
   import {
-    coordOf, scopeLabel, mavenReload, mavenDownload, mavenDownloadSources,
+    coordOf, scopeLabel,
     type Dependency, type DependencyModule,
   } from '$lib/ipc/bennu/deps';
 
@@ -154,59 +150,6 @@
     void projectStore.openFile(m.manifest);
   }
 
-  /**
-   * What Maven can be asked to do to the machine, from here.
-   *
-   * All three are backend jobs that report through the Jobs panel and return immediately — none of
-   * them blocks the panel, and none of them is undone by closing it.
-   */
-  /**
-   * Start one of them and say so, either way.
-   *
-   * The `.catch(() => undefined)` these three used to carry was the whole of their error handling,
-   * which meant a backend that refused — a root with no pom, a dead reverse channel — produced a
-   * menu that closed and nothing else. All three of these are invisible by nature: none opens a
-   * window, none changes a file you have open, and the work happens on a thread. So the only
-   * evidence that a press did anything is what we say about it.
-   */
-  async function runMaven(what: string, start: (root: string) => Promise<string>) {
-    if (!root) return;
-    try {
-      await start(root);
-      toastStore.show(`${what} started — see the Jobs panel`, 'info');
-    } catch (e) {
-      toastStore.show(`${what} could not start: ${e}`, 'error');
-    }
-  }
-
-  const mavenActions = $derived<DropdownItem[]>([
-    {
-      kind: 'item',
-      id: 'reload',
-      label: 'Re-resolve dependencies & rebuild index',
-      subtitle: 'Drops the cached classpath, re-reads the repository, reindexes',
-      icon: RotateCw,
-      onclick: () => void runMaven('Re-resolve', mavenReload),
-    },
-    {
-      kind: 'item',
-      id: 'download',
-      label: 'Download missing dependencies',
-      subtitle: 'mvn dependency:go-offline — the only thing here that uses the network',
-      icon: Download,
-      shortcut: 'Alt+Shift+U',
-      onclick: () => void runMaven('Download', mavenDownload),
-    },
-    {
-      kind: 'item',
-      id: 'sources',
-      label: 'Download sources',
-      subtitle: 'So Ctrl+B into a library lands on real source, not a decompiled stub',
-      icon: FileCode2,
-      onclick: () => void runMaven('Download sources', mavenDownloadSources),
-    },
-  ]);
-
   /** What the origin tag says, in the fewest words that are still true. */
   function originLabel(d: Dependency): string {
     switch (d.origin.kind) {
@@ -244,40 +187,13 @@
   {#snippet toolbar()}
     {#if root}
       <div class="dep-toolbar">
+        <!-- The filter, and only the filter.
+             The module graph, the re-read and the three repository actions used to sit here too.
+             They are about the BUILD rather than about this list — which pom declares what, what is
+             on disk in `~/.m2` — so they live in the build tool's own window now (Maven, Cargo),
+             where the rest of the build already is. One place per question; this panel keeps the
+             one control that acts on the rows it draws. -->
         <BennuFilterBar bind:query={filter} placeholder="Filter dependencies…" />
-        <!-- The graph of the same project, one press away. This panel answers "what does this module
-             need"; the graph answers "who needs it, and what does changing it cost" — which is the
-             question people arrive at this panel with and cannot get from a list. -->
-        <IconButton
-          tooltip={isCargo ? 'Crate graph (Alt+Shift+D)' : 'Module graph (Alt+Shift+D)'}
-          size={22}
-          onclick={() => bennuUiStore.openModuleGraph()}
-        >
-          <Network size={12} />
-        </IconButton>
-        <IconButton
-          tooltip={isCargo
-            ? 'Re-read the manifests and Cargo.lock'
-            : 'Re-read the poms and the resolved classpath'}
-          size={22}
-          disabled={dependenciesStore.loading}
-          onclick={() => root && void dependenciesStore.load(root, true)}
-        >
-          <RefreshCw size={12} />
-        </IconButton>
-        <!-- The three things that change what is ON DISK, as opposed to the refresh above which
-             only re-reads it. Behind one trigger because they are the same errand — "the editor and
-             my repository disagree" — and three more icons in a panel header is a toolbar nobody
-             reads. Maven only: none of them has a Cargo counterpart worth pretending about. -->
-        {#if !isCargo}
-          <Dropdown items={mavenActions} position="fixed" direction="down" width="300px">
-            {#snippet trigger({ toggle })}
-              <IconButton tooltip="Maven actions" size={22} onclick={toggle}>
-                <HardDriveDownload size={12} />
-              </IconButton>
-            {/snippet}
-          </Dropdown>
-        {/if}
       </div>
     {/if}
   {/snippet}

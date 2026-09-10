@@ -37,7 +37,22 @@ export function isFontFile(path: string | null | undefined): boolean {
   return /\.(ttf|otf|woff2?)$/i.test(name);
 }
 
+/** A spreadsheet Bennu can draw.
+ *
+ *  Four unrelated containers, and the reason they can all be listed is that reading them is not
+ *  ours: `.xls` is a compound file of BIFF records, `.xlsx` a ZIP of XML, `.xlsb` the same ZIP with
+ *  the sheets in binary, `.ods` the OpenDocument one. `.xlsm` and `.xlsa` are an `.xlsx` and an
+ *  `.xls` with macros in a part the reader never looks at.
+ *
+ *  The extension only decides whether to OFFER the viewer — what the bytes actually are is decided
+ *  by the reader, so a `.xls` that some export tool wrote as OOXML still opens. */
+export function isSpreadsheetFile(path: string | null | undefined): boolean {
+  if (!path) return false;
+  const name = path.split(/[\\/]/).pop() ?? path;
+  return /\.(xlsx|xlsm|xlsb|xls|xla|ods)$/i.test(name);
+}
+
 /** Whether this file opens as a preview instead of as an editable buffer. */
 export function opensAsPreview(path: string | null | undefined): boolean {
-  return isImageFile(path) || isWordFile(path) || isFontFile(path);
+  return isImageFile(path) || isWordFile(path) || isFontFile(path) || isSpreadsheetFile(path);
 }

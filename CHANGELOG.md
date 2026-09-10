@@ -9,6 +9,24 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **An XML gets its icon from what it says it is.** Tomcat's per-application context is `context.xml` inside a `.war` and `<appname>.xml` under `conf/Catalina/localhost`; a Struts module configuration is called whatever the constant says. The project tree now reads each XML's root element and marks it by that, so a config file is recognisable whatever it was named — and a name that guessed wrong loses to the content.
+
+- **A viewer for spreadsheets.** The column mapping an import expects, the translation table somebody sent, the fixtures a batch job reads — a legacy repository is full of them, and opening one meant leaving the editor. `.xlsx`, the Excel 97-2003 `.xls`, the binary `.xlsb` and OpenDocument `.ods` all open as a grid, with values, dates and formula results as the file recorded them, read-only. Which format it is comes from the bytes, so a workbook saved under the wrong extension still opens.
+
+- **`struts.properties` is understood, not just displayed.** Completion over the documented constants with their types and defaults, hover with the prose, ghost text where the default is certain, and a version gate on the `struts2-core` the project resolves — so `struts.strictMethodInvocation` is offered on 2.5 and not on 2.3, and the constants that were removed for security say what replaced them where they are written.
+
+- **IntelliJ's Java abbreviations.** `psf` offers *public static final*, `psfi` and `psfs` its `int` and `String`, plus `prsf*`, `psvm`, `sout`, `souf`, `serr`, `fori`, `ifn`, `inn` and `thr`. Bodies with more than one blank tab through, and a multi-line one is re-indented to where it lands instead of arriving at the margin — which also fixes every multi-line snippet a language server sends.
+
+- **A schema resolves to its nearest version when the exact one is nowhere.** A legacy `struts.xml` declares `struts-2.1.dtd` while the jar on the classpath ships `struts-2.5.dtd`, and until now nothing resolved at all — no completion, no hover, no go-to, in the file the whole application is configured in. The newest version at or below the one asked for now answers, and says so in the Schemas list. **Its checks stay off**: an underline read off a schema the project is not written against is an accusation about the wrong document.
+
+- **Icons for the files a Struts project is made of.** JSP and its family (`.jspf`, `.tag`, `.tagx`), Struts's own configuration (`struts.xml`, `struts-*.xml`, `struts.properties`) and Tomcat's (`context.xml`, `server.xml`, `tomcat-users.xml`) each read apart from the forty other XMLs in the tree instead of sharing one mark with them.
+
+- **`.bat` and `.cmd` are coloured.** Comments, labels, the control words, `%VAR%` and `!VAR!` expansions, redirections and switches — in the editor, in a markdown fence tagged `bat`/`cmd`/`batch`, and in the rendered preview. On a legacy Java tree that is the whole build-and-deploy story, and it used to open as a wall of grey. They get their own file icon too.
+
+- **The Maven tool window runs the build.** It was a sketch — one hard-coded lifecycle and a toast saying nothing was implemented. It now shows the project's own reactor, one section per module with the plugins that module's pom configures, and every row runs: a phase runs in that module's directory, and the output streams into the Run console like any other run, with Stop, ⟳ and the annotated log. Profiles and *skip tests* are set once in the window and travel with each run.
+
+- **The build actions live in the build tool's window.** The module graph, re-reading the project and the three things that change what is in `~/.m2` moved out of the Dependencies panel's header and into Maven's (and Cargo's), where the rest of the build already is. Dependencies keeps the filter over the rows it draws, and a refresh in either build window now re-reads both.
+
 - **`lombok.config` and `junit-platform.properties` are understood, not just displayed.** Completion over the documented keys with their types and defaults, hover with the prose and the release each one arrived in, ghost text where the answer is certain, and squiggles for a deprecated key or a value outside a closed set. Both files get an icon of their own in the project tree.
 
 - **Those two files are gated on the version the project actually resolves.** The keys offered are the ones your Lombok or JUnit has — on JUnit 5.2 there is no parallel-execution block, because it arrived in 5.3 — and a key already in the file that your version silently ignores is flagged where it is written. When the version cannot be resolved, everything is offered.
@@ -42,6 +60,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **A pom that pins the test selector can be fixed from the warning that reports it.** *Convert to a property* rewrites Surefire's literal `<test>` as a reference to a property defaulted to the same value: a plain `mvn test` still runs the suite, and running one class or one case works again — from Bennu, from a terminal, and from any other tool. The pom to be written is shown first, and only that value changes.
 
 ### Fixed
+
+- **The editor no longer wanders off a second after a go-to.** Jumping to a declaration put the caret in the right place and then, once the usage counts came back from the index, slid the view away from it — each count is a row drawn above a member, so every member above where you landed pushed you down. The view now holds the line you are on while those arrive, whether you got there by jumping or by scrolling.
+
+- **A go-to by byte offset waits for the file it is going to.** Every destination a backend answers with is a byte offset, and that path mapped it one flush after the tab changed — while the editor still held the file being *left*. The offset then resolved to a line in the wrong document and the jump landed there, in the right file, looking exactly like the editor drifting off on its own. It goes through the same flow the line jumps do now, which waits for the buffer before reading anything.
+
+- **A go-to puts the line on screen, and keeps it there.** Two ways it did not. An editor created a frame ago has not been measured, so the scroll computed against a container with no height and moved nothing — leaving the caret on the right line and the view wherever it was, which is the confusing half of it. And for about half a second after a file opens the editor keeps adding height *above* the caret (the usage count over each member, an inlay hint, a fold resolving), sliding the line just landed on. The landing is now held until both have settled, and gives way instantly to a click, a keystroke or another jump.
+
+- **The schema link in an XML is followable when no schema resolved.** Ctrl/Cmd+click on the DOCTYPE of a `struts.xml`, or on one `xsi:schemaLocation` entry of a Spring context, did nothing on exactly the files that needed it: the answer was gated on a grammar already being resolved, and following the link is what puts the schema on the machine. It now downloads it, opens it, and the file starts being validated and completed against it.
+
+- **A right-click in the Project tree marks the row it opened on.** The menu's verbs act on one file and nothing said which — a right-click does not move the selection, on purpose, so on 18px rows there was no way to tell whether you had hit the one you aimed at. Any tree can now mark it; the Project tree does.
+
+- **A JSP attribute written with spaces around its `=` is highlighted again.** `name = "x"` is as legal as `name="x"`, and the grammar only accepted the tight form — so the spaced one fell out of the tag and rendered as plain white text, which on a legacy page written that way is most of the line.
 
 - **Debugging a test showed no debugger.** The session started, the breakpoint was hit and the JVM stopped — but the Run panel's test tab had no transport controls and no frames or variables, because it looked up the debug session by the *program* run in front of it and a test run is not one. It now shows the stack, the variables and the step buttons in the same places a debugged program does, and the tab comes forward when a test stops.
 

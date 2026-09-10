@@ -89,12 +89,23 @@ fn bennu_completion(_ctx: &BennuState, args: CompletionArgs) -> Result<Vec<Compl
     {
         return Ok(items);
     }
-    Ok(IndexService::global().completion(
+    let mut items = IndexService::global().completion(
         &args.file,
         args.offset,
         args.source.as_deref(),
         bennu_complete::prelude::MatchCase::from_flag(args.case_sensitive),
-    ))
+    );
+    // The abbreviations, in front of what the index found. They are **added**, never substituted:
+    // `psf` is also a legal start to an identifier, and a project that has one must still see it.
+    // Empty unless the caret is on a word that begins one, which is nearly every keystroke.
+    if let Some(source) = args.source.as_deref() {
+        let mut templates = crate::java_templates::completions(&args.file, source, args.offset);
+        if !templates.is_empty() {
+            templates.append(&mut items);
+            items = templates;
+        }
+    }
+    Ok(items)
 }
 
 /// One JSP action reference to check for existence: its qualified name plus the byte

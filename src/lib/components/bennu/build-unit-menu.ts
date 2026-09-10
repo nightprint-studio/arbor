@@ -1,11 +1,10 @@
 /**
  * The context menu of a **build unit** — a Cargo crate or a Maven module.
  *
- * Two panels list the project by build unit (Cargo and Dependencies) and a third would if the
- * Maven one were ever wired to a real reactor. The rows there answer what a unit *declares*; the
- * question they leave behind is where it actually lives, which is a fact about the Project tree.
- * Hence one menu, defined once: the same four verbs in the same order, so where they are is
- * learned once rather than per panel.
+ * Three panels list the project by build unit — Cargo, Maven and Dependencies. The rows there
+ * answer what a unit *declares*; the question they leave behind is where it actually lives, which
+ * is a fact about the Project tree. Hence one menu, defined once: the same four verbs in the same
+ * order, so where they are is learned once rather than per panel.
  *
  * A crate and a module are the same idea wearing two names — the folder where a build target is
  * declared — which is why {@link BuildUnit} is two fields and not two types. The only thing the

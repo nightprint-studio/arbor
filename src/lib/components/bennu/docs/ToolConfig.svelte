@@ -1,12 +1,13 @@
-<!-- Bennu docs — lombok.config and junit-platform.properties: properties files with a published,
-     versioned vocabulary behind them. -->
+<!-- Bennu docs — lombok.config, junit-platform.properties and struts.properties: properties files
+     with a published, versioned vocabulary behind them. -->
 <h1>Tool configuration files</h1>
 <p class="doc-lead">
-  Two files in a JVM project look exactly like the hundred other <code>.properties</code> around
-  them and are nothing like them: <code>lombok.config</code> and
-  <code>junit-platform.properties</code>. Their keys are not names somebody chose — they are an
-  API, published per release, with defaults and legal values written down. Bennu knows that
-  vocabulary, and knows which half of it <em>your</em> version understands.
+  Three files in a JVM project look exactly like the hundred other <code>.properties</code> around
+  them and are nothing like them: <code>lombok.config</code>,
+  <code>junit-platform.properties</code> and <code>struts.properties</code>. Their keys are not
+  names somebody chose — they are an API, published per release, with defaults and legal values
+  written down. Bennu knows that vocabulary, and knows which half of it <em>your</em> version
+  understands.
 </p>
 
 <h2>What you get</h2>
@@ -86,6 +87,35 @@
 </p>
 <p>
   The file is found anywhere in the project, which in practice means
-  <code>src/test/resources</code>. Both files get the same icon treatment in the project tree, so
-  they are distinguishable at a glance from the message bundle sitting beside them.
+  <code>src/test/resources</code>. Each of these files gets an icon of its own in the project tree,
+  so they are distinguishable at a glance from the message bundle sitting beside them.
+</p>
+
+<h2>Struts</h2>
+<p>
+  <code>struts.properties</code> is where a legacy Struts application is configured, and its keys
+  are documented in a <code>default.properties</code> inside <code>struts2-core.jar</code> that
+  nobody opens. Completion, hover and the version gate work exactly as above, dated by the
+  <code>struts2-core</code> version the project resolves.
+</p>
+<p>
+  The same constants can be written three ways — here, as
+  <code>&lt;constant name="…"/&gt;</code> in <code>struts.xml</code>, or as an
+  <code>&lt;init-param&gt;</code> in <code>web.xml</code>. What is served is the
+  <code>.properties</code> spelling, because the XML one already has a DTD behind it.
+</p>
+<p>
+  <strong>The security constants are the point.</strong> Several of them are what an advisory was
+  about: <code>struts.enable.DynamicMethodInvocation</code> chooses a method from the URL and was
+  on by default before 2.5; <code>struts.ognl.allowStaticFieldAccess</code> is the half of static
+  access that survived, and <code>struts.ognl.allowStaticMethodAccess</code> is the half that did
+  not — a value for it does nothing from 2.5, and the hover says so where it is written. The
+  <code>struts.excluded*</code> deny lists are the ones every release extends, which is why
+  <code>struts.additional.excludedPatterns</code> exists: it <em>adds</em> to the built-in list
+  where the others replace it.
+</p>
+<p>
+  As with the other two, there is no "unknown key" squiggle. The table is the constants worth
+  documenting, not a transcription of every one Struts defines — so a key that is not in it means
+  <em>not written down here</em>, never <em>not understood</em>.
 </p>

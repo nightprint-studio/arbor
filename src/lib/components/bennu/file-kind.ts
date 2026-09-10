@@ -153,14 +153,14 @@ export function isWgslFile(path: string | null | undefined): boolean {
 }
 
 /**
- * A **build-tool configuration file with a documented vocabulary** — `lombok.config` and
- * `junit-platform.properties`.
+ * A **build-tool configuration file with a documented vocabulary** — `lombok.config`,
+ * `junit-platform.properties` and `struts.properties`.
  *
  * By name and not by extension, because that is the only thing that separates them from the
  * hundred other `.properties` in a legacy tree. The backend's `toolconf` extension keys on exactly
- * these two names, and this predicate has to stay in step with it: a name here that the backend
- * does not own costs a round trip per keystroke for an empty answer, and one it owns that is
- * missing here means the squiggles never arrive.
+ * these names, and this predicate has to stay in step with it: a name here that the backend does
+ * not own costs a round trip per keystroke for an empty answer, and one it owns that is missing
+ * here means the squiggles never arrive.
  *
  * Its own predicate rather than a clause inside {@link supportsDiagnostics}, because the editor
  * asks the same question twice — *does this file have diagnostics* and *does the request need the
@@ -169,7 +169,11 @@ export function isWgslFile(path: string | null | undefined): boolean {
  */
 export function isToolConfigFile(path: string | null | undefined): boolean {
   const name = (path ?? '').split(/[\\/]/).pop()?.toLowerCase() ?? '';
-  return name === 'lombok.config' || name === 'junit-platform.properties';
+  return (
+    name === 'lombok.config'
+    || name === 'junit-platform.properties'
+    || name === 'struts.properties'
+  );
 }
 
 /**

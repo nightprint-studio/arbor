@@ -41,6 +41,23 @@
   during a scan — only when you follow the link.
 </p>
 <p>
+  <strong>When only another version is on the machine.</strong> A legacy <code>struts.xml</code>
+  declares <code>struts-2.1.dtd</code> and the jar on its classpath ships
+  <code>struts-2.5.dtd</code> — the same schema, a different digit, and a strict name match
+  resolves nothing at all. The nearest version answers instead: the newest one <em>at or below</em>
+  what the document asked for, because an older schema can only offer less than the project is
+  allowed to write, and the oldest of the newer ones only when there is nothing below. The Schemas
+  list marks it, and its <strong>checks stay off</strong> — completion and hover from a
+  neighbouring version cost a keystroke when they are wrong, while an underline read off the wrong
+  schema is an accusation about a document that may be perfectly correct.
+</p>
+<p>
+  That link works <em>especially</em> when nothing resolved. On a machine with no copy of the
+  Struts DTD a <code>struts.xml</code> has no completion, no checks and no hover — and following
+  the address in its <code>DOCTYPE</code> is what fixes all three at once. Every other answer here
+  needs a grammar first; this one is the way to get one, so it is offered with or without.
+</p>
+<p>
   <strong>The elements a schema insists on.</strong> A <code>&lt;servlet&gt;</code> with no
   <code>&lt;servlet-name&gt;</code>, a Spring <code>&lt;bean&gt;</code> missing what its schema
   demands, a Struts <code>&lt;action&gt;</code> without its <code>&lt;result&gt;</code> — the

@@ -84,11 +84,87 @@ fn build_node(
     TreeNode {
         hidden: is_hidden(path, &name),
         ignored: inherited,
+        root_tag: if is_dir { String::new() } else { root_tag(path, &name) },
         name,
         path: path.display().to_string(),
         is_dir,
         children,
     }
+}
+
+/// The most bytes read from an XML to find its root element.
+///
+/// A root element is within the first few hundred bytes of every XML that exists — after it come
+/// the declaration, a DOCTYPE and the licence comment somebody's generator writes. This bounds the
+/// cost of being wrong about that on a file that turns out to be a megabyte of one line.
+const ROOT_TAG_BYTES: usize = 4096;
+
+/// The name of an XML file's root element, or empty.
+///
+/// **Why the tree reads files at all.** Because a name is not evidence: Tomcat's per-application
+/// context is `context.xml` inside a `.war` and `<appname>.xml` under `conf/Catalina/localhost`,
+/// and a Struts module configuration is called whatever `struts.configuration.files` says. An icon
+/// keyed on the name is right for the conventional spelling and silent for every other one.
+///
+/// The cost is one bounded read per XML per tree build — not per keystroke, and not for anything
+/// that is not an XML. The prologue is skipped rather than parsed: the declaration, comments and
+/// the DOCTYPE all come before the root element and none of them is it.
+fn root_tag(path: &Path, name: &str) -> String {
+    if !name.rsplit('.').next().is_some_and(|e| e.eq_ignore_ascii_case("xml")) {
+        return String::new();
+    }
+    let Ok(bytes) = read_head(path, ROOT_TAG_BYTES) else { return String::new() };
+    first_element(&String::from_utf8_lossy(&bytes))
+}
+
+/// The first `ROOT_TAG_BYTES` of a file, or fewer when it is shorter.
+fn read_head(path: &Path, limit: usize) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut buffer = vec![0u8; limit];
+    let read = file.read(&mut buffer)?;
+    buffer.truncate(read);
+    Ok(buffer)
+}
+
+/// The first real element's name — skipping the declaration, comments and the DOCTYPE.
+///
+/// Written out rather than handed to the XML scanner because this runs over every XML in the tree
+/// and wants to stop at the first tag; a scan of the whole head to use its first entry would be
+/// doing the work twice for the same answer.
+fn first_element(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        let rest = &text[i..];
+        // The three things that are not the root element, each skipped past its own terminator.
+        if let Some(skip) = rest.strip_prefix("<!--") {
+            match skip.find("-->") {
+                Some(end) => i += 4 + end + 3,
+                None => return String::new(),
+            }
+            continue;
+        }
+        if rest.starts_with("<?") || rest.starts_with("<!") {
+            match rest.find('>') {
+                Some(end) => i += end + 1,
+                None => return String::new(),
+            }
+            continue;
+        }
+        // A real tag. Its name ends at whitespace, `/` or `>`; the prefix is kept off, because
+        // `<beans:beans>` and `<beans>` are the same document to anybody asking this.
+        let name: String = rest[1..]
+            .chars()
+            .take_while(|c| !c.is_whitespace() && *c != '>' && *c != '/')
+            .collect();
+        return name.rsplit(':').next().unwrap_or(&name).to_string();
+    }
+    String::new()
 }
 
 /// Whether the platform considers the entry hidden.
@@ -114,6 +190,37 @@ fn is_hidden(path: &Path, name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// The reason the tree reads XML heads at all: a name is not evidence, and the root element
+    /// is the same in every spelling of the file.
+    #[test]
+    fn the_root_element_is_found_past_everything_that_comes_before_it() {
+        assert_eq!(first_element("<Context path=\"/app\"/>"), "Context");
+        assert_eq!(
+            first_element("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<struts>"),
+            "struts"
+        );
+        assert_eq!(
+            first_element(
+                "<?xml version=\"1.0\"?>\n<!-- a licence\n  spanning lines -->\n\
+                 <!DOCTYPE struts PUBLIC \"-//Apache//DTD\" \"http://x/struts-2.1.dtd\">\n\
+                 <struts>\n  <package/>\n</struts>"
+            ),
+            "struts"
+        );
+        // A namespaced root is the same document to anybody asking this.
+        assert_eq!(first_element("<beans:beans xmlns:beans=\"x\">"), "beans");
+        assert_eq!(first_element("<web-app>"), "web-app");
+    }
+
+    #[test]
+    fn a_head_with_no_element_in_it_answers_nothing_rather_than_guessing() {
+        assert_eq!(first_element(""), "");
+        assert_eq!(first_element("<?xml version=\"1.0\"?>"), "");
+        // An unterminated comment: everything after it is inside the comment, so there is no root.
+        assert_eq!(first_element("<!-- never closed <struts>"), "");
+        assert_eq!(first_element("not xml at all"), "");
+    }
+
     use super::*;
 
     struct TempDir(std::path::PathBuf);

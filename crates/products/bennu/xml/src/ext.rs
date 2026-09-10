@@ -195,10 +195,25 @@ impl FrameworkExtension for XmlExtension {
         intel::hover(&grammar, &doc, ctx.source, offset)
     }
 
+    /// Where the thing under the caret is declared — and, when nothing is, where its schema is.
+    ///
+    /// The second half is not a nicety and it is why this does not go through
+    /// [`Self::context`] like every other answer here. `context` requires a resolved grammar,
+    /// which is right for completion, hover and checks: with no schema there is nothing honest to
+    /// say. But the schema **reference** is a fact of the document's own text, and it is the one
+    /// question worth answering precisely when no grammar resolved — following that link is what
+    /// puts the schema on this machine, and gating it on the schema already being here left a
+    /// `struts.xml` on a machine with no DTD as a file where ctrl+click did nothing, for ever.
     fn navigate(&self, ctx: &FileCtx<'_>, offset: usize) -> Vec<ExtTarget> {
-        match self.context(ctx) {
-            Some((doc, grammar)) => intel::navigate(&grammar, &doc, ctx.source, offset),
-            None => Vec::new(),
+        if !is_xml(&ctx.extension()) {
+            return Vec::new();
+        }
+        let doc = scan(ctx.source);
+        match self.grammar(&ctx.path_str(), &doc).filter(|g| !g.is_empty()) {
+            Some(grammar) => intel::navigate(&grammar, &doc, ctx.source, offset),
+            None => intel::schema_reference(&doc, offset)
+                .map(|location| intel::remote_schema_target(&location))
+                .unwrap_or_default(),
         }
     }
 
@@ -219,7 +234,16 @@ impl FrameworkExtension for XmlExtension {
                 primary: grammar.source.rsplit('/').next().unwrap_or(&grammar.source).to_string(),
                 secondary: grammar.source.clone(),
                 kind: grammar.kind.map(|k| k.label().to_string()).unwrap_or_default(),
-                tags: vec![format!("{} elements", grammar.elements.len())],
+                // The second tag is the answer to "why is nothing underlined in this file": a
+                // schema that is a different version of the one the document names is trusted for
+                // completion and not for accusations, and the list is where that becomes visible.
+                tags: match grammar.approximate {
+                    true => vec![
+                        format!("{} elements", grammar.elements.len()),
+                        "another version — no checks".to_string(),
+                    ],
+                    false => vec![format!("{} elements", grammar.elements.len())],
+                },
                 ..ExtEntry::default()
             });
         }
@@ -272,7 +296,8 @@ mod tests {
         assert_eq!(ext.navigate(&ctx, at).len(), 1);
     }
 
-    /// The gate that replaces a capability check: no schema, no answers, no cost.
+    /// The gate that replaces a capability check: no schema, no answers, no cost. `navigate` is
+    /// the one deliberate exception — see the test below it.
     #[test]
     fn a_document_with_no_resolvable_schema_is_left_entirely_alone() {
         let ext = indexed(&[]);
@@ -281,6 +306,44 @@ mod tests {
         assert!(ext.completions(&ctx, 80).is_empty());
         assert!(ext.hover(&ctx, 80).is_none());
         assert!(ext.inline_hint(&ctx, 80).is_none());
+    }
+
+    /// The exception, and the reason it is one: this is the answer that GETS a schema.
+    ///
+    /// Gated on a resolved grammar, following the link did nothing on exactly the files that
+    /// needed it — a `struts.xml` on a machine with no DTD, which is every machine that has not
+    /// downloaded one, for ever.
+    #[test]
+    fn the_schema_link_is_followable_when_nothing_resolved_it() {
+        let ext = indexed(&[]);
+        let ctx = FileCtx { path: Path::new("/p/struts.xml"), source: DOC };
+        let at = DOC.find("struts.apache.org").unwrap();
+        let targets = ext.navigate(&ctx, at);
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].file, "http://struts.apache.org/dtds/struts-2.5.dtd");
+        // And still nothing else: an element with no grammar behind it has no declaration to go to.
+        assert!(ext.navigate(&ctx, DOC.find("<package").unwrap() + 2).is_empty());
+    }
+
+    /// The same for an `xsi:schemaLocation`, where the caret picks one entry out of a pair list —
+    /// the shape every Spring context file has.
+    #[test]
+    fn one_entry_of_a_schema_location_list_is_followable_on_its_own() {
+        const BEANS: &str = "<beans xmlns=\"http://www.springframework.org/schema/beans\"\n\
+             xsi:schemaLocation=\"http://www.springframework.org/schema/beans \
+             http://www.springframework.org/schema/beans/spring-beans-2.5.xsd \
+             http://www.springframework.org/schema/tx \
+             http://www.springframework.org/schema/tx/spring-tx-2.5.xsd\"></beans>";
+        let ext = indexed(&[]);
+        let ctx = FileCtx { path: Path::new("/p/applicationContext.xml"), source: BEANS };
+        let at = BEANS.find("spring-tx-2.5.xsd").unwrap();
+        let targets = ext.navigate(&ctx, at);
+        assert_eq!(targets.len(), 1);
+        assert!(targets[0].file.ends_with("spring-tx-2.5.xsd"), "got {}", targets[0].file);
+        // On the NAMESPACE half of a pair the location is what you meant — a namespace is not a
+        // document and there is nothing to open at it.
+        let ns = BEANS.find("schema/tx\"").map(|i| i + 2).unwrap_or(at);
+        assert!(!ext.navigate(&ctx, ns).is_empty());
     }
 
     #[test]

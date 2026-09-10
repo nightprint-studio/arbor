@@ -440,6 +440,9 @@ fn table(source: &str, root: &str, rows: &[(&str, &str, &str)]) -> Grammar {
         source: source.to_string(),
         kind: Some(GrammarKind::Builtin),
         roots: vec![root.to_string()],
+        // A curated table is not "a different version of" anything — it is its own answer, and
+        // says so through `GrammarKind::Builtin`.
+        approximate: false,
         elements: rows
             .iter()
             .map(|(name, children, doc)| Element {

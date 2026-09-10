@@ -49,6 +49,8 @@ pub mod env;
 pub mod ext;
 // Hover and go-to.
 pub mod explain;
+// The build the pom declares — the lifecycle, and the plugins it configures.
+pub mod goals;
 // The coordinates every Java project reaches for, for the machine that has none of them yet.
 pub mod known;
 // The pom's own vocabulary, as spans to colour.

@@ -59,6 +59,9 @@ import { yaml } from '@codemirror/legacy-modes/mode/yaml';
 import { rust } from '@codemirror/legacy-modes/mode/rust';
 import { toml } from '@codemirror/legacy-modes/mode/toml';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
+// Written here rather than imported: `@codemirror/legacy-modes` has no batch mode, and a legacy
+// Java tree's whole deploy story is `.bat` files. See `batch-lang.ts`.
+import { batch } from './batch-lang';
 import { c, cpp } from '@codemirror/legacy-modes/mode/clike';
 import { python } from '@codemirror/legacy-modes/mode/python';
 import { lua } from '@codemirror/legacy-modes/mode/lua';
@@ -203,20 +206,23 @@ const yamlLang = streamLang('yaml', yaml);
 const springYamlLang = configPropsLang('spring-yaml', yaml);
 const springPropertiesLang = configPropsLang('spring-properties', properties);
 /**
- * `lombok.config` and `junit-platform.properties` — properties files with a **closed, documented,
- * version-dependent** vocabulary, which is what separates them from the `messages.properties`
- * beside them and is the whole reason they get a descriptor of their own.
+ * `lombok.config`, `junit-platform.properties` and `struts.properties` — properties files with a
+ * **closed, documented, version-dependent** vocabulary, which is what separates them from the
+ * `messages.properties` beside them and is the whole reason they get a descriptor of their own.
  *
  * Same shape as the Spring pair above and the same four backend hooks; which keys exist, what they
  * mean and which of them your Lombok / JUnit version actually understands is the `toolconf`
  * extension's knowledge, never this file's.
  *
  * By NAME, not by extension: `lombok.config` is the only `.config` in a Java tree that means
- * anything, and a `junit-platform.properties` is one file among a hundred `.properties`.
+ * anything, and a `junit-platform.properties` or a `struts.properties` is one file among a
+ * hundred `.properties`.
  */
 const lombokConfigLang = configPropsLang('lombok-config', properties);
 const junitPlatformLang = configPropsLang('junit-platform', properties);
+const strutsPropsLang = configPropsLang('struts-properties', properties);
 const shellLang = streamLang('shell', shell);
+const batchLang = streamLang('batch', batch);
 /**
  * C, C++ and Python — coloured **whether or not a server is running**.
  *
@@ -366,7 +372,11 @@ export function languageForPath(path: string | null): LanguageDescriptor {
   // the shared predicate, because the editor asks the same question when it decides whether the
   // file has diagnostics — and the two answers have to be the same file set.
   if (isToolConfigFile(name)) {
-    return name === 'lombok.config' ? lombokConfigLang : junitPlatformLang;
+    // A descriptor each, and not one shared: the identity is what CodeMirror keys the editor on,
+    // so two files sharing one would remount the editor when you switch between them.
+    if (name === 'lombok.config') return lombokConfigLang;
+    if (name === 'struts.properties') return strutsPropsLang;
+    return junitPlatformLang;
   }
   if (isDockerfile(name)) return dockerLang;
   // The manifest, by NAME: `rustfmt.toml` and `.cargo/config.toml` are not manifests, and applying
@@ -423,6 +433,9 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'wgsl': return wgslLang;
     case 'sql': return sqlLangFor(bennuSettingsStore.sqlDialect);
     case 'sh': case 'bash': case 'zsh': return shellLang;
+    // `.cmd` and `.bat` are one language — the extension only decides which interpreter Windows
+    // picks and how it sets ERRORLEVEL, not what the file says.
+    case 'bat': case 'cmd': return batchLang;
     case 'c': return cLang;
     // ⚠️ A `.h` gets the **C++** mode, and the choice is not a coin toss: the two modes differ
     // only in vocabulary, so a C header read as C++ has a few keywords coloured that it will

@@ -935,6 +935,23 @@
     view.focus();
   }
 
+  /**
+   * Where a **UTF-8 byte offset** lands, as a 1-based line and column — `null` when unmounted.
+   *
+   * The read-only half of {@link scrollToByteOffset}, and it exists so a caller can find out
+   * *where* a backend offset is without moving anything: a navigation has to know the line before
+   * it commits to going there, and mapping the offset itself would mean mapping it against a
+   * document the caller cannot see.
+   */
+  export function lineColOfByteOffset(byteOffset: number): { line: number; col: number } | null {
+    if (!view) return null;
+    const doc = view.state.doc;
+    const b2u = makeByteToU16(doc.toString());
+    const pos = Math.max(0, Math.min(b2u(byteOffset), doc.length));
+    const line = doc.lineAt(pos);
+    return { line: line.number, col: pos - line.from + 1 };
+  }
+
   /** Move the caret to a **UTF-8 byte offset** and reveal it (centred). Backend spans
    *  (diagnostics, form/field ranges) are byte offsets, so we map through
    *  `makeByteToU16` against the live buffer before dispatching — the byte-aware sibling
@@ -1039,6 +1056,29 @@
     return block.top >= top && block.bottom <= top + height;
   }
 
+  /**
+   * Where `line` sits **in the viewport**, in pixels from its top edge. `null` when there is
+   * nothing measured to answer from.
+   *
+   * The question `isLineVisible` cannot answer: a line dragged a third of a screen is still
+   * visible. What moves it is everything the editor draws *above* the caret after a file opens —
+   * the usage count over each member, an inlay hint, a fold resolving — and each of those changes
+   * the height of the content above without anybody scrolling.
+   *
+   * Deliberately relative to the **viewport** and not to the document: the document offset of a
+   * line moves for exactly the reasons this exists to detect, so measuring it there would report
+   * every drift as no drift at all.
+   */
+  export function lineOffset(line: number): number | null {
+    if (!view) return null;
+    const height = view.scrollDOM.clientHeight;
+    if (height <= 0) return null;
+    const doc = view.state.doc;
+    const ln = Math.max(1, Math.min(line, doc.lines));
+    const block = view.lineBlockAt(doc.line(ln).from);
+    return block.top - view.scrollDOM.scrollTop;
+  }
+
   export function scrollToLineCol(line: number, col = 1) {
     if (!view) return;
     const doc = view.state.doc;
@@ -1068,6 +1108,72 @@
     const doc = view.state.doc;
     const ln = Math.max(1, Math.min(line, doc.lines));
     view.dispatch({ effects: EditorView.scrollIntoView(doc.line(ln).from, { y: 'center' }) });
+  }
+
+  /**
+   * Where to anchor the view while something changes the height of the document.
+   *
+   * The caret's line when it is on screen — that is the line the reader is looking at, and after a
+   * go-to it is the whole point of where they are. Otherwise the first line in the viewport, which
+   * is what somebody scrolling through a file is reading from.
+   */
+  function anchorLinePos(v: EditorView): number {
+    const doc = v.state.doc;
+    const caret = doc.lineAt(v.state.selection.main.head).from;
+    const block = v.lineBlockAt(caret);
+    const top = v.scrollDOM.scrollTop;
+    if (block.top >= top && block.bottom <= top + v.scrollDOM.clientHeight) return caret;
+    // Client coordinates rather than a height lookup: this has to agree with the scroll container,
+    // and asking the browser where the top edge lands is the one way that cannot disagree with it.
+    const rect = v.scrollDOM.getBoundingClientRect();
+    return doc.lineAt(v.posAtCoords({ x: rect.left + 1, y: rect.top + 1 }, false)).from;
+  }
+
+  /**
+   * Change a decoration layer **without moving the reader**.
+   *
+   * The defect this exists for is the one nobody reports as a scroll, because nothing scrolled: the
+   * usage count over each member is a block row drawn ABOVE its line, and the counts arrive from
+   * the index a second or two after the file opens. Every member above where you are gains a row,
+   * the content below it slides down by the sum of them — a class with thirty members is some five
+   * hundred pixels — and the line you jumped to leaves the screen. The caret does not move, being a
+   * document position, so nothing about the caret can see it happen. It reads as "the editor
+   * scrolled off on its own a moment after the go-to".
+   *
+   * The cure is an anchor, not a watchdog. A watchdog that puts the view back for a while turns
+   * "wrong immediately" into "wrong a couple of seconds later", which is strictly harder to
+   * diagnose: `nav-flow.ts`'s hold is the backstop for a viewport that does not exist yet, and the
+   * drift it used to chase is fixed here, at the dispatch that causes it.
+   *
+   * ⚠️ Only for changes that leave the DOCUMENT alone. The anchor is a document position held
+   * across the mutation, so a `mutate` that edits the text would put the view back against a
+   * position that has moved.
+   */
+  function keepingPlace(mutate: () => void) {
+    const v = view;
+    if (!v) return;
+    // No layout to preserve — and no layout is also the state in which every measurement below is
+    // a guess, so the honest thing is to do the change and let the first real measure place it.
+    if (v.scrollDOM.clientHeight <= 0) {
+      mutate();
+      return;
+    }
+    const pos = anchorLinePos(v);
+    const before = v.lineBlockAt(pos).top - v.scrollDOM.scrollTop;
+    mutate();
+    // Read and write in CodeMirror's own measure cycle: the new heights are not known until it has
+    // measured, and reading them ourselves a frame later would both thrash layout and let one
+    // painted frame through with the reader already somewhere else.
+    v.requestMeasure({
+      read: (measured) => measured.lineBlockAt(pos).top - measured.scrollDOM.scrollTop,
+      write: (after, measured) => {
+        const delta = after - before;
+        // Sub-pixel differences are not movement anybody perceives, and correcting them every time
+        // a layer is pushed would make the view twitch.
+        if (Math.abs(delta) < 1) return;
+        measured.scrollDOM.scrollTop += delta;
+      },
+    });
   }
 
   /** Imperatively replace the diagnostics (byte spans → lint), e.g. after a fresh
@@ -1163,17 +1269,21 @@
   ) {
     if (!view) return;
     const b2u = makeByteToU16(view.state.doc.toString());
-    view.dispatch({
-      effects: cmSetCodeLenses.of(
-        lenses.map((l) => ({
-          pos: b2u(l.start),
-          title: l.title,
-          actionable: l.actionable,
-          tone: l.tone,
-          key: l.key,
-        })),
-      ),
-    });
+    // Anchored: every lens is a block row above its item, so a set arriving from the index adds a
+    // row's height for each member ABOVE the reader and slides them off the line they are on.
+    keepingPlace(() =>
+      view?.dispatch({
+        effects: cmSetCodeLenses.of(
+          lenses.map((l) => ({
+            pos: b2u(l.start),
+            title: l.title,
+            actionable: l.actionable,
+            tone: l.tone,
+            key: l.key,
+          })),
+        ),
+      }),
+    );
   }
 
   /**
@@ -1188,16 +1298,21 @@
   ) {
     if (!view) return;
     const b2u = makeByteToU16(view.state.doc.toString());
-    view.dispatch({
-      effects: cmSetInlayHints.of(
-        hints.map((h) => ({
-          pos: b2u(h.offset),
-          label: h.label,
-          side: h.before === false ? ('after' as const) : ('before' as const),
-          tooltip: h.tooltip,
-        })),
-      ),
-    });
+    // Anchored for the same reason as the lenses, in a smaller way: a hint is inline, but with
+    // wrapping on it can push a long line onto another row, and enough of those above the reader
+    // move them just as surely.
+    keepingPlace(() =>
+      view?.dispatch({
+        effects: cmSetInlayHints.of(
+          hints.map((h) => ({
+            pos: b2u(h.offset),
+            label: h.label,
+            side: h.before === false ? ('after' as const) : ('before' as const),
+            tooltip: h.tooltip,
+          })),
+        ),
+      }),
+    );
   }
 
   /**

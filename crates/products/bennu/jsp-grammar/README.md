@@ -53,13 +53,17 @@ Highlighting is leaf-driven by the `classify` function in `jsp-lang.ts` (node ty
 with `cc`. They are only for regenerating the grammar after editing `grammar.js`, and the
 wasm must be rebuilt in the same pass or the two consumers drift apart.
 
-Requires the tree-sitter CLI (`cargo install --locked tree-sitter-cli --version "^0.25"`)
-and Docker (for the wasm compile, since Emscripten isn't installed locally). ABI 14.
+Requires the tree-sitter CLI (`cargo install --locked tree-sitter-cli`) and, for the wasm,
+**Emscripten** — `brew install emscripten` on this machine, which `tree-sitter build --wasm`
+picks up on its own; a Docker daemon is used only when `emcc` is absent. The parser is
+**ABI 15**, which is what `web-tree-sitter` 0.25 in the frontend loads: if a future CLI starts
+emitting a newer one, pass `--abi 15` rather than bumping it here alone.
 
 ```sh
 cd crates/products/bennu/jsp-grammar
 tree-sitter generate                 # grammar.js → src/parser.c + metadata
-tree-sitter build --wasm             # src/parser.c → tree-sitter-jsp.wasm (via Docker)
+tree-sitter test                     # the corpus in test/ — run it, the grammar has one
+tree-sitter build --wasm             # src/parser.c → tree-sitter-jsp.wasm
 cp tree-sitter-jsp.wasm ../../../../static/bennu/tree-sitter-jsp.wasm
 ```
 

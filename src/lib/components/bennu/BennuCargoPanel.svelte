@@ -31,6 +31,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuCargoStore } from '$lib/stores/bennu/cargo.svelte';
+  import { dependenciesStore } from '$lib/stores/bennu/dependencies.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { emptyInvocation, hasComponent } from '$lib/ipc/bennu/cargo';
@@ -97,6 +98,13 @@
   }
 
   /** The `[workspace] members` list, so an orphan is one click from being fixed. */
+  /** Re-read the build: this panel's manifests, and the dependency report over the same files. */
+  function refresh() {
+    if (!root) return;
+    void bennuCargoStore.load(root, true);
+    void dependenciesStore.load(root, true);
+  }
+
   function openRootManifest() {
     if (workspace) openFile(`${workspace.root}/Cargo.toml`);
   }
@@ -126,11 +134,15 @@
         >
           <Network size={12} />
         </IconButton>
+        <!-- Re-reads BOTH: the manifests this panel draws from, and the dependency report drawn
+             from the same files. They are one question — a `Cargo.toml` edited to add a member
+             changed what both panels should say — and the Dependencies header no longer carries a
+             refresh of its own. -->
         <IconButton
-          tooltip="Re-read the workspace manifests"
+          tooltip="Re-read the manifests — this panel and the Dependencies one"
           size={22}
           disabled={bennuCargoStore.loading}
-          onclick={() => root && void bennuCargoStore.load(root, true)}
+          onclick={refresh}
         >
           <RefreshCw size={12} />
         </IconButton>

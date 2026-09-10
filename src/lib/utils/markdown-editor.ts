@@ -1718,6 +1718,8 @@ const PRISM_LANG_ALIAS: Record<string, string> = {
   // one paragraph of the document with no colour in it.
   sh: 'bash', shell: 'bash', zsh: 'bash', ksh: 'bash',
   console: 'bash', 'shell-session': 'bash', 'sh-session': 'bash', terminal: 'bash',
+  // Prism's grammar is `batch`; every tag people actually write for it is one of these.
+  bat: 'batch', cmd: 'batch', dosbatch: 'batch', winbatch: 'batch',
   containerfile: 'dockerfile',
   yml: 'yaml', md: 'markdown', rs: 'rust',
   cpp: 'cpp', 'c++': 'cpp', 'c#': 'csharp', cs: 'csharp',

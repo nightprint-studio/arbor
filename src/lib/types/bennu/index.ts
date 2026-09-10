@@ -109,6 +109,13 @@ export interface TreeNode {
   /** Ignored by git. The tree **marks** these rather than hiding them: a stale ignored
    *  artifact you cannot see is one you cannot explain. Omitted on the wire when false. */
   ignored?: boolean;
+  /** For an XML file, its **root element** — `Context`, `struts`, `beans`. Absent for everything
+   *  else, and for an XML that could not be read.
+   *
+   *  It is on the wire because a name is not evidence: Tomcat's per-application context is
+   *  `context.xml` in a `.war` and `<appname>.xml` under `conf/Catalina/localhost`. The root
+   *  element is what the file says it is, and it is what the icon is chosen by. */
+  root_tag?: string;
 }
 
 /** Result of `bennu_read_file`: the decoded text and the encoding it was decoded

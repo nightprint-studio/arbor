@@ -105,6 +105,17 @@
 
     // ── Selection ──────────────────────────────────────────────────────
     selectedId?:  string | null;
+    /**
+     * The row a context menu is currently open ON.
+     *
+     * Separate from {@link selectedId} because they answer different questions: the selection is
+     * what the arrows and Enter act on, and this is what the open menu's verbs will act on — and
+     * a right-click deliberately does not always move the selection. Without it, a right-click
+     * gives no feedback at all, so on a dense tree there is no way to tell whether the menu
+     * belongs to the row you aimed at. The consumer owns the value (it is the one that knows when
+     * its menu closes); the *look* is defined here, once, so every tree marks it the same way.
+     */
+    contextId?:   string | null;
     /** Override the default selectability check (default: any leaf or
      *  any node with `selectable !== false`). */
     selectable?:  (node: T) => boolean;
@@ -197,6 +208,7 @@
     getId           = (n) => (n as any).id,
     hasChildren,
     selectedId      = null,
+    contextId       = null,
     selectable,
     defaultExpanded,
     initialExpanded,
@@ -656,6 +668,7 @@
         <div
           class="tree-row {extraClass}"
           class:tree-row-selected={isSelected}
+          class:tree-row-context={!!contextId && r.id === contextId}
           class:tree-row-expandable={r.hasChildren}
           class:tree-row-leaf={!r.hasChildren}
           class:tree-row-drop-hover={isDropHover}
@@ -804,6 +817,19 @@
   /* Where the file is coming FROM. Two rows are involved in a drag and only one of them was
      ever marked; dimming the source is what makes the pair read as a move. */
   :global(.tree .tree-row.tree-row-dragging) { opacity: 0.45; }
+
+  /* The row an open context menu belongs to.
+     ⚠️ TWO classes for the same reason the drop-hover rule needs them: `.tree .tree-row:hover`
+     is (0,3,0), and the pointer is sitting on this very row for as long as the menu is open. A
+     single-class rule would lose to `:hover` for the entire time it had something to say — which
+     is the bug this fixes, not a detail of it. Declared AFTER the hover rule so the tie goes to
+     the more specific statement.
+     The bar down the leading edge is what makes it readable when the row is ALSO the selection:
+     the tint alone would then say nothing new. */
+  :global(.tree .tree-row.tree-row-context) {
+    background: var(--accent-subtle);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
 
   /* Disclosure caret. Always reserves the same width whether or not
      the node has children, so labels line up across siblings. */

@@ -88,3 +88,6 @@ pub use crate::decl::{
     annotation_named, annotation_string, annotation_value_text, annotations_of, has_modifier,
     modifier_words, named_child_of, node_text, simple_name, string_literal, type_declarations,
 };
+
+// The abbreviations a Java file expands, as a table the caller shapes for the wire.
+pub use crate::templates::{matching as matching_templates, Template, TEMPLATES};

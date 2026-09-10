@@ -90,6 +90,15 @@ pub struct Grammar {
     /// The names a document may have at its root. Empty when the schema does not say (a DTD
     /// says so in the `DOCTYPE`, not in the grammar), and then any known element is accepted.
     pub roots: Vec<String>,
+    /// This is **a different version** of the schema the document asked for — see
+    /// [`crate::catalog`]'s version-family fallback.
+    ///
+    /// It changes what may be said about the document. Completion, hover and go-to are worth
+    /// having from a neighbouring version and are honest about it (the source names the file that
+    /// answered, and it is not the one the document names). **Checks are not**: "this element does
+    /// not exist" read off a schema the project is not written against is an accusation about the
+    /// wrong document, and one underline that is wrong costs more than ten completions that are.
+    pub approximate: bool,
 }
 
 impl Grammar {
@@ -284,7 +293,13 @@ pub fn from_dtd(dtd: &dtd::Dtd, source: &str) -> Grammar {
         .collect();
     // A DTD names no root: the document's own `DOCTYPE` does. Left empty, which the checks read
     // as "any declared element may be the root".
-    Grammar { source: source.to_string(), kind: Some(GrammarKind::Dtd), elements, roots: Vec::new() }
+    Grammar {
+        source: source.to_string(),
+        kind: Some(GrammarKind::Dtd),
+        elements,
+        roots: Vec::new(),
+        approximate: false,
+    }
 }
 
 /// An XSD, as a grammar.
@@ -309,6 +324,7 @@ pub fn from_xsd(schema: &xsd::Xsd, source: &str) -> Grammar {
         kind: Some(GrammarKind::Xsd),
         roots: schema.elements.iter().map(|e| e.name.clone()).collect(),
         elements: Vec::new(),
+        approximate: false,
     };
     let mut queue: Vec<&xsd::XsdElement> = schema.elements.iter().collect();
     let mut seen: HashSet<usize> = HashSet::new();

@@ -24,6 +24,7 @@
     semantic colour the moment clangd, pyright, lua-language-server or gopls is.</li>
   <li><strong>TOML</strong>, <strong>RON</strong>, XML, YAML,
     <code>.properties</code>, CSS/SCSS/LESS, JavaScript/TypeScript, shell,
+    <strong>Windows batch</strong> (<code>.bat</code>, <code>.cmd</code>),
     <strong>Dockerfile</strong> and SQL highlight.
     Colour only: navigation and completion want a language server, and until one is wired those
     actions are hidden rather than offered and silent.</li>
@@ -63,7 +64,8 @@
   put the caret on a line and that line shows its markup, so a typo is fixed where you found it.
   The <strong>source</strong> view colours its fences too, from the same vocabulary — a
   <code>bash</code>, <code>sh</code>, <code>zsh</code> or <code>console</code> block reads as
-  shell in either view, and so do <code>java</code>, <code>xml</code>, <code>yaml</code>,
+  shell in either view, a <code>bat</code>, <code>cmd</code> or <code>batch</code> one as Windows
+  batch, and so do <code>java</code>, <code>xml</code>, <code>yaml</code>,
   <code>dockerfile</code> and the rest of what a project's README quotes.
   The button in the toolbar (or <em>Markdown: edit the source</em> in the Command Palette)
   switches to the code editor for when the markup itself is the work; the choice is remembered.

@@ -316,6 +316,16 @@ mod dependencies;
 // coordinates it does NOT have — and the one verb that changes that. The reporting half runs no
 // process; the download is a job, because it is the only thing here that needs the network.
 mod maven;
+// The Maven BUILD, as the tool window offers it (`bennu_maven_model` / `bennu_maven_goal`): the
+// reactor and the plugins each pom configures, read out of the poms, plus the one verb that starts
+// Maven — streaming into the same Run console a JVM launch and a cargo command use.
+// A spreadsheet in the tree, as a grid (`bennu_read_sheet`). The reading is `bennu-sheet`'s;
+// this is the one call that hands a viewer its rows.
+mod sheet;
+mod maven_goals;
+// The abbreviations a Java file expands (`psf`, `sout`, `psvm`) — the table lives in `bennu-java`,
+// the wire shaping here. Appended to the Java completion, never replacing it.
+mod java_templates;
 // Maven Central (`bennu_maven_version_hints`): which of a pom's pinned dependencies have a newer
 // release. The Java mirror of `crates_io`, and the only Java-side call that opens a socket — behind
 // its own switch, its own cache and its own TTL, for the same three reasons.

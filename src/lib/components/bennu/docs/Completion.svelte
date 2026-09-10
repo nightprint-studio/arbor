@@ -166,6 +166,39 @@
   alone rather than doubled.
 </p>
 
+<h2>Abbreviations</h2>
+<p>
+  Type <code>psf</code> and the list offers <strong>public static final</strong>, with
+  <code>psfi</code> and <code>psfs</code> under it for the <code>int</code> and the
+  <code>String</code>. These are IntelliJ's own Java abbreviations, deliberately: somebody who has
+  typed <code>psf</code> for fifteen years should get it here too, without configuring anything.
+</p>
+<ul>
+  <li><strong>Modifiers</strong> — <code>psf</code>, <code>psfi</code>, <code>psfs</code>,
+    <code>prsf</code>, <code>prsfi</code>, <code>prsfs</code>, and <code>psvm</code> for a
+    <code>main</code>.</li>
+  <li><strong>Printing</strong> — <code>sout</code>, <code>souf</code>, <code>serr</code>.</li>
+  <li><strong>Statements</strong> — <code>fori</code>, <code>ifn</code>, <code>inn</code>,
+    <code>thr</code>.</li>
+</ul>
+<p>
+  The ones with more than one blank tab through with <kbd>Tab</kbd>, and the body is
+  <strong>re-indented</strong> to where it lands, so a <code>psvm</code> three levels into a class
+  arrives lined up rather than at the margin.
+</p>
+<p>
+  They are <em>added</em> to what the index found, never substituted: a field actually called
+  <code>psfCount</code> still appears, under them. And they are offered only where a bare word is
+  being typed — after a <code>.</code> the list is answering "what members does this have", and an
+  abbreviation there would be a wrong answer to a precise question.
+</p>
+<p>
+  What is deliberately missing is the abbreviations that have to <em>read the surrounding code</em>
+  to be right — IntelliJ's <code>iter</code>, which infers the collection in scope. A version that
+  guesses writes a name that is not there, and an abbreviation is supposed to save typing rather
+  than start a correction.
+</p>
+
 <h2>Members that do not exist yet</h2>
 <p>
   Two families, and they are the same gesture: you are in a class body, you start typing a name,

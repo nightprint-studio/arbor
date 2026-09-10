@@ -8,11 +8,26 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { NavFlow, READY_ATTEMPTS, REVEAL_ATTEMPTS, type NavHost, type NavPlace } from './nav-flow';
+import {
+  HOLD_ATTEMPTS, HOLD_SETTLED, HOLD_TOLERANCE, NavFlow, READY_ATTEMPTS, REVEAL_ATTEMPTS,
+  type NavHost, type NavPlace,
+} from './nav-flow';
 
 /** A world the test drives by hand: nothing is timed, everything is stepped. */
-function world(opts: { activeFile?: string | null; readyFiles?: string[]; blindFor?: number } = {}) {
+function world(
+  opts: {
+    activeFile?: string | null;
+    readyFiles?: string[];
+    blindFor?: number;
+    /** The text of each file, for the byte-offset resolver. */
+    texts?: Record<string, string>;
+    /** How many measurements answer "there is no viewport yet" — an editor created and not laid
+     *  out, which is the state a scroll request is lost in. */
+    unmeasuredFor?: number;
+  } = {},
+) {
   const readyFiles = new Set(opts.readyFiles ?? []);
+  const texts = opts.texts ?? {};
   // How many `inView` questions answer "I cannot see it yet" — a stand-in for an editor that has
   // been created but not measured, which is the state a scroll request is lost in.
   let blind = opts.blindFor ?? 0;
@@ -21,7 +36,16 @@ function world(opts: { activeFile?: string | null; readyFiles?: string[]; blindF
   const pushes: NavPlace[] = [];
   const refines: NavPlace[] = [];
   const scrolls: { line: number; col: number }[] = [];
+  /** The corrections the hold made — a reveal, never a scroll: a scroll would take the focus. */
+  const reveals: number[] = [];
   let settles = 0;
+  /** Where the landed line sits in the viewport. A scroll puts it back at the resting value; the
+   *  decorations that arrive after a jump are what move it (see `drift`). */
+  const RESTING = 100;
+  let offset = RESTING;
+  let unmeasured = opts.unmeasuredFor ?? 0;
+  /** The lines the view has actually been brought to — what `inView` answers from. */
+  const visible = new Set<number>();
 
   const host: NavHost = {
     activeFile: () => active,
@@ -34,6 +58,34 @@ function world(opts: { activeFile?: string | null; readyFiles?: string[]; blindF
     scrollTo(line, col) {
       scrolls.push({ line, col });
       if (active) caret = { file: active, line, col };
+      offset = RESTING;
+      visible.add(line);
+    },
+    lineOffset: () => {
+      if (unmeasured > 0) {
+        unmeasured -= 1;
+        return null;
+      }
+      return offset;
+    },
+    // A byte offset means something only against the file's own text, so the fake keeps one text
+    // per file and refuses to answer for a file that is not the one mounted — which is exactly
+    // what the editor does, and the whole reason this is a host call.
+    lineOfByteOffset(file, byteOffset) {
+      if (file !== active || !readyFiles.has(file)) return null;
+      const lines = (texts[file] ?? '').split('\n');
+      let seen = 0;
+      for (let i = 0; i < lines.length; i += 1) {
+        const end = seen + lines[i].length;
+        if (byteOffset <= end) return { line: i + 1, col: byteOffset - seen + 1 };
+        seen = end + 1;
+      }
+      return { line: lines.length, col: 1 };
+    },
+    reveal(line) {
+      reveals.push(line);
+      offset = RESTING;
+      visible.add(line);
     },
     async settle() {
       settles += 1;
@@ -43,7 +95,9 @@ function world(opts: { activeFile?: string | null; readyFiles?: string[]; blindF
         blind -= 1;
         return false;
       }
-      return scrolls.some((sc) => sc.line === line);
+      // Either way of being brought to a line counts: a scroll, and a reveal — which moves the
+      // view without touching the caret and is what the hold corrects with.
+      return visible.has(line) || scrolls.some((sc) => sc.line === line);
     },
     caret: () => caret,
     ring: {
@@ -57,10 +111,19 @@ function world(opts: { activeFile?: string | null; readyFiles?: string[]; blindF
     pushes,
     refines,
     scrolls,
+    reveals,
     get settles() { return settles; },
     get active() { return active; },
     get caret() { return caret; },
     arrive: (file: string) => readyFiles.add(file),
+    /** What a usage count drawn over a member, or a fold resolving, does to the line below it. */
+    drift: (px: number) => { offset = RESTING + px; },
+    /** The view moved and the caret did not — a measurement correcting itself, a container
+     *  resizing. The caret is a document position and stays exactly where it was. */
+    loseSight: () => {
+      visible.clear();
+      scrolls.length = 0;
+    },
     setCaret: (p: NavPlace) => { caret = p; },
     /** The caret moved, and the flow was told — the two halves of one real event. A test that
      *  only calls `onCaret` is describing a world where `caret()` lies. */
@@ -317,5 +380,250 @@ describe('two navigations at once', () => {
     w.arrive('C.java');
     await second;
     expect(flow.inFlight).toBe(false);
+  });
+});
+
+/**
+ * The failure this whole group is named for: **arriving is not staying.**
+ *
+ * The go-to lands on the right line, and a moment later the view is somewhere else — reported as
+ * "it scrolls off on its own", which is exactly what it looks like and exactly what nobody did.
+ * For about half a second after a file opens the editor keeps changing the height of what is
+ * *above* the caret: the usage count drawn over every member, an inlay hint, a fold resolving.
+ * Each one slides the line that was just landed on, without a scroll anywhere.
+ */
+describe('holding a landing while the editor finishes decorating', () => {
+  /** Let the hold run: it is deliberately not awaited by `go`, so a test has to yield to it. */
+  const flush = async (n = 80) => {
+    for (let i = 0; i < n; i += 1) await Promise.resolve();
+  };
+
+  it('puts the line back when something above it moves it', async () => {
+    const w = world({ activeFile: 'A.java', readyFiles: ['A.java'] });
+    const flow = new NavFlow(w.host);
+    expect(await flow.go(at('A.java', 40), { record: true })).toBe('landed');
+    expect(w.scrolls).toEqual([{ line: 40, col: 1 }]);
+
+    // The decorations land, and the line is no longer where it was put.
+    w.drift(HOLD_TOLERANCE + 30);
+    await flush();
+
+    expect(w.reveals).toContain(40);
+    // A REVEAL and not a scroll: a scroll ends by focusing the editor, and by now the reader may
+    // be typing somewhere else entirely.
+    expect(w.scrolls).toEqual([{ line: 40, col: 1 }]);
+  });
+
+  it('ignores movement too small to notice, so the view never twitches', async () => {
+    const w = world({ activeFile: 'A.java', readyFiles: ['A.java'] });
+    const flow = new NavFlow(w.host);
+    await flow.go(at('A.java', 40), { record: true });
+
+    // A scrollbar appearing, a sub-pixel reflow: real movement, and not movement anybody sees.
+    w.drift(HOLD_TOLERANCE - 1);
+    await flush();
+
+    expect(w.reveals).toEqual([]);
+  });
+
+  /** The rule that keeps the hold from becoming a nuisance of its own. */
+  it('stops the moment the reader goes somewhere else', async () => {
+    const w = world({ activeFile: 'A.java', readyFiles: ['A.java'] });
+    const flow = new NavFlow(w.host);
+    await flow.go(at('A.java', 40), { record: true });
+
+    // A click, an arrow key — the caret is no longer on the line the jump was about.
+    w.move(flow, { file: 'A.java', line: 7, col: 3 });
+    w.drift(HOLD_TOLERANCE + 200);
+    await flush();
+
+    expect(w.reveals).toEqual([]);
+  });
+
+  it('stops when a newer navigation takes the view', async () => {
+    const w = world({ activeFile: 'A.java', readyFiles: ['A.java', 'B.java'] });
+    const flow = new NavFlow(w.host);
+    await flow.go(at('A.java', 40), { record: true });
+    await flow.go(at('B.java', 12), { record: true });
+
+    w.drift(HOLD_TOLERANCE + 200);
+    await flush();
+
+    // An older hold putting the view back would undo the jump that replaced it.
+    expect(w.reveals).not.toContain(40);
+    expect(w.scrolls.at(-1)).toEqual({ line: 12, col: 1 });
+  });
+
+  /**
+   * **The one the reader actually reports**, and it is not drift: *the caret is on the right line
+   * and the view is somewhere else.*
+   *
+   * An editor created a frame ago has not been measured, so `scrollIntoView` computed against a
+   * container with no height and moved nothing. The caret went to the destination, being a
+   * document position; the view stayed where it was. The landing's own retry budget is small on
+   * purpose — it waits for a measure, not for I/O — so on a large file in a container still being
+   * laid out it runs out first, and the hold used to give up in exactly the same state, because
+   * "nothing to measure" was read as "nothing to do".
+   */
+  it('waits for a viewport instead of giving up when there is none yet', async () => {
+    const w = world({
+      activeFile: 'A.java',
+      readyFiles: ['A.java'],
+      // No layout for the whole landing and the first frames of the hold.
+      unmeasuredFor: 6,
+      // And while there is none, the line is not on screen.
+      blindFor: 40,
+    });
+    const flow = new NavFlow(w.host);
+    await flow.go(at('A.java', 400), { record: true });
+    // The caret is right — that is what makes this so hard to see.
+    expect(w.caret).toEqual(at('A.java', 400));
+
+    await flush();
+
+    // And once there is something to measure, the line is put on screen.
+    expect(w.reveals).toContain(400);
+  });
+
+  /** The view moved and the caret did not: a measurement correcting itself, a panel resizing. */
+  it('puts the line back when the view leaves it behind', async () => {
+    const w = world({ activeFile: 'A.java', readyFiles: ['A.java'] });
+    const flow = new NavFlow(w.host);
+    await flow.go(at('A.java', 40), { record: true });
+    expect(w.reveals).toEqual([]);
+
+    w.loseSight();
+    await flush();
+
+    expect(w.reveals).toContain(40);
+  });
+
+  /**
+   * The answer to "does a jump now cost two and a half seconds": **no.**
+   *
+   * The navigation resolves when the caret lands — the hold is never awaited — and the watch after
+   * it stops as soon as the line has been still for long enough to have outlasted the editor's own
+   * late passes. The full budget exists for the case that needs it and nothing else pays for it.
+   */
+  it('stops watching as soon as the landing is settled', async () => {
+    const w = world({ activeFile: 'A.java', readyFiles: ['A.java'] });
+    const flow = new NavFlow(w.host);
+    const before = w.settles;
+    await flow.go(at('A.java', 40), { record: true });
+    await flush(HOLD_ATTEMPTS * 2);
+
+    const watched = w.settles - before;
+    expect(watched).toBeLessThan(HOLD_ATTEMPTS);
+    // And it did watch: stopping on the first frame would prove nothing about the decorations
+    // that arrive later.
+    expect(watched).toBeGreaterThanOrEqual(HOLD_SETTLED);
+  });
+
+  it('does not delay the navigation it is watching', async () => {
+    const w = world({ activeFile: 'A.java', readyFiles: ['A.java'] });
+    const flow = new NavFlow(w.host);
+    // The promise resolves with the caret on the line — before any of the watching happens.
+    await flow.go(at('A.java', 40), { record: true });
+    expect(w.caret).toEqual(at('A.java', 40));
+    expect(w.scrolls).toEqual([{ line: 40, col: 1 }]);
+  });
+
+  it('holds nothing in a host with no viewport to measure', async () => {
+    const w = world({ activeFile: 'A.java', readyFiles: ['A.java'] });
+    const blind: NavHost = { ...w.host, lineOffset: undefined };
+    const flow = new NavFlow(blind);
+    await flow.go(at('A.java', 40), { record: true });
+    w.drift(HOLD_TOLERANCE + 200);
+    await flush();
+    expect(w.reveals).toEqual([]);
+  });
+
+  /** The pair is one capability: measuring without revealing could only correct by scrolling. */
+  it('holds nothing in a host that can measure but not reveal', async () => {
+    const w = world({ activeFile: 'A.java', readyFiles: ['A.java'] });
+    const flow = new NavFlow({ ...w.host, reveal: undefined });
+    await flow.go(at('A.java', 40), { record: true });
+    w.drift(HOLD_TOLERANCE + 200);
+    await flush();
+    expect(w.reveals).toEqual([]);
+    expect(w.scrolls).toEqual([{ line: 40, col: 1 }]);
+  });
+});
+
+/**
+ * Going to a **byte offset**, which is what every backend-sourced destination is.
+ *
+ * The defect these are named for: the relay that did this used to map the offset after a single
+ * flush, and a flush is not a buffer. On a cross-file jump the editor still holds the file being
+ * *left*, so the offset resolved to a line in the wrong document — and the jump then landed on
+ * that line, in the right file, looking for all the world like the editor had drifted.
+ */
+describe('going to a byte offset', () => {
+  const A = 'aaa\nbbbb\ncc\ndddd';   // the file being left
+  const B = 'x\ny\nz\nlonger line\nq'; // the destination
+
+  it('resolves the offset against the destination, never against the file being left', async () => {
+    const w = world({
+      activeFile: 'A.java',
+      readyFiles: ['A.java'],
+      texts: { 'A.java': A, 'B.java': B },
+    });
+    const flow = new NavFlow(w.host);
+
+    // Offset 10 is line 4 of B and line 2 of A. Both are real answers, which is what makes this
+    // observable at all: a resolver reading the wrong document does not fail, it succeeds with a
+    // line that belongs to another file.
+    const going = flow.goToOffset('B.java', 10);
+    // The tab is active before its text is: the state the old relay resolved in.
+    expect(w.active).toBe('B.java');
+    w.arrive('B.java');
+    expect(await going).toBe('landed');
+
+    expect(w.scrolls).toEqual([{ line: 4, col: 5 }]);
+    expect(w.pushes).toEqual([{ file: 'B.java', line: 4, col: 5 }]);
+  });
+
+  it('waits for the buffer rather than resolving against nothing', async () => {
+    const w = world({ activeFile: 'A.java', readyFiles: ['A.java'], texts: { 'A.java': A, 'B.java': B } });
+    const flow = new NavFlow(w.host);
+    const going = flow.goToOffset('B.java', 2);
+    // Nothing has been asked of the view while the text is missing.
+    expect(w.scrolls).toEqual([]);
+    w.arrive('B.java');
+    await going;
+    expect(w.scrolls).toEqual([{ line: 2, col: 1 }]);
+  });
+
+  it('gives up rather than guessing when the buffer never arrives', async () => {
+    const w = world({ activeFile: 'A.java', readyFiles: ['A.java'], texts: { 'A.java': A } });
+    const flow = new NavFlow(w.host);
+    expect(await flow.goToOffset('B.java', 2)).toBe('unavailable');
+    expect(w.scrolls).toEqual([]);
+    expect(w.pushes).toEqual([]);
+  });
+
+  it('is superseded by a newer navigation like any other', async () => {
+    const w = world({
+      activeFile: 'A.java',
+      readyFiles: ['A.java'],
+      texts: { 'A.java': A, 'B.java': B, 'C.java': B },
+    });
+    const flow = new NavFlow(w.host);
+    const first = flow.goToOffset('B.java', 10);
+    const second = flow.go(at('C.java', 2), { record: true });
+    w.arrive('C.java');
+    w.arrive('B.java');
+    expect(await first).toBe('superseded');
+    expect(await second).toBe('landed');
+    expect(w.scrolls).toEqual([{ line: 2, col: 1 }]);
+  });
+
+  it('holds the landing afterwards, exactly as a line jump does', async () => {
+    const w = world({ activeFile: 'B.java', readyFiles: ['B.java'], texts: { 'B.java': B } });
+    const flow = new NavFlow(w.host);
+    await flow.goToOffset('B.java', 10);
+    w.drift(HOLD_TOLERANCE + 30);
+    for (let i = 0; i < 80; i += 1) await Promise.resolve();
+    expect(w.reveals).toContain(4);
   });
 });

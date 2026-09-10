@@ -28,3 +28,38 @@ export function isDockerfile(name: string): boolean {
     || lower === 'containerfile' || lower.startsWith('containerfile.')
   );
 }
+
+/**
+ * Whether a file is one of Struts's own configuration files.
+ *
+ * `struts.xml` and the `struts-<module>.xml` a real project splits it into, plus the two a plugin
+ * ships (`struts-plugin.xml`, `struts-default.xml`) and `struts.properties`.
+ *
+ * Deliberately NOT every XML that is Struts's: a `validation.xml` beside them belongs to Struts
+ * too, and it is *also* what Bean Validation calls its config — a file that could be either is
+ * better left generic than labelled with the wrong framework. Same reasoning as `isDockerfile`
+ * living here: the icon resolver and the editor's language registry both ask, and cannot import
+ * from each other.
+ */
+export function isStrutsConfig(name: string): boolean {
+  const lower = (name.split(/[\\/]/).pop() ?? '').toLowerCase();
+  if (lower === 'struts.properties') return true;
+  if (!lower.endsWith('.xml')) return false;
+  return lower === 'struts.xml' || lower.startsWith('struts-');
+}
+
+/**
+ * Whether a file is one of Tomcat's own configuration files, **by name**.
+ *
+ * The fallback tier: the names are generic — `context.xml` and `server.xml` could belong to
+ * anything — so what really decides is the root element, and this only answers where the content
+ * is not to hand (a tab strip has a path and no bytes).
+ *
+ * `web.xml` is deliberately absent. It belongs to the servlet specification and is the same file
+ * under Jetty, WebSphere or nothing at all; a mark naming the wrong container is worse than the
+ * generic one.
+ */
+export function isTomcatConfig(name: string): boolean {
+  const lower = (name.split(/[\\/]/).pop() ?? '').toLowerCase();
+  return lower === 'context.xml' || lower === 'server.xml' || lower === 'tomcat-users.xml';
+}

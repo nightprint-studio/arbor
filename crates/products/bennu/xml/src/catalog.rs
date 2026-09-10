@@ -80,18 +80,13 @@ impl Catalog {
     /// schema nobody ships locally.
     pub fn grammar_for(&self, doc_path: &str, scan: &Scan) -> Option<Grammar> {
         if let Some(dt) = &scan.doctype {
-            if let Some(g) = self.locate(&dt.system_id, doc_path).and_then(|f| self.grammar_of(f, 0))
-            {
-                if !g.is_empty() {
-                    return Some(g);
-                }
+            if let Some(g) = self.resolve(&dt.system_id, doc_path) {
+                return Some(g);
             }
         }
         for location in schema_locations(scan) {
-            if let Some(g) = self.locate(&location, doc_path).and_then(|f| self.grammar_of(f, 0)) {
-                if !g.is_empty() {
-                    return Some(g);
-                }
+            if let Some(g) = self.resolve(&location, doc_path) {
+                return Some(g);
             }
         }
         builtin::grammar_for(scan)
@@ -99,10 +94,14 @@ impl Catalog {
 
     /// The schema file a location refers to.
     ///
-    /// Two ways, and the second is the one that earns its place: a path relative to the document
-    /// (how a project's own schema is referenced), then a file-name match anywhere in the catalog
-    /// (how every published URL resolves to the copy inside a jar).
-    fn locate(&self, location: &str, doc_path: &str) -> Option<&SchemaFile> {
+    /// Three ways, in order of how much they claim:
+    ///
+    /// 1. **a path relative to the document** — how a project's own schema is referenced, and it
+    ///    wins even when a jar ships the same name;
+    /// 2. **a file-name match anywhere in the catalog** — how every published URL resolves to the
+    ///    copy inside a jar;
+    /// 3. **another version of the same schema** — see [`Catalog::locate_family`].
+    fn locate(&self, location: &str, doc_path: &str) -> Option<Located<'_>> {
         let location = location.trim();
         if location.is_empty() {
             return None;
@@ -116,10 +115,66 @@ impl Catalog {
         if !location.contains("://") {
             let resolved = join(parent_of(doc_path), location);
             if let Some(f) = self.files.iter().find(|f| same_path(&f.path, &resolved)) {
-                return Some(f);
+                return Some(Located { file: f, approximate: false });
             }
         }
-        self.files.iter().find(|f| file_name(&f.path).eq_ignore_ascii_case(name))
+        if let Some(f) = self.files.iter().find(|f| file_name(&f.path).eq_ignore_ascii_case(name)) {
+            return Some(Located { file: f, approximate: false });
+        }
+        self.locate_family(name).map(|file| Located { file, approximate: true })
+    }
+
+    /// The nearest version of the same schema, when the exact one is nowhere.
+    ///
+    /// A legacy project routinely declares `struts-2.1.dtd` while the jar on its classpath ships
+    /// `struts-2.5.dtd`, and a strict name match then resolves nothing at all — no completion, no
+    /// hover, no go-to, on the file the whole application is configured in. The two differ in a
+    /// handful of elements; treating them as unrelated because a digit differs is the worse
+    /// error.
+    ///
+    /// **Which neighbour**, and the choice is not arbitrary: the newest version **at or below**
+    /// the one asked for, because an older schema can only ever offer *less* than the project is
+    /// allowed to write. Only when every candidate is newer does the oldest of those win — there
+    /// is nothing else left, and something honest about its own provenance beats silence.
+    ///
+    /// What comes back is marked [`Grammar::approximate`], which is what keeps this from turning
+    /// into a source of wrong accusations: the checks stay off.
+    fn locate_family(&self, name: &str) -> Option<&SchemaFile> {
+        let (stem, ext) = split_ext(name);
+        let (family, wanted) = versioned(stem)?;
+        let mut best: Option<(&SchemaFile, Vec<u32>)> = None;
+        for file in &self.files {
+            let (candidate_stem, candidate_ext) = split_ext(file_name(&file.path));
+            if !candidate_ext.eq_ignore_ascii_case(ext) {
+                continue;
+            }
+            let Some((candidate_family, version)) = versioned(candidate_stem) else { continue };
+            if !candidate_family.eq_ignore_ascii_case(family) {
+                continue;
+            }
+            let better = match &best {
+                None => true,
+                Some((_, held)) => closer(&version, held, &wanted),
+            };
+            if better {
+                best = Some((file, version));
+            }
+        }
+        best.map(|(file, _)| file)
+    }
+
+    /// One location, all the way to a usable grammar — or nothing.
+    ///
+    /// The `is_empty` check is not a formality: a schema that parsed to no elements has to behave
+    /// exactly like no schema, or the *next* location never gets tried.
+    fn resolve(&self, location: &str, doc_path: &str) -> Option<Grammar> {
+        let found = self.locate(location, doc_path)?;
+        let mut grammar = self.grammar_of(found.file, 0)?;
+        if grammar.is_empty() {
+            return None;
+        }
+        grammar.approximate |= found.approximate;
+        Some(grammar)
     }
 
     /// Parse one schema file into a grammar, folding in what it includes.
@@ -133,9 +188,12 @@ impl Catalog {
                     // the whole schema unusable — the elements it would have brought simply stay
                     // unknown, and unknown means silent.
                     if let Some(next) = self.locate(location, &file.path) {
-                        if next.path != file.path {
-                            if let Some(g) = self.grammar_of(next, depth + 1) {
+                        if next.file.path != file.path {
+                            if let Some(g) = self.grammar_of(next.file, depth + 1) {
                                 grammar.absorb(g);
+                                // An include resolved by version family makes the WHOLE grammar
+                                // approximate: the elements it brought are another version's.
+                                grammar.approximate |= next.approximate;
                             }
                         }
                     }
@@ -167,6 +225,79 @@ fn schema_locations(scan: &Scan) -> Vec<String> {
         }
     }
     out
+}
+
+/// A schema file the catalog matched, and how confident that match is.
+struct Located<'a> {
+    file: &'a SchemaFile,
+    /// It is another version of what was asked for — see [`Catalog::locate_family`].
+    approximate: bool,
+}
+
+/// A file name split at its last dot: `("struts-2.1", "dtd")`. A name with no dot keeps an empty
+/// extension, and then only another extensionless name can match it.
+fn split_ext(name: &str) -> (&str, &str) {
+    match name.rfind('.') {
+        Some(i) => (&name[..i], &name[i + 1..]),
+        None => (name, ""),
+    }
+}
+
+/// A stem split into the schema family it belongs to and the version it is of.
+///
+/// `struts-2.1` → (`struts`, `[2, 1]`) · `spring-beans-2.5` → (`spring-beans`, `[2, 5]`) ·
+/// `maven-4.0.0` → (`maven`, `[4, 0, 0]`).
+///
+/// `None` when the name carries no version, which is most schemas — and for those there is
+/// nothing to relax, so the strict match is already the whole answer. The tail has to be **only**
+/// digits and dots: `web-app_2_3` is versioned too, in a spelling this deliberately does not
+/// chase, because guessing at a second convention is how `spring-context` starts matching
+/// `spring-context-support`.
+fn versioned(stem: &str) -> Option<(&str, Vec<u32>)> {
+    let cut = stem.rfind('-')?;
+    let (family, tail) = (&stem[..cut], &stem[cut + 1..]);
+    if family.is_empty() || tail.is_empty() {
+        return None;
+    }
+    if !tail.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    if !tail.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return None;
+    }
+    let parts: Vec<u32> = tail.split('.').map(|p| p.parse::<u32>().unwrap_or(0)).collect();
+    Some((family, parts))
+}
+
+/// Whether version `a` is a better stand-in for `wanted` than version `b`.
+///
+/// At-or-below beats above, because an older schema can only offer less than the project may
+/// write. Among those below, the newest; among those above — when there is nothing below — the
+/// oldest. Both tie-breaks move towards `wanted`.
+fn closer(a: &[u32], b: &[u32], wanted: &[u32]) -> bool {
+    use std::cmp::Ordering;
+    let a_below = compare(a, wanted) != Ordering::Greater;
+    let b_below = compare(b, wanted) != Ordering::Greater;
+    match (a_below, b_below) {
+        (true, false) => true,
+        (false, true) => false,
+        (true, true) => compare(a, b) == Ordering::Greater,
+        (false, false) => compare(a, b) == Ordering::Less,
+    }
+}
+
+/// Component-wise version comparison, a missing component reading as zero — so `2` and `2.0` are
+/// the same version, which is how everyone writes them.
+fn compare(a: &[u32], b: &[u32]) -> std::cmp::Ordering {
+    let len = a.len().max(b.len());
+    for i in 0..len {
+        let (x, y) = (a.get(i).copied().unwrap_or(0), b.get(i).copied().unwrap_or(0));
+        match x.cmp(&y) {
+            std::cmp::Ordering::Equal => {}
+            other => return other,
+        }
+    }
+    std::cmp::Ordering::Equal
 }
 
 /// The last path segment, for either separator and for a jar entry.
@@ -237,6 +368,99 @@ mod tests {
         assert_eq!(g.source, "struts2-core-2.5.30.jar!/struts-2.5.dtd");
         assert_eq!(g.element("struts").unwrap().child_names(), ["package"]);
         assert!(g.element("package").unwrap().attributes[0].required);
+    }
+
+    /// The case this fallback exists for: a legacy `struts.xml` declares 2.1 and the jar on the
+    /// classpath ships 2.5. Strictly, nothing resolves — and nothing resolving means no
+    /// completion at all in the file the whole application is configured in.
+    #[test]
+    fn a_neighbouring_version_answers_when_the_exact_one_is_nowhere() {
+        let c = catalog(&[("struts2-core-2.5.30.jar!/struts-2.5.dtd", STRUTS_DTD)]);
+        let src = "<!DOCTYPE struts PUBLIC \"-//Apache//DTD Struts 2.1//EN\" \
+                   \"http://struts.apache.org/dtds/struts-2.1.dtd\">\n<struts><package/></struts>";
+        let g = c.grammar_for("/p/struts.xml", &scan(src)).unwrap();
+        assert_eq!(g.source, "struts2-core-2.5.30.jar!/struts-2.5.dtd");
+        assert!(g.element("package").is_some(), "completion is the point of the fallback");
+        assert!(g.approximate, "and it must say what it is");
+        // The half that keeps this from being a liability: a schema the project is not written
+        // against does not get to underline it.
+        assert!(crate::intel::diagnostics(&g, &scan(src)).is_empty());
+    }
+
+    /// The exact match still wins, and is not approximate — otherwise the fallback would quietly
+    /// switch the checks off for every document in the project.
+    #[test]
+    fn an_exact_name_is_never_treated_as_a_neighbour() {
+        let c = catalog(&[
+            ("struts2-core.jar!/struts-2.5.dtd", STRUTS_DTD),
+            ("old.jar!/struts-2.1.dtd", STRUTS_DTD),
+        ]);
+        let src = "<!DOCTYPE struts SYSTEM \"http://struts.apache.org/dtds/struts-2.1.dtd\">\n\
+                   <struts><package/></struts>";
+        let g = c.grammar_for("/p/struts.xml", &scan(src)).unwrap();
+        assert_eq!(g.source, "old.jar!/struts-2.1.dtd");
+        assert!(!g.approximate);
+        assert!(!crate::intel::diagnostics(&g, &scan(src)).is_empty());
+    }
+
+    /// Which neighbour: the newest at-or-below what was asked for, because an older schema can
+    /// only ever offer less than the project is allowed to write.
+    #[test]
+    fn the_newest_version_not_above_the_one_asked_for_wins() {
+        let c = catalog(&[
+            ("a.jar!/struts-2.0.dtd", STRUTS_DTD),
+            ("b.jar!/struts-2.3.dtd", STRUTS_DTD),
+            ("c.jar!/struts-2.5.dtd", STRUTS_DTD),
+        ]);
+        let src = "<!DOCTYPE struts SYSTEM \"http://x/struts-2.4.dtd\">\n<struts/>";
+        let g = c.grammar_for("/p/struts.xml", &scan(src)).unwrap();
+        assert_eq!(g.source, "b.jar!/struts-2.3.dtd");
+    }
+
+    /// And when every candidate is newer, the oldest of those — there is nothing else left.
+    #[test]
+    fn with_nothing_below_the_oldest_above_is_taken() {
+        let c = catalog(&[
+            ("b.jar!/struts-2.3.dtd", STRUTS_DTD),
+            ("c.jar!/struts-2.5.dtd", STRUTS_DTD),
+        ]);
+        let src = "<!DOCTYPE struts SYSTEM \"http://x/struts-2.1.dtd\">\n<struts/>";
+        let g = c.grammar_for("/p/struts.xml", &scan(src)).unwrap();
+        assert_eq!(g.source, "b.jar!/struts-2.3.dtd");
+    }
+
+    /// The family has to be the same family, and the extension the same extension. This is the
+    /// test that stops `spring-context-2.5.xsd` from answering for `spring-context-support`.
+    #[test]
+    fn a_different_family_is_not_a_neighbour() {
+        let c = catalog(&[
+            ("a.jar!/spring-context-support-2.5.xsd", "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><xs:element name=\"x\"/></xs:schema>"),
+            ("b.jar!/struts-2.5.xsd", "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"><xs:element name=\"y\"/></xs:schema>"),
+        ]);
+        let src = r#"<beans xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                            xsi:noNamespaceSchemaLocation="http://x/spring-context-2.5.xsd"/>"#;
+        assert!(c.grammar_for("/p/beans.xml", &scan(src)).is_none());
+    }
+
+    #[test]
+    fn a_version_tail_is_digits_and_dots_and_nothing_else() {
+        assert_eq!(versioned("struts-2.1"), Some(("struts", vec![2, 1])));
+        assert_eq!(versioned("spring-beans-2.5"), Some(("spring-beans", vec![2, 5])));
+        assert_eq!(versioned("maven-4.0.0"), Some(("maven", vec![4, 0, 0])));
+        // No version to relax — the strict match was already the whole answer.
+        assert_eq!(versioned("spring-beans"), None);
+        assert_eq!(versioned("struts"), None);
+        // A second spelling this deliberately does not chase.
+        assert_eq!(versioned("web-app_2_3"), None);
+        assert_eq!(versioned("struts-next"), None);
+    }
+
+    /// `2` and `2.0` are the same version, which is how everyone writes them.
+    #[test]
+    fn a_missing_version_component_reads_as_zero() {
+        use std::cmp::Ordering;
+        assert_eq!(compare(&[2], &[2, 0]), Ordering::Equal);
+        assert_eq!(compare(&[2, 0, 1], &[2, 1]), Ordering::Less);
     }
 
     #[test]

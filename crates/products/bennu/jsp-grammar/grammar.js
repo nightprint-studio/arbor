@@ -179,10 +179,21 @@ module.exports = grammar({
     // pattern that could not parse.
     tag_name: _ => token(/[a-zA-Z_][a-zA-Z0-9_.\-]*(:[a-zA-Z_][a-zA-Z0-9_.\-]*)?/),
 
-    // `name` or `name="value"` (no whitespace around `=` — standard in these trees).
+    // `name`, `name="value"` or `name = "value"` — legacy JSP is written both ways.
     attribute: $ => seq(
       $.attribute_name,
-      optional(seq('=', $._attribute_value)),
+      // `_eq` and not a bare '=': `name = "v"` is legal XML, and with `extras: []` the spaces
+      // around it are ours to match. Folding them INTO the token rather than writing
+      // `optional($._ws), '=', optional($._ws)` is what keeps the grammar LR(1): as separate
+      // rules, the whitespace after a name could belong either to this `=` or to the next
+      // attribute's separator, and deciding needs two tokens of lookahead. As one token the
+      // lexer settles it by longest match — ` = ` beats `  ` where there is an `=`, and where
+      // there is not, `_eq` does not match at all.
+      //
+      // Without this, `name = "v"` did not parse as an attribute at all: the name fell out as a
+      // bare attribute and the rest became an ERROR, so a legacy tag written with spaces
+      // rendered as plain white text while the same tag written tight was coloured.
+      optional(seq($._eq, $._attribute_value)),
     ),
     // Attribute names may be namespaced / EL-ish (`aria-label`, `s:if`, `data-x`).
     attribute_name: _ => token(/[a-zA-Z_:@][a-zA-Z0-9_:.\-]*/),
@@ -227,6 +238,8 @@ module.exports = grammar({
 
     // Whitespace inside tags (hidden helper leaf).
     _ws: _ => token(/[ \t\r\n]+/),
+    // `=` with whatever whitespace surrounds it — see `attribute`.
+    _eq: _ => token(/[ \t\r\n]*=[ \t\r\n]*/),
 
     // ── Text + fallback ───────────────────────────────────────────────────────
     // Free text: a run of chars that starts no construct. `<`, and an EL/OGNL start

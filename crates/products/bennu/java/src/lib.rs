@@ -41,6 +41,8 @@ pub mod seam;
 pub mod spans;
 pub mod static_import;
 pub mod symbols;
+// The abbreviations a Java file expands — `psf`, `sout`, `psvm`. A vocabulary, not a feature.
+pub mod templates;
 pub mod typename;
 pub mod typeparse;
 

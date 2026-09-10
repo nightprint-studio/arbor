@@ -1,8 +1,8 @@
 //! `bennu-toolconf` — the build-tool configuration files that have a **documented, versioned
 //! vocabulary** behind them.
 //!
-//! Today that is two files: `lombok.config` and `junit-platform.properties`. Both look like every
-//! other `.properties` in a Java tree and neither is: their keys are not names somebody chose, they
+//! Today that is three files: `lombok.config`, `junit-platform.properties` and
+//! `struts.properties`. All three look like every other `.properties` in a Java tree and none is: their keys are not names somebody chose, they
 //! are an API, published per release, with defaults and legal values written down. An editor that
 //! knows that turns the file from something you keep a browser tab open beside into something you
 //! can read.
@@ -17,7 +17,7 @@
 //!   version of the tool understands it;
 //! * [`answers`] turns a table plus a version into the four editor answers — completion, hover,
 //!   ghost text, diagnostics — and knows nothing about which tool it is serving;
-//! * [`lombok`] and [`junit`] are the tables;
+//! * [`lombok`], [`junit`] and [`struts`] are the tables;
 //! * [`version`] answers "which version is this project actually on", from the poms;
 //! * [`ext`] is the [`FrameworkExtension`](bennu_ext::prelude::FrameworkExtension) a host registers.
 //!
@@ -44,4 +44,5 @@ pub mod lombok;
 pub mod model;
 pub mod prelude;
 pub mod props;
+pub mod struts;
 pub mod version;

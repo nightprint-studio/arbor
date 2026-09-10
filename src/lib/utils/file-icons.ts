@@ -6,7 +6,7 @@
  * (one bundle entry per icon) so there's no CDN dependency at runtime.
  */
 import type { IconifyIcon } from '@iconify/svelte';
-import { isDockerfile } from './file-names';
+import { isDockerfile, isStrutsConfig, isTomcatConfig } from './file-names';
 
 // ── File-type icons ──────────────────────────────────────────────────────────
 import rustIcon        from '@iconify-icons/vscode-icons/file-type-rust';
@@ -30,6 +30,12 @@ import tomlIcon        from '@iconify-icons/vscode-icons/file-type-toml';
 import yamlIcon        from '@iconify-icons/vscode-icons/file-type-yaml';
 import jsonIcon        from '@iconify-icons/vscode-icons/file-type-json';
 import xmlIcon         from '@iconify-icons/vscode-icons/file-type-xml';
+import jspIcon         from '@iconify-icons/vscode-icons/file-type-jsp';
+// The Apache feather, not a Struts mark: neither icon set has one, and the feather is what the
+// file's own DOCTYPE calls it ("Apache Software Foundation//DTD Struts…"). Honest, and it reads
+// apart from the forty other XMLs at a glance, which is the whole job of an icon here.
+import apacheIcon      from '@iconify-icons/simple-icons/apache';
+import tomcatIcon      from '@iconify-icons/simple-icons/apachetomcat';
 import htmlIcon        from '@iconify-icons/vscode-icons/file-type-html';
 import cssIcon         from '@iconify-icons/vscode-icons/file-type-css';
 import scssIcon        from '@iconify-icons/vscode-icons/file-type-scss';
@@ -38,6 +44,7 @@ import markdownIcon    from '@iconify-icons/vscode-icons/file-type-markdown';
 import mdxIcon         from '@iconify-icons/vscode-icons/file-type-mdx';
 import shellIcon       from '@iconify-icons/vscode-icons/file-type-shell';
 import powershellIcon  from '@iconify-icons/vscode-icons/file-type-powershell';
+import batIcon         from '@iconify-icons/vscode-icons/file-type-bat';
 import graphqlIcon     from '@iconify-icons/vscode-icons/file-type-graphql';
 import svgFileIcon     from '@iconify-icons/vscode-icons/file-type-svg';
 import imageIcon       from '@iconify-icons/vscode-icons/file-type-image';
@@ -294,6 +301,9 @@ const EXT_ICONS: Record<string, IconifyIcon> = {
   yaml: yamlIcon, yml: yamlIcon,
   json: jsonIcon, json5: jsonIcon, jsonc: jsonIcon,
   xml: xmlIcon, plist: xmlIcon,
+  // JSP and its family. `.tag` / `.tagx` are tag files — JSP with a different entry point, so the
+  // same mark — and a `.jspf` is a fragment, which is a JSP that cannot be requested on its own.
+  jsp: jspIcon, jspf: jspIcon, jspx: jspIcon, tag: jspIcon, tagx: jspIcon,
   // A `*.pom` is a `pom.xml` under the name the repository files it as — the file you land
   // in by following a dependency. By extension here, because in `~/.m2` the name is the
   // coordinate and no name rule could ever match it.
@@ -305,6 +315,9 @@ const EXT_ICONS: Record<string, IconifyIcon> = {
   md: markdownIcon, mdx: mdxIcon, markdown: markdownIcon,
   sh: shellIcon, bash: shellIcon, zsh: shellIcon, fish: shellIcon,
   ps1: powershellIcon, psm1: powershellIcon,
+  // `.cmd` and `.bat` are the same file with two names — the extension only decides which
+  // interpreter Windows picks, not what is in it.
+  bat: batIcon, cmd: batIcon,
   graphql: graphqlIcon, gql: graphqlIcon,
   svg: svgFileIcon,
   png: imageIcon, jpg: imageIcon, jpeg: imageIcon, gif: imageIcon,
@@ -321,7 +334,8 @@ const EXT_ICONS: Record<string, IconifyIcon> = {
   // still a font, it just cannot be shown.
   ttf: fontIcon, otf: fontIcon, woff: fontIcon, woff2: fontIcon, eot: fontIcon,
   docx: wordIcon, doc: wordIcon, dotx: wordIcon,
-  xlsx: excelIcon, xls: excelIcon, csv: excelIcon,
+  xlsx: excelIcon, xlsm: excelIcon, xls: excelIcon, xlsb: excelIcon, xla: excelIcon,
+  ods: excelIcon, csv: excelIcon,
   pptx: powerpointIcon, ppt: powerpointIcon,
   pdf: pdfIcon,
   // `log` is NOT repeated here: it is already mapped to the log mark above, and a second
@@ -352,6 +366,10 @@ const FILENAME_ICONS: Record<string, IconifyIcon> = {
   // By NAME and not by extension: `pom.xml` is the one XML in a Java project you
   // look for, and an extension rule would give it the same icon as the forty
   // others around it.
+  // Tomcat's `context.xml` and `server.xml` are NOT here, though they look like they belong: they
+  // are generic names, and what the file is is decided by its root element instead — see
+  // `getFileIcon`. Only `catalina.properties` is unambiguous enough to key on the name.
+  'catalina.properties': tomcatIcon,
   'pom.xml': mavenIcon,
   '.flattened-pom.xml': mavenIcon,
   'mvnw': mavenIcon,
@@ -453,13 +471,55 @@ const FOLDER_ICONS: Record<string, [IconifyIcon, IconifyIcon]> = {
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-/** Resolve a file icon from its (base)name. Falls back to a generic text icon. */
-export function getFileIcon(name: string): IconifyIcon {
+/**
+ * What an XML's **root element** says the file is.
+ *
+ * The tier that exists because a name is not evidence. Tomcat's per-application context is
+ * `context.xml` inside a `.war` and `<appname>.xml` under `conf/Catalina/localhost`; a Struts
+ * module configuration is called whatever `struts.configuration.files` says. The root element is
+ * the same in every spelling, so this is the rule that is actually true — which is why it sits
+ * *above* every guess made from a name.
+ *
+ * Only the roots that identify a file unambiguously. `<project>` is Maven's and Ant's; `<beans>`
+ * is Spring's and also CDI's; neither earns a mark here, and `pom.xml` gets its own from the
+ * exact-name tier above where it is certain.
+ */
+const ROOT_TAG_ICONS: Record<string, IconifyIcon> = {
+  // Tomcat: a server-wide configuration and a per-application context.
+  Context: tomcatIcon,
+  Server: tomcatIcon,
+  'tomcat-users': tomcatIcon,
+  // Struts 2 and Struts 1 — different root, same framework, same mark.
+  struts: apacheIcon,
+  'struts-config': apacheIcon,
+};
+
+/**
+ * Resolve a file icon.
+ *
+ * Four tiers, most-certain first, and the order is the whole of it:
+ *
+ * 1. **an exact name** — `pom.xml` is a pom, and no content check improves on that;
+ * 2. **an XML's root element**, when the caller knows it — what the file says it is;
+ * 3. **a name pattern** — `Dockerfile.dev`, `struts-orders.xml`: a good guess, and the only thing
+ *    left when the content is not to hand (a tab strip has a path and no bytes);
+ * 4. **the extension**.
+ *
+ * `rootTag` comes from the project tree, which reads it while walking. Everywhere else it is
+ * absent and the name tiers answer, which is why those still exist.
+ */
+export function getFileIcon(name: string, rootTag?: string): IconifyIcon {
   const lower = name.toLowerCase();
   if (FILENAME_ICONS[lower]) return FILENAME_ICONS[lower];
+  if (rootTag && ROOT_TAG_ICONS[rootTag]) return ROOT_TAG_ICONS[rootTag];
   // Before the extension split, and that ordering is the point: `Dockerfile.dev` read by extension
   // is a `.dev`, which here is geode's playtest format.
   if (isDockerfile(lower)) return dockerIcon;
+  // Same reason: read by extension a `struts-security.xml` is one XML among forty, and in a Struts
+  // project the config files are the ones you go looking for. Below the root element, because a
+  // file whose name says Struts and whose content says otherwise is the content's.
+  if (isStrutsConfig(lower)) return apacheIcon;
+  if (isTomcatConfig(lower)) return tomcatIcon;
   if (lower.startsWith('.env')) return dotenvIcon;
   if (lower.endsWith('.d.ts')) return tsDefIcon;
   const ext = lower.split('.').pop() ?? '';

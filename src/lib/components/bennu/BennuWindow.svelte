@@ -1780,6 +1780,20 @@
           if (r) await mavenDownload(r).catch(() => undefined);
         }),
         when: !!projectStore.project && javaTools },
+      // The two builds people actually type out, by name. Every other goal is a row in the Maven
+      // tool window — a palette entry per phase per module would be a palette of nothing else.
+      { id: 'mvncleaninstall', title: 'Maven: clean install', icon: 'play',
+        action: () => run(() => {
+          const r = projectStore.project?.root;
+          if (r) void bennuRunStore.runMavenGoals(r, ['clean', 'install']);
+        }),
+        when: !!projectStore.project && !projectStore.isCargo },
+      { id: 'mvntest', title: 'Maven: test', icon: 'play',
+        action: () => run(() => {
+          const r = projectStore.project?.root;
+          if (r) void bennuRunStore.runMavenGoals(r, ['test']);
+        }),
+        when: !!projectStore.project && !projectStore.isCargo },
       { id: 'docs', title: 'Documentation', icon: 'command', shortcut: 'F1', action: () => run(() => bennuUiStore.toggleDocs()), when: true },
       { id: 'tour', title: 'Welcome tour', icon: 'book',
         action: () => run(() => bennuOnboardingStore.show()), when: true },

@@ -147,10 +147,45 @@ function clear(view: EditorView): boolean {
 }
 
 /**
+ * A multi-line body, re-indented to where it is being inserted.
+ *
+ * A snippet is written flush-left — it has to be, it does not know where it will land — so every
+ * line after the first arrives at column 0. Inserted three levels deep into a class that reads as
+ * a body that fell out of the code, and the user re-indents by hand what an abbreviation was
+ * supposed to save them typing.
+ *
+ * `shift` maps an offset in the original text to the same place in the indented one, because the
+ * tab stops are offsets into the body and every added indent moves everything after it.
+ *
+ * Exported for its test: it is pure, and it is the half of the insertion that is easy to get
+ * subtly wrong.
+ */
+export function indentBody(text: string, indent: string): { text: string; shift: (i: number) => number } {
+  if (!indent || !text.includes('\n')) return { text, shift: (i) => i };
+  const breaks: number[] = [];
+  for (let i = 0; i < text.length; i++) if (text[i] === '\n') breaks.push(i);
+  return {
+    text: text.split('\n').join(`\n${indent}`),
+    shift: (i) => {
+      let added = 0;
+      for (const b of breaks) {
+        if (b < i) added += indent.length;
+        else break;
+      }
+      return i + added;
+    },
+  };
+}
+
+/**
  * Insert `text` at `[from, to)` and arm its tab stops.
  *
  * `stops` are byte-range pairs **into `text`** — the shape the backend sends. They are converted to
  * document positions here, which is the only place that knows where the text landed.
+ *
+ * A body with more than one line is re-indented to the line it lands on ({@link indentBody}) —
+ * without it, `psvm` and every multi-line snippet a language server sends arrive with their bodies
+ * at column 0.
  *
  * Returns `true` when stops were armed. `false` means it was a plain insertion (no stops, or none of
  * them survived being placed), and the caller need do nothing else.
@@ -164,22 +199,29 @@ export function insertWithStops(
   /** Byte offset → UTF-16 offset within `text`. */
   toU16: (byte: number) => number,
 ): boolean {
+  // The indentation of the line the insertion starts on — what every line after the first is
+  // missing. Taken from the line's own leading whitespace rather than from the editor's indent
+  // unit: what matters is lining up with the code that is already there.
+  const lineText = view.state.doc.lineAt(from).text;
+  const indent = /^[ \t]*/.exec(lineText)?.[0] ?? '';
+  const body = indentBody(text, indent);
+
   const placed: Stop[] = [];
   for (const stop of stops) {
-    const start = from + toU16(stop.start);
-    const end = from + toU16(stop.end);
-    if (end >= start && start >= from && end <= from + text.length) {
+    const start = from + body.shift(toU16(stop.start));
+    const end = from + body.shift(toU16(stop.end));
+    if (end >= start && start >= from && end <= from + body.text.length) {
       placed.push({ from: start, to: end });
     }
   }
 
   const first = placed[0];
   view.dispatch({
-    changes: { from, to, insert: text },
+    changes: { from, to, insert: body.text },
     // The caret goes to the first stop, or to the end of the insertion when there are none.
     selection: first
       ? { anchor: first.from, head: first.to }
-      : { anchor: from + text.length },
+      : { anchor: from + body.text.length },
     // Only worth arming when there is somewhere to tab TO: a single stop is just a caret placement,
     // and leaving the state armed would have Tab swallow an indent for no reason.
     effects: placed.length > 1 ? setStops.of({ stops: placed, active: 0 }) : setStops.of(null),

@@ -37,4 +37,8 @@ pub use crate::doc::Doc as PomDoc;
 pub use crate::env::PomEnv;
 pub use crate::explain::{hover as pom_hover, navigate as pom_navigate};
 pub use crate::ext::is_pom;
+// The build a tool window offers to run: Maven's lifecycle, and the plugins the pom configures.
+pub use crate::goals::{
+    plugins as pom_plugins, profiles as pom_profiles, Phase, PomPlugin, PomProfile, LIFECYCLE,
+};
 pub use crate::paint::highlights as pom_highlights;

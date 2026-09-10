@@ -260,7 +260,9 @@
       // answer, and it settles the moment the index does.
       return { shape: 'kind', kind: javaKindStore.kindOf(path) };
     }
-    return { shape: 'file', icon: getFileIcon(node.name) };
+    // The root element too, when the backend read one: `context.xml` is a name anything can have,
+    // and `<Context>` is not.
+    return { shape: 'file', icon: getFileIcon(node.name, node.root_tag) };
   }
 
   async function openProject(dir: string) {
@@ -520,6 +522,22 @@
     void bennuTestStore.runClasses(root, (found as DiscoveredTest[]).map((c) => c.selector));
   }
 
+  /**
+   * The row an open context menu belongs to, so it can be marked.
+   *
+   * A right-click deliberately does not move the selection — you right-click a file to act on it
+   * without leaving the one you are reading — which meant nothing on screen said which row the
+   * menu had been aimed at. On a dense tree with 18px rows that is a real question.
+   *
+   * It clears itself from the store rather than from every handler: the menu closes by picking an
+   * item, by Escape, and by a click anywhere else, and only one of those three passes through
+   * this file.
+   */
+  let menuTarget = $state<string | null>(null);
+  $effect(() => {
+    if (!bennuContextMenuStore.open) menuTarget = null;
+  });
+
   function onRowContextMenu(node: TreeNode, e: MouseEvent) {
     openRowMenu(node, e.clientX, e.clientY);
   }
@@ -529,6 +547,7 @@
    * too, and a `Shift+F10` has no cursor to sit under.
    */
   function openRowMenu(node: TreeNode, x: number, y: number) {
+    menuTarget = node.path;
     // "New file…" creates in this directory (dir node) or the file's directory (file node).
     const newDir = node.is_dir ? node.path : parentDir(node.path);
     // Offered only where there is something to run — an entry that can only report "matched
@@ -638,6 +657,10 @@
   function openRootMenu(x: number, y: number) {
     const root = projectStore.project?.root;
     if (!root) return;
+    // Explicitly, and not left to the effect: opening this menu straight from a row's one never
+    // takes `open` back through `false`, so the previous row would stay marked under a menu that
+    // is no longer about it.
+    menuTarget = null;
     const items: MenuItem[] = [
       { id: 'new', label: 'New', icon: Plus, children: newSubmenu(root) },
       { separator: true, id: 'sep-root-new', label: '' },
@@ -1013,6 +1036,7 @@
         {filter}
         ariaLabel="Project files"
         onSelect={onRowSelect}
+        contextId={menuTarget}
         onContextMenu={onRowContextMenu}
         onRowKeydown={onRowKeydown}
         draggable={(n) => !n.is_dir}

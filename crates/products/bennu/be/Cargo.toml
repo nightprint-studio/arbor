@@ -155,6 +155,9 @@ bennu-pomedit = { path = "../pomedit" }
 # resolves to against it without running Maven — the dependency tier's fallback and its diagnosis —
 # and the pom.xml editor answers that follow from the same reading.
 bennu-maven = { path = "../maven" }
+# Spreadsheets a project tree contains, read into a grid — the `.xlsx` a legacy repository is
+# full of. Reads only.
+bennu-sheet = { path = "../sheet" }
 # The build-tool config files with a documented vocabulary behind them — `lombok.config` and
 # `junit-platform.properties`. An extension, registered below with the rest.
 bennu-toolconf = { path = "../toolconf" }

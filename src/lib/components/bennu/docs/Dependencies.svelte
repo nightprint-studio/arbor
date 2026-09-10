@@ -36,9 +36,9 @@
   <code>&lt;dependency&gt;</code>.
 </p>
 <p>
-  The panel's header carries the three things that change what is <em>on disk</em>, as opposed to
-  the refresh beside them which only re-reads it. All three are background jobs and report in the
-  Jobs panel.
+  The three things that change what is <em>on disk</em> — as opposed to re-reading it — live in the
+  <strong>build tool's</strong> window: the Maven tool window's actions menu, on a Maven project.
+  All three are background jobs and report in the Jobs panel.
 </p>
 <div class="fc-list">
   <div class="fc-item">
@@ -114,6 +114,6 @@
   The list answers <em>what does this module need</em>. <strong>Who needs it</strong>, what a change to
   it rebuilds, and whether the project has a dependency cycle are properties of the shape instead, and
   they live in their own window — <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd>, or the network
-  button in this panel's header. See <strong>The module graph</strong> for what it draws and what each
-  line means.
+  button in the Maven (or Cargo) tool window's header. See <strong>The module graph</strong> for what
+  it draws and what each line means.
 </p>

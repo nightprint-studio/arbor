@@ -282,17 +282,10 @@ pub fn navigate(grammar: &Grammar, scan: &Scan, _source: &str, offset: usize) ->
     // it *looks* like a link — and until now it did nothing, which reads as broken rather than
     // as unsupported. It lands on the file the URL actually resolved to, which is usually the
     // copy inside a jar rather than anything at that address.
-    if let Some(dt) = &scan.doctype {
-        if within(offset, dt.offset, dt.end) {
-            return schema_target(grammar, &dt.system_id);
-        }
+    if let Some(location) = schema_reference(scan, offset) {
+        return schema_target(grammar, &location);
     }
     let Some(tag) = scan.tag_at(offset) else { return Vec::new() };
-    if let Some(a) = tag.attr_value_at(offset) {
-        if a.local().ends_with("schemaLocation") {
-            return schema_target(grammar, &location_at(a, offset));
-        }
-    }
     let Some(element) = grammar.element(&tag.name) else { return Vec::new() };
 
     let (decl, label, detail) = match tag.attr_name_at(offset) {
@@ -316,7 +309,13 @@ pub fn navigate(grammar: &Grammar, scan: &Scan, _source: &str, offset: usize) ->
 
 /// What the grammar says is wrong, held to the standard in the module docs.
 pub fn diagnostics(grammar: &Grammar, scan: &Scan) -> Vec<Diagnostic> {
-    if grammar.is_empty() {
+    // A grammar that is **another version** of the one this document names may legitimately not
+    // know an element the document is right to use, or demand an attribute this version dropped.
+    // Every check here is an accusation, and an accusation read off the wrong schema is the one
+    // failure this crate's docs say is not worth any amount of coverage: under-report rather than
+    // risk a false positive. Completion and hover keep working — offering something that turns
+    // out not to exist costs a keystroke, not trust.
+    if grammar.is_empty() || grammar.approximate {
         return Vec::new();
     }
     let mut out = Vec::new();
@@ -429,6 +428,49 @@ pub fn diagnostics(grammar: &Grammar, scan: &Scan) -> Vec<Diagnostic> {
 ///    browser rather than to the editor.
 ///
 /// Empty when there is neither, which is the only honest answer left.
+/// The schema location the caret is on, if it is on one: the `DOCTYPE`'s system id, or the entry
+/// of an `xsi:schemaLocation` pair list under the caret.
+///
+/// A fact of the document's **text**, which is why it is a function of its own and takes no
+/// grammar. That is not tidiness: the one moment this question matters most is when no grammar
+/// resolved, because following the link is what puts the schema on the machine — and answering it
+/// only once a grammar exists is a loop with no way in.
+pub fn schema_reference(scan: &Scan, offset: usize) -> Option<String> {
+    if let Some(dt) = &scan.doctype {
+        if within(offset, dt.offset, dt.end) {
+            let id = dt.system_id.trim();
+            return (!id.is_empty()).then(|| id.to_string());
+        }
+    }
+    let tag = scan.tag_at(offset)?;
+    let attr = tag.attr_value_at(offset)?;
+    if !attr.local().ends_with("schemaLocation") {
+        return None;
+    }
+    let location = location_at(attr, offset);
+    (!location.is_empty()).then_some(location)
+}
+
+/// A schema this machine has no copy of, as somewhere to go: the address itself.
+///
+/// The caller downloads it and opens the cached copy — which is the point of the gesture, because
+/// a downloaded schema joins the catalog and the document that named it stops being unanswered.
+/// Empty for anything that is not an `http(s)` address: a relative location that resolved would
+/// have produced a grammar, so one that did not is a path to a file that is not there, and opening
+/// nothing is better than opening the wrong thing.
+pub fn remote_schema_target(location: &str) -> Vec<ExtTarget> {
+    let url = location.trim();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Vec::new();
+    }
+    vec![ExtTarget {
+        file: url.to_string(),
+        offset: 0,
+        label: short_source(url).to_string(),
+        detail: "not on this machine — downloads it, and checks this file against it".to_string(),
+    }]
+}
+
 fn schema_target(grammar: &Grammar, location: &str) -> Vec<ExtTarget> {
     let local = matches!(grammar.kind, Some(k) if k != GrammarKind::Builtin)
         && !grammar.source.is_empty();

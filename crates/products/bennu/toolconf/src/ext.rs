@@ -8,8 +8,8 @@
 //! serving. What is genuinely per-tool is the table and the coordinates whose version dates it,
 //! which is what a [`Catalogue`] is.
 //!
-//! A third file of this shape (`sonar-project.properties`, `spotbugs`'s exclusions) is a table and
-//! one line in [`CATALOGUES`].
+//! A fourth file of this shape (`sonar-project.properties`, `spotbugs`'s exclusions) is a table and
+//! one line in [`catalogues`] — which is what `struts.properties` cost.
 //!
 //! ## What it costs a project that has neither file
 //!
@@ -32,8 +32,8 @@ use crate::answers;
 use crate::model::Catalogue;
 
 /// Every tool this extension serves. One line per file.
-fn catalogues() -> [&'static Catalogue; 2] {
-    [crate::lombok::catalogue(), &crate::junit::CATALOGUE]
+fn catalogues() -> [&'static Catalogue; 3] {
+    [crate::lombok::catalogue(), &crate::junit::CATALOGUE, &crate::struts::CATALOGUE]
 }
 
 pub struct ToolConfExtension {

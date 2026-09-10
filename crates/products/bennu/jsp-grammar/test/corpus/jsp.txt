@@ -319,3 +319,21 @@ a tag name may contain an underscore
       (attribute_name)
       (quoted_value_double
         (attribute_fragment)))))
+
+================================================================================
+attribute with spaces around the equals
+================================================================================
+<es:getAppParam name = "denominazioneStazione" var = "stazApp" />
+--------------------------------------------------------------------------------
+
+(document
+  (self_closing_tag
+    (tag_name)
+    (attribute
+      (attribute_name)
+      (quoted_value_double
+        (attribute_fragment)))
+    (attribute
+      (attribute_name)
+      (quoted_value_double
+        (attribute_fragment)))))

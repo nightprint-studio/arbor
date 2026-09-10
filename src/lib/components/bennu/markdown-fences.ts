@@ -35,6 +35,7 @@
 import { LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import type { StreamParser } from '@codemirror/language';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
+import { batch } from './batch-lang';
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 import { xml } from '@codemirror/legacy-modes/mode/xml';
 import { yaml } from '@codemirror/legacy-modes/mode/yaml';
@@ -75,6 +76,8 @@ function fence(name: string, alias: string[], support: LanguageSupport) {
 export const MARKDOWN_FENCE_LANGUAGES: readonly LanguageDescription[] = [
   // The one a README has more of than any other: every "how do I run this" block.
   streamFence('shell', ['sh', 'bash', 'zsh', 'ksh', 'console', 'shell-session', 'terminal'], shell),
+  // The other half of "how do I run this", on the projects that ship a `.bat` beside the `.sh`.
+  streamFence('batch', ['bat', 'cmd', 'dosbatch', 'winbatch'], batch),
   streamFence('dockerfile', ['docker', 'containerfile'], dockerFile),
   streamFence('java', [], java),
   streamFence('kotlin', ['kt', 'kts'], kotlin),

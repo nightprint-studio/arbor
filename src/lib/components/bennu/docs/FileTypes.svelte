@@ -73,6 +73,38 @@
   <kbd>Ctrl</kbd>+<kbd>S</kbd> could write back over it. The old binary <code>.doc</code> format is
   not supported — Bennu says it cannot open one rather than rendering it wrong.
 </p>
+<h2>Spreadsheets</h2>
+<p>
+  A workbook opens as a <strong>grid</strong>: the values, with the sheet tabs the workbook came
+  with, the column letters and row numbers pinned in place, and numbers lined up on the right so a
+  value that does not belong in a column shows itself. Four containers open — the modern
+  <code>.xlsx</code> and <code>.xlsm</code>, the binary <code>.xlsb</code>, the Excel 97-2003
+  <code>.xls</code>, and the OpenDocument <code>.ods</code>.
+</p>
+<p>
+  <strong>The bytes decide, not the name.</strong> A file saved as OOXML under an <code>.xls</code>
+  name — something every export tool has shipped — opens as what it actually is, and the bar above
+  the grid says which format that turned out to be.
+</p>
+<p>
+  A grid and not a rendering, which is the opposite call from the Word viewer above — and
+  deliberately. Nobody opens a spreadsheet from a source tree to see its borders and its
+  conditional fills; they open it to read the column mapping an import expects, the codes, the
+  translations. So the cell values are what is drawn, and how Excel would have painted them is not.
+</p>
+<p>
+  <strong>What you are looking at is what the file records.</strong> A formula shows its last
+  computed value — the one saved with the workbook — and is not recalculated; a cell whose value
+  was never stored comes back empty rather than guessed at. A date is a number in a spreadsheet,
+  and it is shown as a date only where the cell's own format says it is one.
+</p>
+<p>
+  <strong>Read-only</strong>, like every preview: the file never enters a buffer, so there is
+  nothing for a stray <kbd>Ctrl</kbd> + <kbd>S</kbd> to write back over it. A long or wide sheet
+  shows its beginning and says so rather than pretending to be all of it — for the rest, the
+  <em>Open externally</em> button hands the file to the spreadsheet application.
+</p>
+
 <h2>Fonts</h2>
 <p>
   A <code>.ttf</code>, <code>.otf</code>, <code>.woff</code> or <code>.woff2</code> opens as a

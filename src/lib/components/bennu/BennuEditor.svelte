@@ -28,6 +28,7 @@
   import BennuImageView from './BennuImageView.svelte';
   import BennuDocxView from './BennuDocxView.svelte';
   import BennuFontView from './BennuFontView.svelte';
+  import BennuSheetView from './BennuSheetView.svelte';
   import { CodeEditor } from '$lib/components/shared/ui/code-editor';
   import { tooltip } from '$lib/actions/tooltip';
   import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
@@ -126,7 +127,7 @@
   // the editor, and both are read-only here: the store owns them and persists them.
   import { bennuDebugStore, canonFile } from '$lib/stores/bennu/debug.svelte';
   // Which lines compile to bytecode — the gutter offers a breakpoint only on those.
-  import { isFontFile, isWordFile, opensAsPreview } from '$lib/utils/preview-files';
+  import { isFontFile, isSpreadsheetFile, isWordFile, opensAsPreview } from '$lib/utils/preview-files';
   import { breakpointableLines } from './breakpoint-lines';
   import { buildDiagnosticsFor } from './build-diags';
   import { spellcheck as ipcSpellcheck, type SpellHit } from '$lib/ipc/bennu/spell';
@@ -187,6 +188,13 @@
     documentKey: () => string | undefined;
     /** Whether a line is visible right now, as opposed to having been asked for. */
     isLineVisible: (line: number) => boolean;
+    /** Where a line sits in the viewport, in pixels — what tells a landing that drifted from one
+     *  that held. See `nav-flow`'s `lineOffset`. */
+    lineOffset: (line: number) => number | null;
+    /** Bring a line back into view without moving the caret or taking the focus. */
+    revealLine: (line: number) => void;
+    /** Where a byte offset lands, without moving anything. See `nav-flow`'s `lineOfByteOffset`. */
+    lineColOfByteOffset: (byteOffset: number) => { line: number; col: number } | null;
     scrollToByteOffset: (byteOffset: number) => void;
     replaceByteRange: (startByte: number, endByte: number, text: string) => void;
     coordsAtCaret: () => { x: number; y: number } | null;
@@ -264,6 +272,7 @@
    */
   const isImageTab = $derived(isImageFile(activePath));
   const isDocxTab = $derived(isWordFile(activePath));
+  const isSheetTab = $derived(isSpreadsheetFile(activePath));
   const isFontTab = $derived(isFontFile(activePath));
   /**
    * A markdown document, which opens **rendered**.
@@ -411,6 +420,19 @@
     },
     scrollTo: (line, col) => editorComp?.scrollToLineCol(line, col),
     inView: (line) => editorComp?.isLineVisible(line) ?? false,
+    // What keeps a landing landed. See `NavHost.lineOffset`: for about half a second after a file
+    // opens the editor keeps changing the height of what is ABOVE the caret — the usage counts, the
+    // inlay hints, a fold resolving — and every one of those slides the line just jumped to.
+    lineOffset: (line) => editorComp?.lineOffset(line) ?? null,
+    // A reveal and not a scroll: by the time a correction is needed the reader may be typing in
+    // the search field, and `scrollToLineCol` ends by focusing the editor.
+    reveal: (line) => editorComp?.revealLine(line),
+    // Asked only after `ready`, which is the whole point of it being here: a byte offset read
+    // against the file being LEFT resolves to a line in the wrong document.
+    lineOfByteOffset: (file, offset) =>
+      isSamePath(file, projectStore.activeFilePath)
+        ? editorComp?.lineColOfByteOffset(offset) ?? null
+        : null,
     // A frame, not a microtask: what is being waited for is a buffer arriving and an editor
     // mounting, both of which the browser only finishes between frames.
     settle: () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
@@ -589,28 +611,27 @@
     });
   });
 
-  // ── Goto-by-byte-offset relay: the Forms tool window requests a jump to a `<form>`
-  //    tag / field-name byte span; move the caret there and reveal it. ──
+  // ── Goto-by-byte-offset relay ────────────────────────────────────────────────
+  //
+  // Every destination a backend answers with is a **byte offset**: a `<form>` tag, the `<action>`
+  // element a JSP reference resolves to, a diagnostic's span. This used to do the whole thing
+  // here — one `tick()`, then map the offset and scroll — and that was a hole the line relay
+  // beside it did not have: `tick()` is a flush, not a buffer, so for a cross-file jump the offset
+  // was mapped against whatever document the editor still happened to be holding, and the line it
+  // resolved to belonged to the file being left.
+  //
+  // It is the flow's job now (`goToOffset`), which waits for the buffer before reading the offset
+  // at all — one code path, one set of rules, and one place it is tested.
   let consumedGotoOffsetNonce = 0;
   $effect(() => {
     const t = bennuUiStore.gotoOffsetTarget;
     if (!t || t.nonce === consumedGotoOffsetNonce) return;
     consumedGotoOffsetNonce = t.nonce;
-    restoredCaretFor = projectStore.activeFilePath;
-    // Recorded after the move: a byte offset says nothing about which line it is until the editor
-    // has resolved it. The caret's own event has already refined the entry we are leaving, so the
-    // push below lands on top of the right origin.
-    void tick().then(() => {
-      editorComp?.scrollToByteOffset(t.offset);
-      // Recorded AFTER the move, and by line rather than by offset: a byte offset says nothing
-      // about which line it is until the editor has resolved it, and the ring holds lines. The
-      // flow is told about the resulting place as a same-file navigation, so it records the stop
-      // and swallows the caret event the scroll above already produced.
-      const file = projectStore.activeFilePath;
-      if (file && editorComp) {
-        void goTo({ file, line: caretLine, col: caretCol }, true);
-      }
-    });
+    const file = projectStore.activeFilePath;
+    if (!file) return;
+    // A go-to names the place; the remembered caret must not overrule it when the buffer lands.
+    restoredCaretFor = file;
+    void navFlow.goToOffset(file, t.offset);
   });
 
   // ── Edits → store ────────────────────────────────────────────────────────────
@@ -4466,6 +4487,11 @@
     <!-- Same bargain as an image: no buffer, its own viewer. A `.docx` is a ZIP of XML, and
          the only useful thing to do with one in a project tree is read it. -->
     <BennuDocxView path={activePath} />
+  {:else if activePath && isSheetTab}
+    <!-- Same bargain again. A spreadsheet in a source tree is opened to read its values — the
+         column mapping, the codes, the translations — so this draws a grid rather than trying to
+         be Excel. -->
+    <BennuSheetView path={activePath} />
   {:else if activePath && isFontTab}
     <!-- Same again, and every question about a font is visual: what it looks like, whether it
          has the accents this project needs, how it holds up small. -->
