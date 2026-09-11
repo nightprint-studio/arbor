@@ -1,0 +1,22 @@
+[package]
+name         = "bennu-dtolab"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The DTO Lab's pure half: a class read as its fields and constraints, the invalid values each constraint implies, a JSON skeleton, user-editable test templates and where generated tests go — plus the Java harness that answers the same questions for real, on the project's own JVM."
+
+[dependencies]
+bennu-java    = { path = "../java" }
+bennu-jakarta = { path = "../jakarta" }
+bennu-jackson = { path = "../jackson" }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+base64      = { workspace = true }
+tree-sitter = "0.25"
+# Generated tests are rendered from templates the USER owns and edits. Jinja syntax, because a
+# template language people already know is one they can change without reading our docs first;
+# minijinja because it is small, has no heavy dependencies and its MSRV sits well under the
+# workspace's 1.80.
+minijinja   = "2"

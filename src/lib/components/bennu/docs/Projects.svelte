@@ -109,11 +109,19 @@
   capability is backed by <strong>evidence</strong> at one of three tiers:
 </p>
 <ul>
-  <li><strong>Tier A</strong> — a declared dependency: a coordinate in the <code>pom.xml</code>, or a
-    crate in a <code>Cargo.toml</code> (strongest).</li>
-  <li><strong>Tier B</strong> — a configuration file (e.g. a <code>struts.xml</code> or a TLD).</li>
+  <li><strong>Tier A</strong> — a dependency: a coordinate in any <code>pom.xml</code> of the
+    reactor, one the build resolves to transitively, or a crate in a <code>Cargo.toml</code>
+    (strongest).</li>
+  <li><strong>Tier B</strong> — a configuration file (e.g. a <code>struts.xml</code> or a TLD), in
+    any module.</li>
   <li><strong>Tier C</strong> — a source pattern (corroborating; a C-only hit is provisional).</li>
 </ul>
+<p>
+  The resolved dependency tree matters more than it sounds: an API is rarely what a pom declares.
+  <code>jakarta.validation-api</code> arrives through a Spring starter or a parent pom, so Bean
+  Validation is recognised from the tree once Maven has resolved it — and the tooling that depends
+  on it switches on then, without reopening the project.
+</p>
 <p>
   The detected set gates which features light up — for example, JSP taglib awareness only when a
   taglib is actually in use. The demo project shows Struts (convention + XML), JSP taglibs, the

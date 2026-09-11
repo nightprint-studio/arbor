@@ -1,0 +1,112 @@
+{#-
+  Bennu DTO Lab — the built-in test template: plain Bean Validation, with the project's own JUnit,
+  and AssertJ when the project has it.
+
+  To write your own, create a template from this one and change anything: every line below is
+  output, and everything it is built from is data. The DTO Lab documentation lists all of it; the
+  parts you will want first:
+
+    mode             "file" renders a whole test class; "members" only what goes inside an existing
+                     one, which has its own imports — so members spell types in full
+    valid            one value per field that satisfies its constraints
+    fields           the constrained fields, each with `index` and its `cases`
+    case.value       the invalid value as data (`kind`, and `length` / `value` / `size`)
+    case.value_java  the same value, already spelled in Java
+    case.expected    the violations the project's own validator reported for that value:
+                     `path`, `template`, `message`, `constraint`, `attributes`, `constant`
+
+  A line reading `bennu.constants: com.example.Messages` anywhere in a template asks Bennu to find,
+  in those classes, the constant holding each expected template or message — as `expected.constant`.
+-#}
+{% set file = mode == "file" %}
+{% set pub = "public " if junit == 4 else "" %}
+{% set junit_package = "org.junit.jupiter.api" if junit == 5 else "org.junit" %}
+{% set assertions = "org.assertj.core.api.Assertions" if assertj else ("org.junit.jupiter.api.Assertions" if junit == 5 else "org.junit.Assert") %}
+{% set Test = "@Test" if file else "@" ~ junit_package ~ ".Test" %}
+{% set Set = "Set" if file else "java.util.Set" %}
+{% set Collectors = "Collectors" if file else "java.util.stream.Collectors" %}
+{% set Validation = "Validation" if file else validation ~ ".Validation" %}
+{% set assertThat = "assertThat" if file else assertions ~ ".assertThat" %}
+{% set assertEquals = "assertEquals" if file else assertions ~ ".assertEquals" %}
+{% if file %}
+{% if class.package %}
+package {{ class.package }};
+
+{% endif %}
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import {{ validation }}.Validation;
+import {{ junit_package }}.Test;
+
+import static {{ assertions }}.{{ "assertThat" if assertj else "assertEquals" }};
+
+{{ pub }}class {{ test_class }} {
+
+{% endif %}
+    private static {{ class.name }} valid{{ class.name }}() {
+{% if class.record %}
+        return new {{ class.name }}({% for a in valid %}{{ a.value_java }}{% if not loop.last %}, {% endif %}{% endfor %});
+{% else %}
+        {{ class.name }} instance = new {{ class.name }}();
+{% for a in valid %}
+{% if a.constrained and a.setter %}
+        instance.{{ a.setter }}({{ a.value_java }});
+{% endif %}
+{% endfor %}
+        return instance;
+{% endif %}
+    }
+
+    private static {{ Set }}<String> violationsOf{{ class.name }}({{ class.name }} instance) {
+        return {{ Validation }}.buildDefaultValidatorFactory().getValidator().validate(instance).stream()
+            .map(v -> v.getPropertyPath() + " " + v.getMessageTemplate())
+            .collect({{ Collectors }}.toSet());
+    }
+
+    {{ Test }}
+    {{ pub }}void valid{{ class.name }}IsValid() {
+{% if assertj %}
+        {{ assertThat }}(violationsOf{{ class.name }}(valid{{ class.name }}())).isEmpty();
+{% else %}
+        {{ assertEquals }}(java.util.Collections.emptySet(), violationsOf{{ class.name }}(valid{{ class.name }}()));
+{% endif %}
+    }
+{% for field in fields %}
+{% for case in field.cases %}
+
+    {{ Test }}
+    {{ pub }}void {{ field.name }}_{{ case.name }}() {
+{% if class.record %}
+        {{ class.name }} instance = new {{ class.name }}({% for a in valid %}{% if a.field == field.name %}{{ case.value_java }}{% else %}{{ a.value_java }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %});
+{% else %}
+        {{ class.name }} instance = valid{{ class.name }}();
+{% if field.setter %}
+        instance.{{ field.setter }}({{ case.value_java }});
+{% else %}
+        // `{{ field.name }}` has no setter: give it {{ case.value_java }} before validating.
+{% endif %}
+{% endif %}
+{% if assertj %}
+        {{ assertThat }}(violationsOf{{ class.name }}(instance)).containsExactlyInAnyOrder(
+{% for e in case.expected %}
+            {{ (e.path ~ " " ~ e.template) | java_string }}{% if not loop.last %},{% endif %}
+
+{% endfor %}
+        );
+{% else %}
+        {{ assertEquals }}(
+            new java.util.HashSet<>(java.util.Arrays.asList(
+{% for e in case.expected %}
+                {{ (e.path ~ " " ~ e.template) | java_string }}{% if not loop.last %},{% endif %}
+
+{% endfor %}
+            )),
+            violationsOf{{ class.name }}(instance));
+{% endif %}
+    }
+{% endfor %}
+{% endfor %}
+{% if file %}
+}
+{% endif %}

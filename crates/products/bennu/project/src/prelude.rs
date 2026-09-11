@@ -5,6 +5,7 @@
 //! but the prelude is the canonical call-site path.
 
 pub use crate::capability::detect as detect_capabilities;
+pub use crate::capability::{detect_with as detect_capabilities_with, BuildEvidence};
 pub use crate::cargo::{
     expand_members as expand_cargo_members, parse as parse_cargo_manifest, CargoManifest,
 };

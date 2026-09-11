@@ -9,6 +9,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **DTO Lab: try a class before writing a test for it.** Type a JSON payload and see what the project's own Jackson makes of it, what it writes back — and what it loses on the way — and every violation the project's own Bean Validation reports, with its message in the language you ask for. It runs on the project's JDK, started when first needed and stopped when idle. `Alt+Shift+J` on a class, or *Open in DTO Lab* from the editor's menu.
+
+- **Validation tests generated from a class's constraints, in your own style.** One case per way each constraint can fail, with the expectations the validator actually produced rather than guessed ones. The test is written from a template you can copy and change — your helpers, your factories, your assertions — kept globally, chosen per project, and overridable for a single generation. It goes into a new test file or into an existing class, nested ones included, after a preview.
+
 - **An XML gets its icon from what it says it is.** Tomcat's per-application context is `context.xml` inside a `.war` and `<appname>.xml` under `conf/Catalina/localhost`; a Struts module configuration is called whatever the constant says. The project tree now reads each XML's root element and marks it by that, so a config file is recognisable whatever it was named — and a name that guessed wrong loses to the content.
 
 - **A viewer for spreadsheets.** The column mapping an import expects, the translation table somebody sent, the fixtures a batch job reads — a legacy repository is full of them, and opening one meant leaving the editor. `.xlsx`, the Excel 97-2003 `.xls`, the binary `.xlsb` and OpenDocument `.ods` all open as a grid, with values, dates and formula results as the file recorded them, read-only. Which format it is comes from the bytes, so a workbook saved under the wrong extension still opens.
@@ -60,6 +64,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **A pom that pins the test selector can be fixed from the warning that reports it.** *Convert to a property* rewrites Surefire's literal `<test>` as a reference to a property defaulted to the same value: a plain `mvn test` still runs the suite, and running one class or one case works again — from Bennu, from a terminal, and from any other tool. The pom to be written is shown first, and only that value changes.
 
 ### Fixed
+
+- **Lombok's `onMethod_`, `onParam_` and `onConstructor_` are no longer reported as unknown elements.** They are how code compiled by javac 8 and later writes `onMethod` and the rest; Lombok removes them before the compiler looks, so `@Setter(onMethod_ = @__(@JsonProperty))` compiles — and now reads clean too.
+
+- **Frameworks are recognised from the whole build, not just the root pom.** Bean Validation, Jackson and the rest switched on only for a dependency written in the root `pom.xml` — so a multi-module project, whose root declares nothing but modules, and an API that arrives through a starter or a parent both left their tooling off. Every module's pom, config files and sources count now, and so does the resolved dependency tree as soon as Maven has built it.
+
+- **Go-to works on a method reference.** Ctrl+Click on the name after `::` — `Reports::helper`, `this::run`, `String::valueOf` — did nothing, though rename already treated it as a use; it now lands on the method, in the project or in a library, find usages and hover answer there too, and on the qualifier it opens the type.
+
+- **The type in `Util.helper()` is a type.** With the caret on the name before the dot, hover said it was a *field* of the class you were in, go-to had nothing to open and find usages found nothing. A type receiver now answers as the type; a receiver that is a field is still the field.
 
 - **The editor no longer wanders off a second after a go-to.** Jumping to a declaration put the caret in the right place and then, once the usage counts came back from the index, slid the view away from it — each count is a row drawn above a member, so every member above where you landed pushed you down. The view now holds the line you are on while those arrive, whether you got there by jumping or by scrolling.
 

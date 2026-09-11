@@ -417,6 +417,10 @@ mod type_shape;
 // round trip where the editor takes four, and guidance in the reply rather than in a
 // static description). Delegates to the domain modules above; re-implements nothing.
 mod agent;
+// The DTO Lab: a class tried out as JSON, validated for real on the project's own JVM, and turned
+// into tests from a template the user owns.
+mod dtolab;
+mod dtolab_jvm;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, `bennu_config_dir()` /

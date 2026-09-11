@@ -18,8 +18,9 @@
     DownloadCloud, FileDown, Variable, Database, Clock, Columns3, ListPlus, SquarePen,
     Languages, CaseSensitive, FileCog,
     // The gutter's ▶ and the two other things pressing it might have meant.
-    Play, Bug, SlidersHorizontal,
+    Play, Bug, SlidersHorizontal, Beaker,
   } from 'lucide-svelte';
+  import { bennuDtoLabStore } from '$lib/stores/bennu/dtolab.svelte';
   import { tick, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
@@ -4147,6 +4148,10 @@
       ...(isJavaFile
         ? [{ id: 'generate', label: 'Generate…', icon: Wand2, shortcut: 'Alt+Insert' } as MenuItem]
         : []),
+      // The class under the pointer, tried out — offered where the lab has something to try it with.
+      ...(isJavaFile && (projectStore.capabilities?.bean_validation || projectStore.capabilities?.jackson)
+        ? [{ id: 'dtolab', label: 'Open in DTO Lab', icon: Beaker, shortcut: 'Alt+Shift+J' } as MenuItem]
+        : []),
       { id: 'save', label: 'Save', icon: Save, shortcut: 'Ctrl+S' },
       { id: 's4', label: '', separator: true },
       // Reachable from the buffer as well as from the tree: the moment you want the
@@ -4172,6 +4177,7 @@
         else toastStore.show('Generate works on Java files', 'info');
         break;
       case 'envvar': void showEnvVar(); break;
+      case 'dtolab': bennuDtoLabStore.openAtCaret(); break;
       case 'save':
         void projectStore.saveActive().then((ok) => { if (ok) toastStore.show('Saved', 'success'); });
         break;

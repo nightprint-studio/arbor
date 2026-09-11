@@ -100,6 +100,9 @@ export type BottomPanel =
    *  and closed from its own header. */
   | 'hierarchy'
   | 'forms'
+  /** The DTO Lab — a class tried out as JSON, validated on the project's JVM, and turned into tests.
+   *  Wide data (a payload beside what came out of it), so it docks at the bottom. */
+  | 'dtolab'
   /** A plugin panel registered with `position = "bottom"` — wide data a plugin wants read
    *  beside the editor rather than in a column. Same key shape as the other two docks. */
   | `plugin:${string}`

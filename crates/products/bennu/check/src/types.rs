@@ -276,10 +276,8 @@ fn lombok_on_x_value(name_node: Node, bytes: &[u8]) -> bool {
     let Some(key) = pair.child_by_field_name("key").and_then(|k| k.utf8_text(bytes).ok()) else {
         return false;
     };
-    // `onMethod`, `onConstructor`, `onParam` — and the `_`-suffixed spellings Lombok added so the
-    // element could be written without a warning on Java 8.
-    let key = key.strip_suffix('_').unwrap_or(key);
-    matches!(key, "onMethod" | "onConstructor" | "onParam")
+    // `onMethod`, `onConstructor`, `onParam`, with or without the `_` javac 8 and later need.
+    bennu_lombok::prelude::on_x_element(key).is_some()
 }
 
 fn imports_lombok(symbols: &FileSymbols) -> bool {

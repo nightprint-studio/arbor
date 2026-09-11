@@ -1,0 +1,959 @@
+<title>Bennu a confronto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground:#f3f4f6; --surface:#fff; --raised:#eceef1; --line:#dcdfe5; --line-soft:#e7e9ee;
+    --ink:#1b1e23; --ink-2:#4b5058; --ink-3:#797f89; --accent:#2f66d8;
+    --hi:#2f8f3f; --mid:#b07c0c; --lo:#c2413f; --pip-off:#dde0e6;
+    --hi-bg:rgba(47,143,63,.09); --mid-bg:rgba(190,137,20,.13); --lo-bg:rgba(194,65,63,.10);
+    --own-bg:rgba(47,102,216,.07); --own-line:rgba(47,102,216,.30);
+    --f-display:"IBM Plex Sans Condensed","Helvetica Neue",Arial,sans-serif;
+    --f-body:"IBM Plex Sans",-apple-system,"Segoe UI",Roboto,sans-serif;
+    --f-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+    --wrap:1240px; --r:10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#1e1f22; --surface:#26282c; --raised:#2b2d30; --line:#3a3d43; --line-soft:#313439;
+      --ink:#dfe1e5; --ink-2:#a9adb5; --ink-3:#7d828b; --accent:#5b90ff;
+      --hi:#5cc45c; --mid:#ffb52a; --lo:#ea6a6a; --pip-off:#3a3d43;
+      --hi-bg:rgba(92,196,92,.10); --mid-bg:rgba(255,181,42,.12); --lo-bg:rgba(234,106,106,.10);
+      --own-bg:rgba(91,144,255,.09); --own-line:rgba(91,144,255,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#1e1f22; --surface:#26282c; --raised:#2b2d30; --line:#3a3d43; --line-soft:#313439;
+    --ink:#dfe1e5; --ink-2:#a9adb5; --ink-3:#7d828b; --accent:#5b90ff;
+    --hi:#5cc45c; --mid:#ffb52a; --lo:#ea6a6a; --pip-off:#3a3d43;
+    --hi-bg:rgba(92,196,92,.10); --mid-bg:rgba(255,181,42,.12); --lo-bg:rgba(234,106,106,.10);
+    --own-bg:rgba(91,144,255,.09); --own-line:rgba(91,144,255,.35);
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:var(--f-body);
+         font-size:15px; line-height:1.6; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:var(--wrap); margin:0 auto; padding:0 24px; }
+  .masthead { background:var(--raised); border-bottom:1px solid var(--line); padding:54px 0 32px; }
+  .eyebrow { font-family:var(--f-mono); font-size:11.5px; font-weight:500;
+             letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); }
+  h1 { font-family:var(--f-display); font-weight:700; font-size:clamp(40px,6.5vw,66px);
+       line-height:1.02; letter-spacing:-.018em; margin:14px 0 0; text-wrap:balance; }
+  .standfirst { margin:16px 0 0; max-width:70ch; font-size:17px; color:var(--ink-2); }
+  .standfirst b { color:var(--ink); }
+  .rail { position:sticky; top:0; z-index:20; background:var(--surface); border-bottom:1px solid var(--line); }
+  .rail-inner { display:flex; gap:2px; overflow-x:auto; }
+  .rail a { flex:0 0 auto; display:flex; align-items:baseline; gap:8px; padding:11px 14px;
+            text-decoration:none; color:var(--ink-2); border-bottom:2px solid transparent;
+            font-family:var(--f-display); font-weight:600; font-size:15px; white-space:nowrap; }
+  .rail a:hover { color:var(--ink); background:var(--raised); }
+  .rail a:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+  section { padding:54px 0 8px; }
+  section + section { border-top:1px solid var(--line-soft); }
+  h2 { font-family:var(--f-display); font-weight:700; font-size:34px; letter-spacing:-.012em;
+       margin:0; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; text-wrap:balance; }
+  h2 .kicker { font-family:var(--f-mono); font-size:12px; font-weight:500; letter-spacing:.07em;
+               text-transform:uppercase; color:var(--ink-3); }
+  h3 { font-family:var(--f-display); font-weight:600; font-size:14.5px; letter-spacing:.07em;
+       text-transform:uppercase; color:var(--ink-2); margin:40px 0 12px; }
+  p { margin:14px 0; max-width:76ch; }
+  a { color:var(--accent); }
+  code { font-family:var(--f-mono); font-size:.87em; background:var(--raised);
+         border:1px solid var(--line-soft); border-radius:4px; padding:1px 5px; }
+  ul.plain { margin:10px 0 0; padding-left:20px; max-width:84ch; }
+  ul.plain li { margin:8px 0; }
+
+  /* tables */
+  .tw { overflow-x:auto; border:1px solid var(--line); border-radius:var(--r);
+        background:var(--surface); margin-bottom:20px; }
+  table { border-collapse:collapse; width:100%; min-width:760px; }
+  th, td { padding:7px 12px; text-align:left; border-bottom:1px solid var(--line-soft); font-size:14px; vertical-align:top; }
+  /* Not sticky: every table sits in `.tw`, whose overflow makes IT the sticky container, so an
+     offset meant to clear the page rail pushed the header down over the table's own first row. */
+  thead th { background:var(--raised); font-family:var(--f-display);
+             font-weight:600; font-size:12.5px; color:var(--ink-2);
+             border-bottom:1px solid var(--line); white-space:nowrap; vertical-align:bottom; }
+  tbody tr:last-child td { border-bottom:none; }
+  tbody tr:hover td { background:var(--raised); }
+  td:first-child, th:first-child { min-width:300px; }
+  td small.why { display:block; color:var(--ink-3); font-size:12.5px; line-height:1.45; margin-top:2px; max-width:62ch; }
+  th.own, td.own { background:var(--own-bg); box-shadow:inset 1px 0 0 var(--own-line), inset -1px 0 0 var(--own-line); }
+  tbody tr:hover td.own { background:var(--own-bg); }
+  tbody tr.grp td { background:var(--raised); font-family:var(--f-mono); font-size:11px;
+                    letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3);
+                    padding:10px 12px 6px; border-bottom:1px solid var(--line); }
+  td.c { width:92px; text-align:center; font-size:15px; font-weight:600;
+         font-family:var(--f-mono); line-height:1.2; white-space:nowrap; }
+  td.c.y { color:var(--hi); }
+  td.c.p { color:var(--mid); }
+  td.c.n { color:var(--lo); opacity:.62; }
+  td.c.own.n { opacity:.8; }
+  tr.chg td:first-child { box-shadow:inset 3px 0 0 var(--hi); }
+  tr.chg td { background:var(--hi-bg); }
+  tr.chg:hover td { background:var(--hi-bg); }
+  .tag { display:inline-block; margin-left:6px; padding:0 6px; border-radius:4px;
+         font-family:var(--f-mono); font-size:10.5px; font-weight:500; letter-spacing:.04em;
+         color:var(--hi); border:1px solid var(--hi); vertical-align:1px; white-space:nowrap; }
+  .tag.new { color:var(--accent); border-color:var(--accent); }
+  tr.note td { color:var(--ink-3); font-size:12.5px; font-style:italic; background:var(--mid-bg); }
+  tr.note:hover td { background:var(--mid-bg); }
+  td.n2 { width:112px; text-align:center; font-family:var(--f-mono); font-weight:600;
+          font-variant-numeric:tabular-nums; font-size:15px; }
+  td.n2 small { display:block; font-size:10.5px; font-weight:400; color:var(--ink-3); }
+  td.n2 small.up { color:var(--hi); font-weight:500; }
+  .legend { display:flex; gap:20px; flex-wrap:wrap; margin:10px 0 14px;
+            font-family:var(--f-mono); font-size:11.5px; color:var(--ink-3); align-items:center; }
+  .legend b { font-size:13px; }
+
+  /* facts */
+  .facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:0;
+           border:1px solid var(--line); border-radius:var(--r); overflow:hidden;
+           background:var(--surface); margin-top:22px; }
+  .facts div { padding:15px 18px; border-right:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft); }
+  .facts b { display:block; font-family:var(--f-mono); font-size:22px; font-weight:600;
+             font-variant-numeric:tabular-nums; line-height:1.15; }
+  .facts small { display:block; font-size:12px; color:var(--ink-3); margin-top:3px; }
+
+  /* callouts */
+  .callout { margin-top:22px; padding:16px 20px; background:var(--mid-bg);
+             border:1px solid var(--line); border-left:3px solid var(--mid);
+             border-radius:var(--r); font-size:14px; }
+  .callout.blue { background:var(--surface); border-left-color:var(--accent); }
+  .callout.green { background:var(--surface); border-left-color:var(--hi); }
+  .callout b { font-family:var(--f-display); font-size:15px; }
+  .callout p { margin:6px 0 0; max-width:86ch; }
+  .callout ul { margin:8px 0 0; padding-left:20px; max-width:86ch; }
+  .callout li { margin:6px 0; }
+
+  /* verdict */
+  .verdict3 { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:1px;
+              background:var(--line); border:1px solid var(--line); border-radius:var(--r);
+              overflow:hidden; margin-top:22px; }
+  .verdict3 > div { background:var(--surface); padding:18px 20px; font-size:14.5px; color:var(--ink-2); }
+  .verdict3 b { display:block; color:var(--ink); font-family:var(--f-display); font-size:17px; margin-bottom:4px; }
+
+  /* axis chart */
+  .chart { margin-top:26px; background:var(--surface); border:1px solid var(--line);
+           border-radius:var(--r); padding:18px 22px 14px; }
+  .chart-title { font-family:var(--f-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); margin-bottom:12px; }
+  .crow { display:grid; grid-template-columns:190px 1fr 108px; gap:14px; align-items:center; padding:6px 0; }
+  .crow .lab { font-family:var(--f-display); font-weight:600; font-size:14.5px; }
+  .track { position:relative; height:24px; background:var(--raised); border-radius:4px; }
+  .track .prev { position:absolute; left:0; top:0; bottom:0; background:var(--line); border-radius:4px; }
+  .track .now { position:absolute; left:0; top:6px; bottom:6px; background:var(--accent); border-radius:3px; }
+  .track .grid { position:absolute; top:0; bottom:0; width:1px; background:var(--surface); opacity:.9; }
+  .crow .val { font-family:var(--f-mono); font-variant-numeric:tabular-nums; font-size:13px; color:var(--ink-2); text-align:right; }
+  .crow .val b { color:var(--ink); font-size:15px; }
+  .crow .val .up { color:var(--hi); }
+  .scale { display:grid; grid-template-columns:190px 1fr 108px; gap:14px; margin-top:2px; }
+  .scale .ticks { position:relative; height:16px; font-family:var(--f-mono); font-size:10.5px; color:var(--ink-3); }
+  .scale .ticks span { position:absolute; top:0; transform:translateX(-50%); }
+  .scale .ticks span:first-child { transform:none; }
+  .scale .ticks span:last-child { transform:translateX(-100%); }
+  .chart-key { display:flex; gap:18px; margin-top:8px; font-family:var(--f-mono); font-size:11px; color:var(--ink-3); }
+  .chart-key i { display:inline-block; width:18px; height:9px; border-radius:2px; vertical-align:0; margin-right:6px; }
+
+  /* axis cards */
+  .axes { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:14px; margin-top:22px; }
+  .axis { background:var(--surface); border:1px solid var(--line); border-radius:var(--r); padding:16px 18px; }
+  .axis header { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+  .axis header b { font-family:var(--f-display); font-size:17px; }
+  .axis header span { font-family:var(--f-mono); font-size:14px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .axis header span.up { color:var(--hi); }
+  .axis header span.flat { color:var(--ink-3); }
+  .axis p { font-size:14px; color:var(--ink-2); margin:8px 0 0; }
+
+  /* scorecard */
+  table.board td.score { text-align:center; width:104px; }
+  table.board td.feat { min-width:300px; }
+  table.board .feat b { font-family:var(--f-display); font-weight:600; font-size:14.5px; display:block; }
+  .pips { display:inline-flex; gap:2.5px; }
+  .pips i { width:7px; height:14px; display:block; background:var(--pip-off); }
+  .pips i.on { background:var(--tone, var(--ink-2)); }
+  .num { display:block; margin-top:3px; font-family:var(--f-mono); font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums; }
+  .then { display:block; font-family:var(--f-mono); font-size:10.5px; color:var(--hi); }
+  table.board tr.sub td { font-family:var(--f-mono); font-size:12px; color:var(--ink-2); background:var(--raised);
+                          text-align:center; font-variant-numeric:tabular-nums; border-bottom:1px solid var(--line); }
+  table.board tr.sub td:first-child { text-align:left; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); }
+  table.board tfoot td { border-top:2px solid var(--ink); padding:14px 12px; text-align:center;
+                         font-family:var(--f-mono); font-size:19px; font-weight:600; font-variant-numeric:tabular-nums; }
+  table.board tfoot td:first-child { text-align:left; font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); font-weight:500; }
+  table.board tfoot td small { display:block; font-size:10.5px; font-weight:400; color:var(--ink-3); }
+  .fine { font-size:12.5px; color:var(--ink-3); }
+
+  /* profiles */
+  .profiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(380px,1fr)); gap:14px; margin-top:22px; }
+  .profile { background:var(--surface); border:1px solid var(--line); border-radius:var(--r); padding:18px 20px; }
+  .profile h4 { margin:0; font-family:var(--f-display); font-size:19px; font-weight:700; }
+  .profile .who { font-size:13.5px; color:var(--ink-2); margin:4px 0 14px; }
+  .prow { display:grid; grid-template-columns:150px 1fr 44px; gap:10px; align-items:center; padding:4px 0; font-size:13.5px; }
+  .prow .bar { height:12px; background:var(--raised); border-radius:3px; position:relative; }
+  .prow .bar i { position:absolute; left:0; top:0; bottom:0; border-radius:3px; background:var(--ink-3); }
+  .prow.own { font-weight:600; }
+  .prow.own .bar i { background:var(--accent); }
+  .prow .pct { font-family:var(--f-mono); font-variant-numeric:tabular-nums; text-align:right; }
+  .profile .weights { margin-top:12px; font-size:12.5px; color:var(--ink-3); }
+
+  /* next steps */
+  ol.next { list-style:none; margin:14px 0 0; padding:0; counter-reset:n;
+            display:flex; flex-direction:column; gap:1px; }
+  ol.next li { counter-increment:n; display:grid; grid-template-columns:46px 1fr; gap:14px;
+               padding:13px 18px; background:var(--surface); border:1px solid var(--line); }
+  ol.next li:first-child { border-radius:var(--r) var(--r) 0 0; }
+  ol.next li:last-child { border-radius:0 0 var(--r) var(--r); }
+  ol.next li + li { border-top:none; }
+  ol.next li::before { content:counter(n,decimal-leading-zero); font-family:var(--f-mono);
+                       font-size:13px; font-weight:600; color:var(--accent);
+                       padding-top:2px; font-variant-numeric:tabular-nums; }
+  ol.next b { display:block; font-weight:600; font-family:var(--f-display); font-size:16px; }
+  ol.next span { display:block; font-size:13.5px; color:var(--ink-2); margin-top:2px; }
+
+  footer { padding:42px 0 64px; color:var(--ink-3); font-size:13px; }
+  footer p { max-width:86ch; }
+  @media (max-width:720px) {
+    h2 { font-size:27px; }
+    .crow, .scale { grid-template-columns:110px 1fr 84px; }
+    .prow { grid-template-columns:110px 1fr 40px; }
+  }
+  @media (prefers-reduced-motion:reduce) { * { transition:none !important; animation:none !important; } }
+</style>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="eyebrow">Quarta stesura · solo l'editor · 11 settembre 2026</div>
+    <h1>Bennu a confronto</h1>
+    <p class="standfirst">
+      Bennu contro IntelliJ IDEA Ultimate e Community, Eclipse, VS Code con il Java pack e NetBeans:
+      funzione per funzione, area per area, e sugli assi della stesura precedente. Rifatta dopo nove
+      giorni in cui su Bennu sono arrivate più di sessantacinquemila righe, con la regola che vale in
+      tutte e due le direzioni: <b>un voto si muove solo se il repository, o il tuo uso, lo dimostra</b>.
+    </p>
+  </div>
+</header>
+
+<nav class="rail" aria-label="Sezioni">
+  <div class="wrap rail-inner">
+    <a href="#breve">In breve</a>
+    <a href="#metodo">Metodo</a>
+    <a href="#assi">Assi</a>
+    <a href="#scheda">Scheda</a>
+    <a href="#profili">Due squadre</a>
+    <a href="#codice">Codice</a>
+    <a href="#refactoring">Refactoring</a>
+    <a href="#framework">Framework</a>
+    <a href="#build">Build e debug</a>
+    <a href="#editor">Editor</a>
+    <a href="#salito">Cosa è salito</a>
+    <a href="#fermo">Cosa no</a>
+    <a href="#prossimi">Prossimi passi</a>
+  </div>
+</nav>
+
+<section id="breve">
+  <div class="wrap">
+    <h2>In breve <span class="kicker">tre righe</span></h2>
+    <div class="verdict3">
+      <div>
+        <b>Sale, e sale dove contava.</b>
+        Il 2 settembre il refactoring era cinque righe consecutive a zero. Oggi quattro sono coperte, e
+        misurate ricompilando con <code>javac</code> decine di migliaia di applicazioni. Sono arrivati i
+        controlli sui framework che il compilatore non vede, la tool window Maven che esegue davvero e i
+        test lanciati e debuggati dall'editor. Feature da 7.5 a 8.5 sullo stack legacy e da 7.0 a 8.0 da
+        IDE generalista; affidabilità da 5.5 a 6.5.
+      </div>
+      <div>
+        <b>Non sale dove si vede di più.</b>
+        La UI/UX resta 7.5, per tua scelta: «molte cose sono rimaste grezze». È l'asse che giudichi tu e
+        non il codice, e le prove di questa settimana ti danno ragione: tre dei difetti sistemati in questa
+        sessione erano esattamente di quel tipo.
+      </div>
+      <div>
+        <b>Il divario cambia forma, non sparisce.</b>
+        Sulle funzioni dello stack legacy Bennu è davanti a tutti, Ultimate compreso. Come strumento di
+        lavoro quotidiano, anche per un team legacy, Ultimate resta avanti di nove punti: pesano
+        maturità, debugger e le righe dove Bennu ha ancora uno zero.
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="metodo">
+  <div class="wrap">
+    <h2>Metodo <span class="kicker">da cosa nascono i numeri</span></h2>
+    <p>Due punti di partenza, perché le stesure precedenti erano due e usavano scale diverse.</p>
+    <ul class="plain">
+      <li><b>2 settembre — «Arbor a confronto», terza stesura.</b> Assi in decimi per tutta la suite. Per
+        Bennu: feature 7.5 (scomposta nel testo in 7.5 sullo stack legacy e 7.0 come IDE Java
+        generalista), UI/UX 7.5, estensibilità 8.0, funziona davvero 5.5.</li>
+      <li><b>9 settembre — «Bennu Against the Field».</b> 21 aree da 0 a 5 contro IntelliJ Ultimate,
+        Eclipse, VS Code e NetBeans. Bennu 64 su 105.</li>
+    </ul>
+
+    <h3>Le fonti, e dove si fermano</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Fonte</th><th>Cosa decide</th><th>Dove non arriva</th></tr></thead>
+        <tbody>
+          <tr><td>Il codice al commit <code>b28db196</code>, più il lavoro non ancora committato dell'11 settembre</td><td>Se una funzione c'è: handler RPC, crate, pagine di documentazione in-app</td><td>Se funziona sul tuo progetto</td></tr>
+          <tr><td>Il <code>CHANGELOG</code>, con le date ricavate da <code>git log -S</code></td><td>Quando una funzione è arrivata, e quindi se una stesura precedente poteva già conoscerla</td><td>—</td></tr>
+          <tr><td>Le misure registrate: corpora ricompilati con <code>javac</code>, suite di test</td><td>Quanto regge, in numeri</td><td>Solo sui progetti misurati: Apache Commons Lang e h2</td></tr>
+          <tr><td>Le tue risposte dell'11 settembre</td><td>UI/UX e «funziona davvero»: quello che si sa usando e non leggendo</td><td>—</td></tr>
+          <tr><td>Conoscenza generale degli altri IDE</td><td>Le loro colonne</td><td>Non riverificate su un'installazione: invecchiano, e vanno lette come approssimate</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <b>La tua aspettativa non è un'evidenza; le tue risposte sì.</b>
+      <p>Hai scritto che secondo te i voti erano saliti parecchio. In parte è vero, ma non è per questo che
+        si muovono: si muovono per le righe di questa pagina. E le tue risposte hanno lavorato nei due
+        sensi — hanno alzato l'affidabilità e tenuto ferma la UI/UX, che sarebbe stato facile trascinare
+        su insieme al resto.</p>
+    </div>
+
+    <h3>Tre settembre → oggi</h3>
+    <div class="facts">
+      <div><b>39 → 48</b><small>crate di Bennu</small></div>
+      <div><b>4.194 → 5.380</b><small>test Rust nei crate di Bennu</small></div>
+      <div><b>0 → 85</b><small>test automatici frontend, in 7 file</small></div>
+      <div><b>42 → 48</b><small>pagine di documentazione in-app</small></div>
+      <div><b>27 → 29</b><small>tool esposti ad agenti via MCP</small></div>
+      <div><b>+65.407</b><small>righe su Bennu, 403 file toccati</small></div>
+    </div>
+    <div class="callout green">
+      <b>Il tipo di evidenza nuovo: refactoring ricompilati, non dichiarati.</b>
+      <p>71.209 applicazioni su Apache Commons Lang con 9 rotture in tutto, e quasi 95.000 su h2, dove i refactoring del cuore ricompilano fra il 97,9% e il 100% e dove sono venuti fuori difetti con un nome in cinque refactoring, poi corretti. Extract method è passato da 178 rotture a
+        zero su 15.809 estrazioni; extract variable da 117 a 9 su 35.249; safe delete ha cancellato ogni
+        membro che dichiarava sicuro in Commons Lang e ricompilato 27 volte su 27. Nessun altro IDE di questa
+        pagina pubblica un numero del genere — il che non vuol dire che i loro refactoring rompano di più,
+        ma che del tuo si sa quanto.</p>
+    </div>
+  </div>
+</section>
+<section id="assi">
+  <div class="wrap">
+    <h2>Gli assi <span class="kicker">in decimi</span></h2>
+    <p>La scala è quella del 2 settembre, con una differenza: la feature è su due colonne. Un numero solo
+      mescolava due confronti opposti — Bennu davanti sullo stack legacy e indietro da generalista — ed è lo
+      stesso trucco che quella stesura aveva già tolto al voto di Sitta. Il peso, che allora era una sezione
+      senza voto, qui ne ha uno.</p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Editor</th>
+            <th>Feature<br>stack legacy</th>
+            <th>Feature<br>Java generalista</th>
+            <th>UI/UX</th>
+            <th>Estensibilità</th>
+            <th>Funziona<br>davvero</th>
+            <th>Peso<br>e avvio</th>
+            <th>Nota</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="own"><b>Bennu</b></td>
+            <td class="n2 own">8.5<small class="up">era 7.5</small></td>
+            <td class="n2 own">8.0<small class="up">era 7.0</small></td>
+            <td class="n2 own">7.5<small>invariato</small></td>
+            <td class="n2 own">8.0<small>invariato</small></td>
+            <td class="n2 own">6.5<small class="up">era 5.5</small></td>
+            <td class="n2 own">9.5<small>nuovo</small></td>
+            <td class="own">Primo sullo stack legacy, alla pari con Eclipse da generalista</td>
+          </tr>
+          <tr><td>IntelliJ IDEA Ultimate</td><td class="n2">7.5</td><td class="n2">9.5</td><td class="n2">8.0</td><td class="n2">9.0</td><td class="n2">9.5</td><td class="n2">4.0</td><td>Il riferimento. Lo stack legacy passa da plugin che invecchiano</td></tr>
+          <tr><td>IntelliJ IDEA Community</td><td class="n2">3.0</td><td class="n2">8.5</td><td class="n2">8.0</td><td class="n2">9.0</td><td class="n2">9.5</td><td class="n2">5.0</td><td>Spring, JSP, Jakarta EE e database sono di Ultimate</td></tr>
+          <tr><td>Eclipse IDE for Enterprise Java</td><td class="n2">5.0</td><td class="n2">8.0</td><td class="n2">6.0</td><td class="n2">8.0</td><td class="n2">9.5</td><td class="n2">6.0</td><td>Compilatore vero, refactoring di prim'ordine, UI datata</td></tr>
+          <tr><td>VS Code + Extension Pack for Java</td><td class="n2">3.5</td><td class="n2">7.5</td><td class="n2">8.5</td><td class="n2">9.5</td><td class="n2">9.0</td><td class="n2">7.0</td><td>L'ecosistema più grande, quasi niente sui framework legacy</td></tr>
+          <tr><td>Apache NetBeans</td><td class="n2">5.0</td><td class="n2">7.5</td><td class="n2">6.5</td><td class="n2">6.0</td><td class="n2">8.5</td><td class="n2">6.0</td><td>Maven e Jakarta EE nativi, comunità piccola</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="chart" role="img" aria-label="Bennu, voti in decimi dal 2 settembre a oggi: stack legacy da 7.5 a 8.5, generalista da 7.0 a 8.0, UI/UX 7.5 invariato, estensibilità 8.0 invariato, funziona davvero da 5.5 a 6.5">
+      <div class="chart-title">Bennu, 2 settembre → 11 settembre</div>
+      <div class="crow"><span class="lab">Stack legacy</span><div class="track"><span class="prev" style="width:75%"></span><span class="now" style="width:85%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">7.5 → <b>8.5</b> <span class="up">+1.0</span></span></div>
+      <div class="crow"><span class="lab">Java generalista</span><div class="track"><span class="prev" style="width:70%"></span><span class="now" style="width:80%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">7.0 → <b>8.0</b> <span class="up">+1.0</span></span></div>
+      <div class="crow"><span class="lab">UI/UX</span><div class="track"><span class="prev" style="width:75%"></span><span class="now" style="width:75%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">7.5 → <b>7.5</b></span></div>
+      <div class="crow"><span class="lab">Estensibilità</span><div class="track"><span class="prev" style="width:80%"></span><span class="now" style="width:80%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">8.0 → <b>8.0</b></span></div>
+      <div class="crow"><span class="lab">Funziona davvero</span><div class="track"><span class="prev" style="width:55%"></span><span class="now" style="width:65%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">5.5 → <b>6.5</b> <span class="up">+1.0</span></span></div>
+      <div class="scale"><span></span><div class="ticks"><span style="left:0">0</span><span style="left:20%">2</span><span style="left:40%">4</span><span style="left:60%">6</span><span style="left:80%">8</span><span style="left:100%">10</span></div><span></span></div>
+      <div class="chart-key"><span><i style="background:var(--line)"></i>2 settembre</span><span><i style="background:var(--accent)"></i>oggi</span></div>
+    </div>
+
+    <h3>Perché ogni asse si è mosso, o no</h3>
+    <div class="axes">
+      <article class="axis">
+        <header><b>Feature · stack legacy</b><span class="up">7.5 → 8.5</span></header>
+        <p>Il 2 settembre l'avevi abbassato da 8.5 per «validazioni non segnate, autocomplete non segnati e
+          bug minori»: la copertura reggeva già un 8.5, era scesa la fiducia. Da allora sono arrivati
+          <code>struts.properties</code> con il gate sulla versione di <code>struts2-core</code>, la DTD della
+          versione più vicina quando quella esatta non c'è, il link allo schema seguibile anche senza schema,
+          le icone per elemento radice, il fix della grammatica JSP — e la tua risposta dice che la
+          validazione è più stabile.</p>
+        <p><b>Non 9:</b> questa settimana sono emersi l'attributo JSP bianco e il goto da JSP ad action che
+          scivolava. Difetti proprio sulle superfici legacy, e trovati da te, non da un test.</p>
+      </article>
+      <article class="axis">
+        <header><b>Feature · Java generalista</b><span class="up">7.0 → 8.0</span></header>
+        <p>Il refactoring, soprattutto: extract method, variable, constant e field, inline, safe delete, pull
+          up, push down, move member e move class chiudono quattro delle cinque righe che il 2 settembre erano
+          a zero. Poi la completion ordinata dal tipo che la posizione vuole, i controlli Spring che il
+          compilatore non vede, Bean Validation e Jackson, Maven che esegue, test e debug dei test dal gutter.</p>
+        <p><b>Non 8.5:</b> Change Signature, Gradle, coverage, hot-swap delle classi e attach a una JVM remota
+          sono ancora zero, e un team generalista li usa ogni settimana.</p>
+      </article>
+      <article class="axis">
+        <header><b>UI/UX</b><span class="flat">7.5 = 7.5</span></header>
+        <p>Tuo voto. Eri indeciso fra 7.5 e 8 e hai scelto 7.5 perché «molte cose sono rimaste grezze». Le prove
+          di questi giorni vanno nella stessa direzione: la riga del Project tree senza sfondo mentre il menu
+          contestuale è aperto, gli attributi JSP bianchi, la vista che scivolava via dopo un goto. Sono tutti
+          sistemati, ma sono il genere di difetto che un prodotto rifinito non ha più.</p>
+        <p>La tool window Maven rifatta per modulo e le icone per contenuto sono miglioramenti veri; da soli non
+          spostano la percezione d'insieme, e questa pagina non ha modo di misurarla meglio di te.</p>
+      </article>
+      <article class="axis">
+        <header><b>Estensibilità</b><span class="flat">8.0 = 8.0</span></header>
+        <p>Nessuna evidenza nuova. L'host Lua è quello di prima; i tool MCP sono passati da 27 a 29, ma un tool
+          in più è una funzione, non un punto di estensione. Resta il voto di un'architettura aperta con un
+          ecosistema piccolo.</p>
+      </article>
+      <article class="axis">
+        <header><b>Funziona davvero</b><span class="up">5.5 → 6.5</span></header>
+        <p>Due evidenze nuove, di natura diversa. La tua: «meglio, e si sente», con validazione e refactoring
+          più stabili. Quella misurata: le rotture di extract method da 178 a zero, di extract variable da 117
+          a 9, safe delete 27 su 27, 71.209 applicazioni su Commons Lang con 9 rotture, e su h2 extract method ed extract variable oltre il 99,5%. E il frontend, che il
+          2 settembre non aveva un test, oggi ne ha 85.</p>
+        <p><b>Non 7:</b> un utente solo, 85 test su un'interfaccia di queste dimensioni, e un difetto di
+          navigazione che ha chiesto tre giri per essere capito. Il 7.5 di Corvus viene da mesi d'uso
+          quotidiano, e quelli non si recuperano scrivendo codice.</p>
+      </article>
+      <article class="axis">
+        <header><b>Peso e avvio</b><span class="flat">9.5 · nuovo</span></header>
+        <p>Nella stesura del 2 settembre era la sezione «dove non c'è partita», senza un numero. Misure del
+          maintainer: <code>bennu-be</code> fra 200 e 400&nbsp;MB contro i 2–3&nbsp;GB di IntelliJ su un progetto
+          Java medio-grande, webview compresa; nessuna JVM da avviare, nessuna indicizzazione bloccante.</p>
+        <p><b>Da rimisurare:</b> quel numero è di quando i crate erano 39. Oggi sono 48, e un confronto sul peso
+          va rifatto prima di essere ripetuto.</p>
+      </article>
+    </div>
+  </div>
+</section>
+<section id="scheda">
+  <div class="wrap">
+    <h2>La scheda <span class="kicker">31 aree · 6 editor · da 0 a 5</span></h2>
+    <p>La scheda del 9 settembre aveva 21 aree; questa ne ha 31, e non per gonfiarla. Dieci righe nascono
+      spezzando aree che mescolavano cose diverse — la validazione, che per Eclipse e VS Code è un compilatore
+      vero e per Bennu no; il build, che per Bennu è Maven e niente Gradle — e aggiungendo quelle che il 9
+      settembre non esistevano ancora: i controlli sui framework, Bean Validation e Jackson, i file di
+      configurazione degli strumenti, i fogli di calcolo. Sotto il voto di Bennu trovi quello del 9 settembre,
+      quando la riga esisteva già ed è cambiata.</p>
+
+    <div class="callout blue">
+      <b>Sulle stesse 21 righe del 9 settembre: da 64 a 72 su 105, dal 61% al 69%.</b>
+      <p>È il confronto onesto, perché righe e scala sono le stesse. Gli otto punti vengono da otto righe, uno ciascuna: refactoring, Struts e JSP, Spring, XML, build, debugger, test, e la maturità, che sale da 1 a 2 per la suite di test e i corpora misurati. Due sono in parte correzioni: la scheda del 9 settembre dava i breakpoint condizionali per assenti, e c'erano dal 27 agosto; e il refactoring era fermo a 3 per rotture su h2 lette senza il loro denominatore — 126 su 25.094 è il 99,5%.</p>
+    </div>
+
+    <div class="legend">
+      <span><span class="pips"><i class="on" style="--tone:var(--hi)"></i><i class="on" style="--tone:var(--hi)"></i><i class="on" style="--tone:var(--hi)"></i><i class="on" style="--tone:var(--hi)"></i><i class="on" style="--tone:var(--hi)"></i></span> guida la riga</span>
+      <span><span class="pips"><i class="on" style="--tone:var(--mid)"></i><i class="on" style="--tone:var(--mid)"></i><i class="on" style="--tone:var(--mid)"></i><i></i><i></i></span> intermedio</span>
+      <span><span class="pips"><i class="on" style="--tone:var(--lo)"></i><i></i><i></i><i></i><i></i></span> 0–1, indietro</span>
+      <span><b>0</b> assente · <b>1</b> simbolico · <b>2</b> parziale · <b>3</b> usabile · <b>4</b> forte · <b>5</b> il migliore del gruppo</span>
+    </div>
+    <div class="tw"><table id="board" class="board"><caption class="fine" style="caption-side:bottom;text-align:left;padding:10px 12px">Totali, subtotali e percentuali sono calcolati dalla pagina sulle righe che vedi, non scritti a mano.</caption></table></div>
+
+    <div class="callout">
+      <b>Senza pesi, Bennu e IntelliJ Community finiscono pari — su righe opposte.</b>
+      <p>Community prende i suoi punti sul Java di tutti i giorni: refactoring, errori di compilazione, debugger,
+        maturità. Bennu li prende dove Community ha zero: Struts e JSP, i controlli sui framework, gli encoding,
+        i file che non sono codice. Due strumenti con lo stesso totale e nessuna riga in comune sono il miglior
+        argomento contro il totale — ed è per questo che la sezione successiva lo pesa.</p>
+    </div>
+  </div>
+</section>
+
+<section id="profili">
+  <div class="wrap">
+    <h2>Due squadre <span class="kicker">la stessa scheda, pesata</span></h2>
+    <p>Una somma di righe con lo stesso peso premia l'ampiezza, e nessun team usa tutte le righe allo stesso modo.
+      Qui sotto la stessa scheda, pesata per due squadre concrete. I pesi sono scritti riga per riga nel sorgente
+      della pagina: sono un giudizio, e metterli per iscritto è il modo di renderlo discutibile.</p>
+    <div class="profiles">
+      <article class="profile">
+        <h4>Il monolite legacy</h4>
+        <p class="who">Struts 2 e JSP, Spring configurato in XML, MyBatis, sorgenti in Cp1252, Maven, Tomcat.</p>
+        <div id="prof-legacy"></div>
+        <p class="weights">Pesi alti: Struts e JSP ×3, encoding ×3; Spring, MyBatis, XML, Maven, debugger, maturità ×2. Gradle ×0.</p>
+      </article>
+      <article class="profile">
+        <h4>Il servizio Spring Boot nuovo</h4>
+        <p class="who">Java 21, Spring Boot, Bean Validation e Jackson, Lombok, Gradle o Maven.</p>
+        <div id="prof-boot"></div>
+        <p class="weights">Pesi alti: completion, refactoring, errori di compilazione, Spring ×3. Struts ed encoding ×0.</p>
+      </article>
+    </div>
+    <div class="callout blue">
+      <b>Cosa dicono.</b>
+      <p>Per il monolite legacy Bennu è secondo: dietro Ultimate e davanti a tutti gli altri, Community compresa,
+        che su quello stack non ha niente. Per il servizio Spring Boot è terzo, qualche punto davanti a VS Code ed Eclipse — e Community gli sta davanti pur non sapendo niente di Spring,
+        perché su un servizio nuovo il Java quotidiano pesa più dei controlli sui framework.</p>
+      <p>Il dato che serve è la distanza da Ultimate sul profilo legacy, nove punti. Dice dove lavorare:
+        non sulle funzioni legacy, dove Bennu è già davanti, ma sulle righe generaliste che anche quel team apre
+        ogni giorno — debugger, refactoring, e il tempo.</p>
+    </div>
+  </div>
+</section>
+<section id="codice">
+  <div class="wrap">
+    <h2>Il dettaglio <span class="kicker">funzione per funzione</span></h2>
+    <p>Le matrici della stesura del 2 settembre, aggiornate e allargate. Una riga su sfondo verde è cambiata da
+      allora, e l'etichetta dice com'era; un'etichetta blu segna una riga che allora non c'era. Le colonne sono le
+      quattro di quella stesura, perché sono quelle con cui confrontarsi riga per riga.</p>
+    <div class="legend">
+      <span><b style="color:var(--hi)">✓</b> c'è e regge</span>
+      <span><b style="color:var(--mid)">◐</b> a metà, dietro un plugin, o fragile</span>
+      <span><b style="color:var(--lo)">✗</b> non c'è</span>
+      <span><span class="tag">era ✗</span> cambiata dal 2 settembre</span>
+      <span><span class="tag new">nuova</span> riga che allora non c'era</span>
+    </div>
+
+    <h3>Navigazione e comprensione</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td>Vai alla dichiarazione, all'implementazione, al tipo</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Trova utilizzi, con il conteggio sopra ogni dichiarazione</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Gerarchia delle chiamate, dei tipi, membri ereditati</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Vai a classe, simbolo, file — anche dentro il JDK <span class="tag">JDK nuovo</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Recent locations, torna all'ultimo punto modificato <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Grafo dei moduli navigabile</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr><td>Sorgenti decompilati e download automatico dei sources</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Ricerca in tutti i file, Structural Search &amp; Replace</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Ispettore dell'indice semantico</td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Bookmark</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Diagrammi UML e delle dipendenze</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Completion</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td>Ordinata dal tipo che la posizione vuole <span class="tag new">nuova</span><small class="why">Dichiarazione tipata, assegnazione, <code>return</code>, condizione. Ordina, non filtra: un sottotipo vero non viene nascosto.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Ricorda cosa hai scelto, per tipo dichiarante <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr><td>Accettare un metodo scrive la chiamata, con i tab stop sugli argomenti</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Offre i membri che la classe non ha ancora <span class="tag new">nuova</span><small class="why">Gli accessor che mancano a un campo, i metodi che la classe chiama senza dichiararli, con la firma letta dalla chiamata.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td><code>@</code> completa solo annotazioni; camel hump su tutto, non solo sulle classi <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Tipi ordinati da cosa importa il file e da cosa importa il progetto <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Abbreviazioni Java: <code>psf</code>, <code>psvm</code>, <code>sout</code>, <code>fori</code>, <code>ifn</code>… <span class="tag">era ✗</span><small class="why">Quattordici, con il corpo multi-riga re-indentato dove atterra.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Live template definiti dall'utente</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Completion dell'istruzione (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>)</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Javadoc renderizzato accanto al candidato, provenienza di ogni voce</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Validazione mentre scrivi</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td>Sintassi, statement illegali, modificatori, record, enum</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Control-flow: missing return, irraggiungibile, yield, fall-through</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Membri e arità sul tipo inferito — ora anche chiamate statiche e tipi annidati <span class="tag">allargata</span><small class="why">Misurata a zero falsi positivi su 629 file di Commons Lang.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Ereditarietà, override di final, covarianza del return</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Eccezioni checked, catch morto, multi-catch, try-with-resources</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Generics: arità dei type-argument, erasure clash</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Generics: bound violati, PECS, overload ambiguo</td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Lambda: arità contro la SAM, effectively-final, cattura</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Membro privato o variabile locale che niente legge <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Switch a pattern: esaustività e dominance (Java 17–21)</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Dataflow: definite assignment, NPE, condizione sempre vera</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Profilo delle ispezioni per progetto, spellcheck con dizionario</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Validazione dell'intero progetto, non solo del file aperto</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr><td>Scan mojibake di progetto, report di encoding dal pom</td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr class="note"><td colspan="5">Un ✓ non vale lo stesso in tutte le colonne. VS Code ed Eclipse girano sul compilatore Eclipse (ECJ): per loro un ✓ dice «non sfugge niente». Per Bennu, che non compila e nel dubbio tace, dice «la famiglia c'è» — ed è per questo che nella scheda la riga degli errori di compilazione dà 3 a Bennu e 5 a loro.</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+
+<section id="refactoring">
+  <div class="wrap">
+    <h2>Refactoring <span class="kicker">il 2 settembre: cinque righe a zero</span></h2>
+    <p>La sezione che si è mossa di più, e quella dove la misura conta più della presenza. Ogni refactoring
+      spostato qui da ✗ è stato applicato ovunque fosse valido su Apache Commons Lang, e poi su h2, ricompilando
+      ogni risultato con <code>javac</code>.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td>Rename dall'indice delle referenze dell'intero progetto</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Rename di file e cartelle, sposta in un altro package</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Ottimizza import, genera accessor, override, costruttori</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Genera entità JPA da schema</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Extract Method <span class="tag">era ✗</span><small class="why">15.809 estrazioni su Commons Lang: 178 rotte diventate zero. Su h2, 126 su 25.094: il 99,5%. Statiche, generiche con i loro bound, <code>throws</code> calcolato.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Introduce Variable, Constant, Field <span class="tag">era ✗</span><small class="why">Parameter no, ed è il motivo del ◐. Extract variable: 9 rotture su 35.249 in Commons Lang, tutte da una cattura generica che il motore non modella; su h2 155 su 38.940, il 99,6%.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Inline variabile e metodo <span class="tag">era ✗</span><small class="why">Inline variable: 21 rotture diventate zero, e 21 siti in più correttamente inlineabili. Su h2 inline variable 1 su 1.832, inline method 20 su 961 (97,9%).</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Change Signature</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Safe Delete <span class="tag">era ✗</span><small class="why">Rifiuta sull'override di un tipo che sta in un jar, su gerarchie multiple, sui membri annotati. 27 cancellazioni su 27 ricompilate pulite.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Pull Up, Push Down <span class="tag">era ✗</span><small class="why">Un membro <code>private</code> ancora letto viene allargato a <code>protected</code> invece di essere rifiutato.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c y">✓</td></tr>
+        <tr><td>Estrai interfaccia, estrai superclasse</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c n">✗</td><td class="c y">✓</td></tr>
+        <tr><td>Move member verso un altro tipo, move class nel suo file <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr><td>Inverti if, unisci if annidati, catena di if → switch, split/join, var ↔ tipo <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr><td>Copia una classe dal tree, nuovo modulo Maven <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c y">✓</td></tr>
+        <tr><td>Rifiuto con il motivo, e gate sulla versione Java del progetto <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Quick-fix disponibili al caret</td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="note"><td colspan="5">Il ◐ sui quick-fix resta: una trentina di intention contro 87 moduli di check, quindi molte squiggle sono ancora una diagnosi senza cura. La riga di refactoring della scheda sale invece a 4, e per una misura: su h2, il 9 settembre, extract method ricompila il 99,5% di 25.094 applicazioni, extract variable il 99,6% di 38.940, declaration-to-var il 99,0%, inline variable il 99,9%, inline method il 97,9% — e da allora il codice di quei refactoring non è cambiato. Quello che la tiene lontana dal 5 è l'assenza di Change Signature, Introduce Parameter ed estrai interfaccia.</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+<section id="framework">
+  <div class="wrap">
+    <h2>Framework <span class="kicker">dove il confronto si ribalta</span></h2>
+
+    <h3>Bug che il compilatore non vede</h3>
+    <p>Nessuna di queste righe era nella stesura del 2 settembre. Hanno una cosa in comune: il codice compila, i
+      test che mockano il componente passano, e il difetto si vede solo in esecuzione — o in deploy.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td><code>@Transactional</code>, <code>@Async</code>, <code>@Cacheable</code> che non passano dal proxy <span class="tag new">nuova</span><small class="why">Chiamata dalla stessa classe, metodo non pubblico, metodo o classe final. Silenzioso dove si tesse con AspectJ.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Rotta rivendicata da due handler, <code>@PathVariable</code> che il path non ha <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Transazione tenuta aperta attraverso una chiamata HTTP o un <code>Thread.sleep</code> <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td><code>@JsonCreator</code> multi-argomento senza <code>-parameters</code> <span class="tag new">nuova</span><small class="why">Il difetto vive in due file che nessuno legge insieme: il costruttore e il pom.</small></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>La forma JSON reale di un DTO <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Bean Validation: vincolo su un tipo che il motore non valida, messaggio controllato sul bundle <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td><code>@Scheduled</code>: cron letto in parole, espressione che Spring rifiuta, scheduling mai attivato <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Classi di test che nessun engine eseguirà <span class="tag new">nuova</span><small class="why">JUnit 4 su JUnit Platform senza <code>junit-vintage-engine</code>: compilano, vengono saltate, la build resta verde.</small></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Stack legacy</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td>Grafo delle action Struts 2 su frammenti multipli</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr><td>Merge dei frammenti per nome di classpath (Entando / jAPS)</td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Espansione dei wildcard e delle backref <code>{1}</code></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Result Tiles risolti fino alla vista</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>OGNL <code>%{…}</code>: hover, target, lint sulle property</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td><code>validation.xml</code>: autore, contesto, target, catalogo dei validator</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>JSP: taglib, TLD, include, action — grammatica corretta sugli attributi con spazi <span class="tag">fix 11 set</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Spring bean XML: id → implementazione, property, variabili d'ambiente</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>MyBatis: navigazione mapper ↔ interfaccia</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr><td>Discovery del <code>web.xml</code>, configurazione Tomcat, deploy, hot-swap delle JSP</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr><td>Schema DTD/XSD della versione più vicina, con i controlli spenti <span class="tag new">nuova</span><small class="why">Un <code>struts.xml</code> che dichiara la 2.1 contro un jar che ha la 2.5: completion e navigazione sì, squiggle no.</small></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Link allo schema seguibile anche quando nessuno schema è risolto <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Studio i18n sui <code>.properties</code>, XSD e DTD da schema</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Spring Boot</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td>Pannello degli endpoint, offline, filtrabile per nome e parametri</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr><td><code>@Value("${…}")</code> → property nello yaml, e il ritorno con il numero di utilizzi</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Chiave dello yaml viva o morta, anche quando il valore è una lista o una mappa</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Property → variabile d'ambiente con la regola vera di Spring Boot</td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>SpEL nelle annotazioni, <code>@ConditionalOnProperty</code> colorato come un placeholder</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td><code>@ConfigurationProperties</code>: binding, mappe annidate, metadata dei builtin e dell'actuator</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr><td>Spring Data: query derivate dal nome del metodo, validate contro le property</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Generazione di entità JPA in stile JPA Buddy</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>File di configurazione degli strumenti</h3>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td><code>lombok.config</code>: completion, hover, valori, deprecazioni <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td><code>junit-platform.properties</code> <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td><code>struts.properties</code>, con i controlli di sicurezza della 2.5 <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Gate sulla versione che il progetto risolve davvero <span class="tag new">nuova</span><small class="why">Una chiave che la tua versione di Lombok o JUnit ignora in silenzio viene segnalata dove è scritta.</small></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+
+<section id="build">
+  <div class="wrap">
+    <h2>Build, test, debug <span class="kicker">e le righe ancora a zero</span></h2>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="5">Build</td></tr>
+        <tr><td>Modello Maven: pom, moduli, classpath, encoding</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Tool window Maven: un modulo per sezione, lifecycle, goal dei plugin, profili, skip test <span class="tag">era uno sketch</span><small class="why">Il 2 settembre era un lifecycle scritto a mano e un toast «non implementato».</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr><td>Pom colorato per significato, pom delle dipendenze come pom, versioni più nuove segnalate <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Livello Java per modulo in un reactor a metà migrazione <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr><td>Modello Gradle</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Cargo: workspace, run, test, add, toolchain, outdated</td><td class="c own y">✓</td><td class="c n">✗</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr class="grp"><td colspan="5">Test</td></tr>
+        <tr><td>Runner con catalogo, albero e report (JUnit, cargo)</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>▶ su ogni classe e ogni caso nell'editor, anche sotto debugger <span class="tag">era ✗</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Selettore di test fissato nel pom, riparabile dall'avviso <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Coverage</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr class="grp"><td colspan="5">Debug</td></tr>
+        <tr><td>Debugger Java su JDWP proprio: breakpoint condizionali, più sessioni insieme</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Watch <span class="tag new">nuova, onesta</span><small class="why">Accettano percorsi — <code>order.customer.name</code>, <code>items[2]</code> — non espressioni Java arbitrarie.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Step che attraversa JDK, AOP di Spring e proxy CGLIB/Hibernate; filtri configurabili</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr><td>Hot-swap delle classi Java</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr><td>Attach a una JVM già in esecuzione, anche remota <span class="tag new">nuova, onesta</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Debugger Rust che parte e regge su Windows-MSVC</td><td class="c own y">✓</td><td class="c n">✗</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr><td>Profiler, memory view, thread dump</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr class="note"><td colspan="5">Due righe sono marcate «onesta»: non sono cambiate, erano nascoste. La stesura del 2 settembre dava al debugger Java un ✓ unico con «watch, eval»; separando le funzioni, l'eval è un ◐ e l'attach remoto uno ✗. Abbassano Bennu, e vanno scritte per la stessa ragione per cui si scrivono quelle che lo alzano.</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+
+<section id="editor">
+  <div class="wrap">
+    <h2>Editor e file <span class="kicker">l'ergonomia, e quello che non è codice</span></h2>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr><td>Minimap, sticky scroll, indent guide, rainbow bracket</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr><td>Inlay hint, code lens, signature help, ghost text</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>La vista resta sulla riga mentre arrivano le code lens <span class="tag">fix 11 set</span><small class="why">Prima scivolava via un paio di secondi dopo un goto: ogni conteggio d'uso aggiunge una riga sopra il suo membro.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Multi-caret e selezione a colonna<small class="why"><kbd>Alt</kbd>+<kbd>J</kbd> seleziona l'occorrenza successiva; più cursori e selezione rettangolare no.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr><td>Local History con cambi esterni, ripristino di cartelle e file cancellati</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>VCS nell'editor: gutter delle modifiche, annotate, revert di riga</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Diff e merge dentro l'editor</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Terminale integrato, pannello TODO</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Fogli di calcolo come griglia: <code>.xlsx</code>, <code>.xls</code>, <code>.xlsb</code>, <code>.ods</code> <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr><td>Word, font, immagini, markdown, HTML in anteprima</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Colori per <code>.bat</code>/<code>.cmd</code>, Dockerfile, fence nel markdown <span class="tag">era ◐</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr><td>Icone dei file per contenuto: l'elemento radice di un XML, non il nome <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Superficie MCP nativa: 29 tool, con permessi per prodotto, percorso e azione</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c y">✓</td><td class="c n">✗</td></tr>
+        <tr><td>Plugin di terze parti, marketplace</td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+<section id="salito">
+  <div class="wrap">
+    <h2>Cosa è salito <span class="kicker">riga per riga, con la prova</span></h2>
+    <p>Ogni salita della scheda ha un posto nel repository dove andare a guardarla. Se una di queste prove
+      non regge, la riga torna giù.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Riga</th><th>Movimento</th><th>La prova</th></tr></thead>
+      <tbody>
+        <tr><td><b>Refactoring</b> (dettaglio)</td><td class="n2">5 ✗ → 1 ✗</td><td>Il crate <code>bennu-refactor</code>, nato dopo il 2 settembre: sedici refactoring offerti al caret da <code>offers.rs</code>, più rename, safe delete e copia classe. Misure nel <code>CHANGELOG</code>: 71.000+ applicazioni su Commons Lang, 25.000 su h2.</td></tr>
+        <tr><td><b>Refactoring</b> (scheda)</td><td class="n2">3 → 4</td><td>Il log del harness su h2 del 9 settembre: extract method 99,5% di 25.094, extract variable 99,6% di 38.940, declaration-to-var 99,0%, inline variable 99,9%, inline method 97,9%. Nessun commit su quei file dopo la misura. Il tuo ricordo — «praticamente puliti» — coincide con il log.</td></tr>
+        <tr><td><b>Struts, JSP</b></td><td class="n2">4 → 5</td><td><code>toolconf/src/struts.rs</code> con il gate di versione; <code>xml/src/catalog.rs</code> per la DTD della versione più vicina; il token <code>_eq</code> in <code>jsp-grammar/grammar.js</code>.</td></tr>
+        <tr><td><b>Spring</b></td><td class="n2">3 → 4</td><td><code>spring/src/proxy.rs</code>, <code>transaction.rs</code>, <code>endpoint_check.rs</code>; commit <code>555cbf11</code> del 10 settembre, dopo la scheda.</td></tr>
+        <tr><td><b>XML, XSD, DTD</b></td><td class="n2">3 → 4</td><td>La versione più vicina con i controlli spenti (<code>Grammar.approximate</code>), e il link allo schema seguibile senza grammatica.</td></tr>
+        <tr><td><b>Build</b></td><td class="n2">2 → 3</td><td><code>maven/src/goals.rs</code> e <code>be/src/maven_goals.rs</code>: la tool window esegue per modulo. Il crate <code>bennu-pomedit</code> per pom e nuovi moduli. Gradle resta zero, ed è per questo che la riga si ferma a 3.</td></tr>
+        <tr><td><b>Debugger</b></td><td class="n2">2 → 3</td><td>Metà correzione — <code>be/src/debug_cond.rs</code>, breakpoint condizionali dal 27 agosto — e metà novità: il debug dei test (commit <code>e0175023</code>).</td></tr>
+        <tr><td><b>Test</b></td><td class="n2">3 → 4</td><td><code>be/src/test_engines.rs</code> per le classi che nessun engine eseguirà, <code>be/src/surefire_pom.rs</code> per il selettore fissato, il ▶ su classi e casi.</td></tr>
+        <tr><td><b>Maturità</b></td><td class="n2">1 → 2</td><td>Test Rust nei crate di Bennu da 4.194 a 5.380; frontend da 0 a 85; due corpora ricompilati con <code>javac</code>. Non 3: un utente.</td></tr>
+        <tr><td><b>Righe nuove</b></td><td class="n2">—</td><td>Bean Validation e Jackson (<code>bennu-jakarta</code>, <code>bennu-jackson</code>), job schedulati (<code>bennu-scheduling</code>), file di configurazione (<code>bennu-toolconf</code>), fogli di calcolo (<code>bennu-sheet</code>, oggi su <code>calamine</code>).</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Correzioni alle stesure precedenti, nei due sensi</h3>
+    <div class="callout">
+      <ul>
+        <li><b>Refactoring su h2 — a favore di Bennu, e riguarda questa stesura.</b> La prima pubblicazione di questa pagina citava 126 rotture di extract method e 155 di extract variable senza dire su quante applicazioni: 25.094 e 38.940, cioè il 99,5% e il 99,6%. Presentati così, i numeri tenevano la riga a 3; con il denominatore la tengono a 4.</li>
+        <li><b>Breakpoint condizionali — a favore di Bennu.</b> La scheda del 9 settembre li dava per assenti;
+          esistono dal 27 agosto. Una riga letta dalla documentazione invece che dagli handler.</li>
+        <li><b>Validazione — contro Bennu.</b> La scheda confrontava Bennu con Eclipse e VS Code alla pari, 3 a 3.
+          Loro girano su un compilatore vero, e sugli errori di compilazione valgono 5. La riga è spezzata in due.</li>
+        <li><b>Debugger Java — contro Bennu.</b> Il 2 settembre era un ✓ unico con «watch, eval». I watch sono
+          percorsi, non espressioni Java, e l'attach a una JVM remota non c'è: due righe nuove, ◐ e ✗.</li>
+        <li><b>Superficie per agenti di IntelliJ — a favore di un concorrente.</b> Da 3 a 4: gli IDE JetBrains
+          recenti espongono un proprio server MCP. Non riverificato su un'installazione.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="fermo">
+  <div class="wrap">
+    <h2>Cosa non è salito <span class="kicker">e cosa lo farebbe salire</span></h2>
+    <div class="tw"><table>
+      <thead><tr><th>Riga o asse</th><th>Oggi</th><th>Cosa servirebbe</th></tr></thead>
+      <tbody>
+        <tr><td><b>UI/UX</b></td><td class="n2">7.5</td><td>Il tuo elenco del «grezzo». È un voto tuo, e si muove quando le voci di quell'elenco si chiudono — non quando arrivano funzioni.</td></tr>
+        <tr><td><b>Refactoring</b> (scheda)</td><td class="n2">4</td><td>Salita, ma sotto IntelliJ ed Eclipse per ampiezza: Change Signature, Introduce Parameter, estrai interfaccia e superclasse separano il 4 dal 5.</td></tr>
+        <tr><td><b>Errori di compilazione</b></td><td class="n2">3</td><td>Switch a pattern e bound generici. Il dataflow è un'altra cosa: senza un motore vero produce falsi positivi, e il progetto li rifiuta per principio.</td></tr>
+        <tr><td><b>Gradle, Ant, altri server</b></td><td class="n2">0</td><td>Un modello Gradle. Non serve al target legacy, ed è il motivo per cui è in fondo alla lista.</td></tr>
+        <tr><td><b>Coverage e profiling</b></td><td class="n2">0</td><td>La coverage letta da <code>jacoco.xml</code> nel gutter è la metà economica: si legge un report, non si strumenta niente.</td></tr>
+        <tr><td><b>Debugger</b></td><td class="n2">3</td><td>Hot-swap delle classi (<code>RedefineClasses</code> è nel protocollo JDWP, non nel crate), eval di espressioni Java, attach remoto.</td></tr>
+        <tr><td><b>Estensibilità, ecosistema plugin</b></td><td class="n2">8.0 · 1</td><td>Autori di plugin che non siano il maintainer. Nessuna riga di codice lo sostituisce.</td></tr>
+        <tr><td><b>Funziona davvero</b></td><td class="n2">6.5</td><td>Utenti, e test frontend sulle superfici che si sono rotte questa settimana.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Difetti aperti, con il loro numero</h3>
+    <div class="callout">
+      <ul>
+        <li><b>h2, misura del 9 settembre.</b> Extract method 126 rotte su 25.094 (99,5%), extract variable 155 su 38.940 (99,6%), declaration-to-var 40 su 3.948 (99,0%), inline method 20 su 961 (97,9%), inline variable 1 su 1.832 — ma quell'uno è un errore di sintassi, il tipo peggiore — e 4 pull up su 417 sul campo <code>SCHEME</code>, lasciati aperti di proposito perché la regola non si sapeva ancora nominare.</li>
+        <li><b>Commons Lang.</b> Extract variable ne rompe 9 su 35.249: la cattura che <code>javac</code> introduce
+          inferendo una chiamata generica, un passo che il motore non modella.</li>
+        <li><b>La settimana del 9–11 settembre.</b> Tre difetti trovati a mano sul frontend — la vista che scivolava dopo
+          un goto, gli attributi JSP bianchi, la riga del tree senza sfondo — e nessuno dei tre visibile ai 5.380 test Rust.
+          È un argomento per i test frontend, non contro il backend.</li>
+        <li><b>Il peso non è stato rimisurato</b> da quando i crate sono passati da 39 a 48.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="prossimi">
+  <div class="wrap">
+    <h2>Prossimi passi <span class="kicker">in ordine di ritorno</span></h2>
+    <p>L'ordine è il punto: ogni voce è messa dove sta per quanto sposta rispetto a quanto costa.</p>
+    <ol class="next">
+      <li><div><b>Change Signature, poi Introduce Parameter</b><span>Il refactoring frequente che manca ancora. Con questi due, più estrai interfaccia, la riga del refactoring ha le carte per il 5.</span></div></li>
+      <li><div><b>Test frontend sulle superfici che si sono rotte</b><span>Navigazione, highlighting JSP, menu contestuali. È il modo più economico di spostare «funziona davvero», e <code>nav-flow.test.ts</code> ha già dimostrato di trovare difetti veri.</span></div></li>
+      <li><div><b>L'elenco del grezzo, scritto da te</b><span>Il 7.5 della UI/UX è tuo e si muove solo con voci che si possono spuntare. Senza un elenco non c'è niente da chiudere.</span></div></li>
+      <li><div><b>Hot-swap delle classi e attach remoto</b><span>Le due righe del debugger che un team legacy usa ogni giorno su Tomcat.</span></div></li>
+      <li><div><b>Coverage letta da <code>jacoco.xml</code></b><span>Porta una riga da zero senza toccare il runtime: si legge un report che Maven produce già.</span></div></li>
+      <li><div><b>Le rotture residue su h2</b><span>Prima l'unica che produce un errore di sintassi, in inline variable; poi inline method, il più basso al 97,9%. Il codice non è cambiato dalla misura, quindi i casi sono ancora quelli del log.</span></div></li>
+      <li><div><b>Eval di espressioni Java nel debugger</b><span>Oggi i watch seguono percorsi. È il passo che trasforma il pannello delle variabili in un posto dove fare domande.</span></div></li>
+      <li><div><b>Multi-caret, bookmark, gutter VCS nell'editor</b><span>Piccoli, frequenti, ed è esattamente il genere di assenza che si percepisce come «grezzo».</span></div></li>
+      <li><div><b>Gradle</b><span>Ultimo perché al tuo target non serve. Ma è l'unico zero su una riga che un team generalista apre ogni giorno.</span></div></li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><b>Fonti e limiti.</b> La colonna di Bennu è letta dal codice al commit <code>b28db196</code> e dal lavoro non
+      committato dell'11 settembre, dal <code>CHANGELOG</code> con le date di <code>git log -S</code>, dalle misure registrate — i log del harness su h2 del 9 settembre compresi — e dalle risposte del maintainer su UI/UX e affidabilità. Le colonne degli altri IDE vengono da
+      conoscenza generale delle versioni rilasciate e non sono state riverificate su un'installazione. Le matrici non
+      sono esaustive: l'assenza di una riga non è un giudizio.</p>
+    <p>Stesure precedenti: <code>docs/arbor-a-confronto.html</code> (2 settembre, tutta la suite) e la scheda
+      «Bennu Against the Field» (9 settembre).</p>
+  </div>
+</footer>
+
+<script>
+  const TOOLS = [
+    { key: 'bennu', name: 'Bennu',    sub: 'Arbor',           own: true },
+    { key: 'iu',    name: 'IntelliJ', sub: 'Ultimate' },
+    { key: 'ice',   name: 'IntelliJ', sub: 'Community' },
+    { key: 'ecl',   name: 'Eclipse',  sub: 'Enterprise Java' },
+    { key: 'vsc',   name: 'VS Code',  sub: '+ Java pack' },
+    { key: 'nb',    name: 'NetBeans', sub: 'Apache' },
+  ];
+
+  // [area, nota, Bennu il 9 settembre (null = riga nuova o spezzata),
+  //  Bennu, IntelliJ U, IntelliJ CE, Eclipse, VS Code, NetBeans,
+  //  peso «monolite legacy», peso «servizio Spring Boot»]
+  const SECTIONS = [
+    ['Intelligenza del codice Java', [
+      ['Indice simbolico del progetto', 'Sorgenti e jar in un indice proprio; il goto in una dipendenza apre il -sources.jar o uno stub decompilato.', 4, 4, 5, 5, 4, 4, 4, 2, 2],
+      ['Trova utilizzi e gerarchie', 'Conteggi sopra ogni dichiarazione; gli entry point dei framework non risultano mai «inutilizzati».', 4, 4, 5, 5, 4, 3, 3, 2, 2],
+      ['Completion', 'Ordinata dal tipo atteso e da cosa hai scelto; offre i membri che mancano. Niente live template utente, niente statement completion.', 4, 4, 5, 5, 3, 4, 3, 2, 3],
+      ['Refactoring', 'Sedici al caret più rename e safe delete. Ricompilano il 100% su Commons Lang e fra il 97,9% e il 99,9% su h2. Mancano Change Signature ed estrai interfaccia.', 3, 4, 5, 5, 4, 2, 3, 2, 3],
+      ['Errori di compilazione mentre scrivi', 'Bennu non compila e nel dubbio tace; Eclipse e VS Code girano su ECJ, NetBeans su javac.', null, 3, 5, 5, 5, 5, 5, 2, 3],
+      ['Ispezioni Java oltre il compilatore', 'Bug probabili sul Java puro. IntelliJ ne ha centinaia; Bennu una manciata, senza dataflow.', null, 2, 5, 5, 3, 2, 3, 1, 2],
+    ]],
+    ['Stack legacy e framework', [
+      ['Struts 2, JSP, taglib, OGNL, Tiles', 'Action → frammento → vista → property OGNL come un grafo solo, più struts.properties e la DTD della versione più vicina.', 4, 5, 3, 0, 2, 1, 2, 3, 0],
+      ['Spring, in XML e Boot', 'Bean, iniezione, property nei due sensi, endpoint, Spring Data, SpEL.', 3, 4, 5, 1, 2, 2, 1, 2, 3],
+      ['Ispezioni sui framework', 'Proxy aggirati, rotte in conflitto, transazioni aperte su una chiamata HTTP, job che non partono.', null, 4, 4, 0, 1, 1, 1, 1, 2],
+      ['Bean Validation e Jackson', 'Vincoli che il motore non può validare, messaggi controllati sul bundle, @JsonCreator, forma JSON dei DTO.', null, 4, 3, 1, 1, 1, 2, 0.5, 2],
+      ['MyBatis', 'Statement ↔ metodo dell\'interfaccia, include, result map.', 3, 3, 2, 2, 1, 1, 1, 2, 0.5],
+      ['Lombok', 'Annotazioni lette per quello che generano. IntelliJ lo include anche in Community.', null, 4, 5, 5, 4, 4, 3, 1, 2],
+      ['File di configurazione degli strumenti', 'lombok.config, junit-platform.properties, struts.properties: completion, hover e gate sulla versione risolta.', null, 5, 3, 2, 1, 1, 1, 1, 1],
+      ['XML con XSD e DTD', 'Schemi scaricati e in cache; la versione più vicina risponde quando l\'esatta non c\'è, con i controlli spenti.', 3, 4, 4, 4, 4, 3, 3, 2, 0.5],
+      ['Encoding legacy', 'Cp1252 letto come Cp1252, file non conformi segnalati, scan mojibake del progetto.', 5, 5, 2, 2, 2, 2, 2, 3, 0],
+    ]],
+    ['Build, test, debug', [
+      ['Maven', 'Tool window per modulo che esegue lifecycle e goal, pom colorato, nuovi moduli, livello Java per modulo.', null, 4, 5, 5, 4, 3, 5, 2, 1],
+      ['Gradle, Ant, altri application server', 'Assente: Maven e Tomcat soltanto.', null, 0, 5, 3, 4, 3, 5, 0, 2],
+      ['Debugger', 'Breakpoint condizionali, più sessioni, step oltre i proxy, debug dei test. Mancano hot-swap, eval Java, attach remoto.', 2, 3, 5, 5, 4, 4, 4, 2, 2],
+      ['Test', 'Catalogo, run in streaming, ▶ nell\'editor, classi che nessun engine eseguirà.', 3, 4, 5, 5, 4, 4, 4, 1, 2],
+      ['Coverage e profiling', 'Assenti entrambi.', 0, 0, 5, 3, 3, 2, 4, 1, 1],
+      ['Database', 'Un prodotto fratello nello stesso workspace, con la sua intelligenza SQL.', 3, 3, 5, 0, 3, 3, 3, 1, 1],
+    ]],
+    ['Editor e ambiente', [
+      ['Versionamento', 'Un client git completo accanto, non un pannello. Nell\'editor, però, niente gutter delle modifiche.', 5, 5, 4, 4, 3, 4, 3, 1, 1],
+      ['Local history', 'Timeline per file indipendente da git, con cambi esterni e ripristino.', 4, 4, 5, 5, 3, 1, 2, 1, 1],
+      ['Ergonomia dell\'editor', 'Minimap, sticky scroll, inlay, code lens. Niente multi-caret, niente diff nell\'editor.', null, 3, 5, 5, 3, 5, 3, 1, 2],
+      ['File che non sono codice', 'Fogli di calcolo in quattro formati, docx, font, immagini, markdown e HTML in anteprima.', null, 5, 3, 3, 1, 3, 1, 1, 0.5],
+      ['Tastiera e command palette', 'Ogni flusso completabile da tastiera per regola di progetto; 85 scorciatoie documentate.', null, 4, 5, 5, 3, 5, 3, 1, 1],
+      ['Peso e avvio', 'Nessuna JVM in-process, indice mmap, una webview per tutta la suite. Da rimisurare a 48 crate.', null, 5, 2, 3, 3, 4, 3, 1, 1],
+    ]],
+    ['Piattaforma', [
+      ['Altri linguaggi', 'Rust di prima classe, il resto quanto dà il language server.', 3, 3, 4, 3, 3, 5, 3, 0.5, 1],
+      ['Ecosistema di plugin', 'Un host Lua documentato e una decina di plugin, contro due marketplace enormi.', 1, 1, 5, 5, 4, 5, 2, 0.5, 1],
+      ['Superficie per agenti AI', '29 tool MCP con permessi per prodotto, percorso e azione.', 4, 4, 4, 3, 1, 5, 1, 1, 1],
+      ['Maturità', 'Due corpora misurati e 5.380 test; un utente solo.', 1, 2, 5, 5, 4, 4, 3, 2, 2],
+    ]],
+  ];
+
+  const toneFor = (v, row) => {
+    const max = Math.max(...row);
+    if (v === max && max > 0) return 'var(--hi)';
+    if (v <= 1) return 'var(--lo)';
+    return 'var(--mid)';
+  };
+  const pips = (v, tone) => {
+    let out = '<span class="pips" aria-hidden="true">';
+    for (let i = 0; i < 5; i++) out += `<i class="${i < v ? 'on' : ''}" style="--tone:${tone}"></i>`;
+    return out + '</span>';
+  };
+
+  const rows = SECTIONS.flatMap(([, list]) => list);
+  const scoresOf = (row) => row.slice(3, 3 + TOOLS.length);
+  const totals = TOOLS.map((_, i) => rows.reduce((s, r) => s + scoresOf(r)[i], 0));
+
+  let html = '<thead><tr><th>Area</th>';
+  for (const t of TOOLS) {
+    html += `<th class="${t.own ? 'own' : ''}" style="text-align:center">${t.name}<br>` +
+      `<span style="font-family:var(--f-mono);font-size:10px;font-weight:400;color:var(--ink-3)">${t.sub}</span></th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  for (const [section, list] of SECTIONS) {
+    html += `<tr class="grp"><td colspan="${TOOLS.length + 1}">${section}</td></tr>`;
+    for (const row of list) {
+      const [area, note, then] = row;
+      const scores = scoresOf(row);
+      html += `<tr><td class="feat"><b>${area}</b><small class="why">${note}</small></td>`;
+      scores.forEach((v, i) => {
+        const t = TOOLS[i];
+        let extra = '';
+        if (t.own && then === null) extra = '<span class="then" style="color:var(--accent)">nuova</span>';
+        else if (t.own && then !== v) extra = `<span class="then">era ${then}</span>`;
+        html += `<td class="score${t.own ? ' own' : ''}">${pips(v, toneFor(v, scores))}<span class="num">${v}</span>${extra}</td>`;
+      });
+      html += '</tr>';
+    }
+    html += `<tr class="sub"><td>Subtotale · ${list.length} × 5</td>`;
+    TOOLS.forEach((t, i) => {
+      const s = list.reduce((acc, r) => acc + scoresOf(r)[i], 0);
+      html += `<td class="${t.own ? 'own' : ''}">${s}</td>`;
+    });
+    html += '</tr>';
+  }
+  html += `</tbody><tfoot><tr><td>Totale su ${rows.length * 5}</td>`;
+  TOOLS.forEach((t, i) => {
+    const pct = Math.round((totals[i] / (rows.length * 5)) * 100);
+    html += `<td class="${t.own ? 'own' : ''}">${totals[i]}<small>${pct}%</small></td>`;
+  });
+  html += '</tr></tfoot>';
+  document.getElementById('board').insertAdjacentHTML('beforeend', html);
+
+  const profile = (weightIndex, target) => {
+    const at = 3 + TOOLS.length + weightIndex;
+    const max = rows.reduce((s, r) => s + r[at] * 5, 0);
+    const ranked = TOOLS.map((t, i) => ({
+      t, pct: Math.round((rows.reduce((s, r) => s + r[at] * scoresOf(r)[i], 0) / max) * 100),
+    })).sort((a, b) => b.pct - a.pct);
+    document.getElementById(target).innerHTML = ranked.map(({ t, pct }) =>
+      `<div class="prow${t.own ? ' own' : ''}"><span>${t.name} ${t.own ? '' : t.sub}</span>` +
+      `<span class="bar"><i style="width:${pct}%"></i></span><span class="pct">${pct}%</span></div>`
+    ).join('');
+  };
+  profile(0, 'prof-legacy');
+  profile(1, 'prof-boot');
+</script>

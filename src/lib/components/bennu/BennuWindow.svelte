@@ -25,7 +25,7 @@
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info, Bot, Activity as ActivityIcon,
     Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck, History,
     Palette,
-    TextCursorInput, ListChecks, BookOpen, FlaskConical, ListRestart, Bug, Braces, Languages,
+    TextCursorInput, ListChecks, BookOpen, FlaskConical, Beaker, ListRestart, Bug, Braces, Languages,
     Cog, Network, Plug, Store, ScrollText, LayoutDashboard, FilePlus2, FolderPlus,
   } from 'lucide-svelte';
 
@@ -186,6 +186,7 @@
   import { discoverTests } from '$lib/ipc/bennu/tests';
   import { discoverCargoTests } from '$lib/ipc/bennu/cargo-tests';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import { bennuDtoLabStore } from '$lib/stores/bennu/dtolab.svelte';
 
   // Which file the editor is on, announced to the plugins as `bennu:file_opened`.
   //
@@ -725,6 +726,13 @@
     ) => void;
   } | null>(null);
 
+  // The DTO Lab reads the caret and writes into an open test file through the editor. Bound once:
+  // both closures read `editor` when called, so a remounted editor is picked up without re-binding.
+  bennuDtoLabStore.bindEditor({
+    caretContext: () => editor?.caretContext() ?? null,
+    applyEdits: (edits) => editor?.applyGeneratedEdits(edits),
+  });
+
   /**
    * Rebuild the language server's model of the project — re-read the manifests, re-resolve the crate
    * graph.
@@ -899,6 +907,10 @@
   // a service module, a library, a Cargo root — has nothing it could ever show. Same reasoning
   // as `javaTools`, one notch narrower: the capability set says whether pages exist at all.
   const jspTools = $derived(javaTools && projectStore.capabilities?.jsp_views === true);
+  /** The DTO Lab needs something to try a class with: Bean Validation, Jackson, or both. */
+  const dtoLabTools = $derived(
+    javaTools && (projectStore.capabilities?.bean_validation === true || projectStore.capabilities?.jackson === true),
+  );
   // The Struts `*-validation.xml` tooling — meaningless on a project that doesn't use Struts.
   const hasStruts = $derived(
     projectStore.capabilities?.struts_xml_config === true
@@ -1162,6 +1174,9 @@
     ...(jspTools
       ? [{ id: 'forms', tooltip: 'Forms', shortcut: 'Alt+3', icon: TextCursorInput, active: bennuUiStore.bottomPanel === 'forms', onclick: () => bennuUiStore.toggleBottom('forms') }]
       : []),
+    ...(dtoLabTools
+      ? [{ id: 'dtolab', tooltip: 'DTO Lab', shortcut: 'Alt+Shift+J', icon: Beaker, active: bennuUiStore.bottomPanel === 'dtolab', onclick: () => bennuUiStore.toggleBottom('dtolab') }]
+      : []),
     // The framework catalogs that asked for a rail button — a list you keep open while working
     // rather than one you go and fetch: Endpoints on a web project, Components on a Bevy one. The
     // rest stay palette-only so the rail doesn't grow a row per framework. `catalogs` has already
@@ -1205,6 +1220,7 @@
   $effect(() => {
     const java = javaTools;
     const jsp = jspTools;
+    const dtoLab = dtoLabTools;
     const available = catalogIds;
     // `untrack`: the call reads the very panel state it writes, and an effect that depends
     // on what it assigns is the shape that loops (CLAUDE.md · "Runes — trap da evitare").
@@ -1222,6 +1238,7 @@
           // header closes it.
           'problems', 'terminal', 'build', 'todos', 'run', 'hierarchy',
           ...(jsp ? ['forms' as const] : []),
+          ...(dtoLab ? ['dtolab' as const] : []),
           // Most framework catalogs have no rail button, so one left open after switching to a
           // project that doesn't offer it would be unclosable from the rail.
           ...available,
@@ -1300,6 +1317,7 @@
     'play': Play as unknown as IconComponent,
     'bug': Bug as unknown as IconComponent,
     'flask': FlaskConical as unknown as IconComponent,
+    'beaker': Beaker as unknown as IconComponent,
     'rerun': ListRestart as unknown as IconComponent,
     'todo': ListTodo as unknown as IconComponent,
     'box': Box as unknown as IconComponent,
@@ -1585,6 +1603,13 @@
       // place.
       { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: !!projectStore.project },
       { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: jspTools },
+      // The DTO Lab. The panel toggle everywhere it applies; the two verbs about the class at the caret
+      // only on a Java file, where there is a class to be at.
+      { id: 'dtolab',    title: 'Toggle DTO Lab',   icon: 'beaker', action: () => run(() => bennuUiStore.toggleBottom('dtolab')), when: dtoLabTools },
+      { id: 'dtolab-try', title: 'DTO Lab: try the class at the caret', icon: 'beaker', shortcut: 'Alt+Shift+J',
+        action: () => run(() => bennuDtoLabStore.openAtCaret('payload')), when: dtoLabTools && !!path?.toLowerCase().endsWith('.java') },
+      { id: 'dtolab-tests', title: 'DTO Lab: generate validation tests for the class at the caret', icon: 'beaker',
+        action: () => run(() => bennuDtoLabStore.openAtCaret('tests')), when: dtoLabTools && !!path?.toLowerCase().endsWith('.java') },
       { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: true },
       // The same subject from the other angle: the list says what each module needs, the graph says
       // who needs *it*, what a change to it rebuilds, and whether the project has a cycle. Named for
@@ -2028,6 +2053,15 @@
       if (!(projectStore.activeFilePath ?? '').toLowerCase().endsWith('.svelte')) return;
       e.preventDefault();
       void editor?.findComponentUsages();
+      return;
+    }
+    // DTO Lab (Alt+Shift+J) — the class at the caret, tried out. Anywhere but a Java file there is no
+    // class to be at, so the key just toggles the panel.
+    if (e.altKey && e.shiftKey && !mod && isKey(e, 'j')) {
+      if (!dtoLabTools) return;
+      e.preventDefault();
+      if (projectStore.activeFilePath?.toLowerCase().endsWith('.java')) bennuDtoLabStore.openAtCaret();
+      else bennuUiStore.toggleBottom('dtolab');
       return;
     }
     if (e.altKey && e.shiftKey && !mod && isKey(e, 'h')) {

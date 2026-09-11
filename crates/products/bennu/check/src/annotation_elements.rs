@@ -102,6 +102,17 @@ fn check_annotation(
             let Some(key_node) = pair.child_by_field_name("key") else { continue };
             let Ok(key) = key_node.utf8_text(bytes) else { continue };
             supplied.insert(key);
+            // Lombok's `onMethod_` / `onParam_` / `onConstructor_`. The annotation declares the
+            // element WITHOUT the underscore, and Lombok removes the suffixed spelling before javac
+            // checks the annotation — so `@Setter(onMethod_ = @__(@JsonProperty))` compiles, while a
+            // lookup of the name as written finds nothing. Allowed on Lombok's own annotations only,
+            // and only when the type does declare the element under its plain name.
+            if key.ends_with('_')
+                && is_lombok(&binary)
+                && bennu_lombok::prelude::on_x_element(key).is_some_and(|plain| declares(plain))
+            {
+                continue;
+            }
             if !declares(key) {
                 out.push(CheckId::UnknownAnnotationElement.at(
                     key_node,
@@ -141,6 +152,13 @@ fn check_annotation(
 }
 
 /// `["a"]` → ``` `a` ```; `["a", "b"]` → ``` `a` and `b` ```; more → a comma list ending in "and".
+/// Whether `binary` is one of Lombok's own annotation types.
+fn is_lombok(binary: &str) -> bool {
+    binary
+        .strip_prefix(bennu_lombok::prelude::PACKAGE)
+        .is_some_and(|rest| rest.starts_with('/') || rest.starts_with('.'))
+}
+
 fn list(names: &[&str]) -> String {
     match names {
         [one] => format!("`{one}`"),
@@ -319,8 +337,15 @@ mod tests {
                 flags: ClassFlags::default(),
             },
         );
+        // Lombok's `@Setter`, with the `onX` elements under their plain names — the way the jar
+        // declares them.
+        members.insert(
+            "lombok/Setter".into(),
+            ann(vec![element("value"), element("onMethod"), element("onParam")]),
+        );
         let simple = [
             ("Column", "javax/persistence/Column"),
+            ("Setter", "lombok/Setter"),
             ("Marker", "com/acme/Marker"),
             ("Tag", "com/acme/Tag"),
             ("Quiet", "com/acme/Quiet"),
@@ -396,6 +421,27 @@ mod tests {
     fn a_marker_of_an_all_default_annotation_is_fine() {
         assert!(codes(r#"class A { @Column String f; }"#).is_empty());
         assert!(codes(r#"class A { @Column(name = "c") String f; }"#).is_empty());
+    }
+
+    // ── Lombok's `onX` ───────────────────────────────────────────────────────
+
+    /// `onMethod_` is how code compiled by javac 8 writes Lombok's `onMethod`: declared nowhere under
+    /// that name, removed by Lombok before javac looks, and a compile error nowhere.
+    #[test]
+    fn lombok_on_x_with_its_underscore_is_not_an_unknown_element() {
+        assert!(diags(r#"class A { @Setter(onMethod_ = @__(@Column)) String f; }"#).is_empty());
+        assert!(diags(r#"class A { @Setter(onParam_ = @__(@Column), onMethod = @__(@Column)) String f; }"#).is_empty());
+    }
+
+    /// The allowance is Lombok's syntax on Lombok's annotations — not a pass for every key that ends
+    /// in `_`, and not for a misspelled one.
+    #[test]
+    fn an_underscore_key_is_still_checked_everywhere_else() {
+        let elsewhere = diags(r#"class A { @Tag(onMethod_ = @__(@Column)) String f; }"#);
+        assert_eq!(elsewhere.len(), 1, "{elsewhere:?}");
+        assert!(elsewhere[0].message.contains("declares no element `onMethod_`"), "{elsewhere:?}");
+        let misspelled = diags(r#"class A { @Setter(onMethood_ = @__(@Column)) String f; }"#);
+        assert_eq!(misspelled.len(), 1, "{misspelled:?}");
     }
 
     #[test]

@@ -903,6 +903,45 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Compile `root` unless nothing changed since its last successful compile.
+///
+/// For the DTO Lab, which loads the project's classes from `target/classes`: answering from classes
+/// older than the source would describe code that is not there any more, which is worse than waiting
+/// for a compile. The no-op case is checked here rather than left to [`compile_project`], which would
+/// print "Everything is up to date." into the Build panel on every question the lab asks.
+pub(crate) fn ensure_compiled(ctx: &BennuState, root: &str) -> Result<(), String> {
+    if up_to_date(Path::new(root)).is_some() {
+        return Ok(());
+    }
+    let outcome = compile_project(ctx, root, None)?;
+    if outcome.ok {
+        return Ok(());
+    }
+    let first = outcome
+        .diagnostics
+        .iter()
+        .find(|d| d.severity == "error")
+        .map(|d| match (&d.file, d.line) {
+            (Some(file), Some(line)) => format!(": {file}:{line} {}", d.message),
+            _ => format!(": {}", d.message),
+        })
+        .unwrap_or_default();
+    Err(format!("The project does not compile, so its classes cannot be loaded{first}"))
+}
+
+/// The classpath the DTO Lab loads `root` from — the run classpath at every scope, so test-scoped
+/// libraries are there too — and a token that changes whenever what it holds could have: a different
+/// list, or a new successful compile.
+pub(crate) fn lab_classpath(root: &str) -> (String, String) {
+    use std::hash::{Hash, Hasher};
+    let classpath = run_classpath(Path::new(root), None, None, "");
+    let stamp = build_stamps().lock().unwrap_or_else(|p| p.into_inner()).get(root).copied();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    classpath.hash(&mut hasher);
+    stamp.hash(&mut hasher);
+    (classpath, format!("{:016x}", hasher.finish()))
+}
+
 /// Forget a project's build stamp, so the next build runs for real. Called when the index is
 /// rebuilt — the moment the user has told us not to trust what we remember.
 pub(crate) fn forget_build_stamp(root: &str) {

@@ -111,6 +111,7 @@ bennu-jakarta = { path = "../jakarta" }
 bennu-scheduling = { path = "../scheduling" }
 # What a DTO actually serialises to.
 bennu-jackson = { path = "../jackson" }
+bennu-dtolab = { path = "../dtolab" }
 # The third extension: XML schemas (DTD + XSD → completion, ghost text, hover, go-to, checks).
 # Unlike the other two it is not capability-gated — the resolved grammar is its gate, and a
 # document nothing describes costs one scan and one map lookup.

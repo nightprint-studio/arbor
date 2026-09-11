@@ -8,6 +8,21 @@
 /// Lombok's root package. The only string in the crate that is not an annotation name.
 pub const PACKAGE: &str = "lombok";
 
+/// The elements Lombok's `onX` feature adds to its annotations: annotations to put on the code it
+/// generates — `@Getter(onMethod = @__(@JsonProperty))`.
+pub const ON_X_ELEMENTS: &[&str] = &["onMethod", "onConstructor", "onParam"];
+
+/// The `onX` element `key` names — `onMethod` for both `onMethod` and `onMethod_`. `None` for any
+/// other key.
+///
+/// The underscore spelling is the one code compiled by javac 8 and later writes. Lombok removes it
+/// before javac checks the annotation, so a name like `onMethod_` is declared nowhere and compiles
+/// anyway — which is exactly what a check reading the annotation type's elements has to know.
+pub fn on_x_element(key: &str) -> Option<&'static str> {
+    let base = key.strip_suffix('_').unwrap_or(key);
+    ON_X_ELEMENTS.iter().copied().find(|element| *element == base)
+}
+
 /// The annotations that generate **accessors or other members on the annotated type**: the reason a
 /// method can be called with no declaration anywhere in the source.
 pub const MEMBER_GENERATING: &[&str] = &[
@@ -156,5 +171,14 @@ mod tests {
         assert!(!flag_is_true("force = false", "force"));
         assert!(!flag_is_true("fluent = true", "force"));
         assert!(flag_is_true("fluent = true", "fluent"));
+    }
+
+    #[test]
+    fn an_on_x_element_is_recognised_with_and_without_its_underscore() {
+        assert_eq!(on_x_element("onMethod_"), Some("onMethod"));
+        assert_eq!(on_x_element("onParam"), Some("onParam"));
+        assert_eq!(on_x_element("onConstructor_"), Some("onConstructor"));
+        assert_eq!(on_x_element("onField_"), None);
+        assert_eq!(on_x_element("value_"), None);
     }
 }

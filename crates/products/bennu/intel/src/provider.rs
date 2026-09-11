@@ -1501,6 +1501,23 @@ fn static_import_type(imports: &[bennu_java::prelude::Import], name: &str) -> Op
                         }),
                     });
                 }
+                // `String::valueOf` / `list::add` — caret on the name after `::`. The qualifier is
+                // the receiver, a type or a value, exactly as it is for a call. A caret on the
+                // qualifier itself falls through to the type reference below.
+                "method_reference" => {
+                    if let Some((obj, name)) = crate::refs::method_reference_parts(&p) {
+                        if name == node {
+                            let binary = receiver_binary(obj)?;
+                            return Some(LibraryTarget {
+                                binary,
+                                member: Some(LibraryMember {
+                                    name: text.to_string(),
+                                    is_field: false,
+                                }),
+                            });
+                        }
+                    }
+                }
                 _ => {}
             }
         }

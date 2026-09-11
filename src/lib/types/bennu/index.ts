@@ -51,6 +51,12 @@ export interface CapabilitySet {
   jdbc_dao: boolean;
   lombok: boolean;
   entando_japs: boolean;
+  /** Bean Validation — the API, an engine or Spring's starter, a validation bundle, or constraints in the sources. */
+  bean_validation: boolean;
+  /** Scheduled work — Quartz, `@Scheduled`, `@EnableScheduling`. */
+  scheduling: boolean;
+  /** Jackson — `jackson-databind` or a starter that brings it, or Jackson annotations in the sources. */
+  jackson: boolean;
   /** The fulcrum engine's i18n convention — an `i18n/languages.toml` with `<lang>/<category>.toml`
    *  bundles beside it. Detected from the layout, so a project that only authors content has it. */
   fulcrum_i18n: boolean;

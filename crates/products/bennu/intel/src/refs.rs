@@ -1731,6 +1731,52 @@ fn classify_caret_at(
                 name: ident_text,
             })
         }
+        // `Reports::helper`, `this::run`, `service::fetch` — a method reference names a method as
+        // surely as `recv.name(…)` does, and the reference walk records it as one
+        // (`on_method_reference`). This classifier had no arm for it: the name after `::` fell to
+        // the bare-identifier fallback below, which rightly refuses a member selector, so go-to,
+        // find-usages and hover all answered nothing on a use the index had counted.
+        //
+        // The qualifier is the receiver, and `receiver_owner` already answers both of its shapes:
+        // a value (`find_receiver` climbs from the name to the qualifier) and a type (its static
+        // fallback).
+        "method_reference" => {
+            if let Some((qualifier, name_node)) = method_reference_parts(&parent) {
+                if name_node.id() == ident.id() {
+                    let symbols = extract_symbols_from_root(root, source);
+                    let owner = receiver_owner(
+                        &qualifier,
+                        name_node.start_byte(),
+                        &ident_text,
+                        true,
+                        source,
+                        bytes,
+                        root,
+                        &symbols,
+                        resolver,
+                        project_types,
+                    )?;
+                    return Some(DeclKey::Method {
+                        owner,
+                        name: ident_text,
+                    });
+                }
+            }
+            // The caret is on the QUALIFIER — `Reports` in `Reports::helper`, or in `Reports::new`,
+            // which names no method at all. It is the same question as the receiver of a call.
+            if !matches!(ident.kind(), "identifier" | "type_identifier") {
+                return None;
+            }
+            let symbols = extract_symbols_from_root(root, source);
+            receiver_side_key(
+                &ident,
+                &ident_text,
+                source,
+                resolver,
+                project_types,
+                &symbols.imports,
+            )
+        }
         // An annotation's NAME is a type reference, and the grammar does not say so: a
         // `marker_annotation`'s name field is a plain `identifier` (or a `scoped_identifier` for
         // `@org.junit.Test`), never a `type_identifier`. Without this arm it fell through to the
@@ -1872,22 +1918,33 @@ fn receiver_side_key(
     project_types: &HashMap<String, String>,
     imports: &[bennu_java::prelude::Import],
 ) -> Option<DeclKey> {
-    // The receiver of a member access (`obj` in `obj.foo()` / `obj.field`) is usually a
-    // VARIABLE, not a type. Resolve it as a FIELD of the enclosing type first — a `this`-less
-    // field like `stepper` for `this.stepper` — so go-to lands on the FIELD's declaration
-    // instead of collapsing the variable onto the enclosing class. (Locals are already
-    // resolved by `classify_target` before this.) Only when it isn't a field do we treat it
-    // as a bare TYPE name, e.g. the static receiver in `Foo.staticMethod()`.
+    // The receiver of a member access (`obj` in `obj.foo()` / `obj.field`, the qualifier of
+    // `obj::foo`) is usually a VARIABLE, not a type. A field the enclosing type really declares
+    // comes first — a `this`-less `stepper` for `this.stepper`, and Java's own rule besides: a
+    // variable obscures a type of the same name (JLS §6.5.2). Locals are resolved by
+    // `classify_target` before this. Then a TYPE name — the static receiver in `Util.helper()`.
+    //
+    // "Really declares" is the point. This used to ask `declaring_owner`, which answers with the
+    // type it started from when nothing declares the name, so every receiver came back a field and
+    // the type arm was unreachable: `Util` in `Util.helper()` hovered as a field of the class it
+    // was written in, go-to had no declaration to open, and find usages found none.
+    //
+    // The lenient answer stays as the LAST resort, where it is right: a field inherited from a
+    // supertype the index cannot see — a library base class's `logger` — is declared nowhere this
+    // can look, and is still a field.
     let bytes = source.as_bytes();
-    if let Some(fqn) = enclosing_type_binary(ident, bytes, project_types) {
-        if let Some(owner) = declaring_owner(resolver, &fqn, ident_text, false) {
-            return Some(DeclKey::Field {
-                owner,
-                name: ident_text.to_string(),
-            });
-        }
+    let enclosing = enclosing_type_binary(ident, bytes, project_types);
+    let field = |owner: String| DeclKey::Field {
+        owner,
+        name: ident_text.to_string(),
+    };
+    let declared = enclosing
+        .as_deref()
+        .and_then(|fqn| declared_owner(resolver, fqn, ident_text, false));
+    if let Some(owner) = declared {
+        return Some(field(owner));
     }
-    type_key(ident_text, project_types, resolver, imports)
+    type_key(ident_text, project_types, resolver, imports).or_else(|| enclosing.map(field))
 }
 
 /// The owner type of `member` accessed on `obj` in `obj.member` (`obj.foo()` / `obj.field`).
@@ -1965,6 +2022,20 @@ fn declaring_owner(
     member: &str,
     is_method: bool,
 ) -> Option<String> {
+    declared_owner(resolver, start, member, is_method).or_else(|| Some(start.to_string()))
+}
+
+/// The type in `start`'s hierarchy that really declares `member`, or `None` when none does.
+///
+/// [`declaring_owner`] answers `start` itself in that case, so a member of a supertype the index
+/// cannot see still gets a key. That is right for a member NAME and wrong for a question of the
+/// form "is this identifier a field at all?", which it answers yes to every time.
+fn declared_owner(
+    resolver: &dyn TypeResolver,
+    start: &str,
+    member: &str,
+    is_method: bool,
+) -> Option<String> {
     bennu_java::prelude::declaring(resolver, &JTypeRef::simple(start), |cm| {
         if is_method {
             cm.methods.iter().any(|m| m.name == member)
@@ -1973,7 +2044,6 @@ fn declaring_owner(
         }
     })
     .map(|t| t.binary_name)
-    .or_else(|| Some(start.to_string()))
 }
 
 fn enclosing_type_binary(

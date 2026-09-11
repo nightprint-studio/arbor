@@ -4122,6 +4122,11 @@ fn build_dependency_tier(
                 *slot.dep_jars.write().unwrap_or_else(|p| p.into_inner()) = jars;
                 slot.resolver_epoch.fetch_add(1, Ordering::Relaxed);
                 eprintln!("bennu-be: dependency tier live for {}", root_path.display());
+                // The tree is also where most capabilities are: nobody declares
+                // `jakarta.validation-api`, it arrives through a starter. A framework registry built
+                // before this moment saw only the poms, so it is asked again — and rebuilt only if
+                // the answer moved.
+                crate::frameworks::FrameworkService::global().reevaluate_capabilities(root_str);
             }
             Err(e) => {
                 // Not an eprintln alone: the jars resolved, so from the outside everything looks

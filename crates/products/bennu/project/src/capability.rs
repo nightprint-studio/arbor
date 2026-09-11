@@ -15,7 +15,8 @@
 //! capped so opening a huge legacy tree stays responsive (docs §8: reparse-whole
 //! stalls); Phase-0 detection only needs *presence*, so a capped scan is faithful.
 
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use bennu_proto::prelude::{CapabilityHit, CapabilitySet};
 
@@ -26,21 +27,114 @@ use crate::pom::Pom;
 /// responsive on a 1200-file legacy tree.
 const MAX_SOURCE_FILES: usize = 400;
 const MAX_SOURCE_BYTES: usize = 64 * 1024;
+/// How deep the source walk goes below a module's `src/`. `main/java` is two levels before the
+/// package starts, and `it/acme/product/module/web/dto` is six more — the old 8 stopped a level short
+/// of where a DTO usually lives, which is precisely where `@NotNull` and `@JsonProperty` are written.
+const SOURCE_WALK_DEPTH: usize = 16;
+/// Deeper than any reactor anybody maintains, and a hard stop on a `<module>` loop.
+const MAX_REACTOR_DEPTH: usize = 12;
 
-/// Detect the domain capabilities of the project rooted at `root`, given its parsed
-/// root [`Pom`]. Pure over (pom + filesystem); never fails (an unreadable file is
-/// simply absent evidence).
+/// Detect the domain capabilities of the project rooted at `root`, given its parsed root [`Pom`].
+///
+/// Reads every module of the reactor, but not the resolved dependency tree — a caller that has one
+/// uses [`detect_with`]. Pure over (poms + filesystem); never fails (an unreadable file is simply
+/// absent evidence).
 pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
+    detect_with(&BuildEvidence::read(root, pom))
+}
+
+/// What capability detection reads a build from.
+///
+/// ## Why not just the root pom
+///
+/// It used to be exactly that, and it missed most of what a project has. A reactor's root pom is an
+/// aggregator: it lists modules and, typically, declares nothing — the dependencies are written in
+/// the modules, and so are the config files and the sources. And what a module writes is rarely the
+/// artifact a capability is recognised by. Nobody declares `jakarta.validation-api`: they declare
+/// `spring-boot-starter-web`, or inherit a company parent, and the API arrives three levels down.
+/// Reading the root pom's own `<dependency>` blocks, Bean Validation was off on a project that
+/// validates every form it has.
+///
+/// So the evidence is every pom of the reactor, every module's directories, and — when Maven has
+/// resolved it — the dependency tree.
+#[derive(Debug, Clone)]
+pub struct BuildEvidence {
+    /// Every directory of the reactor, the root first.
+    modules: Vec<PathBuf>,
+    /// `groupId:artifactId`, lowercase: what every pom declares, then what the build resolves to.
+    coordinates: Vec<String>,
+}
+
+impl BuildEvidence {
+    /// The build as its poms declare it: `root`'s own, then each `<module>`, recursively.
+    ///
+    /// Follows the declaration rather than walking the tree, so a `samples/` directory with a pom of
+    /// its own is not read as part of the project.
+    pub fn read(root: &Path, pom: &Pom) -> Self {
+        let mut build = Self { modules: vec![root.to_path_buf()], coordinates: pom.dependencies.clone() };
+        let mut seen: HashSet<PathBuf> = HashSet::from([root.to_path_buf()]);
+        build.collect_modules(root, pom, 0, &mut seen);
+        build
+    }
+
+    /// Add what the build **resolves** to — the transitive tree, as `groupId:artifactId`. Empty
+    /// until Maven has resolved it once, which is why it is added rather than required.
+    pub fn with_resolved(mut self, coordinates: impl IntoIterator<Item = String>) -> Self {
+        self.coordinates.extend(coordinates.into_iter().map(|c| c.to_ascii_lowercase()));
+        self
+    }
+
+    fn root(&self) -> &Path {
+        &self.modules[0]
+    }
+
+    /// The same rule as [`Pom::has_dependency`] — a case-insensitive substring of a coordinate —
+    /// over the whole build.
+    fn has_dependency(&self, needle: &str) -> bool {
+        let needle = needle.to_ascii_lowercase();
+        self.coordinates.iter().any(|c| c.contains(&needle))
+    }
+
+    fn collect_modules(&mut self, dir: &Path, pom: &Pom, depth: usize, seen: &mut HashSet<PathBuf>) {
+        if depth > MAX_REACTOR_DEPTH {
+            return;
+        }
+        for module in &pom.modules {
+            let module = module.trim().trim_end_matches('/');
+            if module.is_empty() {
+                continue;
+            }
+            // Maven allows a module to name its pom file as well as its directory.
+            let base = dir.join(module);
+            let (module_dir, pom_path) = match base.is_file() {
+                true => (base.parent().map(Path::to_path_buf).unwrap_or_else(|| dir.to_path_buf()), base),
+                false => (base.clone(), base.join("pom.xml")),
+            };
+            if !seen.insert(module_dir.clone()) {
+                continue;
+            }
+            let Ok(xml) = std::fs::read_to_string(&pom_path) else { continue };
+            let child = crate::pom::parse(&xml);
+            self.coordinates.extend(child.dependencies.iter().cloned());
+            self.modules.push(module_dir.clone());
+            self.collect_modules(&module_dir, &child, depth + 1, seen);
+        }
+    }
+}
+
+/// Detect the domain capabilities of a build — see [`BuildEvidence`] for what that is read from.
+pub fn detect_with(build: &BuildEvidence) -> CapabilitySet {
+    let root = build.root();
     let mut set = CapabilitySet::default();
     let mut hits: Vec<CapabilityHit> = Vec::new();
 
-    // Tier B: gather the well-known config-file signals once.
-    let files = ConfigFiles::scan(root);
-    // Tier C: gather a bounded sample of source-pattern signals once.
-    let src = SourceSignals::scan(root);
+    // Tier B: gather the well-known config-file signals once, from every module.
+    let files = ConfigFiles::scan(&build.modules);
+    // Tier C: gather a bounded sample of source-pattern signals once, from every module.
+    let src = SourceSignals::scan(&build.modules);
 
     // ── StrutsXmlConfig ──────────────────────────────────────────────────────
-    let struts_a = pom.has_dependency("struts2-core");
+    let struts_a = build.has_dependency("struts2-core");
     let struts_b = files.struts_xml || files.struts_plugin_xml;
     activate(
         &mut set.struts_xml_config,
@@ -52,7 +146,7 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
     );
 
     // ── StrutsConvention ─────────────────────────────────────────────────────
-    let conv_a = pom.has_dependency("struts2-convention-plugin");
+    let conv_a = build.has_dependency("struts2-convention-plugin");
     activate(
         &mut set.struts_convention,
         &mut hits,
@@ -96,7 +190,7 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
     );
 
     // ── TilesViews ───────────────────────────────────────────────────────────
-    let tiles_a = pom.has_dependency("struts2-tiles-plugin") || pom.has_dependency("tiles-");
+    let tiles_a = build.has_dependency("struts2-tiles-plugin") || build.has_dependency("tiles-");
     activate(
         &mut set.tiles_views,
         &mut hits,
@@ -107,9 +201,9 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
     );
 
     // ── SpringXmlDi ──────────────────────────────────────────────────────────
-    let spring_a = pom.has_dependency("spring-beans")
-        || pom.has_dependency("spring-context")
-        || pom.has_dependency("spring-jdbc");
+    let spring_a = build.has_dependency("spring-beans")
+        || build.has_dependency("spring-context")
+        || build.has_dependency("spring-jdbc");
     activate(
         &mut set.spring_xml_di,
         &mut hits,
@@ -120,7 +214,7 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
     );
 
     // ── SpringAnnotationDi ───────────────────────────────────────────────────
-    let spring_ann_a = pom.has_dependency("spring-context");
+    let spring_ann_a = build.has_dependency("spring-context");
     activate(
         &mut set.spring_annotation_di,
         &mut hits,
@@ -135,7 +229,7 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
         &mut set.spring_data_repo,
         &mut hits,
         "spring_data_repo",
-        pom.has_dependency("spring-data-").then_some("dependency spring-data-*"),
+        build.has_dependency("spring-data-").then_some("dependency spring-data-*"),
         None,
         src.jpa_repository.then_some("extends JpaRepository / CrudRepository"),
     );
@@ -145,13 +239,13 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
         &mut set.jpa_hibernate,
         &mut hits,
         "jpa_hibernate",
-        pom.has_dependency("hibernate-core").then_some("dependency hibernate-core"),
+        build.has_dependency("hibernate-core").then_some("dependency hibernate-core"),
         (files.persistence_xml || files.hbm_xml).then_some("persistence.xml / *.hbm.xml"),
         src.jpa_entity.then_some("@Entity / @Table / EntityManager"),
     );
 
     // ── MyBatisMapper ────────────────────────────────────────────────────────
-    let mybatis_a = pom.has_dependency("mybatis");
+    let mybatis_a = build.has_dependency("mybatis");
     activate(
         &mut set.mybatis_mapper,
         &mut hits,
@@ -162,11 +256,11 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
     );
 
     // ── JdbcDao (dep + ≥1 source hit) ────────────────────────────────────────
-    let jdbc_a = pom.has_dependency("spring-jdbc")
-        || pom.has_dependency("commons-dbcp")
-        || pom.has_dependency("mysql")
-        || pom.has_dependency("ojdbc")
-        || pom.has_dependency("postgresql");
+    let jdbc_a = build.has_dependency("spring-jdbc")
+        || build.has_dependency("commons-dbcp")
+        || build.has_dependency("mysql")
+        || build.has_dependency("ojdbc")
+        || build.has_dependency("postgresql");
     // Per Spike D: JDBC needs the driver/coordinate AND ≥1 source hit.
     activate(
         &mut set.jdbc_dao,
@@ -182,7 +276,7 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
         &mut set.lombok,
         &mut hits,
         "lombok",
-        pom.has_dependency("lombok").then_some("dependency org.projectlombok:lombok"),
+        build.has_dependency("lombok").then_some("dependency org.projectlombok:lombok"),
         None,
         src.lombok_import.then_some("import lombok.* / @Data / @Getter"),
     );
@@ -193,7 +287,7 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
     let bval_a = ["jakarta.validation-api", "validation-api", "hibernate-validator",
                   "spring-boot-starter-validation"]
         .iter()
-        .find(|c| pom.has_dependency(c))
+        .find(|c| build.has_dependency(c))
         .copied();
     activate(
         &mut set.bean_validation,
@@ -207,7 +301,7 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
     // ── Scheduling ───────────────────────────────────────────────────────────
     let sched_a = ["quartz", "spring-boot-starter-quartz", "spring-context-support"]
         .iter()
-        .find(|c| pom.has_dependency(c))
+        .find(|c| build.has_dependency(c))
         .copied();
     activate(
         &mut set.scheduling,
@@ -221,7 +315,7 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
     // ── Jackson ──────────────────────────────────────────────────────────────
     let jackson_a = ["jackson-databind", "jackson-core", "spring-boot-starter-web"]
         .iter()
-        .find(|c| pom.has_dependency(c))
+        .find(|c| build.has_dependency(c))
         .copied();
     activate(
         &mut set.jackson,
@@ -233,7 +327,7 @@ pub fn detect(root: &Path, pom: &Pom) -> CapabilitySet {
     );
 
     // ── EntandoJaps ──────────────────────────────────────────────────────────
-    let entando_a = pom.dependencies.iter().any(|d| {
+    let entando_a = build.coordinates.iter().any(|d| {
         d.contains("org.entando") || d.contains("com.agiletec") || d.contains("entando")
     });
     activate(
@@ -443,15 +537,24 @@ impl ConfigFiles {
         }
     }
 
-    fn scan(root: &Path) -> Self {
+    /// Each module's conventional places. A reactor keeps its config in the module that reads it —
+    /// the web module's `ValidationMessages.properties`, never the aggregator's.
+    fn scan(modules: &[PathBuf]) -> Self {
         let mut f = ConfigFiles::default();
+        for root in modules {
+            Self::scan_module(&mut f, root);
+        }
+        f
+    }
+
+    fn scan_module(f: &mut Self, root: &Path) {
         // struts.xml lives on the classpath: src/main/resources or WEB-INF/classes.
         let struts_candidates = [
             "src/main/resources/struts.xml",
             "src/main/webapp/WEB-INF/classes/struts.xml",
             "WEB-INF/classes/struts.xml",
         ];
-        f.struts_xml = struts_candidates.iter().any(|p| root.join(p).is_file());
+        f.struts_xml |= struts_candidates.iter().any(|p| root.join(p).is_file());
 
         // A shallow walk of the resources + WEB-INF trees for the *-suffix / by-name
         // config files. Bounded depth + count keeps this cheap.
@@ -505,7 +608,6 @@ impl ConfigFiles {
                 }
             });
         }
-        f
     }
 
     fn first_struts_file(&self) -> &'static str {
@@ -551,12 +653,29 @@ struct SourceSignals {
 }
 
 impl SourceSignals {
-    fn scan(root: &Path) -> Self {
+    /// One read budget for the whole reactor, spent module by module.
+    fn scan(modules: &[PathBuf]) -> Self {
         let mut s = SourceSignals::default();
         let mut scanned = 0usize;
-        let src_root = root.join("src");
-        let scan_root = if src_root.is_dir() { src_root } else { root.to_path_buf() };
-        walk_shallow(&scan_root, 8, &mut |path, name| {
+        for root in modules {
+            let src_root = root.join("src");
+            let scan_root = if src_root.is_dir() {
+                src_root
+            } else if modules.len() == 1 {
+                // Not a Maven layout at all — the sources are wherever they are.
+                root.clone()
+            } else {
+                // A reactor's aggregator, with no sources of its own. Walking it would walk every
+                // module a second time and spend the budget on whichever the directory lists first.
+                continue;
+            };
+            Self::scan_module(&mut s, &mut scanned, root, &scan_root);
+        }
+        s
+    }
+
+    fn scan_module(s: &mut Self, scanned: &mut usize, root: &Path, scan_root: &Path) {
+        walk_shallow(scan_root, SOURCE_WALK_DEPTH, &mut |path, name| {
             let lname = name.to_ascii_lowercase();
             let is_java = lname.ends_with(".java");
             let is_jsp = lname.ends_with(".jsp") || lname.ends_with(".tag");
@@ -565,13 +684,13 @@ impl SourceSignals {
             // how many files we OPEN, and a project's pages must not become invisible just
             // because they are deep in the walk.
             s.has_jsp |= is_jsp || lname.ends_with(".jspf") || lname.ends_with(".tagx");
-            if scanned >= MAX_SOURCE_FILES {
+            if *scanned >= MAX_SOURCE_FILES {
                 return;
             }
             if !is_java && !is_jsp && !is_rust {
                 return;
             }
-            scanned += 1;
+            *scanned += 1;
             let Some(text) = read_head(path, MAX_SOURCE_BYTES) else { return };
             if is_java {
                 s.filter_dispatcher |= text.contains("FilterDispatcher");
@@ -640,7 +759,6 @@ impl SourceSignals {
                 }
             }
         }
-        s
     }
 }
 
@@ -745,6 +863,43 @@ mod tests {
             .hits
             .iter()
             .any(|h| h.capability == "struts_xml_config" && h.tier == "A"));
+    }
+
+    /// The API arrives transitively — through Spring's starter, or a company parent — and is written
+    /// in no pom at all. The resolved tree is where it is.
+    #[test]
+    fn a_dependency_only_the_resolved_tree_has_still_counts() {
+        let root = Path::new("C:/nonexistent-bennu-test-root");
+        let pom = pom::parse(MYBATIS_POM);
+        assert!(!detect(root, &pom).bean_validation);
+
+        let build = BuildEvidence::read(root, &pom)
+            .with_resolved(["org.hibernate.validator:hibernate-validator".to_string()]);
+        let caps = detect_with(&build);
+        assert!(caps.bean_validation);
+        assert!(caps.hits.iter().any(|h| h.capability == "bean_validation" && h.tier == "A"));
+    }
+
+    /// A reactor's root pom lists modules and declares nothing; the dependencies are in the modules.
+    #[test]
+    fn a_dependency_declared_in_a_module_counts() {
+        let root = std::env::temp_dir().join(format!("bennu-caps-reactor-{}", std::process::id()));
+        let web = root.join("web");
+        std::fs::create_dir_all(&web).unwrap();
+        let root_pom = "<project><artifactId>reactor</artifactId>\
+                        <modules><module>web</module></modules></project>";
+        std::fs::write(root.join("pom.xml"), root_pom).unwrap();
+        std::fs::write(
+            web.join("pom.xml"),
+            "<project><artifactId>web</artifactId><dependencies><dependency>\
+             <groupId>org.hibernate.validator</groupId><artifactId>hibernate-validator</artifactId>\
+             </dependency></dependencies></project>",
+        )
+        .unwrap();
+
+        let caps = detect(&root, &pom::parse(root_pom));
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(caps.bean_validation, "hits: {:?}", caps.hits);
     }
 
     #[test]

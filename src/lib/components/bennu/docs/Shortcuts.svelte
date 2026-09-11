@@ -127,6 +127,7 @@
 
 <h2>Frameworks</h2>
 <ul>
+  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>J</kbd> — the <strong>DTO Lab</strong> on the class at the caret: a JSON payload bound and validated by the project itself, and validation tests generated from the class's constraints. On any other file it toggles the panel. Inside the lab, <kbd>Ctrl</kbd> + <kbd>Enter</kbd> runs the payload, and in the preview it applies the tests</li>
   <li><kbd>Alt</kbd> + <kbd>4</kbd> — <strong>Endpoints</strong> — every URL the application answers, request mappings and Struts actions in one list, each expanding into what it takes and what it returns</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd> — <strong>Spring beans</strong> — every bean the project declares</li>
   <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd> — <strong>Bevy components</strong> — every component, resource, message, event and bundle, each expanding into the systems that read and write it</li>

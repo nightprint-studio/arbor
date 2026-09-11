@@ -353,3 +353,43 @@ fn cross_file_static_method_call() {
     assert_eq!(d.file, "Util.java");
     assert_eq!(d.label, "method app.Util.helper()");
 }
+
+// ── the receiver itself ──────────────────────────────────────────────────────────────────────
+//
+// The caret on `Util` in `Util.helper()`, not on `helper`. The receiver classifier answered "a
+// field of the enclosing class" for every name, because the lookup it asked falls back to the class
+// it started from — so a type receiver had no declaration to go to, hovered as a field, and had no
+// usages.
+
+#[test]
+fn goto_on_a_static_receiver_opens_the_type() {
+    let p = proj();
+    let s = p.source("Service.java").to_string();
+    let d = p
+        .goto("Service.java", at(&s, "Util.helper();"))
+        .expect("goto on the type receiver");
+    assert_eq!(d.file, "Util.java");
+    assert_eq!(d.label, "class app.Util");
+}
+
+#[test]
+fn hover_on_a_static_receiver_is_the_type_not_a_field() {
+    let p = proj();
+    let s = p.source("Service.java").to_string();
+    let h = p
+        .hover("Service.java", at(&s, "Util.helper();"))
+        .expect("hover on the type receiver");
+    assert_eq!(h.kind, "class");
+}
+
+/// The other half of the rule: a receiver that IS a field of the enclosing class stays one.
+#[test]
+fn goto_on_a_field_receiver_still_lands_on_the_field() {
+    let p = proj();
+    let s = p.source("Service.java").to_string();
+    let d = p
+        .goto("Service.java", at(&s, "util.shared();"))
+        .expect("goto on the field receiver");
+    assert_eq!(d.file, "Service.java");
+    assert_eq!(d.label, "field app.Service.util");
+}

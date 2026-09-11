@@ -73,7 +73,9 @@
 <p>
   Put the caret on a Java <strong>symbol</strong> — a class, method, field or local — and press
   <kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click, or the right-click menu) to jump to its
-  declaration. If you're <strong>already on the declaration itself</strong> — a method signature, or
+  declaration. A <strong>method reference</strong> counts as a use of its method: on
+  <code>helper</code> in <code>Reports::helper</code> or <code>run</code> in <code>this::run</code> it
+  lands on the method, and on <code>Reports</code> it opens the type. If you're <strong>already on the declaration itself</strong> — a method signature, or
   the declaration of a variable, class or record — jumping would be a no-op, so the same gesture shows
   its <strong>usages</strong> instead (like IntelliJ). On a JSP form or link <strong>action
   reference</strong> — an <code>action="…"</code> value or a path like
@@ -90,7 +92,7 @@
 </p>
 <p>
   The same gesture on a <strong>library or JDK method</strong> — <code>list.add(…)</code>,
-  <code>LOGGER.info(…)</code> — opens that library's source view and lands <strong>on the method
+  <code>LOGGER.info(…)</code>, <code>String::valueOf</code> — opens that library's source view and lands <strong>on the method
   itself</strong>. The receiver is typed against the project's classpath, so it works on anything your
   dependencies resolve to, and it chains: from inside one library view you can go on to the next.
 </p>

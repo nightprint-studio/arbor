@@ -25,6 +25,7 @@
   import BennuHierarchyPanel from './BennuHierarchyPanel.svelte';
   import BennuFormsPanel from './BennuFormsPanel.svelte';
   import BennuCatalogPanel from './BennuCatalogPanel.svelte';
+  import BennuDtoLabPanel from './dtolab/BennuDtoLabPanel.svelte';
   import { isFrameworkCatalog } from './framework-catalogs';
   import PluginLogsPanel from '$lib/components/plugins/PluginLogsPanel.svelte';
   import PluginPanelSurface from '$lib/components/plugins/PluginPanelSurface.svelte';
@@ -72,6 +73,12 @@
   {#if active === 'forms'}
     <div class="dock-section">
       <BennuFormsPanel dock />
+    </div>
+  {/if}
+  <!-- Mounted only while shown: the payload, the answers and the preview live in the lab's store. -->
+  {#if active === 'dtolab'}
+    <div class="dock-section">
+      <BennuDtoLabPanel />
     </div>
   {/if}
   {#if catalog}

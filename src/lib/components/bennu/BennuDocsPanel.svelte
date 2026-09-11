@@ -17,7 +17,7 @@
    * that comes back with a hit is specific enough to choose between.
    */
   import {
-    BookOpen, Rocket, Boxes, PenLine, Keyboard, FolderGit2, FlaskConical, Play, Replace,
+    BookOpen, Rocket, Boxes, PenLine, Keyboard, FolderGit2, FlaskConical, Beaker, Play, Replace,
     ServerCog, Cog, Languages, Network, Gamepad2, Search, Coffee, FileCode2, Bug, History,
     FileText, Compass, ListTree, Sparkles, ShieldCheck, Wrench, Download, Package, Braces,
     Database, Layers, Palette, Flame, ScrollText, FileType2, SlidersHorizontal,
@@ -61,6 +61,7 @@
   import BeanValidation    from './docs/BeanValidation.svelte';
   import Scheduled         from './docs/Scheduled.svelte';
   import JsonTypes         from './docs/JsonTypes.svelte';
+  import DtoLab            from './docs/DtoLab.svelte';
   import I18n              from './docs/I18n.svelte';
   import XmlSchemas        from './docs/XmlSchemas.svelte';
   import Tomcat            from './docs/Tomcat.svelte';
@@ -129,6 +130,7 @@
       { id: 'bean-validation',  label: 'Bean Validation',   icon: ShieldCheck },
       { id: 'scheduled',        label: 'Scheduled jobs',    icon: History   },
       { id: 'json-types',       label: 'JSON types',        icon: Braces    },
+      { id: 'dto-lab',          label: 'DTO Lab',           icon: Beaker    },
       { id: 'message-bundles',  label: 'Message bundles',   icon: Languages },
       { id: 'i18n',             label: 'i18n labels',       icon: Languages },
       { id: 'xml-schemas',      label: 'XML schemas',       icon: FileCode2 },
@@ -187,6 +189,7 @@
     'bean-validation':   BeanValidation,
     'scheduled':         Scheduled,
     'json-types':        JsonTypes,
+    'dto-lab':           DtoLab,
     'message-bundles':   MessageBundles,
     'i18n':              I18n,
     'xml-schemas':       XmlSchemas,

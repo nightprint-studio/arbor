@@ -36,8 +36,8 @@ use bennu_ext::prelude::{
     ExtAction, ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtStat, ExtTarget,
     ExtensionRegistry, FileCtx, FrameworkExtension, ProjectScan, ScannedFile,
 };
-use bennu_project::prelude::{detect_capabilities, normalize_newlines, parse_pom};
-use bennu_proto::prelude::{CompletionItem, Diagnostic};
+use bennu_project::prelude::normalize_newlines;
+use bennu_proto::prelude::{CapabilitySet, CompletionItem, Diagnostic};
 use bennu_fulcrum_i18n::prelude::FulcrumI18nExtension;
 use bennu_i18n::prelude::MessagesExtension;
 use bennu_jpa::prelude::JpaExtension;
@@ -68,10 +68,15 @@ const MAX_FILES: usize = 20_000;
 /// Java source. Neither is a question about a caret, which is what the trait models.
 struct Slot {
     registry: ExtensionRegistry,
+    /// What the registry was built from — kept so a later read of the build can tell whether the
+    /// answer moved (see [`FrameworkService::reevaluate_capabilities`]).
+    caps: CapabilitySet,
     spring: Option<Arc<SpringExtension>>,
     jpa: Option<Arc<JpaExtension>>,
     jsp: Option<Arc<JspExtension>>,
     fulcrum: Option<Arc<FulcrumI18nExtension>>,
+    /// Kept for the DTO Lab, which has to interpolate messages with the bundles this found.
+    jakarta: Option<Arc<ValidationExtension>>,
 }
 
 /// Process-wide extension host, one slot per project root.
@@ -221,6 +226,37 @@ impl FrameworkService {
         true
     }
 
+    /// The message bundles Bean Validation is redirected to in `root` — see
+    /// [`ValidationExtension::redirected_bundles`]. Empty when the project has no Bean Validation, or
+    /// reads only the specification's `ValidationMessages`.
+    pub fn validation_bundles(&self, root: &str) -> Vec<String> {
+        self.slot(root)
+            .and_then(|slot| slot.jakarta.clone())
+            .map(|ext| ext.redirected_bundles())
+            .unwrap_or_default()
+    }
+
+    /// Re-read `root`'s capabilities, and rebuild its slot when they changed.
+    ///
+    /// Called when the dependency tree lands. Detection reads that tree as well as the poms, and a
+    /// slot built before the resolve — most are, since the resolve shells out to Maven — may have
+    /// declined an extension whose evidence was three levels down in it. Nothing ever asked again:
+    /// Bean Validation stayed off on a project that validates every form, until it was reopened.
+    ///
+    /// Only a slot that exists is re-read (one nobody has asked a framework question of reads the
+    /// tree when it is first built), and only a changed answer pays for the rebuild, which is a
+    /// whole-project scan. The evidence hits are left out of the comparison: a new reason for a
+    /// capability that was already on changes nothing that runs.
+    pub fn reevaluate_capabilities(&self, root: &str) {
+        let key = norm(root);
+        let Some(slot) = self.cached(&key) else { return };
+        let fresh = crate::capabilities::project_capabilities(Path::new(&key));
+        let flags = |c: &CapabilitySet| CapabilitySet { hits: Vec::new(), ..c.clone() };
+        if flags(&fresh) != flags(&slot.caps) {
+            self.refresh(&key);
+        }
+    }
+
     /// Rebuild the model for the project owning `file`, in the background and coalesced.
     ///
     /// The model was built ONCE, on the first question asked of it, and nothing ever invalidated
@@ -281,8 +317,7 @@ impl FrameworkService {
         if !path.is_dir() {
             return None;
         }
-        let xml = std::fs::read_to_string(path.join("pom.xml")).unwrap_or_default();
-        let caps = detect_capabilities(path, &parse_pom(&xml));
+        let caps = crate::capabilities::project_capabilities(path);
 
         let spring = Arc::new(SpringExtension::new());
         // The pinned property file is a persisted setting, so it is applied BEFORE the
@@ -295,6 +330,7 @@ impl FrameworkService {
         let jsp = Arc::new(JspExtension::new());
         let fulcrum = Arc::new(FulcrumI18nExtension::new());
         let bevy = Arc::new(BevyExtension::new());
+        let jakarta = Arc::new(ValidationExtension::new());
         // The whole registration surface. A further framework is one more entry here — and the
         // XML, JSP and message-bundle ones arriving as exactly that entry is the claim the seam
         // was built on, now made four times.
@@ -316,7 +352,7 @@ impl FrameworkService {
                 // constraint's message is resolved against a bundle the VALIDATOR chooses, not
                 // the one the rest of the application reads — and the choice is regularly a
                 // string literal inside a `@Bean`.
-                Arc::new(ValidationExtension::new()) as Arc<dyn FrameworkExtension>,
+                Arc::clone(&jakarta) as Arc<dyn FrameworkExtension>,
                 // What the application does on its own, at times nobody is watching — and the two
                 // ways a job silently never runs.
                 Arc::new(SchedulingExtension::new()) as Arc<dyn FrameworkExtension>,
@@ -336,7 +372,7 @@ impl FrameworkService {
         );
         // Nothing applies → no walk, no parse, no model.
         if registry.is_empty() {
-            return Some(Slot { registry, spring: None, jpa: None, jsp: None, fulcrum: None });
+            return Some(Slot { registry, caps, spring: None, jpa: None, jsp: None, fulcrum: None, jakarta: None });
         }
 
         // Reading the Java tree is by far the most expensive part of a scan, and the XML
@@ -398,7 +434,9 @@ impl FrameworkService {
             jpa: active.contains(&"jpa").then_some(jpa),
             jsp: active.contains(&"jsp").then_some(jsp),
             fulcrum: active.contains(&"fulcrum.i18n").then_some(fulcrum),
+            jakarta: active.contains(&"jakarta.validation").then_some(jakarta),
             registry,
+            caps,
         })
     }
 

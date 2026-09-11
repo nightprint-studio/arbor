@@ -50,6 +50,24 @@ impl ValidationExtension {
         Some(Arc::clone(&found))
     }
 
+    /// The bundle base names constraint messages are redirected to: every validation bundle except the
+    /// one the specification names, which a provider reads without being told.
+    ///
+    /// For a host that interpolates messages itself — the DTO Lab's JVM — and so has to be told what
+    /// the project's own `@Bean` told the validator.
+    pub fn redirected_bundles(&self) -> Vec<String> {
+        self.discovery()
+            .map(|found| {
+                found
+                    .bundles
+                    .iter()
+                    .map(|b| b.base.clone())
+                    .filter(|base| base.as_str() != crate::bundles::SPEC_BASE)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// The constraints in a buffer, parsed. `None` when the file is not Java or does not parse —
     /// which is an ordinary state for a buffer being typed in, not an error.
     fn uses(&self, ctx: &FileCtx<'_>) -> Option<Vec<ConstraintUse>> {
