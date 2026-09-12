@@ -35,6 +35,7 @@ use bennu_naming::prelude::{
     packs, Convention, LanguageRules, NamingConfig, Pack, Target, Violation,
 };
 use bennu_proto::prelude::{Diagnostic, LspSymbol};
+use bennu_templates::prelude::NamingFacts;
 use serde::{Deserialize, Serialize};
 
 /// The TOML section this domain owns.
@@ -257,6 +258,17 @@ fn relative_to(root: &str, file: &str) -> String {
         Some(rel) => rel.to_string(),
         None => file,
     }
+}
+
+/// How the project names things where `file` goes, for a code template: the language's standard, with the
+/// project's own rules for that path laid over it when it checks them. Java's for a file no pack claims — a
+/// template writing YAML has no names to build, and Java is what code templates are written for.
+pub(crate) fn template_naming(root: &str, file: &str) -> NamingFacts {
+    let pack = bennu_naming::prelude::pack_for_path(file).or_else(|| packs().iter().find(|pack| pack.id == "java"));
+    let Some(pack) = pack else { return NamingFacts::default() };
+    let config = config_for_root(root);
+    let rules = config.enabled.then(|| config.rules_for_path(pack.id, &relative_to(root, file)));
+    NamingFacts::new(pack, rules.as_ref())
 }
 
 // ── which languages this project actually contains ──────────────────────────────

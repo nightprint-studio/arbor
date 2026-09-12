@@ -1,159 +1,168 @@
-<!-- Bennu docs — Keyboard shortcuts. -->
+<script lang="ts">
+  /**
+   * Keyboard shortcuts: every binding, by area. The canonical list is keybindings.ts; this page follows it.
+   */
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
+<span class="eyebrow">Reference</span>
 <h1>Keyboard shortcuts</h1>
-<p class="doc-lead">Bennu is keyboard-first — every action below is reachable without the mouse.</p>
+
+<p class="doc-lead">
+  Bennu is keyboard-first: every action below is reachable without the mouse, and <kbd>Ctrl</kbd> + <kbd>K</kbd> finds any of them by name.
+</p>
+<Callout variant="info" title="Why not Ctrl + Alt + a letter">
+  Chromium drops those chords on Italian, German, French and Spanish layouts to keep AltGr working — so where IntelliJ uses one, Bennu uses <kbd>Alt</kbd> + <kbd>Shift</kbd> or another key,
+  and the table says which.
+</Callout>
 
 <h2>Tool windows</h2>
-<ul>
-  <li><kbd>Alt</kbd> + <kbd>1</kbd> — toggle <strong>Project</strong> (files)</li>
-  <li><kbd>Alt</kbd> + <kbd>2</kbd> — toggle <strong>Structure</strong> (symbols)</li>
-  <li><kbd>Alt</kbd> + <kbd>N</kbd> — toggle <strong>Dependencies</strong> (by module, or by crate on a Cargo project)</li>
-  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>U</kbd> — <strong>download dependencies</strong> — fetch whatever this project's poms need and is not in your local repository, then rebuild the index. A background job; Maven projects only</li>
-  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd> — the <strong>module graph</strong> — who depends on whom inside the project, in a window. Inside it, <kbd>Alt</kbd> + <kbd>S</kbd> isolates the selected module's world. <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd> would have been the obvious key for the window itself and is <em>Switch window</em>, bound in every window</li>
-  <li><kbd>Alt</kbd> + <kbd>0</kbd> — toggle <strong>Build</strong> (bottom dock)</li>
-  <li><kbd>Alt</kbd> + <kbd>R</kbd> — toggle <strong>Run</strong> — the launched program's console, and the debugger when it is one (bottom dock)</li>
-  <li><kbd>Alt</kbd> + <kbd>5</kbd> — toggle <strong>Tests</strong> (the catalogue, right rail)</li>
-  <li><kbd>Alt</kbd> + <kbd>9</kbd> — toggle <strong>Trees</strong> — the parse and the declaration model (right rail). Java and JSP: both views read Bennu's own engines, so a Rust project has the Cargo window there instead</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> — <strong>structural search &amp; replace</strong></li>
-  <li><kbd>Alt</kbd> + <kbd>6</kbd> — toggle <strong>Problems</strong> (bottom dock)</li>
-  <li><kbd>Alt</kbd> + <kbd>7</kbd> — toggle <strong>TODO</strong> (bottom dock)</li>
-  <li><kbd>Alt</kbd> + <kbd>3</kbd> — toggle <strong>Forms</strong> — JSP form analysis (bottom dock)</li>
-  <li><kbd>Alt</kbd> + <kbd>F12</kbd> — toggle <strong>Terminal</strong> (bottom dock)</li>
-  <li><kbd>Alt</kbd> + <kbd>8</kbd> — toggle the <strong>build tool</strong> window (right rail): <strong>Maven</strong>'s goals on a Java project, <strong>Cargo</strong>'s crates and commands on a Rust one</li>
-  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd> — toggle <strong>i18n</strong> (right rail) — the fulcrum translation under the caret, rendered, with its parameters and a language picker. Only on a translation bundle; there is no rail button, because on every other file the panel could only say "not here"</li>
-</ul>
+<table>
+  <thead><tr><th>Shortcut</th><th>Toggles</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>Alt</kbd> + <kbd>1</kbd></td><td><strong>Project</strong> — files</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>2</kbd></td><td><strong>Structure</strong> — symbols</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>N</kbd></td><td><strong>Dependencies</strong> — by module, or by crate on a Cargo project</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>8</kbd></td><td>The <strong>build tool</strong> window, right rail — Maven's goals on Java, Cargo's crates and commands on Rust</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>5</kbd></td><td><strong>Tests</strong> — the catalogue, right rail</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>9</kbd></td><td><strong>Trees</strong> — the parse and the declaration model, right rail; Java and JSP, since both views read Bennu's own engines</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd></td><td><strong>i18n</strong> — the fulcrum translation under the caret, rendered. Only on a translation bundle, so there is no rail button</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>0</kbd></td><td><strong>Build</strong>, bottom dock</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>R</kbd></td><td><strong>Run</strong> — the launched program's console, and the debugger when it is one</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>6</kbd></td><td><strong>Problems</strong></td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>7</kbd></td><td><strong>TODO</strong></td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>3</kbd></td><td><strong>Forms</strong> — JSP form analysis</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>F12</kbd></td><td><strong>Terminal</strong></td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd></td><td>The <strong>module graph</strong> window; inside it <kbd>Alt</kbd> + <kbd>S</kbd> isolates the selected module's world. <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd> is <em>Switch window</em>, bound everywhere</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>U</kbd></td><td><strong>Download dependencies</strong> the poms need and the local repository lacks, then rebuild the index — a background job, Maven only</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd></td><td><strong>Structural search &amp; replace</strong></td></tr>
+  </tbody>
+</table>
 
 <h2>Navigate</h2>
-<ul>
-  <li><kbd>Ctrl</kbd> + <kbd>N</kbd> — go to <strong>class</strong> by name (project-wide). On a Rust project the tab reads <strong>Types</strong> and the language server answers — what it finds are structs, enums, traits and type aliases</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> — go to <strong>file</strong> by name</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Y</kbd> — go to <strong>symbol</strong> (methods and fields, project-wide; functions and constants on a Rust project)</li>
-  <li><kbd>Tab</kbd> — inside the navigator, move between <strong>All · Classes · Files · Symbols</strong></li>
-  <li><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>→</kbd> — navigate <strong>back</strong> / <strong>forward</strong> through the places you jumped to (across files). Actions make a stop — a go-to, a usage, a hit, a tab switch — and moving the caret does not</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Backspace</kbd> — back to the <strong>last place you edited</strong>; press it again to walk further back through the session's edits</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd> — <strong>recent locations</strong>: the same history as a filterable list, with the line you were on, and a toggle for the places you edited</li>
-  <li><kbd>Ctrl</kbd> + <kbd>F12</kbd> — <strong>file structure</strong>: a searchable outline of the file in front of you. On a language-server file the server supplies it, so a Rust file lists its structs, traits, impls and functions</li>
-  <li><kbd>Ctrl</kbd> + <kbd>H</kbd> — <strong>type hierarchy</strong> of the type at the caret: its implementors, or by direction what it is built on. The caret may be anywhere inside the type — on a member it climbs to the owner</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> — <strong>call hierarchy</strong> of the method at the caret: its callers, or by direction what it calls. Both open the Hierarchy panel, which expands one level at a time and takes the keyboard as it opens — a recursive chain is walked as far as you care to and no further</li>
-</ul>
+<table>
+  <thead><tr><th>Shortcut</th><th>Goes to</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>N</kbd></td><td>A <strong>class</strong> by name, project-wide — <strong>Types</strong> on a Rust project, answered by the language server</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd></td><td>A <strong>file</strong> by name</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Y</kbd></td><td>A <strong>symbol</strong> — methods and fields; functions and constants on Rust</td></tr>
+    <tr><td><kbd>Tab</kbd>, in the navigator</td><td>The next of <strong>All · Classes · Files · Symbols</strong></td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td><strong>Back</strong> / <strong>forward</strong> through the places you jumped to. Actions make a stop; moving the caret does not</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Backspace</kbd></td><td>The <strong>last place you edited</strong>; again for the one before</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd></td><td><strong>Recent locations</strong>, filterable, with the line you were on and a toggle for edited places</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>F12</kbd></td><td><strong>File structure</strong> — a searchable outline; from the server on a language-server file</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>H</kbd></td><td>The <strong>type hierarchy</strong> of the type at the caret — anywhere inside it</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd></td><td>The <strong>call hierarchy</strong> of the method at the caret — one level at a time</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>G</kbd></td><td>A line, or line:column</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>B</kbd>, <kbd>Ctrl</kbd> + click</td><td>The <strong>declaration</strong> of the symbol under the caret — its usages when already on it</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>F7</kbd></td><td>Its <strong>usages</strong>, across the project</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F7</kbd></td><td>The usages of <strong>this component</strong>, in a <code>.svelte</code> file</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd></td><td>Find in the file / in the project</td></tr>
+  </tbody>
+</table>
 
-<h2>Editor</h2>
-<ul>
-  <li><kbd>Ctrl</kbd> + <kbd>G</kbd> — go to line (or line:column)</li>
-  <li><kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click) — go to declaration of the symbol under the caret (or show its usages when already on the declaration)</li>
-  <li><kbd>Alt</kbd> + <kbd>F7</kbd> — <strong>find usages</strong> of the symbol under the caret (across the project)</li>
-  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F7</kbd> — <strong>find usages of this component</strong>, in a <code>.svelte</code> file: the file <em>is</em> the component, so there is no name inside it to put the caret on</li>
-  <li><kbd>Del</kbd> / <kbd>⌫</kbd> — in the Project tree, <strong>delete</strong> the focused file or folder (it asks first)</li>
-  <li><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Z</kbd> — with the Project tree focused, <strong>undo the last delete</strong>. In the editor the same keys undo typing: two stacks, and whichever has focus answers</li>
-  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> — <strong>local history</strong> of the open file. IntelliJ's own binding is <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + a letter, which Chromium drops on Italian, German, French and Spanish layouts to keep AltGr working</li>
-  <li><kbd>Alt</kbd> + <kbd>D</kbd> — inside that window, switch its comparison between <strong>side by side</strong> and the unified patch</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> — <strong>undo</strong> / <strong>redo</strong>. The history belongs to the buffer you are in: opening another file starts a fresh one, so undo can never reach past the file in front of you</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Y</kbd> — on a Mac also <kbd>Cmd</kbd> + <kbd>⌫</kbd> — delete the current line, whole, wherever in it the caret is (IntelliJ's keys; redo is on <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd>)</li>
-  <li><kbd>Ctrl</kbd> + <kbd>S</kbd> — <strong>save</strong> the current file</li>
-  <li><kbd>Ctrl</kbd> + <kbd>F</kbd> — find in the current file</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> — find in project</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Space</kbd> or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> —
-    on macOS <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> — <strong>completions</strong> at
-    the caret. Member access also opens on <kbd>.</kbd>, and a command language such as
-    <code>.dev</code> asks after a space too. When the request finds nothing, the footer says so for
-    a moment, naming the position it asked at. <strong>The Mac spelling is not a preference</strong>:
-    macOS takes the whole Control + Space family for switching input source, above the application,
-    so no program on that system receives those two</li>
-  <li><kbd>Ctrl</kbd> + <kbd>/</kbd> — toggle line / block <strong>comment</strong> on the selection (Java <code>//</code>, JSP <code>&lt;%-- --%&gt;</code>, XML <code>&lt;!-- --&gt;</code>)</li>
-  <li>Auto-close brackets and quotes — typing <kbd>(</kbd> <kbd>[</kbd> <kbd>&#123;</kbd> <kbd>"</kbd> <kbd>'</kbd> inserts the matching closer; <kbd>Backspace</kbd> on an empty pair removes both</li>
-  <li><kbd>Alt</kbd> + <kbd>Enter</kbd> (<kbd>Option</kbd> + <kbd>Enter</kbd> on a Mac) — show
-    <strong>intentions</strong> at the caret. One list from whichever engine can answer: Bennu's own
-    quick fixes on a <code>.java</code>, the language server's code actions on a file it owns —
-    "import <code>HashMap</code>", "fill match arms", "add missing lifetime"</li>
-  <li><kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>Enter</kbd> — open a <strong>blank line below</strong>
-    and put the caret on it, wherever in the line you were. Not intentions — that is the key above,
-    and on a Mac the two are one modifier apart</li>
-  <li><kbd>Shift</kbd> + <kbd>F6</kbd> — <strong>rename</strong> the symbol under the caret (with a per-file preview)</li>
-  <li><kbd>Alt</kbd> + <kbd>Delete</kbd> — <strong>safe delete</strong> the member under the caret: it goes only when nothing in the project uses it, and otherwise the dialog lists every use so you can go and fix them</li>
-  <li><kbd>Alt</kbd> + <kbd>Insert</kbd> — <strong>generate</strong> constructor, getters or setters</li>
-  <li><kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>I</kbd> — <strong>implement / override methods</strong>: everything the class inherits and may override, grouped by the type that declares it, with the abstract ones already ticked</li>
-  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> — <strong>format</strong> the file. A language with a <strong>language server</strong> is formatted by it (<code>rustfmt</code> for Rust, honouring the project's configuration); <strong>Java</strong> is re-indented and tidied by Bennu's own formatter</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> — <strong>optimize imports</strong> in a Java file: drop what it does not use, order the rest. Eclipse's own key, because IntelliJ's <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>O</kbd> is dropped by Chromium on Italian, German, French and Spanish layouts to keep AltGr working</li>
-  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>→</kbd> / <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>←</kbd> — <strong>expand</strong> / <strong>shrink</strong> the selection by one syntactic step — the token, the expression, the argument list, the call, the block, on the server's own idea of structure. VS Code's keys rather than IntelliJ's <kbd>Ctrl</kbd> + <kbd>W</kbd>, which a WebView may read as "close the window"</li>
-  <li><kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd> — after accepting a completion that inserted <strong>placeholders</strong>, move between them; <kbd>Esc</kbd> leaves the run. Accepting <code>println!</code> puts the caret between the parentheses, and a function completion walks you through its arguments</li>
-  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> — <strong>expand the macro</strong> at the caret and read what it generates (also under <kbd>Alt</kbd> + <kbd>Enter</kbd>). The expansion is recursive (all the way down — the server has no single-step form) and is text rather than a file, so it cannot be navigated: to go deeper, point at the nested macro in the source and expand again</li>
-</ul>
+<h2>Edit</h2>
+<table>
+  <thead><tr><th>Shortcut</th><th>Does</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Space</kbd>, <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> — on macOS <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd></td><td><strong>Completions</strong> at the caret; member access also opens on <kbd>.</kbd>, and a command language like <code>.dev</code> after a space. When nothing is found the footer says so. macOS takes the whole Control + Space family above the application</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Enter</kbd> — <kbd>Option</kbd> + <kbd>Enter</kbd> on a Mac</td><td><strong>Intentions</strong> at the caret — Bennu's quick fixes on Java, the server's code actions on a file it owns</td></tr>
+    <tr><td><kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>Enter</kbd></td><td>A <strong>blank line below</strong>, caret on it — not intentions, one modifier away on a Mac</td></tr>
+    <tr><td><kbd>Shift</kbd> + <kbd>F6</kbd></td><td><strong>Rename</strong> the symbol under the caret, with a preview</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Delete</kbd></td><td><strong>Safe delete</strong> the member under the caret — only when nothing uses it; otherwise every use is listed</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Insert</kbd></td><td><strong>Generate</strong> a constructor, getters or setters</td></tr>
+    <tr><td><kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>I</kbd></td><td><strong>Implement / override methods</strong>, grouped by declaring type, abstract ones ticked</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd></td><td><strong>Format</strong> the file — by its server (<code>rustfmt</code> for Rust), or Bennu's formatter for Java</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd></td><td><strong>Optimize imports</strong> in a Java file — Eclipse's key, since IntelliJ's <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>O</kbd> is dropped on those layouts</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>→</kbd> / <kbd>←</kbd></td><td><strong>Expand</strong> / <strong>shrink</strong> the selection by one syntactic step — VS Code's keys, since <kbd>Ctrl</kbd> + <kbd>W</kbd> may close a WebView</td></tr>
+    <tr><td><kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd></td><td>Walk a completion's <strong>placeholders</strong>; <kbd>Esc</kbd> leaves</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd></td><td><strong>Expand the macro</strong> at the caret — recursive, and text rather than a file</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>/</kbd></td><td>Toggle a <strong>comment</strong> — Java <code>//</code>, JSP <code>&lt;%-- --%&gt;</code>, XML <code>&lt;!-- --&gt;</code></td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td><td><strong>Undo</strong> / <strong>redo</strong> — the history is the buffer's, so undo never reaches past the file in front of you</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Y</kbd> — on a Mac also <kbd>Cmd</kbd> + <kbd>⌫</kbd></td><td>Delete the current line, wherever the caret is in it</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>S</kbd></td><td><strong>Save</strong> the current file</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd></td><td><strong>Local history</strong> of the open file; inside it <kbd>Alt</kbd> + <kbd>D</kbd> switches side by side and unified</td></tr>
+  </tbody>
+</table>
+<p>
+  Brackets and quotes close themselves — typing <kbd>(</kbd> <kbd>[</kbd> <kbd>&#123;</kbd> <kbd>"</kbd> <kbd>'</kbd> inserts the closer, and <kbd>Backspace</kbd> on an empty pair removes both.
+</p>
 
 <h2>Files</h2>
-<ul>
-  <li><kbd>F2</kbd> — <strong>rename</strong> the file selected in the Project tree. On a Rust project the rename also rewrites the <code>mod</code> declaration that names the file and every <code>use</code> path through it; the dialog says how many files it will touch before you commit to it</li>
-  <li><kbd>Ctrl</kbd> + <kbd>C</kbd> — <strong>copy</strong> the file selected in the Project tree. The file itself, not its path: <strong>Copy path</strong> in the right-click menu is still what puts the text on the system clipboard</li>
-  <li><kbd>Ctrl</kbd> + <kbd>V</kbd> — <strong>paste</strong> it into the folder or package you are on (beside the file you are on). A Java copy has its <code>package</code> rewritten to where it lands, its type renamed with the file, and the neighbours it can no longer see by simple name turned into imports</li>
-  <li><kbd>Delete</kbd> — <strong>delete</strong> the selected file, recorded in Local History first so it can be brought back</li>
-</ul>
+<table>
+  <thead><tr><th>Shortcut</th><th>In the Project tree</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>F2</kbd></td><td><strong>Rename</strong> the file — on Rust also its <code>mod</code> declaration and <code>use</code> paths, with the count shown first</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td><strong>Copy</strong> the file itself — <em>Copy path</em> in the menu copies the text</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>V</kbd></td><td><strong>Paste</strong> it into the folder or package you are on — a Java copy gets its package, type and imports rewritten</td></tr>
+    <tr><td><kbd>Del</kbd> / <kbd>⌫</kbd></td><td><strong>Delete</strong> the focused file or folder — it asks first, and keeps it in local history</td></tr>
+    <tr><td><kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>Z</kbd></td><td><strong>Undo the last delete</strong> — with the tree focused; in the editor it undoes typing</td></tr>
+  </tbody>
+</table>
 
-<h2>Build &amp; run</h2>
-<ul>
-  <li><kbd>Ctrl</kbd> + <kbd>F9</kbd> — <strong>build</strong> the project — runs the type chosen on the Build split-button: a Maven compile (<code>javac</code> fallback), or a whole-project <strong>validation without compiling</strong>. In a Cargo project it runs <code>cargo check</code> over the workspace</li>
-  <li><kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run</strong> the active configuration. A JVM one builds first, then launches; a Cargo one is a cargo subcommand, which is its own build</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> — <strong>run what is in front of you</strong>: the test at the caret in a Java or Rust test file, or a hot-swap deploy of the current JSP</li>
-</ul>
-
-<h2>Debug</h2>
-<ul>
-  <li><kbd>Shift</kbd> + <kbd>F9</kbd> — <strong>debug</strong> the active configuration (the same launch as ▶, with a debugger attached)</li>
-  <li><kbd>Ctrl</kbd> + <kbd>F8</kbd> — set or clear a <strong>breakpoint</strong> on the caret's line</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F8</kbd> — the <strong>breakpoint list</strong>: disable, remove, or add an exception breakpoint</li>
-  <li><kbd>F9</kbd> — <strong>resume</strong> the stopped program</li>
-  <li><kbd>F8</kbd> — <strong>step over</strong></li>
-  <li><kbd>F7</kbd> — <strong>step into</strong></li>
-  <li><kbd>Shift</kbd> + <kbd>F8</kbd> — <strong>step out</strong></li>
-</ul>
+<h2>Build, run &amp; debug</h2>
+<table>
+  <thead><tr><th>Shortcut</th><th>Does</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>F9</kbd></td><td><strong>Build</strong> — the type chosen on the Build split button: a Maven compile, or a validation without compiling; <code>cargo check</code> on Cargo</td></tr>
+    <tr><td><kbd>Shift</kbd> + <kbd>F10</kbd></td><td><strong>Run</strong> the active configuration — a JVM one builds first; a Cargo one is its own build</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd></td><td><strong>Run what is in front of you</strong> — the test at the caret, or a hot-swap deploy of the current JSP</td></tr>
+    <tr><td><kbd>Shift</kbd> + <kbd>F9</kbd></td><td><strong>Debug</strong> the active configuration</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>F8</kbd></td><td>Set or clear a <strong>breakpoint</strong> on the caret's line</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F8</kbd></td><td>The <strong>breakpoint list</strong> — disable, remove, add an exception breakpoint</td></tr>
+    <tr><td><kbd>F9</kbd></td><td><strong>Resume</strong> the stopped program</td></tr>
+    <tr><td><kbd>F8</kbd> / <kbd>F7</kbd> / <kbd>Shift</kbd> + <kbd>F8</kbd></td><td>Step <strong>over</strong> / <strong>into</strong> / <strong>out</strong></td></tr>
+  </tbody>
+</table>
 <p>
-  <kbd>F9</kbd> is <em>build</em> with <kbd>Ctrl</kbd> and <em>resume</em> without it; they can
-  never collide, because resume only exists while the program is stopped. Breakpoints can also be
-  set by clicking the left margin, outside the line numbers, and right-clicking one offers to
-  disable rather than delete it. See <em>Building &amp; running</em>.
+  <kbd>F9</kbd> is <em>build</em> with <kbd>Ctrl</kbd> and <em>resume</em> without it, and they never collide: resume only exists while the program is stopped. The Build split button's choice —
+  <em>Maven build</em> or <em>Validate (no compile)</em> — is remembered and becomes what <kbd>Ctrl</kbd> + <kbd>F9</kbd> runs; see <strong>Building &amp; running</strong>.
 </p>
-<p>In a Maven project the <strong>Build</strong> button is a split-button: click it to run the current type, or open its chevron to pick <em>Maven build</em> or <em>Validate (no compile)</em> — the choice is remembered and becomes what <kbd>Ctrl</kbd> + <kbd>F9</kbd> runs. In a Cargo project there is one build and the button is plain. Validation checks every <code>.java</code> file with the editor's diagnostics, reports timing statistics (total, average, slowest file) in the Build tool window, and lists every problem it finds in the <strong>Problems</strong> panel, grouped by file. Only one build or validation runs at a time. Build output streams to the <strong>Build</strong> tool window; problems there are clickable and jump to the offending line. A launched program's own output goes to the <strong>Run</strong> console instead, where you can type back to it and stop it. What ▷ launches is the active run configuration (▷ menu → <em>Edit configurations…</em>); on a project with exactly one entry point there is nothing to configure — ▷ finds it. See <em>Building &amp; running</em>.</p>
 
 <h2>Tests</h2>
-<ul>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd> — run the <strong>test at the caret</strong>: the method or <code>fn</code> you are inside, or — with the caret above the first test — the whole class in Java and the file's cargo target in Rust</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F5</kbd> — run <strong>every test</strong>: the project under Maven, the whole workspace under cargo</li>
-  <li><kbd>Ctrl</kbd> + <kbd>F5</kbd> — <strong>rerun</strong> exactly what ran last</li>
-  <li>Command palette — <strong>Rerun failed tests</strong>, and <strong>Stop the test run</strong></li>
-</ul>
+<table>
+  <thead><tr><th>Shortcut</th><th>Runs</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F10</kbd></td><td>The <strong>test at the caret</strong> — above the first test, the Java class or the Rust file's target</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F5</kbd></td><td><strong>Every test</strong></td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>F5</kbd></td><td>Exactly what ran last</td></tr>
+    <tr><td>Command palette</td><td><strong>Rerun failed tests</strong>, <strong>Stop the test run</strong></td></tr>
+  </tbody>
+</table>
 <p>
-  Inside a test run the tree is driven from the keyboard: <kbd>↑</kbd> <kbd>↓</kbd> move,
-  <kbd>→</kbd> <kbd>←</kbd> expand and collapse a class, <kbd>Enter</kbd> jumps to the source and
-  <kbd>Ctrl</kbd> + <kbd>Enter</kbd> runs whatever the cursor is on. See
-  <em>Testing</em> for what the panel shows.
+  In a test run's tree: <kbd>↑</kbd> <kbd>↓</kbd> move, <kbd>→</kbd> <kbd>←</kbd> expand and collapse, <kbd>Enter</kbd> jumps to the source, <kbd>Ctrl</kbd> + <kbd>Enter</kbd> runs what the
+  cursor is on.
 </p>
 
 <h2>Frameworks</h2>
-<ul>
-  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>J</kbd> — the <strong>DTO Lab</strong> on the class at the caret: a JSON payload bound and validated by the project itself, and validation tests generated from the class's constraints. On any other file it toggles the panel. Inside the lab, <kbd>Ctrl</kbd> + <kbd>Enter</kbd> runs the payload, and in the preview it applies the tests</li>
-  <li><kbd>Alt</kbd> + <kbd>4</kbd> — <strong>Endpoints</strong> — every URL the application answers, request mappings and Struts actions in one list, each expanding into what it takes and what it returns</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd> — <strong>Spring beans</strong> — every bean the project declares</li>
-  <li><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd> — <strong>Bevy components</strong> — every component, resource, message, event and bundle, each expanding into the systems that read and write it</li>
-  <li>Command palette — <strong>Message bundles</strong> (every key with its text, how many places read it, and which locales are missing it), <strong>Spring configuration</strong> (every property key, and which <code>application*.yml</code> resolves first) and <strong>Spring bound properties</strong> (every <code>@ConfigurationProperties</code> field with the key it binds)</li>
-</ul>
-<p>
-  These appear only on a project that actually uses the framework <em>and</em> has something in the
-  list — a service with no routes of either kind gets no Endpoints button, shortcut or palette
-  entry, rather than a door onto an empty panel. Endpoints and Bevy components have a button in
-  the right activity bar, because both are lists you keep open while working; the others are
-  opened from the palette, so the rail doesn't grow a row per framework.
-</p>
+<table>
+  <thead><tr><th>Shortcut</th><th>Opens</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>J</kbd></td><td>The <strong>DTO Lab</strong> on the class at the caret, or toggles its panel elsewhere; inside, <kbd>Ctrl</kbd> + <kbd>Enter</kbd> runs the payload or applies the tests</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>4</kbd></td><td><strong>Endpoints</strong> — request mappings and Struts actions in one list</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></td><td><strong>Spring beans</strong></td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></td><td><strong>Bevy components</strong>, each expanding into the systems reading and writing it</td></tr>
+    <tr><td>Command palette</td><td><strong>Message bundles</strong>, <strong>Spring configuration</strong>, <strong>Spring bound properties</strong></td></tr>
+  </tbody>
+</table>
+<Callout variant="info" title="Only where there is something to show">
+  A service with no routes gets no Endpoints button, shortcut or palette entry, rather than a door onto an empty panel. Endpoints and Bevy components have a rail button because you keep them open
+  while working; the rest open from the palette, so the rail does not grow a row per framework.
+</Callout>
 
 <h2>Window</h2>
-<ul>
-  <li><kbd>Ctrl</kbd> + <kbd>K</kbd> — command palette</li>
-  <li><kbd>Ctrl</kbd> + <kbd>O</kbd> — open project</li>
-  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd> — manage workspaces</li>
-  <li><kbd>Ctrl</kbd> + <kbd>,</kbd> — settings</li>
-  <li><kbd>F1</kbd> — documentation</li>
-</ul>
+<table>
+  <thead><tr><th>Shortcut</th><th>Does</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>K</kbd></td><td>Command palette</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td>Open project</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd></td><td>Manage workspaces</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>,</kbd></td><td>Settings</td></tr>
+    <tr><td><kbd>F1</kbd></td><td>Documentation</td></tr>
+  </tbody>
+</table>
 <p>
-  The palette also carries the plugin host: <strong>Plugin Manager</strong>,
-  <strong>Plugin Marketplace</strong>, <strong>Toggle Plugin Logs</strong> and
-  <strong>Reload plugins</strong> — which re-reads the plugin directories without restarting
-  Bennu, the loop you are in while writing one. Anything a loaded plugin registered with
-  <code>arbor.command.register</code> appears under <strong>Plugin Commands</strong>, and each
-  view a plugin contributes gets its own <strong>Open View: …</strong> entry.
+  The palette also carries the plugin host: <strong>Plugin Manager</strong>, <strong>Plugin Marketplace</strong>, <strong>Toggle Plugin Logs</strong> and <strong>Reload plugins</strong> — which
+  reads the plugin directories again without restarting Bennu, the loop you are in while writing one. What a plugin registers with <code>arbor.command.register</code> appears under
+  <strong>Plugin Commands</strong>, and each view a plugin contributes gets an <strong>Open View: …</strong> entry.
 </p>

@@ -56,6 +56,8 @@ export interface BennuConfig {
   markdown_live_preview: boolean;
   /** Show Local History's diff side by side rather than as a unified patch. */
   history_diff_split: boolean;
+  /** Minutes the DTO Lab's JVM may go without a question before it is stopped. */
+  dtolab_idle_minutes: number;
   /** Which SQL dialect `.sql` buffers are highlighted as — `'oracle'` / `'postgres'` /
    *  `'portable'` (default). Highlighting only: a `.sql` file in a Java project carries nothing
    *  that says which engine it targets, and the two disagree about string quoting. */
@@ -93,6 +95,18 @@ export interface BennuConfig {
   java_max_blank_lines: number;
   /** Java formatter: indent the statements under a `case` label one level in from it. */
   java_indent_case_body: boolean;
+  /** Java style — generated parameters and locals are `final`. */
+  java_final_params: boolean;
+  /** Java style — locals are Lombok's `val`, where the project has Lombok. */
+  java_lombok_val: boolean;
+  /** Java style — locals are `var`, where the project is on Java 10 or later. */
+  java_local_var: boolean;
+  /** Java style — a switch that yields a value is an arrow-style switch expression. */
+  java_switch_with_return: boolean;
+  /** Java style — a single-line generated body has a space inside its braces. */
+  java_space_in_braces: boolean;
+  /** Java style — generated members are separated by a blank line. */
+  java_blank_line_between_members: boolean;
   /** Max worker threads the whole-project validation sweep may use. `0` = auto (leaves ~half the
    *  cores free for the UI / go-to); set a small number (e.g. `1`) so a big project's validation
    *  can't peg every core and freeze the editor. Doesn't affect the initial index build. */
@@ -110,6 +124,12 @@ export interface BennuConfig {
   /** Which dependencies contribute their Spring beans to the Library beans view. Empty by
    *  default, and empty means no jar is ever opened. */
   library_beans: LibraryBeansConfig;
+  /** Per project (absolute, forward-slashed root → file): the property file `${…}` placeholders
+   *  resolve against, pinned from the Spring panel. */
+  spring_property_files: Record<string, string>;
+  /** Per JSP (absolute, forward-slashed path → action qualified name): the Struts action a
+   *  view-only page is checked and navigated against, pinned from the JSP itself. */
+  jsp_action_bindings: Record<string, string>;
   /** Language servers — which may run, where their binaries are, and any the user added. */
   lsp: LspConfigDto;
   /** Cargo / crates.io — the Rust half of the only thing Bennu asks the network. */

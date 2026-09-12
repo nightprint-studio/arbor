@@ -87,6 +87,9 @@ import wgslIcon        from '@iconify-icons/vscode-icons/file-type-wgsl';
 import fontIcon        from '@iconify-icons/vscode-icons/file-type-font';
 import glslIcon        from '@iconify-icons/vscode-icons/file-type-glsl';
 import hlslIcon        from '@iconify-icons/vscode-icons/file-type-hlsl';
+// Jinja — the code templates Bennu generates from. By the last extension, so `Order.java.jinja`
+// wears the template's mark rather than Java's: it is edited as a template, and nothing compiles it.
+import jinjaIcon       from '@iconify-icons/vscode-icons/file-type-jinja';
 
 // ── Folder icons ─────────────────────────────────────────────────────────────
 import folderDefault       from '@iconify-icons/vscode-icons/default-folder';
@@ -313,6 +316,7 @@ const EXT_ICONS: Record<string, IconifyIcon> = {
   scss: scssIcon,
   sass: sassIcon,
   md: markdownIcon, mdx: mdxIcon, markdown: markdownIcon,
+  jinja: jinjaIcon, jinja2: jinjaIcon, j2: jinjaIcon,
   sh: shellIcon, bash: shellIcon, zsh: shellIcon, fish: shellIcon,
   ps1: powershellIcon, psm1: powershellIcon,
   // `.cmd` and `.bat` are the same file with two names — the extension only decides which

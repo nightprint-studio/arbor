@@ -1,0 +1,48 @@
+{# bennu.description: A static builder for the class's fields, added inside the class -#}
+{# bennu.output: members -#}
+{#-
+  A template generated from the class at the caret.
+
+    class        name, package, fqn, record, annotations, annotation_names, superclass,
+                 interfaces, imports, id_type, fields
+    field        name, type_name, type_simple, final, id, setter, setter_chains, getter, wither,
+                 json_name, annotations, annotation_names, constraints
+    file, directory, date, year
+
+  Where the result goes is a directive on a comment line of its own: bennu.output members adds it
+  inside the class (the default), file writes a new file named by bennu.file — itself a template —
+  and text only shows it.
+-#}
+public static Builder builder() {
+    return new Builder();
+}
+
+public static final class Builder {
+{% for field in class.fields %}
+    private {{ field.type_name }} {{ field.name }};
+{% endfor %}
+
+    private Builder() {
+    }
+{% for field in class.fields %}
+
+    public Builder {{ field.name }}({{ field.type_name }} {{ field.name }}) {
+        this.{{ field.name }} = {{ field.name }};
+        return this;
+    }
+{% endfor %}
+
+    public {{ class.name }} build() {
+{% if class.record %}
+        return new {{ class.name }}({% for field in class.fields %}{{ field.name }}{% if not loop.last %}, {% endif %}{% endfor %});
+{% else %}
+        {{ class.name }} built = new {{ class.name }}();
+{% for field in class.fields %}
+{% if field.setter %}
+        built.{{ field.setter }}({{ field.name }});
+{% endif %}
+{% endfor %}
+        return built;
+{% endif %}
+    }
+}

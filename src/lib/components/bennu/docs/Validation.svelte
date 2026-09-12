@@ -1,357 +1,244 @@
-<!-- Bennu docs — the diagnostics Bennu produces itself, without a compiler. -->
+<script lang="ts">
+  /**
+   * Validation and problems: what Bennu checks while you type, what it keeps quiet about, turning checks down, naming
+   * conventions, validating a whole project, and the Problems panel.
+   */
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+  import { highlightCode } from '$lib/utils/highlight';
+</script>
+
+<span class="eyebrow">Editor</span>
 <h1>Validation &amp; problems</h1>
+
 <p class="doc-lead">
-  The squiggles that appear while you type, before anything is compiled — what each tier checks,
-  and what it deliberately stays quiet about.
+  The squiggles that appear while you type, before anything is compiled — what each check looks for, and what it deliberately stays quiet about.
 </p>
 
-<h2>Validation</h2>
+<h2>Checked as you type</h2>
 <p>
-  Java files are checked <strong>as you type</strong>, without compiling. Errors show as red
-  squiggles, warnings as yellow, and everything is also listed in the Problems panel. (Java, JSP and
-  config XML are the files an analyzer understands; a <code>.dig</code>, TOML or SQL buffer is
-  edited and highlighted but not checked. A language a <strong>server</strong> serves — Rust,
-  TypeScript, Svelte — is checked by that server instead, and its results land in the same Problems
-  panel.)
+  Java files are checked <strong>as you type</strong>, without compiling: errors are red squiggles, warnings yellow, and everything is listed in the
+  Problems panel.
 </p>
+<Callout variant="info" title="Which files are checked, and by whom">
+  Java, JSP and configuration XML are the files an analyzer understands; a <code>.dig</code>, TOML or SQL buffer is highlighted but not checked. A
+  language a <strong>server</strong> serves — Rust, TypeScript, Svelte — is checked by that server, and its results land in the same Problems panel.
+</Callout>
 <p>
-  <strong>Static imports are understood</strong>: a member you bring in with
-  <code>import static …</code> and use unqualified (<code>PI</code>, <code>max(a, b)</code>) resolves
-  to its type and isn't reported as an unknown symbol — while a name that <em>isn't</em> supplied by
-  any static import is still caught.
+  It is a best-effort check that complements <strong>Build</strong>, which runs the real compiler. The compiler's own errors appear in the buffer too,
+  marked <em>(build)</em> with what javac said — the symbol it could not find, the type it required against the one it found. They describe the file as
+  the compiler read it, so editing it clears them and live validation covers the file until the next build.
 </p>
-<ul>
-  <li><strong>Syntax errors</strong> — a malformed statement, a missing <code>;</code> or brace.</li>
-  <li><strong>Not a statement</strong> — an expression Java won't accept as a statement, e.g.
-    <code>list.clear;</code> (you forgot the call <code>()</code>) or <code>1 + 1;</code>.</li>
-  <li><strong>Unknown method or field</strong> — a call or field access that doesn't exist on the
-    receiver's type (found by inferring the receiver, so <code>s.lenght()</code> on a
-    <code>String</code> is caught).</li>
-  <li><strong>Wrong argument count</strong> — a method call or <code>new</code> whose number of
-    arguments matches no overload (varargs are understood).</li>
-  <li><strong>Wrong argument type</strong> — an argument that can't be passed to the parameter
-    (<code>foo(1)</code> where <code>foo</code> takes a <code>String</code>). Checked only when a
-    single overload is unambiguous, to avoid false positives.</li>
-  <li><strong>Unresolved import</strong> — an <code>import</code> of a type that doesn't exist (a
-    typo or a removed class). Needs the project classpath to be complete.</li>
-  <li><strong>Unresolved type</strong> — a type name that doesn't resolve to any class (a typo'd
-    class name in a declaration, <code>extends</code>, generics or <code>catch</code>).
-    <strong>An annotation counts</strong>: <code>&#64;SpringBootApplication</code> with no import
-    above it is the same "cannot find symbol", and it is the easiest one to leave behind, because
-    the code around an annotation still reads correctly without it.
-    <strong>A nested type written through its outer counts too</strong> —
-    <code>Cfg.MyProva</code> where <code>Cfg</code> declares no <code>MyProva</code>. The whole
-    thing is one name in the parse, and a name written with dots in it used to be left alone
-    wholesale: right for <code>com.acme.Foo</code>, where the segments are packages, and wrong for
-    the ordinary way of naming a nested class from outside. It is judged only when the qualifier
-    resolves to a type <em>this project declares</em>, so a package-qualified name and a library's
-    <code>Map.Entry</code> are still left exactly as written.
-    <kbd>Alt</kbd> + <kbd>Enter</kbd> on the name offers the import.</li>
-  <li><strong>Type incompatibility</strong> — an impossible cast (<code>(String) anInteger</code>),
-    and an assignment or <code>return</code> whose value isn't of the declared type — including
-    <code>String</code>/number mixups like <code>int x = "1";</code> or <code>int y = "1" + 1;</code>.
-    Reference types are compared only between concrete classes, so it never second-guesses interface
-    or generic code (boxing and widening are allowed). A <strong>fluent chain</strong> is checked
-    like anything else — <code>Optional.ofNullable(repo.kind()).orElse(null)</code> returned as an
-    <code>Integer</code> is caught — with one exception: a chain that is handed a <strong>lambda or
-    method reference</strong> takes its type from that function, which Bennu doesn't type, so it is
-    left to the compiler rather than guessed at.</li>
-  <li><strong>Missing / wrong return</strong> — a non-<code>void</code> method that can finish without
-    returning, a value returned from a <code>void</code> method or constructor, or a bare
-    <code>return;</code> where a value is required.</li>
-  <li><strong>Inheritance errors</strong> — extending a <code>final</code> class, a
-    <code>record</code>, an <code>enum</code> or an interface; implementing a non-interface; a
-    concrete class that leaves an inherited <code>abstract</code> method unimplemented.</li>
-  <li><strong>Constructors</strong> — two methods or two constructors with the same signature, and a
-    subclass constructor that must call <code>super(…)</code> because its superclass has no no-arg
-    constructor.</li>
-  <li><strong>Final</strong> — reassigning a <code>final</code> variable or field that already has an
-    initial value, and overriding a <code>final</code> method inherited from a superclass. A
-    <code>final</code> field left uninitialized (then assigned once, e.g. across <code>if</code>/<code>else</code>
-    branches) is allowed.</li>
-  <li><strong>Duplicate declarations</strong> — two fields, two method/constructor parameters, two
-    local variables in one block, or two types with the same name in one scope (in addition to two
-    methods/constructors with the same signature). Also a <strong>lambda parameter that shadows</strong>
-    a name already in scope where the lambda is written — an enclosing lambda's parameter, the
-    method's parameter, or a local declared before it. A field may be shadowed, and is not reported.</li>
-  <li><strong>Unreachable code</strong> — a statement that can never run because the line before it
-    always <code>return</code>s, <code>throw</code>s, <code>break</code>s or <code>continue</code>s.</li>
-  <li><strong>Switch</strong> — a <code>switch</code> on a type it doesn't accept
-    (<code>long</code>/<code>float</code>/<code>double</code>/<code>boolean</code>), and a
-    <code>switch</code> <em>expression</em> arm that doesn't <code>yield</code> a value.</li>
-  <li><strong>Case labels</strong> — a label that can't match the selector: a number or a string
-    where the selector is an <strong>enum</strong> (an enum label has to be the unqualified name of a
-    constant), a name that is no constant of that enum, and a literal of the wrong family on a
-    <code>String</code> or boxed-integer selector.</li>
-  <li><strong>Lambdas</strong> — a lambda whose parameter count doesn't match its target functional
-    interface (or a target that isn't a functional interface).</li>
-  <li><strong>Declaration &amp; modifier errors</strong> — an <code>abstract</code> method in a
-    concrete class, a <code>default</code> method outside an interface, illegal modifier
-    combinations, a <code>record</code> that can't be abstract or declares instance fields, an
-    <code>enum</code> constant that needs a constructor, and more.</li>
-  <li><strong>Misplaced annotations</strong> — e.g. <code>@Override</code> on a field.</li>
-  <li><strong>Lambda captures</strong> — modifying a captured local inside a lambda.</li>
-  <li><strong>File name &amp; package</strong> — a <code>public</code> class whose name doesn't match
-    the file, or a <code>package</code> that doesn't match the file's folder. Two
-    <kbd>Alt</kbd>+<kbd>Enter</kbd> fixes are offered: <em>set the package</em> to match the folder,
-    or <em>move the file</em> into the folder matching its declared package. The special
-    <code>package-info.java</code> and <code>module-info.java</code> files are held to their
-    restricted shape.</li>
-  <li><strong>Java version</strong> — a feature newer than the project's target level (records,
-    sealed types, <code>var</code>, text blocks, switch arrows, lambdas, …). What
-    <code>switch</code> accepts widened across releases, and each widening is caught where it is
-    written: a <code>String</code> selector needs Java 7, <code>yield</code> needs 14, and type
-    patterns, <code>when</code> guards and <code>case null</code> need 21. A <code>var</code>
-    back-ported by Lombok (imported from <code>lombok</code>) is allowed below Java 10.</li>
-  <li><strong>Imports</strong> — unused or duplicate imports, and a redundant wildcard import
-    (<code>import java.lang.*;</code> or a wildcard on the file's own package, both already in scope).</li>
-  <li><strong>Generics (syntax)</strong> — generic array creation (<code>new List&lt;String&gt;[]</code>),
-    instantiating a type parameter (<code>new T()</code>), generics in an <code>instanceof</code>
-    (<code>x instanceof List&lt;String&gt;</code>) or a <code>catch</code> type, and <code>this</code>/<code>super</code>
-    used in a <code>static</code> context.</li>
-  <li><strong>Type-argument count</strong> — a generic type given the wrong number of type arguments
-    (<code>List&lt;String, Integer&gt;</code>, <code>Map&lt;String&gt;</code>), checked against the type's
-    declared parameters. The diamond <code>&lt;&gt;</code>, wildcards and raw types are always fine.</li>
-  <li><strong>Erasure clash</strong> — two overloads that look distinct but collide after generic
-    type erasure (<code>f(List&lt;String&gt;)</code> and <code>f(List&lt;Integer&gt;)</code>).</li>
-  <li><strong>Duplicate interface</strong> — the same interface listed twice in an
-    <code>implements</code>/<code>extends</code> clause, or once with two different type arguments.</li>
-  <li><strong>Cyclic inheritance</strong> — a type that transitively extends or implements itself.</li>
-  <li><strong>@Override overrides nothing</strong> — a method marked <code>@Override</code> whose name
-    exists nowhere in its (fully known) supertype hierarchy — usually a signature typo.</li>
-  <li><strong>super.method()</strong> — a <code>super.foo()</code> call whose method doesn't exist
-    anywhere in the superclass hierarchy.</li>
-  <li><strong>Exception handling</strong> — an unreachable <code>catch</code> (a type already caught
-    by a clause above), a multi-<code>catch</code> that lists a type together with its supertype, and
-    a try-with-resources whose resource type isn't <code>AutoCloseable</code>.</li>
-  <li><strong>Enum switch exhaustiveness</strong> — a <code>switch</code> <em>expression</em> over an
-    enum that doesn't cover every constant and has no <code>default</code> (it names the missing ones).</li>
-  <li><strong>Constructor lookalike</strong> — a method named exactly like its class (a constructor
-    written with a return type by mistake, which Java silently treats as an ordinary method).</li>
-  <li><strong>Warnings</strong> — assigning a variable to itself, a constant division or modulo by
-    zero, comparing strings with <code>==</code> (reference, not contents), <code>switch</code>
-    fall-through (a colon-style <code>case</code> without <code>break</code>), a
-    <code>return</code>/<code>break</code>/<code>continue</code> inside <code>finally</code> (it
-    discards a pending exception or result), and a stray empty statement (<code>;</code>).</li>
+
+<h2>The checks</h2>
+<h3>What the compiler would refuse</h3>
+<ul class="prop-list">
+  <li><strong>Syntax errors</strong>a malformed statement, a missing <code>;</code> or brace</li>
+  <li><strong>Not a statement</strong><code>list.clear;</code> — the call's <code>()</code> forgotten — or <code>1 + 1;</code></li>
+  <li><strong>Unknown method or field</strong>on the receiver's inferred type, so <code>s.lenght()</code> on a <code>String</code> is caught</li>
+  <li><strong>Wrong argument count</strong>a call or <code>new</code> matching no overload; varargs understood</li>
+  <li><strong>Wrong argument type</strong><code>foo(1)</code> where <code>foo</code> takes a <code>String</code> — only when a single overload is unambiguous</li>
+  <li><strong>Unresolved import</strong>a type that does not exist; needs the classpath complete</li>
+  <li><strong>Unresolved type</strong>in a declaration, <code>extends</code>, generics or <code>catch</code> — an annotation counts, and so does a nested type through its outer (below)</li>
+  <li><strong>Type incompatibility</strong>an impossible cast, or a value of the wrong type assigned or returned — <code>int x = "1";</code>, <code>int y = "1" + 1;</code></li>
+  <li><strong>Missing or wrong return</strong>a non-<code>void</code> method that can finish without returning, a value from a <code>void</code> method, a bare <code>return;</code> where a value is needed</li>
+  <li><strong>Inheritance</strong>extending a <code>final</code> class, a record, an enum or an interface; implementing a non-interface; leaving an inherited <code>abstract</code> method unimplemented</li>
+  <li><strong>Constructors</strong>two with one signature, and a subclass constructor that must call <code>super(…)</code> because the superclass has no no-arg one</li>
+  <li><strong>Final</strong>reassigning a <code>final</code> that already has a value, or overriding a <code>final</code> method; a <code>final</code> field assigned once across <code>if</code>/<code>else</code> is fine</li>
+  <li><strong>Duplicates</strong>two fields, parameters, locals in a block or types in a scope with one name — and a lambda parameter shadowing a name in scope (a field may be shadowed)</li>
+  <li><strong>Unreachable code</strong>after a line that always returns, throws, breaks or continues</li>
+  <li><strong>Switch</strong>on <code>long</code>, <code>float</code>, <code>double</code> or <code>boolean</code>, and a switch <em>expression</em> arm that yields nothing</li>
+  <li><strong>Case labels</strong>a number or string for an enum selector, a name that is no constant of that enum, a literal of the wrong family on a <code>String</code> or boxed-integer selector</li>
+  <li><strong>Lambdas</strong>a parameter count not matching the functional interface, or a target that is not one; modifying a captured local inside</li>
+  <li><strong>Declarations and modifiers</strong>an <code>abstract</code> method in a concrete class, <code>default</code> outside an interface, illegal combinations, an abstract record or one with instance fields, an enum constant needing a constructor</li>
+  <li><strong>Misplaced annotations</strong><code>@Override</code> on a field</li>
+  <li><strong>File name and package</strong>a <code>public</code> class not matching its file, or a <code>package</code> not matching its folder — with <kbd>Alt</kbd> + <kbd>Enter</kbd> to set the package or move the file; <code>package-info.java</code> and <code>module-info.java</code> held to their shapes</li>
+  <li><strong>Java version</strong>a feature newer than the target level — records, sealed types, <code>var</code>, text blocks, switch arrows, lambdas; a <code>String</code> selector needs 7, <code>yield</code> 14, type patterns, <code>when</code> guards and <code>case null</code> 21; a Lombok <code>var</code> is allowed below 10</li>
+  <li><strong>Generics</strong><code>new List&lt;String&gt;[]</code>, <code>new T()</code>, generics in <code>instanceof</code> or <code>catch</code>, <code>this</code>/<code>super</code> in a static context</li>
+  <li><strong>Type arguments</strong>the wrong count — <code>List&lt;String, Integer&gt;</code>, <code>Map&lt;String&gt;</code>; the diamond, wildcards and raw types are fine</li>
+  <li><strong>Erasure clash</strong><code>f(List&lt;String&gt;)</code> beside <code>f(List&lt;Integer&gt;)</code></li>
+  <li><strong>Duplicate interface</strong>listed twice, or twice with different type arguments</li>
+  <li><strong>Cyclic inheritance</strong>a type that extends or implements itself, transitively</li>
+  <li><strong><code>@Override</code> overriding nothing</strong>a name found nowhere in a fully known hierarchy — usually a signature typo</li>
+  <li><strong><code>super.method()</code></strong>calling a method no superclass has</li>
+  <li><strong>Exceptions</strong>an unreachable <code>catch</code>, a multi-catch listing a type with its supertype, a try-with-resources resource that is not <code>AutoCloseable</code></li>
+  <li><strong>Enum switch exhaustiveness</strong>a switch expression over an enum missing constants and a <code>default</code> — naming the missing ones</li>
 </ul>
-<p>
-  The resolver-backed checks (unknown members, argument count, unresolved types, type
-  compatibility, inheritance and lambda targets) lean on the standard library and dependencies, so
-  they run once a JDK is available and stay silent about anything they can't resolve with certainty —
-  they never report a false error.
-</p>
-<p>
-  It's a best-effort check, so it complements <strong>Build</strong> (which runs the real compiler)
-  rather than replacing it — more type checks arrive as the semantic engine grows.
-</p>
-<p>
-  The compiler's own errors appear in the buffer too, marked <em>(build)</em> and carrying whatever
-  javac said about them — the symbol it could not find, the type it required against the one it
-  found. They describe the file as the compiler read it, so editing it clears them and live
-  validation covers the file until the next build.
-</p>
 
-<h2>While a member doesn't parse</h2>
+<h3>Warnings</h3>
+<ul class="prop-list">
+  <li><strong>Imports</strong>unused or duplicate, and a redundant wildcard — <code>import java.lang.*;</code>, or one on the file's own package</li>
+  <li><strong>Constructor lookalike</strong>a method named like its class — a constructor written with a return type, which Java silently treats as a method</li>
+  <li><strong>Suspicious code</strong>a variable assigned to itself, a constant division or modulo by zero, strings compared with <code>==</code>, switch fall-through, a <code>return</code>/<code>break</code>/<code>continue</code> in <code>finally</code>, a stray <code>;</code></li>
+</ul>
+
+<h3>Details worth knowing</h3>
+<dl class="meta-grid">
+  <dt>Static imports</dt>
+  <dd>A member brought in with <code>import static</code> and used unqualified — <code>PI</code>, <code>max(a, b)</code> — resolves to its type; a name no static import supplies is still caught.</dd>
+  <dt>An annotation's import</dt>
+  <dd><code>@SpringBootApplication</code> with no import is the same "cannot find symbol" — the easiest to leave behind, since the code around it still reads correctly.</dd>
+  <dt>A nested type through its outer</dt>
+  <dd><code>Cfg.MyProva</code> where <code>Cfg</code> declares no <code>MyProva</code> is caught, judged only when the qualifier is a type <em>this project declares</em> — so <code>com.acme.Foo</code> and a library's <code>Map.Entry</code> are left as written. <kbd>Alt</kbd> + <kbd>Enter</kbd> offers the import.</dd>
+  <dt>Types</dt>
+  <dd>Reference types are compared only between concrete classes, never second-guessing interface or generic code; boxing and widening are allowed. A <strong>fluent chain</strong> is checked — <code>Optional.ofNullable(repo.kind()).orElse(null)</code> returned as an <code>Integer</code> is caught — unless it is handed a lambda or method reference, whose type Bennu does not infer.</dd>
+</dl>
+<Callout variant="tip" title="Silent rather than wrong">
+  The checks that lean on the standard library and the dependencies — unknown members, argument counts, unresolved types, compatibility, inheritance, lambda
+  targets — run once a JDK is available and stay silent about anything they cannot resolve with certainty. They never report a false error.
+</Callout>
+
+<h2>While a member does not parse</h2>
 <p>
-  A file being typed usually has exactly one member that doesn't parse yet, and the rest of it is
-  checked normally. The error is charged to the <strong>member it landed in</strong> — the method,
-  the constructor, the field, the initialiser — and everything outside that member is validated as
-  if the file were whole, including the nested classes below it.
+  A file being typed usually has one member that does not parse yet, and the rest is checked normally. The error is charged to the <strong>member it landed
+  in</strong> — method, constructor, field, initialiser — and everything outside it is validated as if the file were whole, nested classes below included.
 </p>
 <p>
-  Inside that member you get the syntax error and nothing else. Recovery reads whatever it can as
-  code, so a diagnostic from in there would be about a nesting nobody wrote: a half-closed string
-  literal turns its own contents into a page of undefined symbols.
-</p>
-<p>
-  When no member can be blamed — an unbalanced brace at class level, which changes what every
-  member below it is nested in — the whole file falls back to its syntax error alone. There is
-  nothing smaller to give up.
+  Inside that member you get the syntax error and nothing else: recovery reads what it can as code, so a half-closed string literal would turn its own contents
+  into a page of undefined symbols. When no member can be blamed — an unbalanced brace at class level, changing what every member below is nested in — the
+  whole file falls back to its syntax error alone.
 </p>
 
 <h2>Data flow</h2>
-<p>
-  Three checks follow a <em>value</em> through a method rather than reading a declaration: a member
-  reached on a local that is definitely <code>null</code>, a null check whose answer is already
-  known, and a value assigned to a local and overwritten before anything reads it.
-</p>
-<p>
-  The model is deliberately narrow. It reads a method's statements in order and <strong>forgets
-  everything at the first branch</strong> — an <code>if</code>, a loop, a <code>try</code>, a
-  <code>switch</code> — and it tracks <strong>locals only</strong>, never fields, since another
-  method could change a field between two lines. So it misses more than it finds, and that is the
-  trade: a flow analysis that is wrong accuses working code of throwing, and leaves the reader no
-  way to see why except to reconstruct it in their head.
-</p>
+<p>Three checks follow a <em>value</em> through a method rather than reading a declaration:</p>
+<ul>
+  <li>a member reached on a local that is definitely <code>null</code>;</li>
+  <li>a null check whose answer is already known;</li>
+  <li>a value assigned to a local and overwritten before anything reads it.</li>
+</ul>
+<Callout variant="info" title="Deliberately narrow">
+  It reads a method's statements in order and <strong>forgets everything at the first branch</strong> — an <code>if</code>, a loop, a <code>try</code>, a
+  <code>switch</code> — and tracks <strong>locals only</strong>, since another method could change a field between two lines. It misses more than it finds, and
+  that is the trade: a wrong flow analysis accuses working code of throwing, with no way for the reader to see why.
+</Callout>
 
 <h2>Turning a check down</h2>
 <p>
-  Under Project Configuration → <strong>Inspections</strong>, every check has a severity you can set
-  to <strong>error</strong>, <strong>warning</strong>, <strong>weak</strong> or <strong>off</strong>.
-  That is a policy over <em>kinds</em> — the right shape for "this project does not care about unused
-  imports".
+  Under Project Configuration → <strong>Inspections</strong> every check has a severity — <strong>error</strong>, <strong>warning</strong>,
+  <strong>weak</strong> or <strong>off</strong>. That is a policy over <em>kinds</em>: "this project does not care about unused imports". For one place, the
+  source says so:
 </p>
+<pre><code>{@html highlightCode(`@SuppressWarnings("unused-import")
+class LegacyImporter { … }`, 'java')}</code></pre>
+<pre><code>{@html highlightCode(`import com.acme.Old;   // bennu:ignore unused-import`, 'java')}</code></pre>
 <p>
-  For one place rather than one kind, the source says so:
-  <code>&#64;SuppressWarnings("unused-import")</code> on the enclosing declaration, or a
-  <code>// bennu:ignore unused-import</code> comment on the offending line or the one above it. A
-  marker naming no code silences the line it governs. Javac's own vocabulary —
-  <code>unused</code>, <code>fallthrough</code>, <code>all</code> — is honoured where it overlaps, so
-  a legacy file that already carries it does not have to say the same thing twice.
+  The annotation covers the declaration it sits on; the comment covers its own line, or the line below it. A comment naming no code silences
+  everything on the line it covers. Javac's vocabulary — <code>unused</code>,
+  <code>fallthrough</code>, <code>all</code> — is honoured where it overlaps, so a legacy file already carrying it need not say it twice.
 </p>
 
 <h2>Naming conventions</h2>
 <p>
-  A project can declare how its declarations are spelled, and have every name that breaks it
-  flagged. It's <strong>off until you turn it on</strong>, per kind of declaration, under
-  <strong>Project Configuration → Naming conventions</strong> — nothing is assumed about a project
-  that never asked.
+  A project can declare how its declarations are spelled and have every name that breaks it flagged. It is <strong>off until you turn it on</strong>, per kind of
+  declaration, under <strong>Project Configuration → Naming conventions</strong> — nothing is assumed about a project that never asked.
+</p>
+<div class="feature-grid two-col">
+  <div class="feature-card">
+    <div class="fc-eyebrow">Bennu's own parser</div>
+    <div class="fc-title">Java</div>
+    <div class="fc-desc">Every declaration is seen, locals and parameters included.</div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-eyebrow">The language server's outline</div>
+    <div class="fc-title">TypeScript, JavaScript, Rust</div>
+    <div class="fc-desc">Types and their members only — locals and parameters are not in an outline, so those rows are greyed out. The server must be installed.</div>
+  </div>
+</div>
+<p>
+  Pick a convention for each kind — types, methods, fields, constants, parameters, locals, type parameters, enum constants, package segments — or leave it at
+  <code>any</code>, which checks nothing. <em>Use the standard convention</em> fills in what the community uses — for Java <code>PascalCase</code> types,
+  <code>camelCase</code> members, <code>UPPER_SNAKE_CASE</code> constants. The conventions are a fixed list, not patterns you write, and that is what makes the
+  fix possible: a pattern can refuse a name, a convention can <em>build</em> the right one. Code templates build names with the same conventions — see
+  <strong>Template reference</strong>.
 </p>
 <p>
-  It works for <strong>Java, TypeScript, JavaScript and Rust</strong>, with one difference worth
-  knowing. Java is read by Bennu's own parser, so it sees every declaration — locals and parameters
-  included. The others are read from the <strong>language server's outline</strong>, which lists
-  types and their members and nothing else: locals and parameters are simply not in it, and those
-  rows are greyed out for those languages rather than offered as rules that would never fire. Those
-  languages also need their server installed for the check to have anything to work from.
+  A violation is a <strong>weak warning</strong> — its own level, drawn faintly and grouped apart in Problems. A name breaking a house style is true, but it is not
+  a defect.
+</p>
+
+<h3>Fixing names</h3>
+<p>
+  <kbd>Alt</kbd> + <kbd>Enter</kbd> on a name offers <em>Rename to <code>theRightName</code></em>. A Java local or parameter is renamed straight away, since nothing
+  outside its file can refer to it. Anything a caller could use — a method, a field, a type, and everything in a server-read language — opens the rename preview
+  with the name filled in. A rename does not rewrite JSP, OGNL or reflection strings, which is exactly why those fixes ask first.
+</p>
+<p>For more than a couple, <em>Fix naming in file</em> and <em>Fix naming in project</em> in the command palette:</p>
+<ol class="step-list">
+  <li>The review opens at once and fills in as the plan is built, with progress — and a <strong>Stop</strong> that still hands you what it had.</li>
+  <li>Argue with it: <strong>group</strong> by file, by kind or not at all; switch a <strong>kind</strong> off wholesale, untick a <strong>group</strong> or a single
+    name; <strong>filter</strong> by name. The footer always counts what Apply will do — nothing out of sight is still applied — and the list is windowed, so thousands
+    of names scroll like a handful.</li>
+  <li>Apply. Nothing was written before, and the whole fix is a single Undo after.</li>
+</ol>
+<Callout variant="warning" title="What a bulk fix refuses">
+  Two names in a file becoming the same name; a spelling already used there — how a bulk fix turns compiling code into two members with one signature; a method
+  overriding something from a dependency, whose name a jar fixes; and a file whose bytes are not valid in the project's declared encoding, where the editor and the
+  index read it differently. Every refusal is listed with its reason.
+</Callout>
+<p>
+  Never reported: <strong>generated code</strong> — build output, <code>@Generated</code>, a "do not edit" banner — constructors (their type is reported instead),
+  <code>@Override</code> methods (the supertype's name), and platform names like <code>serialVersionUID</code>. Add your own path globs under <em>Never check</em>.
 </p>
 <p>
-  Pick a convention for each kind — types, methods, fields, constants, parameters, locals, type
-  parameters, enum constants, package segments — or leave it at <code>any</code>, which checks
-  nothing. <em>Use the standard convention</em> fills the column with what the language's community
-  uses (for Java: <code>PascalCase</code> types, <code>camelCase</code> members,
-  <code>UPPER_SNAKE_CASE</code> constants). The conventions are a fixed list rather than patterns
-  you write, and that's what makes the fix possible: a pattern can refuse a name, a convention can
-  <em>build</em> the right one.
+  A project rarely has one convention, so a subtree can have its own. Under <em>Exceptions</em>, name one, give it path globs, and set the conventions that apply
+  inside — <strong>only</strong> those are replaced. Test sources are the usual case: <code>test00_invalid_ragioneSociale</code> mixes camelCase and snake_case on
+  purpose, and an exception setting <em>method</em> to <code>any</code> under <code>**/src/test/**</code> stops reporting it while keeping the type and constant rules
+  that <em>Never check</em> would drop. When two exceptions claim a file, the later one wins.
+</p>
+
+<h2>Validating the whole project</h2>
+<p>
+  The checks normally run on the file you are editing. To run them over <strong>every</strong> <code>.java</code> file at once, in a Maven project:
+</p>
+<ol class="step-list">
+  <li>Open the chevron of the <strong>Build</strong> split button.</li>
+  <li>Pick <em>Validate (no compile)</em> — or make it the default, so <kbd>Ctrl</kbd> + <kbd>F9</kbd> runs it.</li>
+  <li>The Build window reports timing — total, average per file, the slowest file with a fast, normal or slow verdict — and every problem lands in
+    <strong>Problems</strong>, grouped by file.</li>
+</ol>
+<p>
+  <strong>Errors decide the verdict; warnings never do.</strong> A run with warnings only reads as <em>passed</em>, the counts coloured for what they are — red
+  errors, yellow warnings, grey when there are none. A build and a validation cannot run at the same time.
+</p>
+<dl class="meta-grid">
+  <dt>Cached</dt>
+  <dd>Each file's result is kept against the exact project types it depends on, so an unchanged project validates instantly again, and after an edit only the changed file — and whatever its types touched — is checked.</dd>
+  <dt>Warmed up</dt>
+  <dd>The cache fills in the background right after indexing, so the first validation is already instant. <strong>Settings → Java → Validate project on open</strong> turns that off.</dd>
+  <dt>A background citizen</dt>
+  <dd>At most about half the cores by default, so the editor stays responsive. <strong>Settings → Java → Validation CPU threads</strong> caps it (1 for single-threaded); its sibling <strong>Indexing CPU threads</strong> caps the index build and the reference walk, serial by default. <strong>Cancel</strong> on the "Validating…" status stops a sweep.</dd>
+</dl>
+
+<h2>The Problems panel</h2>
+<p>
+  A tree grouped <strong>by severity</strong> — <strong>Errors</strong> and <strong>Warnings</strong> at the top, then <strong>Weak warnings</strong> such as naming
+  and the informational levels — each split by source: a JDK node, an Encoding node, one node per file. A file with errors and warnings appears under both, with just
+  that severity's rows, and every node collapses.
+</p>
+<ul>
+  <li>It follows <strong>the file you are editing</strong> live: a fixed problem disappears, a new one appears, and that file's entry stays right after you switch away.</li>
+  <li>Once <em>Validate (no compile)</em> has run, <strong>saving</strong> refreshes the whole panel quietly — so a fix that resolves an error in a <em>different</em>
+    file clears there too.</li>
+</ul>
+<Callout variant="info" title="It is not a Java panel">
+  Whatever a <strong>language server</strong> reports lands here too — rust-analyzer's <code>cargo check</code>, TypeScript's, Svelte's, Angular's on a template —
+  including for files you have never opened, arriving as each check finishes, with nothing to run or arm.
+</Callout>
+<p>
+  <strong>Only this project's files.</strong> A server reports on the whole crate graph it built, which for a <code>path</code> dependency means files of another
+  repository; those are real and not yours to fix from here, so they are left out — open that project to see them. The same rule drops a registry checkout and, when
+  a session sits on an outer workspace, that workspace's other members.
 </p>
 <p>
-  A violation is a <strong>weak warning</strong> — its own level, below errors and warnings, drawn
-  faintly and grouped on its own in the Problems panel. A name that breaks a house style is true,
-  but it isn't a defect, and a project adopting a convention gets one finding per offending
-  declaration.
+  The sources are kept apart on purpose: a polyglot repository can have a Java half just validated and a Rust half being checked, and either replacing the other would
+  make a <code>cargo check</code> quietly erase a validation depending on which finished last.
 </p>
-<p>
-  <kbd>Alt</kbd> + <kbd>Enter</kbd> on the name offers <em>Rename to
-  <code>theRightName</code></em>. For a Java local variable or parameter it renames straight away —
-  those can't be referred to from outside their file, so the rename is exact. For anything a caller
-  could also be using — a method, a field, a type, and <em>everything</em> in a language read
-  through its server — it opens the rename preview with the name filled in, so you see every file it
-  touches before it happens. A rename doesn't rewrite names inside JSP, OGNL or reflection strings,
-  which is exactly why those fixes ask first.
-</p>
-<p>
-  For more than one or two, don't visit them: the Command Palette has <em>Fix naming in file</em>
-  and <em>Fix naming in project</em>. The review opens straight away and fills in as the plan is
-  built — with progress, and a <strong>Stop</strong> that still hands you what it had — then shows
-  what it would do, and lets you disagree with part of it. Nothing is written until you apply, and
-  the whole fix is a single Undo afterwards. A name is refused when two names in a file would
-  become the same name, or when the spelling it wants is already used there — renaming onto an
-  existing name is how a bulk fix turns compiling code into two members with one signature — when
-  the method overrides something declared in a dependency, whose name a jar fixes and we can't
-  change with it, or when the file's bytes aren't valid in the project's declared encoding, which
-  makes the editor and the index read it differently and every offset in it unreliable. Every
-  refusal is listed with its reason.
-</p>
-<p>
-  The review is meant to be argued with. <strong>Group</strong> the names by file — which for Java
-  is by class — or by kind of declaration, or not at all. Switch off a <strong>kind</strong>
-  wholesale to leave every local alone and rename only methods, untick a whole
-  <strong>group</strong>, or untick a single name. <strong>Filter</strong> by name to find the ones
-  you care about. The footer always counts what Apply will actually do, so anything you hide is
-  something that will not be renamed — there is no state where a name is out of sight and still
-  applied. The list is windowed, so a project-wide fix running to thousands of names opens and
-  scrolls at the same speed as a small one.
-</p>
-<p>
-  Some things are never reported: <strong>generated code</strong> (build output directories, and any
-  file carrying a <code>@Generated</code> annotation or a “do not edit” banner), constructors (the
-  name is the class's — the type is reported instead), <code>@Override</code> methods (the name
-  belongs to the supertype), and platform-mandated names like <code>serialVersionUID</code>. Add
-  your own exclusions as path globs under <em>Never check</em>.
-</p>
-<p>
-  A project rarely has one convention, so a subtree can have its own. Under <em>Exceptions</em>, name
-  one, give it path globs, and set the conventions that apply inside it — <strong>only</strong> the
-  ones you name are replaced, so the rest of the rules still hold there. Test sources are the usual
-  case: names like <code>test00_invalid_ragioneSociale</code> mix camelCase and snake_case on
-  purpose, and an exception that sets <em>method</em> to <code>any</code> under
-  <code>**/src/test/**</code> stops reporting them without giving up the type and constant rules the
-  way <em>Never check</em> would. When two exceptions claim the same file, the later one wins.
-</p>
-<p>
-  These checks normally run on the file you're editing, but you can run them over the <strong>whole
-  project</strong> at once: in a Maven project the <strong>Build</strong> button is a split-button —
-  open its chevron and
-  pick <em>Validate (no compile)</em> (or make it the default so <kbd>Ctrl</kbd> + <kbd>F9</kbd> runs
-  it). It validates every <code>.java</code> file without invoking a compiler and reports timing
-  statistics — total time, average per file and the slowest file (with a fast/normal/slow verdict) —
-  in the Build tool window, while every problem it finds appears in the <strong>Problems</strong>
-  panel grouped by file. A build and a validation can't run at the same time.
-</p>
-<p>
-  <strong>Errors decide the verdict; warnings never do.</strong> A run that ends with warnings only
-  reads as <em>passed</em>, and the counts are coloured for what they are — red errors, yellow
-  warnings, grey when there are none. Only a run with real errors is red.
-</p>
-<p>
-  Validation runs across CPU cores, and each file's result is cached against the exact project types
-  it depends on — so re-validating an unchanged project is instant, and after an edit only the
-  changed file (and anything whose types it touched) is re-checked. The cache is warmed up in the
-  background right after a project finishes indexing, so the first validation is already instant;
-  turn that off under <strong>Settings → Java → Validate project on open</strong> to skip the
-  background work. The sweep is a background citizen — it uses at most about half the CPU cores by
-  default (so the editor, go-to and completion stay responsive); cap it under
-  <strong>Settings → Java → Validation CPU threads</strong> (set 1 for single-threaded) — its sibling <strong>Indexing CPU threads</strong> caps the index build and the reference walk the same way, and is serial by default — and stop a
-  running sweep with the <strong>Cancel</strong> button on the “Validating…” status in the Build panel.
-</p>
-<p>
-  The <strong>Problems</strong> panel is a tree grouped <strong>by severity</strong> — an
-  <strong>Errors</strong> node and a <strong>Warnings</strong> node at the top, then
-  <strong>Weak warnings</strong> (style findings, such as a naming-convention violation) and the
-  informational levels below them — each split by source (a JDK node, an Encoding node, and one node
-  per file), so a file with both errors and warnings appears under both with just its rows of that
-  severity. Every node is collapsible. It updates live
-  for the file you're editing: as you fix a
-  problem it disappears, and a newly-introduced one shows up — no need to re-run the whole-project
-  validation to see the effect. That file's entry stays correct across the panel even after you
-  switch to another file. Once you've run <em>Validate (no compile)</em> once, <strong>saving</strong>
-  a file also silently refreshes the whole panel, so a fix that resolves an error in a
-  <em>different</em> file (one that used what you changed) clears there too — again without re-running
-  validation by hand.
-</p>
-<p>
-  <strong>It is not a Java panel.</strong> Whatever a <strong>language server</strong> reports lands
-  here too — rust-analyzer's <code>cargo check</code>, TypeScript's, Svelte's, Angular's on a
-  template — including for files you have never opened, which is most of what a check produces. It
-  arrives on its own: a server publishes as its check finishes, and the panel follows. Nothing has
-  to be run by hand and nothing has to be armed, because those are not a project-wide sweep somebody
-  opted into — they are what your build already says about your code.
-</p>
-<p>
-  <strong>Only this project's files.</strong> A server reports on the whole crate graph it built,
-  which for a <code>path</code> dependency means files in another repository — open geode and the
-  panel would fill with the engine's warnings. They are real and they are not yours to fix from a
-  window that does not have that project open, so they are left out. Open that project to see them;
-  that is what opening a project means. The same rule drops a registry checkout and, when a session
-  sits on an outer workspace, that workspace's other members.
-</p>
-<p>
-  The four sources are kept apart on purpose. A polyglot repository can have a Java half that was
-  validated and a Rust half that is being checked, and either replacing the other would mean a
-  <code>cargo check</code> quietly erasing a validation depending on which finished last.
-</p>
+
 <h3>Machine-generated expressions</h3>
 <p>
-  Everything that reasons about <em>types</em> — hover, the checks that compare one against another,
-  completion after a dot — works by walking the expression it is looking at. Nesting is what that walk
-  costs, and an expression's nesting is not bounded by what a person would write: a generated
-  concatenation of a few thousand pieces (<code>"a" + "b" + …</code>, an unrolled query builder, a
-  generated messages class) nests one level per piece.
+  Everything that reasons about <em>types</em> — hover, the checks comparing types, completion after a dot — walks the expression it looks at, and nesting is that
+  walk's cost. A generated concatenation of thousands of pieces, an unrolled query builder or a generated messages class nests one level per piece.
 </p>
-<p>
-  Past about <strong>128 levels</strong> Bennu stops descending and answers <em>unknown</em> for that
-  expression. In practice that means a hover over it says nothing and the type-dependent checks skip
-  it — <strong>only there</strong>, in that one expression. The syntax checks, the outline, find
-  usages and go-to are unaffected, and every other expression in the file types normally. Hand-written
-  code never reaches the limit; a long fluent chain is tens of levels, not hundreds.
-</p>
+<Callout variant="info" title="Past about 128 levels">
+  Bennu stops descending and answers <em>unknown</em> for that expression: its hover says nothing and the type checks skip it — <strong>only there</strong>. Syntax
+  checks, the outline, find usages and go-to are unaffected, and hand-written code never reaches the limit: a long fluent chain is tens of levels, not hundreds.
+</Callout>

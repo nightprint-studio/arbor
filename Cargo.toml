@@ -119,6 +119,8 @@ members = [
     "crates/products/bennu/jackson",
     # The DTO Lab's pure half: a class read as its constraints, the cases they imply, and tests
     # rendered from a user-owned template — plus the Java harness that checks them on the JVM.
+    # Code generated from templates the user owns: engine, store, the class model, and each kind's context.
+    "crates/products/bennu/templates",
     "crates/products/bennu/dtolab",
     # Bevy ECS, read from the source shape: the fourth framework extension, and the second that
     # is not Java's.

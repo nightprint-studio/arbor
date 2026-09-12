@@ -106,7 +106,7 @@
   <li><strong>Headings</strong> — <code>#</code> through <code>######</code>, sized down progressively, with a subtle bottom border on H1/H2</li>
   <li><strong>Bold / italic / strikethrough</strong> — the asterisks, underscores and tildes are hidden when off-line</li>
   <li><strong>Inline code</strong> — monospace pill with subtle background</li>
-  <li><strong>Fenced &amp; indented code blocks</strong> — full-line background, monospace, syntax-highlighted via Prism (same grammar set as DiffViewer / blame: JS/TS, Rust, Python, Go, Java, Kotlin, C/C++/C#, Swift, Lua, PowerShell, Bash, JSON/YAML/TOML, CSS/SCSS, HTML/XML, SQL, Docker, Svelte, XSD)</li>
+  <li><strong>Fenced &amp; indented code blocks</strong> — full-line background, monospace, syntax-highlighted via Prism (same grammar set as DiffViewer / blame: JS/TS, Rust, Python, Go, Java, Kotlin, C/C++/C#, Swift, Lua, PowerShell, Bash, JSON/YAML/TOML, CSS/SCSS, HTML/XML, SQL, Docker, Svelte, XSD, and Jinja templates over the language they write)</li>
   <li><strong>Blockquotes</strong> — left accent border, italicised muted text</li>
   <li><strong>Lists</strong> — unordered items show a real bullet glyph (the raw <code>-</code> / <code>*</code> / <code>+</code> appears only while the cursor sits on that line); ordered items keep their number, with tabular alignment for multi-digit numerators</li>
   <li><strong>Task lists</strong> — <code>[ ]</code> / <code>[x]</code> checkbox markers</li>

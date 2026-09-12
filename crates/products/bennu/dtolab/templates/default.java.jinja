@@ -1,3 +1,4 @@
+{# bennu.description: Plain Bean Validation tests, with the project's JUnit and AssertJ -#}
 {#-
   Bennu DTO Lab — the built-in test template: plain Bean Validation, with the project's own JUnit,
   and AssertJ when the project has it.
@@ -8,15 +9,17 @@
 
     mode             "file" renders a whole test class; "members" only what goes inside an existing
                      one, which has its own imports — so members spell types in full
-    valid            one value per field that satisfies its constraints
+    valid            one value per field that satisfies its constraints — `valid | arguments` is
+                     them as a constructor's arguments, `arguments(field.name, case.value_java)`
+                     the same with one of them changed
     fields           the constrained fields, each with `index` and its `cases`
     case.value       the invalid value as data (`kind`, and `length` / `value` / `size`)
     case.value_java  the same value, already spelled in Java
     case.expected    the violations the project's own validator reported for that value:
                      `path`, `template`, `message`, `constraint`, `attributes`, `constant`
 
-  A line reading `bennu.constants: com.example.Messages` anywhere in a template asks Bennu to find,
-  in those classes, the constant holding each expected template or message — as `expected.constant`.
+  A comment line of its own reading bennu.constants: com.example.Messages asks Bennu to find, in
+  those classes, the constant holding each expected template or message — as expected.constant.
 -#}
 {% set file = mode == "file" %}
 {% set pub = "public " if junit == 4 else "" %}
@@ -46,9 +49,9 @@ import static {{ assertions }}.{{ "assertThat" if assertj else "assertEquals" }}
 {% endif %}
     private static {{ class.name }} valid{{ class.name }}() {
 {% if class.record %}
-        return new {{ class.name }}({% for a in valid %}{{ a.value_java }}{% if not loop.last %}, {% endif %}{% endfor %});
+        return new {{ class.name }}({{ valid | arguments }});
 {% else %}
-        {{ class.name }} instance = new {{ class.name }}();
+        {{ style.local(class.name) }} instance = new {{ class.name }}();
 {% for a in valid %}
 {% if a.constrained and a.setter %}
         instance.{{ a.setter }}({{ a.value_java }});
@@ -78,9 +81,9 @@ import static {{ assertions }}.{{ "assertThat" if assertj else "assertEquals" }}
     {{ Test }}
     {{ pub }}void {{ field.name }}_{{ case.name }}() {
 {% if class.record %}
-        {{ class.name }} instance = new {{ class.name }}({% for a in valid %}{% if a.field == field.name %}{{ case.value_java }}{% else %}{{ a.value_java }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %});
+        {{ style.local(class.name) }} instance = new {{ class.name }}({{ valid | arguments(field.name, case.value_java) }});
 {% else %}
-        {{ class.name }} instance = valid{{ class.name }}();
+        {{ style.local(class.name) }} instance = valid{{ class.name }}();
 {% if field.setter %}
         instance.{{ field.setter }}({{ case.value_java }});
 {% else %}

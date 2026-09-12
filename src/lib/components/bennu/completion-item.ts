@@ -180,8 +180,14 @@ export function toCompletion(item: CompletionItem, boost: number, hooks: ItemHoo
   const insert = item.insert_text ?? item.label;
   const extras = item.edits ?? [];
   const stops = item.snippet_stops ?? [];
+  // A snippet is written as code at column 0 and lands wherever the caret is, so every line after the
+  // first needs the caret line's indentation — `insertWithStops` is what adds it, and a template with
+  // no tab stops at all needs it just as much as one with three. Anything else is inserted as it came:
+  // a generated member arrives already indented to the class it goes into, and indenting it twice is
+  // the same defect the other way round.
+  const reindents = !!item.snippet && insert.includes('\n');
   const needsCustomApply =
-    insert !== item.label || extras.length > 0 || stops.length > 0 || !!hooks.after;
+    insert !== item.label || extras.length > 0 || stops.length > 0 || reindents || !!hooks.after;
 
   if (needsCustomApply) {
     completion.apply = (view, _c, from, to) => {
@@ -189,7 +195,7 @@ export function toCompletion(item: CompletionItem, boost: number, hooks: ItemHoo
       // `insert_text` is plain text either way — the placeholder syntax is parsed away in the
       // backend and what is left of it is the stops, as byte ranges into it. So a snippet differs
       // from a plain completion only in what happens *after* the text lands.
-      if (stops.length > 0) {
+      if (stops.length > 0 || reindents) {
         insertWithStops(view, from, to, insert, stops, makeByteToU16(insert));
       } else {
         view.dispatch(insertCompletionText(view.state, insert, from, to));

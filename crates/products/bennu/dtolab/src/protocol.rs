@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
+use bennu_templates::prelude::{ClassModel, ConstraintModel, FieldModel};
 use serde::{Deserialize, Serialize};
 
 /// The harness's class name, which is also its file name.
@@ -42,7 +43,7 @@ pub fn decode_reply(line: &str) -> Option<(u64, serde_json::Value)> {
 }
 
 /// One constraint violation, as the project's validator reported it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Violation {
     /// The property path (`customerName`, `lines[0].quantity`).
     pub path: String,
@@ -99,9 +100,75 @@ pub fn violations_of(body: &serde_json::Value) -> Vec<Violation> {
         .unwrap_or_default()
 }
 
+/// Replace what the source said about a class's constraints with what the validator says.
+///
+/// The validator is the authority on both halves: a property it lists is constrained exactly as it
+/// lists it, and a field it does not list is not constrained at all — an annotation imported from the
+/// wrong package reads as a constraint in the source and is nothing at run time.
+pub fn apply_described(class: &mut ClassModel, described: &Described) {
+    for property in &described.properties {
+        let constraints: Vec<ConstraintModel> = property
+            .constraints
+            .iter()
+            .map(|c| ConstraintModel {
+                name: c.annotation.rsplit(['.', '$']).next().unwrap_or(&c.annotation).to_string(),
+                fqn: c.annotation.clone(),
+                attributes: c.attributes.clone(),
+                message: Some(c.template.clone()).filter(|t| !t.is_empty()),
+            })
+            .collect();
+        match class.fields.iter_mut().find(|f| f.name == property.name) {
+            Some(field) => field.constraints = constraints,
+            // A property the source reader did not see as a field — one declared only through a
+            // constrained getter.
+            None => class.fields.push(FieldModel {
+                name: property.name.clone(),
+                json_name: property.name.clone(),
+                type_name: property.type_name.clone(),
+                type_simple: property.type_name.clone(),
+                is_final: false,
+                id: false,
+                ignored: false,
+                setter: None,
+                setter_chains: false,
+                getter: None,
+                wither: None,
+                annotations: Vec::new(),
+                annotation_names: Vec::new(),
+                constraints,
+            }),
+        }
+    }
+    for field in &mut class.fields {
+        if !described.properties.iter().any(|p| p.name == field.name) {
+            field.constraints.clear();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn what_the_validator_describes_replaces_what_the_source_says() {
+        let source = "package p;\npublic class Order {\n  @NotBlank private String name;\n  private String note;\n}\n";
+        let mut order = bennu_templates::prelude::class_at(source, None).unwrap();
+        apply_described(&mut order, &Described {
+            properties: vec![DescribedProperty {
+                name: "note".into(),
+                type_name: "String".into(),
+                constraints: vec![DescribedConstraint {
+                    annotation: "com.example.validation.Reference".into(),
+                    attributes: BTreeMap::new(),
+                    template: "{reference.invalid}".into(),
+                }],
+            }],
+        });
+        let note = order.fields.iter().find(|f| f.name == "note").unwrap();
+        assert_eq!(note.constraints[0].name, "Reference");
+        assert!(order.fields.iter().filter(|f| f.name != "note").all(|f| f.constraints.is_empty()));
+    }
 
     /// A payload is free text: tabs and newlines in it must not split the request line.
     #[test]

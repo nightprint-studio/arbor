@@ -1,0 +1,14 @@
+{# bennu.description: The keys the class binds, as application.yml -#}
+{#-
+  Rendered with the class at the caret, when it is a @ConfigurationProperties class.
+
+    prefix, class_name, class_fqcn, date, year
+    properties   every key it binds: key, relative_key, segments, field, owner, type_name,
+                 type_simple, sample
+    lines        the same keys as YAML lines with the nesting worked out: indent, key, leaf,
+                 item (the first key of a list element), sample, type_name
+-#}
+{% for line in lines %}
+{{ line.indent }}{{ line.key }}:{% if line.leaf %} {{ line.sample }}{% endif %}
+
+{% endfor %}

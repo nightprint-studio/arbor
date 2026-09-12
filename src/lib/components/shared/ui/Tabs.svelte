@@ -322,7 +322,10 @@
       kind:     'item',
       id:       t.id,
       label:    t.label ?? t.id,
-      icon:     t.icon,
+      // A tab whose icon needs props of its own — a file-type glyph, a Java kind ring — cannot be
+      // drawn faithfully by a menu row, which renders `<Icon size={14} />` and nothing else. No
+      // icon beats the wrong one: rendered without them it comes out blank or generic.
+      icon:     t.iconProps ? undefined : t.icon,
       meta:     t.badge === undefined || t.badge === null || t.badge === '' ? undefined : String(t.badge),
       active:   t.id === value,
       disabled: t.disabled,

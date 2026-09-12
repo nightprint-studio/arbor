@@ -1160,6 +1160,10 @@ pub struct SnippetStop {
     pub start: usize,
     /// Byte offset where it ends.
     pub end: usize,
+    /// The placeholder number this stop was written as — `${1:name}` twice is two stops of group 1,
+    /// and an editor types into both at once. `0` is a stop that stands alone.
+    #[serde(default)]
+    pub group: u32,
 }
 
 /// One `key=value` environment-variable entry of a [`RunConfig`]. Serialized as a

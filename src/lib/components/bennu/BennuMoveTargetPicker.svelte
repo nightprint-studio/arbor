@@ -27,8 +27,7 @@
   import CommandPaletteShell, {
     type PaletteSection,
   } from '$lib/components/shared/ui/CommandPaletteShell.svelte';
-  import type { IconComponent } from '$lib/types/icon';
-  import { Box, Braces, Hexagon, Rows3, Command } from 'lucide-svelte';
+  import { typeKindIcon } from './type-kind-icons';
   import { fuzzyMatchPair } from '$lib/utils/fuzzy';
   import type { MoveTarget } from '$lib/ipc/bennu/refactor';
 
@@ -47,15 +46,8 @@
 
   let query = $state('');
 
-  // One glyph per type kind, the same four the project tree and the class index use.
-  const ICONS: Record<string, IconComponent> = {
-    class: Box,
-    interface: Braces,
-    enum: Hexagon,
-    record: Rows3,
-    annotation: Braces,
-  };
-  const iconResolver = (name: string): IconComponent => ICONS[name] ?? Command;
+  // One glyph per type kind, shared with every picker of types.
+  const iconResolver = typeKindIcon;
 
   /**
    * Ranked by the shared matcher, so this list orders the way go-to-file and the palette do.

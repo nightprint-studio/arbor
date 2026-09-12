@@ -93,6 +93,12 @@ describe('getFileIcon', () => {
     same('Dockerfile', 'Dockerfile.jvm');
   });
 
+  it('marks a Jinja template as a template, whatever language it writes', () => {
+    same('OrderTest.java.jinja', 'page.html.j2');
+    same('OrderTest.java.jinja', 'application.yml.jinja2');
+    different('OrderTest.java.jinja', 'OrderTest.java');
+  });
+
   it('falls back to one generic mark for anything it has no rule for', () => {
     same('notes.unknownextension', 'anything.else');
   });

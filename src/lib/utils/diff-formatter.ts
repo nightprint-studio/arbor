@@ -1,6 +1,7 @@
 import Prism from 'prismjs';
 import type { DiffFile } from '../types/corvus/git';
 import { CUSTOM_HIGHLIGHTERS } from './prism-languages';
+import { isJinjaFile, jinjaPrismLanguage } from './jinja-words';
 // Centralised Prism language registrations (also imported by `highlight.ts`
 // for the read-only code blocks in plugin forms / JSON Studio modal). Add
 // new grammars in `./prism-shared.ts` so both consumers see them.
@@ -60,6 +61,9 @@ const FILENAME_TO_LANG: Record<string, string> = {
 export function getLanguage(path: string): string {
   const filename = path.split('/').pop()?.toLowerCase() ?? '';
   if (FILENAME_TO_LANG[filename]) return FILENAME_TO_LANG[filename];
+  // A template is coloured as the language it writes, with its tags on top — the extension alone says `jinja`
+  // and nothing about the Java under the tags.
+  if (isJinjaFile(filename)) return jinjaPrismLanguage(filename);
   const ext = filename.split('.').pop() ?? '';
   return EXT_TO_LANG[ext] ?? 'plain';
 }

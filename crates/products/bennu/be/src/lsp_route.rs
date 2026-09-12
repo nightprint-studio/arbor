@@ -663,7 +663,7 @@ fn completion_wire(e: bennu_lsp::prelude::CompletionEntry) -> CompletionItem {
         snippet_stops: e
             .snippet_stops
             .into_iter()
-            .map(|t| SnippetStop { start: t.start, end: t.end })
+            .map(|t| SnippetStop { start: t.start, end: t.end, group: t.index })
             .collect(),
         sort_text: e.sort_text,
         filter_text: e.filter_text,

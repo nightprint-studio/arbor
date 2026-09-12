@@ -507,7 +507,7 @@ fn call_syntax(m: &Member) -> (Option<String>, Vec<SnippetStop>) {
         Vec::new()
     } else {
         let at = m.name.len() + 1;
-        vec![SnippetStop { start: at, end: at }]
+        vec![SnippetStop { start: at, end: at, group: 0 }]
     };
     (Some(insert), stops)
 }

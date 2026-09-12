@@ -1,136 +1,205 @@
-<!-- Bennu docs — what a project is, how it is resolved, and where its settings live. -->
+<script lang="ts">
+  /**
+   * Projects: what Bennu opens, what it reads from the manifest, workspaces, where its files live, and
+   * capabilities. Whether a project is Maven or Cargo decides most of what the rest of the manual applies to,
+   * so that comes first.
+   */
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
+<span class="eyebrow">Projects</span>
 <h1>Projects</h1>
+
 <p class="doc-lead">
-  A Bennu project is the folder holding a root manifest — a <strong>Maven</strong>
-  <code>pom.xml</code> or a <strong>Cargo</strong> <code>Cargo.toml</code>. Opening it resolves the
-  build model: the display name, the modules or workspace crates, and — for Maven — the JDK
-  language level and the domain frameworks the code relies on.
-</p>
-<p>
-  That model <strong>follows the manifest</strong>. Saving a <code>pom.xml</code> or a
-  <code>Cargo.toml</code> re-reads it, so renaming an <code>&lt;artifactId&gt;</code> renames the
-  project everywhere it is shown — the window title, the workspace switcher, the Canopy recents —
-  without closing anything. Only the model is re-read: the index is not rebuilt and no language
-  server is restarted.
+  A Bennu project is a folder holding a root manifest — a <strong>Maven</strong> <code>pom.xml</code> or a
+  <strong>Cargo</strong> <code>Cargo.toml</code>. Opening it reads the build model: what the project is called,
+  its modules or workspace crates, and — for Maven — the JDK language level and the frameworks the code relies on.
 </p>
 
+<h2>What opening a folder does</h2>
+<ol class="step-list">
+  <li>Bennu reads the root manifest: the display name, and the modules or the workspace crates.</li>
+  <li>On a Maven project it resolves the <strong>JDK language level</strong> and detects the
+    <strong>capabilities</strong> — the domain frameworks the code uses.</li>
+  <li>The footer says which kind of project is open: the JDK and the capability count for Maven, the toolchain
+    and the crate count for Cargo.</li>
+</ol>
+
+<h2>The model follows the manifest</h2>
+<p>
+  Saving a <code>pom.xml</code> or a <code>Cargo.toml</code> reads it again. Rename an
+  <code>&lt;artifactId&gt;</code> and the project is renamed everywhere it is shown — the window title, the
+  workspace switcher, the Canopy recents — without closing anything.
+</p>
+<Callout variant="info" title="Only the model is read again">
+  The index is not rebuilt and no language server is restarted.
+</Callout>
+
 <h2>Maven and Cargo</h2>
+<p>The two kinds of project get different tools, because different engines answer about them.</p>
+<div class="feature-grid two-col">
+  <div class="feature-card">
+    <div class="fc-eyebrow"><code>pom.xml</code></div>
+    <div class="fc-title">Maven — all of Bennu</div>
+    <div class="fc-desc">
+      The symbol index, completion, go-to declaration, find usages, rename, capability detection, JDK resolution,
+      validation, Generate, the Structure, Maven, Dependencies and Forms tool windows, and Tomcat hot-swap.
+    </div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-eyebrow"><code>Cargo.toml</code></div>
+    <div class="fc-title">Cargo — the editor and rust-analyzer</div>
+    <div class="fc-desc">
+      Everything <a href="#lsp"><strong>rust-analyzer</strong></a> supplies: completion, go-to declaration, find
+      usages, hover, rename, quick fixes, <code>rustfmt</code>, semantic colouring and the compiler's own diagnostics
+      on save.
+    </div>
+  </div>
+</div>
 <p>
-  <strong>Maven</strong> projects get the whole of Bennu: the symbol index, completion, go-to
-  declaration, find usages, rename, capability detection, JDK resolution, validation, Generate, the
-  Structure / Maven / Dependencies / Forms tool windows, and Tomcat hot-swap.
+  A Cargo project also gets the shared surface — the file tree, go-to file, find in files, TODOs, the terminal,
+  TOML highlighting — and <strong>Check project</strong>, which runs <code>cargo check</code> over the workspace and
+  puts its errors in the Problems panel like any other build.
 </p>
 <p>
-  <strong>Cargo</strong> projects get the editor plus everything
-  <a href="#lsp"><strong>rust-analyzer</strong></a> supplies: completion, go-to declaration, find
-  usages, hover, rename, quick fixes, <code>rustfmt</code>, semantic colouring, and the compiler's
-  own diagnostics on save. On top of that the shared surface — the file tree, go-to file, find in
-  files, TODOs, the terminal, TOML highlighting — and <strong>Check project</strong>
-  (<code>cargo check</code> over the workspace, whose errors land in the Problems panel like any
-  other build).
+  Its intelligence comes from the language server, so it depends on rust-analyzer being installed; the footer says
+  which server is serving the open file and whether it is ready. What stays hidden on a Cargo project is the
+  Java-specific machinery — the JDK footer, the capability count, the Structure, Maven, Dependencies and Forms tool
+  windows — so the window never shows a panel that could only ever be empty. <strong>Language servers</strong> has
+  the whole picture.
 </p>
-<p>
-  The intelligence comes from the language server, so it depends on rust-analyzer being installed;
-  the footer says which server is serving the open file and whether it is ready. What stays hidden
-  on a Cargo project is the Java-specific machinery — the JDK footer, the capability count, the
-  Structure / Maven / Dependencies / Forms tool windows — so the window never shows a panel that
-  can only ever be empty. See <strong>Language servers</strong> for the whole picture.
-</p>
-<p>
-  A folder holding <em>both</em> manifests opens as the Maven project: it is the model that has more
-  to say. The footer names which kind is open — the JDK and capability count for Maven, the
-  toolchain and crate count for Cargo.
-</p>
+<Callout variant="tip" title="A folder with both manifests">
+  It opens as the Maven project: that is the model with more to say.
+</Callout>
+
 <h2>Workspaces</h2>
 <p>
-  A <strong>workspace</strong> is a named, colored group of projects you can switch between as a
-  unit. Hold several projects in one workspace and keep several workspaces side by side — the same
-  project may belong to more than one. Each workspace remembers its own open tabs — and the line
-  each of them was on — so switching, or reopening Bennu tomorrow, puts you back where you left
-  off rather than at the top of every file.
+  A <strong>workspace</strong> is a named, coloured group of projects you switch between as a unit. One workspace
+  holds several projects, several workspaces sit side by side, and the same project may belong to more than one.
 </p>
 <p>
-  <strong>There is always one.</strong> A default workspace called <em>Scratch</em> exists from the
-  start, so a project has somewhere to land without you creating anything first, and deleting the
-  last workspace leaves it rather than leaving nothing. A workspace you create without naming takes
-  the name of the first project you add to it.
+  Each workspace remembers its open tabs — and the line each of them was on — so switching, or opening Bennu again
+  tomorrow, puts you back where you were rather than at the top of every file.
 </p>
+<Callout variant="info" title="There is always one">
+  A default workspace called <em>Scratch</em> exists from the start, so a project has somewhere to land without you
+  creating anything first; deleting the last workspace leaves it rather than leaving nothing. A workspace you create
+  without naming takes the name of the first project you add to it.
+</Callout>
+<dl class="meta-grid">
+  <dt>The switcher</dt>
+  <dd>
+    In the title bar, as a tree: every workspace is a row with its projects nested underneath. Click a
+    <strong>workspace</strong> to switch to it, or a <strong>project</strong> to jump straight into it — switching
+    workspace first if needed. <em>Add project…</em> adds one to the workspace you are in, whether or not it already
+    holds any. From the command palette, <strong>Switch project</strong> and <strong>Switch workspace</strong> do the
+    same from the keyboard.
+  </dd>
+  <dt>The workspace manager</dt>
+  <dd>
+    <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd>, or <em>Manage workspaces…</em> in the dropdown: create, rename,
+    recolour and delete workspaces, and add or remove their projects.
+  </dd>
+  <dt>Open project</dt>
+  <dd>
+    <kbd>Ctrl</kbd> + <kbd>O</kbd> resets the active workspace to a single project. The whole set is remembered and
+    opened again on the next launch — closing the window writes the last of it before it goes.
+  </dd>
+  <dt>Across its projects</dt>
+  <dd>
+    <strong>Find in project</strong> and <strong>Go to</strong> both have a toggle beside their field that reaches into
+    every project of the workspace at once, and a row from another project says which.
+  </dd>
+</dl>
 <p>
-  The <strong>switcher</strong> in the titlebar is a tree: every workspace is a row, its member
-  projects nested underneath. Click a <strong>workspace</strong> to switch to it, or a
-  <strong>project</strong> to jump straight into it (switching workspace first if needed). Every
-  project keeps its tabs, tree and index in memory, so switching — a project or a whole workspace —
-  never reopens anything. A file opened from a different project of the workspace stays in the
-  current tab strip, <strong>badged with its owning project</strong>. From the command palette,
-  <strong>Switch project</strong> and <strong>Switch workspace</strong> do the same from the
-  keyboard.
+  Every project keeps its tabs, tree and index in memory, so switching — a project or a whole workspace — never opens
+  anything again. A file opened from another project of the workspace stays in the current tab strip,
+  <strong>badged with the project it belongs to</strong>.
 </p>
-<p>
-  The <strong>workspace manager</strong> (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd>, or
-  <em>Manage workspaces…</em> in the dropdown) is where you create, rename, recolor and delete
-  workspaces and add or remove their member projects; <em>Add project…</em> in the switcher adds one
-  to the workspace you are in, whether or not it already holds any. <strong>Open project</strong>
-  (<kbd>Ctrl</kbd> + <kbd>O</kbd>) resets the active workspace to a single project; the whole set is
-  remembered and reopened on the next launch, and closing the window writes the last of it before it
-  goes. <strong>Find in project</strong> and <strong>Go
-  to</strong> both gain a toggle beside their field that reaches into every member project at
-  once, and a row from another one says which.
-</p>
+
 <h2>Which profile, and where it is kept</h2>
 <p>
-  A <strong>profile</strong> is an isolated Arbor environment — its own settings, plugins and, for
-  Bennu, its own workspaces. The gear menu's <strong>Profile</strong> submenu names the active one
-  and switches between them; <em>Manage profiles…</em> creates, clones, renames and deletes them.
-  Switching is live: the window reloads onto the new profile and Bennu's backend is restarted so it
-  reads and writes the new one's files rather than the old one's.
+  A <strong>profile</strong> is an isolated Arbor environment — its own settings, plugins and, for Bennu, its own
+  workspaces. The gear menu's <strong>Profile</strong> submenu names the active one and switches between them;
+  <em>Manage profiles…</em> creates, clones, renames and deletes them. Switching is live: the window reloads onto the
+  new profile, and Bennu's backend restarts so it reads and writes the new profile's files instead of the old one's.
 </p>
 <p>Bennu keeps two files, both inside the active profile:</p>
-<ul>
-  <li><code>bennu/config.toml</code> — the settings (editor toggles, JDK paths, language servers);</li>
-  <li><code>bennu/workspace.toml</code> — the workspaces, their projects and their open tabs.</li>
-</ul>
+<dl class="meta-grid">
+  <dt><code>bennu/config.toml</code></dt>
+  <dd>The settings — editor toggles, JDK paths, language servers.</dd>
+  <dt><code>bennu/workspace.toml</code></dt>
+  <dd>The workspaces, their projects and their open tabs.</dd>
+</dl>
+<table>
+  <thead><tr><th>System</th><th>The profile folder</th></tr></thead>
+  <tbody>
+    <tr><td>macOS</td><td><code>~/Library/Application Support/arbor/profiles/&lt;profile&gt;/</code></td></tr>
+    <tr><td>Windows</td><td><code>%APPDATA%\arbor\profiles\&lt;profile&gt;\</code></td></tr>
+    <tr><td>Linux</td><td><code>~/.config/arbor/profiles/&lt;profile&gt;/</code></td></tr>
+  </tbody>
+</table>
+<Callout variant="info" title="The heavy things are shared">
+  The symbol indices and the cached decompiled sources are deliberately <em>outside</em> the profile, under
+  <code>arbor/data/bennu/</code>, so an index built once serves every profile instead of being built again for each.
+</Callout>
 <p>
-  The profile folder lives under Arbor's config root:
-  <code>~/Library/Application Support/arbor/profiles/&lt;profile&gt;/</code> on macOS,
-  <code>%APPDATA%\arbor\profiles\&lt;profile&gt;\</code> on Windows,
-  <code>~/.config/arbor/profiles/&lt;profile&gt;/</code> on Linux. The heavy things Bennu builds —
-  the symbol indices and cached decompiled sources — are deliberately <em>outside</em> it, under
-  <code>arbor/data/bennu/</code>, so an index built once is shared by every profile instead of being
-  rebuilt per profile.
+  A development build runs on the <code>dev</code> profile by default and an installed one on <code>default</code>,
+  each remembering its own choice, so running from source never touches an installed Arbor's data.
 </p>
-<p>
-  A development build runs on the <code>dev</code> profile by default and an installed one on
-  <code>default</code>, each tracking its own selection, so running from source never touches an
-  installed Arbor's data.
-</p>
+
 <h2>Capabilities</h2>
 <p>
-  Bennu detects the domain frameworks a project uses and shows the count in the footer. Each
-  capability is backed by <strong>evidence</strong> at one of three tiers:
+  Bennu detects the domain frameworks a project uses and shows how many in the footer. Each capability rests on
+  <strong>evidence</strong>, at one of three tiers:
 </p>
-<ul>
-  <li><strong>Tier A</strong> — a dependency: a coordinate in any <code>pom.xml</code> of the
-    reactor, one the build resolves to transitively, or a crate in a <code>Cargo.toml</code>
-    (strongest).</li>
-  <li><strong>Tier B</strong> — a configuration file (e.g. a <code>struts.xml</code> or a TLD), in
-    any module.</li>
-  <li><strong>Tier C</strong> — a source pattern (corroborating; a C-only hit is provisional).</li>
-</ul>
+<table>
+  <thead><tr><th>Tier</th><th>Evidence</th><th>Weight</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>A</strong></td>
+      <td>A dependency: a coordinate in any <code>pom.xml</code> of the reactor, one the build resolves to transitively,
+        or a crate in a <code>Cargo.toml</code>.</td>
+      <td>The strongest</td>
+    </tr>
+    <tr>
+      <td><strong>B</strong></td>
+      <td>A configuration file — a <code>struts.xml</code>, a TLD — in any module.</td>
+      <td>Strong</td>
+    </tr>
+    <tr>
+      <td><strong>C</strong></td>
+      <td>A pattern in the source.</td>
+      <td>Corroborating; a capability with only this is provisional</td>
+    </tr>
+  </tbody>
+</table>
 <p>
-  The resolved dependency tree matters more than it sounds: an API is rarely what a pom declares.
-  <code>jakarta.validation-api</code> arrives through a Spring starter or a parent pom, so Bean
-  Validation is recognised from the tree once Maven has resolved it — and the tooling that depends
-  on it switches on then, without reopening the project.
+  The resolved dependency tree matters more than it sounds, because an API is rarely what a pom declares.
+  <code>jakarta.validation-api</code> arrives through a Spring starter or a parent pom, so Bean Validation is
+  recognised from the tree once Maven has resolved it — and the tooling that depends on it switches on then, without
+  opening the project again.
 </p>
 <p>
-  The detected set gates which features light up — for example, JSP taglib awareness only when a
-  taglib is actually in use. The demo project shows Struts (convention + XML), JSP taglibs, the
-  OGNL value stack, a JDBC DAO and Entando.
+  The detected set decides which features light up — JSP taglib awareness only when a taglib is actually in use, for
+  instance. The demo project shows Struts (convention and XML), JSP taglibs, the OGNL value stack, a JDBC DAO and
+  Entando.
 </p>
 <p>
-  Not every capability is Java's. A Cargo project is detected the same way, from the same evidence
-  in its own manifest: a <code>bevy</code> (or <code>bevy_*</code>) dependency turns on the
-  <strong>Bevy ECS</strong> tooling, and an <code>i18n/languages.toml</code> beside a
-  <code>.ron</code> tree turns on the <strong>i18n labels</strong> one — that second by layout
-  rather than by dependency, because it is useful on a project that only authors content.
+  <strong>Project Configuration</strong> — the title bar's gear, or the command palette — lists what was detected here
+  with the evidence for each, beside the rest of what belongs to this project: the JDK level it targets, its encoding,
+  its naming rules and its roots. Settings holds what belongs to you and to the machine instead, which is why the two
+  are different dialogs.
 </p>
+<div class="feature-grid two-col">
+  <div class="feature-card">
+    <div class="fc-eyebrow">A <code>bevy</code> or <code>bevy_*</code> dependency</div>
+    <div class="fc-title">Bevy ECS</div>
+    <div class="fc-desc">A Cargo project is detected the same way, from the same evidence in its own manifest.</div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-eyebrow"><code>i18n/languages.toml</code> beside a <code>.ron</code> tree</div>
+    <div class="fc-title">i18n labels</div>
+    <div class="fc-desc">Recognised by layout rather than by dependency, because it is useful on a project that only authors content.</div>
+  </div>
+</div>

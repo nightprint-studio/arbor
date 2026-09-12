@@ -125,6 +125,10 @@ pub struct BennuConfig {
     /// Here rather than on a settings page because its control is the toggle in that window —
     /// a view mode is chosen where it is seen, and remembered so it is chosen once.
     pub history_diff_split: bool,
+    /// How long the DTO Lab's JVM may go without a question before it is stopped, in minutes. `10`
+    /// by default. The JVM takes a second or two to start and holds a project's classes while it
+    /// runs, so this trades the wait for the first answer after a pause against memory held idle.
+    pub dtolab_idle_minutes: u32,
     /// Directory NAMES the Java indexer never walks into, on top of the ones it always skips
     /// (hidden directories, and `target/` except its generated sources). Names, not paths: the
     /// list is matched against each directory's own name at every depth.
@@ -213,6 +217,19 @@ pub struct BennuConfig {
     /// **Java formatter — `case` bodies**: indent the statements under a `case` label one level
     /// in from it. `true` by default, which is the Sun/Oracle convention and IntelliJ's.
     pub java_indent_case_body: bool,
+    /// **Java style** (Settings › Java Style): how generated code is written — and what a code template
+    /// reads as `style`. Generated parameters and locals are `final`.
+    pub java_final_params: bool,
+    /// Locals are Lombok's `val`, where the project has Lombok.
+    pub java_lombok_val: bool,
+    /// Locals are `var`, where the project is on Java 10 or later — Lombok's `val` winning where both apply.
+    pub java_local_var: bool,
+    /// A switch that yields a value is an arrow-style switch expression.
+    pub java_switch_with_return: bool,
+    /// A single-line generated body has a space inside its braces.
+    pub java_space_in_braces: bool,
+    /// Generated members are separated by a blank line.
+    pub java_blank_line_between_members: bool,
     /// **Validation CPU budget**: the maximum worker threads the whole-project validation sweep
     /// (the background warm-up + the explicit "Validate — no compile") may use. `0` = auto (leave
     /// roughly half the cores free for the UI / go-to / completion); set a small number (e.g. `1` for
@@ -563,6 +580,7 @@ impl Default for BennuConfig {
             maven_auto_download: true,
             markdown_live_preview: true,
             history_diff_split: true,
+            dtolab_idle_minutes: 10,
             // The names the settings page has always shown in this box. `target` and `.idea` are
             // already skipped by the walker's own rules; `build` (a Gradle output tree) is not,
             // and is the one that earns the default.
@@ -592,6 +610,12 @@ impl Default for BennuConfig {
             // exactly as it did before they existed.
             java_max_blank_lines: 1,
             java_indent_case_body: true,
+            java_final_params: false,
+            java_lombok_val: false,
+            java_local_var: false,
+            java_switch_with_return: true,
+            java_space_in_braces: false,
+            java_blank_line_between_members: true,
             validation_threads: 0,
             index_threads: 1,
             jdk_paths: Vec::new(),

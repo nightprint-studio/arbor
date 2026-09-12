@@ -1281,7 +1281,19 @@ function createProjectStore() {
      *  loaded — a tab restored from the workspace, or a foreign file, may not be cached yet — then
      *  persists. */
     async setActive(path: string) {
-      if (!openFilePaths.includes(path)) return;
+      // Canonical, like every other path the store keys by: a caller holding a native `\` path —
+      // the OS picker, the tree, a backend payload — was comparing it against forward-slashed keys
+      // and missing, and a miss here used to be a silent `return`, which from outside is a click
+      // that did nothing at all.
+      path = canonPath(path);
+      if (!openFilePaths.includes(path)) {
+        // Asked for a tab that is not in the list: open it. Somebody wanting to look at that file
+        // is what the request means, and refusing it without a word is the one outcome nobody can
+        // debug from the screen.
+        await openFileInternal(path);
+        persistWorkspace();
+        return;
+      }
       const leaving = activeFilePath;
       if (leaving && leaving !== path && autosaveEnabled() && dirty.has(leaving)) {
         await saveText(leaving, sources.get(leaving) ?? '');

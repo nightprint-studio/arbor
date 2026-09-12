@@ -7,7 +7,7 @@
 //! one class asks it one question per case. A JVM per question would make a class with thirty
 //! constraints a minute's wait; one per project for the whole session would hold a JVM's worth of
 //! memory for every project anybody once opened a DTO in. So a session lives until it has been idle
-//! for [`IDLE`], and a rebuilt project replaces the harness's class loader (a `classpath` request with
+//! for as long as the settings allow (ten minutes by default), and a rebuilt project replaces the harness's class loader (a `classpath` request with
 //! a new epoch) rather than the process.
 //!
 //! ## What a failure does to the session
@@ -30,8 +30,12 @@ use bennu_core::prelude::BennuState;
 use bennu_dtolab::prelude::{decode_reply, encode_request, HARNESS_CLASS, HARNESS_SOURCE};
 use serde_json::Value;
 
-/// How long a session waits for its next question before its JVM is stopped.
-const IDLE: Duration = Duration::from_secs(10 * 60);
+/// How long a session waits for its next question before its JVM is stopped — the user's setting,
+/// read at every sweep, so a change applies to the sessions already running.
+fn idle() -> Duration {
+    let minutes = bennu_core::config::load().dtolab_idle_minutes.clamp(1, 240);
+    Duration::from_secs(u64::from(minutes) * 60)
+}
 /// How long one answer may take.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -252,11 +256,14 @@ fn ensure_reaper() {
     });
 }
 
-/// Stop every session idle for longer than [`IDLE`]. A session answering right now is left alone.
+/// Stop every session idle for longer than the setting allows. A session answering right now is left
+/// alone.
 fn reap() {
+    // Read before taking the lock: it is a file read, and every other project waits on this map.
+    let limit = idle();
     let mut map = sessions().lock().unwrap_or_else(|p| p.into_inner());
     map.retain(|_, session| match session.try_lock() {
-        Ok(s) => s.last_used.elapsed() < IDLE,
+        Ok(s) => s.last_used.elapsed() < limit,
         Err(_) => true,
     });
 }

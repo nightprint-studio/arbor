@@ -62,6 +62,9 @@
   import Scheduled         from './docs/Scheduled.svelte';
   import JsonTypes         from './docs/JsonTypes.svelte';
   import DtoLab            from './docs/DtoLab.svelte';
+  import Templates         from './docs/Templates.svelte';
+  import TemplateLanguage  from './docs/TemplateLanguage.svelte';
+  import TemplateReference from './docs/TemplateReference.svelte';
   import I18n              from './docs/I18n.svelte';
   import XmlSchemas        from './docs/XmlSchemas.svelte';
   import Tomcat            from './docs/Tomcat.svelte';
@@ -108,6 +111,9 @@
       { id: 'goto',          label: 'Go to class, file, symbol', icon: Search    },
       { id: 'structure',     label: 'Structure & trees',       icon: ListTree    },
       { id: 'completion',    label: 'Completion',              icon: Sparkles    },
+      { id: 'templates',     label: 'Code templates',          icon: FileCode2   },
+      { id: 'template-language',  label: 'The template language', icon: Braces   },
+      { id: 'template-reference', label: 'Template reference',    icon: BookOpen },
       { id: 'refactoring',   label: 'Refactoring & intentions', icon: Wrench     },
       { id: 'validation',    label: 'Validation & problems',   icon: ShieldCheck },
       { id: 'local-history', label: 'Local history',           icon: History     },
@@ -190,6 +196,9 @@
     'scheduled':         Scheduled,
     'json-types':        JsonTypes,
     'dto-lab':           DtoLab,
+    'templates':         Templates,
+    'template-language': TemplateLanguage,
+    'template-reference': TemplateReference,
     'message-bundles':   MessageBundles,
     'i18n':              I18n,
     'xml-schemas':       XmlSchemas,

@@ -40,7 +40,8 @@ fn bennu_capabilities(_ctx: &BennuState, args: CapabilitiesArgs) -> Result<Capab
 /// own beans. Before the tree was read, Bean Validation was off on projects full of `@NotNull`.
 pub(crate) fn project_capabilities(root: &Path) -> CapabilitySet {
     let xml = std::fs::read_to_string(root.join("pom.xml")).unwrap_or_default();
-    let build = BuildEvidence::read(root, &parse_pom(&xml)).with_resolved(resolved_coordinates(root));
+    let coordinates = resolved_dependencies(root).into_iter().map(|(group, artifact, _)| format!("{group}:{artifact}"));
+    let build = BuildEvidence::read(root, &parse_pom(&xml)).with_resolved(coordinates);
     detect_capabilities_with(&build)
 }
 
@@ -50,7 +51,9 @@ pub(crate) fn project_capabilities(root: &Path) -> CapabilitySet {
 /// the on-disk cache declines to keep. The cache only for a root no project slot holds. Empty until
 /// Maven has resolved once — detection then answers from the poms, and is asked again when the tree
 /// lands (`FrameworkService::reevaluate_capabilities`).
-fn resolved_coordinates(root: &Path) -> Vec<String> {
+/// Every dependency on the resolved classpath as `(group, artifact, version)` — what the capabilities are
+/// recognised by, and what a code template reads as `project.dependencies`.
+pub(crate) fn resolved_dependencies(root: &Path) -> Vec<(String, String, String)> {
     let live = IndexService::global().dep_jars_of(&root.display().to_string());
     let jars: Vec<PathBuf> = match live.is_empty() {
         true => crate::dep_classpath::cached_dep_jars(root),
@@ -62,6 +65,6 @@ fn resolved_coordinates(root: &Path) -> Vec<String> {
     let repo = LocalRepo::discover();
     jars.iter()
         .filter_map(|jar| repo.coord_at(jar))
-        .map(|coord| format!("{}:{}", coord.group_id, coord.artifact_id))
+        .map(|coord| (coord.group_id, coord.artifact_id, coord.version))
         .collect()
 }

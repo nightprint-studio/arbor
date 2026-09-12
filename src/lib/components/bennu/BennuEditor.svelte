@@ -42,8 +42,14 @@
     isLspFile as isLspFileOf, isRustFile as isRustFileOf, isMarkdownFile,
     isRunnableScript, isHtmlFile, hasPushedDiagnostics, supportsCodeNav, supportsDiagnostics,
     isToolConfigFile,
+    isSpringConfigFile,
   } from './file-kind';
   import BennuHtmlPreview from './BennuHtmlPreview.svelte';
+  import BennuTemplatePreview from './templates/BennuTemplatePreview.svelte';
+  import { TEMPLATE_LINK_CLASS } from './templates/template-link.svelte';
+  import BennuBuiltinTemplateBanner from './templates/BennuBuiltinTemplateBanner.svelte';
+  import { isBuiltinTemplatePath } from './templates/template-paths';
+  import { isJinjaFile } from '$lib/utils/jinja-words';
   import BennuTableInsert from './BennuTableInsert.svelte';
   import BennuHtmlScriptsModal from './BennuHtmlScriptsModal.svelte';
   import ResizablePanel from '$lib/components/shared/ui/ResizablePanel.svelte';
@@ -480,6 +486,7 @@
   function onCaret(line: number, col: number) {
     caretLine = line; caretCol = col;
     bennuUiStore.setCaret(line, col);
+    templateCaret = { line, col };
 
     // Occurrence highlighting keys off this, through a `$state` rather than a direct call so the
     // effect owns the debounce and the cancellation in one place.
@@ -776,6 +783,26 @@
     if (!path) return;
     if (remember) bennuSettingsStore.setHtmlScriptsRemembered(path, true);
     else htmlScriptsOnce.add(path);
+  }
+
+  // ── Template preview ────────────────────────────────────────────────────────
+  //
+  // A Jinja template beside what it renders to, from the unsaved buffer. Per session and per file,
+  // like the HTML preview: it is where you are looking, not a setting.
+  const isJinjaTab = $derived(!!activePath && isJinjaFile(activePath));
+  /** A Spring configuration file: a `@ConfigurationProperties` class can be written from its keys. */
+  const isSpringConfigTab = $derived(isSpringConfigFile(activePath));
+  const templatePreviewOpen = new SvelteSet<string>();
+  const templatePreviewing = $derived(!!activePath && isJinjaTab && templatePreviewOpen.has(activePath));
+  /** The caret for the template preview's linked lines — a fresh object per move, so a click back on the line
+   *  the link already comes from still counts as the caret moving. */
+  let templateCaret = $state({ line: 1, col: 1 });
+  /** The template lines a selection in the preview was written by, lit here while the preview is open. */
+  let templateLinkLines = $state<number[]>([]);
+  function onTemplateSourceLines(lines: number[]) {
+    templateLinkLines = lines;
+    const first = lines[0];
+    if (first && editorComp && !editorComp.isLineVisible(first)) editorComp.revealLine(first);
   }
 
   /**
@@ -2408,6 +2435,10 @@
     if (canonFile(frame.file).toLowerCase() !== canonFile(activePath).toLowerCase()) return [];
     return [{ line: frame.line, className: 'cm-paused-line' }];
   });
+  const editorLineHighlights = $derived([
+    ...pausedLine,
+    ...(templatePreviewing ? templateLinkLines.map((line) => ({ line, className: TEMPLATE_LINK_CLASS })) : []),
+  ]);
 
   /** Map backend byte spans to the editor's UTF-16 offsets + a CSS class per kind. */
   function toSpringMarks(src: string, hs: ExtHighlight[]) {
@@ -2656,6 +2687,12 @@
   /** The editor's current selection text ('' when nothing selected) — used by the window to
    *  seed Find-in-project / Go-to navigator fields from what the user highlighted. */
   export function getSelectedText(): string { return editorComp?.getSelectionText() ?? ''; }
+  /** The selection as byte offsets, `null` when nothing is selected — for a command that works on the
+   *  lines you picked rather than on the caret. */
+  export function selectionBytes(): { start: number; end: number } | null {
+    const range = editorComp?.selectionByteRange();
+    return range && !range.empty ? { start: range.start, end: range.end } : null;
+  }
   /** The 1-based line the caret is on — what "run the test at the caret" resolves against. */
   export function getCaretLine(): number { return caretLine; }
 
@@ -3265,6 +3302,21 @@
     );
   }
 
+  /**
+   * Insert generated code **as a snippet**: re-indented where it lands, with its tab stops armed.
+   *
+   * The same path an accepted abbreviation takes, so generated members behave in the buffer exactly
+   * as a template typed inline does — Tab walks the holes, and two holes written with one number
+   * are filled together.
+   */
+  export function insertGeneratedSnippet(
+    offset: number,
+    text: string,
+    stops: readonly { start: number; end: number; group?: number }[],
+  ) {
+    editorComp?.insertSnippetAtByte(offset, offset, text, stops);
+  }
+
   // ── Rename (Shift+F6) — inline ────────────────────────────────────────────────
   // An IntelliJ-style in-place rename: a small field anchored at the caret, pre-filled
   // with the symbol, that only accepts Java-identifier characters. Enter applies the
@@ -3746,6 +3798,8 @@
    *  whether it's a read-only decompiled path (by the data-dir `/decompiled/` segment — robust for
    *  restored tabs too). */
   const decompiledCtx = $derived(decompiledStore.ctx(activePath));
+  /** A built-in code template, written out to be read: compiled into Bennu, so nothing typed here could be kept. */
+  const isBuiltinTemplate = $derived(isBuiltinTemplatePath(activePath));
   // A decompiled view lives in the data dir (never under a project root → always "foreign"); the
   // `isForeign` guard means a real project package literally named `decompiled` isn't made read-only.
   const isDecompiledView = $derived(
@@ -4146,7 +4200,18 @@
       ...envItems,
       { id: 's2', label: '', separator: true },
       ...(isJavaFile
-        ? [{ id: 'generate', label: 'Generate…', icon: Wand2, shortcut: 'Alt+Insert' } as MenuItem]
+        ? [
+            { id: 'generate', label: 'Generate…', icon: Wand2, shortcut: 'Alt+Insert' } as MenuItem,
+            { id: 'generate-template', label: 'Generate from a template…', icon: Wand2 } as MenuItem,
+          ]
+        : []),
+      // Offered on the class that has something to write out: the keys it binds.
+      ...(isJavaFile && activePath && projectStore.sourceOf(activePath).includes('@ConfigurationProperties')
+        ? [{ id: 'config-properties', label: 'Generate configuration properties…', icon: Wand2 } as MenuItem]
+        : []),
+      // And the other way round, on the file the keys are written in.
+      ...(isSpringConfigTab
+        ? [{ id: 'config-class', label: 'Generate @ConfigurationProperties class…', icon: Wand2 } as MenuItem]
         : []),
       // The class under the pointer, tried out — offered where the lab has something to try it with.
       ...(isJavaFile && (projectStore.capabilities?.bean_validation || projectStore.capabilities?.jackson)
@@ -4176,6 +4241,9 @@
         if (isJavaFile) bennuUiStore.openGenerate();
         else toastStore.show('Generate works on Java files', 'info');
         break;
+      case 'generate-template': bennuUiStore.openTemplateGenerate('class'); break;
+      case 'config-properties': bennuUiStore.openTemplateGenerate('config-properties'); break;
+      case 'config-class': bennuUiStore.openConfigClass(); break;
       case 'envvar': void showEnvVar(); break;
       case 'dtolab': bennuDtoLabStore.openAtCaret(); break;
       case 'save':
@@ -4438,6 +4506,33 @@
             {#if htmlPreviewing}<FileCode2 size={13} />{:else}<Eye size={13} />{/if}
           </IconButton>
         {/if}
+        {#if isSpringConfigTab}
+          <!-- The keys, as the class that binds them. On the file itself, because that is where the
+               question comes up — an entry in the right-click menu alone is one nobody finds. -->
+          <IconButton
+            tooltip="Write a @ConfigurationProperties class from these keys"
+            size={26}
+            onclick={() => bennuUiStore.openConfigClass()}
+          >
+            <Wand2 size={13} />
+          </IconButton>
+        {/if}
+        {#if isJinjaTab}
+          <!-- What the template writes, beside it. The same toggle as a page's preview: the source
+               stays where it is, and one press puts it back to the whole width. -->
+          <IconButton
+            tooltip={templatePreviewing ? 'Close the preview' : 'Preview what this template renders, beside it'}
+            size={26}
+            active={templatePreviewing}
+            onclick={() => {
+              if (!activePath) return;
+              if (templatePreviewing) templatePreviewOpen.delete(activePath);
+              else templatePreviewOpen.add(activePath);
+            }}
+          >
+            {#if templatePreviewing}<FileCode2 size={13} />{:else}<Eye size={13} />{/if}
+          </IconButton>
+        {/if}
         {#if markdownLive}
           <!-- Only in the live preview: in the source view a table is markdown you type, and a
                picker that inserted pipes into a code editor would be answering a question
@@ -4467,6 +4562,10 @@
       </div>
     </div>
     {/if}
+  {/if}
+
+  {#if isBuiltinTemplate && activePath}
+    <BennuBuiltinTemplateBanner path={activePath} />
   {/if}
 
   <!-- Decompiled dependency with no attached sources: offer a one-click "Download sources" fetch. -->
@@ -4514,7 +4613,7 @@
         docKey={mdDocKey}
         text={projectStore.sourceOf(activePath)}
         docPath={activePath}
-        readOnly={isDecompiledView}
+        readOnly={isDecompiledView || isBuiltinTemplate}
         autofocus={false}
         onChange={onMarkdownInput}
         onCaret={onMarkdownCaret}
@@ -4530,10 +4629,10 @@
           bind:this={editorComp}
           value={projectStore.sourceOf(activePath)}
           language={editorLanguage}
-          readOnly={isDecompiledView}
+          readOnly={isDecompiledView || isBuiltinTemplate}
           diagnostics={allDiags}
           marks={springMarks}
-          lineHighlights={pausedLine}
+          lineHighlights={editorLineHighlights}
           gutterMarks={allGutterMarks}
           onGutterClick={onGutterClick}
           onGutterContext={onGutterClick}
@@ -4584,6 +4683,17 @@
             onToggleScripts={toggleHtmlScripts}
             onClose={() => activePath && htmlPreviewOpen.delete(activePath)}
             onToggleFullscreen={() => (htmlFullscreen = true)}
+          />
+        </ResizablePanel>
+      {/if}
+      {#if templatePreviewing && activePath}
+        <ResizablePanel direction="horizontal" initialSize={520} minSize={260} maxSize={1400} reverse>
+          <BennuTemplatePreview
+            path={activePath}
+            text={projectStore.sourceOf(activePath)}
+            caret={templateCaret}
+            onSourceLines={onTemplateSourceLines}
+            onClose={() => activePath && templatePreviewOpen.delete(activePath)}
           />
         </ResizablePanel>
       {/if}

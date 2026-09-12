@@ -236,6 +236,15 @@ impl FrameworkService {
             .unwrap_or_default()
     }
 
+    /// Every `@ConfigurationProperties` binding in `root`, each with its full key — what a
+    /// configuration-properties template is rendered from. Empty without Spring.
+    pub fn config_bindings(&self, root: &str) -> Vec<bennu_spring::prelude::ConfigBinding> {
+        self.slot(root)
+            .and_then(|slot| slot.spring.clone())
+            .map(|ext| ext.model().config_bindings.clone())
+            .unwrap_or_default()
+    }
+
     /// Re-read `root`'s capabilities, and rebuild its slot when they changed.
     ///
     /// Called when the dependency tree lands. Detection reads that tree as well as the poms, and a

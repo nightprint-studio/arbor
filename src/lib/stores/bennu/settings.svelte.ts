@@ -75,6 +75,8 @@ export interface BennuSettingsSnapshot {
   /** Show Local History's diff as two columns rather than as a unified patch. Config-backed;
    *  its control is the toggle in that window, not a settings row. */
   historyDiffSplit: boolean;
+  /** Minutes the DTO Lab's JVM may go without a question before it is stopped. Config-backed. */
+  dtoLabIdleMinutes: number;
   /** Autosave a modified buffer to disk (after a short idle, on tab switch, on window blur).
    *  Config-backed (persists to `…/bennu/config.toml`). */
   autosave: boolean;
@@ -113,6 +115,7 @@ export interface BennuSettingsSnapshot {
   javaIndentCaseBody: boolean;
   finalParams: boolean;
   useLombokVal: boolean;
+  useLocalVar: boolean;
   switchWithReturn: boolean;
   spaceInBraces: boolean;
   blankLineBetweenMembers: boolean;
@@ -143,6 +146,7 @@ const DEFAULTS: BennuSettingsSnapshot = {
   mavenAutoDownload: true,
   markdownLivePreview: true,
   historyDiffSplit: true,
+  dtoLabIdleMinutes: 10,
   autosave: true,
   localHistory: true,
   localHistoryDays: 7,
@@ -161,6 +165,7 @@ const DEFAULTS: BennuSettingsSnapshot = {
   javaIndentCaseBody: true,
   finalParams: false,
   useLombokVal: false,
+  useLocalVar: false,
   switchWithReturn: true,
   spaceInBraces: false,
   blankLineBetweenMembers: true,
@@ -206,6 +211,7 @@ function createSettingsStore() {
   let javaIndentCaseBody = $state(DEFAULTS.javaIndentCaseBody);
   let finalParams = $state(DEFAULTS.finalParams);
   let useLombokVal = $state(DEFAULTS.useLombokVal);
+  let useLocalVar = $state(DEFAULTS.useLocalVar);
   let switchWithReturn = $state(DEFAULTS.switchWithReturn);
   let spaceInBraces = $state(DEFAULTS.spaceInBraces);
   let blankLineBetweenMembers = $state(DEFAULTS.blankLineBetweenMembers);
@@ -218,6 +224,7 @@ function createSettingsStore() {
   let mavenAutoDownload = $state(DEFAULTS.mavenAutoDownload);
   let markdownLivePreview = $state(DEFAULTS.markdownLivePreview);
   let historyDiffSplit = $state(DEFAULTS.historyDiffSplit);
+  let dtoLabIdleMinutes = $state(DEFAULTS.dtoLabIdleMinutes);
 
   /** Keep the font size inside the range the settings stepper offers. A hand-edited
    *  `font_size = 2` in the config would otherwise render the settings modal itself
@@ -226,24 +233,29 @@ function createSettingsStore() {
     return Math.min(32, Math.max(8, Math.round(v) || DEFAULTS.fontSize));
   }
 
+  /** The range the settings stepper offers; a hand-edited config outside it is brought back in. */
+  function clampIdleMinutes(v: number): number {
+    return Math.min(240, Math.max(1, Math.round(v) || DEFAULTS.dtoLabIdleMinutes));
+  }
+
   /** Full snapshot — the shape a future `set_bennu_config` would persist. */
   function snapshot(): BennuSettingsSnapshot {
     return {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
       highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, inlayHints,
       usageCounts, rightMargin,
-      sqlDialect, htmlScriptsAllowed, mavenAutoDownload, markdownLivePreview, historyDiffSplit, autosave,
+      sqlDialect, htmlScriptsAllowed, mavenAutoDownload, markdownLivePreview, historyDiffSplit, dtoLabIdleMinutes, autosave,
       collapseLibraryFrames, searchDependencies,
       localHistory, localHistoryDays, localHistoryMaxMb, localHistoryMaxFileMb,
       autoPopup, popupDelayMs, caseSensitive, importCensus, autoImport,
       foldingEnabled, foldBlockComments,
       javaBlankLines, javaIndentCaseBody,
-      finalParams, useLombokVal, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
+      finalParams, useLombokVal, useLocalVar, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
       defaultEncoding, rebuildIndexOnOpen, excludedDirs,
     };
   }
 
-  /** MOCK persistence — no-op today for the in-memory-only fields (folding, java-style, …).
+  /** MOCK persistence — no-op today for the in-memory-only fields (folding, …).
    *  Wire to `set_bennu_config(snapshot())` when the whole typed `[bennu]` config lands (rule 11).
    *  The config-backed fields — every editor and completion preference, autosave, auto-import,
    *  SQL dialect, local history, the Java sources block — DON'T use this; see
@@ -280,6 +292,7 @@ function createSettingsStore() {
         maven_auto_download: mavenAutoDownload,
         markdown_live_preview: markdownLivePreview,
         history_diff_split: historyDiffSplit,
+        dtolab_idle_minutes: dtoLabIdleMinutes,
         autosave,
         auto_import: autoImport,
         // ⚠️ The indentation pair persists HERE and not through `persist()`: it is what the Java
@@ -289,6 +302,13 @@ function createSettingsStore() {
         indent_with_tabs: indentStyle === 'tabs',
         java_max_blank_lines: javaBlankLines,
         java_indent_case_body: javaIndentCaseBody,
+        // Java style: persisted, because the generators and every code template read it.
+        java_final_params: finalParams,
+        java_lombok_val: useLombokVal,
+        java_local_var: useLocalVar,
+        java_switch_with_return: switchWithReturn,
+        java_space_in_braces: spaceInBraces,
+        java_blank_line_between_members: blankLineBetweenMembers,
         sql_dialect: sqlDialect,
         collapse_library_frames: collapseLibraryFrames,
         search_dependencies: searchDependencies,
@@ -389,15 +409,17 @@ function createSettingsStore() {
     get javaIndentCaseBody() { return javaIndentCaseBody; },
     setJavaIndentCaseBody(v: boolean) { javaIndentCaseBody = v; void persistConfigBacked(); },
     get finalParams() { return finalParams; },
-    setFinalParams(v: boolean) { finalParams = v; persist(); },
+    setFinalParams(v: boolean) { finalParams = v; void persistConfigBacked(); },
     get useLombokVal() { return useLombokVal; },
-    setUseLombokVal(v: boolean) { useLombokVal = v; persist(); },
+    setUseLombokVal(v: boolean) { useLombokVal = v; void persistConfigBacked(); },
+    get useLocalVar() { return useLocalVar; },
+    setUseLocalVar(v: boolean) { useLocalVar = v; void persistConfigBacked(); },
     get switchWithReturn() { return switchWithReturn; },
-    setSwitchWithReturn(v: boolean) { switchWithReturn = v; persist(); },
+    setSwitchWithReturn(v: boolean) { switchWithReturn = v; void persistConfigBacked(); },
     get spaceInBraces() { return spaceInBraces; },
-    setSpaceInBraces(v: boolean) { spaceInBraces = v; persist(); },
+    setSpaceInBraces(v: boolean) { spaceInBraces = v; void persistConfigBacked(); },
     get blankLineBetweenMembers() { return blankLineBetweenMembers; },
-    setBlankLineBetweenMembers(v: boolean) { blankLineBetweenMembers = v; persist(); },
+    setBlankLineBetweenMembers(v: boolean) { blankLineBetweenMembers = v; void persistConfigBacked(); },
 
     // ── Java ──────────────────────────────────────────────────────────────
     get defaultEncoding() { return defaultEncoding; },
@@ -432,6 +454,8 @@ function createSettingsStore() {
     setMarkdownLivePreview(v: boolean) { markdownLivePreview = v; void persistConfigBacked(); },
     get historyDiffSplit() { return historyDiffSplit; },
     setHistoryDiffSplit(v: boolean) { historyDiffSplit = v; void persistConfigBacked(); },
+    get dtoLabIdleMinutes() { return dtoLabIdleMinutes; },
+    setDtoLabIdleMinutes(v: number) { dtoLabIdleMinutes = clampIdleMinutes(v); void persistConfigBacked(); },
 
     /** Full snapshot (future `set_bennu_config` payload). */
     snapshot,
@@ -465,6 +489,7 @@ function createSettingsStore() {
         mavenAutoDownload = cfg.maven_auto_download ?? DEFAULTS.mavenAutoDownload;
         markdownLivePreview = cfg.markdown_live_preview ?? DEFAULTS.markdownLivePreview;
         historyDiffSplit = cfg.history_diff_split ?? DEFAULTS.historyDiffSplit;
+        dtoLabIdleMinutes = clampIdleMinutes(cfg.dtolab_idle_minutes ?? DEFAULTS.dtoLabIdleMinutes);
         autosave = cfg.autosave;
         localHistory = cfg.local_history ?? DEFAULTS.localHistory;
         localHistoryDays = cfg.local_history_days ?? DEFAULTS.localHistoryDays;
@@ -477,6 +502,12 @@ function createSettingsStore() {
         indentStyle = (cfg.indent_with_tabs ?? false) ? 'tabs' : 'spaces';
         javaBlankLines = cfg.java_max_blank_lines ?? DEFAULTS.javaBlankLines;
         javaIndentCaseBody = cfg.java_indent_case_body ?? DEFAULTS.javaIndentCaseBody;
+        finalParams = cfg.java_final_params ?? DEFAULTS.finalParams;
+        useLombokVal = cfg.java_lombok_val ?? DEFAULTS.useLombokVal;
+        useLocalVar = cfg.java_local_var ?? DEFAULTS.useLocalVar;
+        switchWithReturn = cfg.java_switch_with_return ?? DEFAULTS.switchWithReturn;
+        spaceInBraces = cfg.java_space_in_braces ?? DEFAULTS.spaceInBraces;
+        blankLineBetweenMembers = cfg.java_blank_line_between_members ?? DEFAULTS.blankLineBetweenMembers;
         // An unknown / empty label from a hand-edited config falls back to the default rather
         // than reaching the editor as an undefined dialect.
         sqlDialect = (SQL_DIALECTS as readonly string[]).includes(cfg.sql_dialect)
@@ -506,6 +537,7 @@ function createSettingsStore() {
       htmlScriptsAllowed = [];
       markdownLivePreview = DEFAULTS.markdownLivePreview;
       historyDiffSplit = DEFAULTS.historyDiffSplit;
+      dtoLabIdleMinutes = DEFAULTS.dtoLabIdleMinutes;
       autosave = DEFAULTS.autosave;
       localHistory = DEFAULTS.localHistory;
       localHistoryDays = DEFAULTS.localHistoryDays;
@@ -522,6 +554,7 @@ function createSettingsStore() {
       javaIndentCaseBody = DEFAULTS.javaIndentCaseBody;
       finalParams = DEFAULTS.finalParams;
       useLombokVal = DEFAULTS.useLombokVal;
+      useLocalVar = DEFAULTS.useLocalVar;
       switchWithReturn = DEFAULTS.switchWithReturn;
       spaceInBraces = DEFAULTS.spaceInBraces;
       blankLineBetweenMembers = DEFAULTS.blankLineBetweenMembers;

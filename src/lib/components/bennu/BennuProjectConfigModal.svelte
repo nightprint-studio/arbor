@@ -16,7 +16,7 @@
    * logical order, Esc cancels (handled by <Modal>), Ctrl/Cmd+Enter applies.
    */
   import { untrack } from 'svelte';
-  import { Settings2, Coffee, FileType, Boxes, FolderTree, SpellCheck } from 'lucide-svelte';
+  import { Settings2, Coffee, FileType, Boxes, FolderTree, SpellCheck, TriangleAlert } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
@@ -25,10 +25,12 @@
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
+  import Badge from '$lib/components/shared/ui/Badge.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
   import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
+  import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import BennuNamingSettings from './BennuNamingSettings.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import {
@@ -48,6 +50,23 @@
   const resolvedJdkSource = $derived(project?.jdk?.source ?? null);
   const resolvedEncoding = $derived(projectStore.activeEncoding ?? 'UTF-8');
   const modules = $derived(project?.modules ?? []);
+
+  /** What the JDK search actually found for this project — the warning that explains a completion
+   *  with no standard library in it. Where JDKs are *looked for* is Settings › Java › JDK locations:
+   *  that is the machine's, this is the project's. */
+  const jdkReport = $derived(bennuDiagnosticsStore.jdk);
+
+  /** The frameworks detected here, with the evidence that activated each — read-only facts about
+   *  the project, which is why they moved out of Settings. */
+  const caps = $derived(projectStore.capabilities);
+  const enabledCaps = $derived.by(() => {
+    if (!caps) return [] as string[];
+    return Object.entries(caps).filter(([k, v]) => k !== 'hits' && v === true).map(([k]) => k);
+  });
+  const capHits = $derived(caps?.hits ?? []);
+  function capLabel(field: string): string {
+    return field.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
 
   // Spelling (opt-in per project). Enable is gated on dictionaries being installed.
   const spellOn = $derived(root ? bennuSpellStore.enabledFor(root) : false);
@@ -159,6 +178,23 @@
         >
           <Select bind:value={draft.jdkOverride} options={jdkOptions} />
         </FormField>
+        {#if jdkReport}
+          {#if !jdkReport.any_installed}
+            <div class="fact-warn fact-warn-error">
+              <TriangleAlert size={13} />
+              No JDK found — completion and navigation can’t resolve the standard library. Add a
+              directory under <strong>Settings › Java › JDK locations</strong>.
+            </div>
+          {:else if !jdkReport.exact}
+            <div class="fact-warn">
+              <TriangleAlert size={13} />
+              No JDK for the exact level installed — using Java {jdkReport.resolved_major} as a fallback.
+            </div>
+          {/if}
+          {#if jdkReport.resolved_home}
+            <div class="fact"><span class="fact-k">Using</span><code>{jdkReport.resolved_home}</code></div>
+          {/if}
+        {/if}
       </section>
 
       <!-- Encoding ────────────────────────────────────────────────────────── -->
@@ -173,6 +209,41 @@
         >
           <Select bind:value={draft.encodingOverride} options={encodingOptions} />
         </FormField>
+        {#if projectStore.activeFilePath}
+          <div class="fact">
+            <span class="fact-k">{projectStore.activeFilePath.split(/[\\/]/).pop()}</span>
+            decoded as {projectStore.activeEncoding}
+          </div>
+        {/if}
+      </section>
+
+      <!-- Capabilities (read-only) ───────────────────────────────────────── -->
+      <section class="cfg-section">
+        <div class="sec-head">
+          <Boxes size={13} />
+          <h3>Frameworks</h3>
+          {#if enabledCaps.length}<span class="sec-count">{enabledCaps.length}</span>{/if}
+        </div>
+        {#if enabledCaps.length === 0}
+          <EmptyState message="No domain frameworks detected in this project." compact />
+        {:else}
+          <div class="caps">
+            {#each enabledCaps as c (c)}
+              <Badge variant="tone" tone="accent" label={capLabel(c)} />
+            {/each}
+          </div>
+          {#if capHits.length}
+            <ul class="ro-list">
+              {#each capHits as h, i (i)}
+                <li class="ro-row">
+                  <span class="tier tier-{h.tier.toLowerCase()}">{h.tier}</span>
+                  <span class="ro-primary">{capLabel(h.capability)}</span>
+                  <span class="ro-detail">{h.detail}</span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        {/if}
       </section>
 
       <!-- Spelling ──────────────────────────────────────────────────────── -->
@@ -368,6 +439,42 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* A fact about the project, under the field that can override it. */
+  .fact {
+    display: flex; align-items: center; gap: 8px; padding: 4px 0 0;
+    font-size: var(--font-size-xs); color: var(--text-muted);
+  }
+  .fact-k { color: var(--text-secondary); }
+  .fact code {
+    font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-secondary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .fact-warn {
+    display: flex; align-items: center; gap: 7px; margin-top: 8px;
+    padding: 7px 10px; font-size: var(--font-size-xs); line-height: 1.4;
+    color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent); border-radius: var(--radius-md);
+  }
+  .fact-warn :global(svg) { flex-shrink: 0; }
+  .fact-warn-error {
+    color: var(--error); background: color-mix(in srgb, var(--error) 12%, transparent);
+    border-color: color-mix(in srgb, var(--error) 30%, transparent);
+  }
+
+  .caps { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 8px; }
+  .ro-detail {
+    flex-shrink: 1; min-width: 0; font-size: var(--font-size-xs); color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tier {
+    flex-shrink: 0; width: 18px; height: 18px; border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+    font-size: var(--font-size-2xs); font-weight: 700;
+  }
+  .tier-a { color: var(--success); background: color-mix(in srgb, var(--success) 18%, transparent); }
+  .tier-b { color: var(--info);    background: color-mix(in srgb, var(--info) 18%, transparent); }
+  .tier-c { color: var(--warning); background: color-mix(in srgb, var(--warning) 18%, transparent); }
+
   .footer-actions {
     display: flex;
     align-items: center;

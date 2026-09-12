@@ -108,6 +108,8 @@
   import PluginTools from '$lib/components/plugins/PluginTools.svelte';
   import { notifyActiveFile, resetActiveFileNotifier } from '$lib/contributions/bennu-file-hook';
   import BennuGenerateModal from './BennuGenerateModal.svelte';
+  import BennuTemplateGenerateModal from './templates/BennuTemplateGenerateModal.svelte';
+  import BennuConfigClassModal from './templates/BennuConfigClassModal.svelte';
   import BennuOverrideModal from './BennuOverrideModal.svelte';
   import BennuSafeDeleteModal from './BennuSafeDeleteModal.svelte';
   import {
@@ -150,7 +152,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { watchRoots, TREE_CHANGED, type TreeChanged } from '$lib/ipc/bennu/tree-watch';
   import { workspacesStore } from '$lib/stores/bennu/workspaces.svelte';
-  import { isJavaFile, isJspFile, isLspFile, isMarkdownFile, supportsCodeNav } from './file-kind';
+  import { isJavaFile, isJspFile, isLspFile, isMarkdownFile, isSpringConfigFile, supportsCodeNav } from './file-kind';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import BennuI18nPanel from './BennuI18nPanel.svelte';
   import { isI18nBundle } from './i18n/bundle-path';
@@ -1527,6 +1529,16 @@
         when: !!projectStore.project && !projectStore.isCargo },
       { id: 'generate', title: 'Generate…', icon: 'wand', shortcut: 'Alt+Insert',
         action: () => run(() => bennuUiStore.openGenerate()), when: isJava },
+      { id: 'generate-template', title: 'Generate from a template…', icon: 'wand',
+        action: () => run(() => bennuUiStore.openTemplateGenerate('class')), when: isJava },
+      { id: 'generate-config-properties', title: 'Generate configuration properties for the class at the caret', icon: 'wand',
+        action: () => run(() => bennuUiStore.openTemplateGenerate('config-properties')), when: isJava },
+      { id: 'generate-config-class', title: 'Generate a @ConfigurationProperties class from these keys', icon: 'wand',
+        action: () => run(() => bennuUiStore.openConfigClass()), when: isSpringConfigFile(path) },
+      { id: 'code-templates', title: 'Code templates…', icon: 'command',
+        action: () => run(() => bennuUiStore.openSettings('templates')), when: true },
+      { id: 'test-values', title: 'Test values for the DTO Lab…', icon: 'command',
+        action: () => run(() => bennuUiStore.openSettings('test-values')), when: !projectStore.isCargo },
       { id: 'override', title: 'Implement / override methods…', icon: 'wand', shortcut: 'Ctrl+I',
         action: () => run(() => void openOverrides()), when: isJava },
       // The same request the shortcut makes, from a list instead. Worth an entry beyond the usual
@@ -2532,6 +2544,25 @@
     mode={bennuUiStore.generateMode}
     onClose={() => bennuUiStore.closeGenerate()}
     onInsert={(text) => { editor?.insertAtCursor(text); editor?.focusEditor(); }}
+    onTemplates={() => { bennuUiStore.closeGenerate(); bennuUiStore.openTemplateGenerate('class'); }}
+  />
+{/if}
+
+{#if bennuUiStore.templateGenerateKind}
+  <BennuTemplateGenerateModal
+    kind={bennuUiStore.templateGenerateKind}
+    caretContext={() => editor?.caretContext() ?? null}
+    applyEdits={(edits) => editor?.applyGeneratedEdits(edits)}
+    insertSnippet={(offset, text, stops) => editor?.insertGeneratedSnippet(offset, text, stops)}
+    onClose={() => { bennuUiStore.closeTemplateGenerate(); editor?.focusEditor(); }}
+  />
+{/if}
+
+{#if bennuUiStore.configClassOpen}
+  <BennuConfigClassModal
+    caretContext={() => editor?.caretContext() ?? null}
+    selection={() => editor?.selectionBytes() ?? null}
+    onClose={() => { bennuUiStore.closeConfigClass(); editor?.focusEditor(); }}
   />
 {/if}
 

@@ -16,7 +16,9 @@
    *
    * Keyboard-first: the name auto-focuses; Esc cancels (Modal owns it); Enter / Ctrl+Enter create.
    */
+  import { onMount } from 'svelte';
   import { FilePlus2 } from 'lucide-svelte';
+  import IconifyIconView from '@iconify/svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
@@ -25,7 +27,10 @@
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
-  import { newFile, type NewFileKind } from '$lib/ipc/bennu/scaffold';
+  import { newFile, newFileFromTemplate, type NewFileKind } from '$lib/ipc/bennu/scaffold';
+  import { getFileIcon } from '$lib/utils/file-icons';
+  import { tooltip } from '$lib/actions/tooltip';
+  import { bennuTemplatesStore } from '$lib/stores/bennu/templates.svelte';
 
   let {
     dir,
@@ -61,10 +66,17 @@
 
   const KINDS = $derived(projectStore.isCargo ? RUST_KINDS : JAVA_KINDS);
 
+  /** The user's own New file templates, under the built-in shapes. Starters are left out: they are
+   *  there to be copied from in Settings, not to make files with. */
+  const templates = $derived(bennuTemplatesStore.of('new-file')?.templates.filter((t) => !t.starter && !t.unmet) ?? []);
+  onMount(() => { void bennuTemplatesStore.load('new-file'); });
+
   // The caller decides which shape this opens in: "New › Java Class" (or "New › Rust File")
   // lands on a typed template, "New › File" on a plain one. Read once, at mount — it is the
   // starting point, not a binding.
   let kind = $state<NewFileKind>(initialKind);
+  /** One of the user's templates, chosen instead of a kind. */
+  let template = $state<string | null>(null);
   let name = $state('');
   let busy = $state(false);
 
@@ -75,7 +87,9 @@
     if (!canCreate) return;
     busy = true;
     try {
-      const res = await newFile(dir, name.trim(), kind);
+      const res = template
+        ? await newFileFromTemplate(projectStore.project?.root ?? dir, dir, name.trim(), template)
+        : await newFile(dir, name.trim(), kind);
       if (!res) { toastStore.show('Could not create the file', 'error'); return; }
       if (res.exists) {
         toastStore.show(`A file named “${res.path.split('/').pop()}” already exists`, 'warning');
@@ -123,9 +137,15 @@
     if (e.key === 'Enter') { e.preventDefault(); void create(); return; }
     if (!isTyped || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
     e.preventDefault();
-    const at = KINDS.findIndex((k) => k.value === kind);
-    const next = (at + (e.key === 'ArrowDown' ? 1 : -1) + KINDS.length) % KINDS.length;
-    kind = KINDS[next].value;
+    // One list: the built-in shapes, then the user's templates.
+    const choices = [
+      ...KINDS.map((k) => ({ kind: k.value, template: null as string | null })),
+      ...templates.map((t) => ({ kind, template: t.name as string | null })),
+    ];
+    const at = choices.findIndex((c) => (template ? c.template === template : !c.template && c.kind === kind));
+    const next = choices[(at + (e.key === 'ArrowDown' ? 1 : -1) + choices.length) % choices.length];
+    kind = next.kind;
+    template = next.template;
   }
 
   let nameEl = $state<HTMLInputElement | undefined>();
@@ -153,7 +173,11 @@
          and a field with one obvious purpose does not need a word above it repeating the
          placeholder. The icon marks which kind the name will become, live. -->
     <div class="nf-name">
-      {#if isTyped}<SymbolKindIcon kind={KINDS.find((k) => k.value === kind)?.iconKind ?? 'class'} />{/if}
+      {#if isTyped && template}
+        <IconifyIconView icon={getFileIcon(`${template}.${templates.find((t) => t.name === template)?.extension ?? 'txt'}`)} width="1em" height="1em" />
+      {:else if isTyped}
+        <SymbolKindIcon kind={KINDS.find((k) => k.value === kind)?.iconKind ?? 'class'} />
+      {/if}
       <input
         class="nf-input"
         bind:this={nameEl}
@@ -172,16 +196,36 @@
             <button
               type="button"
               class="nf-kind"
-              class:nf-kind-on={kind === k.value}
+              class:nf-kind-on={!template && kind === k.value}
               role="option"
-              aria-selected={kind === k.value}
-              onclick={() => { kind = k.value; nameEl?.focus(); }}
+              aria-selected={!template && kind === k.value}
+              onclick={() => { kind = k.value; template = null; nameEl?.focus(); }}
             >
               <SymbolKindIcon kind={k.iconKind} />
               <span>{k.label}</span>
             </button>
           </li>
         {/each}
+        {#if templates.length > 0}
+          <li class="nf-group" role="presentation">Your templates</li>
+          {#each templates as t (t.name)}
+            <li>
+              <button
+                type="button"
+                class="nf-kind"
+                class:nf-kind-on={template === t.name}
+                role="option"
+                aria-selected={template === t.name}
+                use:tooltip={t.path ?? ''}
+                onclick={() => { template = t.name; nameEl?.focus(); }}
+              >
+                <IconifyIconView icon={getFileIcon(`${t.name}.${t.extension}`)} width="1em" height="1em" />
+                <span>{t.name}</span>
+                {#if t.description}<span class="nf-kind-desc">{t.description}</span>{/if}
+              </button>
+            </li>
+          {/each}
+        {/if}
       </ul>
     {/if}
   </div>
@@ -239,6 +283,19 @@
        and `annotation`'s hue IS the accent, so on this row it would be invisible. */
     --jki-color: currentColor;
   }
+  .nf-group {
+    padding: 8px 8px 3px;
+    font-size: var(--font-size-xs); color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  /* A template's own description, pushed right and cut rather than wrapped: the row is picked by its
+     name, and the description is there to tell two similar names apart. */
+  .nf-kind-desc {
+    margin-left: auto; min-width: 0; padding-left: 12px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: var(--font-size-xs); color: var(--text-muted);
+  }
+  .nf-kind-on .nf-kind-desc { color: inherit; opacity: 0.8; }
   .nf-dir { font-size: var(--font-size-xs); color: var(--text-muted); }
   .nf-dir code { font-family: var(--font-code); color: var(--text-secondary); font-size: var(--font-size-xs); }
   /* The border and focus ring live on `.nf-name` (the row) now, so the input is bare. */

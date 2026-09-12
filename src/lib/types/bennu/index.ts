@@ -195,7 +195,7 @@ export interface CompletionItem {
    *  Visiting order, not source order: the provider's `$0` — where the caret ends up — is already
    *  moved to the end, so a consumer walks the list front to back and needs to know nothing about
    *  the syntax it came from. Empty for a plain completion. */
-  snippet_stops?: { start: number; end: number }[];
+  snippet_stops?: { start: number; end: number; group?: number }[];
   /** The provider's own relevance ordering — honoured rather than re-sorted alphabetically. */
   sort_text?: string;
   /** What to match the typed prefix against, when it differs from `label`. */

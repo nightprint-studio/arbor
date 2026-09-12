@@ -1,0 +1,47 @@
+{# bennu.description: A class with getters and setters, nested classes static -#}
+{# bennu.output: file -#}
+{# bennu.file: {{ class_name }}.java -#}
+{#-
+  Rendered with the keys under a prefix of a YAML or .properties file.
+
+    prefix, class_name, package, imports, sources, notes, date, year — and project and style,
+             which every kind reads
+    root     the class: name, path, depth, indent, fields, and types — the nested ones, each the
+             same shape, which is why the class is written in a recursive loop over [root]
+    field    key, full_key, name, pascal, type_name, list, map, nested, sample
+-#}
+{% if package %}
+package {{ package }};
+
+{% endif %}
+{% for import in imports %}
+import {{ import }};
+{% endfor %}
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+{% for type in [root] recursive %}
+{% if loop.depth0 == 0 %}
+@ConfigurationProperties(prefix = "{{ prefix }}")
+{{ type.indent }}public class {{ type.name }} {
+{% else %}
+{{ type.indent }}public static class {{ type.name }} {
+{% endif %}
+{% for field in type.fields %}
+{{ type.indent }}    private {{ field.type_name }} {{ field.name }};
+{% endfor %}
+{% for field in type.fields %}
+
+{{ type.indent }}    public {{ field.type_name }} get{{ field.pascal }}() {
+{{ type.indent }}        return {{ field.name }};
+{{ type.indent }}    }
+
+{{ type.indent }}    public void set{{ field.pascal }}({{ field.type_name }} {{ field.name }}) {
+{{ type.indent }}        this.{{ field.name }} = {{ field.name }};
+{{ type.indent }}    }
+{% endfor %}
+{% if type.types %}
+
+{{ loop(type.types) -}}
+{% endif %}
+{{ type.indent }}}
+{% endfor %}

@@ -1,17 +1,18 @@
 //! `bennu-dtolab` — a DTO, tried out.
 //!
-//! Three questions a class raises and no amount of reading it answers with certainty: *what JSON
-//! does it read and write*, *which violations does a given value produce*, and *what would a test
-//! pinning those down look like*. The DTO Lab answers all three, and this crate is its pure half:
+//! Three questions a class raises and no amount of reading it answers with certainty: *what JSON does
+//! it read and write*, *which violations does a given value produce*, and *what would a test pinning
+//! those down look like*. The DTO Lab answers all three, and this crate is its pure half:
 //!
-//! - [`model`] reads a class from **source** — fields, types, JSON names, accessors, constraints —
-//!   instantly and with nothing compiled;
 //! - [`cases`] turns each constraint into the values that violate it, and a value that satisfies
 //!   every constraint of a field;
-//! - [`generate`] assembles what a test template is rendered with, checking every expectation on
-//!   the JVM when one is available;
-//! - [`template`] renders a user-editable template, and [`placement`] decides where the result goes;
-//! - [`protocol`] is the wire to the Java harness, whose source ships in this crate.
+//! - [`generate`] assembles what a validation-test template is rendered with ([`context`]), checking
+//!   every expectation on the JVM when one is available;
+//! - [`protocol`] is the wire to the Java harness, whose source ships in this crate;
+//! - [`values`] maps field names and constraints to the values a field is given.
+//!
+//! The class model, the template engine and the template store are `bennu-templates`': the lab's
+//! tests are one kind of template among several.
 //!
 //! ## Why the answers that matter come from the JVM
 //!
@@ -24,11 +25,10 @@
 //! possible the static prediction is still given, and marked as such.
 
 pub mod cases;
+pub mod context;
 pub mod generate;
-pub mod model;
-pub mod names;
-pub mod placement;
+pub mod paths;
 pub mod prelude;
 pub mod protocol;
 pub mod skeleton;
-pub mod template;
+pub mod values;

@@ -51,6 +51,7 @@ import { html } from '@codemirror/lang-html';
 import { css } from '@codemirror/lang-css';
 import { javascript } from '@codemirror/lang-javascript';
 import { sqlLanguage } from '$lib/components/shared/ui/code-editor';
+import { jinjaFenceLanguages } from './jinja-lang';
 
 /** A fence language backed by a legacy stream mode. */
 function streamFence(name: string, alias: string[], parser: StreamParser<unknown>) {
@@ -102,4 +103,6 @@ export const MARKDOWN_FENCE_LANGUAGES: readonly LanguageDescription[] = [
   // targets than a `.sql` file does, and `languages.ts` explains at length why guessing is worse
   // than the rules valid on every engine.
   fence('sql', [], new LanguageSupport(sqlLanguage('portable'))),
+  // Bennu's code templates, alone or with the language they write: ```jinja, ```java.jinja.
+  ...jinjaFenceLanguages(),
 ];

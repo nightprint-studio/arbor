@@ -1,0 +1,9 @@
+{# bennu.description: A logger for the class the abbreviation is typed in -#}
+{#-
+  An abbreviation: in a Java file, typing this template's name offers what follows.
+
+  The text is a snippet — $1, $2 and so on are the stops Tab walks through, ${1:name} is one with a
+  default, and $0 is where the caret ends. Jinja runs first, with
+    file_name, class_name, package, date, year
+-#}
+private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger({{ class_name }}.class);$0

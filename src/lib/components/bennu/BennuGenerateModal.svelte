@@ -56,6 +56,7 @@
     mode: initialMode = 'getters-setters',
     onClose,
     onInsert,
+    onTemplates,
   }: {
     /** Preselected generation mode (defaults to getters+setters). */
     mode?: GenerateMode;
@@ -63,6 +64,8 @@
     /** Called with the generated Java text when the user confirms. The Wire phase
      *  connects this to the editor's insert-at-caret imperative API. */
     onInsert: (text: string) => void;
+    /** Generate with one of the user's code templates instead — the window closes this and opens that. */
+    onTemplates?: () => void;
   } = $props();
 
   // ── Mode ──────────────────────────────────────────────────────────────────────
@@ -382,7 +385,14 @@
 
   {#snippet footer()}
     <ModalFooter align="between">
-      <span class="gen-hint">Inserts at the caret.</span>
+      <div class="gen-left">
+        <span class="gen-hint">Inserts at the caret.</span>
+        {#if onTemplates}
+          <Button variant="ghost" size="sm" tooltip="Generate with one of your code templates instead" onclick={onTemplates}>
+            From a template…
+          </Button>
+        {/if}
+      </div>
       <div class="gen-actions">
         <Button variant="ghost" size="sm" onclick={onClose}>Cancel</Button>
         <Button
@@ -597,4 +607,5 @@
   /* ── Footer ── */
   .gen-hint { font-size: var(--font-size-xs); color: var(--text-muted); }
   .gen-actions { display: flex; align-items: center; gap: 8px; }
+  .gen-left { display: flex; align-items: center; gap: 10px; }
 </style>

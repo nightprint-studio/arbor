@@ -89,6 +89,44 @@ fn bennu_new_file(_ctx: &BennuState, args: NewFileArgs) -> Result<Option<NewFile
     Ok(Some(NewFileResult { path, content, exists }))
 }
 
+/// Args for [`bennu_new_file_from_template`].
+#[derive(Deserialize)]
+pub struct NewFileFromTemplateArgs {
+    pub root: String,
+    /// Target directory (absolute, forward slashes).
+    pub dir: String,
+    /// The name the user entered (extension optional).
+    pub name: String,
+    /// One of the user's New file templates.
+    pub template: String,
+}
+
+/// Scaffold a new file from one of the user's New file templates: the same result shape as
+/// [`bennu_new_file`], so the dialog writes it the same way.
+#[arbor_rpc::handler]
+fn bennu_new_file_from_template(_ctx: &BennuState, args: NewFileFromTemplateArgs) -> Result<NewFileResult, String> {
+    let rendered = crate::templates_render::render_request(&crate::templates_render::RenderArgs {
+        root: args.root,
+        kind: "new-file".to_string(),
+        template: Some(args.template),
+        file: None,
+        source: None,
+        offset: None,
+        class: None,
+        prefix: None,
+        profiles: None,
+        keys: None,
+        maps: None,
+        directory: Some(args.dir),
+        name: Some(args.name),
+        text: None,
+        extension: None,
+        parameters: None,
+        trace_lines: false,
+    })?;
+    Ok(NewFileResult { path: rendered.file.unwrap_or_default(), content: rendered.text, exists: rendered.exists })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

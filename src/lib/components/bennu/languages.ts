@@ -84,6 +84,10 @@ import { jspLanguage } from './jsp-lang';
 import { digLanguage } from './dig/dig-lang';
 import { devLanguage } from './dig/dev-lang';
 import { merulaLanguage } from './merula-lang';
+import { jinjaExtension } from './jinja-lang';
+import { isJinjaFile, jinjaInnerLanguage } from '$lib/utils/jinja-words';
+import { jinjaCompletion } from './jinja-completion';
+import { jinjaHover } from './jinja-hover';
 import { MARKDOWN_FENCE_LANGUAGES } from './markdown-fences';
 import { isDockerfile } from '$lib/utils/file-names';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
@@ -125,6 +129,27 @@ function backendIntelLang(id: string, ext: Extension): LanguageDescriptor {
 /** A descriptor from a CodeMirror legacy-mode stream parser. */
 function streamLang(id: string, parser: StreamParser<unknown>): LanguageDescriptor {
   return cmLang(id, StreamLanguage.define(parser));
+}
+
+/**
+ * A Jinja template, one descriptor per language it generates — `OrderTest.java.jinja` is Java with
+ * Jinja on top. Cached, because a descriptor's identity is what the editor keys itself on.
+ */
+const jinjaDescriptors = new Map<string, LanguageDescriptor>();
+function jinjaLang(name: string): LanguageDescriptor {
+  const inner = jinjaInnerLanguage(name);
+  let desc = jinjaDescriptors.get(inner);
+  if (!desc) {
+    desc = {
+      ...cmLang(inner ? `jinja-${inner}` : 'jinja', jinjaExtension(inner)),
+      commentTokens: { block: { open: '{#', close: '#}' } },
+      // A code template also completes what its kind is rendered with — the kind is read from the
+      // folder the file is kept in, when completion is asked.
+      intel: { completion: jinjaCompletion(), hover: jinjaHover() },
+    };
+    jinjaDescriptors.set(inner, desc);
+  }
+  return desc;
 }
 
 // Module-singleton descriptors (built once).
@@ -390,6 +415,8 @@ export function languageForPath(path: string | null): LanguageDescriptor {
   if (isSpringPropertyFile(name)) {
     return ext === 'properties' ? springPropertiesLang : springYamlLang;
   }
+  // By the whole name: `Order.java.jinja` is a template that generates Java, not a Jinja file of no language.
+  if (isJinjaFile(name)) return jinjaLang(name);
   switch (ext) {
     case 'java': return javaLanguage;
     case 'rs': return rustLang;

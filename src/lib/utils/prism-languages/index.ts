@@ -28,6 +28,8 @@ import './dig';
 import './merula';
 import './wgsl';
 import './mermaid';
+// Jinja code templates, over the language each one writes.
+import './jinja';
 
 export const CUSTOM_HIGHLIGHTERS: Record<string, (code: string) => string> = {
   svelte: svelteLine,

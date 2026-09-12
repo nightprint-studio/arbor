@@ -40,6 +40,12 @@ export function newFile(dir: string, name: string, kind: NewFileKind): Promise<N
   return bennu('bennu_new_file', { args: { dir, name, kind } });
 }
 
+/** Scaffold a new file from one of the user's New file templates — the same result as
+ *  {@link newFile}, so the dialog writes it the same way. Wire: `bennu_new_file_from_template`. */
+export function newFileFromTemplate(root: string, dir: string, name: string, template: string): Promise<NewFileResult> {
+  return bennu('bennu_new_file_from_template', { args: { root, dir, name, template } });
+}
+
 // ── new module (Maven) ───────────────────────────────────────────────────────────
 
 /** One pom a new module could be added under — a row of the New Module dialog's parent picker. */

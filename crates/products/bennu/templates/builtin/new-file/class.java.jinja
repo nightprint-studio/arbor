@@ -1,0 +1,19 @@
+{# bennu.description: A class, with the package its folder implies -#}
+{#-
+  A New file template: the file is named after what you type, with this template's extension, and
+  what follows is its content. To make your own, create a template from this one.
+
+    name        what was typed, without the extension
+    package     the package the folder maps to — empty outside a source root
+    file_name   the file being created
+    directory   the folder it is created in
+    date, year  today
+
+  A comment line of its own reading bennu.file: … names the file instead, and is itself a template.
+-#}
+{% if package %}
+package {{ package }};
+
+{% endif %}
+public class {{ name }} {
+}

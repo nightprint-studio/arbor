@@ -1,0 +1,24 @@
+{# bennu.description: A JPA entity with a generated id -#}
+{#-
+  A starting point for entity files. Copy it, and change the imports to javax.persistence when the
+  project is on Java EE rather than Jakarta EE.
+-#}
+{% if package %}
+package {{ package }};
+
+{% endif %}
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.Id;
+
+@Entity
+public class {{ name }} {
+
+    @Id
+    @GeneratedValue
+    private Long id;
+
+    public Long getId() {
+        return id;
+    }
+}

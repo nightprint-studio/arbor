@@ -11,10 +11,12 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
-use crate::cases::{invalid_cases, type_simple, valid_value, Case};
-use crate::model::{LabClass, LabField};
+use bennu_templates::prelude::{type_simple, ClassModel, FieldModel};
+
+use crate::cases::{invalid_cases, valid_value, Case};
+use crate::context::{CaseContext, ClassContext, FieldContext, RenderMode, TestContext, ValidAssignment};
 use crate::protocol::Violation;
-use crate::template::{CaseContext, ClassContext, FieldContext, RenderMode, TestContext, ValidAssignment};
+use crate::values::ValueRule;
 
 /// Validates a JSON instance of the class on the JVM.
 pub type Verifier<'a> = &'a mut dyn FnMut(&Value) -> Result<Vec<Violation>, String>;
@@ -29,7 +31,7 @@ pub struct Toolchain {
 }
 
 pub struct Request<'a> {
-    pub class: &'a LabClass,
+    pub class: &'a ClassModel,
     pub mode: RenderMode,
     pub test_class: String,
     pub toolchain: Toolchain,
@@ -37,6 +39,8 @@ pub struct Request<'a> {
     pub fields: Option<&'a [String]>,
     /// The verifier binds JSON by Jackson's names rather than by field names.
     pub json_names: bool,
+    /// The value rules fields are filled from — see [`crate::values`].
+    pub rules: &'a [ValueRule],
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +52,7 @@ pub struct Built {
 }
 
 pub fn build(request: Request<'_>, verify: Option<Verifier<'_>>, constants: &BTreeMap<String, String>) -> Built {
-    let Request { class, mode, test_class, toolchain, fields: only, json_names } = request;
+    let Request { class, mode, test_class, toolchain, fields: only, json_names, rules } = request;
     let mut verify = verify;
     let mut warnings: Vec<String> = Vec::new();
     let java = toolchain.java;
@@ -58,11 +62,13 @@ pub fn build(request: Request<'_>, verify: Option<Verifier<'_>>, constants: &BTr
         .iter()
         .map(|f| {
             let simple = type_simple(&f.type_name);
-            let value = valid_value(f);
+            let value = valid_value(f, rules);
             ValidAssignment {
                 field: f.name.clone(),
                 type_name: f.type_name.clone(),
                 setter: f.setter.clone(),
+                setter_chains: f.setter_chains,
+                wither: f.wither.clone(),
                 constrained: !f.constraints.is_empty(),
                 value_java: value.to_java(&simple, java),
                 value,
@@ -71,9 +77,9 @@ pub fn build(request: Request<'_>, verify: Option<Verifier<'_>>, constants: &BTr
         })
         .collect();
 
-    let key = |f: &LabField| if json_names { f.json_name.clone() } else { f.name.clone() };
+    let key = |f: &FieldModel| if json_names { f.json_name.clone() } else { f.name.clone() };
     // A field Jackson ignores cannot be set from a payload, so nothing about it can be checked that way.
-    let settable = |f: &LabField| !(json_names && f.ignored);
+    let settable = |f: &FieldModel| !(json_names && f.ignored);
 
     let mut instance = Map::new();
     for (f, assignment) in class.fields.iter().zip(&valid) {
@@ -117,7 +123,7 @@ pub fn build(request: Request<'_>, verify: Option<Verifier<'_>>, constants: &BTr
         }
         let simple = type_simple(&f.type_name);
         let mut cases = Vec::new();
-        for (index, case) in invalid_cases(f).into_iter().enumerate() {
+        for (index, case) in invalid_cases(f, rules).into_iter().enumerate() {
             let value_java = case.value.to_java(&simple, java);
             let mut expected = predicted(f, &case);
             let mut case_verified = false;
@@ -164,7 +170,9 @@ pub fn build(request: Request<'_>, verify: Option<Verifier<'_>>, constants: &BTr
             type_name: f.type_name.clone(),
             type_simple: simple,
             setter: f.setter.clone(),
+            setter_chains: f.setter_chains,
             getter: f.getter.clone(),
+            wither: f.wither.clone(),
             cases,
         });
     }
@@ -191,7 +199,7 @@ pub fn build(request: Request<'_>, verify: Option<Verifier<'_>>, constants: &BTr
 }
 
 /// The violation a case is expected to produce when there is no validator to ask.
-fn predicted(field: &LabField, case: &Case) -> Vec<Violation> {
+fn predicted(field: &FieldModel, case: &Case) -> Vec<Violation> {
     let template = field
         .constraints
         .iter()
@@ -225,7 +233,7 @@ fn summary(found: &[Violation]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::class_at;
+    use bennu_templates::prelude::class_at;
 
     const ORDER: &str = "package com.example;\n\
         public class Order {\n\
@@ -234,7 +242,7 @@ mod tests {
             public void setCustomerName(String v) {}\n\
         }\n";
 
-    fn request(class: &LabClass) -> Request<'_> {
+    fn request(class: &ClassModel) -> Request<'_> {
         Request {
             class,
             mode: RenderMode::File,
@@ -242,6 +250,7 @@ mod tests {
             toolchain: Toolchain { java: 17, junit: 5, assertj: false, validation: "jakarta.validation".into() },
             fields: None,
             json_names: true,
+            rules: &[],
         }
     }
 
@@ -289,6 +298,22 @@ mod tests {
         let mut verifier = |_: &Value| -> Result<Vec<Violation>, String> { Ok(Vec::new()) };
         let built = build(request(&class), Some(&mut verifier), &BTreeMap::new());
         assert_eq!(built.warnings.len(), 2, "{:?}", built.warnings);
+    }
+
+    /// A rule gives the valid instance its value, and that is the value the JVM is asked about.
+    #[test]
+    fn a_value_rule_fills_the_valid_instance_that_is_checked() {
+        let source = "package p;\npublic class Contact {\n  @NotBlank private String email;\n  public void setEmail(String v) {}\n}\n";
+        let class = class_at(source, None).unwrap();
+        let rules = crate::values::builtin_rules();
+        let mut seen: Vec<Value> = Vec::new();
+        let mut verifier = |instance: &Value| -> Result<Vec<Violation>, String> {
+            seen.push(instance.clone());
+            Ok(Vec::new())
+        };
+        let built = build(Request { rules: &rules, ..request(&class) }, Some(&mut verifier), &BTreeMap::new());
+        assert_eq!(seen[0], serde_json::json!({ "email": "mario.rossi@example.com" }));
+        assert_eq!(built.context.valid[0].value_java, "\"mario.rossi@example.com\"");
     }
 
     fn violation(path: &str, template: &str) -> Violation {

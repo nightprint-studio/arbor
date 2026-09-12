@@ -192,6 +192,10 @@ function createBennuUiStore() {
   // (Alt+Insert opens it fresh; an Alt+Enter "Generate…" intention preselects one).
   let generateOpen = $state(false);
   let generateMode = $state<GenerateMode>('getters-setters');
+  // Generate from one of the user's code templates, on the class at the caret — which kind.
+  let templateGenerateKind = $state<'class' | 'config-properties' | null>(null);
+  // A @ConfigurationProperties class written from the configuration file at the caret.
+  let configClassOpen = $state(false);
   // JPA generation (repository / projection / query method). Its own modal rather than a mode of
   // the one above: that one rewrites the class you are in, this one builds against the whole
   // entity model and often writes a different file.
@@ -291,6 +295,8 @@ function createBennuUiStore() {
     get aboutOpen()    { return aboutOpen; },
     get pluginsOpen()     { return pluginsOpen; },
     get generateOpen() { return generateOpen; },
+    get templateGenerateKind() { return templateGenerateKind; },
+    get configClassOpen() { return configClassOpen; },
     get jpaGenerateOpen() { return jpaGenerateOpen; },
     get jpaGenerateFile() { return jpaGenerateFile; },
     get jpaGenerateAction() { return jpaGenerateAction; },
@@ -420,6 +426,10 @@ function createBennuUiStore() {
       generateOpen = true;
     },
     closeGenerate()      { generateOpen = false; },
+    openTemplateGenerate(kind: 'class' | 'config-properties') { templateGenerateKind = kind; },
+    closeTemplateGenerate() { templateGenerateKind = null; },
+    openConfigClass() { configClassOpen = true; },
+    closeConfigClass() { configClassOpen = false; },
     /** `action` is a contributed action id — the kind is chosen before the dialog opens, so the
      *  dialog has one job and a title that names it. */
     openJpaGenerate(action: string, fromFile?: string | null) {

@@ -9,7 +9,33 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
-- **DTO Lab: try a class before writing a test for it.** Type a JSON payload and see what the project's own Jackson makes of it, what it writes back — and what it loses on the way — and every violation the project's own Bean Validation reports, with its message in the language you ask for. It runs on the project's JDK, started when first needed and stopped when idle. `Alt+Shift+J` on a class, or *Open in DTO Lab* from the editor's menu.
+- **Configuration classes bind alike groups as a `Map`.** Groups with the same keys under different names — `postgres1`, `postgres2` — become one type in a `Map<String, …>` instead of a type each; a switch on every group in the dialog decides otherwise.
+
+- **Jinja in Markdown code blocks.** A ```` ```jinja ```` block is coloured as a template, and ```` ```java.jinja ```` as a template that writes Java, the way the template's own tab is.
+
+- **Code templates follow the project and your style.** Every template reads `project` — its Java level and its dependencies — and `style`, your *Settings › Java Style*, whose `style.local(type)`, `style.param(type)` and `style.braces(body)` write a declaration your way: `val` only where you write it and Lombok is there, `var` — new in *Java Style* — only from Java 10, a record only from Java 16. A template can declare `bennu.requires: java >= 16, lombok` to be offered only in projects that meet it; *Settings › Code Templates* says why one is missing.
+
+- **Templates write names and imports the project's way.** `naming.method("should reject", field.name)` is `shouldRejectEmail` or `should_reject_email`, whichever the project's naming rules want for the file being written. `"java.time.LocalDate" | imported` writes `LocalDate` and the file gets the import — as it does for the `val` of `style.local` — whether it is a new file, the class members go into, or the one an abbreviation expands in.
+
+- **Templates know chained setters and withers.** `field.setter_chains` says a setter returns the object and `field.wither` names its `withName` — declared, or from Lombok's `@Accessors(chain = true)` and `@With`. `valid | arguments` writes a constructor's arguments in a validation test, with one changed for each case.
+
+- **A `@ConfigurationProperties` class from `application.yml`.** On a Spring configuration file — the editor toolbar, the right-click menu or the palette — the keys you select — or the group at the caret, with a box per key to leave some out — become a class: each key a field typed by its value (`30s` a `Duration`, `10MB` a `DataSize`), each group a nested type, profile files read too. Written from a template — a record, a Lombok class or a plain one, the default following the project's Java level and Lombok — so its shape is yours to change.
+
+- **Test values by field name.** The DTO Lab fills a field for what it is called or the constraint it carries — `email`, `codiceFiscale`, `partitaIva`, `iban`, `@CodiceFiscale` — in a test's valid instance, in the invalid case of a custom constraint and in the payload sketch. Rules for the common Italian and English fields ship with it; add, order and switch them off in *Settings › Test Values*.
+
+- **Code templates for more than tests.** New file templates, templates that write from the class at the caret — a builder inside it, a Spring Data repository beside an entity — configuration properties for a `@ConfigurationProperties` class as YAML or `.properties`, and abbreviations of your own next to `psf`. All Jinja, kept in your profile, chosen per project, managed in *Settings › Code Templates* — where a built-in opens in the editor read-only, preview included, to copy from.
+
+- **A Jinja template previews beside its source.** The eye button renders the unsaved template as you type, against a class you choose or a name, with parameters of your own laid over its data to try the branches that class does not take. The caret's line lights up what it wrote in the preview, and a selection in the preview lights up the template lines that wrote it.
+
+- **Code templates for an AI client.** `bennu_list_templates` and `bennu_render_template` let a connected AI client find your templates and render one on a class, so the code it writes is shaped like yours. Nothing is written.
+
+- **`.jinja`, `.jinja2` and `.j2` files have the Jinja icon** in the project tree and every file list.
+
+- **Jinja templates are coloured and completed.** A `*.java.jinja` is highlighted as Java with its template tags on top — and any `*.jinja` or `*.j2` as the language its name says — and inside the tags it completes filters, tests, tag names and the names the template binds. A code template also completes every variable its kind is rendered with, following its loops — and hovering a name, a filter, a test, a statement or a `bennu.` directive says what it is.
+
+- **Jinja templates are coloured in Corvus too.** A diff of `OrderTest.java.jinja` reads as Java with its template tags on top, as the template's own tab does in Bennu.
+
+- **DTO Lab: try a class before writing a test for it.** Type a JSON payload and see what the project's own Jackson makes of it, what it writes back — and what it loses on the way — and every violation the project's own Bean Validation reports, with its message in the language you ask for. It runs on the project's JDK, started when first needed and stopped when idle — after ten minutes by default, set in Settings. `Alt+Shift+J` on a class, or *Open in DTO Lab* from the editor's menu.
 
 - **Validation tests generated from a class's constraints, in your own style.** One case per way each constraint can fail, with the expectations the validator actually produced rather than guessed ones. The test is written from a template you can copy and change — your helpers, your factories, your assertions — kept globally, chosen per project, and overridable for a single generation. It goes into a new test file or into an existing class, nested ones included, after a preview.
 
@@ -63,7 +89,43 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **A pom that pins the test selector can be fixed from the warning that reports it.** *Convert to a property* rewrites Surefire's literal `<test>` as a reference to a property defaulted to the same value: a plain `mvn test` still runs the suite, and running one class or one case works again — from Bennu, from a terminal, and from any other tool. The pom to be written is shown first, and only that value changes.
 
+- **A template of yours can be renamed.** From *Settings › Code Templates*: the file moves, a tab open on it follows, and the project generating with it keeps generating with it. For an abbreviation, that is how the word you type is changed.
+
+- **A template can walk you through what it wrote.** `$1`, `${1:name}` and `$0` in an abbreviation are tab stops, and two written with the same number are one value in two places — type in either and the other follows, with `Tab` visiting the pair once. A *From a class* template gets them too by declaring `bennu.stops: true`.
+
+- **An abbreviation can be written for any language Bennu colours.** `dbg.rs.jinja` expands in a Rust file, `sel.sql.jinja` in a query, and one named without a language in every file — the built-in `psf` family stays Java's. They are offered whichever engine answers the completion, so a `.rs` file served by rust-analyzer gets yours too. *New template…* asks which language, and a `.jinja` writing Rust, SQL, Go, Lua, JSON, CSS or shell is coloured like one.
+
+- **A Cargo project is not offered the Java-only kinds of template.** Generating from a class, the two configuration ones and the validation tests read a Java class, the Spring model or Bean Validation, so *Settings › Code Templates* lists only what a Rust workspace can actually generate.
+
+- **An abbreviation's word is no longer its file name.** *Settings › Code Templates › Abbreviations* shows the word that expands each template and lets you change it, so the file can be called what you want to read in a list.
+
+### Changed
+
+- **Settings is a tree, and holds only what is yours.** Pages are grouped the way an IDE's are — Editor › Completion, Java › Code Style, a page per kind of code template, one per language and one per framework the project uses — in a bigger window. What belongs to the project rather than to you moved to *Project Configuration*, which now also shows the JDK that was resolved, the frameworks detected here and the evidence for each.
+
+- **Bennu's docs read as one manual.** Every page opens with its section and a summary, and lays its facts out as cards, steps, tables and callouts instead of long paragraphs.
+
 ### Fixed
+
+- **Code Templates is a page, not a filing cabinet.** Each kind has its templates on the left and the one you pick on the right: **what it writes**, coloured as the language it generates, with its description, the word that expands it, what the project needs for it, and where its file is. The kinds themselves open from an overview. A settings page also has colour in it now — the mark on each card, and the language a template writes.
+
+- **A branch in the settings tree closes again.** The arrow was drawn inside the row's own button, so it selected the page instead of collapsing, and a branch could only ever be opened. It is a control of its own now; selecting the row still opens it.
+
+- **The settings tree lines up.** Every row's label and icon were pushed toward the middle of the sidebar and the longer ones wrapped onto two lines: the rule giving the label the free space was matching the tree's own spacer as well. Rows are tighter, and a group with nothing to expand no longer reserves the column for the arrow.
+
+- **Choosing a file from the tab strip's ⌄ menu never does nothing.** Selecting a tab compared the path against the strip's own list without normalising it first, and a miss was a silent no-op — from the screen, a click that vanished. The path is normalised now, and a file the list does not hold is opened rather than ignored.
+
+- **What a template writes lands where it belongs.** A template with no tab stops in it was inserted at column 0, so a method written in one arrived against the left margin instead of lined up with the class.
+
+- **An abbreviation of yours is matched however you type it.** `psf` and `sout` ignored the case and yours did not, so one named `Hget` answered nothing on `hget`.
+
+- **`@DataJpaTest` is not Lombok's `@Data`.** A code template read a class carrying it — or `@WithMockUser`, or any annotation starting like a Lombok one — as having setters it does not have.
+
+- **Code examples in Bennu's docs are highlighted.** Templates show their tags over the Java or YAML they write, the way the editor does.
+
+- **Java Style settings are kept.** Final parameters, Lombok `val`, switch with return, spaces inside braces and a blank line between members went back to their defaults at every restart.
+
+- **Lombok `val` can be chosen from any project.** *Java Style* locked the toggle in a project without Lombok, though the setting is yours for every project; it still applies only where Lombok is.
 
 - **Lombok's `onMethod_`, `onParam_` and `onConstructor_` are no longer reported as unknown elements.** They are how code compiled by javac 8 and later writes `onMethod` and the rest; Lombok removes them before the compiler looks, so `@Setter(onMethod_ = @__(@JsonProperty))` compiles — and now reads clean too.
 

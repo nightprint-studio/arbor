@@ -16,7 +16,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuDtoLabStore as lab } from '$lib/stores/bennu/dtolab.svelte';
   import type { DtoLabConstraint } from '$lib/ipc/bennu/dtolab';
-  import DtoLabTemplateBar from './DtoLabTemplateBar.svelte';
+  import BennuTemplateBar from '../templates/BennuTemplateBar.svelte';
 
   const constrained = $derived(lab.view?.class.fields.filter((f) => f.constraints.length > 0) ?? []);
   const chosen = $derived(lab.fields ?? constrained.map((f) => f.name));
@@ -83,7 +83,7 @@
     <div class="col-head"><span class="col-title">Output</span></div>
     <div class="output-body">
       <FormField label="Template">
-        <DtoLabTemplateBar />
+        <BennuTemplateBar kind="validation-tests" value={lab.template} onchange={(next) => lab.setTemplate(next)} />
       </FormField>
       <FormField
         label="Written to"

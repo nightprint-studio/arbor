@@ -75,6 +75,13 @@ describe('toCompletion', () => {
     expect(c.apply).toBeTypeOf('function');
   });
 
+  /// A template with no tab stops at all is still a body that has to line up with the code it lands
+  /// in — left to CodeMirror it arrives with every line after the first at column 0.
+  it('takes over the insertion for a multi-line snippet with no stops', () => {
+    const c = toCompletion(item({ insert_text: 'void m() {\n}', snippet: true }), 10);
+    expect(c.apply).toBeTypeOf('function');
+  });
+
   /// …and does not, when there is nothing to do beyond inserting the label. A custom `apply` that
   /// only reproduces the default is a second implementation of it.
   it('leaves a plain item to CodeMirror', () => {

@@ -63,6 +63,24 @@ pub struct CompletionArgs {
 /// just been opened degrades the same way regardless of which one owns the file.
 #[arbor_rpc::handler]
 fn bennu_completion(_ctx: &BennuState, args: CompletionArgs) -> Result<Vec<CompletionItem>, String> {
+    // The abbreviations, in front of whatever engine answers. They are **added**, never substituted:
+    // `psf` is also a legal start to an identifier, and a project that has one must still see it.
+    // Computed here rather than inside one branch because an abbreviation belongs to the file's
+    // language, not to whoever is serving it — a `dbg.rs.jinja` of yours has to survive the fact
+    // that rust-analyzer, and not the index, is the one being asked.
+    let abbreviations = match args.source.as_deref() {
+        Some(source) => crate::abbreviations::completions(&args.file, source, args.offset),
+        None => Vec::new(),
+    };
+    let engine = engine_completion(&args)?;
+    Ok(match abbreviations.is_empty() {
+        true => engine,
+        false => abbreviations.into_iter().chain(engine).collect(),
+    })
+}
+
+/// What the engine that owns the file answers — the half of completion that is not abbreviations.
+fn engine_completion(args: &CompletionArgs) -> Result<Vec<CompletionItem>, String> {
     // A language server needs the live buffer to answer at all — the caret offset is in its
     // coordinates. Without one there is nothing to ask, and falling through to the Java index
     // for a `.rs` file would be worse than answering nothing.
@@ -89,23 +107,12 @@ fn bennu_completion(_ctx: &BennuState, args: CompletionArgs) -> Result<Vec<Compl
     {
         return Ok(items);
     }
-    let mut items = IndexService::global().completion(
+    Ok(IndexService::global().completion(
         &args.file,
         args.offset,
         args.source.as_deref(),
         bennu_complete::prelude::MatchCase::from_flag(args.case_sensitive),
-    );
-    // The abbreviations, in front of what the index found. They are **added**, never substituted:
-    // `psf` is also a legal start to an identifier, and a project that has one must still see it.
-    // Empty unless the caret is on a word that begins one, which is nearly every keystroke.
-    if let Some(source) = args.source.as_deref() {
-        let mut templates = crate::java_templates::completions(&args.file, source, args.offset);
-        if !templates.is_empty() {
-            templates.append(&mut items);
-            items = templates;
-        }
-    }
-    Ok(items)
+    ))
 }
 
 /// One JSP action reference to check for existence: its qualified name plus the byte

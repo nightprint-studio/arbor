@@ -1,0 +1,4 @@
+{# bennu.description: The keys the class binds, as application.properties -#}
+{% for property in properties %}
+{{ property.key }}={{ property.sample }}
+{% endfor %}

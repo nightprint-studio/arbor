@@ -225,3 +225,15 @@ export function isTestSource(path: string | null | undefined): boolean {
   const p = path.replace(/\\/g, '/');
   return /\/src\/test(\/|$)/.test(p) || /\/(tests|benches)(\/|$)/.test(p);
 }
+
+/**
+ * A Spring **configuration file** — `application.yml`, `bootstrap.properties`, `application-dev.yaml` —
+ * the files a `@ConfigurationProperties` class can be written from.
+ *
+ * By name, as the backend decides it, because every other `.yml` in a project — a CI pipeline, a Compose
+ * file — holds nothing a class could bind.
+ */
+export function isSpringConfigFile(path: string | null | undefined): boolean {
+  const name = (path ?? '').split(/[\\/]/).pop() ?? '';
+  return /^(application|bootstrap).*\.(ya?ml|properties)$/i.test(name);
+}

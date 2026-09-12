@@ -6,15 +6,14 @@
 //! JUnit and assertion library a generated test may use, and where the result is written.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use bennu_core::prelude::BennuState;
 use bennu_dtolab::prelude::{
-    build, check_template_name, class_at, declared_constant_classes, insert_members, list_templates,
-    load_template, render, skeleton, template_path, test_class_name, test_file_for, types_in,
-    violations_of, Described, LabClass, RenderMode, Request, TemplateInfo, Toolchain, TypeInFile,
-    Verifier, Violation, DEFAULT_TEMPLATE_NAME,
+    apply_described, build, constant_classes, skeleton, test_class_name, test_file_for, violations_of,
+    Described, RenderMode, Request, Toolchain, Verifier, Violation, DEFAULT_TEMPLATE_NAME,
 };
+use bennu_templates::prelude::{class_at, insert_members, render_code, types_in, ClassModel, Template, TemplateKind, TypeInFile};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,21 +21,7 @@ use serde_json::Value;
 use crate::dtolab_jvm;
 use crate::frameworks::FrameworkService;
 use crate::index_service::IndexService;
-
-/// `[dtolab]` in the per-repo `.arbor/bennu/config.toml`.
-const SECTION: &str = "dtolab";
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct RepoSettings {
-    /// The template this project generates tests with, when not the built-in one.
-    #[serde(default)]
-    test_template: Option<String>,
-}
-
-/// Global templates: `profiles/<active>/bennu/dtolab/templates/`.
-fn templates_dir() -> PathBuf {
-    arbor_core::prelude::bennu_config_path("dtolab").join("templates")
-}
+use crate::templates_render::{RenderArgs, Rendered};
 
 // ── the class ─────────────────────────────────────────────────────────────────────────────────
 
@@ -54,7 +39,7 @@ pub struct ClassArgs {
 
 #[derive(Serialize)]
 pub struct ClassView {
-    pub class: LabClass,
+    pub class: ClassModel,
     /// A JSON payload sketched from source — replaced by the real one once the JVM answers.
     pub skeleton: Value,
     /// `jakarta.validation`, `javax.validation`, or empty when neither is recognisable.
@@ -69,12 +54,12 @@ pub struct ClassView {
 #[arbor_rpc::handler]
 fn bennu_dtolab_class(_ctx: &BennuState, args: ClassArgs) -> Result<Option<ClassView>, String> {
     let Some(class) = class_at(&args.source, args.offset) else { return Ok(None) };
-    let settings: RepoSettings = crate::repo_config::load(&args.root, SECTION);
     Ok(Some(ClassView {
-        skeleton: skeleton(&class),
+        skeleton: skeleton(&class, &crate::dtolab_values::rules()),
         validation: validation_namespace(&args.source, &args.root),
         test_file: test_file_for(&args.file, &class.package, &test_class_name(&class.name)),
-        template: settings.test_template.unwrap_or_else(|| DEFAULT_TEMPLATE_NAME.to_string()),
+        template: crate::templates::project_choice(&args.root, TemplateKind::ValidationTests)
+            .unwrap_or_else(|| DEFAULT_TEMPLATE_NAME.to_string()),
         class,
     }))
 }
@@ -177,72 +162,6 @@ fn validate_payload(
         .map_err(|e| explain(&e, class))
 }
 
-// ── templates ───────────────────────────────────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct RootArgs {
-    pub root: String,
-}
-
-#[derive(Serialize)]
-pub struct TemplatesView {
-    pub templates: Vec<TemplateInfo>,
-    /// The one this project generates with.
-    pub project: String,
-    /// Where global templates live.
-    pub dir: String,
-}
-
-#[arbor_rpc::handler]
-fn bennu_dtolab_templates(_ctx: &BennuState, args: RootArgs) -> Result<TemplatesView, String> {
-    let dir = templates_dir();
-    let templates = list_templates(&dir);
-    let settings: RepoSettings = crate::repo_config::load(&args.root, SECTION);
-    // A project pointing at a template that has since been deleted generates with the built-in one,
-    // and says so by showing it as selected.
-    let project = settings
-        .test_template
-        .filter(|name| templates.iter().any(|t| &t.name == name))
-        .unwrap_or_else(|| DEFAULT_TEMPLATE_NAME.to_string());
-    Ok(TemplatesView { templates, project, dir: dir.display().to_string() })
-}
-
-#[derive(Deserialize)]
-pub struct ProjectTemplateArgs {
-    pub root: String,
-    pub name: String,
-}
-
-/// Choose the template `root` generates tests with. The built-in one is stored as no choice at all.
-#[arbor_rpc::handler]
-fn bennu_dtolab_set_project_template(_ctx: &BennuState, args: ProjectTemplateArgs) -> Result<(), String> {
-    let test_template = (args.name != DEFAULT_TEMPLATE_NAME).then_some(args.name);
-    crate::repo_config::save(&args.root, SECTION, &RepoSettings { test_template })
-}
-
-#[derive(Deserialize)]
-pub struct NewTemplateArgs {
-    pub name: String,
-    /// The template to start from; the built-in one when absent.
-    #[serde(default)]
-    pub from: Option<String>,
-}
-
-/// Create a global template as a copy of another, and return its path for the editor to open.
-#[arbor_rpc::handler]
-fn bennu_dtolab_new_template(_ctx: &BennuState, args: NewTemplateArgs) -> Result<String, String> {
-    check_template_name(&args.name)?;
-    let dir = templates_dir();
-    let path = template_path(&dir, &args.name);
-    if path.exists() {
-        return Err(format!("A template called `{}` already exists", args.name));
-    }
-    let text = load_template(&dir, args.from.as_deref().unwrap_or(DEFAULT_TEMPLATE_NAME))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(path.display().to_string())
-}
-
 // ── generating tests ────────────────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -297,19 +216,21 @@ pub struct GeneratePreview {
     pub warnings: Vec<String>,
     /// The classes of the target file, for choosing another one.
     pub classes: Vec<TypeInFile>,
+    /// For an existing file: the imports the tests need, as edits computed against `base` — applied with the
+    /// insertion. `text` has them already.
+    pub import_edits: Vec<crate::templates_imports::TemplateEdit>,
 }
 
 #[arbor_rpc::handler]
 fn bennu_dtolab_generate(ctx: &BennuState, args: GenerateArgs) -> Result<GeneratePreview, String> {
     let root = args.root.as_str();
     let mut class = class_at(&args.source, args.offset).ok_or("There is no class at the caret")?;
-    let settings: RepoSettings = crate::repo_config::load(root, SECTION);
     let template_name = args
         .template
         .clone()
-        .or(settings.test_template)
+        .or_else(|| crate::templates::project_choice(root, TemplateKind::ValidationTests))
         .unwrap_or_else(|| DEFAULT_TEMPLATE_NAME.to_string());
-    let template = load_template(&templates_dir(), &template_name)?;
+    let template = crate::templates::load(TemplateKind::ValidationTests, &template_name)?;
     let validation = validation_namespace(&args.source, root);
     let mut warnings: Vec<String> = Vec::new();
 
@@ -339,7 +260,7 @@ fn bennu_dtolab_generate(ctx: &BennuState, args: GenerateArgs) -> Result<Generat
     let mut jvm = match dtolab_jvm::call(ctx, root, "describe", &[&class.binary, &validation]) {
         Ok(body) => {
             match serde_json::from_value::<Described>(body) {
-                Ok(described) => class.apply_described(&described),
+                Ok(described) => apply_described(&mut class, &described),
                 Err(e) => warnings.push(format!("The validator's description of the class could not be read: {e}")),
             }
             true
@@ -363,7 +284,7 @@ fn bennu_dtolab_generate(ctx: &BennuState, args: GenerateArgs) -> Result<Generat
         }
     }
     let mut constants: BTreeMap<String, String> = BTreeMap::new();
-    let constant_classes = declared_constant_classes(&template);
+    let constant_classes = constant_classes(&template.text);
     if jvm && !constant_classes.is_empty() {
         match dtolab_jvm::ask(root, "constants", &[&constant_classes.join(",")]) {
             Ok(body) => {
@@ -392,6 +313,7 @@ fn bennu_dtolab_generate(ctx: &BennuState, args: GenerateArgs) -> Result<Generat
         }
         false => None,
     };
+    let rules = crate::dtolab_values::rules();
     let built = build(
         Request {
             class: &class,
@@ -400,18 +322,24 @@ fn bennu_dtolab_generate(ctx: &BennuState, args: GenerateArgs) -> Result<Generat
             toolchain: toolchain(root, &validation),
             fields: args.fields.as_deref(),
             json_names,
+            rules: &rules,
         },
         verify,
         &constants,
     );
     warnings.extend(built.warnings);
 
-    let rendered = render(&template, &built.context)?;
-    let (text, inserted, offset) = match &existing {
-        None => (rendered.clone(), rendered, None),
+    let output = render_code(&template.text, &built.context, &crate::templates_facts::facts_at(root, &file), None)?;
+    let (text, inserted, offset, import_edits) = match &existing {
+        None => {
+            let text = crate::templates_imports::with_imports(&file, output.text, &output.imports);
+            (text.clone(), text, None, Vec::new())
+        }
         Some(source) => {
-            let insertion = insert_members(source, class_path.as_deref(), &rendered)?;
-            (insertion.apply(source), insertion.text, Some(insertion.offset))
+            let insertion = insert_members(source, class_path.as_deref(), &output.text)?;
+            let edits = crate::templates_imports::import_edits(source, &output.imports);
+            let text = crate::templates_imports::with_imports(&file, insertion.apply(source), &output.imports);
+            (text, insertion.text, Some(insertion.offset), edits)
         }
     };
     Ok(GeneratePreview {
@@ -426,31 +354,49 @@ fn bennu_dtolab_generate(ctx: &BennuState, args: GenerateArgs) -> Result<Generat
         cases: built.cases,
         verified: built.context.verified,
         warnings,
+        import_edits,
     })
 }
 
-#[derive(Deserialize)]
-pub struct CreateFileArgs {
-    pub root: String,
-    pub file: String,
-    pub text: String,
-}
-
-/// Write a generated test that is a new file, creating its directories. Refuses a file that exists —
-/// that one is written through the editor, which knows whether it has unsaved changes.
-#[arbor_rpc::handler]
-fn bennu_dtolab_create_file(_ctx: &BennuState, args: CreateFileArgs) -> Result<(), String> {
-    let path = Path::new(&args.file);
-    if !path.starts_with(&args.root) {
-        return Err(format!("{} is outside the project", args.file));
-    }
-    if path.exists() {
-        return Err(format!("{} already exists", args.file));
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-    }
-    std::fs::write(path, args.text).map_err(|e| format!("{}: {e}", args.file))
+/// A validation-test template rendered for an AI client or a preview: the expectations predicted from
+/// the source, because there is no editor waiting for the project's JVM to check them.
+pub(crate) fn render_predicted(args: &RenderArgs, template: &Template) -> Result<Rendered, String> {
+    let (file, source) = crate::templates_render::source_of(args)?;
+    let class = crate::templates_render::class_of(args, &file, &source)?;
+    let validation = validation_namespace(&source, &args.root);
+    let test_class = test_class_name(&class.name);
+    let test_file = test_file_for(&file, &class.package, &test_class);
+    let rules = crate::dtolab_values::rules();
+    let built = build(
+        Request {
+            class: &class,
+            mode: RenderMode::File,
+            test_class,
+            toolchain: toolchain(&args.root, &validation),
+            fields: None,
+            json_names: true,
+            rules: &rules,
+        },
+        None,
+        &BTreeMap::new(),
+    );
+    let facts = crate::templates_facts::facts_at(&args.root, &test_file);
+    let output = render_code(&template.text, &built.context, &facts, args.parameters.as_ref())?;
+    Ok(Rendered {
+        text: crate::templates_imports::with_imports(&test_file, output.text, &output.imports),
+        exists: Path::new(&test_file).exists(),
+        file: Some(test_file),
+        output: "file".to_string(),
+        template: template.name.clone(),
+        insertion: None,
+        insertion_stops: Vec::new(),
+        import_edits: Vec::new(),
+        source_lines: None,
+        notes: vec![
+            "The expected violations are predicted from the source; the DTO Lab checks them on the project's JVM before writing."
+                .to_string(),
+        ],
+    })
 }
 
 // ── what the project's build offers ─────────────────────────────────────────────────────────────
@@ -472,7 +418,7 @@ fn spring_boot(root: &str) -> bool {
 /// Which Bean Validation the class uses: its own imports first, then the jars. A project migrating
 /// from `javax` has both, and validating a `javax`-annotated class with the `jakarta` provider finds
 /// nothing wrong with anything.
-fn validation_namespace(source: &str, root: &str) -> String {
+pub(crate) fn validation_namespace(source: &str, root: &str) -> String {
     if source.contains("import javax.validation") {
         return "javax.validation".into();
     }
@@ -489,7 +435,7 @@ fn validation_namespace(source: &str, root: &str) -> String {
     }
 }
 
-fn toolchain(root: &str, validation: &str) -> Toolchain {
+pub(crate) fn toolchain(root: &str, validation: &str) -> Toolchain {
     let jars: Vec<String> =
         IndexService::global().dep_jars_of(root).into_iter().map(|j| j.replace('\\', "/")).collect();
     let has = |needle: &str| jars.iter().any(|j| j.contains(needle));
@@ -510,7 +456,7 @@ fn toolchain(root: &str, validation: &str) -> Toolchain {
 }
 
 /// `"1.8"` → 8, `"17"` → 17.
-fn java_major(level: &str) -> u32 {
+pub(crate) fn java_major(level: &str) -> u32 {
     let level = level.trim();
     level.strip_prefix("1.").unwrap_or(level).split(['.', '_', '-']).next().and_then(|s| s.parse().ok()).unwrap_or(8)
 }

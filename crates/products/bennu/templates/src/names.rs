@@ -2,7 +2,7 @@
 //! name, a field name in another case, and any text as a Java string literal.
 //!
 //! Exposed to templates as filters (`snake`, `camel`, `pascal`, `java_string`) — see
-//! [`crate::template::render`].
+//! [`crate::engine::render`].
 
 /// `NotBlank` → `not_blank`, `customerName` → `customer_name`, `URLValue` → `url_value`.
 pub fn snake(text: &str) -> String {

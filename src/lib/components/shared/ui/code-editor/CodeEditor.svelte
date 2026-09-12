@@ -42,6 +42,7 @@
   } from './extensions';
   import { minimapExtension } from './minimap';
   import { makeByteToU16 } from './highlight';
+  import { insertWithStops } from './snippet-stops';
   import {
     setDocumentHighlights as cmSetDocumentHighlights,
     setFoldRanges as cmSetFoldRanges,
@@ -976,6 +977,31 @@
       changes: { from, to, insert: text },
       selection: { anchor: from + text.length },
     });
+    view.focus();
+  }
+
+  /**
+   * Insert `text` at a byte offset **as a snippet**: re-indented to the line it lands on, with its
+   * tab stops armed so Tab walks them and stops sharing a group update together.
+   *
+   * The same machinery a completion's snippet goes through — which is the point: generated members
+   * and an accepted abbreviation should behave identically once they are in the buffer, and two
+   * implementations of "insert a template" would eventually disagree about indentation.
+   */
+  export function insertSnippetAtByte(
+    startByte: number,
+    endByte: number,
+    text: string,
+    stops: readonly { start: number; end: number; group?: number }[],
+  ) {
+    if (!view) return;
+    const doc = view.state.doc.toString();
+    const b2u = makeByteToU16(doc);
+    const len = view.state.doc.length;
+    const from = Math.max(0, Math.min(b2u(startByte), len));
+    const to = Math.max(from, Math.min(b2u(endByte), len));
+    // The stops are byte offsets into `text`, so they convert against `text` and not the document.
+    insertWithStops(view, from, to, text, stops, makeByteToU16(text));
     view.focus();
   }
 

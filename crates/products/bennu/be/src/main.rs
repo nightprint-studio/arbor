@@ -325,7 +325,7 @@ mod sheet;
 mod maven_goals;
 // The abbreviations a Java file expands (`psf`, `sout`, `psvm`) — the table lives in `bennu-java`,
 // the wire shaping here. Appended to the Java completion, never replacing it.
-mod java_templates;
+mod abbreviations;
 // Maven Central (`bennu_maven_version_hints`): which of a pom's pinned dependencies have a newer
 // release. The Java mirror of `crates_io`, and the only Java-side call that opens a socket — behind
 // its own switch, its own cache and its own TTL, for the same three reasons.
@@ -421,6 +421,16 @@ mod agent;
 // into tests from a template the user owns.
 mod dtolab;
 mod dtolab_jvm;
+mod dtolab_values;
+// Code generated from templates the user owns — every kind, where they are kept, and their MCP tools.
+mod templates;
+mod templates_facts;
+mod templates_imports;
+mod templates_kinds;
+mod templates_live;
+mod templates_manage;
+mod templates_render;
+mod config_class;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, `bennu_config_dir()` /

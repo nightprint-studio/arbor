@@ -889,6 +889,11 @@ input[type="radio"]:disabled {
 /* XSD built-in type references inside attribute values (`type="xs:string"`). */
 .token.tag .token.attr-value .token.builtin     { color: var(--syntax-type,    #4d78cc); font-weight: 500; }
 .token.namespace                    { color: var(--syntax-keyword,  #cc7832); }
+/* A Jinja template's tags on a tinted ground, the way its own editor tab draws them: a template is two
+   languages, and it reads as two layers rather than one. `font-style` because a tag inside a Java
+   comment is still a tag, not part of the comment. */
+.token.jinja-tag, .token.jinja-comment { background: color-mix(in srgb, var(--syntax-annotation, #bbb529) 9%, transparent); border-radius: 3px; }
+.token.jinja-tag                    { color: var(--text-primary); font-style: normal; }
 /* A name the LANGUAGE brings rather than one the file does — python's `len`, bash's `echo`,
    dig's `harvest`, WGSL's `f32`. Emitted by a dozen Prism grammars and styled by none of them
    until now, so every one of those read as plain text. Between a call's orange and ordinary

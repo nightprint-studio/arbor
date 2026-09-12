@@ -1,409 +1,293 @@
-<!-- Bennu docs — changing code rather than reading it: intentions, rename, generate. -->
+<script lang="ts">
+  /**
+   * Refactoring and intentions: the Alt+Enter list, extract and inline, moving members and classes, the create fixes and safe
+   * delete, quick fixes, rename, Generate, implement/override, and spelling. Everything goes through the reference index.
+   */
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+  import { highlightCode } from '$lib/utils/highlight';
+</script>
+
+<span class="eyebrow">Editor</span>
 <h1>Refactoring &amp; intentions</h1>
+
 <p class="doc-lead">
-  The edits Bennu makes for you. All of them go through the same reference index the navigation
-  does, which is what separates a rename from a search-and-replace: the index knows which
-  <code>getName</code> is <em>this</em> one.
+  The edits Bennu makes for you. All of them go through the reference index navigation uses, which is what separates a rename from a
+  search-and-replace: the index knows which <code>getName</code> is <em>this</em> one.
 </p>
 
-<h2>Right-click menu</h2>
-<p>
-  Right-clicking in the editor opens a context menu with the clipboard actions (Cut · Copy · Paste)
-  and the semantic ones — <strong>Go to declaration</strong>, <strong>Find usages</strong>,
-  <strong>Rename</strong>, <strong>Generate</strong> and <strong>Save</strong>. The semantic actions
-  act on the symbol <strong>under the pointer</strong> — right-clicking moves the caret there first.
-</p>
+<h2>Where they are</h2>
+<dl class="meta-grid">
+  <dt>The right-click menu</dt>
+  <dd>Cut · Copy · Paste, and the semantic actions — <strong>Go to declaration</strong>, <strong>Find usages</strong>, <strong>Rename</strong>, <strong>Generate</strong>, <strong>Save</strong> — on the symbol <strong>under the pointer</strong>: right-clicking moves the caret there first.</dd>
+  <dt><kbd>Alt</kbd> + <kbd>Enter</kbd></dt>
+  <dd>The <strong>intentions</strong> popup at the caret — everything available there, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>Enter</kbd> to apply, <kbd>Esc</kbd> to dismiss. The entry to the generators, the refactorings and the quick fixes.</dd>
+</dl>
+
 <h2>Intentions</h2>
 <p>
-  <kbd>Alt</kbd> + <kbd>Enter</kbd> opens the <strong>intentions</strong> popup at the caret — a
-  keyboard-driven list of the context actions available there (↑/↓ to move, <kbd>Enter</kbd> to
-  apply, <kbd>Esc</kbd> to dismiss). It's the entry point to the generator flows and to quick-fixes.
+  On a <strong>type that is not imported</strong>, <strong>Import '…'</strong> adds the <code>import</code> — after the package, sorted among the
+  others. When several classes share the name each is its own entry, so you pick the package; a type in the same package, in
+  <code>java.lang</code>, or covered by a wildcard is not offered, needing none.
 </p>
-<p>
-  With the caret on a <strong>type that isn't imported</strong>, the popup offers
-  <strong>Import '…'</strong> — it adds the <code>import</code> line for you (placed after the package
-  declaration and sorted among the existing imports). When more than one class shares that name, each
-  candidate is listed as its own entry, so you pick the package you meant; a type in the same package,
-  in <code>java.lang</code>, or already covered by a wildcard import isn't offered (it needs none).
-</p>
-<p>
-  More quick-fixes live here too. With the caret inside a logging call whose message is built by
-  string concatenation — <code>logger.info("user " + id + " logged in")</code> — the popup offers
-  <strong>Replace concatenation with parameterized logging</strong>, rewriting it to the form the
-  logging APIs prefer: <code>logger.info("user &lbrace;&rbrace; logged in", id)</code> (a trailing
-  exception argument is kept last). On a <code>x.equals("literal")</code> call it offers
-  <strong>Flip to null-safe equals</strong> — <code>"literal".equals(x)</code>, which never throws
-  when <code>x</code> is null. And a family of one-click <strong>simplifications</strong>:
-  <code>list.size() == 0</code> → <code>list.isEmpty()</code>, <code>flag == true</code> →
-  <code>flag</code>, <code>!(a == b)</code> → <code>a != b</code>.
-</p>
-<p>
-  When a file's name and the <code>public</code> type inside it disagree — which Java does not allow,
-  so the file does not compile — the popup offers <strong>both ways out</strong>: rename the type to
-  match the file, or rename the file to match the type. Neither is chosen for you.
-  <code>Foo.java</code> holding <code>public class Bar</code> happens in both directions — somebody
-  renamed the class in a text editor, or somebody copied a file and renamed the class inside it —
-  and picking one for you gets it wrong half the time, in the direction that loses the name you
-  meant to keep. Renaming the type goes through the rename preview, so every use of it follows.
-</p>
+<table>
+  <thead><tr><th>Offered on</th><th>Becomes</th></tr></thead>
+  <tbody>
+    <tr><td><code>logger.info("user " + id + " logged in")</code></td><td><code>logger.info("user &lbrace;&rbrace; logged in", id)</code> — parameterized logging; a trailing exception stays last</td></tr>
+    <tr><td><code>x.equals("literal")</code></td><td><code>"literal".equals(x)</code> — never throws when <code>x</code> is null</td></tr>
+    <tr><td><code>list.size() == 0</code></td><td><code>list.isEmpty()</code></td></tr>
+    <tr><td><code>flag == true</code></td><td><code>flag</code></td></tr>
+    <tr><td><code>!(a == b)</code></td><td><code>a != b</code></td></tr>
+  </tbody>
+</table>
+<Callout variant="info" title="A file and its type disagree">
+  <code>Foo.java</code> holding <code>public class Bar</code> does not compile, and it happens both ways — a class renamed in a text editor, or a
+  file copied and the class inside renamed. So the popup offers <strong>both ways out</strong>: rename the type to match the file, or the file to
+  match the type. Picking one for you would be wrong half the time, in the direction that loses the name you meant to keep. Renaming the type goes
+  through the rename preview, so every use follows.
+</Callout>
+
 <h2>Extract and inline</h2>
 <p>
-  One <kbd>Alt</kbd> + <kbd>Enter</kbd> list, offered from what you have selected: a run of
-  statements means <em>extract method</em>, a caret in an expression means <em>extract variable</em>,
-  a caret on a name means one of the inlines, a caret on a member's own header means one of the
-  moves. All of them arrive as a single undo.
-</p>
-<div class="fc-list">
-  <div class="fc-item">
-    <div class="fc-title">Extract method</div>
-    <div class="fc-desc">
-      The selected statements become a method and a call. The locals it reads become parameters,
-      typed as they were declared; a local it produces that <em>outlives</em> the selection and the
-      code afterwards reads becomes the return value — a name declared inside a loop or a branch of
-      the selection dies with it, whatever the code after happens to call its own variables. A
-      <code>static</code> method extracts a <code>static</code> one, a generic one carries the type
-      parameters its new signature needs with their bounds — the <code>throws</code> clause counts —
-      the checked exceptions the moved body can raise are declared on it, and the moved body is
-      re-indented rather than pasted. A name caught as <code>A | B</code> has no single type to write
-      into a signature, so a selection that reads one is refused instead.
-    </div>
-  </div>
-  <div class="fc-item">
-    <div class="fc-title">Extract variable · Extract constant</div>
-    <div class="fc-desc">
-      The expression gets a name — a local above the statement it was in, or a
-      <code>private static final</code> beside the class's other fields when it is constant to read.
-      A constant is refused in the type's own header, where an annotation like
-      <code>@SuppressWarnings</code> sits before the <code>&#123;</code> and a field declared inside
-      would not be in scope.
-      The type is resolved against the project, so the declaration says <code>List&lt;String&gt;</code>
-      and not <code>var</code>, and the import it needs comes with it. The name steps aside from
-      anything already in scope — a field the method reads on its own gets the name it has, and the
-      new local becomes <code>value2</code> rather than quietly taking over every later mention of
-      it. Where the surrounding code is what decides the expression's type, in an argument, a
-      <code>return</code> or an arm of a conditional, a type the engine works out but cannot write
-      is a refusal instead: <code>var</code> there would infer the expression again with nothing to
-      infer from. A type carrying a <strong>captured wildcard</strong> — what
-      <code>a.annotationType()</code> gives, a <code>Class&lt;? extends Annotation&gt;</code> — is a
-      refusal for the same reason at a field and keeps <code>var</code> at a local: the compiler has
-      a capture there, and a capture has no name anyone can type. An expression it cannot type at all
-      still gets <code>var</code>, which is what javac would infer anyway.
-    </div>
-  </div>
-  <div class="fc-item">
-    <div class="fc-title">Invert if · Merge nested if</div>
-    <div class="fc-desc">
-      <code>if (a) X else Y</code> becomes <code>if (!a) Y else X</code>, with the condition negated
-      the way a person would write it: a comparison flips its operator, a <code>!</code> comes off
-      rather than doubling, and <code>&amp;&amp;</code> becomes <code>||</code> over negated halves.
-      A condition of a shape that has no exact opposite is wrapped instead of guessed at. Two
-      <code>if</code>s with nothing between them join into one — refused when either carries an
-      <code>else</code>, which would have to run in a case the merged test no longer distinguishes.
-    </div>
-  </div>
-  <div class="fc-item">
-    <div class="fc-title">Split · Join · <code>var</code></div>
-    <div class="fc-desc">
-      A declaration separates from its assignment and joins back again, and an explicit type swaps
-      with <code>var</code> in either direction — going back to a written type asks the project what
-      the initialiser's type is, and declines rather than leaving <code>var</code> where it was.
-      Splitting a <code>final</code> local is refused: Java allows that shape only where it can prove
-      the variable is still unset. The four things <code>var</code> cannot read — a lambda, a method
-      reference, a bare <code>&#123;…&#125;</code> and <code>null</code> — each say so by name.
-    </div>
-  </div>
-  <div class="fc-item">
-    <div class="fc-title">Introduce field</div>
-    <div class="fc-desc">
-      A local becomes a field of the class it was written in, and its
-      <strong>initialisation stays where it ran</strong> — <code>int total = a + b;</code> becomes a
-      field <code>private int total;</code> and the statement <code>total = a + b;</code>, in that
-      place. Initialising the field at its own declaration instead would run the expression at
-      construction time, which is a different program whenever it reads a parameter, throws, or costs
-      anything. The field goes with the other fields, except when the local lives in an
-      <strong>initialiser block</strong>: a field may only be read by an initialiser declared after
-      it, so there it goes above the block instead.
-      A local of a <code>static</code> method makes a <code>static</code> field, the type
-      is resolved against the project so a <code>var</code> local still gets a written one, and a
-      name the class already declares is refused rather than shadowed. A local declared with a type
-      parameter of its own <em>method</em> stays too — that name exists only inside the method, and a
-      field of the class cannot be declared with it. So do the places a field cannot go at all: an
-      interface, whose fields are <code>public static final</code> and must be initialised where they
-      are declared, a record, which may not have an instance field, and a local inside an anonymous
-      class, where the field would land on the class around it.
-    </div>
-  </div>
-  <div class="fc-item">
-    <div class="fc-title">Replace <code>if</code> chain with <code>switch</code></div>
-    <div class="fc-desc">
-      An <code>if</code> / <code>else if</code> ladder testing one value against constants becomes a
-      <code>switch</code>, with <code>case</code> labels and the <code>break</code>s the compiler
-      will accept — an arm that already returns or throws gets none, because a <code>break</code>
-      after it is an unreachable statement. Enum constants lose their type, which is how a
-      <code>switch</code> over an enum has to write them. The subject has to be something re-reading
-      cannot change, so a chain testing <code>kind()</code> is left alone: it ran the call once per
-      rung and a <code>switch</code> would run it once. So is
-      <code>"a".equals(s)</code> — the null-safe form, which falls through on a null <code>s</code>
-      where <code>switch (s)</code> throws. When an arm ends in a <code>try</code> or a nested
-      <code>switch</code>, where whether a <code>break</code> would be reachable cannot be read off
-      the text, the whole conversion is refused rather than guessed. A chain over strings produces a
-      <code>switch</code> over a <code>String</code>, which is <strong>Java 7</strong> — on a project
-      targeting less, that is said rather than written.
-    </div>
-  </div>
-  <div class="fc-item">
-    <div class="fc-title">Pull up · Push down · Move member</div>
-    <div class="fc-desc">
-      A member changes the type it belongs to. What differs between the three is only which type,
-      and the menu is where you choose: every target written in this file — each
-      <code>extends</code> and <code>implements</code> clause, each subtype declared here — is its
-      own row, so the common move is one keystroke and no dialog. The rows ending in
-      <strong>…</strong> ask instead, and that is the case the file cannot answer: they open a
-      filterable list of every candidate the <em>project index</em> knows — a superclass in another
-      file, a subtype declared elsewhere, any type in the project for a sideways move. Whichever way
-      the target is chosen, a target in another file means that file is edited too, with the imports
-      the member reads carried over. What it checks first is <strong>who still needs the member where
-      it is</strong>, and across the whole project rather than just this file: one something else
-      calls, or a subclass overrides, does not go down or sideways. A target in <strong>another
-      package</strong> is its own question — a type the member reached through its own package
-      resolves to nothing there and has no import to carry, and a name it did not declare itself may
-      simply stop being visible, so a cross-package move takes only what is self-contained, and what
-      does travel is widened to <code>protected</code> if it was package-private. And a
-      <code>static</code> <em>method</em> pulled into an <strong>interface</strong> is refused while
-      anything still calls it: unlike a field, a static interface method is not inherited (JLS
-      §8.4.8), so every unqualified call would stop resolving. What is left is what it takes from
-      the type it leaves, and each refusal names the thing that
-      keeps the member where it is: a method that reads <code>count</code> will not go to a type that
-      has no <code>count</code>; one written in terms of the class's type parameter will not go
-      anywhere that never declared it; one that names its own class — a factory returning it, a
-      <code>new</code> of it — means the same class wherever it lands, so it stays. So do a
-      <code>super</code> call, which means a different method once it moves; an
-      <code>@Override</code>, which is a promise about the type the member is declared in; a method
-      with no body, which is a contract rather than code; a name the target already declares; a member
-      that anything still calls or that a subclass overrides, moved anywhere but up; a call to one of
-      its own <strong>overloads</strong>, which reads as recursion and is not — the overload stays
-      behind, and the call meets a class where only the moved one exists; and a pull up into a
-      generic supertype whose type arguments this class fixes, where the member would meet the type
-      variable in place of the concrete type it was written for. Moving <em>sideways</em>, to a class
-      that is neither above nor below, is for <code>static</code> members that need nothing from
-      where they were: an instance member would find <code>this</code> pointing at a different
-      object, and a name it reads would mean something else. What arrives is written the way its new
-      home requires — a method landing in an interface becomes <code>default</code> and drops the
-      modifiers one may not carry, one landing back in a class loses that <code>default</code> and
-      keeps the <code>public</code> the interface gave it, and an <code>enum</code> whose constants
-      had no <code>;</code> gets one. A <code>private</code> member pulled up is
-      <strong>widened to <code>protected</code></strong> where the class it leaves still reads it —
-      the smallest change that works whether or not the supertype shares a package — and the row
-      says so rather than doing it quietly; one nothing reads goes up exactly as written. Into an
-      interface no widening is needed at all: members there are implicitly public, which is also why
-      a method keeping its body becomes a <code>default</code> one and a <code>private static</code>
-      helper does not stay private. That last part has a floor: <code>default</code> and
-      <code>static</code> interface methods are <strong>Java 8</strong>, and a project targeting
-      less is told so instead of being handed code its compiler rejects. The one member that stays
-      put whatever the rules allow is <code>serialVersionUID</code> and its serialization
-      neighbours: the runtime reads those <em>by name</em>, so no source mentioning them proves
-      nothing.
-    </div>
-  </div>
-  <div class="fc-item">
-    <div class="fc-title">Move class</div>
-    <div class="fc-desc">
-      A type written inside another one gets its own file, beside the one it left — the same folder,
-      which is what "the same package" means, so every unqualified mention of it in the package still
-      resolves. It travels with the package line, the imports it actually reads, and without the
-      modifiers a top-level type may not carry: <code>static</code>, because nothing encloses it any
-      more, and <code>private</code> or <code>protected</code>, which are not top-level modifiers. An
-      <strong>inner</strong> class — a nested <code>class</code> without <code>static</code> — stays:
-      it holds a reference to an instance of the class around it, and a top-level type has nowhere to
-      keep one. So does one that reads the outer class's own members, or names a <em>sibling</em>
-      nested type: that sibling is still nested afterwards, and the bare name it was written with
-      resolves to nothing from outside. And so does one this file spells <code>Outer.Inner</code>
-      anywhere, which stops meaning anything the moment <code>Inner</code> is top-level — as does one
-      any <em>other</em> file mentions, which it can only have reached as <code>Outer.Inner</code> or
-      through an import of it. Its own <code>private</code> members are the last check: those are
-      visible to the class around it and to nothing else, so a nested type whose privates that class
-      reads — a private constructor included — stays where it is.
-    </div>
-  </div>
-  <div class="fc-item">
-    <div class="fc-title">Inline variable · Inline method</div>
-    <div class="fc-desc">
-      The value goes back where the name was, parenthesised wherever the surrounding expression
-      binds tighter. Which occurrences count is a question of scope, not of spelling: the ones in
-      the declaration's own scope, after it, that read the variable — not a method of the same name
-      (<code>Math.max</code>), not the selector after a dot, not a lambda parameter, and not a second
-      variable of the same name in the next block. It declines where the declaration was doing work
-      the expression alone cannot: a <code>final byte n = 5;</code> narrows a constant in a way only
-      an assignment may, and a value moved into a lambda becomes a capture, so it may only read
-      locals that never change. A one-expression method goes back into its call the same way, with
-      its arguments substituted where the parameters are read — structurally, so a local that happens
-      to share a parameter's name is untouched, and an argument that is not a simple name is
-      parenthesised so a cast keeps binding to what it was cast from.
-    </div>
-  </div>
-</div>
-<div class="fc-list">
-  <div class="fc-item">
-    <div class="fc-title">Create method</div>
-    <div class="fc-desc">
-      On a call to a method that does not exist, <kbd>Alt</kbd> + <kbd>Enter</kbd> writes it, just
-      below the method that calls it. The call site is the specification: the arguments' declared
-      types and names become the signature, what the result is used as becomes the return type
-      (nothing at all means <code>void</code>, a condition means <code>boolean</code>), and a call
-      from a <code>static</code> method reaches a <code>static</code> one. The body throws, so it
-      compiles whatever it returns and fails loudly rather than returning a plausible
-      <code>null</code>.
-    </div>
-  </div>
-  <div class="fc-item">
-    <div class="fc-title">Create method in the receiver's class</div>
-    <div class="fc-desc">
-      A call on <em>another</em> object — <code>order.total(label)</code> where <code>Order</code>
-      declares no <code>total</code> — writes the method into <strong>that class's own file</strong>,
-      at the end of its body, with the imports it needs for the parameter and return types. The
-      signature is read from the call site exactly as above; the member is <code>public</code>,
-      because it is being called from another class. The target file opens, since a method that was
-      just created is one you are about to fill in.
-      <br /><br />
-      It declines rather than guessing: a receiver whose type comes from a <strong>jar</strong> has
-      no source to write into, a class that <strong>already declares</strong> that name at any arity
-      is a different problem, and a receiver whose type does not resolve would send the method
-      somewhere guessed at.
-    </div>
-  </div>
-  <div class="fc-item">
-    <div class="fc-title">Safe delete</div>
-    <div class="fc-desc">
-      Removes a member and its documentation comment — or refuses, and lists every use that has to
-      go first with the file, line and the line's text. The list is the point: "it is used" is not an
-      answer, and the next question is always where. It declines outright on a method that overrides
-      something from a jar, where deleting does not remove the behaviour but hands the call to the
-      inherited version; on a method declared at several levels of one hierarchy, which is one method
-      to every caller; on a method something in the project <em>implements</em>, where removing the
-      declaration would leave an <code>@Override</code> with nothing to override; and on anything
-      carrying an annotation, where a framework may reach it by name at run time — a use no index
-      can see.
-    </div>
-  </div>
-  <div class="fc-item">
-    <div class="fc-title">Create class</div>
-    <div class="fc-desc">
-      On a type that does not resolve, the file is created beside the one that named it — the same
-      folder, which is what "the same package" means — and opened. How the name is used decides what
-      it is: a name in an <code>implements</code> clause becomes an <code>interface</code>, a name
-      after <code>@</code> an annotation type, everything else a class. The file is empty apart from
-      its package line, and a name that already has a file is refused rather than overwritten.
-    </div>
-  </div>
-</div>
-<p>
-  <strong>A refactoring that cannot be done safely says why, and stays in the list greyed.</strong>
-  That is the point of the feature as much as the edits are: <em>"the selection produces
-  <code>total</code> and <code>count</code>, and a method can only return one"</em> tells you what to
-  change. The others read the same way — a <code>return</code> that would leave the selection, a
-  variable assigned again later, a value with a side effect read twice, an overloaded method whose
-  call cannot be resolved from its arguments alone, a local declared with <code>var</code> whose type
-  cannot be written into a signature.
-</p>
-<p>
-  On a file served by a <strong>language server</strong> — Rust, TypeScript, Python — the same list
-  carries that server's own refactorings, computed with its full type knowledge, and its disabled
-  ones with their reasons. The gesture is the same; which engine answered is not something you have
-  to know.
+  One <kbd>Alt</kbd> + <kbd>Enter</kbd> list, offered from what is selected: a run of statements means <em>extract method</em>, a caret in an expression
+  <em>extract variable</em>, a caret on a name one of the inlines, a caret on a member's header one of the moves. Every one arrives as a single undo.
 </p>
 
-<h2>Quick-fixes</h2>
+<h3>Extract method</h3>
 <p>
-  With the caret on a <strong>diagnostic</strong>, <kbd>Alt</kbd> + <kbd>Enter</kbd> offers its
-  repair — not just the sentence saying what is wrong:
+  The selected statements become a method and a call. The locals it reads become parameters, typed as declared; a local it produces that
+  <em>outlives</em> the selection, and that the code after reads, becomes the return value — a name declared inside a loop or a branch of the selection
+  dies with it, whatever the later code calls its own variables.
 </p>
 <ul>
-  <li><strong>Unused, duplicate or redundant import</strong> → remove it, with its line.</li>
-  <li><strong>Unhandled checked exception</strong> → two ways out: add <code>throws</code> to the
-    enclosing method (extending the clause it already has, if any), or surround the statement with a
-    <code>try</code>/<code>catch</code>.</li>
-  <li><strong>Non-exhaustive enum switch</strong> → write the missing cases, in the form the switch
-    already uses (arrows or colons, never a mix — that doesn't compile).</li>
-  <li><strong>Comparing strings with <code>==</code></strong> → <code>equals</code>, with the literal
-    moved to the receiver side so it cannot throw. <code>!=</code> keeps its negation.</li>
-  <li><strong>Switch fall-through</strong> → add the missing <code>break;</code>, indented with the
-    group it ends.</li>
-  <li><strong>A stray <code>;</code></strong> → remove it.</li>
-  <li><strong>A missing import</strong> → add it, one entry per candidate package (see above).</li>
+  <li>A <code>static</code> method extracts a <code>static</code> one; a generic one carries the type parameters its signature needs, with their bounds —
+    the <code>throws</code> clause counts.</li>
+  <li>The checked exceptions the moved body can raise are declared on it, and the body is re-indented rather than pasted.</li>
+  <li>A name caught as <code>A | B</code> has no single type to write in a signature, so a selection reading one is refused.</li>
 </ul>
+
+<h3>Extract variable · extract constant</h3>
 <p>
-  A fix is keyed to the <em>kind</em> of diagnostic and reads the source itself, so it is never
-  guessing from the wording. The two that need to know types — which exception, which constants —
-  are recomputed from the same analysis that raised the diagnostic, so a fix that appears is one
-  that will actually clear the squiggle.
+  The expression gets a name: a local above its statement, or a <code>private static final</code> beside the class's fields when it is constant to read.
+  The type is resolved, so the declaration says <code>List&lt;String&gt;</code> rather than <code>var</code>, and its import comes along.
 </p>
+<ul>
+  <li>The name steps aside from anything in scope — a field the method reads keeps its name, and the new local becomes <code>value2</code> rather than
+    quietly taking over every later mention.</li>
+  <li>A constant is refused in the type's own header, where <code>@SuppressWarnings</code> sits before the <code>&#123;</code> and a field would not be in scope.</li>
+  <li>Where the surrounding code decides the type — an argument, a <code>return</code>, an arm of a conditional — a type it works out but cannot write is a
+    refusal: <code>var</code> there would have nothing to infer from.</li>
+  <li>A <strong>captured wildcard</strong> — <code>a.annotationType()</code> gives <code>Class&lt;? extends Annotation&gt;</code> — is refused at a field and
+    keeps <code>var</code> at a local: a capture has no name anyone can type. An expression it cannot type at all gets <code>var</code>, as javac would infer.</li>
+</ul>
+
+<h3>Invert if · merge nested if</h3>
+<pre><code>{@html highlightCode(`if (a) X else Y      →      if (!a) Y else X`, 'java')}</code></pre>
+<p>
+  The condition is negated the way a person would: a comparison flips its operator, a <code>!</code> comes off rather than doubling, and
+  <code>&amp;&amp;</code> becomes <code>||</code> over negated halves. A shape with no exact opposite is wrapped, not guessed at. Two <code>if</code>s with
+  nothing between them join into one — refused when either has an <code>else</code>, which would run in a case the merged test no longer tells apart.
+</p>
+
+<h3>Split · join · <code>var</code></h3>
+<p>
+  A declaration separates from its assignment and joins back, and a written type swaps with <code>var</code> both ways — going back asks the project what
+  the initialiser's type is, and declines rather than leaving <code>var</code>. Splitting a <code>final</code> local is refused: Java allows that shape only
+  where it can prove the variable unset. The four things <code>var</code> cannot read — a lambda, a method reference, a bare <code>&#123;…&#125;</code>,
+  <code>null</code> — each say so by name.
+</p>
+
+<h3>Introduce field</h3>
+<p>A local becomes a field of its class, and its <strong>initialisation stays where it ran</strong>:</p>
+<pre><code>{@html highlightCode(`int total = a + b;`, 'java')}</code></pre>
+<pre><code>{@html highlightCode(`private int total;
+…
+total = a + b;`, 'java')}</code></pre>
+<p>
+  Initialising the field at its declaration would run the expression at construction time — a different program whenever it reads a parameter, throws,
+  or costs anything. The field joins the other fields, except for a local in an <strong>initialiser block</strong>, where it goes above the block, since a
+  field may only be read by initialisers declared after it.
+</p>
+<ul>
+  <li>A local of a <code>static</code> method makes a <code>static</code> field; a <code>var</code> local still gets a written type.</li>
+  <li>Refused: a name the class already declares; a local typed with its method's own type parameter; an interface, whose fields must be initialised at
+    their declaration; a record, which may not have instance fields; a local inside an anonymous class, whose field would land on the class around it.</li>
+</ul>
+
+<h3>Replace <code>if</code> chain with <code>switch</code></h3>
+<p>
+  An <code>if</code> / <code>else if</code> ladder testing one value against constants becomes a <code>switch</code>, with the <code>break</code>s the compiler
+  accepts — none after an arm that already returns or throws, where it would be unreachable. Enum constants lose their type, as a <code>switch</code> writes them.
+</p>
+<Callout variant="warning" title="When it is left alone">
+  The subject must be something re-reading cannot change, so a chain testing <code>kind()</code> stays — it ran the call once per rung. So does
+  <code>"a".equals(s)</code>, null-safe where <code>switch (s)</code> throws. An arm ending in a <code>try</code> or a nested <code>switch</code>, where a
+  <code>break</code>'s reachability cannot be read off the text, refuses the whole conversion. And a <code>switch</code> over a <code>String</code> is
+  <strong>Java 7</strong>: below that, it is said rather than written.
+</Callout>
+
+<h3>Pull up · push down · move member</h3>
+<p>
+  A member changes the type it belongs to; the three differ only in which type, and the menu is where you choose. Every target written in this file — each
+  <code>extends</code> and <code>implements</code>, each subtype declared here — is its own row, so the common move is one keystroke. The rows ending in
+  <strong>…</strong> open a filterable list of every candidate the <em>project index</em> knows: a superclass in another file, a subtype elsewhere, any type
+  for a sideways move. A target in another file is edited too, with the imports the member reads carried over.
+</p>
+<p>
+  First it checks <strong>who still needs the member where it is</strong>, across the whole project: one something calls, or a subclass overrides, does not go
+  down or sideways. Then what it takes from the type it leaves — and each refusal names what keeps the member there:
+</p>
+<ul>
+  <li>a field it reads that the target does not have — a method reading <code>count</code> will not go where there is no <code>count</code>;</li>
+  <li>the class's type parameter, where the target never declared it;</li>
+  <li>its own class by name — a factory returning it, a <code>new</code> of it — which would mean the same class wherever it lands;</li>
+  <li>a <code>super</code> call, meaning another method once moved; an <code>@Override</code>, a promise about the type it is in; no body, a contract rather than code;</li>
+  <li>a name the target already declares;</li>
+  <li>a call to one of its own <strong>overloads</strong>, which reads as recursion and is not;</li>
+  <li>a pull up into a generic supertype whose type arguments this class fixes, where the member would meet a type variable in place of its concrete type.</li>
+</ul>
+<dl class="meta-grid">
+  <dt>Another package</dt>
+  <dd>A type the member reached through its own package resolves to nothing there and has no import to carry, so only what is self-contained moves, widened to <code>protected</code> if it was package-private.</dd>
+  <dt>Sideways</dt>
+  <dd>For <code>static</code> members needing nothing from where they were: an instance member would find <code>this</code> pointing elsewhere.</dd>
+  <dt>Into an interface</dt>
+  <dd>A method becomes <code>default</code> and drops the modifiers it may not carry; a <code>private static</code> helper does not stay private. <code>default</code> and <code>static</code> interface methods are <strong>Java 8</strong> — below it, you are told. A <code>static</code> method called from anywhere is refused: static interface methods are not inherited (JLS §8.4.8).</dd>
+  <dt>Back into a class</dt>
+  <dd>It loses that <code>default</code> and keeps the <code>public</code> the interface gave it; an <code>enum</code> whose constants had no <code>;</code> gets one.</dd>
+  <dt>A <code>private</code> member pulled up</dt>
+  <dd>Widened to <code>protected</code> where the class it leaves still reads it — the row says so. One nothing reads goes up as written.</dd>
+</dl>
+<Callout variant="info" title="serialVersionUID stays put">
+  It and its serialization neighbours are read <em>by name</em> at run time, so no source mentioning them proves anything.
+</Callout>
+
+<h3>Move class</h3>
+<p>
+  A type written inside another gets its own file beside it — the same folder, which is "the same package", so every unqualified mention in the package still
+  resolves. It takes the package line and the imports it reads, and drops the modifiers a top-level type may not carry: <code>static</code>,
+  <code>private</code>, <code>protected</code>. It stays nested when:
+</p>
+<ul>
+  <li>it is <strong>inner</strong> — a nested <code>class</code> without <code>static</code> holds a reference to its outer instance, which a top-level type has nowhere to keep;</li>
+  <li>it reads the outer class's own members, or names a <em>sibling</em> nested type, which would resolve to nothing from outside;</li>
+  <li>this file spells it <code>Outer.Inner</code> anywhere, or any <em>other</em> file mentions it at all;</li>
+  <li>the outer class reads its <code>private</code> members — a private constructor included.</li>
+</ul>
+
+<h3>Inline variable · inline method</h3>
+<p>
+  The value goes back where the name was, parenthesised wherever the surrounding expression binds tighter. Which occurrences count is a question of scope:
+  the ones in the declaration's own scope, after it, that read the variable — not <code>Math.max</code>, not a selector after a dot, not a lambda parameter,
+  not a same-named variable in the next block.
+</p>
+<p>
+  It declines where the declaration did work the expression alone cannot: <code>final byte n = 5;</code> narrows a constant only an assignment may, and a value
+  moved into a lambda becomes a capture that may only read unchanging locals. A one-expression method goes back into its call with its arguments substituted
+  structurally, so a local sharing a parameter's name is untouched and a non-simple argument is parenthesised.
+</p>
+
+<h2>Creating what is missing, and deleting safely</h2>
+<div class="feature-grid two-col">
+  <div class="feature-card">
+    <div class="fc-eyebrow">On a call to a method that does not exist</div>
+    <div class="fc-title">Create method</div>
+    <div class="fc-desc">Written just below the calling method. The call site is the specification: argument types and names become the signature, how the result is used the return type — nothing means <code>void</code>, a condition <code>boolean</code> — and a <code>static</code> caller gets a <code>static</code> method. The body throws, so it compiles and fails loudly rather than returning a plausible <code>null</code>.</div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-eyebrow">On <code>order.total(label)</code></div>
+    <div class="fc-title">Create method in the receiver's class</div>
+    <div class="fc-desc">Written at the end of <strong>that class's file</strong>, <code>public</code>, with the imports its types need, and the file opens. Declined for a receiver from a <strong>jar</strong>, a class that <strong>already declares</strong> the name at any arity, or a receiver whose type does not resolve.</div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-eyebrow">On a type that does not resolve</div>
+    <div class="fc-title">Create class</div>
+    <div class="fc-desc">The file is created beside the one naming it and opened. The use decides the kind: an <code>implements</code> clause makes an <code>interface</code>, after <code>@</code> an annotation, anything else a class. A name that already has a file is refused.</div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-eyebrow">On a member</div>
+    <div class="fc-title">Safe delete</div>
+    <div class="fc-desc">Removes it and its doc comment — or refuses and lists every use with file, line and text, because "it is used" is not an answer. Declined outright on an override of something from a jar, a method declared at several levels of one hierarchy, one something implements, and anything annotated, which a framework may reach by name.</div>
+  </div>
+</div>
+<Callout variant="tip" title="A refactoring that cannot be done says why">
+  It stays in the list, greyed, with the reason: <em>"the selection produces <code>total</code> and <code>count</code>, and a method can only return
+  one"</em> tells you what to change. So do a <code>return</code> leaving the selection, a variable assigned again later, a value with a side effect read
+  twice, an overloaded call its arguments cannot resolve, a <code>var</code> local whose type cannot go in a signature.
+</Callout>
+<p>
+  On a file a <strong>language server</strong> serves — Rust, TypeScript, Python — the same list carries the server's own refactorings, with its full type
+  knowledge and its disabled ones with their reasons. The gesture is the same.
+</p>
+
+<h2>Quick fixes</h2>
+<p>With the caret on a <strong>diagnostic</strong>, <kbd>Alt</kbd> + <kbd>Enter</kbd> offers the repair, not only the sentence:</p>
+<table>
+  <thead><tr><th>Diagnostic</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr><td>Unused, duplicate or redundant import</td><td>Remove it, with its line</td></tr>
+    <tr><td>Unhandled checked exception</td><td>Add <code>throws</code> — extending a clause already there — or surround the statement with <code>try</code>/<code>catch</code></td></tr>
+    <tr><td>Non-exhaustive enum switch</td><td>Write the missing cases, in the form the switch uses — arrows or colons, never a mix</td></tr>
+    <tr><td>Strings compared with <code>==</code></td><td><code>equals</code>, the literal on the receiver side; <code>!=</code> keeps its negation</td></tr>
+    <tr><td>Switch fall-through</td><td>Add the <code>break;</code>, indented with its group</td></tr>
+    <tr><td>A stray <code>;</code></td><td>Remove it</td></tr>
+    <tr><td>A missing import</td><td>Add it, one entry per candidate package</td></tr>
+  </tbody>
+</table>
+<p>
+  A fix is keyed to the <em>kind</em> of diagnostic and reads the source itself, never guessing from the wording. The two that need types are recomputed from
+  the analysis that raised the diagnostic, so a fix that appears is one that clears the squiggle.
+</p>
+
 <h2>Rename</h2>
+<ol class="step-list">
+  <li>Put the caret on a symbol and press <kbd>Shift</kbd> + <kbd>F6</kbd>. A small field opens at the caret.</li>
+  <li><kbd>Enter</kbd> applies — or <kbd>Shift</kbd> + <kbd>Enter</kbd> first opens a <strong>preview</strong> of every edit, grouped by file.</li>
+  <li>Either way it goes through the editor, so one <kbd>Ctrl</kbd> + <kbd>Z</kbd> undoes it all — and either way the file moves when the rename requires it.</li>
+</ol>
+<table>
+  <thead><tr><th>The caret on</th><th>What is rewritten</th></tr></thead>
+  <tbody>
+    <tr><td>A <strong>local</strong> or <strong>parameter</strong></td><td>Scope-exact: that method only — never a same-named variable elsewhere, or a field.</td></tr>
+    <tr><td>A <strong>method</strong> or <strong>field</strong></td><td>Its declaration and every use in the project, including through a library generic — a lambda parameter off <code>list.stream().map(…)</code>. A method carries its whole <strong>override family</strong> and all its <strong>overloads</strong>: to a caller they are one.</td></tr>
+    <tr><td>A <strong>record component</strong>, or a field <strong>Lombok</strong> writes accessors for</td><td>The field and the calls to accessors nobody wrote — <code>failure.sourcePath()</code>, <code>order.getCustomerName()</code> — getters, setters and <code>@With</code> copies. A hand-written accessor is its own declaration and stays.</td></tr>
+    <tr><td>A <strong>class</strong> or <strong>interface</strong></td><td>Declaration, references, <code>import</code>s and Spring <code>&lt;bean class="…"&gt;</code> entries — a Struts <code>&lt;action class="…"&gt;</code> names a bean id and is left. A public top-level type's <strong>file is renamed with it</strong>; a nested type's file is its outer type's.</td></tr>
+  </tbody>
+</table>
 <p>
-  Put the caret on a symbol and press <kbd>Shift</kbd> + <kbd>F6</kbd> to rename it across the
-  project. A small field opens at the caret: <kbd>Enter</kbd> applies the rename,
-  <kbd>Shift</kbd> + <kbd>Enter</kbd> opens a <strong>preview</strong> listing every edit grouped by
-  file first. Either way it goes through the editor, so a single <kbd>Ctrl</kbd> + <kbd>Z</kbd>
-  undoes the whole rename — <strong>and either way the file moves when the rename requires it</strong>.
-  What gets rewritten depends on what the caret is on:
+  A member reached through <code>import static</code> carries the import and its bare calls, and a <strong>method reference</strong> —
+  <code>Failure::sourcePath</code> — moves with its method. Edits that cannot be pinned exactly, like an overloaded method's call sites, are marked for review
+  in the preview rather than applied silently. It answers once the index is warm; OGNL and JSP references are not rewritten yet.
 </p>
-<ul>
-  <li>a <strong>local variable</strong> or <strong>parameter</strong> — scope-exact, in that method only, never a same-named variable elsewhere or a field of the same name;</li>
-  <li>a <strong>method</strong> or <strong>field</strong> — its declaration and every use across the project, including uses whose receiver is only typed through a library generic (a lambda parameter off <code>list.stream().map(…)</code>). A method carries its whole <strong>override family</strong> with it: the abstract or interface declaration it comes from, and every implementation that overrides it, since to a caller those are one method. All <strong>overloads</strong> of the name move together for the same reason;</li>
-  <li>a <strong>record component</strong>, or a field whose accessors <strong>Lombok</strong> generates — the field itself, plus the call sites of accessors nobody wrote down. <code>failure.sourcePath()</code> and <code>order.getCustomerName()</code> appear at every caller even though the methods appear nowhere, so they move with the field; getters, setters and <code>@With</code> copy-methods all follow. An accessor you wrote by hand is a declaration in its own right and is left alone;</li>
-  <li>a <strong>class</strong> or <strong>interface</strong> — its declaration, references, <code>import</code> statements, and the matching Spring <code>&lt;bean class="…"&gt;</code> entries. A Struts <code>&lt;action class="…"&gt;</code> names a bean id, not the class, so it is left untouched. When the file is named after the type — a public top-level one — <strong>the file is renamed with it</strong>, since Java requires the two to match; a nested type's file is named after its outer type and stays where it is.</li>
-</ul>
-<p>
-  Edits that can't be pinned down exactly — an overloaded method's call sites, for instance — are
-  marked for review in the preview rather than applied silently. It answers once the index is warm.
-  OGNL and JSP references are not rewritten yet.
-</p>
-<p>
-  A member reached through an <code>import static</code> carries both the import and the bare calls
-  with it, and so does a <strong>method reference</strong> — <code>Failure::sourcePath</code> moves
-  with the method it names. And a rename is <strong>refused</strong> when it would break an override of code that
-  can't follow: a method implementing an interface from a dependency has its name fixed by that
-  dependency, so renaming only your side leaves a class that no longer implements what it declares.
-  The preview still shows what it would have done, and names the library type, but won't apply it.
-</p>
+<Callout variant="warning" title="Refused when it would break an override that cannot follow">
+  A method implementing an interface from a dependency has its name fixed by that dependency; renaming only your side leaves a class that no longer implements
+  what it declares. The preview still shows what it would have done and names the library type, but will not apply it.
+</Callout>
+
 <h2>Generate</h2>
 <p>
-  <kbd>Alt</kbd> + <kbd>Insert</kbd> opens the <strong>Generate</strong> dialog — build a constructor,
-  getters, setters or both from the active class's fields. Pick a mode, tick the fields to include,
-  choose fluent or plain setters and camelCase or snake_case accessors; a live preview shows the code
-  and <kbd>Ctrl</kbd> + <kbd>Enter</kbd> inserts it at the caret.
+  <kbd>Alt</kbd> + <kbd>Insert</kbd> builds a constructor, getters, setters or both from the class's fields: pick a mode, tick the fields, choose fluent or
+  plain setters and camelCase or snake_case accessors, watch the live preview, and <kbd>Ctrl</kbd> + <kbd>Enter</kbd> inserts it at the caret.
+  <em>From a template…</em> there writes with a code template of yours instead — see <strong>Code templates</strong>.
 </p>
+
 <h2>Implement / override methods</h2>
 <p>
-  With the caret inside a class, <kbd>Alt</kbd> + <kbd>Enter</kbd> →
-  <strong>Implement / override methods…</strong> (also in the Command Palette) lists everything the
-  class inherits and is allowed to override, <strong>grouped by the type that declares it</strong>.
-  Tick the ones you want — a group's own box takes all of them at once — and
-  <kbd>Ctrl</kbd> + <kbd>Enter</kbd> writes them just inside the class's closing brace, as a single
-  undo step.
+  With the caret in a class, <kbd>Alt</kbd> + <kbd>Enter</kbd> → <strong>Implement / override methods…</strong> — or the command palette — lists what the class
+  inherits and may override, <strong>grouped by the declaring type</strong>. Tick them — a group's box takes all — and <kbd>Ctrl</kbd> + <kbd>Enter</kbd> writes
+  them inside the closing brace, as one undo step.
 </p>
-<p>
-  <strong>Abstract methods are ticked when the dialog opens</strong>, and nothing else is: those are
-  the ones the compiler will demand, so implementing an interface is one gesture, while overriding
-  something that already works stays a decision. An abstract method's body throws
-  <code>UnsupportedOperationException</code> — a stub that returned <code>null</code> would compile,
-  run, and lie. A concrete one's body starts with <code>super.…</code>, because overriding one
-  usually means adding to it.
-</p>
-<p>
-  Only what Java would actually let you override is offered: never a <code>static</code>,
-  <code>final</code> or <code>private</code> method, never a constructor, never a package-private
-  method from another package, and never one this class already declares — matched on the parameter
-  types, so the overloads you have not written yet are still there. The types the new methods
-  mention are <strong>imported in the same step</strong>; generated code that does not compile is
-  not generated code.
-</p>
+<ul>
+  <li><strong>Abstract methods start ticked</strong>, and nothing else: those the compiler demands. Their body throws <code>UnsupportedOperationException</code> —
+    a stub returning <code>null</code> would compile, run and lie. A concrete one's body starts with <code>super.…</code>.</li>
+  <li>Only what Java lets you override: never a <code>static</code>, <code>final</code> or <code>private</code> method, a constructor, a package-private method
+    from another package, or one this class declares — matched on parameter types, so unwritten overloads remain.</li>
+  <li>The types they mention are <strong>imported in the same step</strong>: generated code that does not compile is not generated code.</li>
+</ul>
 
 <h2>Spelling</h2>
 <p>
-  Opt-in per project (Project Configuration → <strong>Spelling</strong>): after downloading the
-  English + Italian dictionaries, Bennu checks your <strong>declared names</strong> — split by
-  camelCase, snake_case and kebab-case — and your <strong>comments</strong>. A misspelled word is
-  underlined as a hint; <kbd>Alt</kbd> + <kbd>Enter</kbd> (or the lint action) offers to replace it
-  with a suggestion or <strong>add it to a project or global dictionary</strong>. Common programming
-  abbreviations are allow-listed, so it stays quiet on the usual jargon.
+  Opt-in per project, in Project Configuration → <strong>Spelling</strong>. After the English and Italian dictionaries download, Bennu checks your
+  <strong>declared names</strong> — split by camelCase, snake_case and kebab-case — and your <strong>comments</strong>. A misspelled word is a hint;
+  <kbd>Alt</kbd> + <kbd>Enter</kbd> replaces it with a suggestion or <strong>adds it to a project or global dictionary</strong>. Common programming
+  abbreviations are allowed, so it stays quiet on jargon.
 </p>

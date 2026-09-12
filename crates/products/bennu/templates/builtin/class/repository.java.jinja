@@ -1,0 +1,11 @@
+{# bennu.description: A Spring Data repository for the entity at the caret, in a file beside it -#}
+{# bennu.output: file -#}
+{# bennu.file: {{ class.name }}Repository.java -#}
+{% if class.package %}
+package {{ class.package }};
+
+{% endif %}
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface {{ class.name }}Repository extends JpaRepository<{{ class.name }}, {{ class.id_type or "Long" }}> {
+}

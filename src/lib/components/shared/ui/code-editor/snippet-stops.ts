@@ -17,25 +17,34 @@
  * Ranges have neither problem: a nested stop is simply another range that happens to sit inside
  * one, and it is visited in its turn.
  *
- * ## What is deliberately not implemented
+ * ## Mirroring
  *
- * **Mirroring.** In a real snippet engine two stops sharing an index update together as you type.
- * Here they are two stops you tab between. The provider tells us which stops shared a number, so the
- * information is not lost on the wire — it is unused, and adding it means tracking edits inside a
- * range and echoing them, which is a feature rather than a detail. Nothing silently half-works: two
- * mirrored stops behave as two ordinary ones.
+ * Two stops written with the same number — `${1:name}` twice — are one thing typed in two places:
+ * type in either and the other follows, and Tab visits the pair once. The number rides along from
+ * the parser as each stop's `group`, so nothing here has to guess which ranges belong together.
+ *
+ * The echo is a **transaction filter** rather than an update listener: an edit and the mirrors it
+ * implies have to be one transaction, or undo takes them apart and leaves a name half-renamed. A
+ * stop with no group (`0`) stands alone, which is every stop a plain completion has.
  */
 
 import { Decoration, EditorView, keymap, type DecorationSet } from '@codemirror/view';
 import {
-  Prec, StateEffect, StateField, type ChangeDesc, type Extension,
+  Annotation, EditorState, Prec, StateEffect, StateField,
+  type ChangeDesc, type Extension, type TransactionSpec,
 } from '@codemirror/state';
 
 /** One stop, in document positions (UTF-16), once it has been placed in the buffer. */
 interface Stop {
   from: number;
   to: number;
+  /** The placeholder number it was written as; `0` for a stop that stands alone. Stops sharing a
+   *  group are one value in several places. */
+  group: number;
 }
+
+/** Marks the transaction this module appends, so echoing an echo is impossible. */
+const mirroring = Annotation.define<boolean>();
 
 /** The stops of the insertion currently being tabbed through. */
 interface ActiveStops {
@@ -64,7 +73,7 @@ function mapStops(active: ActiveStops, changes: ChangeDesc): ActiveStops | null 
       if (i < activeIndex) activeIndex -= 1;
       continue;
     }
-    stops.push({ from, to });
+    stops.push({ from, to, group: stop.group });
   }
   if (stops.length === 0) return null;
   return { stops, active: Math.min(activeIndex, stops.length - 1) };
@@ -74,13 +83,23 @@ function mapStops(active: ActiveStops, changes: ChangeDesc): ActiveStops | null 
 const pendingMark = Decoration.mark({ class: 'cm-snip-stop' });
 /** The one the selection is on. */
 const activeMark = Decoration.mark({ class: 'cm-snip-stop cm-snip-stop-active' });
+/** Somewhere else the thing being typed also appears — drawn apart, or the text updating over there
+ *  looks like the editor doing something of its own. */
+const mirrorMark = Decoration.mark({ class: 'cm-snip-stop cm-snip-stop-mirror' });
+
+function markFor(active: ActiveStops, index: number): Decoration {
+  if (index === active.active) return activeMark;
+  const group = active.stops[active.active]?.group ?? 0;
+  return group !== 0 && active.stops[index].group === group ? mirrorMark : pendingMark;
+}
 
 function decorationsFor(active: ActiveStops | null, docLength: number): DecorationSet {
   if (!active) return Decoration.none;
   const ranges = active.stops
     // A zero-width stop is a caret position; there is nothing to underline.
-    .filter((s) => s.to > s.from && s.from >= 0 && s.to <= docLength)
-    .map((s, i) => (i === active.active ? activeMark : pendingMark).range(s.from, s.to));
+    .map((s, i) => ({ s, i }))
+    .filter(({ s }) => s.to > s.from && s.from >= 0 && s.to <= docLength)
+    .map(({ s, i }) => markFor(active, i).range(s.from, s.to));
   ranges.sort((a, b) => a.from - b.from || a.to - b.to);
   return Decoration.set(ranges, true);
 }
@@ -114,12 +133,25 @@ const stopsField = StateField.define<ActiveStops | null>({
     ),
 });
 
+/**
+ * The next stop in `dir`, skipping the mirrors of the one we are on: they hold the same value, and
+ * tabbing through the second copy of a name you have just typed is a press that does nothing.
+ */
+function nextStop(active: ActiveStops, dir: 1 | -1): number {
+  const group = active.stops[active.active]?.group ?? 0;
+  let i = active.active + dir;
+  while (group !== 0 && i >= 0 && i < active.stops.length && active.stops[i].group === group) {
+    i += dir;
+  }
+  return i;
+}
+
 /** Move to the stop `dir` away. `false` when there is none, so the key falls through. */
 function move(dir: 1 | -1) {
   return (view: EditorView): boolean => {
     const active = view.state.field(stopsField, false);
     if (!active) return false;
-    const next = active.active + dir;
+    const next = nextStop(active, dir);
     if (next < 0 || next >= active.stops.length) {
       // Past the end: the run is over. Consumed rather than passed on, because inserting a tab
       // character at the last stop is never what the press meant.
@@ -138,6 +170,42 @@ function move(dir: 1 | -1) {
     return true;
   };
 }
+
+/**
+ * Echo what was typed in the active stop into the other stops of its group.
+ *
+ * A filter and not an update listener, for one reason that shows up immediately: the edit and its
+ * echo have to be **one transaction**. Dispatched separately, undo takes them apart and the first
+ * press leaves the name changed in one place and not the other — which is the state the feature
+ * exists to prevent.
+ *
+ * `sequential` because the appended changes are written in the coordinates of the document *after*
+ * the user's edit, which is the only frame in which the mirrors' positions are known.
+ */
+const mirror = EditorState.transactionFilter.of((tr): TransactionSpec | readonly TransactionSpec[] => {
+  if (!tr.docChanged || tr.annotation(mirroring)) return tr;
+  const active = tr.startState.field(stopsField, false);
+  const current = active?.stops[active.active];
+  if (!active || !current || current.group === 0) return tr;
+
+  // Where the stop being typed in ended up, and what it now holds.
+  const from = tr.changes.mapPos(current.from, -1);
+  const to = tr.changes.mapPos(current.to, 1);
+  if (to < from) return tr;
+  const text = tr.state.doc.sliceString(from, to);
+
+  const changes: { from: number; to: number; insert: string }[] = [];
+  for (const [i, stop] of active.stops.entries()) {
+    if (i === active.active || stop.group !== current.group) continue;
+    const at = tr.changes.mapPos(stop.from, -1);
+    const end = tr.changes.mapPos(stop.to, 1);
+    // Deleted by this very edit, or already holding the text: nothing to say.
+    if (end < at || tr.state.doc.sliceString(at, end) === text) continue;
+    changes.push({ from: at, to: end, insert: text });
+  }
+  if (changes.length === 0) return tr;
+  return [tr, { changes, sequential: true, annotations: mirroring.of(true), scrollIntoView: false }];
+});
 
 /** Abandon the run, leaving the text as it is. */
 function clear(view: EditorView): boolean {
@@ -195,7 +263,7 @@ export function insertWithStops(
   from: number,
   to: number,
   text: string,
-  stops: readonly { start: number; end: number }[],
+  stops: readonly { start: number; end: number; group?: number }[],
   /** Byte offset → UTF-16 offset within `text`. */
   toU16: (byte: number) => number,
 ): boolean {
@@ -211,7 +279,7 @@ export function insertWithStops(
     const start = from + body.shift(toU16(stop.start));
     const end = from + body.shift(toU16(stop.end));
     if (end >= start && start >= from && end <= from + body.text.length) {
-      placed.push({ from: start, to: end });
+      placed.push({ from: start, to: end, group: stop.group ?? 0 });
     }
   }
 
@@ -241,6 +309,7 @@ export function insertWithStops(
 export function snippetStops(): Extension {
   return [
     stopsField,
+    mirror,
     Prec.highest(
       keymap.of([
         { key: 'Tab', run: move(1) },
@@ -256,6 +325,12 @@ export function snippetStops(): Extension {
       },
       '.cm-snip-stop-active': {
         backgroundColor: 'color-mix(in srgb, var(--accent-primary, #888) 14%, transparent)',
+      },
+      // The same value, over there. Fainter than the stop being typed in and not underlined
+      // differently: it is not somewhere you are going, it is somewhere this text also is.
+      '.cm-snip-stop-mirror': {
+        backgroundColor: 'color-mix(in srgb, var(--accent-primary, #888) 7%, transparent)',
+        borderBottomStyle: 'dashed',
       },
     }),
   ];

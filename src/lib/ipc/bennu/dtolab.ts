@@ -6,6 +6,7 @@
  * `default`) pass through from the harness as they are, so their fields are snake_case too.
  */
 
+import type { TemplateEdit } from './templates';
 import { bennu } from '../rpc';
 
 export interface DtoLabConstraint {
@@ -89,20 +90,6 @@ export interface DtoLabValidateResult {
   note?: string;
 }
 
-export interface DtoLabTemplateInfo {
-  name: string;
-  origin: 'builtin' | 'global';
-  path: string | null;
-}
-
-export interface DtoLabTemplates {
-  templates: DtoLabTemplateInfo[];
-  /** The one the project generates with. */
-  project: string;
-  /** Where global templates live. */
-  dir: string;
-}
-
 export interface DtoLabTypeInFile {
   name: string;
   /** `Outer.Inner`. */
@@ -126,6 +113,8 @@ export interface DtoLabPreview {
   verified: boolean;
   warnings: string[];
   classes: DtoLabTypeInFile[];
+  /** For an existing file: the imports the tests need, as edits against `base` — applied with the insertion. */
+  import_edits: TemplateEdit[];
 }
 
 export interface DtoLabTarget {
@@ -170,22 +159,6 @@ export function dtoLabValidate(
   return bennu('bennu_dtolab_validate', { args: { root, class: cls, json, locale, validation } });
 }
 
-/** The templates, and the one the project uses. Wire: `bennu_dtolab_templates`. */
-export function dtoLabTemplates(root: string): Promise<DtoLabTemplates> {
-  return bennu('bennu_dtolab_templates', { args: { root } });
-}
-
-/** Wire: `bennu_dtolab_set_project_template`. */
-export function dtoLabSetProjectTemplate(root: string, name: string): Promise<void> {
-  return bennu('bennu_dtolab_set_project_template', { args: { root, name } });
-}
-
-/** Create a global template as a copy of `from` (the built-in one when null); returns its path.
- *  Wire: `bennu_dtolab_new_template`. */
-export function dtoLabNewTemplate(name: string, from: string | null): Promise<string> {
-  return bennu('bennu_dtolab_new_template', { args: { name, from } });
-}
-
 /** What a generation would write. Nothing is written. Wire: `bennu_dtolab_generate`. */
 export function dtoLabGenerate(request: DtoLabGenerateRequest): Promise<DtoLabPreview> {
   return bennu('bennu_dtolab_generate', {
@@ -198,7 +171,47 @@ export function dtoLabGenerate(request: DtoLabGenerateRequest): Promise<DtoLabPr
   });
 }
 
-/** Write a generated test that is a new file. Wire: `bennu_dtolab_create_file`. */
-export function dtoLabCreateFile(root: string, file: string, text: string): Promise<void> {
-  return bennu('bennu_dtolab_create_file', { args: { root, file, text } });
+/** A test value: the fields it answers — by name, or by a constraint they carry — and what it gives
+ *  them. Mirrors `bennu_dtolab::values::ValueRule`. */
+export interface DtoLabValueRule {
+  name: string;
+  /** Field names; case, `_` and `-` are ignored, and `*` at either end matches any prefix or suffix. */
+  fields: string[];
+  /** Constraint simple names, without `@`. */
+  constraints: string[];
+  value: string;
+  /** Written in a test instead of `value`. */
+  java?: string | null;
+  /** The invalid case of a constraint this rule names. */
+  invalid?: string | null;
+  invalid_java?: string | null;
+}
+
+export interface DtoLabValueRules {
+  rules: DtoLabValueRule[];
+  /** Built-ins switched off, by name. */
+  disabled: string[];
+  builtins: DtoLabValueRule[];
+  /** Where the user's rules are kept. */
+  path: string;
+}
+
+/** The user's test values and the built-ins. Wire: `bennu_dtolab_value_rules`. */
+export function dtoLabValueRules(): Promise<DtoLabValueRules> {
+  return bennu('bennu_dtolab_value_rules', { args: {} });
+}
+
+/** Replace the user's test values, in order. Wire: `bennu_dtolab_save_value_rules`. */
+export function saveDtoLabValueRules(rules: DtoLabValueRule[], disabled: string[]): Promise<void> {
+  return bennu('bennu_dtolab_save_value_rules', {
+    args: {
+      rules: rules.map((r) => ({
+        ...r,
+        java: r.java || null,
+        invalid: r.invalid ?? null,
+        invalid_java: r.invalid_java || null,
+      })),
+      disabled,
+    },
+  });
 }

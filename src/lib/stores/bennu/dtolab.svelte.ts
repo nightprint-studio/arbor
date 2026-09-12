@@ -9,25 +9,23 @@
 
 import {
   dtoLabClass,
-  dtoLabCreateFile,
   dtoLabDefaultJson,
   dtoLabGenerate,
-  dtoLabNewTemplate,
   dtoLabRead,
-  dtoLabSetProjectTemplate,
-  dtoLabTemplates,
   dtoLabValidate,
   type DtoLabClassView,
   type DtoLabPreview,
   type DtoLabReadResult,
   type DtoLabTarget,
-  type DtoLabTemplates,
   type DtoLabValidateResult,
 } from '$lib/ipc/bennu/dtolab';
+import { createFileFromTemplate } from '$lib/ipc/bennu/templates';
 import { writeFile } from '$lib/ipc/bennu';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import { projectStore } from './project.svelte';
 import { bennuUiStore } from './ui.svelte';
+import { bennuTemplatesStore } from './templates.svelte';
+import { bufferOf } from './buffer-wait';
 
 export type DtoLabTab = 'payload' | 'tests';
 
@@ -62,7 +60,6 @@ function createBennuDtoLabStore() {
   let validateResult = $state<DtoLabValidateResult | null>(null);
   let validateError = $state<string | null>(null);
 
-  let templates = $state<DtoLabTemplates | null>(null);
   /** This generation's template; `null` means the project's. */
   let template = $state<string | null>(null);
   /** The fields to generate for; `null` means every constrained one. */
@@ -93,34 +90,13 @@ function createBennuDtoLabStore() {
       }
       view = found;
       payload = JSON.stringify(found.skeleton, null, 2);
-      void loadTemplates(next.root);
+      void bennuTemplatesStore.load('validation-tests');
     } catch (e) {
       view = null;
       openError = String(e);
     } finally {
       opening = false;
     }
-  }
-
-  async function loadTemplates(root: string) {
-    try {
-      templates = await dtoLabTemplates(root);
-    } catch {
-      templates = null;
-    }
-  }
-
-  /** Wait until the editor shows `file`, and return its buffer — or the last buffer seen. */
-  async function bufferOf(file: string, expected: string | null): Promise<string | null> {
-    let seen: string | null = null;
-    for (let i = 0; i < 40; i++) {
-      if (projectStore.activeFilePath === file) {
-        seen = editorApi?.caretContext()?.source ?? null;
-        if (seen !== null && (expected === null || seen === expected)) return seen;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    return seen;
   }
 
   return {
@@ -138,7 +114,6 @@ function createBennuDtoLabStore() {
     get readError() { return readError; },
     get validateResult() { return validateResult; },
     get validateError() { return validateError; },
-    get templates() { return templates; },
     get template() { return template; },
     get fields() { return fields; },
     get target() { return target; },
@@ -259,7 +234,7 @@ function createBennuDtoLabStore() {
       const count = `${result.cases} test case${result.cases === 1 ? '' : 's'}`;
       try {
         if (!result.exists) {
-          await dtoLabCreateFile(current.root, result.file, result.text);
+          await createFileFromTemplate(current.root, result.file, result.text);
           await projectStore.openFile(result.file);
           preview = null;
           toastStore.show(`Wrote ${count}`, 'success');
@@ -273,12 +248,12 @@ function createBennuDtoLabStore() {
           return;
         }
         await projectStore.openFile(result.file);
-        const buffer = await bufferOf(result.file, result.base);
+        const buffer = await bufferOf(result.file, result.base, () => editorApi?.caretContext()?.source ?? null);
         if (buffer === null || result.base === null || result.offset === null || buffer !== result.base) {
           toastStore.show('The test file has changes the preview did not see — save it and generate again', 'info');
           return;
         }
-        editorApi?.applyEdits([{ start: result.offset, end: result.offset, replacement: result.inserted }]);
+        editorApi?.applyEdits([{ start: result.offset, end: result.offset, replacement: result.inserted }, ...result.import_edits]);
         preview = null;
         toastStore.show(`Added ${count} — save the file to keep them`, 'success');
       } catch (e) {
@@ -286,40 +261,6 @@ function createBennuDtoLabStore() {
       } finally {
         applying = false;
       }
-    },
-
-    async setProjectTemplate(name: string) {
-      const current = origin;
-      if (!current) return;
-      try {
-        await dtoLabSetProjectTemplate(current.root, name);
-        await loadTemplates(current.root);
-      } catch (e) {
-        toastStore.show(`Couldn't save the project's template: ${e}`, 'error');
-      }
-    },
-
-    /** Create a template from `from` and open it for editing. */
-    async newTemplate(name: string, from: string | null): Promise<boolean> {
-      try {
-        const path = await dtoLabNewTemplate(name, from);
-        if (origin) await loadTemplates(origin.root);
-        template = name;
-        await projectStore.openFile(path);
-        return true;
-      } catch (e) {
-        toastStore.show(`${e}`, 'error');
-        return false;
-      }
-    },
-
-    async editTemplate(name: string) {
-      const info = templates?.templates.find((t) => t.name === name);
-      if (info?.path) await projectStore.openFile(info.path);
-    },
-
-    async refreshTemplates() {
-      if (origin) await loadTemplates(origin.root);
     },
   };
 }

@@ -979,6 +979,7 @@ dependencies = [
  "bennu-sheet",
  "bennu-spring",
  "bennu-ssr",
+ "bennu-templates",
  "bennu-test",
  "bennu-toolconf",
  "bennu-web",
@@ -1085,13 +1086,10 @@ name = "bennu-dtolab"
 version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
- "bennu-jackson",
- "bennu-jakarta",
- "bennu-java",
- "minijinja",
+ "bennu-templates",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
- "tree-sitter",
 ]
 
 [[package]]
@@ -1394,6 +1392,21 @@ dependencies = [
  "serde",
  "tree-sitter",
  "tree-sitter-java",
+]
+
+[[package]]
+name = "bennu-templates"
+version = "0.3.0"
+dependencies = [
+ "bennu-jackson",
+ "bennu-jakarta",
+ "bennu-java",
+ "bennu-naming",
+ "minijinja",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "tree-sitter",
 ]
 
 [[package]]

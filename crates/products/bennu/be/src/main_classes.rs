@@ -127,6 +127,13 @@ fn cache() -> &'static RwLock<HashMap<String, Arc<Vec<MainClassEntry>>>> {
     CACHE.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
+/// The file of a Spring Boot application class under `under`, from a scan of `root` already made — the
+/// cached answer only, so asking never walks the tree.
+pub(crate) fn cached_boot_application(root: &str, under: &str) -> Option<String> {
+    let entries = cache().read().ok()?.get(root).cloned()?;
+    entries.iter().filter(|e| e.spring_boot).filter_map(|e| e.source_file.clone()).find(|file| file.starts_with(under))
+}
+
 /// Drop a project's cached entry points — called when its index is rebuilt, so a newly
 /// written `main` doesn't need a restart to appear in the picker.
 pub(crate) fn forget_main_classes(root: &str) {

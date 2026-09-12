@@ -1,0 +1,24 @@
+[package]
+name         = "bennu-templates"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Code generated from templates the user owns: a Jinja engine with Bennu's filters, templates kept by kind in the profile, the directives a template declares about itself, the class model most of them read, the context each kind is rendered with, and where the output goes."
+
+[dependencies]
+bennu-java    = { path = "../java" }
+bennu-jakarta = { path = "../jakarta" }
+bennu-jackson = { path = "../jackson" }
+# The project's naming conventions, which a template builds names with (`naming.method(…)`) — the same
+# conventions the naming check holds code to.
+bennu-naming  = { path = "../naming" }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+# The schema of what a template is rendered with, for the editor's completion inside one — generated
+# from the context structs, so completion and rendering cannot disagree.
+schemars    = { workspace = true }
+tree-sitter = "0.25"
+# Templates are Jinja: a language people already know is one they can change without our docs.
+minijinja   = "2"
