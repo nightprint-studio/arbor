@@ -143,6 +143,8 @@ impl FrameworkService {
     /// on it and then find the finished slot in the map. Still built outside the `slots`
     /// mutex — holding that across a parse would serialise every OTHER project's queries too.
     fn slot(&self, root: &str) -> Option<Arc<Slot>> {
+        // A framework question is a use of the project: it keeps it from being released as idle.
+        crate::project_close::touch(root);
         let key = norm(root);
         if let Some(s) = self.cached(&key) {
             return Some(s);
@@ -170,6 +172,55 @@ impl FrameworkService {
     fn cached(&self, key: &str) -> Option<Arc<Slot>> {
         let map = self.slots.lock().ok()?;
         map.get(key).map(Arc::clone)
+    }
+
+    /// Release `root`'s extension models — the project was closed.
+    ///
+    /// A slot holds the Spring, JPA, JSP, i18n and validation models built from a walk of the whole
+    /// project, and nothing used to remove one. The root also leaves the registered set, so a file
+    /// under it stops resolving to a project that is no longer open.
+    pub fn forget(&self, root: &str) {
+        let key = norm(root);
+        let slot = self.slots.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+        self.building.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+        self.refresh.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+        self.roots.lock().unwrap_or_else(|p| p.into_inner()).retain(|r| *r != key);
+        spring_class_names().lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+        // Outside every lock, for the same reason as the index service's: it can be the last `Arc`.
+        drop(slot);
+    }
+
+    /// What each project's framework models hold, per extension — the memory breakdown's lines.
+    ///
+    /// A line with nothing in it is left out: every project carries the always-on extensions (XML,
+    /// Maven, tool config), and a Rust project listing them all at zero would bury the lines that
+    /// have something to say.
+    pub fn memory_items(&self) -> Vec<arbor_be::prelude::MemoryItem> {
+        use arbor_be::prelude::MemoryItem;
+        // Snapshot the slots, then size them outside the map's lock: an extension's own locks are
+        // taken while sizing, and the map must not wait behind them.
+        let slots: Vec<(String, Arc<Slot>)> = self
+            .slots
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .map(|(root, slot)| (root.clone(), Arc::clone(slot)))
+            .collect();
+        let mut items = Vec::new();
+        for (root, slot) in slots {
+            for (name, m) in slot.registry.memory() {
+                if m.count == 0 && m.bytes.unwrap_or(0) == 0 {
+                    continue;
+                }
+                let label = format!("{name} — {}", m.label);
+                items.push(match m.bytes {
+                    Some(bytes) if m.exact => MemoryItem::exact(&root, label, m.count, bytes),
+                    Some(bytes) => MemoryItem::estimate(&root, label, m.count, bytes),
+                    None => MemoryItem::counted(&root, label, m.count),
+                });
+            }
+        }
+        items
     }
 
     /// The slot for the project owning `file`, via the index service's root map.
@@ -329,6 +380,10 @@ impl FrameworkService {
         let caps = crate::capabilities::project_capabilities(path);
 
         let spring = Arc::new(SpringExtension::new());
+        // The class-name lookup the project open registered — see `set_spring_class_names`.
+        if let Some(source) = spring_class_names().lock().unwrap_or_else(|p| p.into_inner()).get(&norm(root)) {
+            spring.set_class_names(Arc::clone(source));
+        }
         // The pinned property file is a persisted setting, so it is applied BEFORE the
         // scan — the model is then built resolving against the file the user chose,
         // and a restart doesn't need the frontend to replay the choice.
@@ -413,7 +468,11 @@ impl FrameworkService {
             registry.ids().iter().any(|id| matches!(*id, "fulcrum.i18n" | "bevy"));
         let walked = collect_config_files(path, wants_sources);
         let descriptors = collect_descriptors(path);
-        let schemas = collect_schemas(path);
+        // Schemas only for a project with XML to describe. The collection reads the whole shared
+        // schema cache — every grammar fetched or extracted for any project, 13 MB on a machine that
+        // has opened a few Spring ones — and each project's catalogue holds its own copy of it, so a
+        // Cargo project with no `.xml` anywhere was carrying all of it for nothing.
+        let schemas = if walked.xml.is_empty() { Vec::new() } else { collect_schemas(path) };
         // Only walked when something asked for it: on a project with no tag libraries the JSP
         // extension is not in the registry, and opening every dependency jar to find nothing
         // would be a project scan spent on a feature that is off.
@@ -1015,9 +1074,23 @@ pub fn set_spring_library_beans(root: &str, beans: Vec<bennu_spring::prelude::Be
 /// lookup is the same one "Import class" uses, so a class completes here exactly when it would
 /// complete anywhere else.
 pub fn set_spring_class_names(root: &str, source: std::sync::Arc<dyn bennu_spring::prelude::ClassNameSource>) {
-    if let Some(ext) = FrameworkService::global().slot(root).and_then(|s| s.spring.clone()) {
+    let key = norm(root);
+    spring_class_names().lock().unwrap_or_else(|p| p.into_inner()).insert(key.clone(), Arc::clone(&source));
+    // Only a model that already exists is handed it now. This used to go through `slot`, which
+    // BUILDS the model — and it is called from every project open, so opening a workspace built the
+    // whole framework model (a tree walk, every schema, the Bevy and fulcrum scans) of every member,
+    // on screen or not. A model built later picks the source up in `build`.
+    if let Some(ext) = FrameworkService::global().cached(&key).and_then(|s| s.spring.clone()) {
         ext.set_class_names(source);
     }
+}
+
+/// Each project's class-name source for the Spring extension, kept until its model is built.
+fn spring_class_names(
+) -> &'static Mutex<HashMap<String, Arc<dyn bennu_spring::prelude::ClassNameSource>>> {
+    static SOURCES: OnceLock<Mutex<HashMap<String, Arc<dyn bennu_spring::prelude::ClassNameSource>>>> =
+        OnceLock::new();
+    SOURCES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// The rule behind [`FrameworkService::vantage_root`], with the project on screen passed in.

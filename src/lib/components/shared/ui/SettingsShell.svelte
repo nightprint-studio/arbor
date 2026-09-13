@@ -326,7 +326,12 @@
     padding: 22px 24px 32px; overflow-y: auto;
     display: flex; flex-direction: column; gap: 16px;
   }
+  /* A page is a column of blocks, each its own height — nothing stretches by accident. */
   .content > :global(*) { flex-shrink: 0; }
+  /* …except a block that says it wants the rest of the page: a list beside what it is showing has
+     nothing to size itself by, and left alone it draws a band of empty pane under it. Two classes
+     deep so it wins over the rule above whichever file the bundler writes first. */
+  .content > :global(.fills) { flex: 1 1 auto; min-height: 0; }
 
   /* Section header */
   .content :global(.section-header) { margin-bottom: 4px; }

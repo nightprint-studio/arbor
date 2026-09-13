@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { paletteIcon } from '$lib/utils/plugin-icons';
   /**
    * Every overlay this window can put in front, and the catalogue that reaches
    * them.
@@ -25,7 +26,6 @@
   import GarrulusRemoteModal from './shell/GarrulusRemoteModal.svelte';
   import {
     buildGarrulusPalette,
-    garrulusPaletteIcon,
     type GarrulusPaletteActions,
     type GarrulusPaletteContext,
   } from './garrulus-palette';
@@ -150,7 +150,7 @@
 {#if garrulusUiStore.paletteOpen}
   <CommandPaletteShell
     onClose={() => garrulusUiStore.closePalette()}
-    iconResolver={garrulusPaletteIcon}
+    iconResolver={paletteIcon}
     sections={paletteSections}
     bind:query={paletteQuery}
     placeholder="Search a command, a vault or a note type…"

@@ -3,14 +3,14 @@
 //! The shape and the rules are `bennu-templates`' ([`bennu_templates::facts`], [`bennu_templates::requires`]).
 //! This is where the answers come from: the Java level the index read, the classpath Maven resolved (the
 //! same coordinates the capabilities are recognised by, so "has Lombok" means one thing everywhere), and
-//! Settings › Java Style.
+//! the two Code Style pages — Java's and Rust's.
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use bennu_templates::prelude::{NamingFacts, ProjectFacts, StyleFacts, TemplateFacts};
+use bennu_templates::prelude::{NamingFacts, ProjectFacts, RustStyleFacts, StyleFacts, TemplateFacts};
 
 use crate::index_service::IndexService;
 
@@ -48,6 +48,20 @@ fn read(root: &str) -> TemplateFacts {
         switch_with_return: config.java_switch_with_return,
         space_in_braces: config.java_space_in_braces,
         blank_line_between_members: config.java_blank_line_between_members,
+        rust: RustStyleFacts {
+            // The trailing space is baked in here rather than in every template: an empty
+            // visibility and a `pub ` have to read the same at the call site, and `{{ vis }} fn`
+            // would leave a stray space for a private item.
+            visibility: match config.rust_visibility.as_str() {
+                "pub" => "pub ".to_string(),
+                "private" => String::new(),
+                _ => "pub(crate) ".to_string(),
+            },
+            derives: config.rust_derives.clone(),
+            doc_comments: config.rust_doc_comments,
+            error_style: config.rust_error_style.clone(),
+            self_in_impl: config.rust_self_in_impl,
+        },
     };
     TemplateFacts { project, style, naming: NamingFacts::default() }
 }

@@ -1,5 +1,8 @@
-//! `mojibake` domain — `bennu_mojibake_check`: find UTF-8-decoded-as-Cp1252 corruption in a
-//! file and offer the corrected character.
+//! `mojibake` domain — `bennu_mojibake_check`: find characters in a file that are not the ones the
+//! file was written with, and offer the correction where there is one.
+//!
+//! Two different corruptions, and they are worth telling apart because only one of them can be
+//! repaired from the text alone.
 //!
 //! "Mojibake" here is the classic double-decode: text that was UTF-8 but got read as Windows-1252
 //! (Latin-1), so `é` (`C3 A9`) shows up as `Ã©`, a right quote `'` (`E2 80 99`) as `â€™`, a
@@ -10,8 +13,23 @@
 //! detector from flagging its own source (the CLAUDE.md self-test rule) and makes it trivially
 //! correct. Each hit carries the byte span + the bad text + the single correct char, so the FE can
 //! squiggle it and offer a one-click replace.
+//!
+//! The second is a byte that could not be decoded **at all**. The read path is lossy by design
+//! (`bennu_project`'s `decode`), so a stray `0xE8` in a file being read as UTF-8 arrives in the
+//! buffer as the replacement character `U+FFFD` — one character, standing where `è` was written.
+//! Nothing here can say what it was: the byte that would have said is gone before the text
+//! reaches this function. So it is reported with **no fix**, and the answer is to reload the file
+//! in the encoding it is actually written in (Project Configuration → Encoding), not to type over
+//! the glyph — typing over it saves a file whose original byte has already been thrown away.
+//!
+//! Leaving it undetected was the worse option by a distance: it is the corruption that *looks* like
+//! a typo, and a check that answers "no problems" over a visibly broken character teaches people
+//! not to run it.
+
+use std::sync::OnceLock;
 
 use bennu_core::prelude::BennuState;
+use bennu_proto::prelude::Diagnostic;
 use serde::{Deserialize, Serialize};
 
 /// Args for [`bennu_mojibake_check`].
@@ -34,7 +52,10 @@ pub struct MojibakeHit {
     pub end: usize,
     /// The garbled text as it appears (e.g. `"Ã©"`).
     pub bad: String,
-    /// The single correct character it should be (e.g. `"é"`).
+    /// The single correct character it should be (e.g. `"é"`), or **empty** when the bad text is
+    /// the replacement character: the byte that would have said what it was is gone before the
+    /// text reaches the scan, so there is nothing to offer and a guess would corrupt the file a
+    /// second time. The fix for those is to reload in the right encoding.
     pub fix: String,
 }
 
@@ -157,24 +178,112 @@ const TARGETS: &[char] = &[
 
 /// `(mojibake sequence, correct char)` for every [`TARGETS`] char whose sequence round-trips,
 /// sorted **longest sequence first** so a 3-char match (a smart quote) wins over a coincidental
-/// 2-char prefix.
-fn mojibake_table() -> Vec<(String, char)> {
-    let mut table: Vec<(String, char)> =
-        TARGETS.iter().filter_map(|&c| mojibake_of(c).map(|m| (m, c))).collect();
-    table.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
-    table
+/// 2-char prefix — plus the set of bytes one can begin with.
+///
+/// Built once. It used to be built and sorted per call, which did not matter while the only caller
+/// was a palette command on one file, and mattered a great deal the moment the scan joined ordinary
+/// validation.
+struct Table {
+    entries: Vec<(String, char)>,
+    /// The distinct first **bytes** of those sequences.
+    ///
+    /// This is what makes the scan linear. Every mojibake sequence starts with a byte the UTF-8
+    /// encoding of a non-ASCII character begins with — `0xC3`, `0xC2`, `0xE2` — so a byte outside
+    /// this set cannot start one, and the table never has to be consulted for it. Without the
+    /// check the loop ran ~70 `starts_with` per character of the file: fine for one file on
+    /// demand, seconds of dead time when every buffer in a reopened project asks at once.
+    leads: [bool; 256],
 }
 
-/// Scan `text` for mojibake sequences, returning each as a [`MojibakeHit`] (byte span + fix), in
-/// document order, non-overlapping.
+fn table() -> &'static Table {
+    static TABLE: OnceLock<Table> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut entries: Vec<(String, char)> =
+            TARGETS.iter().filter_map(|&c| mojibake_of(c).map(|m| (m, c))).collect();
+        entries.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        let mut leads = [false; 256];
+        for (bad, _) in &entries {
+            if let Some(&first) = bad.as_bytes().first() {
+                leads[first as usize] = true;
+            }
+        }
+        Table { entries, leads }
+    })
+}
+
+/// The corruptions in `source`, as wire diagnostics — what puts a squiggle under a broken
+/// character while you type instead of only when you go and ask.
+///
+/// Two codes, because the two are two different problems with two different answers:
+/// `encoding.mojibake` can be repaired in place (the correct character is known), and
+/// `encoding.undecodable` cannot be repaired at all — it says the file is being read in the wrong
+/// encoding, and the answer is to reload it in the right one.
+///
+/// Not restricted to any file type. Every other contributor here is about a language; this one is
+/// about bytes, and a legacy tree keeps its accented text in `.properties` and templates far more
+/// often than in `.java`.
+pub(crate) fn diagnostics_for(source: &str) -> Vec<Diagnostic> {
+    find_mojibake(source)
+        .into_iter()
+        .map(|hit| {
+            // One line each. A diagnostic message is read in a hover the width of the editor, so
+            // the paragraph explaining what to do about it belongs in the documentation — a
+            // tooltip that has to be resized to be read is one nobody finishes reading.
+            let (code, message) = if hit.fix.is_empty() {
+                (
+                    "encoding.undecodable",
+                    "Unreadable character — the file is not in the encoding it is being decoded \
+                     with. Reload it in the right one."
+                        .to_string(),
+                )
+            } else {
+                (
+                    "encoding.mojibake",
+                    format!("Mojibake: “{}” should be “{}”.", hit.bad, hit.fix),
+                )
+            };
+            Diagnostic {
+                message,
+                severity: "warning".to_string(),
+                code: code.to_string(),
+                start: hit.start,
+                end: hit.end,
+            }
+        })
+        .collect()
+}
+
+/// The character a lossy decode leaves where a byte it could not read used to be.
+const REPLACEMENT: char = '\u{FFFD}';
+
+/// Its first UTF-8 byte (`EF BF BD`), for the lead-byte skip in [`find_mojibake`].
+const REPLACEMENT_LEAD: u8 = 0xEF;
+
+/// Scan `text` for corrupted characters, returning each as a [`MojibakeHit`] (byte span, and a fix
+/// where one can be known), in document order, non-overlapping.
 pub fn find_mojibake(text: &str) -> Vec<MojibakeHit> {
-    let table = mojibake_table();
+    let table = table();
+    let bytes = text.as_bytes();
     let mut hits = Vec::new();
     let mut i = 0;
     while i < text.len() {
+        // The fast path, and the reason this can run on every keystroke: a byte that cannot begin
+        // any corrupted sequence is skipped without touching the table at all. That is every ASCII
+        // byte, which is nearly all of every file.
+        //
+        // Stepping one **byte** here is safe, and the invariant is worth stating because the slice
+        // below would panic if it were not: every lead byte in the table is the first byte of a
+        // multi-byte UTF-8 character (`0xC3`, and `0xEF` for the replacement character), and a
+        // UTF-8 continuation byte is always `0x80..=0xBF`. So a byte this guard stops on is always
+        // the start of a character, and the bytes it skips over are never sliced.
+        let lead = bytes[i];
+        if !table.leads[lead as usize] && lead != REPLACEMENT_LEAD {
+            i += 1;
+            continue;
+        }
         let rest = &text[i..];
         // Longest-first table, so the first `starts_with` is the maximal match.
-        if let Some((bad, fix)) = table.iter().find(|(bad, _)| rest.starts_with(bad.as_str())) {
+        if let Some((bad, fix)) = table.entries.iter().find(|(bad, _)| rest.starts_with(bad.as_str())) {
             let end = i + bad.len();
             hits.push(MojibakeHit {
                 start: i,
@@ -183,6 +292,18 @@ pub fn find_mojibake(text: &str) -> Vec<MojibakeHit> {
                 fix: fix.to_string(),
             });
             i = end;
+        } else if rest.starts_with(REPLACEMENT) {
+            // A run of them is one wound, not three: a single character of a multi-byte encoding
+            // can lose several bytes, and three squiggles side by side say nothing the first does
+            // not. Reported with an empty `fix` — see the module doc for why there cannot be one.
+            let run = rest.len() - rest.trim_start_matches(REPLACEMENT).len();
+            hits.push(MojibakeHit {
+                start: i,
+                end: i + run,
+                bad: rest[..run].to_string(),
+                fix: String::new(),
+            });
+            i += run;
         } else {
             // Advance one whole char (byte indices stay on char boundaries).
             i += rest.chars().next().map(char::len_utf8).unwrap_or(1);
@@ -229,6 +350,47 @@ mod tests {
         assert_eq!(hits[1].fix, "è");
         assert_eq!(hits[2].fix, "ù");
         assert!(hits[0].start < hits[1].start && hits[1].start < hits[2].start);
+    }
+
+    #[test]
+    fn detects_a_byte_that_could_not_be_decoded_at_all() {
+        // What the editor's lossy read leaves where a Cp1252 `è` sat in a file read as UTF-8 — the
+        // corruption that looks like a typo, and the one the scan used to walk straight past.
+        let text = "# Il campo \u{FFFD} obbligatorio";
+        let hits = find_mojibake(text);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].bad, "\u{FFFD}");
+        assert!(hits[0].fix.is_empty(), "nothing can be known about what it was");
+        assert_eq!(&text[hits[0].start..hits[0].end], hits[0].bad);
+    }
+
+    #[test]
+    fn a_run_of_replacement_characters_is_one_hit() {
+        let hits = find_mojibake("a\u{FFFD}\u{FFFD}\u{FFFD}b");
+        assert_eq!(hits.len(), 1, "one wound, not three");
+        assert_eq!(hits[0].bad.chars().count(), 3);
+    }
+
+    /// The guard in `find_mojibake` steps one byte at a time and then slices. That is only sound
+    /// while no lead byte can also be a UTF-8 continuation byte — which a `TARGETS` entry outside
+    /// the Latin-1 and General-Punctuation ranges could break without any test failing.
+    #[test]
+    fn no_lead_byte_is_a_utf8_continuation_byte() {
+        for (bad, correct) in &table().entries {
+            let lead = bad.as_bytes()[0];
+            assert!(
+                !(0x80..=0xBF).contains(&lead),
+                "the sequence for {correct:?} starts with a continuation byte",
+            );
+        }
+    }
+
+    #[test]
+    fn a_long_ascii_buffer_is_scanned_without_touching_the_table() {
+        // Not a timing assertion — a correctness one that happens to describe the fast path: the
+        // scan walks a file of ordinary source and finds nothing, on any length.
+        let text = "public class Order { private String name; }\n".repeat(2_000);
+        assert!(find_mojibake(&text).is_empty());
     }
 
     #[test]

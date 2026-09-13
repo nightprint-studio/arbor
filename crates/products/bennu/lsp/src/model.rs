@@ -305,6 +305,12 @@ pub struct ServerStatus {
     /// The tail of the server's stderr. The only place the reason a server refused to
     /// start is ever written down.
     pub log_tail: Vec<String>,
+    /// The server process's id while it is alive.
+    ///
+    /// What lets a screen measuring Arbor's own processes name the row it is showing — and, from
+    /// that row, reach the server's Restart without the screen having to know anything about
+    /// language servers.
+    pub pid: Option<u32>,
 }
 
 /// A session's lifecycle state.

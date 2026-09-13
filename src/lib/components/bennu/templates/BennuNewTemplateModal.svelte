@@ -49,15 +49,27 @@
   // svelte-ignore state_referenced_locally
   let name = $state(rename ?? '');
   let chosen = $state<string | null>(null);
-  /** What it writes; `null` until chosen, when the copied template's language is kept. */
+  /** What it writes; `null` until chosen, when the copied template's language is kept. `other` hands
+   *  the answer to the field below it. */
   let language = $state<string | null>(null);
+  /** An extension Bennu has no grammar for — a `.env`, a `.csv`, a `.sql.j2` of your own. Offered
+   *  because "the languages we colour" is a smaller list than "the files people generate". */
+  let otherExtension = $state('');
   let saving = $state(false);
 
   const renaming = $derived(!!rename);
+  /** The value that means "I will type it" — not an extension anybody writes. */
+  const OTHER = '\u0000other';
   const source = $derived(chosen ?? from ?? sources[0]?.name ?? null);
   /** The language shown: the one picked, else the one the template being copied writes. */
   const sourceLanguage = $derived(sources.find((t) => t.name === source)?.extension ?? '');
-  const extension = $derived(language ?? sourceLanguage);
+  const typedExtension = $derived(otherExtension.trim().replace(/^\./, '').toLowerCase());
+  const extension = $derived(language === OTHER ? typedExtension : language ?? sourceLanguage);
+  const extensionError = $derived(
+    language === OTHER && typedExtension && !/^[a-z0-9]+$/.test(typedExtension)
+      ? 'Letters and digits only — the extension of the file it writes.'
+      : null,
+  );
   const trimmed = $derived(name.trim());
   // An abbreviation's name is what gets typed, so it has to be a word the editor completes.
   const pattern = $derived(kind === 'live' ? /^\w+$/ : /^[A-Za-z0-9_-]+$/);
@@ -74,7 +86,9 @@
           ? `There is already a template called “${trimmed}”.`
           : null,
   );
-  const valid = $derived(!!trimmed && !error && trimmed !== rename);
+  const valid = $derived(
+    !!trimmed && !error && !extensionError && trimmed !== rename && (language !== OTHER || !!typedExtension),
+  );
 
   async function submit() {
     if (!valid || saving) return;
@@ -126,13 +140,25 @@
           : 'The language of the file this template writes.'}
       >
         <Select
-          value={extension}
-          options={languages.map((l) => ({ value: l.extension, label: l.label }))}
+          value={language ?? sourceLanguage}
+          options={[
+            ...languages.map((l) => ({ value: l.extension, label: l.label })),
+            { value: OTHER, label: 'Other extension…' },
+          ]}
           size="sm"
           ariaLabel="Language the template writes"
           onchange={(next) => (language = next)}
         />
       </FormField>
+      {#if language === OTHER}
+        <FormField
+          label="Extension"
+          hint="Plain text with the extension you name: the file is written `«name».«ext».jinja`, and what it generates gets that extension."
+          error={extensionError}
+        >
+          <Input bind:value={otherExtension} placeholder="env" />
+        </FormField>
+      {/if}
     {/if}
     {#if !renaming && sources.length > 1}
       <FormField label="Start from">

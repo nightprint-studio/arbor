@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use arbor_rpc::{async_registry_for, registry_for, AsyncCallFn, CallFn};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// The reserved method every backend answers with its AI-tool self-description.
@@ -26,6 +27,87 @@ use serde_json::Value;
 /// change and no widening of the `Hello` frame (which must stay exactly what it is:
 /// the first frame on the wire, with nothing allowed to precede it).
 pub const TOOLS_METHOD: &str = "__tools";
+
+/// The reserved method a backend answers with **what its own memory is holding** — the process
+/// monitor's per-backend breakdown.
+///
+/// Reserved for the same reasons as [`TOOLS_METHOD`]: host plumbing on the ordinary request path, no
+/// protocol change. Unlike it, it is **opt-in**. Describing tools needs no state, so every backend
+/// can answer; describing memory means walking the product's own structures, which only the product
+/// knows how to do. So a dispatcher advertises it only once [`Dispatcher::memory`] has given it a
+/// reporter — and that is what lets the monitor tell "this backend does not measure itself" from
+/// "it measured, and holds nothing worth listing".
+pub const MEMORY_METHOD: &str = "__memory";
+
+/// One thing a backend is holding in memory, as the process monitor lists it.
+///
+/// **An estimate unless it says otherwise.** There is no allocator keeping per-category statistics,
+/// so a product sizes its structures by walking them: exact where that is a sum of lengths (sources
+/// held as text), approximate where it is entries × the size of the structure plus the strings they
+/// own. The monitor shows the backend's measured total beside the items, so the gap is visible
+/// rather than hidden.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryItem {
+    /// What the memory belongs to: a project root, or `"process"` for what the backend holds once
+    /// whatever is open.
+    pub scope: String,
+    /// What it is, in words a person reads — "Reference index", "Sources held as text".
+    pub label: String,
+    /// Bytes, when the structure can be sized. `None` when it can only be counted cheaply: sizing a
+    /// deeply nested structure would mean serialising it, which costs more than it tells.
+    pub bytes: Option<u64>,
+    /// How many entries it holds, when that says something the bytes do not.
+    pub count: Option<u64>,
+    /// `bytes` is a sum of lengths, not an estimate.
+    pub exact: bool,
+    /// Memory-mapped files. They count towards the process's resident size, but the operating system
+    /// can take the pages back whenever it wants them — so they are not memory the backend is
+    /// *keeping* in the sense the rest of the list is.
+    pub mapped: bool,
+}
+
+impl MemoryItem {
+    /// A structure sized by walking it — an estimate.
+    pub fn estimate(scope: impl Into<String>, label: impl Into<String>, count: usize, bytes: usize) -> Self {
+        Self::new(scope, label, Some(bytes), Some(count), false)
+    }
+
+    /// A sum of lengths actually held — text, sample buffers, a Lua heap's own count.
+    pub fn exact(scope: impl Into<String>, label: impl Into<String>, count: usize, bytes: usize) -> Self {
+        Self::new(scope, label, Some(bytes), Some(count), true)
+    }
+
+    /// A structure only counted: sizing it would cost more than it tells.
+    pub fn counted(scope: impl Into<String>, label: impl Into<String>, count: usize) -> Self {
+        Self::new(scope, label, None, Some(count), false)
+    }
+
+    fn new(
+        scope: impl Into<String>,
+        label: impl Into<String>,
+        bytes: Option<usize>,
+        count: Option<usize>,
+        exact: bool,
+    ) -> Self {
+        Self {
+            scope: scope.into(),
+            label: label.into(),
+            bytes: bytes.map(|b| b as u64),
+            count: count.map(|c| c as u64),
+            exact,
+            mapped: false,
+        }
+    }
+}
+
+/// The scope of what a backend holds once, whatever is open — [`MemoryItem::scope`]'s other value.
+pub const PROCESS_SCOPE: &str = "process";
+
+/// A backend's whole [`MEMORY_METHOD`] answer.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct MemoryReport {
+    pub items: Vec<MemoryItem>,
+}
 
 /// [`TOOLS_METHOD`]'s body: every `#[handler(mcp(...))]` this binary links.
 ///
@@ -68,7 +150,16 @@ pub struct Dispatcher<S: 'static> {
     sync: HashMap<&'static str, CallFn>,
     asyncs: HashMap<&'static str, AsyncCallFn>,
     extra: Vec<ExtraGroup>,
+    /// The product's [`MEMORY_METHOD`] reporter, when it has one. A closure over the state rather
+    /// than a `CallFn`: a fn pointer cannot carry the product's knowledge of its own structures, and
+    /// the method exists precisely to carry that.
+    memory: Option<Arc<dyn Fn(&S) -> MemoryReport + Send + Sync>>,
+    /// Lines the runtime adds to any backend's answer — what `arbor-be` itself hosts, the plugin
+    /// VMs, which no product reporter should have to know how to size.
+    memory_extras: Vec<MemoryExtra>,
 }
+
+type MemoryExtra = Arc<dyn Fn() -> Vec<MemoryItem> + Send + Sync>;
 
 impl<S: 'static> Dispatcher<S> {
     /// A dispatcher whose primary context is `state`. Async handlers are awaited on
@@ -89,7 +180,40 @@ impl<S: 'static> Dispatcher<S> {
             sync,
             asyncs: HashMap::new(),
             extra: Vec::new(),
+            memory: None,
+            memory_extras: Vec::new(),
         }
+    }
+
+    /// Answer [`MEMORY_METHOD`] with `reporter`.
+    ///
+    /// Called on demand — when someone opens a backend's breakdown in the process monitor — never on
+    /// a timer, so a reporter may walk what it needs to. It should still count rather than
+    /// serialise: a report that allocates gigabytes to say how much memory is in use has answered
+    /// its own question badly.
+    pub fn memory(mut self, reporter: impl Fn(&S) -> MemoryReport + Send + Sync + 'static) -> Self {
+        self.memory = Some(Arc::new(reporter));
+        self
+    }
+
+    /// Append `extra`'s lines to the [`MEMORY_METHOD`] answer, and advertise the method even when
+    /// the product has no reporter of its own. For the runtime's own holdings (see
+    /// [`crate::App::run`]), so every backend reports them without each product repeating it.
+    pub(crate) fn memory_extra(mut self, extra: impl Fn() -> Vec<MemoryItem> + Send + Sync + 'static) -> Self {
+        self.memory_extras.push(Arc::new(extra));
+        self
+    }
+
+    fn reports_memory(&self) -> bool {
+        self.memory.is_some() || !self.memory_extras.is_empty()
+    }
+
+    fn memory_report(&self) -> MemoryReport {
+        let mut report = self.memory.as_ref().map(|r| r(&self.state)).unwrap_or_default();
+        for extra in &self.memory_extras {
+            report.items.extend(extra());
+        }
+        report
     }
 
     /// Add every `#[handler]` registered under `program` (sync + async),
@@ -129,6 +253,8 @@ impl<S: 'static> Dispatcher<S> {
             .keys()
             .chain(self.asyncs.keys())
             .chain(self.extra.iter().flat_map(|g| g.map.keys()))
+            // Advertised only with a reporter behind it — see [`MEMORY_METHOD`].
+            .chain(self.reports_memory().then_some(&MEMORY_METHOD))
             .map(|s| s.to_string())
             .collect();
         m.sort();
@@ -144,6 +270,9 @@ impl<S: 'static> Dispatcher<S> {
         S: Send + Sync,
     {
         move |method: &str, params: Value| {
+            if method == MEMORY_METHOD && self.reports_memory() {
+                return serde_json::to_value(self.memory_report()).map_err(|e| e.to_string());
+            }
             if let Some(call) = self.sync.get(method) {
                 return call(&*self.state as &dyn Any, params);
             }

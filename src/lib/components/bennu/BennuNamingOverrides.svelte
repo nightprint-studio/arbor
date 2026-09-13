@@ -27,10 +27,12 @@
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
-  import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
+  import type { NamingDocument } from '$lib/stores/bennu/naming.svelte';
   import type { NamingConvention, NamingPack, NamingTarget } from '$lib/ipc/bennu/naming';
 
   interface Props {
+    /** The document being edited — the profile's defaults, or this project's own section. */
+    doc: NamingDocument;
     /** Whether the naming check is on — an override of a check nobody runs is not editable. */
     enabled: boolean;
     /** The packs on screen in the rules grid above, in the same order. */
@@ -41,15 +43,15 @@
     targetLabels: Record<string, string>;
   }
 
-  const { enabled, packs, conventionOptions, targetLabels }: Props = $props();
+  const { doc, enabled, packs, conventionOptions, targetLabels }: Props = $props();
 
-  const overrides = $derived(bennuNamingStore.draft.overrides);
+  const overrides = $derived(doc.draft.overrides);
 
   /** The (pack, target) pairs this override can usefully speak about: the ones the project set. */
   function configuredTargets(): { packId: string; packLabel: string; target: NamingTarget }[] {
     const out: { packId: string; packLabel: string; target: NamingTarget }[] = [];
     for (const pack of packs) {
-      const rules = bennuNamingStore.draft.rules[pack.id] ?? {};
+      const rules = doc.draft.rules[pack.id] ?? {};
       for (const [target, convention] of Object.entries(rules)) {
         if (convention === 'any') continue;
         out.push({ packId: pack.id, packLabel: pack.label, target: target as NamingTarget });
@@ -63,7 +65,7 @@
   /** What applies inside this override: its own choice, else the project-wide one. */
   function conventionAt(index: number, packId: string, target: NamingTarget): NamingConvention {
     const own = overrides[index]?.rules[packId]?.[target];
-    return own ?? bennuNamingStore.draft.rules[packId]?.[target] ?? 'any';
+    return own ?? doc.draft.rules[packId]?.[target] ?? 'any';
   }
 
   function parseGlobs(text: string): string[] {
@@ -80,6 +82,7 @@
    * would delete the comma the moment it was typed. Re-seeded from the draft only when the two
    * genuinely disagree — on load and on Reset, never while typing.
    */
+  // svelte-ignore state_referenced_locally
   let pathText = $state<string[]>(overrides.map((o) => o.paths.join(', ')));
   $effect(() => {
     const fromStore = overrides.map((o) => o.paths);
@@ -96,7 +99,7 @@
 
   function onPathsInput(index: number, text: string) {
     pathText[index] = text;
-    bennuNamingStore.setOverridePaths(index, parseGlobs(text));
+    doc.setOverridePaths(index, parseGlobs(text));
   }
 </script>
 
@@ -115,14 +118,14 @@
           value={override.name}
           disabled={!enabled}
           placeholder="name this exception (e.g. tests)"
-          oninput={(v) => bennuNamingStore.setOverrideName(i, v)}
+          oninput={(v) => doc.setOverrideName(i, v)}
           ariaLabel="Exception name"
         />
         <Button
           variant="ghost"
           size="sm"
           disabled={!enabled}
-          onclick={() => bennuNamingStore.removeOverride(i)}
+          onclick={() => doc.removeOverride(i)}
           tooltip={{ content: 'Remove this exception' }}
         >
           {#snippet iconStart()}<Trash2 size={12} />{/snippet}
@@ -162,7 +165,7 @@
                 highlight={override.rules[t.packId]?.[t.target] !== undefined}
                 ariaLabel={`${t.packLabel} ${targetLabels[t.target] ?? t.target} convention in ${override.name || 'this exception'}`}
                 onchange={(v) =>
-                  bennuNamingStore.setOverrideConvention(i, t.packId, t.target, v as NamingConvention)}
+                  doc.setOverrideConvention(i, t.packId, t.target, v as NamingConvention)}
               />
             </li>
           {/each}
@@ -172,7 +175,7 @@
   {/each}
 
   <div class="add">
-    <Button variant="ghost" size="sm" disabled={!enabled} onclick={() => bennuNamingStore.addOverride()}>
+    <Button variant="ghost" size="sm" disabled={!enabled} onclick={() => doc.addOverride()}>
       {#snippet iconStart()}<Plus size={12} />{/snippet}
       Add an exception
     </Button>

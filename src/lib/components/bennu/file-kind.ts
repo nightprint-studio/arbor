@@ -177,6 +177,19 @@ export function isToolConfigFile(path: string | null | undefined): boolean {
 }
 
 /**
+ * Extensions whose files are text somebody writes prose into.
+ *
+ * They reach {@link supportsDiagnostics} for **one** contributor — the encoding check — which is
+ * about bytes rather than about a language, so no analyzer needs to understand the file for it to
+ * have something true to say. A legacy tree keeps almost all of its accented text in exactly these:
+ * message bundles, templates, SQL seed data, a README.
+ */
+const PROSE_EXTS = new Set([
+  'properties', 'txt', 'md', 'sql', 'yml', 'yaml', 'json', 'csv', 'jinja', 'jinja2', 'j2',
+  'ini', 'conf', 'env', 'ftl', 'vm', 'css', 'js', 'ts',
+]);
+
+/**
  * True when it is worth asking `bennu_diagnostics` about the file.
  *
  * Nearly the same set as {@link supportsCodeNav}, and named separately because the *reason* differs:
@@ -186,10 +199,16 @@ export function isToolConfigFile(path: string | null | undefined): boolean {
  * A **`Cargo.toml`** is in this set and not in the navigation one, which is the difference the two
  * names exist for: the manifest schema has plenty to say about whether the file is right, and
  * nothing to say about going to a declaration in it.
+ *
+ * The **prose kinds** are here for the encoding check alone. That check is not about a language —
+ * it reports a character the file was not written with — so "no engine understands this file" stops
+ * being a reason to skip it: a corrupted `è` in a message bundle is exactly the case, and the file
+ * used to be asked nothing at all. The request rides the idle debounce and the scan is linear, so
+ * the cost is one round trip per pause in typing.
  */
 export function supportsDiagnostics(path: string | null | undefined): boolean {
   return isAnalyzedFile(path) || isLspFile(path) || isCargoManifest(path) || isWgslFile(path)
-    || isToolConfigFile(path);
+    || isToolConfigFile(path) || PROSE_EXTS.has(ext(path));
 }
 
 /**

@@ -144,6 +144,26 @@ public void rename(final String name) { this.name = name; }    // final paramete
   <li><code>blank_line_between_members</code>members are separated by a blank line</li>
 </ul>
 
+<h3><code>style.rust</code> — how you write Rust</h3>
+<p>
+  From <strong>Settings › Rust › Code Style</strong>, and its own object rather than more fields beside Java's: none of
+  it means anything in a Java template and none of Java's means anything in a Rust one. It is a short list on purpose —
+  <code>rustfmt</code> owns the formatting, so what is here is only what a generator decides and a formatter never
+  touches.
+</p>
+<ul class="prop-list">
+  <li><code>visibility</code>what goes in front of a generated item, <strong>trailing space included</strong><code>pub </code>, <code>pub(crate) </code>, or empty for a private one</li>
+  <li><code>derives</code>the traits a generated <code>struct</code> or <code>enum</code> derives, in order. Empty means no <code>#[derive(…)]</code> line</li>
+  <li><code>doc_comments</code>generated items carry a <code>///</code> line</li>
+  <li><code>error_style</code><code>anyhow</code>, <code>thiserror</code> or <code>std</code> — how a fallible function reports failure</li>
+  <li><code>self_in_impl</code>inside an <code>impl</code>, the type is written <code>Self</code></li>
+</ul>
+<pre><code>{@html highlightCode(`{% if style.rust.doc_comments %}/// {{ description }}
+{% endif %}{% if style.rust.derives %}#[derive({{ style.rust.derives | join(", ") }})]
+{% endif %}{{ style.rust.visibility }}struct {{ name }} {
+    {{ style.rust.visibility }}id: String,
+}`, 'jinja-rust')}</code></pre>
+
 <pre><code>{@html highlightCode(`{% if "lombok" in project.artifacts %}
 @Builder
 {% endif %}
@@ -152,7 +172,8 @@ public {% if project.java >= 16 %}record{% else %}final class{% endif %} {{ name
 <h3><code>naming</code> — how the project names things</h3>
 <p>
   The convention for each kind of declaration in the file being written. It comes from
-  <strong>Project Configuration → Naming conventions</strong> when the project checks them — for that file's path,
+  <strong>Settings → Editor → Naming</strong> and whatever <strong>Project Configuration → Naming</strong> states
+  differently, when the check is on — for that file's path,
   so a project whose tests are named in snake_case gets snake_case in a test — and from the language's standard
   when it does not. Read alone, a target is its convention; called, it makes a name out of words in it:
 </p>
@@ -222,12 +243,20 @@ public class {{ name }} {
 }`, 'jinja-java')}</code></pre>
 
 <h2>From a class</h2>
-<p>Rendered with the class the caret is in.</p>
+<p>
+  Rendered with the <strong>type</strong> the caret is in — a class, a record, an interface, an enum or an
+  annotation. <code>class.kind</code> says which, so one template can write for several and refuse the rest.
+</p>
 <ul class="prop-list">
-  <li><code>class.name</code>, <code>class.package</code>, <code>class.fqn</code>the class, its package, its qualified name</li>
-  <li><code>class.record</code>whether it is a record</li>
+  <li><code>class.name</code>, <code>class.package</code>, <code>class.fqn</code>the type, its package, its qualified name</li>
+  <li><code>class.kind</code><code>class</code>, <code>record</code>, <code>interface</code>, <code>enum</code> or <code>annotation</code></li>
+  <li><code>class.record</code>whether it is a record — what <code>class.kind</code> says, for a template written before it existed</li>
+  <li><code>class.abstract</code>declared <code>abstract</code>. An interface's methods are abstract without the word; this is about the word</li>
+  <li><code>class.type_parameters</code>as written, without the brackets — <code>["T", "ID extends Serializable"]</code></li>
+  <li><code>class.constants</code>an enum's constants, in declaration order</li>
+  <li><code>class.methods</code>each with <code>name</code>, <code>returns</code>, <code>params</code> (<code>"String id"</code>), <code>param_names</code>, <code>abstract</code>, <code>static</code>, <code>visibility</code> and <code>annotation_names</code> — what an implementation of an interface has to write</li>
   <li><code>class.annotations</code>each with <code>name</code> and <code>attributes</code>; <code>class.annotation_names</code> just the names</li>
-  <li><code>class.superclass</code>, <code>class.interfaces</code>, <code>class.imports</code>what it extends, implements and imports</li>
+  <li><code>class.superclass</code>, <code>class.interfaces</code>, <code>class.imports</code>what it extends, implements and imports — an interface's own <code>extends</code> list is <code>interfaces</code>, since it is the same list</li>
   <li><code>class.id_type</code>the type of its <code>@Id</code> field, boxed — <code>Long</code></li>
   <li><code>class.fields</code>each with <code>name</code>, <code>json_name</code>, <code>type_name</code>, <code>type_simple</code>, <code>final</code>, <code>id</code>, <code>setter</code>, <code>getter</code> (Lombok's counted), <code>annotations</code> and <code>constraints</code></li>
   <li><code>field.setter_chains</code>the setter returns the object, so calls chain — <code>order.setName(n).setQuantity(1)</code>; Lombok's <code>@Accessors(chain = true)</code> counted</li>

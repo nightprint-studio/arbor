@@ -157,7 +157,8 @@
     <tr><td><kbd>Ctrl</kbd> + <kbd>K</kbd></td><td>Command palette</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td>Open project</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd></td><td>Manage workspaces</td></tr>
-    <tr><td><kbd>Ctrl</kbd> + <kbd>,</kbd></td><td>Settings</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>,</kbd></td><td>Settings — yours, and this machine's</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>,</kbd></td><td><strong>Project Configuration</strong> — what belongs to the open project: its JDK level, encoding and modules, the frameworks detected in it, and the naming and spelling it states differently from your profile</td></tr>
     <tr><td><kbd>F1</kbd></td><td>Documentation</td></tr>
   </tbody>
 </table>

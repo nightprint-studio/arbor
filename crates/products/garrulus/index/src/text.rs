@@ -141,6 +141,33 @@ impl TextIndex {
         self.terms.len()
     }
 
+    /// `(notes with a body, bytes of body text)` — exact: it is the text held.
+    pub(crate) fn body_footprint(&self) -> (usize, usize) {
+        (self.bodies.len(), self.bodies.values().map(String::capacity).sum())
+    }
+
+    /// `(distinct words, estimated bytes)` of the postings and of the per-note term lists that let
+    /// an update retract them — every word held twice, once each side.
+    pub(crate) fn word_footprint(&self) -> (usize, usize) {
+        let note_slot = std::mem::size_of::<NoteId>();
+        let postings: usize = self
+            .postings
+            .iter()
+            .map(|(word, notes)| {
+                word.capacity() + notes.iter().map(|id| note_slot + id.as_str().len()).sum::<usize>()
+            })
+            .sum();
+        let terms: usize = self
+            .terms
+            .values()
+            .map(|words| {
+                words.capacity() * std::mem::size_of::<String>()
+                    + words.iter().map(String::capacity).sum::<usize>()
+            })
+            .sum();
+        (self.postings.len(), postings + terms)
+    }
+
     /// Whether the index holds nothing.
     pub fn is_empty(&self) -> bool {
         self.terms.is_empty()
@@ -305,5 +332,19 @@ mod tests {
         let s = snippet(&body, &["trovami".to_string()]).unwrap();
         assert!(s.text.starts_with('…') && s.text.ends_with('…'));
         assert!(snippet(&body, &["assente".to_string()]).is_none());
+    }
+
+    #[test]
+    fn the_footprint_counts_the_text_held_and_forgets_a_removed_note() {
+        let mut idx = TextIndex::new();
+        idx.upsert(&note_id("a"), "", "ciao mondo");
+        assert_eq!(idx.body_footprint(), (1, "ciao mondo".len()));
+        let (words, bytes) = idx.word_footprint();
+        assert_eq!(words, 2);
+        assert!(bytes >= "ciao".len() * 2 + "mondo".len() * 2, "each word is held in both directions");
+
+        idx.remove(&note_id("a"));
+        assert_eq!(idx.body_footprint(), (0, 0));
+        assert_eq!(idx.word_footprint(), (0, 0));
     }
 }

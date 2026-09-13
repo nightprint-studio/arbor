@@ -26,5 +26,5 @@ pub use crate::model::{
     SessionState, SignatureText, SpanTarget, SymbolNode, TokenSpan,
 };
 pub use crate::semantic::EMITTED_CLASSES;
-pub use crate::session::{LspSession, SessionConfig, SessionObserver, StartFailure};
+pub use crate::session::{LspSession, SessionConfig, SessionMemory, SessionObserver, StartFailure};
 pub use crate::uri::{from_uri, is_file_uri, to_uri};

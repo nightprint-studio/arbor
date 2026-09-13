@@ -116,16 +116,7 @@ fn bennu_dict_add(_ctx: &BennuState, args: DictAddArgs) -> Result<(), String> {
     if word.is_empty() {
         return Err("word is empty".to_string());
     }
-    let path = match args.scope.as_str() {
-        "global" => global_custom_dict_path(&bennu_data_dir()),
-        "project" => {
-            if args.root.trim().is_empty() {
-                return Err("scope 'project' requires a root".to_string());
-            }
-            project_custom_dict_path(&PathBuf::from(&args.root))
-        }
-        other => return Err(format!("unknown scope '{other}' (expected 'project' | 'global')")),
-    };
+    let path = dict_path_for(&args.scope, &args.root)?;
     append_word_deduped(&path, word)?;
 
     // Reflect it immediately in the loaded engine (no full reload needed for one word).
@@ -151,6 +142,83 @@ fn append_word_deduped(path: &std::path::Path, word: &str) -> Result<(), String>
     content.push_str(word);
     content.push('\n');
     std::fs::write(path, content).map_err(|e| format!("write dict: {e}"))
+}
+
+// ── bennu_dict_words / bennu_dict_set_words ──────────────────────────────────────
+
+/// Args for [`bennu_dict_words`] and [`bennu_dict_set_words`].
+#[derive(Deserialize)]
+pub struct DictWordsArgs {
+    /// `"project"` (`<root>/.arbor/bennu-dict.txt`) or `"global"` (`<data>/custom-dict.txt`).
+    pub scope: String,
+    /// The project root. Required for `"project"`, ignored for `"global"`.
+    #[serde(default)]
+    pub root: String,
+    /// The whole list, for [`bennu_dict_set_words`]. Ignored on a read.
+    #[serde(default)]
+    pub words: Vec<String>,
+}
+
+/// The words in one custom dictionary, in file order.
+///
+/// A settings screen needs the list and not only the "add" that the quick-fix uses: a word added
+/// by a typo stays added forever otherwise, and the only way to take it back was to find the file
+/// on disk.
+#[arbor_rpc::handler]
+fn bennu_dict_words(_ctx: &BennuState, args: DictWordsArgs) -> Result<Vec<String>, String> {
+    let path = dict_path_for(&args.scope, &args.root)?;
+    Ok(read_words(&path))
+}
+
+/// Replace one custom dictionary with `words` — trimmed, de-duplicated case-insensitively, and
+/// written one per line.
+///
+/// The whole list rather than a remove: this is what a screen that edits a list has in hand, and it
+/// makes two words removed at once one write instead of a sequence that can half-fail.
+#[arbor_rpc::handler]
+fn bennu_dict_set_words(_ctx: &BennuState, args: DictWordsArgs) -> Result<(), String> {
+    let path = dict_path_for(&args.scope, &args.root)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create dict dir: {e}"))?;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut kept: Vec<&str> = Vec::new();
+    for word in args.words.iter().map(|w| w.trim()).filter(|w| !w.is_empty()) {
+        if seen.insert(word.to_ascii_lowercase()) {
+            kept.push(word);
+        }
+    }
+    let mut text = kept.join("\n");
+    if !text.is_empty() {
+        text.push('\n');
+    }
+    std::fs::write(&path, text).map_err(|e| format!("write dict: {e}"))?;
+    // The engine caches the merged custom set, and it can only be *added* to in place — a removal
+    // has to come off the same reload the download does, or a word taken back stays correct until
+    // the process restarts.
+    SpellEngine::new(bennu_data_dir()).reload();
+    Ok(())
+}
+
+/// Which file a scope names. The one place the two spellings of "where custom words live" are
+/// resolved, so an unknown scope is refused in exactly the same words wherever it arrives.
+fn dict_path_for(scope: &str, root: &str) -> Result<PathBuf, String> {
+    match scope {
+        "global" => Ok(global_custom_dict_path(&bennu_data_dir())),
+        "project" => {
+            if root.trim().is_empty() {
+                return Err("scope 'project' requires a root".to_string());
+            }
+            Ok(project_custom_dict_path(&PathBuf::from(root)))
+        }
+        other => Err(format!("unknown scope '{other}' (expected 'project' | 'global')")),
+    }
+}
+
+/// The non-empty, trimmed lines of a word file. A missing file is an empty list.
+fn read_words(path: &std::path::Path) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
+    text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect()
 }
 
 // ── bennu_spell_status ───────────────────────────────────────────────────────────
@@ -290,9 +358,7 @@ fn project_root_of(file: &str) -> Option<PathBuf> {
 
 /// Read the per-project custom words (lowercasing is handled by the engine merge).
 fn read_project_words(root: &std::path::Path) -> Vec<String> {
-    let path = project_custom_dict_path(root);
-    let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
-    text.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).map(|l| l.to_string()).collect()
+    read_words(&project_custom_dict_path(root))
 }
 
 #[cfg(test)]

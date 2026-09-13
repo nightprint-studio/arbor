@@ -37,6 +37,18 @@ use crate::types::{
 };
 use crate::uri;
 
+/// What a session keeps in memory on the client side — see [`LspSession::memory`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionMemory {
+    pub open_files: usize,
+    /// The text of every open file, kept in step with the editor's buffer — exact.
+    pub open_text_bytes: usize,
+    /// Diagnostics held, over every file.
+    pub diagnostics: usize,
+    /// Items of the last completion list, kept so one item's documentation can be resolved.
+    pub completion_items: usize,
+}
+
 /// How long to wait for `initialize`.
 ///
 /// Generous because it is once per session and the alternative failure is worse: a server
@@ -349,6 +361,7 @@ impl LspSession {
             message: s.message.clone(),
             progress: s.progress.clone(),
             log_tail: self.client.log_tail(),
+            pid: self.client.pid(),
         }
     }
 
@@ -436,6 +449,16 @@ impl LspSession {
     /// Tell the server a file was closed, so it can drop its copy (and, for most servers,
     /// its diagnostics for it).
     pub fn did_close(&self, file: &str) {
+        // The last completion list belongs to the file it was computed for. Once that file is
+        // closed nothing can resolve an item of it, and nothing else ever replaced it — so up to
+        // `MAX_COMPLETIONS` items, with their edits and documentation, stayed for the life of the
+        // session.
+        {
+            let mut last = self.shared.last_completion.lock().unwrap_or_else(|p| p.into_inner());
+            if last.as_ref().is_some_and(|(owner, _)| owner == file) {
+                *last = None;
+            }
+        }
         let was_open =
             self.shared.docs.lock().unwrap_or_else(|p| p.into_inner()).remove(file).is_some();
         if !was_open {
@@ -447,6 +470,31 @@ impl LspSession {
                 text_document: types::TextDocumentIdentifier::new(uri::to_uri(file)),
             },
         );
+    }
+
+    /// What this session keeps on the client side of the pipe, for a memory breakdown. The server
+    /// itself is a process of its own and is measured as one.
+    pub fn memory(&self) -> SessionMemory {
+        let (open_files, open_text_bytes) = {
+            let docs = self.shared.docs.lock().unwrap_or_else(|p| p.into_inner());
+            (docs.len(), docs.values().map(|d| d.text.capacity()).sum())
+        };
+        let diagnostics = self
+            .shared
+            .diagnostics
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .map(Vec::len)
+            .sum();
+        let completion_items = self
+            .shared
+            .last_completion
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .map_or(0, |(_, items)| items.len());
+        SessionMemory { open_files, open_text_bytes, diagnostics, completion_items }
     }
 
     /// Whether `file` is open in this session.

@@ -136,10 +136,21 @@ impl CorvusState {
         }
     }
 
-    /// Forget a tab's repo. Pushed by the shell on repo close.
+    /// Forget a tab's repo — and the statistics memoised for it. Pushed by the shell on repo close.
+    ///
+    /// The statistics go with the tab: they are keyed by it, and nothing else ever removed them, so
+    /// every repository opened in a session kept its figures until the backend exited. Taking the
+    /// tab out of `stats_computing` too is what stops a computation still running from putting them
+    /// back when it finishes (the compute thread stores only if its mark was still there).
     pub fn deregister_repo(&self, tab_id: &str) {
         if let Ok(mut repos) = self.repos.lock() {
             repos.remove(tab_id);
+        }
+        if let Ok(mut computing) = self.stats_computing.lock() {
+            computing.remove(tab_id);
+        }
+        if let Ok(mut cache) = self.stats_cache.lock() {
+            cache.remove(tab_id);
         }
     }
 

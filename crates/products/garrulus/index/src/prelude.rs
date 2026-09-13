@@ -5,7 +5,7 @@ pub use crate::fuzzy::{matches as fuzzy_matches, score as fuzzy_score, FuzzyMatc
 pub use crate::graph::{
     leaf_key, link_key, Backlink, Edge, LinkGraph, Mention, Resolver, UnresolvedLink,
 };
-pub use crate::index::{Hit, Index};
+pub use crate::index::{Hit, Index, IndexFootprint};
 pub use crate::note_view::{
     flatten_frontmatter, front_value_to_string, note_id, type_id, LinkRef, NoteView,
 };

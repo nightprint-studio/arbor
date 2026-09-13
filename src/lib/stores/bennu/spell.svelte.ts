@@ -50,6 +50,8 @@ function createBennuSpellStore() {
     }
   }
   let status = $state<SpellStatus | null>(null);
+  /** Whether {@link loadStatus} has ever succeeded — see `statusKnown`. */
+  let known = $state(false);
   let downloading = $state(false);
   let progress = $state<string | null>(null);
   // Bumped whenever the dictionaries change (download / add-word) so the editor's
@@ -102,9 +104,31 @@ function createBennuSpellStore() {
       return () => { unlisten?.(); attached = false; };
     },
 
-    /** Refresh the install status from the BE. */
+    /**
+     * Whether the backend has ever answered which dictionaries are on disk.
+     *
+     * Distinct from `installed`, and the distinction is a defect rather than a nicety: a screen
+     * that cannot tell "none installed" from "nobody has answered yet" offers to download
+     * dictionaries that are sitting on disk, which is what it did every time the first read
+     * happened before the backend was up.
+     */
+    get statusKnown() { return known; },
+
+    /**
+     * Refresh the install status from the BE.
+     *
+     * A failure leaves the last known answer alone instead of writing "not installed" over it.
+     * This runs at window mount, which is a moment the backend may not be serving yet — and the
+     * old behaviour turned one early rejection into a permanent fact, since nothing ever asked
+     * again. Callers that show the answer ask on mount, which is the retry.
+     */
     async loadStatus() {
-      try { status = await ipcStatus(); } catch { status = { installed: false, languages: [] }; }
+      try {
+        status = await ipcStatus();
+        known = true;
+      } catch {
+        // Deliberately nothing: an unanswered question is not a "no".
+      }
     },
 
     /** Download the EN + IT dictionaries (job-like; progress via events). Surfaces a failure as a
@@ -116,6 +140,7 @@ function createBennuSpellStore() {
       progress = 'Starting…';
       try {
         status = await ipcDownload();
+        known = true;
         revision += 1;
         if (status?.installed) toastStore.show('Spell-check dictionaries installed.', 'success');
       } catch (e) {
@@ -124,6 +149,17 @@ function createBennuSpellStore() {
         downloading = false;
         progress = null;
       }
+    },
+
+    /**
+     * Say the dictionaries changed under somebody else's write.
+     *
+     * The dictionary list edits the files directly (it replaces a whole list, which is not what
+     * `addToDictionary` does), and the editor's spell effect has to re-run for a word that was
+     * *removed* just as much as for one that was added.
+     */
+    bumpRevision() {
+      revision += 1;
     },
 
     /** Add a word to a custom dictionary + bump the revision so the editor re-lints. */

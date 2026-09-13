@@ -141,6 +141,47 @@ pub struct ReferenceIndex {
     footprints: HashMap<String, FileFootprint>,
 }
 
+impl DeclKey {
+    /// Heap the key's names own.
+    fn heap_estimate(&self) -> usize {
+        match self {
+            DeclKey::Type { binary } => binary.capacity(),
+            DeclKey::Method { owner, name } | DeclKey::Field { owner, name } => owner.capacity() + name.capacity(),
+        }
+    }
+}
+
+/// What the reference index holds, for the memory breakdown.
+pub struct ReferenceMemory {
+    /// Use sites kept, resolved and unresolved.
+    pub usages: usize,
+    /// An estimate of the heap those use sites and their keys own.
+    pub bytes: usize,
+    /// Files whose parsed symbols are kept — counted, not sized: see `crate::memory`.
+    pub files: usize,
+}
+
+impl ReferenceIndex {
+    /// What this index holds. The use sites are the part that grows with the size of a project:
+    /// each carries its file's path and a preview of its line, both as owned strings, so a symbol
+    /// used ten thousand times owns ten thousand copies of both.
+    pub fn memory_estimate(&self) -> ReferenceMemory {
+        fn sites(list: &Vec<UsageLocation>) -> usize {
+            list.capacity() * std::mem::size_of::<UsageLocation>()
+                + list.iter().map(|u| u.file.capacity() + u.preview.capacity()).sum::<usize>()
+        }
+        let decl_slot = std::mem::size_of::<DeclKey>() + std::mem::size_of::<Vec<UsageLocation>>() + 1;
+        let name_slot = std::mem::size_of::<String>() + std::mem::size_of::<Vec<UsageLocation>>() + 1;
+        let bytes = self.by_decl.capacity() * decl_slot
+            + self.by_decl.iter().map(|(k, v)| k.heap_estimate() + sites(v)).sum::<usize>()
+            + self.unresolved_by_name.capacity() * name_slot
+            + self.unresolved_by_name.iter().map(|(k, v)| k.capacity() + sites(v)).sum::<usize>();
+        let usages = self.by_decl.values().map(Vec::len).sum::<usize>()
+            + self.unresolved_by_name.values().map(Vec::len).sum::<usize>();
+        ReferenceMemory { usages, bytes, files: self.file_symbols.len() }
+    }
+}
+
 /// Where one file's contribution landed, so it can be taken back out again.
 ///
 /// The index is a merge: every file's edges are poured into shared buckets keyed by declaration,
@@ -1178,7 +1219,7 @@ impl<'a> FileWalker<'a> {
         // METHOD path already asked this question (see `enclosing_owner`); the field path did not,
         // so those uses were filed under nobody and a rename of the field left every one of them
         // behind — in test sources, where one fixture is star-imported by half a dozen classes.
-        self.static_import_owner(name, MemberSort::Field, None)
+        static_import_owner(self.resolver, &self.imports, name, MemberSort::Field, None)
     }
 
     /// `field name → declaring type` for every scope a bare field read inside `start` can bind to:
@@ -1369,102 +1410,10 @@ impl<'a> FileWalker<'a> {
         Some((span.start + at, span.start + at + member.len()))
     }
 
-    /// The number of arguments a `method_invocation` passes, for telling apart two statically
-    /// imported methods of the same name — which is how Java itself tells them apart.
-    fn call_arity(node: &Node) -> Option<usize> {
-        let args = node.child_by_field_name("arguments")?;
-        let mut c = args.walk();
-        Some(args.named_children(&mut c).count())
-    }
-
     fn enclosing_owner(&self, node: &Node, member: &str, sort: MemberSort) -> Option<String> {
         let fqn = self.enclosing_type_binary(node)?;
-        if let Some(found) = self.declaring_owner_strict(&fqn, member, sort) {
-            return Some(found);
-        }
-        // Not on the INNERMOST type or anything it inherits — but Java's scope does not stop there.
-        // A nested class sees the members of every class it is written inside (JLS §8.1.3) and
-        // writes them unqualified: `z_offset` inside `Mapper.Deserializer` is `Mapper.z_offset`.
-        //
-        // Stopping at the innermost type filed those uses under the INNER class, a key no rename
-        // ever looks up, so renaming the outer member rewrote its declaration and left every use
-        // inside a nested class spelling the old name — code that does not compile.
-        //
-        // The climb is over the binary name rather than the AST because nesting IS the binary name
-        // here (`pkg/Outer/Inner`, and `pkg/Outer/1` for an anonymous body), and it stops the moment
-        // the trimmed prefix is no longer a project type: what is above the outermost type is the
-        // package, whose types are not in scope unqualified.
-        let mut scope = fqn.as_str();
-        while let Some(i) = scope.rfind('/') {
-            let outer = &scope[..i];
-            if !self.resolver.is_project_type(outer) {
-                break;
-            }
-            if let Some(found) = self.declaring_owner_strict(outer, member, sort) {
-                return Some(found);
-            }
-            scope = outer;
-        }
-        // A bare name can also be bound by
-        // an `import static`, which is precisely how a statically-imported helper is called — and
-        // without this the call was filed under the CALLER's own type, a key no rename looks up, so
-        // renaming the helper left every such call spelling the old name.
-        let arity = (node.kind() == "method_invocation")
-            .then(|| Self::call_arity(node))
-            .flatten();
-        if let Some(owner) = self.static_import_owner(member, sort, arity) {
-            return Some(owner);
-        }
-        Some(fqn)
-    }
-
-    /// The static-import owner that binds a bare `member` into this file, if one does.
-    fn static_import_owner(
-        &self,
-        member: &str,
-        sort: MemberSort,
-        arity: Option<usize>,
-    ) -> Option<String> {
-        // Two static imports can name the same member from different owners; Java picks between
-        // them by the call's shape, and arity is the part of that we can see. Without it the first
-        // import won every call, and the calls to the OTHER method were filed under a method that
-        // does not have them.
-        if let Some(n) = arity {
-            let mut matching = bennu_java::prelude::static_import_targets(&self.imports)
-                .into_iter()
-                .filter(|t| t.member.as_deref() == Some(member))
-                .filter(|t| {
-                    self.resolver.members_of(&t.owner_binary).is_some_and(|cm| {
-                        cm.methods
-                            .iter()
-                            .any(|m| m.name == member && m.params.len() == n)
-                    })
-                });
-            if let (Some(only), None) = (matching.next(), matching.next()) {
-                return Some(only.owner_binary);
-            }
-        }
-        for target in bennu_java::prelude::static_import_targets(&self.imports) {
-            match &target.member {
-                // `import static a.b.C.member;` — named outright.
-                Some(named) if named == member => return Some(target.owner_binary),
-                Some(_) => continue,
-                // `import static a.b.C.*;` — binds it only if the owner declares it.
-                None => {
-                    let Some(cm) = self.resolver.members_of(&target.owner_binary) else {
-                        continue;
-                    };
-                    let declares = match sort {
-                        MemberSort::Method => cm.methods.iter().any(|m| m.name == member),
-                        MemberSort::Field => cm.fields.iter().any(|f| f.name == member),
-                    };
-                    if declares {
-                        return Some(target.owner_binary);
-                    }
-                }
-            }
-        }
-        None
+        let arity = (node.kind() == "method_invocation").then(|| call_arity(node)).flatten();
+        Some(bare_member_owner(self.resolver, &self.imports, &fqn, member, sort, arity))
     }
 
     fn declaring_owner(
@@ -1690,8 +1639,18 @@ fn classify_caret_at(
                     )?
                 }
                 None => {
+                    // The same scope the walk used to file this call — see `bare_member_owner`.
+                    // Two different answers here is not a wrong jump, it is no jump at all.
+                    let symbols = extract_symbols_from_root(root, source);
                     let fqn = enclosing_type_binary(&parent, bytes, project_types)?;
-                    declaring_owner(resolver, &fqn, &ident_text, true)?
+                    bare_member_owner(
+                        resolver,
+                        &symbols.imports,
+                        &fqn,
+                        &ident_text,
+                        MemberSort::Method,
+                        call_arity(&parent),
+                    )
                 }
             };
             Some(DeclKey::Method {
@@ -1831,8 +1790,18 @@ fn classify_caret_at(
             // `this.foo`. Without this a bare field usage classified to nothing, so go-to
             // silently did nothing (and the FE mis-fell-back to a same-named class).
             if ident.kind() == "identifier" && !is_member_selector_node(&ident) {
+                let symbols = extract_symbols_from_root(root, source);
                 let fqn = enclosing_type_binary(&ident, bytes, project_types)?;
-                let owner = declaring_owner(resolver, &fqn, &ident_text, false)?;
+                // A bare constant is statically imported as often as a bare call is — `MAX_VALUE`,
+                // `EMPTY_LIST` — and it reaches the same dead end without this.
+                let owner = bare_member_owner(
+                    resolver,
+                    &symbols.imports,
+                    &fqn,
+                    &ident_text,
+                    MemberSort::Field,
+                    None,
+                );
                 return Some(DeclKey::Field {
                     owner,
                     name: ident_text,
@@ -2044,6 +2013,109 @@ fn declared_owner(
         }
     })
     .map(|t| t.binary_name)
+}
+
+/// The number of arguments a `method_invocation` passes, for telling apart two statically
+/// imported methods of the same name — which is how Java itself tells them apart.
+fn call_arity(node: &Node) -> Option<usize> {
+    let args = node.child_by_field_name("arguments")?;
+    let mut c = args.walk();
+    Some(args.named_children(&mut c).count())
+}
+
+/// Who owns a bare `member` — one written with no receiver — inside the type `fqn`.
+///
+/// **The one definition of Java's scope for an unqualified name**, and it has to stay that way: the
+/// walk files a use site under the key this returns and the caret classifier looks one up, so the
+/// two answering differently is not a wrong answer, it is *no* answer — go-to does nothing,
+/// find-usages is empty, and nothing reports an error anywhere. That is exactly what happened to a
+/// statically imported call: the walk consulted the imports, the classifier did not, and
+/// `my_static_method()` resolved to nothing while `Helper.my_static_method()` resolved fine.
+///
+/// In order:
+///
+/// 1. `fqn` itself or anything it inherits;
+/// 2. each **lexically enclosing** type and its supertypes — a nested class sees the members of
+///    every class it is written inside (JLS §8.1.3) and writes them unqualified. The climb is over
+///    the binary name rather than the AST because nesting *is* the binary name here
+///    (`pkg/Outer/Inner`, `pkg/Outer/1` for an anonymous body), and it stops the moment the trimmed
+///    prefix is no longer a project type: above the outermost type is the package, whose types are
+///    not in scope unqualified;
+/// 3. an `import static`, which is how a statically imported helper is called;
+/// 4. failing all three, `fqn` — right for a member of a supertype the index cannot see.
+fn bare_member_owner(
+    resolver: &dyn TypeResolver,
+    imports: &[bennu_java::prelude::Import],
+    fqn: &str,
+    member: &str,
+    sort: MemberSort,
+    arity: Option<usize>,
+) -> String {
+    let is_method = matches!(sort, MemberSort::Method);
+    if let Some(found) = declared_owner(resolver, fqn, member, is_method) {
+        return found;
+    }
+    let mut scope = fqn;
+    while let Some(i) = scope.rfind('/') {
+        let outer = &scope[..i];
+        if !resolver.is_project_type(outer) {
+            break;
+        }
+        if let Some(found) = declared_owner(resolver, outer, member, is_method) {
+            return found;
+        }
+        scope = outer;
+    }
+    static_import_owner(resolver, imports, member, sort, arity)
+        .unwrap_or_else(|| fqn.to_string())
+}
+
+/// The static-import owner that binds a bare `member` into a file with these `imports`, if one does.
+fn static_import_owner(
+    resolver: &dyn TypeResolver,
+    imports: &[bennu_java::prelude::Import],
+    member: &str,
+    sort: MemberSort,
+    arity: Option<usize>,
+) -> Option<String> {
+    // Two static imports can name the same member from different owners; Java picks between them by
+    // the call's shape, and arity is the part of that we can see. Without it the first import won
+    // every call, and the calls to the OTHER method were filed under a method that does not have
+    // them.
+    if let Some(n) = arity {
+        let mut matching = bennu_java::prelude::static_import_targets(imports)
+            .into_iter()
+            .filter(|t| t.member.as_deref() == Some(member))
+            .filter(|t| {
+                resolver.members_of(&t.owner_binary).is_some_and(|cm| {
+                    cm.methods.iter().any(|m| m.name == member && m.params.len() == n)
+                })
+            });
+        if let (Some(only), None) = (matching.next(), matching.next()) {
+            return Some(only.owner_binary);
+        }
+    }
+    for target in bennu_java::prelude::static_import_targets(imports) {
+        match &target.member {
+            // `import static a.b.C.member;` — named outright.
+            Some(named) if named == member => return Some(target.owner_binary),
+            Some(_) => continue,
+            // `import static a.b.C.*;` — binds it only if the owner declares it.
+            None => {
+                let Some(cm) = resolver.members_of(&target.owner_binary) else {
+                    continue;
+                };
+                let declares = match sort {
+                    MemberSort::Method => cm.methods.iter().any(|m| m.name == member),
+                    MemberSort::Field => cm.fields.iter().any(|f| f.name == member),
+                };
+                if declares {
+                    return Some(target.owner_binary);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn enclosing_type_binary(

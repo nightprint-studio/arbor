@@ -365,6 +365,9 @@ impl LspRegistry {
         if let Some(lease) = self.leases.lock().unwrap_or_else(|p| p.into_inner()).get_mut(key) {
             lease.last_used = Instant::now();
         }
+        // And the project's: a request to its server is a use of it, which keeps it from being
+        // released as idle — the Rust half of what the index lookup does for Java.
+        crate::project_close::touch(&key.0);
     }
 
     /// Record who wants a slot, promoting it if a window now does.
@@ -379,6 +382,8 @@ impl LspRegistry {
         if matches!(origin, SessionOrigin::Window) {
             lease.origin = SessionOrigin::Window;
         }
+        drop(leases);
+        crate::project_close::touch(&key.0);
     }
 
     /// Whether a slot runs on the lean profile.
@@ -910,6 +915,7 @@ impl LspRegistry {
                         progress: s.progress,
                         features: session.features().iter().map(|f| f.to_string()).collect(),
                         log_tail: s.log_tail,
+                        pid: s.pid,
                     }
                 }
                 Slot::Starting(info) => status_of(info, SessionState::Starting, String::new(), Vec::new()),
@@ -978,6 +984,60 @@ impl LspRegistry {
         }
         self.emit_status();
         stopped
+    }
+
+    /// Stop every server started for `root` — the project was closed. Returns how many were running.
+    ///
+    /// Servers are separate processes, so this is the part of closing a project the process monitor
+    /// shows at once. Without it a closed project's server kept its memory until the idle reaper
+    /// found it — and the reaper only ever looks at background leases, so one a window had started
+    /// was never reclaimed at all.
+    pub fn stop_root(&self, root: &str) -> usize {
+        let root = root.replace('\\', "/");
+        let languages: Vec<String> = self
+            .slots
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .keys()
+            .filter(|(r, _)| *r == root)
+            .map(|(_, language)| language.clone())
+            .collect();
+        languages.iter().filter(|language| self.stop(&root, language)).count()
+    }
+
+    /// What each running server's session keeps on this side of the pipe, per project. The servers
+    /// are processes of their own, measured in their own rows of the monitor.
+    pub fn memory_items(&self) -> Vec<arbor_be::prelude::MemoryItem> {
+        use arbor_be::prelude::MemoryItem;
+        // Sessions snapshotted, then asked outside the slot map's lock: each takes its own locks.
+        let sessions: Vec<(String, Arc<LspSession>)> = self
+            .slots
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .filter_map(|((root, _), slot)| match slot {
+                Slot::Ready(session) => Some((root.clone(), Arc::clone(session))),
+                _ => None,
+            })
+            .collect();
+        let mut items = Vec::new();
+        for (root, session) in sessions {
+            let m = session.memory();
+            let server = session.language().to_string();
+            items.push(MemoryItem::exact(
+                &root,
+                format!("{server} server — open files, as text"),
+                m.open_files,
+                m.open_text_bytes,
+            ));
+            items.push(MemoryItem::counted(&root, format!("{server} server — diagnostics held"), m.diagnostics));
+            items.push(MemoryItem::counted(
+                &root,
+                format!("{server} server — last completion list"),
+                m.completion_items,
+            ));
+        }
+        items
     }
 
     /// Stop every server — the backend is going away.
@@ -1154,6 +1214,9 @@ fn status_of(
         progress: String::new(),
         features: Vec::new(),
         log_tail,
+        // A slot that is starting or failed has no process to measure. `Starting` briefly does,
+        // but the pid is the session's and the session is what does not exist yet.
+        pid: None,
     }
 }
 

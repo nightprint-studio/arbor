@@ -5,6 +5,22 @@
 //! per-repo section — CLAUDE.md rule 11), which project owns a file, and the cache that keeps a
 //! project-wide pass from re-reading the same TOML once per file.
 //!
+//! ## Two levels: the profile's defaults, and what a project says differently
+//!
+//! There is a second document — `<profile>/bennu/naming.toml` — holding the same
+//! [`NamingConfig`] shape as *your* answer for every project. A project's own section states the
+//! differences, and [`NamingConfig::over`] is the one place they are put together.
+//!
+//! It is two levels rather than one because the two questions are different: "how do I spell a
+//! method" is yours, "does this codebase agree" is the project's. With only the per-repo level, the
+//! answer to the first had to be retyped into every checkout, and changing your mind meant a tour of
+//! all of them.
+//!
+//! Everything downstream — the scan, the diagnostics, a template's `naming` facts — reads the
+//! **merged** config through [`config_for_root`]. Only the settings screens see the two halves, and
+//! only [`bennu_get_naming_config`] hands back a project's own section unmerged, because that is the
+//! document it edits.
+//!
 //! ## The cache is invalidated by the writer, not by a clock
 //!
 //! Validation asks for the config on every debounce and once per file on a project-wide pass, so
@@ -30,6 +46,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+use arbor_core::prelude::bennu_config_path;
 use bennu_core::prelude::BennuState;
 use bennu_naming::prelude::{
     packs, Convention, LanguageRules, NamingConfig, Pack, Target, Violation,
@@ -40,6 +57,9 @@ use serde::{Deserialize, Serialize};
 
 /// The TOML section this domain owns.
 const SECTION: &str = "naming";
+
+/// The profile file holding the defaults every project inherits.
+const DEFAULTS_FILE: &str = "naming.toml";
 
 // ── the wire ────────────────────────────────────────────────────────────────────
 
@@ -120,13 +140,17 @@ pub struct SetNamingConfigArgs {
 
 // ── handlers ────────────────────────────────────────────────────────────────────
 
-/// Read `[naming]`. A project that never configured it yields the default — everything off.
+/// Read a project's **own** `[naming]` — what it states differently, not what it ends up with.
+///
+/// Unmerged on purpose: this is the document the project settings screen edits, and a screen that
+/// saved back what it was shown would copy every inherited value into the repository the first time
+/// anybody opened it. What the scan actually applies is [`config_for_root`].
 #[arbor_rpc::handler]
 fn bennu_get_naming_config(
     _ctx: &BennuState,
     args: GetNamingConfigArgs,
 ) -> Result<NamingConfig, String> {
-    Ok(config_for_root(&args.root))
+    Ok(own_config_for_root(&args.root))
 }
 
 /// Persist `[naming]`, leaving every other section of the file intact, and drop the cached copy so
@@ -136,6 +160,61 @@ fn bennu_set_naming_config(_ctx: &BennuState, args: SetNamingConfigArgs) -> Resu
     crate::repo_config::save(&args.root, SECTION, &args.config)?;
     invalidate(&args.root);
     Ok(())
+}
+
+/// Args for [`bennu_set_naming_defaults`].
+#[derive(Deserialize)]
+pub struct SetNamingDefaultsArgs {
+    /// The profile-wide defaults, whole.
+    pub config: NamingConfig,
+}
+
+/// Args for [`bennu_get_naming_defaults`] — none. Tolerant of any shape, like every other argless
+/// handler here.
+pub struct NoArgs;
+
+impl<'de> Deserialize<'de> for NoArgs {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde::de::IgnoredAny::deserialize(d)?;
+        Ok(NoArgs)
+    }
+}
+
+/// The profile's defaults — your answer for every project. Everything off until you say otherwise.
+#[arbor_rpc::handler]
+fn bennu_get_naming_defaults(_ctx: &BennuState, _args: NoArgs) -> Result<NamingConfig, String> {
+    Ok(defaults())
+}
+
+/// Persist the profile's defaults, and forget **every** cached project.
+///
+/// Every project, and not the one that happens to be open: the defaults are behind all of them, so
+/// a project whose window is in the background would otherwise keep validating against the rules
+/// you just changed until something else invalidated it.
+#[arbor_rpc::handler]
+fn bennu_set_naming_defaults(
+    _ctx: &BennuState,
+    args: SetNamingDefaultsArgs,
+) -> Result<(), String> {
+    let path = bennu_config_path(DEFAULTS_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create config dir: {e}"))?;
+    }
+    let text = toml::to_string_pretty(&args.config).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))?;
+    if let Ok(mut guard) = cache().lock() {
+        guard.clear();
+    };
+    Ok(())
+}
+
+/// The profile's defaults as they are on disk. A missing or unparseable file is "nothing
+/// configured" — an editor preference never hard-fails a read.
+fn defaults() -> NamingConfig {
+    std::fs::read_to_string(bennu_config_path(DEFAULTS_FILE))
+        .ok()
+        .and_then(|text| toml::from_str(&text).ok())
+        .unwrap_or_default()
 }
 
 /// The packs, targets and conventions a settings screen renders from.
@@ -334,7 +413,11 @@ fn cache() -> &'static Mutex<HashMap<String, NamingConfig>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The project's `[naming]`, read once and remembered until it is written.
+/// What this project is actually judged by: the profile's defaults with the project's own section
+/// laid over them, read once and remembered until either level is written.
+///
+/// The **merged** config is what the cache holds, because it is what every reader wants and
+/// merging per file on a project-wide pass would be the same work thousands of times.
 fn config_for_root(root: &str) -> NamingConfig {
     let key = root.replace('\\', "/");
     if let Ok(guard) = cache().lock() {
@@ -342,11 +425,17 @@ fn config_for_root(root: &str) -> NamingConfig {
             return hit.clone();
         }
     }
-    let loaded: NamingConfig = crate::repo_config::load(root, SECTION);
+    let merged = own_config_for_root(root).over(&defaults());
     if let Ok(mut guard) = cache().lock() {
-        guard.insert(key, loaded.clone());
+        guard.insert(key, merged.clone());
     }
-    loaded
+    merged
+}
+
+/// The project's own section, straight off disk and never merged. What the project settings screen
+/// edits.
+fn own_config_for_root(root: &str) -> NamingConfig {
+    crate::repo_config::load(root, SECTION)
 }
 
 /// Drop the cached copy for `root`.
@@ -438,7 +527,8 @@ mod tests {
         cache().lock().unwrap().insert(root.to_string(), seeded.clone());
         assert_eq!(config_for_root(root), seeded);
         invalidate(root);
-        // With nothing on disk at that path, the reload is the default — i.e. the cache is gone.
-        assert!(!config_for_root(root).enabled);
+        // Asserted on the cache itself rather than on a re-read: what a re-read produces now
+        // depends on the profile's defaults, which belong to whoever is running the test.
+        assert!(!cache().lock().unwrap().contains_key(root), "invalidate must drop the entry");
     }
 }

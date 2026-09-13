@@ -577,6 +577,34 @@ pub struct NativeJavaProvider {
     annotation_memo: RwLock<HashMap<String, Arc<Vec<String>>>>,
 }
 
+impl NativeJavaProvider {
+    /// What the completion provider is holding, for a backend's `__memory` answer.
+    ///
+    /// The JDK tier is reported **once**, from the full resolver: the reference walk's resolver
+    /// shares the same decoded JDK behind an `Arc`, and counting it from both would double it.
+    pub fn memory_estimate(&self) -> Vec<crate::memory::MemoryEstimate> {
+        use crate::memory::MemoryEstimate;
+        let (names, name_bytes) = self.class_names.heap_estimate();
+        let mut out = vec![MemoryEstimate::sized("Class names (imports, completion)", names, name_bytes)];
+        if let Some(resolver) = &self.resolver {
+            let classpath = resolver.jdk_index();
+            let (entries, bytes) = classpath.jdk_tier().memory_estimate();
+            out.push(MemoryEstimate::sized("JDK classes decoded", entries, bytes));
+            if let Some(deps) = classpath.deps_tier() {
+                let (entries, bytes) = deps.memory_estimate();
+                out.push(MemoryEstimate::sized("Library classes decoded", entries, bytes));
+            }
+            out.push(MemoryEstimate::counted("Types kept for completion lookups", resolver.cached_members()));
+        }
+        if let Some(walk) = &self.walk_resolver {
+            out.push(MemoryEstimate::counted("Types kept for the reference walk", walk.cached_members()));
+        }
+        let annotations = self.annotation_memo.read().map_or(0, |memo| memo.len());
+        out.push(MemoryEstimate::counted("Annotation lookups remembered", annotations));
+        out
+    }
+}
+
 impl std::fmt::Debug for NativeJavaProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeJavaProvider")

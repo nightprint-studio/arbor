@@ -52,6 +52,8 @@ mod packs_download;
 mod models_download;
 mod importers;
 mod libraries_sync;
+// What this backend holds in memory, for the process monitor's `__memory` breakdown.
+mod memory_report;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, `merula_config_dir()`
@@ -72,8 +74,9 @@ fn main() {
     // The method routing, declared as the inventory of `#[handler]`s this binary
     // links (self-test today, the merula domains as the waves land). `inventory("")`
     // covers them all — merula-be links only its own handlers.
-    let dispatcher =
-        arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle()).inventory("");
+    let dispatcher = arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle())
+        .inventory("")
+        .memory(memory_report::report);
 
     // Serve over framed stdio until the shell disconnects. No plugin host means the
     // `App`'s default post-`Hello` hook is a clean no-op (nothing to reload).

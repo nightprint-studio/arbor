@@ -294,6 +294,11 @@ impl Default for Registry {
 }
 
 impl Registry {
+    /// `(samples, bytes of audio)` decoded into this registry — see [`SampleBank::resident_footprint`].
+    pub fn resident_footprint(&self) -> (usize, usize) {
+        self.bank.resident_footprint()
+    }
+
     /// An empty registry whose every lookup falls back to the default synth.
     /// Enough to make sound with no manifest installed.
     pub fn new() -> Self {

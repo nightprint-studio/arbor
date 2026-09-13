@@ -119,11 +119,26 @@ export interface BennuSettingsSnapshot {
   switchWithReturn: boolean;
   spaceInBraces: boolean;
   blankLineBetweenMembers: boolean;
+  // Rust Style (what a generator writes; `rustfmt` still owns the formatting)
+  /** `pub` | `pub(crate)` | `private` — what a generated item's visibility is. */
+  rustVisibility: RustVisibility;
+  /** The traits a generated `struct` / `enum` derives, comma-separated as the field edits them. */
+  rustDerives: string;
+  rustDocComments: boolean;
+  /** `anyhow` | `thiserror` | `std` — how a generated fallible function says so. */
+  rustErrorStyle: RustErrorStyle;
+  rustSelfInImpl: boolean;
   // Java
   defaultEncoding: SourceEncoding;
   rebuildIndexOnOpen: boolean;
   excludedDirs: string;
 }
+
+/** What a generated Rust item is declared as. */
+export type RustVisibility = 'pub' | 'pub(crate)' | 'private';
+
+/** How a generated Rust function reports failure. */
+export type RustErrorStyle = 'anyhow' | 'thiserror' | 'std';
 
 /** Sensible defaults — IntelliJ-flavoured (4-space indent, auto-popup on, index
  *  rebuild on open, target/.git excluded). */
@@ -169,6 +184,13 @@ const DEFAULTS: BennuSettingsSnapshot = {
   switchWithReturn: true,
   spaceInBraces: false,
   blankLineBetweenMembers: true,
+  // `pub(crate)` rather than `pub`: a generator that makes everything public writes a crate's API
+  // by accident.
+  rustVisibility: 'pub(crate)',
+  rustDerives: 'Debug, Clone',
+  rustDocComments: true,
+  rustErrorStyle: 'anyhow',
+  rustSelfInImpl: true,
   defaultEncoding: 'UTF-8',
   rebuildIndexOnOpen: true,
   excludedDirs: 'target, .git, .idea, build',
@@ -215,6 +237,11 @@ function createSettingsStore() {
   let switchWithReturn = $state(DEFAULTS.switchWithReturn);
   let spaceInBraces = $state(DEFAULTS.spaceInBraces);
   let blankLineBetweenMembers = $state(DEFAULTS.blankLineBetweenMembers);
+  let rustVisibility = $state(DEFAULTS.rustVisibility);
+  let rustDerives = $state(DEFAULTS.rustDerives);
+  let rustDocComments = $state(DEFAULTS.rustDocComments);
+  let rustErrorStyle = $state(DEFAULTS.rustErrorStyle);
+  let rustSelfInImpl = $state(DEFAULTS.rustSelfInImpl);
   // Java
   let defaultEncoding = $state<SourceEncoding>(DEFAULTS.defaultEncoding);
   let rebuildIndexOnOpen = $state(DEFAULTS.rebuildIndexOnOpen);
@@ -251,6 +278,7 @@ function createSettingsStore() {
       foldingEnabled, foldBlockComments,
       javaBlankLines, javaIndentCaseBody,
       finalParams, useLombokVal, useLocalVar, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
+      rustVisibility, rustDerives, rustDocComments, rustErrorStyle, rustSelfInImpl,
       defaultEncoding, rebuildIndexOnOpen, excludedDirs,
     };
   }
@@ -309,6 +337,12 @@ function createSettingsStore() {
         java_switch_with_return: switchWithReturn,
         java_space_in_braces: spaceInBraces,
         java_blank_line_between_members: blankLineBetweenMembers,
+        // Rust style: persisted for the same reason Java's is — every code template reads it.
+        rust_visibility: rustVisibility,
+        rust_derives: derivesList(),
+        rust_doc_comments: rustDocComments,
+        rust_error_style: rustErrorStyle,
+        rust_self_in_impl: rustSelfInImpl,
         sql_dialect: sqlDialect,
         collapse_library_frames: collapseLibraryFrames,
         search_dependencies: searchDependencies,
@@ -326,7 +360,17 @@ function createSettingsStore() {
    *  and the indexer's walk consumes. Kept as a helper so the box's comma-separated text is
    *  split in one place. */
   function excludedDirList(): string[] {
-    return excludedDirs.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+    return commaList(excludedDirs);
+  }
+
+  /** The derives, as the list the config keeps. Same split as the excluded dirs, one definition. */
+  function derivesList(): string[] {
+    return commaList(rustDerives);
+  }
+
+  /** A comma-separated field as a list — trimmed, empties dropped. */
+  function commaList(text: string): string[] {
+    return text.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
   }
 
   return {
@@ -421,6 +465,20 @@ function createSettingsStore() {
     get blankLineBetweenMembers() { return blankLineBetweenMembers; },
     setBlankLineBetweenMembers(v: boolean) { blankLineBetweenMembers = v; void persistConfigBacked(); },
 
+    // ── Rust Style (what a generator writes) ──────────────────────────────
+    get rustVisibility() { return rustVisibility; },
+    setRustVisibility(v: RustVisibility) { rustVisibility = v; void persistConfigBacked(); },
+    get rustDerives() { return rustDerives; },
+    setRustDerives(v: string) { rustDerives = v; void persistConfigBacked(); },
+    /** The derives as the list the backend stores — trimmed, empties dropped. */
+    rustDerivesList(): string[] { return derivesList(); },
+    get rustDocComments() { return rustDocComments; },
+    setRustDocComments(v: boolean) { rustDocComments = v; void persistConfigBacked(); },
+    get rustErrorStyle() { return rustErrorStyle; },
+    setRustErrorStyle(v: RustErrorStyle) { rustErrorStyle = v; void persistConfigBacked(); },
+    get rustSelfInImpl() { return rustSelfInImpl; },
+    setRustSelfInImpl(v: boolean) { rustSelfInImpl = v; void persistConfigBacked(); },
+
     // ── Java ──────────────────────────────────────────────────────────────
     get defaultEncoding() { return defaultEncoding; },
     setDefaultEncoding(v: SourceEncoding) { defaultEncoding = v; void persistConfigBacked(); },
@@ -508,6 +566,21 @@ function createSettingsStore() {
         switchWithReturn = cfg.java_switch_with_return ?? DEFAULTS.switchWithReturn;
         spaceInBraces = cfg.java_space_in_braces ?? DEFAULTS.spaceInBraces;
         blankLineBetweenMembers = cfg.java_blank_line_between_members ?? DEFAULTS.blankLineBetweenMembers;
+        // Narrowed rather than trusted: a hand-edited config naming a visibility that does not
+        // exist would otherwise reach a template and be written into someone's source.
+        rustVisibility = (['pub', 'pub(crate)', 'private'] as const).includes(
+          cfg.rust_visibility as RustVisibility,
+        )
+          ? (cfg.rust_visibility as RustVisibility)
+          : DEFAULTS.rustVisibility;
+        rustDerives = (cfg.rust_derives ?? []).join(', ') || '';
+        rustDocComments = cfg.rust_doc_comments ?? DEFAULTS.rustDocComments;
+        rustErrorStyle = (['anyhow', 'thiserror', 'std'] as const).includes(
+          cfg.rust_error_style as RustErrorStyle,
+        )
+          ? (cfg.rust_error_style as RustErrorStyle)
+          : DEFAULTS.rustErrorStyle;
+        rustSelfInImpl = cfg.rust_self_in_impl ?? DEFAULTS.rustSelfInImpl;
         // An unknown / empty label from a hand-edited config falls back to the default rather
         // than reaching the editor as an undefined dialect.
         sqlDialect = (SQL_DIALECTS as readonly string[]).includes(cfg.sql_dialect)
@@ -558,6 +631,11 @@ function createSettingsStore() {
       switchWithReturn = DEFAULTS.switchWithReturn;
       spaceInBraces = DEFAULTS.spaceInBraces;
       blankLineBetweenMembers = DEFAULTS.blankLineBetweenMembers;
+      rustVisibility = DEFAULTS.rustVisibility;
+      rustDerives = DEFAULTS.rustDerives;
+      rustDocComments = DEFAULTS.rustDocComments;
+      rustErrorStyle = DEFAULTS.rustErrorStyle;
+      rustSelfInImpl = DEFAULTS.rustSelfInImpl;
       defaultEncoding = DEFAULTS.defaultEncoding;
       rebuildIndexOnOpen = DEFAULTS.rebuildIndexOnOpen;
       excludedDirs = DEFAULTS.excludedDirs;

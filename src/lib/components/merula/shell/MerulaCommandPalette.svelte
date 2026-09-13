@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { paletteIcon } from '$lib/utils/plugin-icons';
   /**
    * Merula command palette — every discoverable window action in one searchable,
    * keyboard-driven list (panel toggles, transport, project ops, settings).
@@ -10,16 +11,7 @@
    * Enter to run, Esc to close.
    */
   import type { IconComponent } from '$lib/types/icon';
-  import {
-    Play, Square, SkipBack, SkipForward, FolderPlus, FolderOpen, FilePlus2, Save, Download,
-    Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
-    Crosshair, BookOpen, Minimize2, Maximize2, PanelLeft, PanelRight, Search, Settings, Piano,
-    Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
-    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
-    Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map as MapIcon, StretchVertical,
-    FileMusic, Layers, PackageOpen, Crop, Snowflake, Grid3x3, LayoutGrid, FilePen, Trash2, Rewind, FastForward,
-  } from 'lucide-svelte';
-  import CommandPaletteShell, {
+    import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
   } from '$lib/components/shared/ui/CommandPaletteShell.svelte';
   import { merulaStore } from '../merula-store.svelte';
@@ -42,18 +34,9 @@
 
   let { onClose }: { onClose: () => void } = $props();
 
-  // Icon keys resolved by the shell. Local map keeps merula self-contained — no
-  // dependency on Arbor's PLUGIN_ICONS registry.
-  const ICONS: Record<string, IconComponent> = {
-    Play, Square, SkipBack, SkipForward, FolderPlus, FolderOpen, FilePlus2, Save, Download,
-    Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
-    Crosshair, BookOpen, Minimize2, Maximize2, PanelLeft, PanelRight, Search, Settings, Piano,
-    Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
-    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
-    Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map: MapIcon, StretchVertical,
-    FileMusic, Layers, PackageOpen, Crop, Snowflake, Grid3x3, LayoutGrid, FilePen, Trash2, Rewind, FastForward,
-  };
-  const iconResolver = (name: string): IconComponent => ICONS[name] ?? Command;
+  // The palette vocabulary every product shares. Merula kept a copy of its own so it would not
+  // depend on Arbor's registry; the copy is what drifts, and one list is the fix.
+  const iconResolver = paletteIcon;
 
   interface Cmd {
     id: string;
@@ -209,6 +192,7 @@
     { id: 'docs',      label: 'Documentation',      group: 'Window', icon: 'BookOpen', keys: 'F1',       desc: 'Open the in-app merula documentation.', run: () => merulaStore.openDocs() },
     { id: 'settings',  label: 'Settings…',          group: 'Window', icon: 'Settings', keys: 'Ctrl+,',   desc: 'Open the merula settings (audio, render, editor).', run: () => merulaStore.openSettings() },
     { id: 'shortcuts', label: 'Keyboard Shortcuts', group: 'Window', icon: 'Keyboard', keys: 'Shift+F1', desc: 'View the full keyboard shortcut reference.', run: () => merulaStore.openShortcuts() },
+    { id: 'processes', label: 'Process monitor…', group: 'Window', icon: 'Gauge', desc: "What Arbor is costing this machine — every backend, language server and run.", run: () => window.dispatchEvent(new CustomEvent('arbor:open-processes')) },
     { id: 'ai-activity', label: 'AI activity…', group: 'Window', icon: 'Activity', desc: 'What an AI client is doing right now, and what it has done.', run: () => window.dispatchEvent(new CustomEvent('arbor:open-mcp-activity')) },
   ]);
 

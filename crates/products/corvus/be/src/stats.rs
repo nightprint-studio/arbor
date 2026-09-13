@@ -334,17 +334,22 @@ fn compute_repo_stats(state: &CorvusState, tab_id: String) -> Result<(), String>
             Ok(compute_stats(&repo, &exclude)?)
         })();
 
-        // Always unmark as computing, even on error.
-        if let Ok(mut computing) = computing_arc.lock() {
-            computing.remove(&tab_id_bg);
-        }
+        // Always unmark as computing, even on error. The mark being gone already means the tab was
+        // closed while this ran (`deregister_repo` takes it) — then the result is not stored, or a
+        // closed tab would get its statistics back after its close released them.
+        let still_open = computing_arc
+            .lock()
+            .map(|mut computing| computing.remove(&tab_id_bg))
+            .unwrap_or(false);
 
         match result {
             Ok(stats) => {
                 // Store the RepoStats as JSON (CorvusState stays git2-free).
-                if let Ok(stats_json) = serde_json::to_value(&stats) {
-                    if let Ok(mut cache) = cache_arc.lock() {
-                        cache.insert(tab_id_bg.clone(), (cache_key, stats_json));
+                if still_open {
+                    if let Ok(stats_json) = serde_json::to_value(&stats) {
+                        if let Ok(mut cache) = cache_arc.lock() {
+                            cache.insert(tab_id_bg.clone(), (cache_key, stats_json));
+                        }
                     }
                 }
                 sink.emit("arbor://repo-stats-ready", serde_json::json!({

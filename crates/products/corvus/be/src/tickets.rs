@@ -40,6 +40,27 @@ fn caches() -> std::sync::MutexGuard<'static, HashMap<String, TicketLinkCache>> 
     TICKET_CACHES.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// Drop a closed tab's cache. Called by `close_repo`: the cache is keyed by tab, and a tab id is
+/// never reused, so an entry left behind is memory nothing will read again.
+pub(crate) fn forget_tab(tab_id: &str) {
+    caches().remove(tab_id);
+}
+
+/// Commits with ticket links looked up, per tab — for the memory breakdown. Counted, not sized:
+/// the entries are small, and it is their number that grows with every commit scrolled past.
+pub(crate) fn memory_by_tab() -> Vec<(String, usize)> {
+    caches()
+        .iter()
+        .map(|(tab, c)| {
+            let entries = c.auto_parsed.len()
+                + c.manual.len()
+                + c.manual_checked.len()
+                + c.toml_all.as_ref().map_or(0, HashMap::len);
+            (tab.clone(), entries)
+        })
+        .collect()
+}
+
 // ── Config shapes (wire twins of the shell's app/repo config slices) ──────────
 
 /// The per-repo `[ticket_links]` override (wire twin of the shell's

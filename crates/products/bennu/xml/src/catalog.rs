@@ -73,6 +73,11 @@ impl Catalog {
         self.files.len()
     }
 
+    /// Bytes of schema text held, paths included — for a memory breakdown.
+    pub fn text_bytes(&self) -> usize {
+        self.files.iter().map(|f| f.path.capacity() + f.text.capacity()).sum()
+    }
+
     /// The grammar this document is written against, or `None`.
     ///
     /// The three ways a document says so, in the order they are authoritative: a `DOCTYPE`, an

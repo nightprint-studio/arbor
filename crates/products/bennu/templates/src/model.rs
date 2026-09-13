@@ -27,8 +27,22 @@ pub struct ClassModel {
     pub binary: String,
     /// `Order.Line` — where it is inside its file.
     pub path_in_file: String,
-    /// A record rather than a class.
+    /// A record rather than a class. Kept beside [`ClassModel::kind`], which says the same thing and
+    /// four more: a template written before the kind existed goes on working.
     pub record: bool,
+    /// What the declaration is: `class`, `record`, `interface`, `enum` or `annotation`.
+    pub kind: String,
+    /// Declared `abstract` — an interface's methods are abstract without the word, and this is about
+    /// the word.
+    #[serde(rename = "abstract")]
+    pub is_abstract: bool,
+    /// Its type parameters as written, without the brackets: `["T", "ID extends Serializable"]`.
+    pub type_parameters: Vec<String>,
+    /// An enum's constants, in declaration order. Empty for everything else.
+    pub constants: Vec<String>,
+    /// The methods the body declares — what an interface is, and what a template implementing one
+    /// has to write.
+    pub methods: Vec<MethodModel>,
     /// The annotations on the class.
     pub annotations: Vec<AnnotationModel>,
     /// Their simple names — `"Entity" in class.annotation_names`.
@@ -44,6 +58,28 @@ pub struct ClassModel {
     pub id_type: Option<String>,
     /// Instance fields in declaration order — a record's components.
     pub fields: Vec<FieldModel>,
+}
+
+/// One method of the class, as a template reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MethodModel {
+    pub name: String,
+    /// The return type as written — `void`, `Order`, `List<Line>`. Empty for a constructor.
+    pub returns: String,
+    /// The parameters as written, each `type name`: `["String id", "int page"]`.
+    pub params: Vec<String>,
+    /// Its parameters' names alone, for writing a call: `["id", "page"]`.
+    pub param_names: Vec<String>,
+    /// Declared `abstract`, or declared with no body in an interface — what a template implementing
+    /// the type has to write.
+    #[serde(rename = "abstract")]
+    pub is_abstract: bool,
+    #[serde(rename = "static")]
+    pub is_static: bool,
+    /// `public`, `protected`, `private`, or empty for package-private.
+    pub visibility: String,
+    /// The annotations on it, by simple name.
+    pub annotation_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -125,8 +161,32 @@ pub fn type_simple(type_name: &str) -> String {
     }
 }
 
+/// Every declaration a template can be run on.
+///
+/// Classes and records only, until an interface at the caret meant *nothing to generate from* — not
+/// "this template has nothing to say about an interface", but the dialog refusing to open. An enum
+/// and an annotation are declarations too, and a template that wants to write for one has to be able
+/// to see it first.
 fn is_class(node: &Node<'_>) -> bool {
-    matches!(node.kind(), "class_declaration" | "record_declaration")
+    matches!(
+        node.kind(),
+        "class_declaration"
+            | "record_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "annotation_type_declaration"
+    )
+}
+
+/// What the declaration is, as a template reads it.
+fn kind_of(node: &Node<'_>) -> &'static str {
+    match node.kind() {
+        "record_declaration" => "record",
+        "interface_declaration" => "interface",
+        "enum_declaration" => "enum",
+        "annotation_type_declaration" => "annotation",
+        _ => "class",
+    }
 }
 
 fn enclosing_type(root: Node<'_>, at: usize) -> Option<Node<'_>> {
@@ -164,10 +224,7 @@ fn read_class(root: Node<'_>, decl: Node<'_>, source: &str) -> ClassModel {
     let mut chain = vec![name.clone()];
     let mut up = decl.parent();
     while let Some(node) = up {
-        if matches!(
-            node.kind(),
-            "class_declaration" | "record_declaration" | "interface_declaration" | "enum_declaration"
-        ) {
+        if is_class(&node) {
             chain.insert(0, name_of(node, source));
         }
         up = node.parent();
@@ -181,8 +238,10 @@ fn read_class(root: Node<'_>, decl: Node<'_>, source: &str) -> ClassModel {
     let binary = qualify("$");
     let path_in_file = chain.join(".");
     let record = decl.kind() == "record_declaration";
+    let kind = kind_of(&decl).to_string();
 
-    let class_lombok = Lombok::read(&modifiers_text(decl, source));
+    let class_modifiers = modifiers_text(decl, source);
+    let class_lombok = Lombok::read(&class_modifiers);
     let methods = methods_of(decl, source);
     let json = dtos_in(source)
         .into_iter()
@@ -254,9 +313,13 @@ fn read_class(root: Node<'_>, decl: Node<'_>, source: &str) -> ClassModel {
         .child_by_field_name("superclass")
         .map(|n| text(n, source).trim().trim_start_matches("extends").trim().to_string())
         .filter(|s| !s.is_empty());
+    // `implements` on a class, `extends` on an interface — the same list, and a template asking what
+    // a type promises should not have to know which word the source used.
     let interfaces = decl
         .child_by_field_name("interfaces")
-        .map(|n| split_top_level(text(n, source).trim().trim_start_matches("implements")))
+        .map(|n| {
+            split_top_level(text(n, source).trim().trim_start_matches("implements").trim_start_matches("extends"))
+        })
         .unwrap_or_default();
     let id_type = fields.iter().find(|f| f.id).map(|f| boxed(&f.type_name));
 
@@ -267,6 +330,11 @@ fn read_class(root: Node<'_>, decl: Node<'_>, source: &str) -> ClassModel {
         binary,
         path_in_file,
         record,
+        kind,
+        is_abstract: class_modifiers.contains("abstract"),
+        type_parameters: type_parameters_of(decl, source),
+        constants: constants_of(decl, source),
+        methods: methods.clone(),
         annotations,
         annotation_names,
         superclass,
@@ -344,15 +412,9 @@ fn declared_fields(decl: Node<'_>, source: &str) -> Vec<DeclaredField> {
 }
 
 /// A method the class body declares, as far as telling an accessor needs.
-struct Method {
-    name: String,
-    params: usize,
-    /// The return type as written: `void`, `Order`, `Builder<T>`.
-    returns: String,
-}
-
-/// Every method the class body declares.
-fn methods_of(decl: Node<'_>, source: &str) -> Vec<Method> {
+/// Every method the body declares, as [`MethodModel`] — the accessor tests here read the same list a
+/// template does, so what a template is told and what Bennu decides can never be two readings.
+fn methods_of(decl: Node<'_>, source: &str) -> Vec<MethodModel> {
     let Some(body) = decl.child_by_field_name("body") else { return Vec::new() };
     let mut out = Vec::new();
     let mut cursor = body.walk();
@@ -361,20 +423,88 @@ fn methods_of(decl: Node<'_>, source: &str) -> Vec<Method> {
             continue;
         }
         let Some(name) = member.child_by_field_name("name") else { continue };
-        let params = member
-            .child_by_field_name("parameters")
-            .map(|p| {
-                let mut c = p.walk();
-                let count = p
-                    .named_children(&mut c)
-                    .filter(|n| matches!(n.kind(), "formal_parameter" | "spread_parameter"))
-                    .count();
-                count
-            })
-            .unwrap_or(0);
-        let returns = member.child_by_field_name("type").map(|t| text(t, source).to_string()).unwrap_or_default();
-        out.push(Method { name: text(name, source).to_string(), params, returns });
+        let mut params = Vec::new();
+        let mut param_names = Vec::new();
+        if let Some(list) = member.child_by_field_name("parameters") {
+            let mut c = list.walk();
+            for p in list.named_children(&mut c) {
+                if !matches!(p.kind(), "formal_parameter" | "spread_parameter") {
+                    continue;
+                }
+                params.push(text(p, source).split_whitespace().collect::<Vec<_>>().join(" "));
+                param_names.push(name_of(p, source));
+            }
+        }
+        let modifiers = modifiers_text(member, source);
+        // An interface's method is abstract without the word, and what a template implementing the
+        // type needs to know is "is there a body to inherit", not which of the two spellings was used.
+        let is_abstract = modifiers.contains("abstract") || member.child_by_field_name("body").is_none();
+        let visibility = ["public", "protected", "private"]
+            .into_iter()
+            .find(|word| modifiers.contains(word))
+            .unwrap_or_default()
+            .to_string();
+        out.push(MethodModel {
+            name: text(name, source).to_string(),
+            returns: member.child_by_field_name("type").map(|t| text(t, source).to_string()).unwrap_or_default(),
+            params,
+            param_names,
+            is_abstract,
+            is_static: modifiers.contains("static"),
+            visibility,
+            annotation_names: annotation_names_in(&modifiers),
+        });
     }
+    out
+}
+
+/// The simple names of the annotations written in a modifiers clause: `@Override @Deprecated` →
+/// `["Override", "Deprecated"]`. Read from the text rather than from nodes because that is the one
+/// form every caller here already has.
+fn annotation_names_in(modifiers: &str) -> Vec<String> {
+    modifiers
+        .split('@')
+        .skip(1)
+        .filter_map(|rest| {
+            let name: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '.').collect();
+            let simple = name.rsplit('.').next().unwrap_or(&name).to_string();
+            (!simple.is_empty()).then_some(simple)
+        })
+        .collect()
+}
+
+/// An enum's constants, in declaration order.
+fn constants_of(decl: Node<'_>, source: &str) -> Vec<String> {
+    let Some(body) = decl.child_by_field_name("body") else { return Vec::new() };
+    let mut cursor = body.walk();
+    body.named_children(&mut cursor)
+        .filter(|n| n.kind() == "enum_constant")
+        .map(|n| name_of(n, source))
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+/// The type parameters as written, without the brackets: `<T, ID extends Serializable>` →
+/// `["T", "ID extends Serializable"]`. Split on the commas that are not inside a bound's own
+/// brackets, so `Map<K, V>` in a bound stays one parameter.
+fn type_parameters_of(decl: Node<'_>, source: &str) -> Vec<String> {
+    let Some(node) = decl.child_by_field_name("type_parameters") else { return Vec::new() };
+    let inner = text(node, source).trim().trim_start_matches('<').trim_end_matches('>');
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut current = String::new();
+    for ch in inner.chars() {
+        match ch {
+            '<' => { depth += 1; current.push(ch); }
+            '>' => { depth = depth.saturating_sub(1); current.push(ch); }
+            ',' if depth == 0 => { out.push(current.trim().to_string()); current.clear(); }
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() {
+        out.push(current.trim().to_string());
+    }
+    out.retain(|p| !p.is_empty());
     out
 }
 
@@ -449,13 +579,13 @@ fn capitalized(name: &str) -> String {
 }
 
 /// The method that sets `name`, and whether it returns the object so calls chain.
-fn setter_for(name: &str, record: bool, methods: &[Method], lombok: Lombok) -> Option<(String, bool)> {
+fn setter_for(name: &str, record: bool, methods: &[MethodModel], lombok: Lombok) -> Option<(String, bool)> {
     if record {
         return None;
     }
     let conventional = format!("set{}", capitalized(name));
     for candidate in [conventional.as_str(), name] {
-        if let Some(method) = methods.iter().find(|m| m.name == candidate && m.params == 1) {
+        if let Some(method) = methods.iter().find(|m| m.name == candidate && m.params.len() == 1) {
             return Some((method.name.clone(), method.returns != "void"));
         }
     }
@@ -463,18 +593,18 @@ fn setter_for(name: &str, record: bool, methods: &[Method], lombok: Lombok) -> O
 }
 
 /// The method that returns a copy with `name` changed: a declared `withName`, or Lombok's `@With`.
-fn wither_for(name: &str, methods: &[Method], lombok: Lombok) -> Option<String> {
+fn wither_for(name: &str, methods: &[MethodModel], lombok: Lombok) -> Option<String> {
     let wither = format!("with{}", capitalized(name));
-    (lombok.with || methods.iter().any(|m| m.name == wither && m.params == 1)).then_some(wither)
+    (lombok.with || methods.iter().any(|m| m.name == wither && m.params.len() == 1)).then_some(wither)
 }
 
-fn getter_for(name: &str, type_name: &str, record: bool, methods: &[Method], lombok: Lombok) -> Option<String> {
+fn getter_for(name: &str, type_name: &str, record: bool, methods: &[MethodModel], lombok: Lombok) -> Option<String> {
     if record {
         return Some(name.to_string());
     }
     let get = format!("get{}", capitalized(name));
     let is = format!("is{}", capitalized(name));
-    if let Some(found) = methods.iter().find(|m| (m.name == get || m.name == is) && m.params == 0) {
+    if let Some(found) = methods.iter().find(|m| (m.name == get || m.name == is) && m.params.is_empty()) {
         return Some(found.name.clone());
     }
     lombok.getters.then(|| match (lombok.fluent, type_name.trim()) {
@@ -661,6 +791,42 @@ fn text<'s>(node: Node<'_>, source: &'s str) -> &'s str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The complaint this answers was not "a template has nothing to say about an interface": with
+    /// the caret in one, the dialog refused to open at all.
+    #[test]
+    fn an_interface_is_a_declaration_a_template_can_read() {
+        let src = "package p;\npublic interface Repo<T, ID extends Serializable> extends Crud<T> {\n    T find(ID id);\n    default boolean has(ID id) { return find(id) != null; }\n}\n";
+        let model = class_at(src, None).expect("an interface is a type");
+        assert_eq!(model.kind, "interface");
+        assert_eq!(model.type_parameters, ["T", "ID extends Serializable"]);
+        assert_eq!(model.interfaces, ["Crud<T>"], "`extends` on an interface is the same list as `implements`");
+        assert_eq!(model.methods.len(), 2);
+        assert_eq!(model.methods[0].name, "find");
+        assert_eq!(model.methods[0].params, ["ID id"]);
+        assert_eq!(model.methods[0].param_names, ["id"]);
+        assert!(model.methods[0].is_abstract, "no body — what an implementation has to write");
+        assert!(!model.methods[1].is_abstract, "a default method has one");
+    }
+
+    #[test]
+    fn an_enum_carries_its_constants() {
+        let src = "package p;\npublic enum State { NEW, PAID, SHIPPED }\n";
+        let model = class_at(src, None).expect("an enum is a type");
+        assert_eq!(model.kind, "enum");
+        assert_eq!(model.constants, ["NEW", "PAID", "SHIPPED"]);
+        assert!(model.type_parameters.is_empty());
+    }
+
+    /// `record` said one thing and `kind` says five; both answer for a record, so no template that
+    /// reads the old field stops working.
+    #[test]
+    fn a_record_answers_to_both_names() {
+        let src = "package p;\npublic record Line(String sku, int qty) {}\n";
+        let model = class_at(src, None).expect("a record is a type");
+        assert!(model.record);
+        assert_eq!(model.kind, "record");
+    }
 
     const ORDER: &str = r#"package com.example.orders;
 

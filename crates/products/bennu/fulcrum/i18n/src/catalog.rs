@@ -158,6 +158,55 @@ impl LabelCatalog {
         self.labels.is_empty()
     }
 
+    /// `(labels, estimated bytes)` of everything the catalogue holds — for a memory breakdown.
+    pub fn footprint(&self) -> (usize, usize) {
+        let opt = |s: &Option<String>| s.as_ref().map_or(0, String::capacity);
+        let labels: usize = self
+            .labels
+            .iter()
+            .map(|(key, decls)| {
+                key.capacity()
+                    + std::mem::size_of_val(decls.as_slice())
+                    + decls
+                        .iter()
+                        .map(|d| d.lang.capacity() + d.file.capacity() + d.value.capacity())
+                        .sum::<usize>()
+            })
+            .sum();
+        let styles: usize = self
+            .styles
+            .iter()
+            .map(|(key, s)| {
+                key.capacity()
+                    + s.name.capacity()
+                    + s.file.capacity()
+                    + opt(&s.weight)
+                    + opt(&s.size)
+                    + opt(&s.decoration)
+                    + opt(&s.color)
+            })
+            .sum();
+        let glossary: usize = self
+            .glossary
+            .iter()
+            .map(|(key, g)| {
+                key.capacity()
+                    + g.key.capacity()
+                    + g.name.capacity()
+                    + g.description.capacity()
+                    + g.style.capacity()
+                    + g.file.capacity()
+            })
+            .sum();
+        let languages: usize = self
+            .languages
+            .iter()
+            .map(|l| l.code.capacity() + l.name.capacity() + l.native_name.capacity() + l.file.capacity())
+            .sum();
+        let rest: usize = self.roots.iter().chain(&self.controls).map(String::capacity).sum();
+        (self.labels.len(), labels + styles + glossary + languages + rest)
+    }
+
     pub fn roots(&self) -> &[String] {
         &self.roots
     }

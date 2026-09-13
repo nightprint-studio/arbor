@@ -11,12 +11,17 @@
    * The tree is the IDE shape: a parent is a page in its own right and its children are what it
    * splits into — Editor › Completion, Java › Code Style. Selecting a parent opens it.
    *
-   * **Per-project settings are not here.** The JDK a project targets, its encoding, its naming rules
-   * and the frameworks detected in it live in *Project Configuration* (the title bar's gear, or the
-   * command palette): a dialog whose title is "Settings" and whose contents change with the project
-   * open is a dialog nobody can reason about. What stays here is what belongs to you and to this
-   * machine — including the JDK *search paths*, which are where JDKs are installed, not which one a
-   * project wants.
+   * **Per-project settings are not here.** The JDK a project targets, its encoding and the
+   * frameworks detected in it live in *Project Configuration* (the title bar's gear, `Ctrl+Shift+,`,
+   * or the command palette): a dialog whose title is "Settings" and whose contents change with the
+   * project open is a dialog nobody can reason about. What stays here is what belongs to you and to
+   * this machine — including the JDK *search paths*, which are where JDKs are installed, not which
+   * one a project wants.
+   *
+   * Two things live at **both** levels, and they are the exception that proves the line: naming
+   * conventions and the spelling dictionary. How you spell a method is yours, whether this codebase
+   * agrees is the project's — so the profile's answer is here, a project states what it says
+   * differently, and the project page marks every value with where it came from.
    *
    * The first group is not Bennu's at all: `Interface` is the shell's shared settings, which already
    * applied to this window and simply had no dialog in it. They are the same components Corvus's
@@ -25,7 +30,7 @@
   import {
     Settings, Coffee, TextCursorInput, ListTree, Bug, FoldVertical, Braces, RotateCcw, Wand2,
     ServerCog, Monitor, Sparkles, Command, Terminal, Beaker, FileCode2, Save, Boxes, Workflow,
-    FileStack,
+    FileStack, CaseSensitive, SpellCheck,
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -50,6 +55,10 @@
   import BennuDebuggerSettings from './settings/BennuDebuggerSettings.svelte';
   import BennuLspSettings from './settings/BennuLspSettings.svelte';
   import BennuRustSettings from './settings/BennuRustSettings.svelte';
+  import BennuRustStyleSettings from './settings/BennuRustStyleSettings.svelte';
+  import BennuNamingDefaultsSettings from './settings/BennuNamingDefaultsSettings.svelte';
+  import BennuSpellingSettings from './settings/BennuSpellingSettings.svelte';
+  import BennuRustDebuggerSettings from './settings/BennuRustDebuggerSettings.svelte';
   import BennuSpringSettings from './settings/BennuSpringSettings.svelte';
   import BennuStrutsSettings from './settings/BennuStrutsSettings.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
@@ -134,6 +143,11 @@
         { id: 'completion', label: 'Completion', icon: ListTree },
         { id: 'folding',    label: 'Folding',    icon: FoldVertical },
         { id: 'files',      label: 'Files',      icon: Save },
+        // Both have a per-project counterpart, and both are here because the answer is yours
+        // first: how you spell a method, and the words you accept, are the same in every project
+        // until one says otherwise. Project Configuration is where one does.
+        { id: 'naming',     label: 'Naming',     icon: CaseSensitive },
+        { id: 'spelling',   label: 'Spelling',   icon: SpellCheck },
       ] },
       // Global, like the templates it lists — a project only chooses among them.
       { id: 'templates', label: 'Code Templates', icon: FileCode2, children: templatePages.map((p) => ({
@@ -152,7 +166,17 @@
           { id: 'test-values', label: 'Test Values',   icon: Beaker },
         ],
       }]),
-      ...(hasRust ? [{ id: 'rust', label: 'Rust', icon: FileStack, iconColor: 'var(--error)' }] : []),
+      ...(hasRust ? [{
+        id: 'rust', label: 'Rust', icon: FileStack, iconColor: 'var(--error)', children: [
+          // Narrower than Java's page by necessity: `rustfmt` owns the formatting, so what is left
+          // is what a *generator* decides and a formatter never touches.
+          { id: 'rust-style', label: 'Code Style', icon: Wand2 },
+          // Both languages have a debugger and they are debugged by different machinery: a JVM is
+          // debugged by the VM, a binary by whatever starts it. Two pages, under the language each
+          // belongs to.
+          { id: 'rust-debugger', label: 'Debugger', icon: Bug },
+        ],
+      }] : []),
       // Always present, on every project kind: it is where a *missing* server is explained, and
       // hiding it on a Java project would hide the answer to "why does my `.rs` file have no go-to"
       // from exactly the polyglot repo that has one.
@@ -210,6 +234,10 @@
         <BennuCompletionSettings />
       {:else if active === 'folding'}
         <BennuFoldingSettings />
+      {:else if active === 'naming'}
+        <BennuNamingDefaultsSettings />
+      {:else if active === 'spelling'}
+        <BennuSpellingSettings />
       {:else if active === 'templates'}
         <BennuTemplatesSettings onOpenKind={(k) => (active = `tpl:${k}`)} />
       {:else if templateKind}
@@ -228,6 +256,10 @@
         <BennuLspSettings />
       {:else if active === 'rust'}
         <BennuRustSettings />
+      {:else if active === 'rust-style'}
+        <BennuRustStyleSettings />
+      {:else if active === 'rust-debugger'}
+        <BennuRustDebuggerSettings />
       {:else if active === 'spring'}
         <BennuSpringSettings />
       {:else if active === 'struts'}

@@ -286,8 +286,15 @@ total = a + b;`, 'java')}</code></pre>
 
 <h2>Spelling</h2>
 <p>
-  Opt-in per project, in Project Configuration → <strong>Spelling</strong>. After the English and Italian dictionaries download, Bennu checks your
-  <strong>declared names</strong> — split by camelCase, snake_case and kebab-case — and your <strong>comments</strong>. A misspelled word is a hint;
-  <kbd>Alt</kbd> + <kbd>Enter</kbd> replaces it with a suggestion or <strong>adds it to a project or global dictionary</strong>. Common programming
-  abbreviations are allowed, so it stays quiet on jargon.
+  Opt-in per project, in Project Configuration → <strong>Spelling</strong>. After the English and Italian dictionaries download —
+  <strong>Settings → Editor → Spelling</strong>, once per machine — Bennu checks your <strong>declared names</strong>, split by camelCase, snake_case and
+  kebab-case, and your <strong>comments</strong>. A misspelled word is a hint; <kbd>Alt</kbd> + <kbd>Enter</kbd> replaces it with a suggestion or adds it to a
+  dictionary. Common programming abbreviations are allowed, so it stays quiet on jargon.
+</p>
+<p>
+  There are <strong>two dictionaries</strong>, and both are lists you can read and edit rather than one-way doors. The one in
+  <strong>Settings → Editor → Spelling</strong> holds the spellings that are correct in any project of yours; the one in
+  <strong>Project Configuration → Spelling</strong> holds this codebase's own vocabulary — a domain term, a legacy abbreviation, a table name — and lives in the
+  repository, so everyone who clones it gets the same answer. Removing a word from either starts flagging it again on the next keystroke, which is the way back
+  from a word accepted by mistake.
 </p>

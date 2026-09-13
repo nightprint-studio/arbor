@@ -93,6 +93,14 @@ pub struct RecordingEngine {
     inner: Mutex<Option<Active>>,
 }
 
+/// What a running recording holds — see [`RecordingEngine::footprint`].
+pub struct RecordingFootprint {
+    /// One captured BGRA frame, cropped: the unit every buffer of the recording is counted in.
+    pub frame_bytes: usize,
+    /// Frames delivered to the sink so far.
+    pub frames: u64,
+}
+
 /// Lightweight capture diagnostics, written to a temp file at stop. Distinguishes a
 /// genuinely low encode fps from a low *unique*-frame rate (a slow producer that the
 /// emitter has to paper over with duplicates), and reports which producer ran.
@@ -313,6 +321,20 @@ impl RecordingEngine {
             None => {}
         }
         Ok(a.out.clone())
+    }
+
+    /// What the running recording holds, for the memory breakdown — `None` when idle.
+    ///
+    /// Only *tried*: `start` holds the lock for as long as capture takes to deliver its first frame
+    /// (up to five seconds), and a report that waited would freeze the breakdown on it. A recording
+    /// that is still starting reads as idle for that moment.
+    pub fn footprint(&self) -> Option<RecordingFootprint> {
+        let guard = self.inner.try_lock().ok()?;
+        let a = guard.as_ref()?;
+        Some(RecordingFootprint {
+            frame_bytes: a.dims.0 as usize * a.dims.1 as usize * 4,
+            frames: a.count.load(Relaxed),
+        })
     }
 
     /// Current state (idle when nothing is recording).

@@ -153,6 +153,15 @@ impl App {
         for init in self.inits {
             init();
         }
+        // The plugin VMs are the runtime's, not the product's: every backend that hosts plugins
+        // lists them in its `__memory` answer, whether or not the product sizes anything itself.
+        let dispatcher = match &self.plugin_host {
+            Some(host) => {
+                let host = Arc::clone(host);
+                dispatcher.memory_extra(move || crate::memory::plugin_items(&host))
+            }
+            None => dispatcher,
+        };
         let methods = dispatcher.methods();
         eprintln!("arbor-be: ready, serving {} method(s): {:?}", methods.len(), methods);
         let dispatch = dispatcher.into_fn();

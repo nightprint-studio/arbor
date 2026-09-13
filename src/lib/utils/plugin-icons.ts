@@ -37,7 +37,7 @@ import {
   // Time
   Clock, Calendar, Timer, History,
   // Charts
-  BarChart2, LineChart, PieChart, Activity, TrendingUp, TrendingDown,
+  BarChart2, LineChart, PieChart, Activity, TrendingUp, TrendingDown, Gauge,
   // Status
   CheckCircle, CheckCircle2, XCircle, AlertTriangle, AlertCircle, AlertOctagon,
   Info, HelpCircle, Loader, Loader2,
@@ -82,7 +82,11 @@ import {
   Gift,
   // Game / inspection
   Gamepad, Gamepad2, ScanLine, Joystick, Pin, PinOff,
+  // Product palettes — Bennu, Garrulus, Picus and Merula resolve their commands here rather
+  // than in registries of their own.
+  Command, ListTree, FileCode2, Wand2, Lightbulb, SlidersHorizontal, Library, Target, ListTodo, IndentIncrease, TextCursorInput, BookOpen, FlaskConical, Beaker, ListRestart, Languages, LayoutDashboard, ArrowUpFromLine, CalendarDays, RotateCcw, FolderCog, FormInput, PackageMinus, Tags, SkipBack, Music4, Minimize2, Maximize2, Piano, FileInput, FileAudio, SearchCode, AlignLeft, PenLine, FolderPen, Repeat, PlayCircle, Hourglass, ZoomIn, ZoomOut, StretchVertical, FileMusic, PackageOpen, Crop, Snowflake, FilePen,
 } from 'lucide-svelte';
+import type { IconComponent } from '$lib/types/icon';
 
 export const PLUGIN_ICONS: Record<string, any> = {
   Zap, Circle,
@@ -102,7 +106,7 @@ export const PLUGIN_ICONS: Record<string, any> = {
   FileCopy2: Files, FileOutput: FileDown,
   Terminal, TerminalSquare, Code, Code2, Bug, Braces, Keyboard,
   Clock, Calendar, Timer, History,
-  BarChart2, LineChart, PieChart, Activity, TrendingUp, TrendingDown,
+  BarChart2, LineChart, PieChart, Activity, TrendingUp, TrendingDown, Gauge,
   CheckCircle, CheckCircle2, XCircle, AlertTriangle, AlertCircle, AlertOctagon,
   Info, HelpCircle, Loader, Loader2,
   Ban, MinusCircle, CirclePause, CircleCheck, CircleX, CircleAlert, CircleDashed,
@@ -131,4 +135,21 @@ export const PLUGIN_ICONS: Record<string, any> = {
   Bot,
   Gift,
   Gamepad, Gamepad2, ScanLine, Joystick, Pin, PinOff,
+  Command, ListTree, FileCode2, Wand2, Lightbulb, SlidersHorizontal, Library, Target, ListTodo, IndentIncrease, TextCursorInput, BookOpen, FlaskConical, Beaker, ListRestart, Languages, LayoutDashboard, ArrowUpFromLine, CalendarDays, RotateCcw, FolderCog, FormInput, PackageMinus, Tags, SkipBack, Music4, Minimize2, Maximize2, Piano, FileInput, FileAudio, SearchCode, AlignLeft, PenLine, FolderPen, Repeat, PlayCircle, Hourglass, ZoomIn, ZoomOut, StretchVertical, FileMusic, PackageOpen, Crop, Snowflake, FilePen,
 };
+
+/**
+ * Resolve a command-palette icon name — one lucide name, one glyph, for every product.
+ *
+ * This replaced four private registries (Bennu's, Garrulus's, Picus's, Merula's) that each mapped
+ * their own words to glyphs. They drifted the way copies do: a key used in a palette but missing
+ * from that product's map fell back to the generic glyph with no error anywhere, so `git-branch`,
+ * `download` and `trash` had been rendering as ⌘ for as long as anyone could tell. With one
+ * vocabulary, a name either exists or it does not, in one place.
+ *
+ * Falls back to `Command` — the palette's own glyph — rather than throwing: a missing glyph must
+ * never be the reason a verb cannot be reached.
+ */
+export function paletteIcon(name: string): IconComponent {
+  return (PLUGIN_ICONS[name] as IconComponent | undefined) ?? (Command as unknown as IconComponent);
+}

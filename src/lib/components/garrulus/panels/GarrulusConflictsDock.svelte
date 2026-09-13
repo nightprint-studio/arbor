@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { paletteIcon } from '$lib/utils/plugin-icons';
   /**
    * The bottom dock: tasks, problems and conflicts, behind one tab strip.
    *
@@ -35,7 +36,7 @@
   import ConflictsPanel from './ConflictsPanel.svelte';
   import ProblemsPanel from './ProblemsPanel.svelte';
   import TasksPanel from './TasksPanel.svelte';
-  import { GARRULUS_DOCK_TABS, garrulusPaletteIcon } from '../garrulus-palette';
+  import { GARRULUS_DOCK_TABS } from '../garrulus-palette';
   import { garrulusSyncStore } from '$lib/stores/garrulus/sync.svelte';
   import { garrulusUiStore, DOCK_PANELS, type DockPanel } from '$lib/stores/garrulus/ui.svelte';
 
@@ -81,7 +82,7 @@
       .map((tab) => ({
         id: tab.id,
         label: tab.label,
-        icon: garrulusPaletteIcon(tab.icon),
+        icon: paletteIcon(tab.icon),
         iconSize: 13,
         badge: tab.id === 'conflicts' && conflictCount > 0 ? conflictCount : undefined,
       })),

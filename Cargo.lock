@@ -270,6 +270,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar",
+ "sysinfo",
  "systemicons",
  "tauri",
  "tauri-build",
@@ -314,6 +315,7 @@ dependencies = [
  "arbor-plugin-core",
  "arbor-rpc",
  "arbor-scheduler",
+ "serde",
  "serde_json",
  "tokio",
 ]

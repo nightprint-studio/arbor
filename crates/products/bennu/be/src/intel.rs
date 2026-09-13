@@ -171,10 +171,20 @@ pub(crate) fn bennu_diagnostics(
         (true, Some(source)) => crate::naming::diagnostics_for(&args.file, source),
         _ => Vec::new(),
     };
+    // Encoding rides alongside too, and for a stronger version of the same reason: a corrupted
+    // character is not a fact about any language, so no route below would ever own it — and a
+    // `.properties` or a template, where a legacy tree keeps most of its accented text, reaches no
+    // route at all. Skipped on the FAST tier like the others; it is a scan of the buffer, not a
+    // syntax pass.
+    let encoding = match (args.resolved.unwrap_or(true), args.source.as_deref()) {
+        (true, Some(source)) => crate::mojibake::diagnostics_for(source),
+        _ => Vec::new(),
+    };
     let file = args.file.clone();
     let source = args.source.clone();
     let mut diags = route_diagnostics(args)?;
     diags.extend(naming);
+    diags.extend(encoding);
 
     // The project's inspection policy, applied ONCE over everything above — whichever route
     // produced it, and including the framework and naming contributions. Applying it inside the

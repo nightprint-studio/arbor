@@ -159,6 +159,13 @@ impl LinkGraph {
         Self::default()
     }
 
+    /// Links held, resolved and dangling — each resolved one twice, as an edge and a backlink.
+    pub(crate) fn link_count(&self) -> usize {
+        let edges: usize = self.forward.values().map(Vec::len).sum();
+        let backlinks: usize = self.backward.values().map(Vec::len).sum();
+        edges + backlinks + self.unresolved.len()
+    }
+
     /// Walk every note's links once, filling both directions and collecting the
     /// dangling ones.
     ///

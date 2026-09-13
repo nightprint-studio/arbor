@@ -50,6 +50,11 @@ use crate::vault_io;
 /// list wholesale.
 static LAST_CONFLICTS: LazyLock<Mutex<Vec<Conflict>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
+/// How many conflicts the last pull left, for the memory breakdown.
+pub(crate) fn conflict_count() -> usize {
+    LAST_CONFLICTS.lock().map(|c| c.len()).unwrap_or(0)
+}
+
 /// What a full sync did, for the button's toast and for the log.
 #[derive(Debug, Clone, Serialize)]
 pub struct SyncReport {

@@ -75,6 +75,7 @@ async fn picus_save_connection(
 /// exactly the sort of thing that erodes trust in "Picus stores no password".
 #[arbor_rpc::handler]
 async fn picus_delete_connection(state: &PicusState, id: String) -> Result<(), String> {
+    state.schemas().invalidate(&id);
     if let Some(session) = state.sessions().remove(&id) {
         let _ = session.close().await;
     }
@@ -154,6 +155,10 @@ async fn picus_reset_connection(state: &PicusState, id: String) -> Result<Connec
 /// no-op, not an error.
 #[arbor_rpc::handler]
 async fn picus_disconnect(state: &PicusState, id: String) -> Result<(), String> {
+    // The schema goes with the connection, as `SchemaCache` promises — and before the close,
+    // which can fail and return early. A reset keeps it: the database is the same one, and the
+    // expander would otherwise go blind until the tree is read again.
+    state.schemas().invalidate(&id);
     if let Some(session) = state.sessions().remove(&id) {
         session.close().await.map_err(|e| e.to_string())?;
     }

@@ -115,6 +115,8 @@ mod plan;
 mod lineage;
 // Explicit transactions — open one, look at what you did, then decide.
 mod tx;
+// What this backend holds in memory, for the process monitor's `__memory` breakdown.
+mod memory_report;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, any
@@ -152,8 +154,10 @@ fn main() {
 
     // The method routing, declared as the inventory of `#[handler]`s this binary
     // links. `inventory("")` covers them all — picus-be links only its own handlers.
-    let dispatcher =
-        arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle()).inventory("");
+    let dispatcher = arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle())
+        .inventory("")
+        // What this backend holds, for the process monitor's breakdown. See `memory_report`.
+        .memory(memory_report::report);
 
     // Serve over framed stdio until the shell disconnects.
     if let Err(e) = app.run(dispatcher) {

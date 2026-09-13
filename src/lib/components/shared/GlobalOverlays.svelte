@@ -19,6 +19,9 @@
    *    that was answered by nobody and denied on timeout. The backend picks ONE
    *    window to ask in (see `mcp::consent::prompt_window`) and emits only there,
    *    so mounting this everywhere does not mean prompting everywhere.
+   *  • the process monitor — Arbor is the shell plus a backend per product plus whatever
+   *    those started, so what the suite is costing this machine is a question no single
+   *    product can answer. It samples only while it is open;
    *  • the AI tools reference and the call log — the endpoint is process-wide,
    *    so both have the same answer in every window, and both are asked for from
    *    each window's own command palette. Their chunks are pulled on first open.
@@ -47,6 +50,9 @@
 
   let McpActivity = $state<Component<{ onClose: () => void }> | null>(null);
   let activityOpen = $state(false);
+
+  let Processes = $state<Component<{ onClose: () => void }> | null>(null);
+  let processesOpen = $state(false);
 
   $effect(() => {
     if (!credentialsStore.open || requested) return;
@@ -85,6 +91,22 @@
     return () => window.removeEventListener('arbor:open-mcp-activity', open);
   });
 
+  // Arbor is not one process — it is the shell, a backend per product, and whatever those
+  // started — so "what is making this machine slow" is a question no single product can answer.
+  // Here for that reason, and opened from every palette the same way the AI panels are.
+  onMount(() => {
+    const open = () => {
+      processesOpen = true;
+      if (!Processes) {
+        void import('$lib/components/shared/ProcessMonitorModal.svelte')
+          .then((m) => { Processes = m.default; })
+          .catch(() => { processesOpen = false; });
+      }
+    };
+    window.addEventListener('arbor:open-processes', open);
+    return () => window.removeEventListener('arbor:open-processes', open);
+  });
+
   // Collected in every window from the moment it mounts, panel open or not — see above.
   onMount(() => {
     const unlisten = listen<McpAuditEntry>('arbor://mcp-call', (e) => mcpStore.record(e.payload));
@@ -116,4 +138,8 @@
 
 {#if activityOpen && McpActivity}
   <McpActivity onClose={() => (activityOpen = false)} />
+{/if}
+
+{#if processesOpen && Processes}
+  <Processes onClose={() => (processesOpen = false)} />
 {/if}

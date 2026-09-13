@@ -5,7 +5,7 @@
 //! stay `pub` for rustdoc navigation, but the prelude is the path of record.
 
 pub use crate::auth::{OAuthHandle, ProviderAuth, ProviderUser};
-pub use crate::avatar::resolve_avatar;
+pub use crate::avatar::{avatar_cache_len, resolve_avatar};
 pub use crate::branch::BranchProtection;
 pub use crate::capability::Capabilities;
 pub use crate::ci::{CiFilter, CiJob, CiProviderInfo, CiRun, CiWorkflow, PipelineCreateRequest};

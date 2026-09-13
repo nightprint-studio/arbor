@@ -109,6 +109,44 @@ pub trait FrameworkExtension: Send + Sync {
     fn stats(&self) -> Vec<ExtStat> {
         Vec::new()
     }
+
+    /// What this extension's model keeps in memory, for the process monitor's breakdown.
+    ///
+    /// Asked when somebody opens the breakdown, never on a timer — but still cheap: sum the
+    /// capacities of what the model owns, and **count** what is too deep to walk. Empty (the
+    /// default) when the extension keeps nothing worth a line.
+    fn memory(&self) -> Vec<ExtMemory> {
+        Vec::new()
+    }
+}
+
+/// One structure an extension keeps in memory — see [`FrameworkExtension::memory`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtMemory {
+    /// What it is, in words a person reads — "Schemas held as text".
+    pub label: &'static str,
+    pub count: usize,
+    /// `None` when the structure is only counted.
+    pub bytes: Option<usize>,
+    /// `bytes` is text held, summed — not an estimate of a structure.
+    pub exact: bool,
+}
+
+impl ExtMemory {
+    /// A structure sized by walking it — an estimate.
+    pub fn estimate(label: &'static str, count: usize, bytes: usize) -> Self {
+        Self { label, count, bytes: Some(bytes), exact: false }
+    }
+
+    /// Text held, summed.
+    pub fn text(label: &'static str, count: usize, bytes: usize) -> Self {
+        Self { label, count, bytes: Some(bytes), exact: true }
+    }
+
+    /// Only counted.
+    pub fn counted(label: &'static str, count: usize) -> Self {
+        Self { label, count, bytes: None, exact: false }
+    }
 }
 
 /// The extensions active for one project.
@@ -140,6 +178,17 @@ impl ExtensionRegistry {
     /// The ids of the active extensions, in registration order.
     pub fn ids(&self) -> Vec<&'static str> {
         self.active.iter().map(|e| e.id()).collect()
+    }
+
+    /// Every active extension's memory lines, each with the extension's display name.
+    pub fn memory(&self) -> Vec<(&'static str, ExtMemory)> {
+        self.active
+            .iter()
+            .flat_map(|e| {
+                let name = e.display_name();
+                e.memory().into_iter().map(move |m| (name, m))
+            })
+            .collect()
     }
 
     /// The active extension with this id, if any — for a query that names one

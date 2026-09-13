@@ -86,6 +86,20 @@ impl SchemaCache {
         self.lock_definitions().clear();
     }
 
+    /// Every schema held, with its view definitions when they were read — for a memory breakdown.
+    pub fn held(&self) -> Vec<(String, Arc<SchemaSnapshot>, Option<ViewDefinitions>)> {
+        let schemas: Vec<(String, Arc<SchemaSnapshot>)> =
+            self.lock().iter().map(|(id, s)| (id.clone(), Arc::clone(s))).collect();
+        let definitions = self.lock_definitions();
+        schemas
+            .into_iter()
+            .map(|(id, schema)| {
+                let defs = definitions.get(&id).cloned();
+                (id, schema, defs)
+            })
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.lock().len()
     }

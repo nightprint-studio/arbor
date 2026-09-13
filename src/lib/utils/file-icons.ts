@@ -220,6 +220,31 @@ const lombokIcon: IconifyIcon = {
 };
 
 /**
+ * `ValidationMessages.properties` — i messaggi con cui Bean Validation parla all'utente finale.
+ *
+ * È il file che **sovrascrive** i testi di serie di `@NotNull`, `@Size` e compagnia, e le sue
+ * varianti per lingua (`ValidationMessages_it.properties`) sono la traduzione di quegli stessi
+ * testi. In un progetto Jakarta sta in mezzo a decine di `.properties` che non contano niente, ed
+ * è l'unico che decide cosa legge chi compila un form: un'icona propria è il modo di ritrovarlo.
+ *
+ * Disegnata qui perché non esiste un marchio da citare — Bean Validation è una specifica, non un
+ * prodotto. Un'etichetta con una spunta: un messaggio (l'etichetta) e un vincolo (la spunta).
+ */
+const validationMessagesIcon: IconifyIcon = {
+  width: 32,
+  height: 32,
+  body:
+    // L'etichetta, inclinata come un cartellino appeso.
+    '<path d="M4 15.2L15.2 4a2.6 2.6 0 013.7 0l9.1 9.1a2.6 2.6 0 010 3.7L16.8 28a2.6 2.6 0 01-3.7 0'
+    + 'L4 18.9a2.6 2.6 0 010-3.7z" fill="#2f6fb0"/>'
+    // Il foro del cartellino.
+    + '<circle cx="22.4" cy="9.6" r="1.9" fill="#dce9f6"/>'
+    // La spunta: il vincolo soddisfatto.
+    + '<path d="M10.6 17.2l3.6 3.6 7-7" stroke="#eaf3fb" stroke-width="2.6" stroke-linecap="round" '
+    + 'stroke-linejoin="round" fill="none"/>',
+};
+
+/**
  * `junit-platform.properties` — i parametri con cui la piattaforma JUnit lancia i test.
  *
  * Il glifo vero di JUnit 5 (simple-icons), tinto del verde del progetto invece che lasciato a
@@ -389,6 +414,9 @@ const FILENAME_ICONS: Record<string, IconifyIcon> = {
   // dietro, e per questo con un'icona propria invece di quella generica dei `.properties`.
   'lombok.config': lombokIcon,
   'junit-platform.properties': junitIcon,
+  // Il bundle di Bean Validation. Le varianti per lingua le prende `isValidationMessages`, qui
+  // sotto: la mappa è a nome esatto e le lingue sono una famiglia.
+  'validationmessages.properties': validationMessagesIcon,
   'gradlew': gradleIcon,
   'gradlew.bat': gradleIcon,
   // ── CI / tooling ─────────────────────────────────────────────────────────
@@ -524,10 +552,21 @@ export function getFileIcon(name: string, rootTag?: string): IconifyIcon {
   // file whose name says Struts and whose content says otherwise is the content's.
   if (isStrutsConfig(lower)) return apacheIcon;
   if (isTomcatConfig(lower)) return tomcatIcon;
+  // `ValidationMessages_it.properties` e ogni altra lingua: è lo stesso file, tradotto.
+  if (isValidationMessages(lower)) return validationMessagesIcon;
   if (lower.startsWith('.env')) return dotenvIcon;
   if (lower.endsWith('.d.ts')) return tsDefIcon;
   const ext = lower.split('.').pop() ?? '';
   return EXT_ICONS[ext] ?? textIcon;
+}
+
+/**
+ * Il bundle di Bean Validation, in qualunque lingua: `ValidationMessages.properties` e le sue
+ * varianti `_it`, `_en_US`. Il nome è fissato dalla specifica — è quello che il motore cerca sul
+ * classpath — quindi riconoscerlo per prefisso non è un'euristica, è la regola.
+ */
+function isValidationMessages(lower: string): boolean {
+  return /^validationmessages(_[a-z]{2}(_[a-z0-9]+)*)?\.properties$/i.test(lower);
 }
 
 /** Resolve a folder icon from its name and open/closed state. */

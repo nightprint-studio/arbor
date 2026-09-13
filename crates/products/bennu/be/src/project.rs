@@ -94,8 +94,11 @@ fn active_slot() -> &'static Mutex<Option<String>> {
 }
 
 fn set_active_root(root: &str) {
-    if let Ok(mut slot) = active_slot().lock() {
-        *slot = Some(root.to_string());
+    let previous = active_slot().lock().ok().and_then(|mut slot| slot.replace(root.to_string()));
+    // The project being left starts its idle clock now, not from whenever it was last asked
+    // something while it was on screen — see `project_close`.
+    if let Some(previous) = previous.filter(|p| p != root) {
+        crate::project_close::touch(&previous);
     }
 }
 
@@ -118,14 +121,14 @@ pub struct ActivateProjectArgs {
 /// the first for every member and the second for exactly one, and switching between members
 /// afterwards does the second again with no re-open.
 ///
-/// Idempotent and cheap — a server already up is claimed rather than restarted, which is what
-/// stops it being reclaimed as idle while somebody is reading it.
+/// Goes through [`open_and_start`], warm, because being looked at is now what starts a project's
+/// engines: a workspace member opened in the background has no index yet, and one released for
+/// sitting idle has nothing at all. Idempotent for a project already running — the manifest is
+/// re-read, a running index and a server already up are left alone.
 #[arbor_rpc::handler]
 fn bennu_activate_project(ctx: &BennuState, args: ActivateProjectArgs) -> Result<(), String> {
     set_active_root(&args.root);
-    crate::lsp_registry::LspRegistry::global().set_sink(ctx.event_sink());
-    crate::lsp_registry::LspRegistry::global().warm_start(&args.root, SessionOrigin::Window);
-    Ok(())
+    open_and_start(ctx, &args.root, SessionOrigin::Window, true).map(|_| ())
 }
 
 /// Open `root` and start everything that opening it starts: the language-server warm-up,
@@ -153,6 +156,10 @@ pub(crate) fn open_and_start(
     let jdk_override = cfg.jdk_overrides.get(&args.root).map(|s| s.as_str());
     let opts = OpenOptions { default_encoding: &cfg.default_encoding, jdk_override };
     let info = open_project(Path::new(&args.root), &opts).map_err(String::from)?;
+    // Every engine below keys this project by `args.root`, while the window will later name it by
+    // `info.root` — and the two are not always the same string. Recorded under both, so closing it
+    // releases what was actually opened. See `project_close`.
+    let first_open = crate::project_close::opened(&args.root, &info.root);
 
     // The registry needs the sink before it can report its own progress, and `warm_start`
     // itself only claims slots and spawns threads — the handshake happens on those, so this
@@ -181,9 +188,16 @@ pub(crate) fn open_and_start(
     // Retention, off-thread. Opening a project is the one moment that is already slow for
     // other reasons and happens once per session — which is exactly what a policy that
     // deletes things should be attached to, rather than to a timer nobody can predict.
-    crate::history::purge_in_background(&args.root);
+    // Once per open, not once per activation: switching to a project re-enters this function.
+    if first_open {
+        crate::history::purge_in_background(&args.root);
+    }
 
-    if !info.kind.is_java() {
+    // The symbol index only for a Java project somebody is looking at. A workspace restore opens
+    // every member to read its manifest, and building an index for each — a walk, a parse and the
+    // classpath of every project in the workspace — is how opening one Java project came to index
+    // all of them. A member's index starts when it is activated, like its language server.
+    if !info.kind.is_java() || !warm {
         return Ok(info);
     }
 

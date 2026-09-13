@@ -79,6 +79,8 @@ mod trash;
 // The `notify` watcher over the open vault, emitting debounced
 // `garrulus:vault-changed` events from its own thread.
 mod watch;
+// What this backend holds in memory, for the process monitor's `__memory` breakdown.
+mod memory_report;
 
 // Shared, non-handler modules.
 //
@@ -155,8 +157,10 @@ fn main() {
 
     // The method routing, declared as the inventory of `#[handler]`s this binary
     // links. `inventory("")` covers them all — garrulus-be links only its own.
-    let dispatcher =
-        arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle()).inventory("");
+    let dispatcher = arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle())
+        .inventory("")
+        // What this backend holds, for the process monitor's breakdown. See `memory_report`.
+        .memory(memory_report::report);
 
     // Post-`Hello` startup, and it has TWO jobs.
     //

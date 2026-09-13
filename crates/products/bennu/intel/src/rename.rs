@@ -1652,6 +1652,13 @@ pub struct SubtypeMap {
 }
 
 impl SubtypeMap {
+    /// An estimate of the heap both directions of the map own. See `crate::memory`.
+    pub(crate) fn heap_estimate(&self) -> usize {
+        crate::memory::map_of_string_vecs(&self.children) + crate::memory::map_of_string_vecs(&self.parents)
+    }
+}
+
+impl SubtypeMap {
     /// Invert the supertype links of every project type.
     pub(crate) fn build(index: &ReferenceIndex, resolver: &dyn TypeResolver) -> Self {
         let mut map = Self::default();

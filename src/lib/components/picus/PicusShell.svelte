@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { paletteIcon } from '$lib/utils/plugin-icons';
   /**
    * PicusShell — the SQL studio window.
    *
@@ -67,7 +68,6 @@
   import {
     PICUS_SECTIONS,
     buildPicusPalette,
-    picusPaletteIcon,
   } from './picus-palette';
   import { findingsToText } from './panels/finding-text';
   import { saveOpenScript } from './save-script';
@@ -801,7 +801,7 @@
 {#if picusUiStore.paletteOpen}
   <CommandPaletteShell
     onClose={() => picusUiStore.closePalette()}
-    iconResolver={picusPaletteIcon}
+    iconResolver={paletteIcon}
     sections={paletteSections}
     bind:query={paletteQuery}
     placeholder="Search a command, a table or a file…"

@@ -21,12 +21,11 @@
    */
   import { onMount, onDestroy, untrack } from 'svelte';
   import {
-    Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
-    TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info, Bot, Activity as ActivityIcon,
-    Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck, History,
-    Palette,
-    TextCursorInput, ListChecks, BookOpen, FlaskConical, Beaker, ListRestart, Bug, Braces, Languages,
-    Cog, Network, Plug, Store, ScrollText, LayoutDashboard, FilePlus2, FolderPlus,
+    FolderTree, ListTree, AlertTriangle,
+    TerminalSquare, Hammer, 
+    Library, Play, ListTodo, 
+    TextCursorInput, Beaker, Bug, Braces, 
+    Cog, 
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -67,7 +66,7 @@
   // The icon names a PLUGIN may use — its own vocabulary, not this window's. Consulted as a
   // fallback by `iconResolver` so a contributed command or view keeps the glyph it asked for
   // instead of collapsing into the generic one.
-  import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
+  import { PLUGIN_ICONS, paletteIcon } from '$lib/utils/plugin-icons';
   import PluginOverlays from '$lib/components/plugins/PluginOverlays.svelte';
   import PluginViewPanel from '$lib/components/plugins/PluginViewPanel.svelte';
   import PluginPanelSurface from '$lib/components/plugins/PluginPanelSurface.svelte';
@@ -1299,66 +1298,16 @@
     paletteWasOpen = open;
   });
 
-  const ICONS: Record<string, IconComponent> = {
-    'folder-tree': FolderTree as unknown as IconComponent,
-    'list-tree': ListTree as unknown as IconComponent,
-    'list': TextCursorInput as unknown as IconComponent,
-    'library': Library as unknown as IconComponent,
-    'search': Search as unknown as IconComponent,
-    'hash': Hash as unknown as IconComponent,
-    'target': Target as unknown as IconComponent,
-    'file': FileCode2 as unknown as IconComponent,
-    'alert': AlertTriangle as unknown as IconComponent,
-    'terminal': TerminalSquare as unknown as IconComponent,
-    'hammer': Hammer as unknown as IconComponent,
-    'maven': MavenIcon as unknown as IconComponent,
-    'cog': Cog as unknown as IconComponent,
-    'junit': JUnitIcon as unknown as IconComponent,
-    'braces': Braces as unknown as IconComponent,
-    'list-checks': ListChecks as unknown as IconComponent,
-    'play': Play as unknown as IconComponent,
-    'bug': Bug as unknown as IconComponent,
-    'flask': FlaskConical as unknown as IconComponent,
-    'beaker': Beaker as unknown as IconComponent,
-    'rerun': ListRestart as unknown as IconComponent,
-    'todo': ListTodo as unknown as IconComponent,
-    'box': Box as unknown as IconComponent,
-    'server': Server as unknown as IconComponent,
-    'command': Command as unknown as IconComponent,
-    'wand': Wand2 as unknown as IconComponent,
-    'bulb': Lightbulb as unknown as IconComponent,
-    'sliders': SlidersHorizontal as unknown as IconComponent,
-    'info': Info as unknown as IconComponent,
-    'bot': Bot as unknown as IconComponent,
-    'activity': ActivityIcon as unknown as IconComponent,
-    'refresh-cw': RotateCw as unknown as IconComponent,
-    'indent': IndentIncrease as unknown as IconComponent,
-    'shield': ShieldCheck as unknown as IconComponent,
-    'palette': Palette as unknown as IconComponent,
-    'history': History as unknown as IconComponent,
-    'file-plus': FilePlus2 as unknown as IconComponent,
-    'folder-plus': FolderPlus as unknown as IconComponent,
-    // The two framework catalogs that were falling through to the generic `command` glyph:
-    // a bound-properties list and the property reference read out of the dependency jars.
-    // (`list` is declared once, above — a second entry here silently shadowed it.)
-    // Bevy's own bird. A brand mark rather than a metaphor, like Maven's above — and the rail
-    // resolves a catalog's icon through this map, so the one entry serves the button and the
-    // palette entry both.
-    'bevy': BevyIcon as unknown as IconComponent,
-    'book': BookOpen as unknown as IconComponent,
-    'languages': Languages as unknown as IconComponent,
-    'network': Network as unknown as IconComponent,
-    'plug': Plug as unknown as IconComponent,
-    'store': Store as unknown as IconComponent,
-    'scroll': ScrollText as unknown as IconComponent,
-    'layout': LayoutDashboard as unknown as IconComponent,
+  /**
+   * Bennu's brand marks — the three icons that are components of this product rather than names in a
+   * vocabulary, so they cannot live in `PLUGIN_ICONS` (`utils/` does not import product components).
+   * Everything else a palette entry or a catalog names is a lucide name, resolved by `paletteIcon`.
+   */
+  const BRAND_ICONS: Record<string, IconComponent> = {
+    Maven: MavenIcon as unknown as IconComponent,
+    JUnit: JUnitIcon as unknown as IconComponent,
+    Bevy: BevyIcon as unknown as IconComponent,
   };
-  /** This window's own names first, then the plugin vocabulary, then the generic glyph.
-   *
-   *  In that order because the two overlap and Bennu's meaning wins where it does: `list` here
-   *  is the Forms panel's, not lucide's `List`. Everything a plugin can name that Bennu has no
-   *  word for — `Eye`, `GitBranch`, `Rocket` — comes from the second lookup, which is what
-   *  stops every contributed command from rendering as the same ⌘. */
   /** Whether a watcher burst touched a build manifest — the file the project's own name,
    *  modules and JDK come out of.
    *
@@ -1372,21 +1321,29 @@
     });
   }
 
+  /** A brand mark first, then the one palette vocabulary every product shares. A plugin's
+   *  contributed command names a lucide icon too, so it resolves on the same path. */
   function iconResolver(name: string): IconComponent {
-    return ICONS[name] ?? (PLUGIN_ICONS[name] as IconComponent | undefined) ?? ICONS.command;
+    return BRAND_ICONS[name] ?? paletteIcon(name);
   }
 
   function run(fn: () => void) { bennuUiStore.closePalette(); queueMicrotask(fn); }
 
   /** Whether the project has switched the naming check on — what gates the two bulk-fix entries.
    *  Offering "Fix naming" to a project with no convention is offering to do nothing. */
-  const namingOn = $derived(bennuNamingStore.config.enabled);
+  const namingOn = $derived(bennuNamingStore.enabled);
 
-  // Read the project's naming section when a project opens, so `namingOn` is right before anyone
-  // has been near Project Configuration. Untracked because `load` writes the state it reads.
+  // Read both naming documents when a project opens, so `namingOn` is right before anyone has been
+  // near Settings or Project Configuration — the profile counts, because a project that states
+  // nothing is judged by it. Untracked because `load` writes the state it reads.
   $effect(() => {
     const root = projectStore.project?.root;
-    if (root) untrack(() => void bennuNamingStore.load(root));
+    if (root) {
+      untrack(() => {
+        void bennuNamingStore.load(root);
+        void bennuNamingStore.profile.load();
+      });
+    }
   });
 
   /**
@@ -1433,69 +1390,69 @@
     const canNav = supportsCodeNav(path);
     const isJava = isJavaFile(path);
     const editorItems = [
-      { id: 'goto', title: 'Go to line', icon: 'hash', shortcut: 'Ctrl+G',
+      { id: 'goto', title: 'Go to line', icon: 'Hash', shortcut: 'Ctrl+G',
         action: () => run(() => editor?.openGoto()), when: !!projectStore.activeFilePath },
       // Local history. Three entries and not one, because the three answer different
       // questions and only one of them has a file to be about — an entry that opens on
       // nothing is the same lie as a panel that can only say "not here".
-      { id: 'history', title: 'Local history: this file', icon: 'history', shortcut: 'Alt+Shift+H',
+      { id: 'history', title: 'Local history: this file', icon: 'History', shortcut: 'Alt+Shift+H',
         action: () => run(() => bennuHistoryStore.show(projectStore.project!.root, projectStore.activeFilePath!)),
         when: !!projectStore.project && !!projectStore.activeFilePath },
-      { id: 'historyproject', title: 'Local history: project', icon: 'history',
+      { id: 'historyproject', title: 'Local history: project', icon: 'History',
         action: () => run(() => bennuHistoryStore.showProject(projectStore.project!.root)),
         when: !!projectStore.project },
-      { id: 'historydeleted', title: 'Local history: deleted files…', icon: 'history',
+      { id: 'historydeleted', title: 'Local history: deleted files…', icon: 'History',
         action: () => run(() => bennuHistoryStore.showDeleted(projectStore.project!.root)),
         when: !!projectStore.project },
-      { id: 'gotodef', title: 'Go to declaration', icon: 'target', shortcut: 'Ctrl+B',
+      { id: 'gotodef', title: 'Go to declaration', icon: 'Target', shortcut: 'Ctrl+B',
         action: () => run(() => editor?.goToDefinition()), when: canNav },
       // The navigation history, findable by name. Back and Forward are muscle memory once you
       // know them, and unfindable until you do.
-      { id: 'navback', title: 'Back', icon: 'history', shortcut: 'Ctrl+Alt+Left',
+      { id: 'navback', title: 'Back', icon: 'History', shortcut: 'Ctrl+Alt+Left',
         action: () => run(() => editor?.navBack()), when: !!projectStore.activeFilePath },
-      { id: 'navforward', title: 'Forward', icon: 'history', shortcut: 'Ctrl+Alt+Right',
+      { id: 'navforward', title: 'Forward', icon: 'History', shortcut: 'Ctrl+Alt+Right',
         action: () => run(() => editor?.navForward()), when: !!projectStore.activeFilePath },
-      { id: 'navlastedit', title: 'Last edit location', icon: 'history', shortcut: 'Ctrl+Shift+Backspace',
+      { id: 'navlastedit', title: 'Last edit location', icon: 'History', shortcut: 'Ctrl+Shift+Backspace',
         action: () => run(() => editor?.navLastEdit()), when: bennuNavStore.hasEdits },
-      { id: 'recentlocations', title: 'Recent locations…', icon: 'history', shortcut: 'Ctrl+Shift+E',
+      { id: 'recentlocations', title: 'Recent locations…', icon: 'History', shortcut: 'Ctrl+Shift+E',
         action: () => run(() => (recentLocationsOpen = true)),
         when: bennuNavStore.recent.length > 0 },
       // Not gated on the ecosystem: the navigator has two engines behind it. A Java project's
       // types and members come from the symbol index; a Cargo project's come from the language
       // server, and the tab reads **Types** there because what it finds are structs, enums and
       // traits. Which engine answers is the modal's business — see `BennuGotoModal.lspBacked`.
-      { id: 'gotoclass', title: javaTools ? 'Go to class…' : 'Go to type…', icon: 'box', shortcut: 'Ctrl+N',
+      { id: 'gotoclass', title: javaTools ? 'Go to class…' : 'Go to type…', icon: 'Box', shortcut: 'Ctrl+N',
         action: () => run(() => bennuUiStore.openNav('class', editor?.getSelectedText() ?? '')),
         when: !!projectStore.project },
-      { id: 'gotofile', title: 'Go to file…', icon: 'file', shortcut: 'Ctrl+Shift+N',
+      { id: 'gotofile', title: 'Go to file…', icon: 'FileCode2', shortcut: 'Ctrl+Shift+N',
         action: () => run(() => bennuUiStore.openNav('file', editor?.getSelectedText() ?? '')), when: !!projectStore.project },
-      { id: 'gotosymbol', title: 'Go to symbol…', icon: 'search', shortcut: 'Ctrl+Shift+Y',
+      { id: 'gotosymbol', title: 'Go to symbol…', icon: 'Search', shortcut: 'Ctrl+Shift+Y',
         action: () => run(() => bennuUiStore.openNav('symbol', editor?.getSelectedText() ?? '')),
         when: !!projectStore.project },
-      { id: 'expandsel', title: 'Expand selection', icon: 'braces', shortcut: 'Alt+Shift+Right',
+      { id: 'expandsel', title: 'Expand selection', icon: 'Braces', shortcut: 'Alt+Shift+Right',
         action: () => run(() => void editor?.expandSelection()), when: canNav },
-      { id: 'shrinksel', title: 'Shrink selection', icon: 'braces', shortcut: 'Alt+Shift+Left',
+      { id: 'shrinksel', title: 'Shrink selection', icon: 'Braces', shortcut: 'Alt+Shift+Left',
         action: () => run(() => void editor?.shrinkSelection()), when: canNav },
-      { id: 'filestructure', title: 'File structure…', icon: 'list-tree', shortcut: 'Ctrl+F12',
+      { id: 'filestructure', title: 'File structure…', icon: 'ListTree', shortcut: 'Ctrl+F12',
         action: () => run(() => bennuUiStore.openFileStructure()), when: canNav },
-      { id: 'usages', title: 'Find usages', icon: 'search', shortcut: 'Alt+F7',
+      { id: 'usages', title: 'Find usages', icon: 'Search', shortcut: 'Alt+F7',
         action: () => run(() => void editor?.findUsages()), when: canNav },
       // A verb of its own, and only where it means something. A `.svelte` file has no
       // declaration inside it to put the caret on — the file IS the component — so Alt+F7 can
       // never be asked about it. See `findComponentUsages`.
-      { id: 'componentusages', title: 'Find usages of this component', icon: 'search',
+      { id: 'componentusages', title: 'Find usages of this component', icon: 'Search',
         shortcut: 'Alt+Shift+F7',
         action: () => run(() => void editor?.findComponentUsages()),
         when: (path ?? '').toLowerCase().endsWith('.svelte') },
       // Both engines answer these now — a `.java` buffer over the whole-project reference index,
       // everything else over its language server. The backend routes on the file.
-      { id: 'callhierarchy', title: 'Call hierarchy', icon: 'network', shortcut: 'Ctrl+Shift+H',
+      { id: 'callhierarchy', title: 'Call hierarchy', icon: 'Network', shortcut: 'Ctrl+Shift+H',
         action: () => run(() => editor?.showCallHierarchy()), when: isJava || isLspFile(path) },
-      { id: 'typehierarchy', title: 'Type hierarchy', icon: 'network', shortcut: 'Ctrl+H',
+      { id: 'typehierarchy', title: 'Type hierarchy', icon: 'Network', shortcut: 'Ctrl+H',
         action: () => run(() => editor?.showTypeHierarchy()), when: isJava || isLspFile(path) },
-      { id: 'rename', title: 'Rename…', icon: 'target', shortcut: 'Shift+F6',
+      { id: 'rename', title: 'Rename…', icon: 'Target', shortcut: 'Shift+F6',
         action: () => run(() => editor?.openRename()), when: canNav },
-      { id: 'safedelete', title: 'Safe delete…', icon: 'trash', shortcut: 'Alt+Delete',
+      { id: 'safedelete', title: 'Safe delete…', icon: 'Trash2', shortcut: 'Alt+Delete',
         action: () => run(() => void openSafeDelete()), when: isJava },
       // The bulk half of the naming check. Two entries and not one: "this file" is the answer to a
       // screen full of squiggles, "the project" is a deliberate sweep, and they cost very
@@ -1503,105 +1460,105 @@
       // No keybinding on purpose: a bulk fix is something you run once after adopting a
       // convention, not something you reach for while typing, and every free Ctrl+Shift+<letter>
       // is worth more to an action that is.
-      { id: 'namingfixfile', title: 'Fix naming in file', icon: 'wand',
+      { id: 'namingfixfile', title: 'Fix naming in file', icon: 'Wand2',
         action: () => run(() => void planNamingFix('file')),
         when: !!projectStore.activeFilePath && namingOn },
-      { id: 'namingfixproject', title: 'Fix naming in project', icon: 'wand',
+      { id: 'namingfixproject', title: 'Fix naming in project', icon: 'Wand2',
         action: () => run(() => void planNamingFix('project')), when: namingOn },
-      { id: 'save', title: 'Save file', icon: 'file', shortcut: 'Ctrl+S',
+      { id: 'save', title: 'Save file', icon: 'FileCode2', shortcut: 'Ctrl+S',
         action: () => run(saveActive), when: !!projectStore.activeFilePath },
-      { id: 'find', title: 'Find in file', icon: 'search', shortcut: 'Ctrl+F',
+      { id: 'find', title: 'Find in file', icon: 'Search', shortcut: 'Ctrl+F',
         action: () => run(() => editor?.openSearch()), when: !!projectStore.activeFilePath },
-      { id: 'findproj', title: 'Find in project', icon: 'search', shortcut: 'Ctrl+Shift+F',
+      { id: 'findproj', title: 'Find in project', icon: 'Search', shortcut: 'Ctrl+Shift+F',
         action: () => run(() => bennuUiStore.openFind(editor?.getSelectedText() ?? '')), when: true },
-      { id: 'reveal', title: 'Select opened file in tree', icon: 'folder-tree',
+      { id: 'reveal', title: 'Select opened file in tree', icon: 'FolderTree',
         action: () => run(() => bennuUiStore.revealActiveInTree()), when: !!projectStore.activeFilePath },
       // The two the project tree could only be right-clicked for. WHERE they create is the
       // tree's answer — the directory it is sitting on — so these only open the dialog.
-      { id: 'newfile', title: 'New file…', icon: 'file-plus',
+      { id: 'newfile', title: 'New file…', icon: 'FilePlus2',
         action: () => run(() => bennuUiStore.newInTree('file')), when: !!projectStore.project },
-      { id: 'newfolder', title: 'New folder or package…', icon: 'folder-plus',
+      { id: 'newfolder', title: 'New folder or package…', icon: 'FolderPlus',
         action: () => run(() => bennuUiStore.newInTree('folder')), when: !!projectStore.project },
       // Maven only — on a Cargo workspace a new member crate is a different operation, and an
       // entry that opens a dialog with nothing to put in it is worse than no entry.
-      { id: 'newmodule', title: 'New module…', icon: 'folder-plus',
+      { id: 'newmodule', title: 'New module…', icon: 'FolderPlus',
         action: () => run(() => bennuUiStore.newInTree('module')),
         when: !!projectStore.project && !projectStore.isCargo },
-      { id: 'generate', title: 'Generate…', icon: 'wand', shortcut: 'Alt+Insert',
+      { id: 'generate', title: 'Generate…', icon: 'Wand2', shortcut: 'Alt+Insert',
         action: () => run(() => bennuUiStore.openGenerate()), when: isJava },
-      { id: 'generate-template', title: 'Generate from a template…', icon: 'wand',
+      { id: 'generate-template', title: 'Generate from a template…', icon: 'Wand2',
         action: () => run(() => bennuUiStore.openTemplateGenerate('class')), when: isJava },
-      { id: 'generate-config-properties', title: 'Generate configuration properties for the class at the caret', icon: 'wand',
+      { id: 'generate-config-properties', title: 'Generate configuration properties for the class at the caret', icon: 'Wand2',
         action: () => run(() => bennuUiStore.openTemplateGenerate('config-properties')), when: isJava },
-      { id: 'generate-config-class', title: 'Generate a @ConfigurationProperties class from these keys', icon: 'wand',
+      { id: 'generate-config-class', title: 'Generate a @ConfigurationProperties class from these keys', icon: 'Wand2',
         action: () => run(() => bennuUiStore.openConfigClass()), when: isSpringConfigFile(path) },
-      { id: 'code-templates', title: 'Code templates…', icon: 'command',
+      { id: 'code-templates', title: 'Code templates…', icon: 'Command',
         action: () => run(() => bennuUiStore.openSettings('templates')), when: true },
-      { id: 'test-values', title: 'Test values for the DTO Lab…', icon: 'command',
+      { id: 'test-values', title: 'Test values for the DTO Lab…', icon: 'Command',
         action: () => run(() => bennuUiStore.openSettings('test-values')), when: !projectStore.isCargo },
-      { id: 'override', title: 'Implement / override methods…', icon: 'wand', shortcut: 'Ctrl+I',
+      { id: 'override', title: 'Implement / override methods…', icon: 'Wand2', shortcut: 'Ctrl+I',
         action: () => run(() => void openOverrides()), when: isJava },
       // The same request the shortcut makes, from a list instead. Worth an entry beyond the usual
       // discoverability argument: `Ctrl+Space` is a chord the operating system can take away
       // (macOS binds it to switching input source), and this is then the only way left to ask.
-      { id: 'completions', title: 'Suggest completions', icon: 'bulb', shortcut: 'Ctrl+Shift+Space',
+      { id: 'completions', title: 'Suggest completions', icon: 'Lightbulb', shortcut: 'Ctrl+Shift+Space',
         action: () => run(() => editor?.requestCompletion()), when: !!projectStore.activeFilePath },
-      { id: 'intentions', title: 'Show intentions', icon: 'bulb', shortcut: 'Alt+Enter',
+      { id: 'intentions', title: 'Show intentions', icon: 'Lightbulb', shortcut: 'Alt+Enter',
         // Also the language-server quick-fix list for a server-backed buffer — the user's gesture
         // is "what can you do here", and which engine answers is not their problem.
         action: () => run(() => editor?.openIntentions()), when: isJava || isLspFile(path) },
       // NOT IntelliJ's Ctrl+Alt+L: on IT/DE/FR/ES layouts Chromium drops Ctrl+Alt+<letter> to
       // preserve AltGr, so the binding would simply never fire. Alt+Shift+F is VS Code's and is
       // in the safe family.
-      { id: 'format', title: 'Format file', icon: 'wand', shortcut: 'Alt+Shift+F',
+      { id: 'format', title: 'Format file', icon: 'Wand2', shortcut: 'Alt+Shift+F',
         action: () => run(() => void editor?.formatDocument()), when: isJava || isLspFile(path) },
       // Eclipse's own binding for this, and it is the one people reach for: IntelliJ's Ctrl+Alt+O
       // is unusable here (Chromium drops Ctrl+Alt+<letter> on IT/DE/FR/ES layouts to preserve
       // AltGr).
-      { id: 'optimizeimports', title: 'Optimize imports', icon: 'wand', shortcut: 'Ctrl+Shift+O',
+      { id: 'optimizeimports', title: 'Optimize imports', icon: 'Wand2', shortcut: 'Ctrl+Shift+O',
         action: () => run(() => void editor?.optimizeImportsInBuffer()), when: isJava },
       // What a macro expands to. Recursive — the server has no single-step form — and read-only,
       // because what comes back is text rather than a file it knows.
-      { id: 'expandmacro', title: 'Expand macro', icon: 'wand', shortcut: 'Alt+Shift+M',
+      { id: 'expandmacro', title: 'Expand macro', icon: 'Wand2', shortcut: 'Alt+Shift+M',
         action: () => run(() => editor?.expandMacro()), when: isLspFile(path) },
-      { id: 'lsp-restart', title: 'Restart language server', icon: 'refresh-cw',
+      { id: 'lsp-restart', title: 'Restart language server', icon: 'RotateCw',
         action: () => run(() => void restartActiveLanguageServer()),
         when: !!bennuLspStore.statusFor(path) },
       // Not the same thing as a restart: this re-reads the manifests in the SAME session, keeping
       // everything the server has already indexed.
-      { id: 'lsp-reload', title: 'Reload workspace (re-read the manifests)', icon: 'refresh-cw',
+      { id: 'lsp-reload', title: 'Reload workspace (re-read the manifests)', icon: 'RotateCw',
         action: () => run(() => void reloadLanguageServerWorkspace()),
         when: !!projectStore.project && !!bennuLspStore.statusFor(path) },
-      { id: 'lsp-settings', title: 'Language server settings…', icon: 'sliders',
+      { id: 'lsp-settings', title: 'Language server settings…', icon: 'SlidersHorizontal',
         action: () => run(() => bennuUiStore.openSettings('languages')), when: true },
-      { id: 'mojibake', title: 'Check file for mojibake', icon: 'shield',
+      { id: 'mojibake', title: 'Check file for mojibake', icon: 'ShieldCheck',
         action: () => run(() => void editor?.checkMojibake()), when: !!path },
-      { id: 'mojibakeproject', title: 'Scan project for mojibake…', icon: 'shield',
+      { id: 'mojibakeproject', title: 'Scan project for mojibake…', icon: 'ShieldCheck',
         action: () => run(() => bennuUiStore.openMojibakeScan()), when: !!projectStore.project },
-      { id: 'newvalidator', title: 'Add Struts validators…', icon: 'shield',
+      { id: 'newvalidator', title: 'Add Struts validators…', icon: 'ShieldCheck',
         action: () => run(() => bennuUiStore.openValidationCreator()),
         when: projectStore.activeFilePath?.toLowerCase().endsWith('-validation.xml') ?? false },
-      { id: 'createvalidation', title: 'Create Struts validation file', icon: 'shield',
+      { id: 'createvalidation', title: 'Create Struts validation file', icon: 'ShieldCheck',
         action: () => run(() => void editor?.createValidationFile()), when: isJava && hasStruts },
-      { id: 'hotswap-jsp', title: 'Deploy current JSP to Tomcat', icon: 'server', shortcut: 'Ctrl+Shift+F10',
+      { id: 'hotswap-jsp', title: 'Deploy current JSP to Tomcat', icon: 'Server', shortcut: 'Ctrl+Shift+F10',
         action: () => run(() => void deployToTomcat(false)), when: isJspFile(path) },
       // Indentation — mirrors the footer control (BennuIndentStatus). Gated to the
       // alternatives only (the active style / width is hidden), so at most 3 entries show.
-      { id: 'indent-spaces', title: 'Indent using spaces', icon: 'indent',
+      { id: 'indent-spaces', title: 'Indent using spaces', icon: 'IndentIncrease',
         action: () => run(() => bennuSettingsStore.setIndentStyle('spaces')),
         when: bennuSettingsStore.indentStyle !== 'spaces' },
-      { id: 'indent-tabs', title: 'Indent using tabs', icon: 'indent',
+      { id: 'indent-tabs', title: 'Indent using tabs', icon: 'IndentIncrease',
         action: () => run(() => bennuSettingsStore.setIndentStyle('tabs')),
         when: bennuSettingsStore.indentStyle !== 'tabs' },
-      { id: 'tabwidth-2', title: 'Tab width: 2', icon: 'indent',
+      { id: 'tabwidth-2', title: 'Tab width: 2', icon: 'IndentIncrease',
         action: () => run(() => bennuSettingsStore.setTabSize(2)), when: bennuSettingsStore.tabSize !== 2 },
-      { id: 'tabwidth-4', title: 'Tab width: 4', icon: 'indent',
+      { id: 'tabwidth-4', title: 'Tab width: 4', icon: 'IndentIncrease',
         action: () => run(() => bennuSettingsStore.setTabSize(4)), when: bennuSettingsStore.tabSize !== 4 },
-      { id: 'tabwidth-8', title: 'Tab width: 8', icon: 'indent',
+      { id: 'tabwidth-8', title: 'Tab width: 8', icon: 'IndentIncrease',
         action: () => run(() => bennuSettingsStore.setTabSize(8)), when: bennuSettingsStore.tabSize !== 8 },
       // Markdown: rendered or raw. Offered only on a `.md`, and phrased as the thing it would
       // switch TO — a palette entry is read as a verb, not as a status.
-      { id: 'md-source', title: 'Markdown: edit the source', icon: 'file',
+      { id: 'md-source', title: 'Markdown: edit the source', icon: 'FileCode2',
         action: () => run(() => bennuSettingsStore.setMarkdownLivePreview(false)),
         when: isMarkdownFile(path) && bennuSettingsStore.markdownLivePreview },
       { id: 'md-preview', title: 'Markdown: live preview', icon: 'Eye',
@@ -1609,45 +1566,45 @@
         when: isMarkdownFile(path) && !bennuSettingsStore.markdownLivePreview },
     ];
     const viewItems = [
-      { id: 'project',   title: 'Toggle Project',   icon: 'folder-tree', shortcut: 'Alt+1', action: () => run(() => bennuUiStore.toggleLeft('project')), when: true },
+      { id: 'project',   title: 'Toggle Project',   icon: 'FolderTree', shortcut: 'Alt+1', action: () => run(() => bennuUiStore.toggleLeft('project')), when: true },
       // The Java-only tools are gated on `javaTools`, exactly like their rail icons — a
       // palette entry that opens a permanently-empty panel is the same lie in a different
       // place.
-      { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: !!projectStore.project },
-      { id: 'forms',     title: 'Toggle Forms',     icon: 'list',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: jspTools },
+      { id: 'structure', title: 'Toggle Structure', icon: 'ListTree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: !!projectStore.project },
+      { id: 'forms',     title: 'Toggle Forms',     icon: 'TextCursorInput',        shortcut: 'Alt+3', action: () => run(() => bennuUiStore.toggleBottom('forms')), when: jspTools },
       // The DTO Lab. The panel toggle everywhere it applies; the two verbs about the class at the caret
       // only on a Java file, where there is a class to be at.
-      { id: 'dtolab',    title: 'Toggle DTO Lab',   icon: 'beaker', action: () => run(() => bennuUiStore.toggleBottom('dtolab')), when: dtoLabTools },
-      { id: 'dtolab-try', title: 'DTO Lab: try the class at the caret', icon: 'beaker', shortcut: 'Alt+Shift+J',
+      { id: 'dtolab',    title: 'Toggle DTO Lab',   icon: 'Beaker', action: () => run(() => bennuUiStore.toggleBottom('dtolab')), when: dtoLabTools },
+      { id: 'dtolab-try', title: 'DTO Lab: try the class at the caret', icon: 'Beaker', shortcut: 'Alt+Shift+J',
         action: () => run(() => bennuDtoLabStore.openAtCaret('payload')), when: dtoLabTools && !!path?.toLowerCase().endsWith('.java') },
-      { id: 'dtolab-tests', title: 'DTO Lab: generate validation tests for the class at the caret', icon: 'beaker',
+      { id: 'dtolab-tests', title: 'DTO Lab: generate validation tests for the class at the caret', icon: 'Beaker',
         action: () => run(() => bennuDtoLabStore.openAtCaret('tests')), when: dtoLabTools && !!path?.toLowerCase().endsWith('.java') },
-      { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: true },
+      { id: 'dependencies', title: 'Dependencies',  icon: 'Library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: true },
       // The same subject from the other angle: the list says what each module needs, the graph says
       // who needs *it*, what a change to it rebuilds, and whether the project has a cycle. Named for
       // the ecosystem's own word so a Rust workspace is not offered a "module" graph.
-      { id: 'modulegraph', title: projectStore.isCargo ? 'Crate graph' : 'Module graph', icon: 'network',
+      { id: 'modulegraph', title: projectStore.isCargo ? 'Crate graph' : 'Module graph', icon: 'Network',
         shortcut: 'Alt+Shift+D', action: () => run(() => bennuUiStore.openModuleGraph()), when: !!projectStore.project },
       // Offered only on a translation bundle: everywhere else the panel could only say "not here",
       // and a palette that lists what cannot work is a palette you stop trusting.
-      { id: 'i18npanel', title: 'Toggle i18n panel', icon: 'languages', shortcut: 'Alt+Shift+I',
+      { id: 'i18npanel', title: 'Toggle i18n panel', icon: 'Languages', shortcut: 'Alt+Shift+I',
         action: () => run(() => bennuUiStore.toggleRight('i18n')), when: isI18nBundle(path) },
-      { id: 'runpanel',  title: 'Toggle Run',       icon: 'play',        shortcut: 'Alt+R', action: () => run(() => bennuUiStore.toggleBottom('run')), when: true },
-      { id: 'tests',     title: 'Toggle Tests',     icon: 'junit',       shortcut: 'Alt+5', action: () => run(() => bennuUiStore.toggleRight('tests')), when: javaTools },
-      { id: 'problems',  title: 'Toggle Problems',  icon: 'alert',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
-      { id: 'todos',     title: 'Toggle TODO',      icon: 'todo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
-      { id: 'terminal',  title: 'Toggle Terminal',  icon: 'terminal',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
+      { id: 'runpanel',  title: 'Toggle Run',       icon: 'Play',        shortcut: 'Alt+R', action: () => run(() => bennuUiStore.toggleBottom('run')), when: true },
+      { id: 'tests',     title: 'Toggle Tests',     icon: 'JUnit',       shortcut: 'Alt+5', action: () => run(() => bennuUiStore.toggleRight('tests')), when: javaTools },
+      { id: 'problems',  title: 'Toggle Problems',  icon: 'AlertTriangle',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
+      { id: 'todos',     title: 'Toggle TODO',      icon: 'ListTodo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
+      { id: 'terminal',  title: 'Toggle Terminal',  icon: 'TerminalSquare',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
       // Why a plugin did nothing. Docked rather than modal, so it belongs beside the other
       // panel toggles — and in the palette, because it is opened exactly when something is
       // wrong and the hamburger is one more thing to remember.
-      { id: 'pluginlogs', title: 'Toggle Plugin Logs', icon: 'scroll',    action: () => run(() => bennuUiStore.togglePluginLogs()), when: true },
-      { id: 'maven',     title: 'Toggle Maven',     icon: 'maven',       shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
-      { id: 'cargo',     title: 'Toggle Cargo',     icon: 'cog',         shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('cargo')), when: projectStore.isCargo },
+      { id: 'pluginlogs', title: 'Toggle Plugin Logs', icon: 'ScrollText',    action: () => run(() => bennuUiStore.togglePluginLogs()), when: true },
+      { id: 'maven',     title: 'Toggle Maven',     icon: 'Maven',       shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
+      { id: 'cargo',     title: 'Toggle Cargo',     icon: 'Cog',         shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('cargo')), when: projectStore.isCargo },
       // Runs the real `cargo add`. In the View section beside the Cargo window because that is where
       // it is otherwise reached from, and gated on the ecosystem: there is nothing to add to a pom.
-      { id: 'cargoadd',  title: 'Add dependency… (cargo add)', icon: 'library', action: () => run(() => bennuUiStore.openCargoAdd()), when: projectStore.isCargo },
-      { id: 'ast',       title: 'Toggle Trees — syntax and model', icon: 'braces',    shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('ast')), when: javaTools },
-      { id: 'ssr',       title: 'Structural search / replace…', icon: 'search', shortcut: 'Ctrl+Shift+M', action: () => run(() => bennuUiStore.openSsr()), when: javaTools },
+      { id: 'cargoadd',  title: 'Add dependency… (cargo add)', icon: 'Library', action: () => run(() => bennuUiStore.openCargoAdd()), when: projectStore.isCargo },
+      { id: 'ast',       title: 'Toggle Trees — syntax and model', icon: 'Braces',    shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('ast')), when: javaTools },
+      { id: 'ssr',       title: 'Structural search / replace…', icon: 'Search', shortcut: 'Ctrl+Shift+M', action: () => run(() => bennuUiStore.openSsr()), when: javaTools },
       // The framework catalogs. Palette-only by design (see `framework-catalogs.ts`) and gated
       // on the project having something in them, so they are absent — not empty — everywhere
       // else. Same list the rail is built from: a verb the palette offers must have somewhere to
@@ -1690,7 +1647,7 @@
       ...JPA_PALETTE_ACTIONS.map((a) => ({
         id: `jpa:${a.id}`,
         title: `JPA: ${a.title.toLowerCase()}…`,
-        icon: 'wand',
+        icon: 'Wand2',
         action: () => run(() => bennuUiStore.openJpaGenerate(a.id, projectStore.activeFilePath)),
         when: hasJpa,
       })),
@@ -1702,43 +1659,43 @@
     const testStore = activeTestStore();
     const testsIdle = idle && !testStore.running;
     const runItems = [
-      { id: 'build', title: javaTools ? 'Build project' : 'Check project (cargo check)', icon: 'hammer', shortcut: 'Ctrl+F9',
+      { id: 'build', title: javaTools ? 'Build project' : 'Check project (cargo check)', icon: 'Hammer', shortcut: 'Ctrl+F9',
         action: () => run(triggerBuild), when: idle },
-      { id: 'validate', title: 'Validate project (no compile)', icon: 'list-checks',
+      { id: 'validate', title: 'Validate project (no compile)', icon: 'ListChecks',
         action: () => run(triggerValidate), when: idle && javaTools },
-      { id: 'run', title: 'Run', icon: 'play', shortcut: 'Shift+F10',
+      { id: 'run', title: 'Run', icon: 'Play', shortcut: 'Shift+F10',
         action: () => run(triggerRun), when: idle },
       // Both ecosystems: JDWP attaches to the JVM `bennu_run` spawned, a Cargo target is built and
       // then launched under a debug adapter.
-      { id: 'debug', title: 'Debug', icon: 'bug', shortcut: 'Shift+F9',
+      { id: 'debug', title: 'Debug', icon: 'Bug', shortcut: 'Shift+F9',
         action: () => run(triggerDebug), when: idle },
       // The three that only mean anything while the program is standing still. Offered from
       // the palette as well as the panel because the panel has to be open to press one, and
       // reaching a verb from wherever you are is what the palette is for.
-      { id: 'dbgresume', title: 'Resume the program', icon: 'play', shortcut: 'F9',
+      { id: 'dbgresume', title: 'Resume the program', icon: 'Play', shortcut: 'F9',
         action: () => run(() => void bennuDebugStore.resume()), when: bennuDebugStore.paused },
-      { id: 'dbgstepover', title: 'Step over', icon: 'play', shortcut: 'F8',
+      { id: 'dbgstepover', title: 'Step over', icon: 'Play', shortcut: 'F8',
         action: () => run(() => void bennuDebugStore.step('over')), when: bennuDebugStore.paused },
-      { id: 'dbgstepinto', title: 'Step into', icon: 'play', shortcut: 'F7',
+      { id: 'dbgstepinto', title: 'Step into', icon: 'Play', shortcut: 'F7',
         action: () => run(() => void bennuDebugStore.step('into')), when: bennuDebugStore.paused },
-      { id: 'dbgstepout', title: 'Step out', icon: 'play', shortcut: 'Shift+F8',
+      { id: 'dbgstepout', title: 'Step out', icon: 'Play', shortcut: 'Shift+F8',
         action: () => run(() => void bennuDebugStore.step('out')), when: bennuDebugStore.paused },
-      { id: 'dbgbreak', title: 'Toggle breakpoint', icon: 'bug', shortcut: 'Ctrl+F8',
+      { id: 'dbgbreak', title: 'Toggle breakpoint', icon: 'Bug', shortcut: 'Ctrl+F8',
         action: () => run(toggleBreakpointAtCaret),
         when: javaTools && supportsCodeNav(projectStore.activeFilePath) },
-      { id: 'dbglist', title: 'Breakpoints…', icon: 'bug', shortcut: 'Ctrl+Shift+F8',
+      { id: 'dbglist', title: 'Breakpoints…', icon: 'Bug', shortcut: 'Ctrl+Shift+F8',
         action: () => run(() => bennuUiStore.openBreakpoints()),
         when: javaTools && !!projectStore.project },
       { id: 'dbgmute', title: bennuDebugStore.muted ? 'Arm breakpoints' : 'Mute breakpoints',
-        icon: 'bug',
+        icon: 'Bug',
         action: () => run(() => void bennuDebugStore.toggleMute()), when: bennuDebugStore.live },
-      { id: 'dbgdetach', title: 'Detach the debugger', icon: 'bug',
+      { id: 'dbgdetach', title: 'Detach the debugger', icon: 'Bug',
         action: () => run(() => void bennuDebugStore.detachSession()), when: bennuDebugStore.live },
-      { id: 'rerun', title: 'Rerun', icon: 'rerun',
+      { id: 'rerun', title: 'Rerun', icon: 'ListRestart',
         action: () => run(() => void bennuRunStore.rerunApp()), when: idle && bennuRunStore.canRerun },
-      { id: 'stoprun', title: 'Stop the program', icon: 'hammer',
+      { id: 'stoprun', title: 'Stop the program', icon: 'Hammer',
         action: () => run(() => void bennuRunStore.stop()), when: bennuRunStore.canStop },
-      { id: 'runcfg', title: 'Edit run configuration…', icon: 'sliders',
+      { id: 'runcfg', title: 'Edit run configuration…', icon: 'SlidersHorizontal',
         action: () => run(() => bennuUiStore.openRunConfig()), when: !!projectStore.project },
       // One entry per cargo command, so every one is reachable by name from the keyboard rather
       // than only by clicking a row in the panel — which has to be open to click. Aimed at the
@@ -1747,7 +1704,7 @@
       ...bennuCargoStore.commonCommands.map((c) => ({
         id: `cargo:${c.id}`,
         title: `Cargo: ${c.label} the workspace`,
-        icon: 'cog',
+        icon: 'Cog',
         action: () =>
           run(() => {
             const root = projectStore.project?.root;
@@ -1764,17 +1721,17 @@
       // open to press one, and the point of the palette is to reach a verb from wherever you
       // are. The caret verb is gated on the file actually declaring a test, so it is absent
       // rather than present-and-useless everywhere else.
-      { id: 'test-all', title: 'Run all tests', icon: 'flask', shortcut: 'Ctrl+Shift+F5',
+      { id: 'test-all', title: 'Run all tests', icon: 'FlaskConical', shortcut: 'Ctrl+Shift+F5',
         action: () => run(triggerRunAllTests), when: testsIdle },
-      { id: 'test-caret', title: 'Run test at caret', icon: 'play', shortcut: 'Ctrl+Shift+F10',
+      { id: 'test-caret', title: 'Run test at caret', icon: 'Play', shortcut: 'Ctrl+Shift+F10',
         action: () => run(() => void triggerRunTestAtCaret()), when: testsIdle && activeFileHasTests },
-      { id: 'test-rerun', title: 'Rerun tests', icon: 'refresh-cw', shortcut: 'Ctrl+F5',
+      { id: 'test-rerun', title: 'Rerun tests', icon: 'RotateCw', shortcut: 'Ctrl+F5',
         action: () => run(() => void testStore.rerun()), when: testsIdle && testStore.hasResults },
-      { id: 'test-rerun-failed', title: 'Rerun failed tests', icon: 'rerun',
+      { id: 'test-rerun-failed', title: 'Rerun failed tests', icon: 'ListRestart',
         action: () => run(() => void testStore.rerunFailed()), when: testsIdle && testStore.hasFailures },
-      { id: 'test-stop', title: 'Stop the test run', icon: 'hammer',
+      { id: 'test-stop', title: 'Stop the test run', icon: 'Hammer',
         action: () => run(() => void testStore.stop()), when: testStore.running },
-      { id: 'hotswap-all', title: 'Deploy all JSPs to Tomcat', icon: 'server',
+      { id: 'hotswap-all', title: 'Deploy all JSPs to Tomcat', icon: 'Server',
         action: () => run(() => void deployToTomcat(true)), when: !!projectStore.project && javaTools },
     ];
     // Switch project — one entry per other project in the ACTIVE workspace (keyboard-first).
@@ -1782,7 +1739,7 @@
       ? projectStore.workspaceProjects
           .filter((p) => p.root !== projectStore.project?.root)
           .map((p) => ({
-            id: `psw:${p.root}`, title: `Switch to project ${p.name}`, icon: 'folder-tree',
+            id: `psw:${p.root}`, title: `Switch to project ${p.name}`, icon: 'FolderTree',
             shortcut: undefined as string | undefined,
             action: () => run(() => void projectStore.switchProject(p.root)), when: true,
           }))
@@ -1792,25 +1749,25 @@
       ? workspacesStore.workspaces
           .filter((w) => w.id !== workspacesStore.activeId)
           .map((w) => ({
-            id: `wss:${w.id}`, title: `Switch to workspace ${w.name || 'Workspace'}`, icon: 'folder-tree',
+            id: `wss:${w.id}`, title: `Switch to workspace ${w.name || 'Workspace'}`, icon: 'FolderTree',
             shortcut: undefined as string | undefined,
             action: () => run(() => void workspacesStore.switchTo(w.id)), when: true,
           }))
       : [];
     const appItems = [
-      { id: 'workspaces', title: 'Manage workspaces…', icon: 'folder-tree', action: () => run(() => bennuUiStore.openWorkspaceManager()), when: true },
-      { id: 'newworkspace', title: 'New workspace…', icon: 'folder-tree',
+      { id: 'workspaces', title: 'Manage workspaces…', icon: 'FolderTree', action: () => run(() => bennuUiStore.openWorkspaceManager()), when: true },
+      { id: 'newworkspace', title: 'New workspace…', icon: 'FolderTree',
         action: () => run(async () => { await workspacesStore.create('New workspace'); bennuUiStore.openWorkspaceManager(); }), when: true },
-      { id: 'projectcfg', title: 'Project Configuration…', icon: 'sliders', action: () => run(() => bennuUiStore.openProjectConfig()), when: !!projectStore.project },
-      { id: 'tomcatcfg', title: 'Tomcat hot-swap…', icon: 'server', action: () => run(() => bennuUiStore.openTomcatConfig()), when: !!projectStore.project && javaTools },
-      { id: 'indexinspector', title: 'Index inspector…', icon: 'box', action: () => run(() => bennuUiStore.openIndexInspector()), when: !!projectStore.project && javaTools },
-      { id: 'reindex', title: 'Rebuild index', icon: 'refresh-cw',
+      { id: 'projectcfg', title: 'Project Configuration…', icon: 'SlidersHorizontal', action: () => run(() => bennuUiStore.openProjectConfig()), when: !!projectStore.project },
+      { id: 'tomcatcfg', title: 'Tomcat hot-swap…', icon: 'Server', action: () => run(() => bennuUiStore.openTomcatConfig()), when: !!projectStore.project && javaTools },
+      { id: 'indexinspector', title: 'Index inspector…', icon: 'Box', action: () => run(() => bennuUiStore.openIndexInspector()), when: !!projectStore.project && javaTools },
+      { id: 'reindex', title: 'Rebuild index', icon: 'RotateCw',
         action: () => run(() => { const r = projectStore.project?.root; if (r) void bennuIndexStore.rebuild(r); }),
         when: !!projectStore.project && javaTools && !bennuIndexStore.indexing },
       // The one action in the dependency story that uses the network. Reachable by name because
       // the state it fixes — a jar that was never downloaded — announces itself as unresolvable
       // types in files that are fine, which is the least searchable symptom there is.
-      { id: 'mavendownload', title: 'Download dependencies', icon: 'download',
+      { id: 'mavendownload', title: 'Download dependencies', icon: 'Download',
         shortcut: 'Alt+Shift+U',
         action: () => run(async () => {
           const r = projectStore.project?.root;
@@ -1819,45 +1776,47 @@
         when: !!projectStore.project && javaTools },
       // The two builds people actually type out, by name. Every other goal is a row in the Maven
       // tool window — a palette entry per phase per module would be a palette of nothing else.
-      { id: 'mvncleaninstall', title: 'Maven: clean install', icon: 'play',
+      { id: 'mvncleaninstall', title: 'Maven: clean install', icon: 'Play',
         action: () => run(() => {
           const r = projectStore.project?.root;
           if (r) void bennuRunStore.runMavenGoals(r, ['clean', 'install']);
         }),
         when: !!projectStore.project && !projectStore.isCargo },
-      { id: 'mvntest', title: 'Maven: test', icon: 'play',
+      { id: 'mvntest', title: 'Maven: test', icon: 'Play',
         action: () => run(() => {
           const r = projectStore.project?.root;
           if (r) void bennuRunStore.runMavenGoals(r, ['test']);
         }),
         when: !!projectStore.project && !projectStore.isCargo },
-      { id: 'docs', title: 'Documentation', icon: 'command', shortcut: 'F1', action: () => run(() => bennuUiStore.toggleDocs()), when: true },
-      { id: 'tour', title: 'Welcome tour', icon: 'book',
+      { id: 'docs', title: 'Documentation', icon: 'Command', shortcut: 'F1', action: () => run(() => bennuUiStore.toggleDocs()), when: true },
+      { id: 'tour', title: 'Welcome tour', icon: 'BookOpen',
         action: () => run(() => bennuOnboardingStore.show()), when: true },
-      { id: 'settings', title: 'Settings', icon: 'command', shortcut: 'Ctrl+,', action: () => run(() => bennuUiStore.openSettings()), when: true },
+      { id: 'settings', title: 'Settings', icon: 'Command', shortcut: 'Ctrl+,', action: () => run(() => bennuUiStore.openSettings()), when: true },
       // Not only for screencasts: it is the one way to see whether a chord reaches this window,
       // which is what a shortcut that "does nothing" is really asking.
-      { id: 'keystrokes', title: 'Show keyboard inputs', icon: 'command',
+      { id: 'keystrokes', title: 'Show keyboard inputs', icon: 'Command',
         shortcut: 'Alt+Shift+K', action: () => run(() => keystrokesStore.toggle()), when: true },
-      { id: 'customizerails', title: 'Customize Activity Bar…', icon: 'sliders',
+      { id: 'customizerails', title: 'Customize Activity Bar…', icon: 'SlidersHorizontal',
         action: () => run(() => bennuUiStore.openCustomizeRails()), when: true },
       // The three doors of the plugin host. They were in the hamburger only — which is the
       // menu you go to when you already know what you are looking for, and the palette is
       // the one you go to when you do not.
-      { id: 'plugins', title: 'Plugin Manager', icon: 'plug',
+      { id: 'plugins', title: 'Plugin Manager', icon: 'Plug',
         action: () => run(() => bennuUiStore.togglePlugins()), when: true },
-      { id: 'marketplace', title: 'Plugin Marketplace', icon: 'store',
+      { id: 'marketplace', title: 'Plugin Marketplace', icon: 'Store',
         action: () => run(() => sharedUiStore.openMarketplace()), when: true },
       // Picks up a plugin edited on disk without restarting Bennu — the loop anyone writing
       // one is in all day. Routed through `host()`, so it reloads **bennu-be's** host and not
       // whichever backend happened to be named first.
-      { id: 'reloadplugins', title: 'Reload plugins', icon: 'refresh-cw',
+      { id: 'reloadplugins', title: 'Reload plugins', icon: 'RotateCw',
         action: () => run(() => void reloadAllPlugins()), when: true },
-      { id: 'mcpactivity', title: 'AI activity…', icon: 'activity',
+      { id: 'processes', title: 'Process monitor…', icon: 'Gauge',
+        action: () => run(() => window.dispatchEvent(new CustomEvent('arbor:open-processes'))), when: true },
+      { id: 'mcpactivity', title: 'AI activity…', icon: 'Activity',
         action: () => run(() => window.dispatchEvent(new CustomEvent('arbor:open-mcp-activity'))), when: true },
-      { id: 'mcptools', title: 'AI tools…', icon: 'bot',
+      { id: 'mcptools', title: 'AI tools…', icon: 'Bot',
         action: () => run(() => window.dispatchEvent(new CustomEvent('arbor:open-mcp-tools'))), when: true },
-      { id: 'about', title: 'About Bennu', icon: 'info', action: () => run(() => bennuUiStore.openAbout()), when: true },
+      { id: 'about', title: 'About Bennu', icon: 'Info', action: () => run(() => bennuUiStore.openAbout()), when: true },
     ];
     const pack = (items: typeof editorItems) =>
       items.filter((c) => c.when && (!q || c.title.toLowerCase().includes(q)))
@@ -1908,7 +1867,12 @@
 
     // F1 toggles docs from anywhere; Docs/Settings/Find modals own Esc themselves.
     if (e.key === 'F1') { e.preventDefault(); bennuUiStore.toggleDocs(); return; }
-    if (mod && e.key === ',') { e.preventDefault(); bennuUiStore.openSettings(); return; }
+    if (mod && e.key === ',' && !e.shiftKey) { e.preventDefault(); bennuUiStore.openSettings(); return; }
+    // The project's own settings, one modifier away from yours: the two dialogs answer "how do I
+    // work" and "what is this project", and which one you want is never in doubt once you know
+    // both are on the same key.
+    if (mod && e.shiftKey && e.key === '<') { e.preventDefault(); bennuUiStore.openProjectConfig(); return; }
+    if (mod && e.shiftKey && e.key === ',') { e.preventDefault(); bennuUiStore.openProjectConfig(); return; }
 
     // The Go-to navigator. One overlay over classes / files / symbols — the shortcut only
     // decides which tab it lands on, and Tab moves between them without reopening.

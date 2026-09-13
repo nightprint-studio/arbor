@@ -48,11 +48,21 @@ use crate::convention::Convention;
 use crate::target::Target;
 
 /// The `[naming]` section.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NamingConfig {
     /// Master switch. Off by default — see the module doc.
     pub enabled: bool,
+    /// Start from the **profile's** defaults and state only the differences. `true` by default.
+    ///
+    /// The two levels exist because the answer to "how do I spell a method" belongs to the person
+    /// and the answer to "does this codebase agree" belongs to the project. Writing the same six
+    /// conventions into every repository was the alternative, and it makes changing your mind a
+    /// tour of every checkout you own.
+    ///
+    /// Turning it off is how a project disagrees *wholesale* — a legacy tree that must not be
+    /// judged by the conventions every other project of yours is. See [`NamingConfig::over`].
+    pub inherit: bool,
     /// Path globs (`*`, `?`, `**`) matched against the project-relative path, forward-slashed.
     /// A file that matches is skipped entirely.
     pub ignore: Vec<String>,
@@ -63,7 +73,61 @@ pub struct NamingConfig {
     pub overrides: Vec<NamingOverride>,
 }
 
+/// Everything off, and inheriting — which is what a project that never configured anything means.
+///
+/// Hand-written rather than derived for `inherit` alone: `bool::default()` is `false`, and a
+/// project decoded from a file written before the profile existed would then be cut off from it.
+/// The default has to be the one that changes nothing, and that is "take what the profile says" —
+/// a fresh profile says nothing either.
+impl Default for NamingConfig {
+    fn default() -> Self {
+        NamingConfig {
+            enabled: false,
+            inherit: true,
+            ignore: Vec::new(),
+            rules: BTreeMap::new(),
+            overrides: Vec::new(),
+        }
+    }
+}
+
 impl NamingConfig {
+    /// This config read as the project's **differences** from `base`, the profile's defaults.
+    ///
+    /// Layer by layer, and each in the shape its own meaning demands:
+    ///
+    /// - **`enabled`** — either level may switch the feature on. A profile that turns naming on
+    ///   turns it on everywhere, which is the point of having one; a project that does not inherit
+    ///   speaks only for itself.
+    /// - **`rules`** — per target, not per pack: a project that pins `constant` keeps the
+    ///   profile's `type` and `method` instead of replacing the language wholesale.
+    /// - **`ignore`** — the union. Both levels are naming a place that should not be judged, and
+    ///   an intersection would judge it.
+    /// - **`overrides`** — the profile's first, so a project's own path rule wins where both claim
+    ///   a file (the list is ordered, last match wins).
+    pub fn over(&self, base: &NamingConfig) -> NamingConfig {
+        if !self.inherit {
+            return self.clone();
+        }
+        let mut rules = base.rules.clone();
+        for (pack, mine) in &self.rules {
+            rules.entry(pack.clone()).or_default().overlay(mine);
+        }
+        let mut ignore = base.ignore.clone();
+        for glob in &self.ignore {
+            if !ignore.contains(glob) {
+                ignore.push(glob.clone());
+            }
+        }
+        NamingConfig {
+            enabled: base.enabled || self.enabled,
+            inherit: true,
+            ignore,
+            rules,
+            overrides: base.overrides.iter().chain(&self.overrides).cloned().collect(),
+        }
+    }
+
     /// The rules for one pack — empty (so: everything off) when the project never configured it.
     pub fn rules_for(&self, pack_id: &str) -> LanguageRules {
         self.rules.get(pack_id).cloned().unwrap_or_default()
@@ -220,6 +284,51 @@ fn matches_from(p: &[char], mut pi: usize, s: &[char], mut si: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The profile's defaults reach a project that stated nothing, and a project that states one
+    /// target keeps the profile's answer for the others.
+    #[test]
+    fn a_project_states_its_differences_and_inherits_the_rest() {
+        let mut base = NamingConfig { enabled: true, ..Default::default() };
+        base.rules.insert(
+            "java".to_string(),
+            LanguageRules::from_pairs([
+                (Target::Type, Convention::Pascal),
+                (Target::Method, Convention::Camel),
+            ]),
+        );
+        base.ignore.push("**/generated/**".to_string());
+
+        let mut project = NamingConfig::default();
+        project.rules.insert(
+            "java".to_string(),
+            LanguageRules::from_pairs([(Target::Method, Convention::LowerSnake)]),
+        );
+        project.ignore.push("**/legacy/**".to_string());
+
+        let effective = project.over(&base);
+        assert!(effective.enabled, "the profile switches it on for every project that inherits");
+        let java = effective.rules_for("java");
+        assert_eq!(java.convention_for(Target::Method), Convention::LowerSnake, "the project wins");
+        assert_eq!(java.convention_for(Target::Type), Convention::Pascal, "…on that target only");
+        assert_eq!(effective.ignore.len(), 2, "both levels name a place not to judge");
+    }
+
+    /// A project that opts out is judged by itself alone — including being off while the profile
+    /// is on, which is the only way a legacy tree escapes a convention adopted everywhere else.
+    #[test]
+    fn a_project_that_does_not_inherit_ignores_the_profile() {
+        let mut base = NamingConfig { enabled: true, ..Default::default() };
+        base.rules.insert(
+            "java".to_string(),
+            LanguageRules::from_pairs([(Target::Type, Convention::Pascal)]),
+        );
+
+        let project = NamingConfig { inherit: false, ..Default::default() };
+        let effective = project.over(&base);
+        assert!(!effective.enabled);
+        assert!(effective.rules_for("java").is_off());
+    }
 
     #[test]
     fn a_default_config_checks_nothing() {

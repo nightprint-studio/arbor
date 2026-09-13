@@ -57,6 +57,9 @@ pub struct AppConfig {
     /// Activity bar visibility and ordering.
     #[serde(default)]
     pub activity_bar: ActivityBarConfig,
+    /// The process monitor's watchdog — when to say a process of Arbor's has grown too large.
+    #[serde(default)]
+    pub processes: ProcessesConfig,
     /// Override for the `git` executable used by Arbor's CLI shell-outs
     /// (rebase, stash, submodules, recovery snapshots, …). When empty Arbor
     /// auto-detects via PATH then the bundled portable copy.
@@ -522,6 +525,44 @@ pub struct WhatsNewConfig {
     /// `None` means the user has never seen it (fresh install).
     #[serde(default)]
     pub last_seen_version: Option<String>,
+}
+
+/// What the process monitor considers too much.
+///
+/// A **warning**, deliberately, and not a cap. There is no portable way to hold a native process
+/// under a memory ceiling — Windows has job objects, Linux has cgroups, macOS has nothing
+/// equivalent — so a "maximum RAM" switch would work on one platform and silently do nothing on
+/// the others, which is worse than not offering it. What is real is noticing, and saying so.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessesConfig {
+    /// Warn when one process holds more than this many megabytes. `0` turns the warning off.
+    ///
+    /// 2 GB by default, which is the point at which a language server on a large project has
+    /// usually stopped being worth what it costs — and is far enough above normal that the warning
+    /// means something when it appears.
+    #[serde(default = "default_process_warn_mb")]
+    pub warn_mb: u64,
+    /// Warn when one process has held more than `warn_cpu` percent of **one** core across two
+    /// consecutive samples. `0` turns it off.
+    ///
+    /// Two samples because one is noise: every language server pins a core while it indexes, and
+    /// that is the system working rather than the system stuck.
+    #[serde(default = "default_process_warn_cpu")]
+    pub warn_cpu: f32,
+}
+
+impl Default for ProcessesConfig {
+    fn default() -> Self {
+        Self { warn_mb: default_process_warn_mb(), warn_cpu: default_process_warn_cpu() }
+    }
+}
+
+fn default_process_warn_mb() -> u64 {
+    2048
+}
+
+fn default_process_warn_cpu() -> f32 {
+    90.0
 }
 
 /// User-facing visual tweaks. Theme lives in its own slot (the active theme id

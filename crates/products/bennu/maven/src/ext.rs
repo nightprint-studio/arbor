@@ -26,7 +26,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use bennu_ext::prelude::{
-    ExtEntry, ExtHighlight, ExtHover, ExtStat, ExtTarget, FileCtx, FrameworkExtension, ProjectScan,
+    ExtEntry, ExtHighlight, ExtHover, ExtMemory, ExtStat, ExtTarget, FileCtx, FrameworkExtension,
+    ProjectScan,
 };
 use bennu_proto::prelude::{CapabilitySet, CompletionItem, Diagnostic};
 
@@ -206,6 +207,29 @@ impl FrameworkExtension for MavenExtension {
     /// the XML extension is: the file is a better question than the bitset, and asking it is free.
     fn applies(&self, _caps: &CapabilitySet) -> bool {
         true
+    }
+
+    /// Each project's extension holds its own copy of the repository's coordinates, so a line per
+    /// project is what is really held — not the same catalogue counted twice.
+    fn memory(&self) -> Vec<ExtMemory> {
+        use std::mem::size_of_val;
+        let catalog = self.installed();
+        let bytes = size_of_val(catalog.artifacts.as_slice())
+            + catalog
+                .artifacts
+                .iter()
+                .map(|a| {
+                    a.group_id.capacity()
+                        + a.artifact_id.capacity()
+                        + size_of_val(a.versions.as_slice())
+                        + a.versions.iter().map(String::capacity).sum::<usize>()
+                })
+                .sum::<usize>();
+        let poms = self.effective.lock().map(|m| m.len()).unwrap_or(0);
+        vec![
+            ExtMemory::estimate("Local repository artifacts", catalog.len(), bytes),
+            ExtMemory::counted("Effective poms remembered", poms),
+        ]
     }
 
     fn reindex(&self, scan: &ProjectScan<'_>) {

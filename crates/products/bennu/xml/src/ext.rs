@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use bennu_ext::prelude::{
-    ExtEntry, ExtHover, ExtStat, ExtTarget, FileCtx, FrameworkExtension, ProjectScan,
+    ExtEntry, ExtHover, ExtMemory, ExtStat, ExtTarget, FileCtx, FrameworkExtension, ProjectScan,
 };
 use bennu_proto::prelude::{CapabilitySet, CompletionItem, Diagnostic};
 
@@ -132,6 +132,15 @@ impl FrameworkExtension for XmlExtension {
     /// capability bit could be.
     fn applies(&self, _caps: &CapabilitySet) -> bool {
         true
+    }
+
+    fn memory(&self) -> Vec<ExtMemory> {
+        let (files, bytes) = self.catalog.read().map(|c| (c.len(), c.text_bytes())).unwrap_or((0, 0));
+        let grammars = self.grammars.read().map(|g| g.len()).unwrap_or(0);
+        vec![
+            ExtMemory::text("Schemas held as text", files, bytes),
+            ExtMemory::counted("Grammars resolved", grammars),
+        ]
     }
 
     fn reindex(&self, project: &ProjectScan<'_>) {

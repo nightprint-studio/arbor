@@ -321,6 +321,22 @@ fn cache() -> &'static Mutex<HashMap<String, RepoStatusCache>> {
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// What the status cache holds, for a backend's memory breakdown: `(repo root, non-clean files,
+/// estimated bytes)` per repository. An estimate — the file list's slots and the text it owns.
+pub fn status_cache_footprint() -> Vec<(String, usize, usize)> {
+    let Ok(guard) = cache().lock() else { return Vec::new() };
+    guard
+        .iter()
+        .map(|(root, c)| {
+            let bytes = root.capacity()
+                + c.files.capacity() * std::mem::size_of::<(String, GitBadge)>()
+                + c.files.iter().map(|(path, _)| path.capacity()).sum::<usize>()
+                + c.branch.as_ref().map_or(0, String::capacity);
+            (root.clone(), c.files.len(), bytes)
+        })
+        .collect()
+}
+
 fn badge_from(s: Status) -> Option<GitBadge> {
     if s.contains(Status::CONFLICTED) {
         return Some(GitBadge::Conflicted);

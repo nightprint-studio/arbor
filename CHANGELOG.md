@@ -9,6 +9,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **What a backend's memory is holding.** In the process monitor, every backend's row opens into a breakdown per project — Bennu's index and decoded classes, its framework models, the files it keeps for a language server, its shader library and crate catalogue, Garrulus's note text and word index, Picus's scripts and schemas, Merula's decoded samples, a recording's frames in Tyto, Corvus's memoised statistics, the explorer's git badges, and each plugin's Lua memory — with the measured total beside it, so the part the estimates do not cover is visible. Loaded on demand.
+
+- **A process monitor for the whole suite.** *Show Process Monitor* in any command palette: every process Arbor is running — the shell, each product's backend, the language servers and runs those started — with its CPU and memory in three tables — Arbor itself, the language servers, and everything else started through it — the product's own icon on each row, and totals against what the machine has. A warning threshold you set for memory and for sustained CPU, and Restart on a language server. It samples only while it is open, and it reports rather than caps: there is no portable way to hold a native process under a memory ceiling.
+
+- **Naming conventions are yours first, and a project's second.** *Settings → Editor → Naming* holds how you spell declarations in every project; *Project Configuration → Naming* holds what one project spells differently, marking each row with where its value came from and offering it back. A project that must not be judged by your conventions at all can opt out of them.
+
+- **The spelling dictionaries are lists you can edit.** *Settings → Editor → Spelling* holds the words correct in any project of yours and downloads the dictionaries; *Project Configuration → Spelling* holds this codebase's own vocabulary, in the repository. A word accepted by mistake can now be taken back.
+
+- **Project Configuration → Inspections.** Every check with its own severity — error, warning, weak or off — searchable, marked where it differs from the default, and reset in one click. The backend has served this since the checks got stable codes and the documentation described it; there was no screen.
+
+- **Settings → Rust → Code Style.** What a code template writes: visibility, derives, documentation lines, how a fallible function reports failure, and `Self` inside an `impl` — read as `style.rust` in a template. Formatting stays `rustfmt`'s.
+
 - **Configuration classes bind alike groups as a `Map`.** Groups with the same keys under different names — `postgres1`, `postgres2` — become one type in a `Map<String, …>` instead of a type each; a switch on every group in the dialog decides otherwise.
 
 - **Jinja in Markdown code blocks.** A ```` ```jinja ```` block is coloured as a template, and ```` ```java.jinja ```` as a template that writes Java, the way the template's own tab is.
@@ -98,14 +110,52 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **A Cargo project is not offered the Java-only kinds of template.** Generating from a class, the two configuration ones and the validation tests read a Java class, the Spring model or Bean Validation, so *Settings › Code Templates* lists only what a Rust workspace can actually generate.
 
 - **An abbreviation's word is no longer its file name.** *Settings › Code Templates › Abbreviations* shows the word that expands each template and lets you change it, so the file can be called what you want to read in a list.
+- **A template can be written for an interface, an enum or an annotation.** With the caret in one, *Generate from a template…* refused to open at all. A template now reads `class.kind`, the type's `methods` — with their parameters, and whether each has a body to inherit — an enum's `constants`, and the type parameters as written, which is what writing an implementation takes.
+
+- **Project Configuration has a shortcut and a place to find it.** <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>,</kbd>, one modifier from Settings, and an entry beside Settings in the title bar's gear.
+
+- **The Rust debugger has a settings page.** Which adapter drives a native session — CodeLLDB, lldb-dap or GDB — and where its executable is. The three are not interchangeable: only one of them renders a `Vec` as its elements.
+
+- **`ValidationMessages.properties` has an icon of its own**, locale variants included: the one `.properties` among dozens that decides what somebody filling in a form reads.
+
+- **The run console's tabs have an overflow menu**, like the editor's.
+
 
 ### Changed
+- **Project Configuration is four sections with a sidebar.** The same layout as Settings — Project, Frameworks, Naming, Spelling — instead of one column scrolling through six unrelated subjects. It is reached from the title bar's gear, `Ctrl+Shift+,` or the palette; the duplicate entry in the Project menu is gone.
+
 
 - **Settings is a tree, and holds only what is yours.** Pages are grouped the way an IDE's are — Editor › Completion, Java › Code Style, a page per kind of code template, one per language and one per framework the project uses — in a bigger window. What belongs to the project rather than to you moved to *Project Configuration*, which now also shows the JDK that was resolved, the frameworks detected here and the evidence for each.
 
 - **Bennu's docs read as one manual.** Every page opens with its section and a summary, and lays its facts out as cards, steps, tables and callouts instead of long paragraphs.
 
 ### Fixed
+- **Opening a workspace indexed every Java project in it, and switching projects left each one loaded.** Opening a workspace also built the framework models of every member, and each project held its own 13 MB copy of the shared XML schemas; models are now built for a project somebody asks about, and schemas only where there is XML. Bennu now starts a project's index and language servers when you switch to it, and releases a project nobody has looked at or asked about for ten minutes — an AI client's included; *Settings › Language Servers* sets the time. The project on screen is never released.
+- **The process monitor overstated memory on macOS.** It showed resident size, which counts pages of the program the system can drop; it now shows the physical footprint Activity Monitor shows, and private bytes on Windows.
+- **A language server's last completion list outlived its file, and a closed project's crate catalogue stayed loaded.** Both are released now.
+- **Closed repositories and database connections kept their memory.** Corvus now releases a repository's statistics and ticket links when its tab closes, and keeps a bounded number of commit avatars — without remembering a lookup that failed offline as "no avatar". Picus drops a connection's schema when you disconnect or delete it.
+- **The Run tab strip showed one tab and put the rest in its menu, with the header empty beside it.** The strip measured the room it had on a container sized to the tabs it was already showing, so each tab it hid made the room smaller and hid the next. It now measures the free space in the header.
+
+- **Bennu kept every project you had opened in memory until it exited.** Closing a project, or opening another in its place, released nothing: its sources, reference index, decoded classpath and framework models stayed loaded, and its language servers kept running — so switching between a few large projects left the backend holding all of them. A project that leaves the open set — closed, replaced, or left behind by a workspace switch — now gives all of that back and stops its servers about twenty seconds later, which is what keeps a workspace switch from releasing the projects it is reopening. Projects of the workspace you are in stay loaded, so switching between them is still instant.
+
+- **Three command-palette entries showed the wrong icon** — Picus's branch entry, and Bennu's download and delete entries, fell back to the generic ⌘. Every product's palette now resolves icons from one shared list, so a name either exists or it does not.
+
+- **A run/debug tab now says which project it came from** — a chip after the label in a workspace with more than one, and the project on every tab's tooltip. Three projects with a `Main` used to produce three tabs called `Main`.
+
+- **The unreadable-character warning offered to delete the character.** The palette command's quick fix was built from the correction, and for that kind of corruption there is none — so it read “should be “”” and offered “Replace with “””. It no longer offers a fix it does not have, and the message no longer arrives as a paragraph in a hover that resized itself around it. The command also stopped drawing a second squiggle over the one validation already drew.
+
+- **Switching project stalled for seconds.** The new encoding check scanned every buffer against its whole correction table, one comparison per entry per character — fine for the one file the palette command used to ask about, and far too slow once it joined ordinary validation. It now skips any byte that cannot begin a corrupted sequence, which is nearly every byte of every file.
+
+- **Bennu offered to download dictionaries that were already installed.** The install status was read once at window mount; when that landed before the backend was serving, the rejection was remembered as "none installed" and nothing ever asked again. A failed read now leaves the last answer alone, the screens ask again when they open, and neither offers a download before the backend has answered at all.
+
+- **Go to declaration did nothing on a statically imported method or constant.** `Util.helper()` jumped and `helper()` did not: the index filed the bare call under the import's owner and the caret classifier looked it up under the caller's own class, so nothing matched and nothing was reported. Both now read the same scope, which also picks up a bare call to a method of an enclosing class.
+
+- **The encoding check said "no problems" over a visibly broken character.** It only knew the double-decode corruption (`Ã©` for `é`); a byte that could not be decoded at all — the replacement glyph a Cp1252 file read as UTF-8 leaves behind — walked straight past it. Both are now reported, in any text file and while you type, rather than only from the palette command. Code templates and case-different extensions also stopped being skipped by the project-wide scan.
+
+
+- **Closing a running tab asks first.** The ✕ on a run tab killed the program and everything it had started, with a server behind it and nothing said. It names what is about to stop.
+
+- **The tab strip's ⌄ menu draws the file's own icon**, and tints a file that is not the project's the way the strip does — it was showing a column of blanks beside names the strip draws in full.
 
 - **Code Templates is a page, not a filing cabinet.** Each kind has its templates on the left and the one you pick on the right: **what it writes**, coloured as the language it generates, with its description, the word that expands it, what the project needs for it, and where its file is. The kinds themselves open from an overview. A settings page also has colour in it now — the mark on each card, and the language a template writes.
 
@@ -180,6 +230,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Completing the name of a call that was already written answered nothing.** `list.ad|(x)` — correcting a method name in place — left the receiver unparseable, so no candidates were offered at all.
 
 ### Removed
+
+- **Project Configuration's source root, output root and excluded directories.** Three fields that were held in memory for a session and written to no file: the roots are the build's answer, read from the manifest, and excluded directories already exist once in *Settings → Java*.
+
 
 - **Cloud storage is no longer part of Arbor.** The panel is a plugin and the stores are reached by sandboxed provider packages, so the built-in implementation — object-storage operators, transfers, the Google sign-in, twenty-two internal handlers — is gone, along with the browser-side chunk-order and download-progress dialogs. Installing the `cloud-storage` package (with a provider, e.g. `cloud-gcs`) restores the panel, in any product that hosts plugins.
 

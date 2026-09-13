@@ -11,4 +11,4 @@ pub use crate::model::{
 };
 
 // The trait a framework plugin implements + the capability-gated registry over it.
-pub use crate::registry::{ExtensionRegistry, FrameworkExtension};
+pub use crate::registry::{ExtMemory, ExtensionRegistry, FrameworkExtension};

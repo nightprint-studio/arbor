@@ -44,6 +44,44 @@ pub struct Hit {
     pub snippet: Option<Snippet>,
 }
 
+/// What an [`Index`] holds — see [`Index::footprint`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IndexFootprint {
+    pub notes: usize,
+    /// Titles, tags, links, headings and frontmatter — estimated.
+    pub metadata_bytes: usize,
+    pub bodies: usize,
+    /// The note text held for search and snippets — exact.
+    pub body_bytes: usize,
+    pub words: usize,
+    /// The word index, both directions — estimated.
+    pub word_index_bytes: usize,
+    /// Edges, backlinks and dangling links.
+    pub links: usize,
+    pub mentions: usize,
+    /// Unlinked mentions with their snippets — estimated.
+    pub mention_bytes: usize,
+}
+
+/// Heap a note's projection owns, estimated from what each of its lists holds.
+fn view_bytes(view: &NoteView) -> usize {
+    let strings = |list: &Vec<String>| {
+        list.capacity() * std::mem::size_of::<String>() + list.iter().map(String::capacity).sum::<usize>()
+    };
+    let links: usize = view.links.capacity() * std::mem::size_of::<crate::note_view::LinkRef>()
+        + view
+            .links
+            .iter()
+            .map(|l| {
+                l.target.capacity()
+                    + l.heading.as_ref().map_or(0, String::capacity)
+                    + l.alias.as_ref().map_or(0, String::capacity)
+            })
+            .sum::<usize>();
+    let fields: usize = view.fields.iter().map(|(k, v)| k.capacity() + v.capacity()).sum();
+    view.id.as_str().len() + view.title.capacity() + strings(&view.tags) + strings(&view.headings) + links + fields
+}
+
 /// The vault index.
 #[derive(Debug, Default, Clone)]
 pub struct Index {
@@ -111,6 +149,33 @@ impl Index {
     }
 
     // ── Reads ───────────────────────────────────────────────────────────────
+
+    /// What the index holds, for a backend's memory breakdown.
+    ///
+    /// Walks the stores — O(vault), and asked only when somebody opens the breakdown. Body bytes are
+    /// the text held; everything else is an estimate from the capacities of what each part owns.
+    pub fn footprint(&self) -> IndexFootprint {
+        let (bodies, body_bytes) = self.text.body_footprint();
+        let (words, word_index_bytes) = self.text.word_footprint();
+        let mentions = self.mentions.values().map(Vec::len).sum();
+        let mention_bytes = self
+            .mentions
+            .values()
+            .flatten()
+            .map(|m| std::mem::size_of::<Mention>() + m.snippet.text.capacity())
+            .sum();
+        IndexFootprint {
+            notes: self.views.len(),
+            metadata_bytes: self.views.values().map(view_bytes).sum(),
+            bodies,
+            body_bytes,
+            words,
+            word_index_bytes,
+            links: self.graph.link_count(),
+            mentions,
+            mention_bytes,
+        }
+    }
 
     /// Number of indexed notes.
     pub fn len(&self) -> usize {

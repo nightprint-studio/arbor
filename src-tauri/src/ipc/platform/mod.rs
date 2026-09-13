@@ -26,6 +26,7 @@ pub mod plugin;
 pub mod plugin_logs;
 pub mod plugin_templates;
 pub mod post_hooks;
+pub mod processes;
 pub mod scheduler;
 pub mod stream;
 pub mod terminal;

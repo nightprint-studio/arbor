@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Settings — Performance</h1>
 
 <h2>Cache</h2>
@@ -65,6 +69,101 @@
   The status bar shows a <strong>last refreshed</strong> timestamp (e.g. <em>2m ago</em>) next to
   the branch name, indicating when the cached data was last fetched from the backend.
 </p>
+
+<h2>Process Monitor</h2>
+<p>
+  Arbor is not one process. It is the shell you are looking at, its interface, one backend per
+  product, whatever those backends started — a language server, a JVM under test, a
+  <code>cargo</code> build — and whatever <em>those</em> started. <strong>Show Process Monitor</strong>
+  in the command palette opens one screen for all of it, from any window, with totals against what
+  this machine has and three tables, because they answer three different questions:
+</p>
+<ul>
+  <li><strong>Arbor</strong> — the application itself: its frontend and one backend per product, each
+    under the product's own name and icon. This is the table to read to judge Arbor.</li>
+  <li><strong>Language servers</strong> — started by a product for the projects open in it, with the
+    icon of the product that started them. The usual reason a machine is slow, and the only rows with
+    an action.</li>
+  <li><strong>Everything else</strong> — what was started through Arbor: runs, builds, tests, a
+    terminal's shell. It ends when you stop it.</li>
+</ul>
+<p>
+  Bennu keeps loaded only what is in use. A project's index and language servers start when it is
+  on screen; one that has gone ten minutes without being on screen or asked about — by you or by an
+  AI client — gives back its index, framework models and library data, and its language servers
+  stop (<em>Settings › Language Servers</em> sets the time). A project that leaves the workspace —
+  closed, replaced, or left behind by a workspace switch — goes about twenty seconds later without
+  waiting: a workspace switch reopens its projects one at a time, and releasing at once would close
+  the very projects it is about to open again. A backend's row shrinks with what you stop using,
+  rather than growing with every project opened in the session.
+</p>
+<h3>What a backend is holding</h3>
+<p>
+  A backend's row in the <strong>Arbor</strong> table opens into a breakdown of its own memory, per
+  project. It is loaded when you open it — never on the one-second tick — and has its own
+  <em>Refresh</em>. What each backend lists is what grows in it:
+</p>
+<ul>
+  <li><strong>Bennu</strong> — per project, the sources kept as text, the reference index, the
+    classes decoded from the JDK and from libraries, the index files; each framework model it built
+    (Bevy's declarations, fulcrum's labels, XML schemas, the Maven repository); the files it keeps
+    open for a language server with their diagnostics; the shader library; the crates Cargo
+    completion offers.</li>
+  <li><strong>Garrulus</strong> — the open vault's note text, its word index, titles and properties,
+    links and unlinked mentions.</li>
+  <li><strong>Picus</strong> — the scripts of each repository read, and the schema each connection
+    reported, by connection name.</li>
+  <li><strong>Merula</strong> — the samples the live session has decoded and keeps for playback.</li>
+  <li><strong>Tyto</strong> — while recording, the newest frame and the most the encoder can have
+    queued.</li>
+  <li><strong>Corvus</strong> — per repository, its statistics and the ticket links looked up; the
+    commit avatars resolved.</li>
+  <li><strong>File Explorer</strong> — the git status behind the badges, per repository browsed.</li>
+  <li>Every backend that hosts plugins lists each plugin's Lua memory — an exact figure, since Lua
+    counts what it allocates. A busy plugin host says so; <em>Refresh</em> asks again.</li>
+</ul>
+<ul>
+  <li>The figures are <strong>estimates</strong>, marked <code>≈</code>: a backend sizes its
+    structures by walking them, since nothing keeps allocation statistics per category. Text held is
+    summed and shown without the mark.</li>
+  <li>A line reading <em>counted</em> gives a number of entries instead of bytes — the structure is
+    too deep to size without doing more work than the answer is worth.</li>
+  <li><em>mapped</em> marks memory-mapped index files. They are in the measured total, but the system
+    can take those pages back whenever it needs them.</li>
+  <li><em>Measured</em> against <em>Accounted for</em> shows the gap: the allocator's own overhead,
+    and whatever is not sized yet.</li>
+</ul>
+<p>
+  Language servers are not in a backend's breakdown: they are processes of their own, with a row and
+  a real measurement in the <strong>Language servers</strong> table.
+</p>
+<p>
+  Memory is the figure the system's own monitor leads with: the <strong>physical footprint</strong>
+  on macOS — Activity Monitor's Memory column — and private bytes on Windows. Not resident size,
+  which also counts pages of the program and its libraries that the system can drop at any time and
+  shares with other processes; for a backend that can be a third again of the real figure.
+</p>
+<p>
+  CPU is given as a percentage of <strong>one</strong> core, so a four-core machine can legitimately
+  total 400 — the header says what share of the whole machine that is. The first reading after the
+  screen opens shows <code>—</code> rather than 0%: CPU usage is the work done between two samples,
+  and there has only been one.
+</p>
+<ul>
+  <li><strong>Warn above … MB</strong> — a process holding more than this is marked. Off at 0.</li>
+  <li><strong>… % CPU</strong> — marked when it holds more than this share of one core across
+    <em>two consecutive</em> readings. One is noise: every language server pins a core while it
+    indexes, and that is the system working rather than the system stuck.</li>
+  <li><strong>Restart</strong> — offered on a language server, the one kind of process that can be
+    restarted without losing anything, since it rebuilds its state from the files.</li>
+</ul>
+<Callout variant="important" title="It reports; it does not cap">
+  There is no <code>-Xmx</code> for Arbor, and there cannot be a portable one: holding a native
+  process under a memory ceiling is a job object on Windows, a cgroup on Linux, and nothing at all
+  on macOS. A “maximum RAM” switch would work on one platform and silently do nothing on the other
+  two, which is worse than not offering it. The limits that <em>are</em> real are per-product and
+  live with that product — Bennu's indexing and validation thread budgets, in its own settings.
+</Callout>
 
 <h2>Memory Management</h2>
 <p>

@@ -32,6 +32,7 @@
       server_paths: {},
       servers: [],
       background_idle_timeout_secs: 600,
+      inactive_project_release_secs: 600,
     },
   );
   const lspEnabled = $derived(lspCfg.enabled);
@@ -40,6 +41,8 @@
   // `?? 600` and not `|| 600`: zero is a real choice here — never reclaim — and `||` would read it
   // as absent and silently put ten minutes back.
   const backgroundIdle = $derived(String(lspCfg.background_idle_timeout_secs ?? 600));
+  // Same reasoning: zero means keep every project loaded.
+  const inactiveRelease = $derived(String(lspCfg.inactive_project_release_secs ?? 600));
 
   async function patchLsp(patch: Partial<LspConfigDto>, restart = true) {
     await bennuConfigStore.patch({ lsp: { ...lspCfg, ...patch } });
@@ -88,6 +91,24 @@
     description="A server only starts for a project whose root carries the matching manifest (a Cargo.toml for Rust) and whose binary is installed — so leaving this on costs nothing when neither is true."
   >
     <Toggle checked={lspEnabled} onchange={(v) => void patchLsp({ enabled: v })} ariaLabel="Enable language servers" />
+  </FormRow>
+  <!-- Outside the `lspEnabled` gate: it releases a project's index and framework models too, which
+       exist whether or not any server can start. -->
+  <FormRow
+    label="Release projects you are not using after"
+    description="A project of the workspace you switched away from — or one an AI client asked about and left — keeps its index, framework models and language servers until it has gone this long without being on screen or asked about. Switching back sooner is instant; later, the index is read back from disk and the server starts again. The project on screen is never released."
+  >
+    <Select
+      value={inactiveRelease}
+      options={[
+        { value: '300', label: '5 minutes' },
+        { value: '600', label: '10 minutes' },
+        { value: '1800', label: '30 minutes' },
+        { value: '3600', label: '1 hour' },
+        { value: '0', label: 'Never — keep every project loaded' },
+      ]}
+      onchange={(v) => void patchLsp({ inactive_project_release_secs: Number(v) }, false)}
+    />
   </FormRow>
   <!-- Only meaningful while servers can start at all. -->
   {#if lspEnabled}

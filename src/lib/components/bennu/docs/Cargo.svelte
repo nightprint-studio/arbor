@@ -189,3 +189,23 @@ json = ["dep:serde_json"]    # nothing called serde_json: Cargo refuses the mani
   Both of its views read Bennu's own engines — tree-sitter grammars for Java and JSP, and Java's declaration model — so on a Rust project it could only report their
   absence, which would read as Bennu not understanding a language rust-analyzer is answering everything about. The rail slot holds the Cargo window instead.
 </Callout>
+
+<h2>Generated Rust</h2>
+<p>
+  <strong>Settings → Rust → Code Style</strong> says how a code template writes Rust — read as <code>style.rust</code>
+  in a template. It is a short list, and deliberately: <code>rustfmt</code> owns the formatting, and a second set of
+  switches here would either agree with the project's own <code>rustfmt.toml</code> or fight it. What is left is what a
+  generator has to decide and a formatter never touches:
+</p>
+<ul class="prop-list">
+  <li><strong>Visibility</strong><code>pub</code>, <code>pub(crate)</code> or private, for a generated item and its fields</li>
+  <li><strong>Derives</strong>what a generated <code>struct</code> or <code>enum</code> derives, in order — empty writes no <code>#[derive(…)]</code> line</li>
+  <li><strong>Documentation lines</strong>a <code>///</code> on each generated item, which is what <code>missing_docs</code> asks for on anything public</li>
+  <li><strong>Errors</strong><code>anyhow::Result</code>, a crate error type, or a <code>Result&lt;T, E&gt;</code> spelled out</li>
+  <li><strong>Self inside impl</strong><code>Self</code> rather than the type's name — Clippy's <code>use_self</code></li>
+</ul>
+<p>
+  The page carries a preview of a small generated type, so each choice is read in the output rather than in its label.
+  Java's equivalent is <strong>Settings → Java → Code Style</strong>, and the two are separate because almost nothing
+  they say overlaps.
+</p>

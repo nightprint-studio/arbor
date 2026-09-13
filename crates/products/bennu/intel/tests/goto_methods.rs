@@ -393,3 +393,90 @@ fn goto_on_a_field_receiver_still_lands_on_the_field() {
     assert_eq!(d.file, "Service.java");
     assert_eq!(d.label, "field app.Service.util");
 }
+
+#[test]
+fn bare_call_of_a_statically_imported_method() {
+    // The classifier used to file a bare call under the CALLER's own type, while the index filed it
+    // under the static import's owner. Two different keys for one caret is not a wrong jump, it is
+    // no jump: `Util.helper()` resolved and `helper()` did nothing.
+    let p = Project::new(&[
+        (
+            "Util.java",
+            "package app;\n\
+             public class Util {\n\
+             \x20   public static int helper() { return 42; }\n\
+             \x20   public static final int LIMIT = 7;\n\
+             }\n",
+        ),
+        (
+            "Client.java",
+            "package app;\n\
+             import static app.Util.helper;\n\
+             public class Client {\n\
+             \x20   public int go() { return helper(); }\n\
+             }\n",
+        ),
+    ]);
+    let s = p.source("Client.java").to_string();
+    let d = p
+        .goto("Client.java", at(&s, "helper(); }"))
+        .expect("goto a bare statically imported call");
+    assert_eq!(d.file, "Util.java");
+    assert_eq!(d.label, "method app.Util.helper()");
+}
+
+#[test]
+fn bare_call_through_a_static_wildcard_import() {
+    // `import static a.b.C.*;` binds only what the owner declares, so the owner has to be asked —
+    // which is the half a named import does not need.
+    let p = Project::new(&[
+        (
+            "Util.java",
+            "package app;\n\
+             public class Util {\n\
+             \x20   public static int helper() { return 42; }\n\
+             }\n",
+        ),
+        (
+            "Client.java",
+            "package app;\n\
+             import static app.Util.*;\n\
+             public class Client {\n\
+             \x20   public int go() { return helper(); }\n\
+             }\n",
+        ),
+    ]);
+    let s = p.source("Client.java").to_string();
+    let d = p
+        .goto("Client.java", at(&s, "helper(); }"))
+        .expect("goto through a static wildcard import");
+    assert_eq!(d.file, "Util.java");
+    assert_eq!(d.label, "method app.Util.helper()");
+}
+
+#[test]
+fn bare_reference_to_a_statically_imported_constant() {
+    // A constant reaches the same dead end a call did, by the same route.
+    let p = Project::new(&[
+        (
+            "Limits.java",
+            "package app;\n\
+             public class Limits {\n\
+             \x20   public static final int LIMIT = 7;\n\
+             }\n",
+        ),
+        (
+            "Client.java",
+            "package app;\n\
+             import static app.Limits.LIMIT;\n\
+             public class Client {\n\
+             \x20   public int go() { return LIMIT; }\n\
+             }\n",
+        ),
+    ]);
+    let s = p.source("Client.java").to_string();
+    let d = p
+        .goto("Client.java", at(&s, "LIMIT; }"))
+        .expect("goto a bare statically imported constant");
+    assert_eq!(d.file, "Limits.java");
+}

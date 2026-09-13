@@ -65,7 +65,7 @@
     const file = projectStore.activeFilePath;
     const ctx = caretContext();
     if (!root || !file || !file.toLowerCase().endsWith('.java') || !ctx) {
-      error = 'Put the caret in a Java class first.';
+      error = 'Put the caret in a Java type first — a class, a record, an interface or an enum.';
       return;
     }
     origin = { root, file, source: ctx.source, offset: ctx.offset };

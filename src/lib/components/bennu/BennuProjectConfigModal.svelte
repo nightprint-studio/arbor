@@ -1,354 +1,157 @@
 <script lang="ts">
   /**
-   * Bennu Project Configuration — per-project settings for the open Java project.
+   * Project Configuration — everything that is true of **this project** rather than of you.
    *
-   * Lets the user OVERRIDE the BE-resolved project facts (JDK language level,
-   * source encoding, source/output roots, excluded dirs) and inspect the
-   * read-only facts (modules). Overrides route through
-   * `bennuProjectConfigStore`, the SEAM that will map onto a future `[bennu]`
-   * section in the per-repo `<repo>/.arbor/bennu/config.toml` (CLAUDE.md rule #11).
+   * ## Why it looks like Settings now
    *
-   * Structure/scaffold phase: the config store is in-memory (MOCK). Every mock is
-   * marked inline. Dependencies live in their own left tool window
-   * (BennuDependenciesPanel), not here.
+   * It is the same `SettingsShell`, the same card vocabulary, the same colours. The two dialogs
+   * answer neighbouring questions — "how do I work" and "what is this project" — and somebody who
+   * has just closed one of them should recognise the other on sight instead of learning a second
+   * layout. It also ends the shape this modal had grown into: one column that scrolled through six
+   * unrelated subjects, with the naming grid two thirds of the way down where nobody found it.
    *
-   * Keyboard-first: first field auto-focused by <Modal>, Tab cycles fields in
-   * logical order, Esc cancels (handled by <Modal>), Ctrl/Cmd+Enter applies.
+   * ## The line between here and Settings
+   *
+   * Settings is you and this machine; this is the project. Where a setting genuinely has both — a
+   * naming convention, a dictionary — the profile holds your answer and the project states what it
+   * says differently, and the project page marks each value with where it came from.
+   *
+   * ## Who writes what
+   *
+   * Every section writes as you go, like Settings does, **except naming**: that one is a document
+   * rather than a row of switches, and writing it per keystroke would have the backend re-reading
+   * the conventions of every open project while one is still being chosen. So it carries its own
+   * Save, and the footer is a Done.
+   *
+   * Keyboard-first: `Esc` closes, the nav is a tree walked with Tab and the arrow keys, every
+   * control inside a section is reachable in reading order.
    */
   import { untrack } from 'svelte';
-  import { Settings2, Coffee, FileType, Boxes, FolderTree, SpellCheck, TriangleAlert } from 'lucide-svelte';
+  import { SlidersHorizontal, FolderCog, CaseSensitive, SpellCheck, Boxes, ListFilter } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
-  import FormField from '$lib/components/shared/ui/FormField.svelte';
-  import Select from '$lib/components/shared/ui/Select.svelte';
-  import Input from '$lib/components/shared/ui/Input.svelte';
+  import SettingsShell, { type SettingsNavGroup } from '$lib/components/shared/ui/SettingsShell.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
-  import Toggle from '$lib/components/shared/ui/Toggle.svelte';
-  import Badge from '$lib/components/shared/ui/Badge.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
-  import { projectStore } from '$lib/stores/bennu/project.svelte';
-  import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
-  import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
-  import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
+  import BennuProjectFacts from './project-config/BennuProjectFacts.svelte';
+  import BennuProjectFrameworks from './project-config/BennuProjectFrameworks.svelte';
+  import BennuProjectInspections from './project-config/BennuProjectInspections.svelte';
+  import BennuProjectSpelling from './project-config/BennuProjectSpelling.svelte';
   import BennuNamingSettings from './BennuNamingSettings.svelte';
+  import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { bennuConfigStore } from '$lib/stores/bennu/config.svelte';
+  import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
-  import {
-    bennuProjectConfigStore,
-    defaultConfig,
-    AUTO,
-    type BennuProjectConfig,
-  } from '$lib/stores/bennu/project-config.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
   const project = $derived(projectStore.project);
   const root = $derived(project?.root ?? null);
 
-  // Resolved facts from the BE (what "Auto" defers to).
-  const resolvedJdk = $derived(project?.jdk?.version ?? null);
-  const resolvedJdkSource = $derived(project?.jdk?.source ?? null);
-  const resolvedEncoding = $derived(projectStore.activeEncoding ?? 'UTF-8');
-  const modules = $derived(project?.modules ?? []);
+  let active = $state('project');
 
-  /** What the JDK search actually found for this project — the warning that explains a completion
-   *  with no standard library in it. Where JDKs are *looked for* is Settings › Java › JDK locations:
-   *  that is the machine's, this is the project's. */
-  const jdkReport = $derived(bennuDiagnosticsStore.jdk);
+  const naming = $derived(bennuNamingStore.project);
 
-  /** The frameworks detected here, with the evidence that activated each — read-only facts about
-   *  the project, which is why they moved out of Settings. */
-  const caps = $derived(projectStore.capabilities);
-  const enabledCaps = $derived.by(() => {
-    if (!caps) return [] as string[];
-    return Object.entries(caps).filter(([k, v]) => k !== 'hits' && v === true).map(([k]) => k);
-  });
-  const capHits = $derived(caps?.hits ?? []);
-  function capLabel(field: string): string {
-    return field.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-  }
-
-  // Spelling (opt-in per project). Enable is gated on dictionaries being installed.
-  const spellOn = $derived(root ? bennuSpellStore.enabledFor(root) : false);
-
-  // ── Local editable draft ──────────────────────────────────────────────────
-  // Seeded from the store on open; applied back on Ctrl+Enter / Apply. Editing a
-  // local copy (not the store directly) keeps Cancel a true no-op.
-  let draft = $state<BennuProjectConfig>(
-    root ? { ...bennuProjectConfigStore.get(root) } : defaultConfig(),
-  );
-
-  // ── Select options ─────────────────────────────────────────────────────────
-  // "Auto" carries the resolved value in its label so the user sees what it maps
-  // to without leaving the modal.
-  const jdkOptions = $derived([
-    { value: AUTO, label: resolvedJdk ? `Auto — from pom (${resolvedJdk})` : 'Auto — from pom' },
-    { value: '1.8', label: 'Java 8 (1.8)' },
-    { value: '11',  label: 'Java 11' },
-    { value: '17',  label: 'Java 17' },
-    { value: '21',  label: 'Java 21' },
+  const groups = $derived<SettingsNavGroup[]>([
+    {
+      label: 'This project',
+      items: [
+        { id: 'project', label: 'Project', icon: FolderCog, iconColor: 'var(--accent)' },
+        { id: 'frameworks', label: 'Frameworks', icon: Boxes, iconColor: 'var(--success)' },
+        // Per project and with no profile level, unlike the two below: "is an unused import worth
+        // a warning" is a question about this codebase's state, not about you.
+        { id: 'inspections', label: 'Inspections', icon: ListFilter, iconColor: 'var(--error)' },
+      ],
+    },
+    {
+      // Both have a counterpart in Settings, and the group label is what says so — a project page
+      // for something that exists at two levels is not the same kind of page as one that does not.
+      label: 'Overrides your profile',
+      items: [
+        { id: 'naming', label: 'Naming', icon: CaseSensitive, iconColor: 'var(--warning)' },
+        { id: 'spelling', label: 'Spelling', icon: SpellCheck, iconColor: 'var(--info)' },
+      ],
+    },
   ]);
 
-  const encodingOptions = $derived([
-    { value: AUTO,      label: `Auto — resolved (${resolvedEncoding})` },
-    { value: 'UTF-8',   label: 'UTF-8' },
-    { value: 'Cp1252',  label: 'Cp1252 (Windows-1252)' },
-    { value: 'ISO-8859-1', label: 'ISO-8859-1 (Latin-1)' },
-    { value: 'US-ASCII', label: 'US-ASCII' },
-  ]);
-
-  // ── Actions ────────────────────────────────────────────────────────────────
-  // The naming section edits its own store's draft (it is a real per-repo section on disk, not
-  // part of the in-memory `draft` above), so it is loaded when the modal opens on a project and
-  // written by the same Apply.
+  // The config (for the JDK / encoding overrides) and both naming documents. Untracked because
+  // each call reads the state it then writes, and depending on that would re-run this per answer.
   $effect(() => {
     const r = root;
-    // Untracked: both calls READ the store state they then write (the cached catalog, the loaded
-    // section), and reading it here would make this effect depend on its own result — one extra
-    // round-trip per open, for nothing. The project root is the only real dependency.
     untrack(() => {
+      void bennuConfigStore.load();
       void bennuNamingStore.loadCatalog(r);
+      void bennuNamingStore.profile.load();
       if (r) void bennuNamingStore.load(r);
     });
   });
 
-  function apply() {
-    // MOCK — persists only to the in-memory store; wire to per-project
-    // `<repo>/.arbor/bennu/config.toml` when the BE lands.
-    if (root) bennuProjectConfigStore.apply(root, draft);
-    // Naming IS on disk already; only written when it actually changed, so opening and closing the
-    // modal never rewrites the file (and never invalidates the BE's cached copy for nothing).
-    if (root && bennuNamingStore.dirty) {
-      void bennuNamingStore.apply().then((ok) => {
-        if (!ok) toastStore.show("Couldn't save the naming conventions", 'error');
-      });
-    }
-    onClose();
-  }
-
-  function resetToDefaults() {
-    draft = defaultConfig();
-    // "Reset" must mean the whole modal, not the half of it that happens to live in a local. The
-    // naming draft goes back to what is on disk — resetting it to *empty* would silently offer to
-    // delete a convention the project deliberately adopted.
-    bennuNamingStore.revert();
-  }
-
-  // Ctrl/Cmd+Enter submits from anywhere in the modal body.
-  function handleKeydown(e: KeyboardEvent) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      apply();
+  async function saveNaming() {
+    if (!(await naming.apply())) {
+      toastStore.show("Couldn't save the naming conventions", 'error');
     }
   }
 </script>
 
-<Modal
-  {onClose}
-  width="680px"
-  height="620px"
-  ariaLabel="Bennu Project Configuration"
->
+<Modal {onClose} width="980px" height="660px" padBody={false} ariaLabel="Bennu Project Configuration">
   {#snippet header()}
     <ModalHeader {onClose}>
-      <Settings2 size={14} />
+      <SlidersHorizontal size={14} />
       <span class="modal-title">Project Configuration</span>
-      {#if project}
-        <span class="hdr-name">{project.name}</span>
-      {/if}
+      {#if project}<span class="hdr-name">{project.name}</span>{/if}
     </ModalHeader>
   {/snippet}
 
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="body" onkeydown={handleKeydown}>
-    {#if !project}
-      <EmptyState message="Open a project to configure it." />
-    {:else}
-      <!-- JDK ─────────────────────────────────────────────────────────────── -->
-      <section class="cfg-section">
-        <div class="sec-head">
-          <Coffee size={13} />
-          <h3>JDK</h3>
+  <SettingsShell {groups} bind:active searchPlaceholder="Search this project’s settings…">
+    {#snippet content()}
+      {#if !project}
+        <EmptyState message="Open a project to configure it." />
+      {:else if active === 'project'}
+        <BennuProjectFacts />
+      {:else if active === 'frameworks'}
+        <BennuProjectFrameworks />
+      {:else if active === 'inspections'}
+        <BennuProjectInspections />
+      {:else if active === 'spelling'}
+        <BennuProjectSpelling />
+      {:else if active === 'naming'}
+        <div class="section-header">
+          <h2>Naming</h2>
+          <p>
+            What this project spells differently. Everything it does not state comes from
+            <strong>Settings › Editor › Naming</strong>, and each row says which of the two it is
+            showing.
+          </p>
         </div>
-        <FormField
-          label="Language level"
-          hint={resolvedJdkSource
-            ? `Resolved from ${resolvedJdkSource}. Override only to pin a different level.`
-            : 'The Java language level Bennu resolves the classpath against.'}
-        >
-          <Select bind:value={draft.jdkOverride} options={jdkOptions} />
-        </FormField>
-        {#if jdkReport}
-          {#if !jdkReport.any_installed}
-            <div class="fact-warn fact-warn-error">
-              <TriangleAlert size={13} />
-              No JDK found — completion and navigation can’t resolve the standard library. Add a
-              directory under <strong>Settings › Java › JDK locations</strong>.
-            </div>
-          {:else if !jdkReport.exact}
-            <div class="fact-warn">
-              <TriangleAlert size={13} />
-              No JDK for the exact level installed — using Java {jdkReport.resolved_major} as a fallback.
-            </div>
-          {/if}
-          {#if jdkReport.resolved_home}
-            <div class="fact"><span class="fact-k">Using</span><code>{jdkReport.resolved_home}</code></div>
-          {/if}
-        {/if}
-      </section>
-
-      <!-- Encoding ────────────────────────────────────────────────────────── -->
-      <section class="cfg-section">
-        <div class="sec-head">
-          <FileType size={13} />
-          <h3>Encoding</h3>
-        </div>
-        <FormField
-          label="Source encoding"
-          hint="How file source is decoded. Legacy projects often declare Cp1252 in the pom."
-        >
-          <Select bind:value={draft.encodingOverride} options={encodingOptions} />
-        </FormField>
-        {#if projectStore.activeFilePath}
-          <div class="fact">
-            <span class="fact-k">{projectStore.activeFilePath.split(/[\\/]/).pop()}</span>
-            decoded as {projectStore.activeEncoding}
-          </div>
-        {/if}
-      </section>
-
-      <!-- Capabilities (read-only) ───────────────────────────────────────── -->
-      <section class="cfg-section">
-        <div class="sec-head">
-          <Boxes size={13} />
-          <h3>Frameworks</h3>
-          {#if enabledCaps.length}<span class="sec-count">{enabledCaps.length}</span>{/if}
-        </div>
-        {#if enabledCaps.length === 0}
-          <EmptyState message="No domain frameworks detected in this project." compact />
-        {:else}
-          <div class="caps">
-            {#each enabledCaps as c (c)}
-              <Badge variant="tone" tone="accent" label={capLabel(c)} />
-            {/each}
-          </div>
-          {#if capHits.length}
-            <ul class="ro-list">
-              {#each capHits as h, i (i)}
-                <li class="ro-row">
-                  <span class="tier tier-{h.tier.toLowerCase()}">{h.tier}</span>
-                  <span class="ro-primary">{capLabel(h.capability)}</span>
-                  <span class="ro-detail">{h.detail}</span>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        {/if}
-      </section>
-
-      <!-- Spelling ──────────────────────────────────────────────────────── -->
-      <section class="cfg-section">
-        <div class="sec-head">
-          <SpellCheck size={13} />
-          <h3>Spelling</h3>
-        </div>
-        <FormField
-          label="Spell-check identifiers &amp; comments"
-          hint="Checks declared names (split by camelCase / snake_case / kebab-case) and comments against English + Italian dictionaries. Misspellings show as hints with an 'Add to dictionary' quick-fix."
-        >
-          <Toggle
-            checked={spellOn}
-            disabled={!bennuSpellStore.installed || !root}
-            onchange={(v) => { if (root) bennuSpellStore.setEnabled(root, v); }}
-            label={bennuSpellStore.installed ? (spellOn ? 'On' : 'Off') : 'Download the dictionaries first'}
-          />
-        </FormField>
-        <div class="spell-dicts">
-          {#if bennuSpellStore.installed}
-            <span class="spell-status ok">Installed: {bennuSpellStore.status?.languages.join(', ')}</span>
-          {:else}
-            <span class="spell-status">No dictionaries installed yet.</span>
-          {/if}
+        <BennuNamingSettings
+          doc={naming}
+          inherited={bennuNamingStore.profile.config}
+          inheritedLabel="your profile"
+        />
+        <div class="actions">
+          <Button variant="ghost" size="sm" onclick={() => naming.revert()} disabled={!naming.dirty}>
+            Discard changes
+          </Button>
           <Button
-            variant="secondary"
+            variant="primary"
             size="sm"
-            onclick={() => void bennuSpellStore.download()}
-            disabled={bennuSpellStore.downloading}
+            onclick={saveNaming}
+            disabled={!naming.dirty || naming.saving}
           >
-            {bennuSpellStore.downloading ? 'Downloading…' : bennuSpellStore.installed ? 'Re-download' : 'Download EN + IT'}
+            {naming.saving ? 'Saving…' : 'Save for this project'}
           </Button>
         </div>
-        {#if bennuSpellStore.downloading && bennuSpellStore.progress}
-          <div class="spell-prog">{bennuSpellStore.progress}</div>
-        {/if}
-      </section>
-
-      <!-- Naming conventions ─────────────────────────────────────────────── -->
-      <BennuNamingSettings />
-
-      <!-- Source / output roots ──────────────────────────────────────────── -->
-      <section class="cfg-section">
-        <div class="sec-head">
-          <FolderTree size={13} />
-          <h3>Roots</h3>
-        </div>
-        <div class="two-col">
-          <FormField label="Source root">
-            <Input bind:value={draft.sourceRoot} placeholder="src/main/java" />
-          </FormField>
-          <FormField label="Output root">
-            <Input bind:value={draft.outputRoot} placeholder="target/classes" />
-          </FormField>
-        </div>
-        <FormField
-          label="Excluded directories"
-          hint="Comma-separated folder names skipped by indexing and search."
-        >
-          <Input bind:value={draft.excludedDirs} placeholder="target, .git, .idea" />
-        </FormField>
-      </section>
-
-      <!-- Modules (read-only) ────────────────────────────────────────────── -->
-      <section class="cfg-section">
-        <div class="sec-head">
-          <Boxes size={13} />
-          <h3>Modules</h3>
-          {#if modules.length}<span class="sec-count">{modules.length}</span>{/if}
-        </div>
-        {#if modules.length === 0}
-          <EmptyState message="Single-module project — no child modules declared." compact />
-        {:else}
-          <ul class="ro-list">
-            {#each modules as m (m)}
-              <li class="ro-row">
-                <Boxes size={12} />
-                <span class="ro-primary">{m}</span>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
-
-    {/if}
-  </div>
+      {/if}
+    {/snippet}
+  </SettingsShell>
 
   {#snippet footer()}
     <ModalFooter align="between">
-      <Button variant="ghost" size="sm" onclick={resetToDefaults} disabled={!project}>
-        Reset to defaults
-      </Button>
-      <div class="footer-actions">
-        <Button variant="secondary" size="sm" onclick={onClose}>Cancel</Button>
-        <Button
-          variant="primary"
-          size="sm"
-          onclick={apply}
-          disabled={!project}
-          tooltip={{ content: 'Apply', shortcut: 'Ctrl+Enter' }}
-        >
-          Apply
-        </Button>
-      </div>
+      <span class="foot-note">
+        {#if root}Stored in <code>{root}/.arbor/bennu/</code> and in your profile{/if}
+      </span>
+      <Button variant="primary" size="sm" onclick={onClose}>Done</Button>
     </ModalFooter>
   {/snippet}
 </Modal>
@@ -356,138 +159,13 @@
 <style>
   .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .hdr-name {
-    font-size: var(--font-size-xs);
-    color: var(--text-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .body {
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-  }
-
-  .cfg-section {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .sec-head {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    color: var(--text-secondary);
-  }
-  .sec-head h3 {
-    margin: 0;
-    font-size: var(--font-size-sm);
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    color: var(--text-primary);
-  }
-  .sec-count {
-    font-size: var(--font-size-2xs);
-    font-weight: 600;
-    color: var(--text-muted);
-    background: var(--bg-overlay);
-    border: 1px solid var(--border-subtle);
-    border-radius: 999px;
-    padding: 0 6px;
-    line-height: 15px;
-  }
-  .sec-note {
-    margin: -2px 0 2px;
-    font-size: var(--font-size-xs);
-    color: var(--text-muted);
-    line-height: 1.45;
-  }
-
-  .two-col {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-  }
-
-  .ro-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-  }
-  .ro-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 10px;
-    font-size: var(--font-size-sm);
-    color: var(--text-primary);
-    border-top: 1px solid var(--border-subtle);
-  }
-  .ro-row:first-child { border-top: none; }
-  .ro-row :global(svg) { color: var(--text-muted); flex-shrink: 0; }
-  .ro-primary {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  /* A fact about the project, under the field that can override it. */
-  .fact {
-    display: flex; align-items: center; gap: 8px; padding: 4px 0 0;
     font-size: var(--font-size-xs); color: var(--text-muted);
-  }
-  .fact-k { color: var(--text-secondary); }
-  .fact code {
-    font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-secondary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .fact-warn {
-    display: flex; align-items: center; gap: 7px; margin-top: 8px;
-    padding: 7px 10px; font-size: var(--font-size-xs); line-height: 1.4;
-    color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent); border-radius: var(--radius-md);
+  .foot-note {
+    font-size: var(--font-size-2xs); color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
   }
-  .fact-warn :global(svg) { flex-shrink: 0; }
-  .fact-warn-error {
-    color: var(--error); background: color-mix(in srgb, var(--error) 12%, transparent);
-    border-color: color-mix(in srgb, var(--error) 30%, transparent);
-  }
-
-  .caps { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 8px; }
-  .ro-detail {
-    flex-shrink: 1; min-width: 0; font-size: var(--font-size-xs); color: var(--text-muted);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .tier {
-    flex-shrink: 0; width: 18px; height: 18px; border-radius: var(--radius-sm);
-    display: flex; align-items: center; justify-content: center;
-    font-size: var(--font-size-2xs); font-weight: 700;
-  }
-  .tier-a { color: var(--success); background: color-mix(in srgb, var(--success) 18%, transparent); }
-  .tier-b { color: var(--info);    background: color-mix(in srgb, var(--info) 18%, transparent); }
-  .tier-c { color: var(--warning); background: color-mix(in srgb, var(--warning) 18%, transparent); }
-
-  .footer-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .spell-dicts {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-  }
-  .spell-status { font-size: var(--font-size-xs); color: var(--text-muted); }
-  .spell-status.ok { color: var(--success); }
-  .spell-prog { font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-code); }
+  .foot-note code { font-family: var(--font-code); }
+  .actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 </style>

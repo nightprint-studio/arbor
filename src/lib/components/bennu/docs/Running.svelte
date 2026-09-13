@@ -161,8 +161,12 @@
 
 <h3>Tabs</h3>
 <ul>
+  <li><strong>Each tab says which project it came from</strong> in a workspace with more than one — a chip after the label, since run
+    configurations are named after what they launch and three projects with a <code>Main</code> produce three tabs called <code>Main</code>. The tab's
+    tooltip names the project whatever the workspace holds.</li>
   <li><strong>One tab per run</strong>, so this run can be compared with the last. The eight most recent are kept; ⟳ repeats <em>the tab you are looking at</em>, into a new tab; 🗑 closes
-    the finished ones. Closing a running tab stops its program.</li>
+    the finished ones. Past the width of the strip the rest are in the <strong>⌄</strong> menu at its end. Closing a tab whose program is still going stops it —
+    and says so first, naming what is about to stop.</li>
   <li>The console <strong>follows new output only while you are at the bottom</strong>; scroll up and it stays put.</li>
   <li><strong>Long lines scroll sideways</strong>, one line one row. Past four thousand characters a line is cut and says how much; ten thousand lines are kept per tab.</li>
   <li>Several programs run at once — a server and its client — each with its tab, stdin and Stop, and a ▷ in the strip on live tabs. <strong>Stop and the input line act on the tab in

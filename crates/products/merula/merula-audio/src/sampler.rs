@@ -95,6 +95,13 @@ impl SampleBank {
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.resident.keys().map(String::as_str)
     }
+
+    /// `(samples, bytes of audio)` resident — exact: `f32` frames held. A clone of the bank shares
+    /// the buffers through their `Arc`, so a bank and its clone are the same bytes, not twice them.
+    pub fn resident_footprint(&self) -> (usize, usize) {
+        let bytes = self.resident.values().map(|s| std::mem::size_of_val(&*s.data)).sum();
+        (self.resident.len(), bytes)
+    }
 }
 
 /// Looping parameters resolved for a player (frames, in the *resident* buffer).

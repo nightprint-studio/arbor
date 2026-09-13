@@ -38,6 +38,9 @@ mod config_cmds;
 // `list_registry_repos`), parsing the same JSON directly so the Projects sidebar
 // lists projects without spawning the git client.
 mod workspace;
+// What this backend holds in memory, for the process monitor's `__memory` breakdown.
+mod memory_report;
+
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, the plugin dir and
     // any `sitta_config_dir()` / `sitta_data_dir()` would silently resolve the
@@ -61,8 +64,9 @@ fn main() {
     // The method routing, declared as the inventory of `#[handler]`s this binary
     // links (self-test today, the sitta domains as the waves land). `inventory("")`
     // covers them all — sitta-be links only its own handlers.
-    let dispatcher =
-        arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle()).inventory("");
+    let dispatcher = arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle())
+        .inventory("")
+        .memory(|_state| memory_report::report());
 
     // Serve over framed stdio until the shell disconnects. The `App`'s post-`Hello`
     // hook boot-loads the host-pure plugins from sitta's installed/ pool.

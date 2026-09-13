@@ -5,6 +5,9 @@
 
 pub use crate::app::App;
 pub use crate::app_ctx::BackendAppCtx;
-pub use crate::dispatch::{Dispatcher, TOOLS_METHOD};
+pub use crate::dispatch::{
+    Dispatcher, MemoryItem, MemoryReport, MEMORY_METHOD, PROCESS_SCOPE, TOOLS_METHOD,
+};
+pub use crate::memory::json_heap_estimate;
 pub use crate::focus::{app_focused, set_app_focused, FOCUS_METHOD};
 pub use crate::io::BackendIo;

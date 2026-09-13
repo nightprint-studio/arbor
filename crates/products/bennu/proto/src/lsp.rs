@@ -66,6 +66,13 @@ pub struct LspStatus {
     /// is written down, so it is surfaced rather than kept in a log nobody opens.
     #[serde(default)]
     pub log_tail: Vec<String>,
+    /// The server process's id while it is alive.
+    ///
+    /// On the wire so the process monitor — which measures by pid and knows nothing about
+    /// language servers — can name a row and reach that server's Restart. `#[serde(default)]`:
+    /// a slot that never started has no process.
+    #[serde(default)]
+    pub pid: Option<u32>,
 }
 
 /// A server Bennu knows how to run, resolved against this machine — the settings list.

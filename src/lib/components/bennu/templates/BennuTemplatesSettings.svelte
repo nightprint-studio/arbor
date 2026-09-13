@@ -143,7 +143,7 @@
     <p>{group.description}</p>
   </div>
 
-  <div class="card tpl">
+  <div class="card tpl fills">
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <ul class="tpl-list" onkeydown={onListKeydown}>
       {#each list as t (t.name)}
@@ -327,7 +327,10 @@
   .kind-project code { font-family: var(--font-code); color: var(--accent); }
 
   /* ── One kind: the list beside the template ─────────────────────────────── */
-  .tpl { display: grid; grid-template-columns: minmax(180px, 240px) 1fr; min-height: 340px; }
+  /* The page is a column: the card takes what is left of it, and the body of the template takes what
+     is left of the card. A fixed height here left a band of nothing under a short template and a
+     scrollbar under a long one. */
+  .tpl { display: grid; grid-template-columns: minmax(180px, 240px) 1fr; min-height: 300px; }
   .tpl-list {
     display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 6px;
     list-style: none; overflow-y: auto;
@@ -364,7 +367,7 @@
   .pill-neutral { color: var(--text-muted); background: var(--bg-overlay); }
 
   /* ── The template itself ────────────────────────────────────────────────── */
-  .tpl-detail { display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; min-width: 0; }
+  .tpl-detail { display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; min-width: 0; min-height: 0; }
   .det-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
   .det-name { font-family: var(--font-code); font-size: var(--font-size-sm); color: var(--text-primary); }
   .det-ext { color: var(--text-muted); }
@@ -384,7 +387,7 @@
   .det-actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
   .det-spacer { flex: 1; }
   .det-body {
-    flex: 1; min-height: 120px; max-height: 320px; margin: 0; padding: 9px 11px;
+    flex: 1 1 auto; min-height: 120px; margin: 0; padding: 9px 11px;
     overflow: auto; white-space: pre;
     background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
     font-family: var(--font-code); font-size: var(--font-size-2xs); line-height: 1.55;

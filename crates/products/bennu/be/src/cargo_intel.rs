@@ -164,6 +164,37 @@ pub(crate) fn forget_catalog(root: &str) {
     }
 }
 
+/// Drop every catalogue cached for a workspace at or under `root` — the project was closed.
+///
+/// By prefix rather than by key: the cache is keyed by the workspace root a manifest resolved to,
+/// which for a member opened on its own is not the string the project was opened with.
+pub(crate) fn forget_under(root: &str) {
+    let root = Path::new(root);
+    if let Ok(mut map) = cache().lock() {
+        map.retain(|key, _| !key.starts_with(root));
+    }
+}
+
+/// What the catalogue cache holds, per workspace — for the memory breakdown.
+pub(crate) fn memory_items() -> Vec<arbor_be::prelude::MemoryItem> {
+    let Ok(map) = cache().lock() else { return Vec::new() };
+    map.iter()
+        .map(|(root, cached)| {
+            let c = &cached.catalog;
+            let bytes = std::mem::size_of_val(c.crates.as_slice())
+                + c.crates.iter().map(String::capacity).sum::<usize>()
+                + std::mem::size_of_val(c.versions.as_slice())
+                + c.versions.iter().map(|(name, version)| name.capacity() + version.capacity()).sum::<usize>();
+            arbor_be::prelude::MemoryItem::estimate(
+                root.to_string_lossy(),
+                "Crate names and versions for completion",
+                c.versions.len(),
+                bytes,
+            )
+        })
+        .collect()
+}
+
 /// The lower-cased final segment of a path.
 fn file_name(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_ascii_lowercase()

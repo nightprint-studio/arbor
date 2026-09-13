@@ -51,6 +51,17 @@ pub struct IndexResolver<M: CpMemberIndex> {
     project_only: bool,
 }
 
+impl<M: CpMemberIndex> IndexResolver<M> {
+    /// How many types the `members_of` memo holds, for the process monitor.
+    ///
+    /// **Counted, not sized.** The entries are the Java model's `ClassMembers`, a nested structure
+    /// of its own, and sizing it would mean walking every member of every type each time somebody
+    /// opens the breakdown. The count is what moves when this cache is the problem.
+    pub fn cached_members(&self) -> usize {
+        self.members_cache.read().map_or(0, |cache| cache.len())
+    }
+}
+
 /// The edited-file overlay: a binary→members-JSON lookup for the resolver, plus a
 /// simple→binary hint map, plus a per-file record of what each file contributed (so a
 /// re-patch of the same file drops that file's stale entries — rename/remove correctness).

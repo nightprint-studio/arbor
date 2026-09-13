@@ -111,6 +111,16 @@
   that is the trade: a wrong flow analysis accuses working code of throwing, with no way for the reader to see why.
 </Callout>
 
+<h2>Broken characters</h2>
+<p>
+  Two encoding checks ride the ordinary validation, in <strong>any</strong> text file rather than only the ones an
+  analyzer understands — a message bundle, a code template, a <code>.sql</code>, a README — because they are about bytes
+  and not about a language. <code>encoding.mojibake</code> flags text that was UTF-8 and got read as Windows-1252, and
+  carries the correct character as a one-click fix. <code>encoding.undecodable</code> flags a byte that could not be read
+  at all, and has no fix by nature: the answer is to reload the file in the encoding it is written in. See
+  <strong>Encodings</strong>.
+</p>
+
 <h2>Turning a check down</h2>
 <p>
   Under Project Configuration → <strong>Inspections</strong> every check has a severity — <strong>error</strong>, <strong>warning</strong>,
@@ -128,8 +138,18 @@ class LegacyImporter { … }`, 'java')}</code></pre>
 
 <h2>Naming conventions</h2>
 <p>
-  A project can declare how its declarations are spelled and have every name that breaks it flagged. It is <strong>off until you turn it on</strong>, per kind of
-  declaration, under <strong>Project Configuration → Naming conventions</strong> — nothing is assumed about a project that never asked.
+  Declarations can be checked against how they are meant to be spelled, and every name that breaks the rule is flagged. It is
+  <strong>off until you turn it on</strong>, per kind of declaration — nothing is assumed about a project that never asked.
+</p>
+<p>
+  It is set at <strong>two levels</strong>. <strong>Settings → Editor → Naming</strong> is your answer for every project: adopt a convention once instead of
+  retyping it into every checkout. <strong>Project Configuration → Naming</strong> is what one project spells differently — and each row there says whether the
+  value it shows is the project's or came from your profile, with <em>Back to your profile</em> to hand a language back. A project that must not be judged by your
+  conventions at all turns <em>Start from your profile</em> off and is read by itself alone.
+</p>
+<p>
+  The two are merged per target rather than per language, so pinning <code>constant</code> in one project keeps your <code>type</code> and <code>method</code>
+  answers. <em>Never check</em> globs add up — both levels are naming a place that should not be judged — and exceptions apply in order, the project's after yours.
 </p>
 <div class="feature-grid two-col">
   <div class="feature-card">

@@ -19,7 +19,7 @@
 
 use crate::config::app_config::{
     self, ActivityBarConfig, AnimationsConfig, AppearanceConfig, ExplorerConfig, OAuthOverrides,
-    TytoConfig, WhatsNewConfig,
+    ProcessesConfig, TytoConfig, WhatsNewConfig,
 };
 use crate::error::AppError;
 use crate::ipc::platform;
@@ -123,6 +123,25 @@ fn get_activity_bar_config(state: &AppState) -> Result<ActivityBarConfig, AppErr
 fn set_activity_bar_config(state: &AppState, config: ActivityBarConfig) -> Result<(), AppError> {
     let mut cfg = state.lock_config()?;
     cfg.activity_bar = config;
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
+}
+
+// ── Process monitor watchdog ────────────────────────────────────────────────
+
+/// Return the process-monitor thresholds.
+#[platform::handler(program = "platform")]
+fn get_processes_config(state: &AppState) -> Result<ProcessesConfig, AppError> {
+    let config = state.lock_config()?;
+    Ok(config.processes.clone())
+}
+
+/// Persist the process-monitor thresholds.
+#[platform::handler(program = "platform")]
+fn set_processes_config(state: &AppState, config: ProcessesConfig) -> Result<(), AppError> {
+    let mut cfg = state.lock_config()?;
+    cfg.processes = config;
     let cfg_clone = cfg.clone();
     drop(cfg);
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))

@@ -112,8 +112,13 @@
   </dd>
 </dl>
 <p>
-  Every project keeps its tabs, tree and index in memory, so switching — a project or a whole workspace — never opens
-  anything again. A file opened from another project of the workspace stays in the current tab strip,
+  Every project of the workspace keeps its tabs and tree. Its <strong>index, framework models and language servers start
+  when you switch to it</strong>, not when the workspace opens, and a project you have not looked at or searched for ten minutes gives
+  them back — <em>Settings › Language Servers › Release projects you are not using after</em> sets how long, or never.
+  Switching back sooner is instant; later, the index is read back from disk and the server starts again. The project on
+  screen is never released. A project that leaves the workspace — removed, replaced with <kbd>Ctrl</kbd> + <kbd>O</kbd>,
+  or left behind when you switch workspace — is released about twenty seconds later, without waiting for the rest.
+  A file opened from another project of the workspace stays in the current tab strip,
   <strong>badged with the project it belongs to</strong>.
 </p>
 
@@ -186,10 +191,12 @@
   Entando.
 </p>
 <p>
-  <strong>Project Configuration</strong> — the title bar's gear, or the command palette — lists what was detected here
-  with the evidence for each, beside the rest of what belongs to this project: the JDK level it targets, its encoding,
-  its naming rules and its roots. Settings holds what belongs to you and to the machine instead, which is why the two
-  are different dialogs.
+  <strong>Project Configuration</strong> — the title bar's gear, <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>,</kbd>, or
+  the command palette — holds everything that is true of <em>this project</em> rather than of you, as four sections with
+  a sidebar: <strong>Project</strong> (the JDK level it targets, its encoding, its modules), <strong>Frameworks</strong>
+  (what was detected here, each with the evidence that convinced Bennu), and the two that override your profile —
+  <strong>Naming</strong> and <strong>Spelling</strong>. Settings holds what belongs to you and to the machine instead,
+  which is why the two are different dialogs; they share a layout so the boundary is the only thing you have to learn.
 </p>
 <div class="feature-grid two-col">
   <div class="feature-card">

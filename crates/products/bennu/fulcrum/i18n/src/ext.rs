@@ -38,7 +38,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use bennu_ext::prelude::{
-    ExtEntry, ExtHighlight, ExtHover, ExtStat, ExtTarget, FileCtx, FrameworkExtension, ProjectScan,
+    ExtEntry, ExtHighlight, ExtHover, ExtMemory, ExtStat, ExtTarget, FileCtx, FrameworkExtension,
+    ProjectScan,
 };
 use bennu_proto::prelude::{CapabilitySet, CompletionItem, Diagnostic};
 
@@ -121,6 +122,30 @@ impl FrameworkExtension for FulcrumI18nExtension {
 
     fn applies(&self, caps: &CapabilitySet) -> bool {
         caps.fulcrum_i18n
+    }
+
+    fn memory(&self) -> Vec<ExtMemory> {
+        let (labels, label_bytes) = self.catalog.read().map(|c| c.footprint()).unwrap_or((0, 0));
+        let (uses, use_bytes) = self
+            .uses
+            .read()
+            .map(|u| {
+                let count = u.values().map(Vec::len).sum();
+                let bytes = u
+                    .iter()
+                    .map(|(label, sites)| {
+                        label.capacity()
+                            + std::mem::size_of_val(sites.as_slice())
+                            + sites.iter().map(|s| s.file.capacity()).sum::<usize>()
+                    })
+                    .sum();
+                (count, bytes)
+            })
+            .unwrap_or((0, 0));
+        vec![
+            ExtMemory::estimate("Labels", labels, label_bytes),
+            ExtMemory::estimate("Label uses", uses, use_bytes),
+        ]
     }
 
     fn reindex(&self, scan: &ProjectScan<'_>) {

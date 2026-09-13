@@ -45,6 +45,26 @@ export function dictAdd(word: string, scope: 'project' | 'global', root: string)
   return bennu('bennu_dict_add', { args: { word, scope, root } });
 }
 
+/**
+ * The words in one custom dictionary, in file order.
+ *
+ * The list, not just the "add" the quick-fix uses: a word added by a typo stays added forever
+ * otherwise. Wire: `bennu_dict_words — { scope, root }`.
+ */
+export function dictWords(scope: 'project' | 'global', root = ''): Promise<string[]> {
+  return bennu('bennu_dict_words', { args: { scope, root, words: [] } });
+}
+
+/** Replace one custom dictionary with `words` (trimmed, de-duplicated by the backend). Wire:
+ *  `bennu_dict_set_words — { scope, root, words }`. */
+export function setDictWords(
+  scope: 'project' | 'global',
+  words: string[],
+  root = '',
+): Promise<void> {
+  return bennu('bennu_dict_set_words', { args: { scope, root, words } });
+}
+
 /** Query which dictionaries are installed. Wire: `bennu_spell_status — {}`. */
 export function spellStatus(): Promise<SpellStatus> {
   return bennu('bennu_spell_status', { args: {} });

@@ -324,7 +324,13 @@ handler) and 3–6 (workspace + router + ensure + window); everything else grows
    - `src/main.rs`: copy the `sitta-be` skeleton — `init_active_profile()` →
      `App::new(BackendIo::new())` → `.plugin_host("foo", foo_hook_dispatcher)` →
      `.api_installer(...)` → build `Arc<FooState>` → `Dispatcher::new(state, rt).inventory("")`
-     → `app.run(dispatcher)`.
+     → `.memory(memory_report::report)` → `app.run(dispatcher)`.
+   - `src/memory_report.rs`: the reserved `__memory` answer the process monitor's breakdown
+     reads — one `MemoryItem` per thing that grows (`estimate` / `exact` / `counted`, scoped to a
+     project root or `PROCESS_SCOPE`). Size what the product owns and only that: the plugin VMs
+     are appended by `App::run` for any backend with a plugin host. Count what is too deep to
+     size cheaply — the report runs when someone opens the row, and must not do more work than
+     the answer is worth.
    - `src/selftest.rs`: `be_ping` / `be_echo` handlers to prove the seam first.
    - Domain modules: one file per domain, each a set of
      `#[arbor_rpc::handler] fn(&FooState, …) -> Result<T, String>`.

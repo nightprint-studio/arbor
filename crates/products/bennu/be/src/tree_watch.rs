@@ -93,6 +93,15 @@ pub fn watch(sink: Arc<dyn EventSink>, roots: Vec<PathBuf>) -> Result<(), String
     Ok(())
 }
 
+/// The roots being watched right now — empty when nothing is.
+fn watched_roots() -> Vec<PathBuf> {
+    CURRENT
+        .lock()
+        .ok()
+        .and_then(|slot| slot.as_ref().map(|running| running.roots.clone()))
+        .unwrap_or_default()
+}
+
 /// Ask the running watcher to stop. Safe when none is.
 pub fn stop() {
     if let Ok(mut slot) = CURRENT.lock() {
@@ -253,13 +262,20 @@ pub struct WatchArgs {
 #[arbor_rpc::handler]
 fn bennu_watch_roots(ctx: &BennuState, args: WatchArgs) -> Result<bool, String> {
     let roots: Vec<PathBuf> = args.roots.iter().map(PathBuf::from).filter(|p| p.is_dir()).collect();
-    match watch(ctx.event_sink(), roots) {
-        Ok(()) => Ok(true),
+    // The set this replaces is also the only record of which projects the window just closed:
+    // whatever was watched and is not any more. Read before `watch` swaps it out.
+    let previous = watched_roots();
+    let watched = match watch(ctx.event_sink(), roots.clone()) {
+        Ok(()) => true,
         Err(e) => {
             eprintln!("bennu-be: tree watcher: {e}");
-            Ok(false)
+            false
         }
-    }
+    };
+    // Whether or not the watcher started: a project closed is closed, and its memory is owed back
+    // either way. Released off this thread — see `project_close`.
+    crate::project_close::release_closed(&previous, &roots);
+    Ok(watched)
 }
 
 #[cfg(test)]

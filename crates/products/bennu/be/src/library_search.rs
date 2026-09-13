@@ -157,6 +157,49 @@ fn cache() -> &'static Mutex<HashMap<String, Arc<LibraryIndex>>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// What the library indexes hold, one line per project — part of the backend's `__memory` answer.
+///
+/// Every class and resource name of every dependency jar, plus the JDK's class names, as owned
+/// strings: on a project with a few hundred jars this is one of the larger things the backend keeps.
+pub(crate) fn memory_items() -> Vec<arbor_be::prelude::MemoryItem> {
+    use std::mem::size_of;
+    fn names(list: &Vec<String>) -> usize {
+        list.capacity() * size_of::<String>() + list.iter().map(String::capacity).sum::<usize>()
+    }
+    let indexes: Vec<(String, Arc<LibraryIndex>)> = cache()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .map(|(root, index)| (root.clone(), Arc::clone(index)))
+        .collect();
+    indexes
+        .into_iter()
+        .map(|(root, index)| {
+            let entries = index.entries.iter().map(|jar| jar.classes.len() + jar.resources.len()).sum::<usize>()
+                + index.jdk.as_ref().map_or(0, |jdk| jdk.classes.len());
+            let bytes = index.entries.capacity() * size_of::<JarEntries>()
+                + index.entries.iter().map(|jar| jar.name.capacity() + names(&jar.classes) + names(&jar.resources)).sum::<usize>()
+                + index.jdk.as_ref().map_or(0, |jdk| jdk.label.capacity() + names(&jdk.classes));
+            arbor_be::prelude::MemoryItem {
+                scope: root.replace('\\', "/"),
+                label: "Library contents (search)".to_string(),
+                bytes: Some(bytes as u64),
+                count: Some(entries as u64),
+                exact: false,
+                mapped: false,
+            }
+        })
+        .collect()
+}
+
+/// Drop `root`'s library index — the project was closed.
+///
+/// The index is rebuilt when the jar set changes, which kept it correct; nothing ever removed one,
+/// which kept every project opened in the session holding the entry list of every jar it depends on.
+pub(crate) fn forget(root: &str) {
+    cache().lock().unwrap_or_else(|p| p.into_inner()).remove(root);
+}
+
 /// The index for `root`, built if the project's jar set has changed since the last one.
 ///
 /// The lock is released before the build: building holds no lock, so a second search arriving

@@ -55,10 +55,24 @@ export interface NamingOverride {
   rules: Record<string, NamingRules>;
 }
 
-/** The `[naming]` section of `<repo>/.arbor/bennu/config.toml`. */
+/**
+ * A naming document — the profile's defaults, or a project's `[naming]` section.
+ *
+ * The same shape twice on purpose: the profile holds your answer for every project and a project
+ * states only what it says differently. What a file is finally judged by is the two merged, which
+ * the backend does; nothing on this side ever needs the merged document, because each screen edits
+ * exactly one of the two.
+ */
 export interface NamingConfig {
   /** Master switch. Off by default — a project opts in. */
   enabled: boolean;
+  /**
+   * Start from the profile's defaults and state only the differences. `true` by default.
+   *
+   * Off is how a project disagrees wholesale — a legacy tree that must not be judged by the
+   * conventions every other project of yours is. Meaningless on the profile document itself.
+   */
+  inherit: boolean;
   /** Project-relative path globs (`*`, `?`, `**`) that are skipped entirely. */
   ignore: string[];
   /** Rules per language pack id. */
@@ -189,7 +203,17 @@ export function cancelNamingFix(root: string): Promise<void> {
 
 /** The default section — what a project that never configured naming has. */
 export function emptyNamingConfig(): NamingConfig {
-  return { enabled: false, ignore: [], rules: {}, overrides: [] };
+  return { enabled: false, inherit: true, ignore: [], rules: {}, overrides: [] };
+}
+
+/** Read the profile's defaults — your answer for every project. Wire: `bennu_get_naming_defaults`. */
+export function getNamingDefaults(): Promise<NamingConfig> {
+  return bennu('bennu_get_naming_defaults', { args: {} });
+}
+
+/** Persist the profile's defaults. Wire: `bennu_set_naming_defaults`. */
+export function setNamingDefaults(config: NamingConfig): Promise<void> {
+  return bennu('bennu_set_naming_defaults', { args: { config } });
 }
 
 /** Read `[naming]` for the project at `root`. Wire: `bennu_get_naming_config`. */

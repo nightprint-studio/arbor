@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { paletteIcon } from '$lib/utils/plugin-icons';
   /**
    * GarrulusShell — the notes window.
    *
@@ -34,7 +35,7 @@
   import GarrulusConflictsDock from './panels/GarrulusConflictsDock.svelte';
   import GarrulusSearchView from './search/GarrulusSearchView.svelte';
   import { garrulusNotesStore } from '$lib/stores/garrulus/notes.svelte';
-  import { GARRULUS_SECTIONS, garrulusPaletteIcon } from './garrulus-palette';
+  import { GARRULUS_SECTIONS } from './garrulus-palette';
   import { surfaceStore } from '$lib/stores/surfaces.svelte';
   import { garrulusUiStore } from '$lib/stores/garrulus/ui.svelte';
   import { garrulusSyncStore } from '$lib/stores/garrulus/sync.svelte';
@@ -65,7 +66,7 @@
   const railTop = $derived<ActivityRailItem[]>(
     GARRULUS_SECTIONS.map((s) => ({
       id: s.id,
-      icon: garrulusPaletteIcon(s.icon),
+      icon: paletteIcon(s.icon),
       tooltip: s.label,
       shortcut: s.shortcut,
       active: garrulusUiStore.sidebarOpen && garrulusUiStore.sidebarSection === s.id,

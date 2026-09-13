@@ -86,7 +86,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'endpoints',
     title: 'Endpoints',
     command: 'Endpoints',
-    icon: 'target',
+    icon: 'Target',
     placeholder: 'Filter by path, verb, handler, result or interceptor…',
     empty: 'No routes found in this project — no request mappings and no Struts actions.',
     groups: [
@@ -107,7 +107,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'messages.keys',
     title: 'Messages',
     command: 'Message bundles',
-    icon: 'languages',
+    icon: 'Languages',
     placeholder: 'Filter by key, text or bundle…',
     empty: 'No message bundles found in this project.',
     groups: [
@@ -126,7 +126,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'fulcrum.i18n.labels',
     title: 'Labels',
     command: 'i18n labels',
-    icon: 'languages',
+    icon: 'Languages',
     placeholder: 'Filter by label, text or category…',
     empty: 'No i18n labels found — this project has no i18n/languages.toml.',
     groups: [
@@ -148,7 +148,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'bevy.components',
     title: 'Components',
     command: 'Bevy components, resources, messages and events',
-    icon: 'bevy',
+    icon: 'Bevy',
     placeholder: 'Filter by component, resource, message, event or bundle…',
     empty: 'No ECS declarations found — no #[derive(Component)] and no #[derive(Resource)].',
     groups: [
@@ -166,7 +166,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'bevy.systems',
     title: 'Systems',
     command: 'Bevy systems',
-    icon: 'list-checks',
+    icon: 'ListChecks',
     placeholder: 'Filter by system, schedule or the type it touches…',
     empty: 'No systems found — no function in this project takes a Bevy system parameter.',
     groups: [
@@ -187,7 +187,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'bevy.shaders',
     title: 'Shaders',
     command: 'Bevy shaders and the materials that run them',
-    icon: 'palette',
+    icon: 'Palette',
     placeholder: 'Filter by shader, material or finding…',
     empty: 'No material in this project names a shader.',
     groups: [
@@ -204,7 +204,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'bevy.conflicts',
     title: 'Access conflicts',
     command: 'Bevy system access conflicts',
-    icon: 'shield',
+    icon: 'ShieldCheck',
     placeholder: 'Filter by system, schedule or contended type…',
     empty: 'No pair of systems in one schedule contends over the same data.',
     groups: [
@@ -218,7 +218,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'spring.beans',
     title: 'Beans',
     command: 'Spring beans',
-    icon: 'box',
+    icon: 'Box',
     placeholder: 'Filter by name, class or stereotype…',
     empty: 'No Spring beans found in this project.',
     groups: [
@@ -233,7 +233,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'spring.librarybeans',
     title: 'Library beans',
     command: 'Spring beans from libraries',
-    icon: 'box',
+    icon: 'Box',
     placeholder: 'Filter by bean, class or artifact…',
     // Offered only when the allowlist matched something that declares beans, so this is what
     // you see having configured a coordinate that turns out to have none.
@@ -248,7 +248,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'spring.properties',
     title: 'Config',
     command: 'Spring configuration',
-    icon: 'sliders',
+    icon: 'SlidersHorizontal',
     placeholder: 'Filter by key or value…',
     empty: 'No application property files found in this project.',
     groups: [
@@ -265,7 +265,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'spring.documented',
     title: 'Property reference',
     command: 'Spring property reference',
-    icon: 'book',
+    icon: 'BookOpen',
     placeholder: 'Filter by key, type or description…',
     empty: 'No configuration metadata found — build the project once so its dependencies resolve.',
     groups: [
@@ -278,7 +278,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'jpa.entities',
     title: 'Entities',
     command: 'JPA entities',
-    icon: 'box',
+    icon: 'Box',
     placeholder: 'Filter by entity, table, column or field…',
     empty: 'No @Entity classes found in this project.',
     groups: [
@@ -292,7 +292,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'jpa.repositories',
     title: 'Repositories',
     command: 'JPA repositories',
-    icon: 'list',
+    icon: 'TextCursorInput',
     placeholder: 'Filter by repository, entity or query…',
     empty: 'No Spring Data repositories found in this project.',
     groups: [
@@ -306,7 +306,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'spring.bindings',
     title: 'Bound properties',
     command: 'Spring bound properties',
-    icon: 'list',
+    icon: 'TextCursorInput',
     placeholder: 'Filter by key, class or type…',
     empty: 'No @ConfigurationProperties classes in this project.',
     groups: [
@@ -319,7 +319,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     kind: 'jsp.taglibs',
     title: 'Tag libraries',
     command: 'JSP tag libraries',
-    icon: 'list',
+    icon: 'TextCursorInput',
     placeholder: 'Filter by URI or file…',
     empty: 'No tag library descriptors were found in this project or its dependencies.',
     // The answer to "why is my tag not completing": a library that did not resolve is not here.

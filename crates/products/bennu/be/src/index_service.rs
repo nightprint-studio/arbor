@@ -1323,12 +1323,18 @@ impl IndexService {
     /// the bail signal for a superseded build thread. Bailing stops the remaining (expensive) work
     /// and, crucially, suppresses the terminal `ready` event, so an old thread finishing after a
     /// rebuild can't close the new build's progress card (leaving its warm-up running unnotified).
+    ///
+    /// A root with **no** generation counts as superseded too. The only way to lose one is for the
+    /// project to have been closed ([`IndexService::forget`]) while its build was still running, and
+    /// a build that carried on after that would hold the whole slot alive until it finished — the
+    /// memory the close was meant to give back — and then announce `ready` for a project nobody has
+    /// open.
     fn superseded(&self, root: &Path, my_gen: u64) -> bool {
         self.build_gen
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .get(root)
-            .is_some_and(|&g| g != my_gen)
+            .is_none_or(|&g| g != my_gen)
     }
 
     /// Rebuild the index for an already-open project (by root), reusing the JDK level it
@@ -1593,6 +1599,107 @@ impl IndexService {
         g.retain(|(r, _), _| r != root);
     }
 
+    /// Release everything this service holds for `root` — the project was closed.
+    ///
+    /// Before this existed the slot map was only ever inserted into, so every project opened in a
+    /// session stayed loaded until the backend exited: its sources as text, its reference index with
+    /// a preview line per use site, its decoded classpath, its mapped symbol index. Switching between
+    /// three large projects held all three, which is how a backend ends up reporting more than a
+    /// gigabyte while showing one.
+    ///
+    /// The build generation is **removed**, not bumped: [`Self::superseded`] reads a missing one as
+    /// superseded, so a build still running for this root stops at its next check instead of keeping
+    /// the slot alive to the end and announcing `ready` for a project nobody has open.
+    ///
+    /// Maps keyed by file rather than by root are filtered by prefix. Nothing here touches disk: the
+    /// index generations and the include cache stay where they are.
+    pub fn forget(&self, root: &str) {
+        let root_path = PathBuf::from(root);
+        let slot = self.slots.lock().unwrap_or_else(|p| p.into_inner()).remove(&root_path);
+        self.build_gen.lock().unwrap_or_else(|p| p.into_inner()).remove(&root_path);
+        self.include_caches.lock().unwrap_or_else(|p| p.into_inner()).remove(root);
+        self.include_synced.lock().unwrap_or_else(|p| p.into_inner()).remove(root);
+        self.dep_sources.lock().unwrap_or_else(|p| p.into_inner()).remove(root);
+        self.forget_library_facts(root);
+        self.incremental
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .retain(|file, _| !file.starts_with(&root_path));
+        self.patch_counts
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .per_file
+            .retain(|file, _| !file.starts_with(&root_path));
+        // Dropped last and outside every lock: this is usually the final `Arc` of the slot, and with
+        // it go the provider, the reference index and the memory maps — seconds of deallocation on a
+        // large project, which must not happen while holding a map another request is waiting on.
+        drop(slot);
+    }
+
+    /// What this service holds, per open project and once for the process — its part of the
+    /// backend's `__memory` answer.
+    ///
+    /// The slots are cloned out of the map and the lock released before anything is walked: the
+    /// estimates take each engine's own read lock, and holding the slot map across that would stall
+    /// every project's requests behind one breakdown.
+    pub fn memory_report(&self) -> Vec<arbor_be::prelude::MemoryItem> {
+        fn item(scope: &str, e: bennu_intel::prelude::MemoryEstimate, mapped: bool) -> arbor_be::prelude::MemoryItem {
+            arbor_be::prelude::MemoryItem {
+                scope: scope.to_string(),
+                label: e.label.to_string(),
+                bytes: e.bytes,
+                count: e.count,
+                exact: e.exact,
+                mapped,
+            }
+        }
+        use bennu_intel::prelude::MemoryEstimate;
+
+        let slots: Vec<Arc<ProjectSlot>> =
+            self.slots.lock().unwrap_or_else(|p| p.into_inner()).values().cloned().collect();
+        let mut items = Vec::new();
+        for slot in slots {
+            let scope = slot.root.to_string_lossy().replace('\\', "/");
+            let provider = Arc::clone(&*slot.provider.read().unwrap_or_else(|p| p.into_inner()));
+            let semantics = slot.semantics.read().unwrap_or_else(|p| p.into_inner()).clone();
+            items.extend(provider.memory_estimate().into_iter().map(|e| item(&scope, e, false)));
+            if let Some(engine) = &semantics {
+                items.extend(engine.memory_estimate().into_iter().map(|e| item(&scope, e, false)));
+            }
+            {
+                let classes = slot.classes.read().unwrap_or_else(|p| p.into_inner());
+                // Slots by the element type, not `size_of_val` of the vector — that is its 24-byte
+                // header, and the first version of this reported every project's list as nearly empty.
+                fn slots<T>(list: &[T], capacity: usize) -> usize {
+                    let _ = list;
+                    capacity * std::mem::size_of::<T>()
+                }
+                let bytes = slots(&classes[..], classes.capacity())
+                    + classes.iter().map(|c| c.fqcn.capacity() + c.simple.capacity() + c.file.capacity() + c.kind.capacity()).sum::<usize>();
+                items.push(item(&scope, MemoryEstimate::sized("Go to Class list", classes.len(), bytes), false));
+            }
+            let hashes = slot.indexed_hashes.lock().unwrap_or_else(|p| p.into_inner()).len();
+            items.push(item(&scope, MemoryEstimate::counted("Files tracked for re-indexing", hashes), false));
+            // The symbol index proper lives in memory-mapped files. Measured from disk, exact, and
+            // flagged: the pages count towards resident memory, but the system can take them back.
+            let dir = slot.index_dir.read().unwrap_or_else(|p| p.into_inner()).clone();
+            let mapped_bytes: u64 = std::fs::read_dir(&dir)
+                .map(|entries| {
+                    entries.flatten().filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum()
+                })
+                .unwrap_or(0);
+            items.push(item(&scope, MemoryEstimate::text("Symbol index files (memory-mapped)", 1, mapped_bytes as usize), true));
+        }
+
+        let facts = self.library_facts.lock().unwrap_or_else(|p| p.into_inner()).len();
+        let incremental = self.incremental.lock().unwrap_or_else(|p| p.into_inner()).len();
+        let includes = self.include_caches.lock().unwrap_or_else(|p| p.into_inner()).len();
+        items.push(item("process", MemoryEstimate::counted("Library source facts remembered", facts), false));
+        items.push(item("process", MemoryEstimate::counted("Files with cached validation", incremental), false));
+        items.push(item("process", MemoryEstimate::counted("JSP include graphs", includes), false));
+        items
+    }
+
     /// Validate a Java `file` over its owning project's provider (AST checks + the resolver-backed
     /// unknown-member check when the index is built). `source` is the live buffer. Falls back to the
     /// pure AST checks when no project owns the file / its index isn't built yet.
@@ -1806,8 +1913,15 @@ impl IndexService {
 
     /// The slot for a project root, if it is open.
     fn slot_for_root(&self, root: &str) -> Option<Arc<ProjectSlot>> {
-        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
-        slots.get(&PathBuf::from(root)).map(Arc::clone)
+        let slot = {
+            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            slots.get(&PathBuf::from(root)).map(Arc::clone)
+        };
+        // A question answered from the index is a use of the project — see `project_close`.
+        if slot.is_some() {
+            crate::project_close::touch(root);
+        }
+        slot
     }
 
     pub fn has_resolver(&self, root: &str) -> bool {
@@ -3686,6 +3800,10 @@ impl IndexService {
                     _ => best = Some(slot),
                 }
             }
+        }
+        // A question about one of its files is a use of the project — see `project_close`.
+        if let Some(slot) = best {
+            crate::project_close::touch(&slot.root.to_string_lossy());
         }
         best.cloned()
     }

@@ -174,6 +174,7 @@ fn close_repo(state: &CorvusState, tab_id: String) -> Result<(), String> {
         json!({ "tab_id": &tab_id, "path": &path, "name": &name }),
     );
     state.deregister_repo(&tab_id);
+    crate::tickets::forget_tab(&tab_id);
 
     // Orphan GC. Scope the read guard so it drops BEFORE `forget_repo_if_orphaned`
     // re-locks the registry (else self-deadlock).

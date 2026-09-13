@@ -10,7 +10,7 @@ pub use crate::config_props::read_properties;
 pub use crate::config_tree::{canonical, read_config, ConfigValue};
 pub use crate::config_yaml::read_yaml;
 pub use crate::dates::today;
-pub use crate::facts::{with_fact_schemas, ProjectFacts, StyleFacts, TemplateFacts};
+pub use crate::facts::{with_fact_schemas, ProjectFacts, RustStyleFacts, StyleFacts, TemplateFacts};
 pub use crate::line_map::{carry_lines, trace_lines, LineTrace};
 pub use crate::style::STYLE_METHODS;
 pub use crate::requires::unmet;

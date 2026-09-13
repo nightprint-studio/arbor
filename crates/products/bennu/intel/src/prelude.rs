@@ -13,6 +13,9 @@ pub use crate::provider::{
 // The class-name index behind the "Import class" intention (simple name → importable FQNs).
 pub use crate::class_names::{ClassNameIndex, Segment};
 
+// A line of a backend's memory breakdown — see `crate::memory`.
+pub use crate::memory::MemoryEstimate;
+
 // The wire types the provider produces, re-exported so a consumer (bennu-be) reaches
 // them through the intel prelude it already imports.
 pub use bennu_proto::prelude::{CompletionItem, Diagnostic};

@@ -23,6 +23,7 @@
       server_paths: {},
       servers: [],
       background_idle_timeout_secs: 600,
+      inactive_project_release_secs: 600,
     },
   );
   const cargoCfg = $derived<CargoConfigDto>(cfg?.cargo ?? { crates_io: true, index_ttl_hours: 24 });

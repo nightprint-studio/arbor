@@ -59,9 +59,11 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import BennuConsole from './BennuConsole.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuRunStore, formatMs } from '$lib/stores/bennu/run.svelte';
   import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
   import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
@@ -122,18 +124,47 @@
   const command = $derived(bennuRunStore.runCommand);
 
   /**
+   * Which project a run came from, short enough for a chip — and **only** in a workspace that has
+   * more than one.
+   *
+   * A run configuration is named after what it launches, so three projects with a `Main` produce
+   * three tabs called `Main`, and the strip stops being able to answer the first question you have
+   * about it. In a single-project workspace the same chip would be on every tab saying the one
+   * thing that is never in doubt, so it is not drawn at all.
+   */
+  const multiProject = $derived(projectStore.workspaceProjects.length > 1);
+  /** The project the test run belongs to — it runs in the active one, which is the only thing a
+   *  test run is tied to. */
+  const activeRoot = $derived(projectStore.project?.root ?? null);
+
+  function projectOf(root: string): string {
+    const found = projectStore.workspaceProjects.find((p) => p.root === root);
+    return found?.name ?? (root.split(/[\\/]/).pop() || root);
+  }
+
+  /** The chip, or nothing at all outside a multi-project workspace. */
+  function projectBadge(root: string | undefined): string | undefined {
+    return multiProject && root ? projectOf(root) : undefined;
+  }
+
+  /**
    * The tab strip: the test run first when there is one, then one tab per launched program,
    * newest last.
    *
    * A live tab carries a ▷ so a run still going is visible from whichever tab you happen to be
    * reading. Closing the test tab clears the run, which is what closing a run tab does too.
+   *
+   * The project is on the tab's title whatever the workspace holds — a tooltip costs nothing and
+   * answers "which one is this" without having to compare labels — and on a chip only where there
+   * is something to tell apart.
    */
   const tabItems = $derived<TabItem[]>([
     ...(hasTestRun
       ? [{
           id: TESTS,
           label: testStore.label || 'Tests',
-          title: 'The test run',
+          title: activeRoot ? `The test run — ${projectOf(activeRoot)}` : 'The test run',
+          badge: projectBadge(activeRoot ?? undefined),
           closable: true,
           icon: testStore.running ? Play : testIcon(),
           iconSize: 11,
@@ -142,7 +173,8 @@
     ...bennuRunStore.tabs.map((t) => ({
       id: t.id,
       label: t.label,
-      title: t.command || t.subject,
+      title: [projectOf(t.spec.root), t.command || t.subject].filter(Boolean).join(' — '),
+      badge: projectBadge(t.spec.root),
       closable: true,
       icon: t.live ? Play : undefined,
       iconSize: 11,
@@ -156,9 +188,32 @@
     if (id !== TESTS) bennuRunStore.showTab(id);
   }
 
-  /** Close a tab: a test run is cleared, a program's transcript is dropped. Neither kills a
-   *  live process — the store refuses that, and Stop is right there. */
+  /**
+   * A tab whose program is still going, held while the confirmation is on screen.
+   *
+   * Named apart from `stopping` above on purpose: that one is the store's "a stop has been asked
+   * for and the process has not gone yet", and the status badge reads it. Two different facts, and
+   * one name for both would have made the badge answer from this dialog.
+   */
+  let stopRequest = $state<{ id: string; label: string } | null>(null);
+
+  /**
+   * Close a tab — and ask first when there is something running in it.
+   *
+   * Closing a live tab kills the process, which is right: the tab *is* the program. What was wrong
+   * was doing it on a click aimed at an ✕, with a server behind it and nothing said. The question is
+   * asked once, names what is going to stop, and is the only thing between the click and the kill.
+   */
   function closeTab(id: string) {
+    const live = id === TESTS ? testStore.running : bennuRunStore.tabs.find((t) => t.id === id)?.live;
+    if (live) {
+      stopRequest = { id, label: tabItems.find((t) => t.id === id)?.label ?? 'this run' };
+      return;
+    }
+    discardTab(id);
+  }
+
+  function discardTab(id: string) {
     if (id === TESTS) {
       testStore.clear();
       bennuUiStore.showRunTab(null);
@@ -397,6 +452,7 @@
           variant="panel"
           size="sm"
           closable
+          overflow
           ariaLabel="Runs"
           onSelect={showTab}
           onClose={closeTab}
@@ -521,6 +577,22 @@
   {/if}
 </div>
 
+{#if stopRequest}
+  <ConfirmModal
+    title="Stop this run?"
+    message={`“${stopRequest.label}” is still running.`}
+    detail="Closing the tab stops the program and everything it started. Its output goes with it."
+    variant="danger"
+    confirmLabel="Stop and close"
+    onConfirm={() => {
+      const target = stopRequest;
+      stopRequest = null;
+      if (target) discardTab(target.id);
+    }}
+    onCancel={() => (stopRequest = null)}
+  />
+{/if}
+
 <style>
   .rp { display: flex; flex-direction: column; height: 100%; width: 100%; min-height: 0; background: var(--bg-base); overflow: hidden; }
   .rp-run-icon { display: inline-flex; color: var(--success); }
@@ -535,8 +607,14 @@
      push the header's actions off the end. */
   /* Stretched to the header's full height so the panel variant's active-tab underline lands on
      the header's own bottom border, the way a tool-window tab strip reads in IntelliJ. */
+  /* It must GROW, not only be allowed to shrink. `Tabs` budgets its overflow on its parent's width,
+     and a wrapper sized to its content hands it the width of the tabs already visible: it hides one,
+     the wrapper narrows by that much, it hides the next — until only the active tab is left, with
+     the whole header empty beside it. Growing into the free space (capped as before) is what gives
+     the budget something real to measure. */
   .rp-tabs {
     display: flex; align-self: stretch;
+    flex: 1 1 auto;
     min-width: 0; max-width: 60%; margin-left: 2px;
   }
   .rp-tabs :global(.tabs) { flex: 1; min-width: 0; }

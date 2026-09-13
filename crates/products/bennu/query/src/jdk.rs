@@ -70,6 +70,25 @@ unsafe impl Sync for JdkMemberIndex {}
 unsafe impl Send for JdkMemberIndex {}
 
 impl JdkMemberIndex {
+    /// How many classes the memo holds, and an estimate of the heap it owns — for the process
+    /// monitor.
+    ///
+    /// Misses count as entries too: a `None` is a real answer ("not in this JDK") and it is kept as
+    /// firmly as a hit, so a project that asked about many absent names holds them all. Estimated
+    /// rather than measured — see `ClassMembers::heap_estimate` — and behind the same lock every
+    /// lookup takes, so it is asked for on demand and never on a timer.
+    pub fn memory_estimate(&self) -> (usize, usize) {
+        let Ok(guard) = self.inner.lock() else { return (0, 0) };
+        let slot = std::mem::size_of::<String>() + std::mem::size_of::<Option<ClassMembers>>() + 1;
+        let bytes = guard.memo.capacity() * slot
+            + guard
+                .memo
+                .iter()
+                .map(|(key, members)| key.capacity() + members.as_ref().map_or(0, ClassMembers::heap_estimate))
+                .sum::<usize>();
+        (guard.memo.len(), bytes)
+    }
+
     /// The archive `binary_name` came out of — see `ClassSource::origin`.
     ///
     /// Behind the same lock every other access takes, and it does no decoding: a hash probe per

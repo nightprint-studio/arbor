@@ -6,6 +6,10 @@
         label:     string;
         /** Lucide-style component rendered at size 14. */
         icon?:     any;
+        /** Props the icon needs to draw itself — an Iconify name, a symbol kind. Without them an
+         *  icon that takes any comes out blank, which is how a menu ends up with a column of
+         *  nothing where a file's own glyph should be. */
+        iconProps?: Record<string, unknown>;
         /** Optional CSS colour applied to the icon (any CSS colour or
          *  `var(--token)`). Matches the same option on ContextMenu — useful
          *  for split-button menus that mirror a right-click menu's palette. */
@@ -16,6 +20,9 @@
         subtitle?: string;
         /** Right-aligned muted text (counts, dates, …). */
         meta?:     string;
+        /** A colour for `meta` (any CSS colour or `var(--token)`) — for a row whose tag means
+         *  something, the way a tab strip tints the file that is not the project's. */
+        metaColor?: string;
         /** Built-in keybinding action id (e.g. 'commit') — resolved live via
          *  keybindingsStore so user remaps flow through. Preferred over
          *  `shortcut`. Rendered as an inline kbd hint on the right. */
@@ -748,16 +755,18 @@
     {:else if item.icon}
       {@const ItemIcon = item.icon}
       {#if item.iconColor}
-        <span class="dd-icon-tint" style="color:{item.iconColor}"><ItemIcon size={14} /></span>
+        <span class="dd-icon-tint" style="color:{item.iconColor}">
+          <ItemIcon size={14} {...(item.iconProps ?? {})} />
+        </span>
       {:else}
-        <ItemIcon size={14} class="dd-icon" />
+        <ItemIcon size={14} class="dd-icon" {...(item.iconProps ?? {})} />
       {/if}
     {/if}
     <span class="dd-item-body">
       <span class="dd-item-label">{item.label}</span>
       {#if item.subtitle}<span class="dd-item-sub">{item.subtitle}</span>{/if}
     </span>
-    {#if item.meta}<span class="dd-item-meta">{item.meta}</span>{/if}
+    {#if item.meta}<span class="dd-item-meta" style:color={item.metaColor}>{item.meta}</span>{/if}
     {#if item.action}
       <span class="dd-shortcut"><Kbd action={item.action} variant="inline" /></span>
     {:else if item.shortcut}

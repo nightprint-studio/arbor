@@ -34,6 +34,8 @@ pub mod hierarchy;
 pub mod framework_entry;
 pub mod import_census;
 pub mod java_index;
+// What the engines hold in memory, for a backend's `__memory` answer.
+pub mod memory;
 // Internal: Lombok generated-member synthesis, an implementation detail of index-building
 // (java_index). Not part of the public surface, so it stays a private module (no prelude entry).
 mod lombok;

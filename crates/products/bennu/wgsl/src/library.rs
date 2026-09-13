@@ -150,6 +150,35 @@ impl ShaderLibrary {
         self.modules.len()
     }
 
+    /// `(modules, symbols, estimated bytes)` — for a memory breakdown. Sources are not held, so
+    /// this is the symbols' own text: names, signatures, documentation, paths.
+    pub fn footprint(&self) -> (usize, usize, usize) {
+        let opt = |s: &Option<String>| s.as_ref().map_or(0, String::capacity);
+        let mut symbols = 0;
+        let mut bytes = 0;
+        for (key, module) in &self.modules {
+            symbols += module.symbols.len();
+            bytes += key.capacity()
+                + module.path.capacity()
+                + module.file.capacity()
+                + std::mem::size_of_val(module.symbols.as_slice());
+            bytes += module
+                .symbols
+                .iter()
+                .map(|s| {
+                    s.name.capacity()
+                        + s.detail.capacity()
+                        + opt(&s.container)
+                        + s.signature.capacity()
+                        + opt(&s.doc)
+                        + s.module.capacity()
+                        + s.file.capacity()
+                })
+                .sum::<usize>();
+        }
+        (self.modules.len(), symbols, bytes)
+    }
+
     pub fn module(&self, path: &str) -> Option<&ShaderModule> {
         self.modules.get(path)
     }

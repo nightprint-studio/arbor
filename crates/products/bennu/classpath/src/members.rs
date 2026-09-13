@@ -209,6 +209,52 @@ pub struct ClassMembers {
     pub type_params: Vec<String>,
 }
 
+// ── How much a decoded class holds ──────────────────────────────────────────────
+//
+// For the process monitor's per-backend breakdown. **Estimates**: they add up what each string and
+// vector has allocated (`capacity`, not `len` — a vector that grew and shrank still holds its high
+// water mark), and the allocator's own rounding is not counted. The struct itself is counted by
+// whoever holds it, so each estimate is the heap a value owns *beyond* its own `size_of`.
+
+impl TypeRef {
+    /// Heap bytes this type reference owns, recursively through its type arguments.
+    pub fn heap_estimate(&self) -> usize {
+        self.binary_name.capacity()
+            + self.type_args.capacity() * std::mem::size_of::<TypeRef>()
+            + self.type_args.iter().map(TypeRef::heap_estimate).sum::<usize>()
+    }
+}
+
+impl Member {
+    /// Heap bytes this member owns: its name, its types, its raw signature, its `throws` list.
+    pub fn heap_estimate(&self) -> usize {
+        self.name.capacity()
+            + self.return_type.heap_estimate()
+            + self.params.capacity() * std::mem::size_of::<TypeRef>()
+            + self.params.iter().map(TypeRef::heap_estimate).sum::<usize>()
+            + self.raw_signature.capacity()
+            + self.throws.capacity() * std::mem::size_of::<String>()
+            + self.throws.iter().map(String::capacity).sum::<usize>()
+    }
+}
+
+impl ClassMembers {
+    /// Heap bytes this class's decoded surface owns — supertypes, every member, type parameters.
+    pub fn heap_estimate(&self) -> usize {
+        let members = |list: &Vec<Member>| {
+            list.capacity() * std::mem::size_of::<Member>()
+                + list.iter().map(Member::heap_estimate).sum::<usize>()
+        };
+        self.superclass.as_ref().map_or(0, TypeRef::heap_estimate)
+            + self.interfaces.capacity() * std::mem::size_of::<TypeRef>()
+            + self.interfaces.iter().map(TypeRef::heap_estimate).sum::<usize>()
+            + members(&self.methods)
+            + members(&self.fields)
+            + self.type_params.capacity() * std::mem::size_of::<String>()
+            + self.type_params.iter().map(String::capacity).sum::<usize>()
+    }
+}
+
 /// Look up a class's [`ClassMembers`] by binary name (`java/util/ArrayList`).
 pub trait MemberIndex {
     /// The member index for `binary_name`, or `None` when the class is not resolvable

@@ -132,6 +132,12 @@ impl ScriptCache {
         self.lock().clear();
     }
 
+    /// Every snapshot held, for a memory breakdown. `Arc` clones: the caller sizes them without
+    /// holding the lock.
+    pub fn snapshots(&self) -> Vec<Arc<ScriptSnapshot>> {
+        self.lock().values().cloned().collect()
+    }
+
     /// How many repositories are held. For diagnostics.
     pub fn len(&self) -> usize {
         self.lock().len()

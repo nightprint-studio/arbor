@@ -19,6 +19,7 @@
 mod speech;
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -46,6 +47,38 @@ const TICK_MS: u64 = 20;
 /// from the tick so a burst of control messages can't flood the front end.
 const EMIT_INTERVAL: Duration = Duration::from_millis(33);
 
+// ── What the live registry holds, published for the memory breakdown ─────────
+//
+// The registry lives on this thread's stack and inside the cpal callback, and nothing outside can
+// reach either — which is the point of the design. So its size is published instead: written on
+// every open and swap, zeroed when the session ends. Two atomics rather than a lock, because the
+// audio thread must never wait on somebody reading a number.
+
+static RESIDENT_SAMPLES: AtomicU64 = AtomicU64::new(0);
+static RESIDENT_SAMPLE_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// `(samples, bytes of audio)` the live session has decoded and keeps resident. `(0, 0)` when no
+/// session is running.
+pub fn resident_samples() -> (u64, u64) {
+    (RESIDENT_SAMPLES.load(Ordering::Relaxed), RESIDENT_SAMPLE_BYTES.load(Ordering::Relaxed))
+}
+
+fn publish_resident(registry: &Registry) {
+    let (samples, bytes) = registry.resident_footprint();
+    RESIDENT_SAMPLES.store(samples as u64, Ordering::Relaxed);
+    RESIDENT_SAMPLE_BYTES.store(bytes as u64, Ordering::Relaxed);
+}
+
+/// Zeroes the published figures when [`run`] returns, by whichever of its exits.
+struct ResidentReset;
+
+impl Drop for ResidentReset {
+    fn drop(&mut self) {
+        RESIDENT_SAMPLES.store(0, Ordering::Relaxed);
+        RESIDENT_SAMPLE_BYTES.store(0, Ordering::Relaxed);
+    }
+}
+
 /// Run the audio session until a `Shutdown` (or the channel closing). Opens the
 /// stream with the built-in synths only; sample voices are decoded **off this
 /// thread** by the command layer and arrive ready in `SetTracks` (the audio
@@ -67,6 +100,7 @@ pub fn run(
     cfg: MerulaConfig,
     loaded: Arc<Mutex<HashSet<String>>>,
 ) {
+    let _reset = ResidentReset;
     // Start with synths only (always available, no decode); sample voices arrive
     // pre-decoded from the command on first reference.
     let mut session = match Session::open(&cfg, loaded) {
@@ -210,6 +244,7 @@ impl Session {
         // a rebuild.
         let registry = build_registry(cfg, &HashSet::new(), &[]);
         let (sink, stream) = open_output_stream(device.as_deref(), Vec::new(), registry.clone())?;
+        publish_resident(&registry);
         Ok(Session {
             transport: Transport::new(sink, cfg.default_cps),
             _stream: stream,
@@ -342,6 +377,7 @@ impl Session {
                 // (dropping the old stream stops its audio). Keep the decoded registry
                 // resident so a later device switch reuses it (no re-decode).
                 *self.loaded.lock().unwrap_or_else(|e| e.into_inner()) = prep.names;
+                publish_resident(&registry);
                 self.registry = registry;
                 self.transport = Transport::new(sink_handle, cps);
                 self._stream = stream;

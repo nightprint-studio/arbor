@@ -38,6 +38,20 @@
   );
   const allowlistEmpty = $derived(beanAxes.every((a) => (libraryBeans[a.key] ?? []).length === 0));
 
+  /** How many of the project's artifacts the allowlist admits — the answer the four lists add up to,
+   *  and the one thing four lists of strings cannot say on their own. */
+  const matched = $derived.by(() => {
+    if (allowlistEmpty) return 0;
+    return projectCoords.filter((c) =>
+      beanAxes.some((axis) => {
+        const value = axis.axis === 'group' ? c.group : c.artifact;
+        return (libraryBeans[axis.key] ?? []).some((entry) =>
+          axis.exact ? value === entry : value.startsWith(entry),
+        );
+      }),
+    ).length;
+  });
+
   /**
    * Every `group:artifact` the project actually has — declared and transitive, deduplicated.
    *
@@ -136,35 +150,50 @@
 
 <div class="card">
   <div class="card-section-title"><Boxes size={12} /> Read beans from these dependencies</div>
-  <p class="set-empty">
-    Any match admits an artifact. The intended entries are your <strong>own</strong> shared modules
-    and starters — their beans are plain <code>@Service</code> / <code>@Configuration</code> and
-    simply true. Spring Boot's own starters can be added, but their beans are conditional and are
-    shown as such.
+  <!-- Where the page stands, in one line: what is admitted, and whether the project can be asked. -->
+  <div class="summary" class:summary-empty={allowlistEmpty}>
+    {#if allowlistEmpty}
+      <span class="summary-dot dot-idle"></span>
+      <span>No jar is opened — the <strong>Library beans</strong> view stays empty until something is named here.</span>
+    {:else}
+      <span class="summary-dot dot-on"></span>
+      <span>
+        <strong>{matched}</strong> of this project's {projectCoords.length} artifacts
+        {matched === 1 ? 'has' : 'have'} its beans read.
+      </span>
+    {/if}
+  </div>
+  <p class="set-hint">
+    Any match admits an artifact. The entries this is for are your <strong>own</strong> shared modules
+    and starters — their beans are plain <code>@Service</code> / <code>@Configuration</code> and simply
+    true. Spring Boot's own starters can be added, but their beans are conditional and are shown as such.
   </p>
-  {#each beanAxes as axis (axis.key)}
-    <div class="axis">
-      <div class="axis-head">{axis.label}</div>
-      <TokenListInput
-        values={libraryBeans[axis.key] ?? []}
-        onchange={(next) => void commitAxis(axis.key, next)}
-        placeholder={axis.hint}
-        suggestions={suggestionsFor(axis.axis)}
-        status={(v) => statusOf(v, axis.axis, axis.exact)}
-        normalise={normalise}
-        emptyMessage="None."
-        ariaLabel={axis.label}
-      />
-    </div>
-  {/each}
+  <div class="axes">
+    {#each beanAxes as axis (axis.key)}
+      {@const values = libraryBeans[axis.key] ?? []}
+      <div class="axis">
+        <div class="axis-head">
+          <span class="axis-label">{axis.label}</span>
+          {#if values.length}<span class="axis-count">{values.length}</span>{/if}
+        </div>
+        <TokenListInput
+          values={values}
+          onchange={(next) => void commitAxis(axis.key, next)}
+          placeholder={axis.hint}
+          suggestions={suggestionsFor(axis.axis)}
+          status={(v) => statusOf(v, axis.axis, axis.exact)}
+          normalise={normalise}
+          emptyMessage="None yet."
+          ariaLabel={axis.label}
+        />
+      </div>
+    {/each}
+  </div>
   {#if !dependenciesStore.report}
-    <p class="set-empty">
+    <p class="set-hint">
       The project's dependencies have not been read yet, so nothing here can be checked against
       them — open the Dependencies panel, or wait for the index.
     </p>
-  {/if}
-  {#if allowlistEmpty}
-    <p class="set-empty">Empty — no dependency jar is opened, and the Library beans view stays empty.</p>
   {/if}
 </div>
 
@@ -180,25 +209,61 @@
   {#if !root}
     <p class="set-empty">No project open.</p>
   {:else if pinnedFile}
-    <div class="set-list">
-      <div class="set-list-row">
-        <span class="set-list-text" use:tooltip={pinnedFile}>{pinnedFile}</span>
-        <button class="set-list-del" type="button" onclick={() => void unpinPropertyFile()} aria-label="Unpin the property file">
-          <Trash2 size={13} />
-        </button>
-      </div>
+    <div class="pinned">
+      <span class="summary-dot dot-on"></span>
+      <span class="pinned-file" use:tooltip={pinnedFile}>{pinnedFile.split('/').pop()}</span>
+      <span class="pinned-path">{pinnedFile}</span>
+      <button class="set-list-del" type="button" onclick={() => void unpinPropertyFile()} aria-label="Unpin the property file">
+        <Trash2 size={13} />
+      </button>
     </div>
   {:else}
-    <p class="set-empty">Nothing pinned — the profile-less files answer.</p>
+    <div class="pinned pinned-none">
+      <span class="summary-dot dot-idle"></span>
+      <span>Nothing pinned — the profile-less files answer, which is what Spring always loads.</span>
+    </div>
   {/if}
 </div>
 
 <style>
-  /* An axis is a block and not a row: its list grows downward, so a label beside it would drift
-     away from what it names as soon as there were three entries. */
+  /* Two columns: four full-width lists made a page you scroll to see what is otherwise four short
+     lists. An axis is a block and not a row — its list grows downward, so a label beside it would
+     drift away from what it names as soon as there were three entries. */
+  .axes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 4px 14px; padding: 2px; }
   .axis { padding: 6px 2px; }
-  .axis-head {
-    font-size: 11px; font-weight: 600; color: var(--text-secondary);
-    margin-bottom: 4px; letter-spacing: 0.01em;
+  .axis-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .axis-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.01em; }
+  .axis-count {
+    padding: 0 5px; border-radius: var(--radius-sm);
+    font-size: var(--font-size-2xs); font-weight: 600;
+    color: var(--accent); background: var(--accent-subtle);
+  }
+
+  /* Where the page stands, before the fields that decide it. */
+  .summary {
+    display: flex; align-items: center; gap: 8px; margin: 8px 2px 2px; padding: 8px 11px;
+    font-size: var(--font-size-xs); line-height: 1.45; color: var(--text-secondary);
+    background: color-mix(in srgb, var(--success) 9%, transparent);
+    border: 1px solid color-mix(in srgb, var(--success) 26%, transparent);
+    border-radius: var(--radius-md);
+  }
+  .summary-empty {
+    background: var(--bg-overlay); border-color: var(--border-subtle); color: var(--text-muted);
+  }
+  .summary strong { color: var(--text-primary); }
+  .summary-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .dot-on { background: var(--success); }
+  .dot-idle { background: var(--text-disabled); }
+
+  .pinned {
+    display: flex; align-items: center; gap: 8px; margin: 4px 2px 2px; padding: 7px 10px;
+    font-size: var(--font-size-xs); color: var(--text-secondary);
+    background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+  }
+  .pinned-none { color: var(--text-muted); }
+  .pinned-file { font-family: var(--font-code); color: var(--text-primary); flex-shrink: 0; }
+  .pinned-path {
+    flex: 1; min-width: 0; font-family: var(--font-code); font-size: var(--font-size-2xs);
+    color: var(--text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl;
   }
 </style>

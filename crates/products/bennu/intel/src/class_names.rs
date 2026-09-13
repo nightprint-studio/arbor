@@ -58,6 +58,23 @@ pub struct ClassNameIndex {
 }
 
 impl ClassNameIndex {
+    /// How many importable names this holds, and an estimate of the heap it owns.
+    ///
+    /// Every name is stored more than once on purpose — by simple name, on the sorted simple axis,
+    /// on the sorted qualified axis — because each serves a different completion, and this is where
+    /// that choice shows up as memory. See `crate::memory` for what the estimate counts.
+    pub fn heap_estimate(&self) -> (usize, usize) {
+        use crate::memory::{map_of_string_vecs, string_set, string_vec};
+        let bytes = map_of_string_vecs(&self.by_simple)
+            + map_of_string_vecs(&self.nested)
+            + string_vec(&self.sorted_simples)
+            + string_vec(&self.sorted_fqns)
+            + string_set(&self.project);
+        (self.sorted_fqns.len().max(self.by_simple.len()), bytes)
+    }
+}
+
+impl ClassNameIndex {
     pub fn new() -> Self {
         Self::default()
     }

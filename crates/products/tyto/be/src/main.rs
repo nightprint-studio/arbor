@@ -48,6 +48,8 @@ mod capture;
 // windows by title, images by value. Separate from the UI domains because the shapes
 // genuinely differ, not because the code does.
 mod agent;
+// What this backend holds in memory, for the process monitor's `__memory` breakdown.
+mod memory_report;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, the plugin dir and
@@ -81,8 +83,9 @@ fn main() {
 
     // The method routing, declared as the inventory of `#[handler]`s this binary
     // links. `inventory("")` covers them all — tyto-be links only its own handlers.
-    let dispatcher =
-        arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle()).inventory("");
+    let dispatcher = arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle())
+        .inventory("")
+        .memory(|_state| memory_report::report());
 
     // Serve over framed stdio until the shell disconnects. The `App`'s post-`Hello`
     // hook boot-loads the host-pure plugins from tyto's installed/ pool.

@@ -230,6 +230,31 @@ pub struct BennuConfig {
     pub java_space_in_braces: bool,
     /// Generated members are separated by a blank line.
     pub java_blank_line_between_members: bool,
+    /// **Rust style** (Settings › Rust › Code Style): what a generated item's visibility is —
+    /// `"pub"`, `"pub(crate)"` or `"private"`. What a code template reads as
+    /// `style.rust.visibility`, already carrying its trailing space.
+    ///
+    /// Narrower than the Java half on purpose: `rustfmt` owns the formatting, and nothing here
+    /// competes with it. These are the decisions a *generator* has to make and a formatter never
+    /// touches.
+    #[serde(default = "pub_crate")]
+    pub rust_visibility: String,
+    /// The traits a generated `struct` or `enum` derives, in the order they are written. Empty
+    /// writes no `#[derive(…)]` line at all.
+    #[serde(default = "debug_clone")]
+    pub rust_derives: Vec<String>,
+    /// Generated Rust items carry a `///` documentation line. `true` by default — a `pub` item
+    /// without one is what `missing_docs` is about.
+    #[serde(default = "yes")]
+    pub rust_doc_comments: bool,
+    /// How a generated fallible function says so: `"anyhow"`, `"thiserror"`, or `"std"` for a
+    /// `Result<T, E>` spelled out. `"anyhow"` by default.
+    #[serde(default = "anyhow")]
+    pub rust_error_style: String,
+    /// Inside an `impl`, write `Self` rather than the type's name. `true` by default, which is what
+    /// Clippy's `use_self` asks for.
+    #[serde(default = "yes")]
+    pub rust_self_in_impl: bool,
     /// **Validation CPU budget**: the maximum worker threads the whole-project validation sweep
     /// (the background warm-up + the explicit "Validate — no compile") may use. `0` = auto (leave
     /// roughly half the cores free for the UI / go-to / completion); set a small number (e.g. `1` for
@@ -474,6 +499,19 @@ pub struct LspConfig {
     /// window opened is **never** stopped by this, whatever it says: something is on screen, and
     /// taking it away costs a rebuild the moment it is looked at.
     pub background_idle_timeout_secs: u64,
+    /// How long a project may go **without being on screen or asked about** before everything it
+    /// holds is released — its index, framework models and language servers — in seconds. `0`
+    /// keeps every project loaded.
+    ///
+    /// A workspace keeps all its members listed, and before this it kept them all loaded: switching
+    /// through five projects left five indexes and a rust-analyzer apiece until the workspace
+    /// closed. The project on screen is never released; leaving it starts the clock. Coming back
+    /// after it re-opens the project — the index is read back from its files on disk, a language
+    /// server starts cold.
+    ///
+    /// Here rather than in a section of its own because it governs the same trade the setting above
+    /// does — memory held against a cold start — and the two sit side by side in the settings.
+    pub inactive_project_release_secs: u64,
 }
 
 impl Default for LspConfig {
@@ -485,6 +523,7 @@ impl Default for LspConfig {
             server_paths: BTreeMap::new(),
             servers: Vec::new(),
             background_idle_timeout_secs: 600,
+            inactive_project_release_secs: 600,
         }
     }
 }
@@ -558,6 +597,22 @@ fn yes() -> bool {
     true
 }
 
+/// The default Rust visibility for generated items. `pub(crate)` rather than `pub`: a generator
+/// that makes everything public writes a crate's API by accident.
+fn pub_crate() -> String {
+    "pub(crate)".to_string()
+}
+
+/// The two traits almost every generated type wants.
+fn debug_clone() -> Vec<String> {
+    vec!["Debug".to_string(), "Clone".to_string()]
+}
+
+/// The default error style — the one a binary reaches for.
+fn anyhow() -> String {
+    "anyhow".to_string()
+}
+
 impl Default for BennuConfig {
     fn default() -> Self {
         Self {
@@ -616,6 +671,11 @@ impl Default for BennuConfig {
             java_switch_with_return: true,
             java_space_in_braces: false,
             java_blank_line_between_members: true,
+            rust_visibility: pub_crate(),
+            rust_derives: debug_clone(),
+            rust_doc_comments: true,
+            rust_error_style: anyhow(),
+            rust_self_in_impl: true,
             validation_threads: 0,
             index_threads: 1,
             jdk_paths: Vec::new(),

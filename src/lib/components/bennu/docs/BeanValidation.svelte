@@ -39,7 +39,7 @@ private String name;`, 'java')}</code></pre>
   <div class="feature-card">
     <div class="fc-eyebrow">The specification's</div>
     <div class="fc-title"><code>ValidationMessages.properties</code></div>
-    <div class="fc-desc">On a resource root, in every locale written. Nothing declares it — being called that <em>is</em> the declaration.</div>
+    <div class="fc-desc">On a resource root, in every locale written. Nothing declares it — being called that <em>is</em> the declaration, which is also why it wears an icon of its own in the project tree, locale variants included: it is the one <code>.properties</code> among dozens that decides what a person filling in a form reads.</div>
   </div>
   <div class="feature-card">
     <div class="fc-eyebrow">Named in code</div>

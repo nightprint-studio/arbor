@@ -205,11 +205,11 @@ fn template_for(args: &RenderArgs, kind: TemplateKind) -> Result<Template, Strin
 pub(crate) fn class_of(args: &RenderArgs, file: &str, source: &str) -> Result<ClassModel, String> {
     let name = Path::new(file).file_name().and_then(|n| n.to_str()).unwrap_or(file);
     match (args.offset, args.class.as_deref()) {
-        (Some(at), _) => class_at(source, Some(at)).ok_or_else(|| "There is no class at the caret".to_string()),
+        (Some(at), _) => class_at(source, Some(at)).ok_or_else(|| "There is no type at the caret".to_string()),
         (None, Some(class)) => {
-            class_named(source, class).ok_or_else(|| format!("{name} declares no class or record named `{class}`"))
+            class_named(source, class).ok_or_else(|| format!("{name} declares no type named `{class}`"))
         }
-        (None, None) => class_at(source, None).ok_or_else(|| format!("{name} declares no class or record")),
+        (None, None) => class_at(source, None).ok_or_else(|| format!("{name} declares no type")),
     }
 }
 

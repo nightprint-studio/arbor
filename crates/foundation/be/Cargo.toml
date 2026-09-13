@@ -18,3 +18,5 @@ arbor-scheduler   = { path = "../../platform/scheduler" }
 arbor-core        = { path = "../core" }
 tokio      = { workspace = true }
 serde_json = { workspace = true }
+# `MemoryItem` / `MemoryReport` — the `__memory` wire type, which the shell deserialises.
+serde      = { workspace = true }

@@ -46,6 +46,11 @@ impl ClasspathIndex {
         Self { jdk, deps: None }
     }
 
+    /// The dependency tier, when the project has one.
+    pub fn deps_tier(&self) -> Option<&JdkMemberIndex> {
+        self.deps.as_ref()
+    }
+
     /// The dependency jar `binary_name` came out of, when a dependency declares it.
     ///
     /// The **dependency** tier only, and deliberately: the JDK is not a Maven artifact, so naming
@@ -61,6 +66,8 @@ impl ClasspathIndex {
     /// [`JdkMemberIndex`] re-opens the JVM image, re-enumerates it and re-decodes every class the
     /// first already holds, and on a Mac it costs the file descriptors to match: the image, plus
     /// every dependency jar held open beside the first view's.
+    ///
+    /// Shared means a memory report must count it once, not once per view that holds it.
     pub fn jdk_tier(&self) -> Arc<JdkMemberIndex> {
         Arc::clone(&self.jdk)
     }

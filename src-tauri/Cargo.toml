@@ -183,6 +183,9 @@ thiserror = { workspace = true }
 
 # --- Logging ---
 tracing            = { workspace = true }
+# Per-process CPU and memory for the process monitor. The shell is the only place that can
+# measure them: it is the process every backend, language server and run is a descendant of.
+sysinfo            = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # --- Terminal / PTY ---

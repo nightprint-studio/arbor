@@ -18,14 +18,6 @@
  * this file only decides how they are found and what they are called.
  */
 
-import {
-  Activity,
-  Bookmark, BookmarkPlus, BookOpen, Braces, Check, Command, Database, FileCode2, FileCog, FolderCog,
-  FolderOpen, FolderTree, FormInput, Info, Keyboard, Layers, PackageMinus, PackagePlus,
-  PanelBottom, PanelLeft, Pencil, Play, Plus, RefreshCw, Replace, Search, Settings, Table2, Tags,
-  Trash2,
-  TriangleAlert, Wrench, Zap,
-} from 'lucide-svelte';
 
 import type { IconComponent } from '$lib/types/icon';
 import { connectionsStore } from '$lib/stores/picus/connections.svelte';
@@ -46,46 +38,6 @@ import {
   type ExclusionTarget,
 } from './exclude';
 
-const ICONS: Record<string, IconComponent> = {
-  command: Command as unknown as IconComponent,
-  database: Database as unknown as IconComponent,
-  folder: FolderTree as unknown as IconComponent,
-  folderOpen: FolderOpen as unknown as IconComponent,
-  form: FormInput as unknown as IconComponent,
-  layers: Layers as unknown as IconComponent,
-  alert: TriangleAlert as unknown as IconComponent,
-  play: Play as unknown as IconComponent,
-  table: Table2 as unknown as IconComponent,
-  file: FileCode2 as unknown as IconComponent,
-  settings: Settings as unknown as IconComponent,
-  keyboard: Keyboard as unknown as IconComponent,
-  docs: BookOpen as unknown as IconComponent,
-  plus: Plus as unknown as IconComponent,
-  refresh: RefreshCw as unknown as IconComponent,
-  panelLeft: PanelLeft as unknown as IconComponent,
-  panelBottom: PanelBottom as unknown as IconComponent,
-  check: Check as unknown as IconComponent,
-  wrench: Wrench as unknown as IconComponent,
-  folderCog: FolderCog as unknown as IconComponent,
-  fileCog: FileCog as unknown as IconComponent,
-  tags: Tags as unknown as IconComponent,
-  pencil: Pencil as unknown as IconComponent,
-  info: Info as unknown as IconComponent,
-  activity: Activity as unknown as IconComponent,
-  trash: Trash2 as unknown as IconComponent,
-  outOfProject: PackageMinus as unknown as IconComponent,
-  intoProject: PackagePlus as unknown as IconComponent,
-  zap: Zap as unknown as IconComponent,
-  search: Search as unknown as IconComponent,
-  bookmark: Bookmark as unknown as IconComponent,
-  bookmarkPlus: BookmarkPlus as unknown as IconComponent,
-  braces: Braces as unknown as IconComponent,
-  replace: Replace as unknown as IconComponent,
-};
-
-export function picusPaletteIcon(name: string): IconComponent {
-  return ICONS[name] ?? ICONS.command;
-}
 
 /** The rail's sections, shared by the palette and the shell that draws them. */
 export const PICUS_SECTIONS: { id: SidebarSection; label: string; shortcut: string }[] = [
@@ -158,27 +110,27 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       id,
       title: action.label(target.name),
       subtitle: action.detail ? `${subtitle} · ${action.detail}` : subtitle,
-      icon: action.excluded ? 'outOfProject' : 'intoProject',
+      icon: action.excluded ? 'PackageMinus' : 'PackagePlus',
       when: true,
       action: () => a.run(() => void setExcluded(target, action.excluded)),
     };
   };
 
   const generateItems: Raw[] = [
-    { id: 'gen', title: 'Generate DML', icon: 'form', shortcut: 'Ctrl+G', when: true, action: () => a.run(a.generate) },
-    { id: 'write', title: 'Write the generated SQL to the scripts', icon: 'check', shortcut: 'Ctrl+Shift+W', when: dmlStore.generated && !dmlStore.applied, action: () => a.run(a.requestWrite) },
-    { id: 'preview', title: 'Show what would change on disk', icon: 'wrench', when: dmlStore.generated, action: () => a.run(() => { picusUiStore.showBottom('changes'); void dmlStore.ensurePreview(); }) },
-    { id: 'dest', title: 'Add a destination…', icon: 'plus', when: attached, action: () => a.run(() => picusUiStore.openAddDestination()) },
+    { id: 'gen', title: 'Generate DML', icon: 'FormInput', shortcut: 'Ctrl+G', when: true, action: () => a.run(a.generate) },
+    { id: 'write', title: 'Write the generated SQL to the scripts', icon: 'Check', shortcut: 'Ctrl+Shift+W', when: dmlStore.generated && !dmlStore.applied, action: () => a.run(a.requestWrite) },
+    { id: 'preview', title: 'Show what would change on disk', icon: 'Wrench', when: dmlStore.generated, action: () => a.run(() => { picusUiStore.showBottom('changes'); void dmlStore.ensurePreview(); }) },
+    { id: 'dest', title: 'Add a destination…', icon: 'Plus', when: attached, action: () => a.run(() => picusUiStore.openAddDestination()) },
     {
       id: 'restructure',
       title: 'Structural search and replace across the repository',
       subtitle: 'A pattern is the statement with holes in it — $name$ for one node, $name...$ for a list',
-      icon: 'replace',
+      icon: 'Replace',
       shortcut: 'Ctrl+Shift+R',
       when: attached,
       action: () => a.run(() => picusTabsStore.openRestructure()),
     },
-    { id: 'set-save', title: 'Save these destinations as a set…', subtitle: 'Kept with the repository; update files are stored as their folder', icon: 'bookmarkPlus', when: attached && dmlStore.targets.length > 0, action: () => a.run(() => picusUiStore.openDestinationSetSave()) },
+    { id: 'set-save', title: 'Save these destinations as a set…', subtitle: 'Kept with the repository; update files are stored as their folder', icon: 'BookmarkPlus', when: attached && dmlStore.targets.length > 0, action: () => a.run(() => picusUiStore.openDestinationSetSave()) },
     // Every saved set is addressable by name — arming one is the shortest path
     // there is from "a new datum" to "every file that expects it".
     ...destinationSetsStore.sets.map((set): Raw => {
@@ -189,7 +141,7 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
         subtitle: unusable
           ? `${set.destinations.length - unusable} of ${set.destinations.length} usable — replaces what is armed`
           : `${set.destinations.length} destination${set.destinations.length === 1 ? '' : 's'} — replaces what is armed`,
-        icon: 'bookmark',
+        icon: 'Bookmark',
         when: true,
         action: () => a.run(() => {
           destinationSetsStore.apply(set.name);
@@ -197,9 +149,9 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
         }),
       };
     }),
-    { id: 'src-form', title: 'Source: guided form', icon: 'form', shortcut: 'Alt+1', when: true, action: () => a.run(() => { dmlStore.setSource('form'); picusTabsStore.openGenerate(); }) },
-    { id: 'src-paste', title: 'Source: paste SQL', icon: 'form', shortcut: 'Alt+2', when: true, action: () => a.run(() => { dmlStore.setSource('paste'); picusTabsStore.openGenerate(); }) },
-    { id: 'src-csv', title: 'Source: CSV', icon: 'form', shortcut: 'Alt+3', when: true, action: () => a.run(() => { dmlStore.setSource('csv'); picusTabsStore.openGenerate(); }) },
+    { id: 'src-form', title: 'Source: guided form', icon: 'FormInput', shortcut: 'Alt+1', when: true, action: () => a.run(() => { dmlStore.setSource('form'); picusTabsStore.openGenerate(); }) },
+    { id: 'src-paste', title: 'Source: paste SQL', icon: 'FormInput', shortcut: 'Alt+2', when: true, action: () => a.run(() => { dmlStore.setSource('paste'); picusTabsStore.openGenerate(); }) },
+    { id: 'src-csv', title: 'Source: CSV', icon: 'FormInput', shortcut: 'Alt+3', when: true, action: () => a.run(() => { dmlStore.setSource('csv'); picusTabsStore.openGenerate(); }) },
   ];
 
   const databaseItems: Raw[] = [
@@ -209,17 +161,17 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       id: 'navigate',
       title: 'Go to a script, an object or a connection…',
       subtitle: 'Type part of the name — sort:new, ext:sql and in:FOLDER narrow it',
-      icon: 'search',
+      icon: 'Search',
       shortcut: 'Ctrl+Shift+O',
       when: true,
       action: () => a.run(() => picusUiStore.openNavigate()),
     },
-    { id: 'newquery', title: 'New query', icon: 'play', shortcut: 'Ctrl+T', when: true, action: () => a.run(() => picusTabsStore.openQuery()) },
+    { id: 'newquery', title: 'New query', icon: 'Play', shortcut: 'Ctrl+T', when: true, action: () => a.run(() => picusTabsStore.openQuery()) },
     {
       id: 'ast',
       title: 'Syntax tree — how the parser reads the open document',
       subtitle: 'Click a node to select its text; move the caret and the tree follows',
-      icon: 'braces',
+      icon: 'Braces',
       shortcut: 'Ctrl+Shift+Y',
       when: tab?.kind === 'file' || tab?.kind === 'query',
       action: () => a.run(() => picusUiStore.showTool('ast')),
@@ -229,7 +181,7 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       title: 'Structural replace in this document',
       subtitle:
         'The same $name$ patterns as the repository-wide one, applied to the open buffer — one edit, undone with Ctrl+Z',
-      icon: 'replace',
+      icon: 'Replace',
       shortcut: 'Ctrl+Shift+M',
       when: tab?.kind === 'file' || tab?.kind === 'query',
       action: () => a.run(() => picusUiStore.showTool('restructure')),
@@ -239,18 +191,18 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
     // the moment a tab is rebound to another database, and using the sidebar
     // highlight here would run the statement against a different server than the
     // one named above the editor.
-    { id: 'runquery', title: 'Run the selection, or the statement under the cursor', icon: 'play', shortcut: 'Ctrl+Enter', when: tab?.kind === 'query', action: () => a.run(() => a.runQuery('statement')) },
-    { id: 'runall', title: 'Run every statement in this tab', subtitle: 'In order, stopping at the first failure', icon: 'play', shortcut: 'Ctrl+Shift+Enter', when: tab?.kind === 'query', action: () => a.run(() => a.runQuery('buffer')) },
+    { id: 'runquery', title: 'Run the selection, or the statement under the cursor', icon: 'Play', shortcut: 'Ctrl+Enter', when: tab?.kind === 'query', action: () => a.run(() => a.runQuery('statement')) },
+    { id: 'runall', title: 'Run every statement in this tab', subtitle: 'In order, stopping at the first failure', icon: 'Play', shortcut: 'Ctrl+Shift+Enter', when: tab?.kind === 'query', action: () => a.run(() => a.runQuery('buffer')) },
     // A verb nobody would find by looking: the panel's icon says nothing on its own,
     // and "where does this column come from" is a question people ask in words long
     // before they think to look for a button. The subtitle names the situation it is
     // for rather than restating the title.
     // Reveals the dock as well as the pane: an entry that switched a pane inside a
     // panel nobody has open does nothing visible, and reads as broken.
-    { id: 'lineage', title: 'Trace where these columns come from', subtitle: 'Follows each column of the result through the views to the table it is read from', icon: 'git-branch', when: tab?.kind === 'query', action: () => a.run(() => { if (!tab) return; queryStore.setPane(tab.id, 'lineage'); picusUiStore.showBottom('results'); }) },
-    { id: 'newconn', title: 'Add a connection…', icon: 'plus', shortcut: 'Ctrl+Shift+N', when: true, action: () => a.run(() => picusUiStore.openConnectionEditor(null)) },
-    { id: 'cycleconn', title: 'Switch to the next connection', icon: 'database', shortcut: 'Ctrl+Shift+D', when: connectionsStore.connections.length > 1, action: () => a.run(() => connectionsStore.cycle(1)) },
-    { id: 'editconn', title: 'Edit the active connection…', icon: 'pencil', shortcut: 'F4', when: !!connectionsStore.active, action: () => a.run(() => picusUiStore.openConnectionEditor(activeConnectionId)) },
+    { id: 'lineage', title: 'Trace where these columns come from', subtitle: 'Follows each column of the result through the views to the table it is read from', icon: 'GitBranch', when: tab?.kind === 'query', action: () => a.run(() => { if (!tab) return; queryStore.setPane(tab.id, 'lineage'); picusUiStore.showBottom('results'); }) },
+    { id: 'newconn', title: 'Add a connection…', icon: 'Plus', shortcut: 'Ctrl+Shift+N', when: true, action: () => a.run(() => picusUiStore.openConnectionEditor(null)) },
+    { id: 'cycleconn', title: 'Switch to the next connection', icon: 'Database', shortcut: 'Ctrl+Shift+D', when: connectionsStore.connections.length > 1, action: () => a.run(() => connectionsStore.cycle(1)) },
+    { id: 'editconn', title: 'Edit the active connection…', icon: 'Pencil', shortcut: 'F4', when: !!connectionsStore.active, action: () => a.run(() => picusUiStore.openConnectionEditor(activeConnectionId)) },
     // Nobody discovers a shorthand by typing into an editor and hoping. The entry
     // carries the example rather than a name, because the example *is* the
     // explanation — and it is here rather than under Application because it only
@@ -259,7 +211,7 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       id: 'abbrev',
       title: 'SQL abbreviations — expand s#table(cols)[filter] into a statement',
       subtitle: "s#localstrings(keycode,value)[keycode='ita'] → SELECT … FROM LOCALSTRINGS WHERE KEYCODE = 'ita'. Type it in a query, press Tab.",
-      icon: 'zap',
+      icon: 'Zap',
       when: true,
       action: () => a.run(() => picusUiStore.openDocs('abbreviations')),
     },
@@ -269,18 +221,18 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       const subtitle = `${c.alias} · ${c.schema}@${c.host}`;
       const root = connectionsStore.scriptRootFor(c.id);
       return [
-        { id: `conn:${c.id}`, title: `Switch to ${c.name}`, subtitle, icon: 'database', when: true, action: () => a.run(() => connectionsStore.setActive(c.id)) },
-        { id: `conn-edit:${c.id}`, title: `Edit connection ${c.name}…`, subtitle, icon: 'pencil', when: true, action: () => a.run(() => picusUiStore.openConnectionEditor(c.id)) },
-        { id: `conn-info:${c.id}`, title: `Connection details: ${c.name}`, subtitle, icon: 'info', when: true, action: () => a.run(() => picusUiStore.openConnectionDetails(c.id)) },
+        { id: `conn:${c.id}`, title: `Switch to ${c.name}`, subtitle, icon: 'Database', when: true, action: () => a.run(() => connectionsStore.setActive(c.id)) },
+        { id: `conn-edit:${c.id}`, title: `Edit connection ${c.name}…`, subtitle, icon: 'Pencil', when: true, action: () => a.run(() => picusUiStore.openConnectionEditor(c.id)) },
+        { id: `conn-info:${c.id}`, title: `Connection details: ${c.name}`, subtitle, icon: 'Info', when: true, action: () => a.run(() => picusUiStore.openConnectionDetails(c.id)) },
         {
           id: `conn-root:${c.id}`,
           title: root ? `Change the scripts of ${c.name}…` : `Attach scripts to ${c.name}…`,
           subtitle: root || 'No script repository attached',
-          icon: 'folderOpen',
+          icon: 'FolderOpen',
           when: true,
           action: () => a.run(() => picusUiStore.openScriptRootPicker(c.id)),
         },
-        { id: `conn-del:${c.id}`, title: `Delete connection ${c.name}…`, subtitle, icon: 'trash', when: true, action: () => a.run(() => picusUiStore.requestConnectionDelete(c.id)) },
+        { id: `conn-del:${c.id}`, title: `Delete connection ${c.name}…`, subtitle, icon: 'Trash2', when: true, action: () => a.run(() => picusUiStore.requestConnectionDelete(c.id)) },
       ];
     }),
     // Every schema object is reachable by name, whatever kind it is: the palette is
@@ -288,14 +240,14 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
     ...schemaStore.relations.map((t): Raw => ({
       id: `object:${t.name}`,
       title: `Open ${t.kind} ${t.name}`,
-      icon: 'table',
+      icon: 'Table2',
       when: true,
       action: () => a.run(() => picusTabsStore.openObject(t.name, t.kind)),
     })),
     ...schemaStore.sequences.map((s): Raw => ({
       id: `sequence:${s.name}`,
       title: `Open sequence ${s.name}`,
-      icon: 'table',
+      icon: 'Table2',
       when: true,
       action: () => a.run(() => picusTabsStore.openObject(s.name, 'sequence')),
     })),
@@ -303,7 +255,7 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       id: `trigger:${t.name}`,
       title: `Open trigger ${t.name}`,
       subtitle: `on ${t.table}`,
-      icon: 'table',
+      icon: 'Table2',
       when: true,
       action: () => a.run(() => picusTabsStore.openObject(t.name, 'trigger')),
     })),
@@ -314,7 +266,7 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       id: `file:${f.path}`,
       title: `Open ${f.name}`,
       subtitle: f.path,
-      icon: 'file',
+      icon: 'FileCode2',
       when: true,
       action: () => a.run(() => picusTabsStore.openFile(f.path, f.name, picusProjectStore.dialectOfFile(f.path))),
     })),
@@ -322,14 +274,14 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       id: 'attach',
       title: attached ? 'Point this connection at another script folder…' : 'Attach a script repository to this connection…',
       subtitle: picusProjectStore.root || undefined,
-      icon: 'folderOpen',
+      icon: 'FolderOpen',
       when: !!activeConnectionId,
       action: () => a.run(() => picusUiStore.openScriptRootPicker(activeConnectionId)),
     },
     {
       id: 'rescan',
       title: 'Re-read the scripts from disk',
-      icon: 'refresh',
+      icon: 'RefreshCw',
       shortcut: 'F5',
       when: attached,
       action: () => a.run(() => void picusProjectStore.refresh()),
@@ -340,7 +292,7 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       subtitle: picusProjectStore.unclassifiedFolders.length
         ? `${picusProjectStore.unclassifiedFolders.length} folder(s) of scripts have no engine`
         : 'Every folder holding scripts has an engine',
-      icon: 'folderCog',
+      icon: 'FolderCog',
       shortcut: 'Ctrl+Shift+F',
       when: attached && picusProjectStore.folderCount > 0,
       action: () => a.run(() => picusUiStore.openFolderClassify()),
@@ -354,7 +306,7 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       subtitle: picusProjectStore.declaredFiles.length
         ? `${picusProjectStore.declaredFiles.length} script(s) declare their own engine`
         : 'Every script takes its engine from its folder',
-      icon: 'fileCog',
+      icon: 'FileCog',
       shortcut: 'F6',
       when: attached && picusProjectStore.fileCount > 0,
       action: () => a.run(() => picusUiStore.openFileClassify()),
@@ -369,7 +321,7 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       subtitle: picusProjectStore.aliases.length
         ? `${picusProjectStore.aliases.length} name(s) declared for this repository`
         : 'This repository declares no names of its own yet',
-      icon: 'tags',
+      icon: 'Tags',
       when: attached,
       action: () => a.run(() => picusUiStore.openSettings('aliases')),
     },
@@ -385,7 +337,7 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       id: `classify:${e.node.path}`,
       title: `Set the engine of ${e.node.name}…`,
       subtitle: `${e.node.path} · ${e.node.files.length} file(s) generated into nothing`,
-      icon: 'folderCog',
+      icon: 'FolderCog',
       when: true,
       action: () => a.run(() => picusUiStore.openFolderClassify(e.node.path)),
     })),
@@ -417,48 +369,48 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
       id: `classify-file:${f.path}`,
       title: `Set the engine of ${f.name}…`,
       subtitle: f.engine ? `${f.path} · declares ${engineLabel(f.engine)} of its own` : f.path,
-      icon: 'fileCog',
+      icon: 'FileCog',
       when: true,
       action: () => a.run(() => picusUiStore.openFileClassify(f.path)),
     })),
   ];
 
   const checkItems: Raw[] = [
-    { id: 'check', title: 'Run the consistency check', icon: 'alert', shortcut: 'Ctrl+Shift+K', when: attached, action: () => a.run(() => { picusUiStore.showBottom('consistency'); void picusProjectStore.analyze(); }) },
-    { id: 'findings', title: 'Show the consistency report', icon: 'alert', when: true, action: () => a.run(() => picusUiStore.showBottom('consistency')) },
+    { id: 'check', title: 'Run the consistency check', icon: 'AlertTriangle', shortcut: 'Ctrl+Shift+K', when: attached, action: () => a.run(() => { picusUiStore.showBottom('consistency'); void picusProjectStore.analyze(); }) },
+    { id: 'findings', title: 'Show the consistency report', icon: 'AlertTriangle', when: true, action: () => a.run(() => picusUiStore.showBottom('consistency')) },
     // Discoverable by verb, because "copy the report" is what somebody about to
     // paste it into a ticket goes looking for — not a button in a panel header.
     {
       id: 'copyfindings',
       title: 'Copy the consistency report',
       subtitle: 'The findings currently shown, as text',
-      icon: 'alert',
+      icon: 'AlertTriangle',
       when: consistencyStore.visible.length > 0,
       action: () => a.run(() => void a.copyFindings()),
     },
-    { id: 'next-finding', title: 'Go to the next finding', icon: 'alert', shortcut: 'F8', when: consistencyStore.visible.length > 0, action: () => a.run(() => a.stepFinding(1)) },
-    { id: 'prev-finding', title: 'Go to the previous finding', icon: 'alert', shortcut: 'Shift+F8', when: consistencyStore.visible.length > 0, action: () => a.run(() => a.stepFinding(-1)) },
+    { id: 'next-finding', title: 'Go to the next finding', icon: 'AlertTriangle', shortcut: 'F8', when: consistencyStore.visible.length > 0, action: () => a.run(() => a.stepFinding(1)) },
+    { id: 'prev-finding', title: 'Go to the previous finding', icon: 'AlertTriangle', shortcut: 'Shift+F8', when: consistencyStore.visible.length > 0, action: () => a.run(() => a.stepFinding(-1)) },
     {
       id: 'suppressed',
       title: consistencyStore.showSuppressed ? 'Hide silenced findings' : 'Show silenced findings',
       subtitle: consistencyStore.suppressedCount
         ? `${consistencyStore.suppressedCount} silenced by a declared suppression`
         : 'Nothing is silenced in this repository',
-      icon: 'alert',
+      icon: 'AlertTriangle',
       when: true,
       action: () => a.run(() => { picusUiStore.showBottom('consistency'); consistencyStore.toggleSuppressed(); }),
     },
-    { id: 'changes', title: 'Show pending changes', icon: 'wrench', when: true, action: () => a.run(() => picusUiStore.showBottom('changes')) },
-    { id: 'inventory', title: 'Open the inventory', icon: 'layers', shortcut: 'Ctrl+4', when: true, action: () => a.run(() => picusTabsStore.openInventory()) },
+    { id: 'changes', title: 'Show pending changes', icon: 'Wrench', when: true, action: () => a.run(() => picusUiStore.showBottom('changes')) },
+    { id: 'inventory', title: 'Open the inventory', icon: 'Layers', shortcut: 'Ctrl+4', when: true, action: () => a.run(() => picusTabsStore.openInventory()) },
   ];
 
   const viewItems: Raw[] = [
-    { id: 'sidebar', title: 'Toggle the sidebar', icon: 'panelLeft', shortcut: 'Ctrl+B', when: true, action: () => a.run(() => picusUiStore.toggleSidebar()) },
-    { id: 'bottom', title: 'Toggle the bottom panel', icon: 'panelBottom', shortcut: 'Ctrl+J', when: true, action: () => a.run(() => picusUiStore.toggleBottom()) },
+    { id: 'sidebar', title: 'Toggle the sidebar', icon: 'PanelLeft', shortcut: 'Ctrl+B', when: true, action: () => a.run(() => picusUiStore.toggleSidebar()) },
+    { id: 'bottom', title: 'Toggle the bottom panel', icon: 'PanelBottom', shortcut: 'Ctrl+J', when: true, action: () => a.run(() => picusUiStore.toggleBottom()) },
     ...PICUS_SECTIONS.map((s): Raw => ({
       id: `sec:${s.id}`,
       title: `Show ${s.label}`,
-      icon: 'folder',
+      icon: 'FolderTree',
       shortcut: s.shortcut,
       when: true,
       action: () => a.run(() => picusUiStore.showSection(s.id)),
@@ -466,11 +418,12 @@ export function buildPicusPalette(query: string, a: PicusPaletteActions): Sectio
   ];
 
   const appItems: Raw[] = [
-    { id: 'settings', title: 'Settings…', icon: 'settings', shortcut: 'Ctrl+,', when: true, action: () => a.run(() => picusUiStore.openSettings()) },
-    { id: 'shortcuts', title: 'Keyboard shortcuts…', icon: 'keyboard', shortcut: 'Shift+F1', when: true, action: () => a.run(() => picusUiStore.openShortcuts()) },
-    { id: 'docs', title: 'Documentation', icon: 'docs', shortcut: 'F1', when: true, action: () => a.run(() => picusUiStore.toggleDocs()) },
-    { id: 'ai-activity', title: 'AI activity…', subtitle: 'What an AI client is doing right now, and what it has done', icon: 'activity', when: true, action: () => a.run(() => window.dispatchEvent(new CustomEvent('arbor:open-mcp-activity'))) },
-    { id: 'about', title: 'About Picus', icon: 'command', when: true, action: () => a.run(() => picusUiStore.openAbout()) },
+    { id: 'settings', title: 'Settings…', icon: 'Settings', shortcut: 'Ctrl+,', when: true, action: () => a.run(() => picusUiStore.openSettings()) },
+    { id: 'shortcuts', title: 'Keyboard shortcuts…', icon: 'Keyboard', shortcut: 'Shift+F1', when: true, action: () => a.run(() => picusUiStore.openShortcuts()) },
+    { id: 'docs', title: 'Documentation', icon: 'BookOpen', shortcut: 'F1', when: true, action: () => a.run(() => picusUiStore.toggleDocs()) },
+    { id: 'processes', title: 'Process monitor…', subtitle: "What Arbor is costing this machine — every backend, language server and run", icon: 'Gauge', when: true, action: () => a.run(() => window.dispatchEvent(new CustomEvent('arbor:open-processes'))) },
+    { id: 'ai-activity', title: 'AI activity…', subtitle: 'What an AI client is doing right now, and what it has done', icon: 'Activity', when: true, action: () => a.run(() => window.dispatchEvent(new CustomEvent('arbor:open-mcp-activity'))) },
+    { id: 'about', title: 'About Picus', icon: 'Command', when: true, action: () => a.run(() => picusUiStore.openAbout()) },
   ];
 
   const pack = (items: Raw[]) =>

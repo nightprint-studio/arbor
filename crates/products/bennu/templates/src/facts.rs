@@ -86,6 +86,34 @@ pub struct StyleFacts {
     pub space_in_braces: bool,
     /// Generated members are separated by a blank line.
     pub blank_line_between_members: bool,
+    /// The Rust half — Settings › Rust › Code Style. Its own object because none of it means
+    /// anything in a Java template and none of the fields above mean anything in a Rust one:
+    /// `style.rust.visibility` says which language a line is being written for at a glance.
+    pub rust: RustStyleFacts,
+}
+
+/// How the user writes Rust — Settings › Rust › Code Style. A template reads it as `style.rust`.
+///
+/// Narrower than the Java half by design. Formatting is `rustfmt`'s and nothing here competes with
+/// it: these are the decisions a *generator* has to make and a formatter never touches — what is
+/// public, what a type derives, how an error is spelled.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct RustStyleFacts {
+    /// What goes in front of a generated item, **with its trailing space**: `"pub "`,
+    /// `"pub(crate) "`, or empty for a private item. Ready to write — `{{ style.rust.visibility }}fn
+    /// load()` is correct in all three cases, which a bare keyword would not be.
+    pub visibility: String,
+    /// The traits a generated `struct` or `enum` derives, in the order they should be written.
+    /// Empty means no `#[derive(…)]` line at all.
+    pub derives: Vec<String>,
+    /// Generated items carry a `///` documentation line.
+    pub doc_comments: bool,
+    /// How a fallible function says so: `"anyhow"` (`anyhow::Result<T>`), `"thiserror"` (a crate
+    /// error type), or `"std"` (`Result<T, E>` spelled out).
+    pub error_style: String,
+    /// Inside an `impl`, the type is written `Self` rather than by name.
+    pub self_in_impl: bool,
 }
 
 /// Both, as a render receives them.

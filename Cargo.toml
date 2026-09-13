@@ -214,6 +214,10 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # are synchronous Lua work, so this never blocks a worker).
 futures-executor = { version = "0.3", default-features = false, features = ["std"] }
 async-trait  = "0.1"
+# Per-process CPU and memory, for the process monitor in the shell. Pinned in the workspace
+# although only the shell names it: `scap` (tyto-be) already resolves sysinfo, and two versions
+# would mean cargo building and linking two copies of the same platform bindings.
+sysinfo = "0.30"
 
 # Plugin runtime (Lua). ONE pin shared by every plugin-host crate (arbor-plugin-
 # core, corvus-plugin, corvus-plugin-ns, the product BEs sitta/corvus, the shell)

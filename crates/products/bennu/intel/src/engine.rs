@@ -62,6 +62,35 @@ pub struct SemanticEngine {
     lang_level: LangLevel,
 }
 
+impl SemanticEngine {
+    /// What the semantic engine is holding, for a backend's `__memory` answer.
+    ///
+    /// Taken under the live read lock, which every query also takes — so it is asked for on demand,
+    /// when somebody opens the breakdown, and never on a timer.
+    pub fn memory_estimate(&self) -> Vec<crate::memory::MemoryEstimate> {
+        use crate::memory::{string_map, MemoryEstimate};
+        fn plan_files(files: &[PlanFile]) -> usize {
+            files.iter().map(|f| f.path.capacity() + f.source.capacity()).sum()
+        }
+        let live = self.live();
+        let refs = live.index.memory_estimate();
+        vec![
+            MemoryEstimate::text(
+                "Sources held as text",
+                live.java_files.len() + self.xml_files.len(),
+                plan_files(&live.java_files) + plan_files(&self.xml_files),
+            ),
+            MemoryEstimate::sized("Reference index (use sites)", refs.usages, refs.bytes),
+            MemoryEstimate::counted("Parsed symbols per file", refs.files),
+            MemoryEstimate::sized(
+                "Type hierarchy and type names",
+                live.project_types.len(),
+                string_map(&live.project_types) + live.subtypes.heap_estimate(),
+            ),
+        ]
+    }
+}
+
 /// The policy resolver, and whether it is the full classpath yet.
 ///
 /// The flag is not a detail: an incomplete policy answers "does this override something in a jar?"

@@ -40,6 +40,10 @@ mod config_cmds;
 // pom parse + capability detection + JDK/encoding detection + file tree + decoded
 // reads, all driven through the leaf `bennu-project` crate.
 mod project;
+// Giving back what opening a project took — see the module doc for why it is driven by the watched roots.
+mod project_close;
+// What this backend holds in memory, for the process monitor's `__memory` breakdown.
+mod memory_report;
 // Local history — the record of what every project file used to be. Sits beside
 // `project` because it is fed by the same write paths: a save, a rename, a change
 // detected on disk.
@@ -486,6 +490,9 @@ fn main() {
     // links. `inventory("")` covers them all — bennu-be links only its own handlers.
     let dispatcher = arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle())
         .inventory("")
+        // What this backend is holding, and for which project — asked for when somebody opens its
+        // row in the process monitor. See `memory_report`.
+        .memory(|_state| memory_report::report())
         // The Plugin Manager's own surface — enable/disable, reload, the info list, the
         // dependency graph. Generic in `arbor-plugin-rpc`, monomorphised onto bennu's state.
         .group(plugin_rpc::methods(), {

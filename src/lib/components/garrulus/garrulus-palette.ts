@@ -21,55 +21,12 @@
  */
 
 import {
-  Activity,
-  ArrowDownToLine, ArrowUpFromLine, BookOpen, Bug, CalendarDays, Command, FileText, FolderOpen,
-  FolderTree, Hash, History as HistoryIcon, Keyboard, Layers, Link, ListTodo, PanelBottom,
-  PanelLeft, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, Share2, Table2, Trash2,
-  TriangleAlert, Upload, Zap,
+  Table2, 
 } from 'lucide-svelte';
 
 import type { IconComponent } from '$lib/types/icon';
 import type { SidebarSection } from '$lib/stores/garrulus/ui.svelte';
 
-const ICONS: Record<string, IconComponent> = {
-  command: Command as unknown as IconComponent,
-  note: FileText as unknown as IconComponent,
-  notes: FolderTree as unknown as IconComponent,
-  plus: Plus as unknown as IconComponent,
-  search: Search as unknown as IconComponent,
-  sync: RefreshCw as unknown as IconComponent,
-  pull: ArrowDownToLine as unknown as IconComponent,
-  push: ArrowUpFromLine as unknown as IconComponent,
-  commit: Upload as unknown as IconComponent,
-  alert: TriangleAlert as unknown as IconComponent,
-  history: HistoryIcon as unknown as IconComponent,
-  link: Link as unknown as IconComponent,
-  graph: Share2 as unknown as IconComponent,
-  table: Table2 as unknown as IconComponent,
-  tasks: ListTodo as unknown as IconComponent,
-  tags: Hash as unknown as IconComponent,
-  types: Layers as unknown as IconComponent,
-  type: Bug as unknown as IconComponent,
-  daily: CalendarDays as unknown as IconComponent,
-  rename: Pencil as unknown as IconComponent,
-  trash: Trash2 as unknown as IconComponent,
-  activity: Activity as unknown as IconComponent,
-  restore: RotateCcw as unknown as IconComponent,
-  folder: FolderOpen as unknown as IconComponent,
-  export: FileText as unknown as IconComponent,
-  zap: Zap as unknown as IconComponent,
-  panelLeft: PanelLeft as unknown as IconComponent,
-  panelBottom: PanelBottom as unknown as IconComponent,
-  settings: Settings as unknown as IconComponent,
-  keyboard: Keyboard as unknown as IconComponent,
-  docs: BookOpen as unknown as IconComponent,
-};
-
-/** Resolve a palette entry's icon key. Unknown keys fall back rather than throw —
- *  a missing glyph must never be the reason a verb cannot be reached. */
-export function garrulusPaletteIcon(name: string): IconComponent {
-  return ICONS[name] ?? ICONS.command;
-}
 
 /**
  * The sidebar's sections, shared by the palette, the activity rail that draws
@@ -82,7 +39,7 @@ export function garrulusPaletteIcon(name: string): IconComponent {
 export interface GarrulusSection {
   id: SidebarSection;
   label: string;
-  /** Icon key, resolved through {@link garrulusPaletteIcon}. */
+  /** Icon key, resolved through {@link paletteIcon} — a lucide name. */
   icon: string;
   shortcut: string;
   /** What the section holds — the palette's subtitle and the panel's own copy
@@ -91,22 +48,22 @@ export interface GarrulusSection {
 }
 
 export const GARRULUS_SECTIONS: GarrulusSection[] = [
-  { id: 'notes', label: 'Notes', icon: 'notes', shortcut: 'Ctrl+1',
+  { id: 'notes', label: 'Notes', icon: 'FolderTree', shortcut: 'Ctrl+1',
     description: 'The vault tree, pinned notes and recents.' },
-  { id: 'search', label: 'Search', icon: 'search', shortcut: 'Ctrl+2',
+  { id: 'search', label: 'Search', icon: 'Search', shortcut: 'Ctrl+2',
     description: 'Full text plus structured filters — type:bug status:open and free text together.' },
-  { id: 'tags', label: 'Tags and fields', icon: 'tags', shortcut: 'Ctrl+3',
+  { id: 'tags', label: 'Tags and fields', icon: 'Hash', shortcut: 'Ctrl+3',
     description: 'The tag vocabulary and the frontmatter fields the vault filters by.' },
-  { id: 'types', label: 'Note types', icon: 'types', shortcut: 'Ctrl+4',
+  { id: 'types', label: 'Note types', icon: 'Layers', shortcut: 'Ctrl+4',
     description: 'Note types and their templates, read from inside the vault so they travel with it.' },
 ];
 
 /** What the bottom dock holds, in the order its tabs appear. */
 export const GARRULUS_DOCK_TABS: { id: string; label: string; icon: string }[] = [
-  { id: 'tasks', label: 'Tasks', icon: 'tasks' },
-  { id: 'problems', label: 'Problems', icon: 'alert' },
-  { id: 'conflicts', label: 'Conflicts', icon: 'alert' },
-  { id: 'history', label: 'History', icon: 'history' },
+  { id: 'tasks', label: 'Tasks', icon: 'ListTodo' },
+  { id: 'problems', label: 'Problems', icon: 'AlertTriangle' },
+  { id: 'conflicts', label: 'Conflicts', icon: 'AlertTriangle' },
+  { id: 'history', label: 'History', icon: 'History' },
 ];
 
 /**
@@ -247,12 +204,12 @@ export function buildGarrulusPalette(
   const hasRemote = ctx.syncTag !== 'no-remote';
 
   const noteItems: Raw[] = [
-    { id: 'new', title: 'New note', icon: 'plus', shortcut: 'Ctrl+N', when: open && !!a.newNote, action: () => a.run(() => a.newNote?.()) },
+    { id: 'new', title: 'New note', icon: 'Plus', shortcut: 'Ctrl+N', when: open && !!a.newNote, action: () => a.run(() => a.newNote?.()) },
     {
       id: 'new-typed',
       title: 'New note of a type…',
       subtitle: 'The type decides the folder, the filename and what the note starts with',
-      icon: 'types',
+      icon: 'Layers',
       shortcut: 'Ctrl+Shift+N',
       when: open && ctx.types.length > 0 && !!a.newTypedNote,
       action: () => a.run(() => a.newTypedNote?.()),
@@ -262,7 +219,7 @@ export function buildGarrulusPalette(
     ...ctx.types.map((t): Raw => ({
       id: `new-type:${t.id}`,
       title: `New ${t.name}`,
-      icon: 'type',
+      icon: 'Bug',
       when: open && !!a.newTypedNote,
       action: () => a.run(() => a.newTypedNote?.(t.id)),
     })),
@@ -270,7 +227,7 @@ export function buildGarrulusPalette(
       id: 'daily',
       title: "Today's daily note",
       subtitle: 'Created on the first line of the day, appended to after that',
-      icon: 'daily',
+      icon: 'CalendarDays',
       shortcut: 'Ctrl+D',
       when: open && !!a.openDailyNote,
       action: () => a.run(() => a.openDailyNote?.()),
@@ -279,7 +236,7 @@ export function buildGarrulusPalette(
       id: 'scratch',
       title: 'Inbox scratch',
       subtitle: 'An unnamed, unfiled buffer — file it later, or never',
-      icon: 'zap',
+      icon: 'Zap',
       shortcut: 'Ctrl+Shift+Space',
       when: open && !!a.inboxScratch,
       action: () => a.run(() => a.inboxScratch?.()),
@@ -288,17 +245,17 @@ export function buildGarrulusPalette(
       id: 'switcher',
       title: 'Open a note by title…',
       subtitle: 'Matched loosely — type the words you remember, in any order',
-      icon: 'note',
+      icon: 'FileText',
       shortcut: 'Ctrl+O',
       when: open && !!a.quickSwitch,
       action: () => a.run(() => a.quickSwitch?.()),
     },
-    { id: 'save', title: 'Save this note now', icon: 'note', shortcut: 'Ctrl+S', when: !!note && !!a.saveNote, action: () => a.run(() => a.saveNote?.()) },
+    { id: 'save', title: 'Save this note now', icon: 'FileText', shortcut: 'Ctrl+S', when: !!note && !!a.saveNote, action: () => a.run(() => a.saveNote?.()) },
     {
       id: 'rename',
       title: 'Rename this note and update every link to it',
       subtitle: 'Shows what changes before it changes anything',
-      icon: 'rename',
+      icon: 'Pencil',
       shortcut: 'F2',
       when: !!note && !!a.renameNote,
       action: () => a.run(() => a.renameNote?.()),
@@ -307,7 +264,7 @@ export function buildGarrulusPalette(
       id: 'apply-type',
       title: 'Give this note a type…',
       subtitle: "Adds the type's missing headings and opens its fields — nothing already written is touched",
-      icon: 'types',
+      icon: 'Layers',
       when: !!note && ctx.types.length > 0 && !!a.applyType,
       action: () => a.run(() => a.applyType?.()),
     },
@@ -315,7 +272,7 @@ export function buildGarrulusPalette(
       id: 'intentions',
       title: 'Intentions on the selection…',
       subtitle: 'Extract to a new note, promote to a type, turn a line into a task, link a mention',
-      icon: 'zap',
+      icon: 'Zap',
       shortcut: 'Alt+Enter',
       when: !!note && !!a.intentions,
       action: () => a.run(() => a.intentions?.()),
@@ -324,12 +281,12 @@ export function buildGarrulusPalette(
       id: 'delete',
       title: 'Delete this note',
       subtitle: "To the vault's own trash, where it can be restored without going through git",
-      icon: 'trash',
+      icon: 'Trash2',
       when: !!note && !!a.deleteNote,
       action: () => a.run(() => a.deleteNote?.()),
     },
-    { id: 'export-html', title: 'Export this note as HTML…', subtitle: 'One self-contained file — styling and images travel with it', icon: 'export', shortcut: 'Alt+Shift+E', when: !!note && !!a.exportNote, action: () => a.run(() => a.exportNote?.('html')) },
-    { id: 'export-pdf', title: 'Export this note as PDF…', icon: 'export', when: !!note && !!a.exportNote, action: () => a.run(() => a.exportNote?.('pdf')) },
+    { id: 'export-html', title: 'Export this note as HTML…', subtitle: 'One self-contained file — styling and images travel with it', icon: 'FileText', shortcut: 'Alt+Shift+E', when: !!note && !!a.exportNote, action: () => a.run(() => a.exportNote?.('html')) },
+    { id: 'export-pdf', title: 'Export this note as PDF…', icon: 'FileText', when: !!note && !!a.exportNote, action: () => a.run(() => a.exportNote?.('pdf')) },
   ];
 
   const findItems: Raw[] = [
@@ -337,23 +294,23 @@ export function buildGarrulusPalette(
       id: 'search',
       title: 'Search the vault',
       subtitle: 'Full text and typed filters together — type:bug status:open and the words you remember',
-      icon: 'search',
+      icon: 'Search',
       shortcut: 'Ctrl+Shift+F',
       when: open && !!a.search,
       action: () => a.run(() => a.search?.()),
     },
-    { id: 'backlinks', title: 'What links to this note', icon: 'link', when: !!note && !!a.showBacklinks, action: () => a.run(() => a.showBacklinks?.()) },
-    { id: 'tasks', title: 'Tasks across the vault', icon: 'tasks', when: open && !!a.showDock, action: () => a.run(() => a.showDock?.('tasks')) },
+    { id: 'backlinks', title: 'What links to this note', icon: 'Link', when: !!note && !!a.showBacklinks, action: () => a.run(() => a.showBacklinks?.()) },
+    { id: 'tasks', title: 'Tasks across the vault', icon: 'ListTodo', when: open && !!a.showDock, action: () => a.run(() => a.showDock?.('tasks')) },
     {
       id: 'problems',
       title: 'Problems in the vault',
       subtitle: 'Broken links, orphan notes, unreferenced attachments, notes with no type',
-      icon: 'alert',
+      icon: 'AlertTriangle',
       when: open && !!a.showDock,
       action: () => a.run(() => a.showDock?.('problems')),
     },
-    { id: 'graph', title: 'Show the link graph', icon: 'graph', when: open && !!a.showGraph, action: () => a.run(() => a.showGraph?.()) },
-    { id: 'table', title: 'Show the notes as a table', subtitle: "Columns are the type's own fields, and the cells are editable", icon: 'table', when: open && !!a.showTable, action: () => a.run(() => a.showTable?.()) },
+    { id: 'graph', title: 'Show the link graph', icon: 'Share2', when: open && !!a.showGraph, action: () => a.run(() => a.showGraph?.()) },
+    { id: 'table', title: 'Show the notes as a table', subtitle: "Columns are the type's own fields, and the cells are editable", icon: 'Table2', when: open && !!a.showTable, action: () => a.run(() => a.showTable?.()) },
   ];
 
   const syncItems: Raw[] = [
@@ -361,27 +318,27 @@ export function buildGarrulusPalette(
       id: 'sync',
       title: 'Sync now',
       subtitle: 'Commit what changed, pull, push — in that order, and only when asked',
-      icon: 'sync',
+      icon: 'RefreshCw',
       shortcut: 'Ctrl+Shift+S',
       when: hasRemote,
       action: () => a.run(a.syncNow),
     },
-    { id: 'pull', title: 'Pull only', subtitle: 'Bring in what the other machine sent, send nothing', icon: 'pull', when: hasRemote, action: () => a.run(a.pull) },
-    { id: 'push', title: 'Push only', icon: 'push', when: hasRemote, action: () => a.run(a.push) },
+    { id: 'pull', title: 'Pull only', subtitle: 'Bring in what the other machine sent, send nothing', icon: 'ArrowDownToLine', when: hasRemote, action: () => a.run(a.pull) },
+    { id: 'push', title: 'Push only', icon: 'ArrowUpFromLine', when: hasRemote, action: () => a.run(a.push) },
     {
       id: 'commit',
       title: 'Commit with a message…',
       subtitle: 'For the change that deserves one — the rest are described for you',
-      icon: 'commit',
+      icon: 'Upload',
       when: hasRemote,
       action: () => a.run(a.commitWithMessage),
     },
-    { id: 'pending', title: 'Show what would be sent', icon: 'commit', when: hasRemote && !!a.showPending, action: () => a.run(() => a.showPending?.()) },
+    { id: 'pending', title: 'Show what would be sent', icon: 'Upload', when: hasRemote && !!a.showPending, action: () => a.run(() => a.showPending?.()) },
     {
       id: 'conflicts',
       title: ctx.conflicts > 0 ? `Resolve the conflicts (${ctx.conflicts})` : 'Show the conflicts',
       subtitle: 'Both versions side by side — keep mine, take theirs, or merge by hand',
-      icon: 'alert',
+      icon: 'AlertTriangle',
       when: hasRemote && !!a.showConflicts,
       action: () => a.run(() => a.showConflicts?.()),
     },
@@ -389,7 +346,7 @@ export function buildGarrulusPalette(
       id: 'note-history',
       title: 'History of this note',
       subtitle: 'Every past version, with a diff and a restore',
-      icon: 'history',
+      icon: 'History',
       when: !!note && ctx.history && !!a.showNoteHistory,
       action: () => a.run(() => a.showNoteHistory?.()),
     },
@@ -397,7 +354,7 @@ export function buildGarrulusPalette(
       id: 'remote',
       title: hasRemote ? 'Change where this vault syncs…' : 'Choose where this vault syncs…',
       subtitle: 'A git remote, or a folder the vault is mirrored to',
-      icon: 'sync',
+      icon: 'RefreshCw',
       when: open,
       action: () => a.run(a.configureRemote),
     },
@@ -405,38 +362,38 @@ export function buildGarrulusPalette(
       id: 'create-repo',
       title: 'Create a private repository for this vault…',
       subtitle: 'Private, with no public option anywhere — a note vault has no business being public',
-      icon: 'sync',
+      icon: 'RefreshCw',
       when: open && !hasRemote && !!a.createRemoteRepo,
       action: () => a.run(() => a.createRemoteRepo?.()),
     },
   ];
 
   const vaultItems: Raw[] = [
-    { id: 'open-vault', title: 'Open a vault…', subtitle: 'A folder of markdown notes — Obsidian vaults open as they are', icon: 'folder', when: true, action: () => a.run(a.openVault) },
-    { id: 'create-vault', title: 'Create a vault…', icon: 'plus', when: true, action: () => a.run(a.createVault) },
+    { id: 'open-vault', title: 'Open a vault…', subtitle: 'A folder of markdown notes — Obsidian vaults open as they are', icon: 'FolderOpen', when: true, action: () => a.run(a.openVault) },
+    { id: 'create-vault', title: 'Create a vault…', icon: 'Plus', when: true, action: () => a.run(a.createVault) },
     ...ctx.vaults.map((v): Raw => ({
       id: `vault:${v.id}`,
       title: `Open vault ${v.displayName}`,
       subtitle: v.path,
-      icon: 'folder',
+      icon: 'FolderOpen',
       when: true,
       action: () => a.run(() => a.switchVault(v.id)),
     })),
-    { id: 'trash', title: 'Show the vault trash', subtitle: 'Deleted notes, restorable to where they were', icon: 'restore', when: open && !!a.showTrash, action: () => a.run(() => a.showTrash?.()) },
+    { id: 'trash', title: 'Show the vault trash', subtitle: 'Deleted notes, restorable to where they were', icon: 'RotateCcw', when: open && !!a.showTrash, action: () => a.run(() => a.showTrash?.()) },
     {
       id: 'rebuild',
       title: 'Rebuild the index',
       subtitle: 'Re-reads every note. The answer to a vault changed by something other than Garrulus',
-      icon: 'sync',
+      icon: 'RefreshCw',
       when: open,
       action: () => a.run(a.rebuildIndex),
     },
-    { id: 'close-vault', title: 'Close the vault', icon: 'folder', when: open, action: () => a.run(a.closeVault) },
+    { id: 'close-vault', title: 'Close the vault', icon: 'FolderOpen', when: open, action: () => a.run(a.closeVault) },
   ];
 
   const viewItems: Raw[] = [
-    { id: 'sidebar', title: 'Toggle the sidebar', icon: 'panelLeft', shortcut: 'Ctrl+B', when: true, action: () => a.run(a.toggleSidebar) },
-    { id: 'dock', title: 'Toggle the bottom dock', icon: 'panelBottom', shortcut: 'Ctrl+J', when: !!a.toggleDock, action: () => a.run(() => a.toggleDock?.()) },
+    { id: 'sidebar', title: 'Toggle the sidebar', icon: 'PanelLeft', shortcut: 'Ctrl+B', when: true, action: () => a.run(a.toggleSidebar) },
+    { id: 'dock', title: 'Toggle the bottom dock', icon: 'PanelBottom', shortcut: 'Ctrl+J', when: !!a.toggleDock, action: () => a.run(() => a.toggleDock?.()) },
     ...GARRULUS_SECTIONS.map((s): Raw => ({
       id: `sec:${s.id}`,
       title: `Show ${s.label}`,
@@ -456,21 +413,22 @@ export function buildGarrulusPalette(
   ];
 
   const appItems: Raw[] = [
-    { id: 'settings', title: 'Settings…', icon: 'settings', shortcut: 'Ctrl+,', when: !!a.openSettings, action: () => a.run(() => a.openSettings?.()) },
-    { id: 'shortcuts', title: 'Keyboard shortcuts…', icon: 'keyboard', shortcut: 'Shift+F1', when: true, action: () => a.run(a.openShortcuts) },
-    { id: 'docs', title: 'Documentation', icon: 'docs', shortcut: 'F1', when: true, action: () => a.run(() => a.openDocs()) },
+    { id: 'settings', title: 'Settings…', icon: 'Settings', shortcut: 'Ctrl+,', when: !!a.openSettings, action: () => a.run(() => a.openSettings?.()) },
+    { id: 'shortcuts', title: 'Keyboard shortcuts…', icon: 'Keyboard', shortcut: 'Shift+F1', when: true, action: () => a.run(a.openShortcuts) },
+    { id: 'docs', title: 'Documentation', icon: 'BookOpen', shortcut: 'F1', when: true, action: () => a.run(() => a.openDocs()) },
     // The one page somebody goes looking for by name, because "what does the
     // button do when it says diverged" is a question asked at the button.
     {
       id: 'docs-sync',
       title: 'How syncing works',
       subtitle: 'What the button shows, what the background does, and what it never does',
-      icon: 'docs',
+      icon: 'BookOpen',
       when: true,
       action: () => a.run(() => a.openDocs('sync')),
     },
-    { id: 'ai-activity', title: 'AI activity…', subtitle: 'What an AI client is doing right now, and what it has done', icon: 'activity', when: true, action: () => a.run(() => window.dispatchEvent(new CustomEvent('arbor:open-mcp-activity'))) },
-    { id: 'about', title: 'About Garrulus', icon: 'command', when: !!a.openAbout, action: () => a.run(() => a.openAbout?.()) },
+    { id: 'processes', title: 'Process monitor…', subtitle: "What Arbor is costing this machine — every backend, language server and run", icon: 'Gauge', when: true, action: () => a.run(() => window.dispatchEvent(new CustomEvent('arbor:open-processes'))) },
+    { id: 'ai-activity', title: 'AI activity…', subtitle: 'What an AI client is doing right now, and what it has done', icon: 'Activity', when: true, action: () => a.run(() => window.dispatchEvent(new CustomEvent('arbor:open-mcp-activity'))) },
+    { id: 'about', title: 'About Garrulus', icon: 'Command', when: !!a.openAbout, action: () => a.run(() => a.openAbout?.()) },
   ];
 
   const pack = (items: Raw[]) =>

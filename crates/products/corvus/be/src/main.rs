@@ -47,6 +47,7 @@ mod graph;
 mod issues;
 mod jobs;
 mod linked_worktree;
+mod memory_report;
 mod merge;
 mod missing;
 mod mr;
@@ -1505,7 +1506,9 @@ fn main() {
         .group(plugin_rpc::methods(), {
             let state = Arc::clone(&state);
             move || plugin_rpc::CorvusRpcCtx::new(Arc::clone(&state))
-        });
+        })
+        // What this backend holds, for the process monitor's breakdown. See `memory_report`.
+        .memory(memory_report::report);
 
     // Pre-serve inits: the issue-tracker + git-provider registries resolve
     // credentials over the reverse channel; git self-detect resolves the system

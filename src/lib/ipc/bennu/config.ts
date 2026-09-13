@@ -88,6 +88,11 @@ export interface BennuConfig {
    *  `org.springframework.*`). Empty = the backend defaults. A `*` is allowed at one end
    *  only; anything else is dropped rather than sent to the VM. */
   step_excludes: string[];
+  /** Which adapter drives a native (Rust) debug session: `codelldb`, `lldb-dap`, `gdb` — or empty
+   *  for whichever is installed, preferring the one that renders Rust's own types. */
+  debug_adapter: string;
+  /** An explicit path to that adapter's executable, when it is somewhere the search does not look. */
+  debug_adapter_path: string;
   /** Auto-import on accepting a type-name completion whose simple name resolves to a SINGLE class.
    *  `true` by default; off inserts just the name (import later with Alt+Enter). */
   auto_import: boolean;
@@ -107,6 +112,17 @@ export interface BennuConfig {
   java_space_in_braces: boolean;
   /** Java style — generated members are separated by a blank line. */
   java_blank_line_between_members: boolean;
+  /** **Rust style** — what a generated item is declared as: `"pub"`, `"pub(crate)"` or
+   *  `"private"`. A template reads it as `style.rust.visibility`, trailing space included. */
+  rust_visibility: string;
+  /** The traits a generated `struct` / `enum` derives, in the order they are written. */
+  rust_derives: string[];
+  /** Generated Rust items carry a `///` line. */
+  rust_doc_comments: boolean;
+  /** How a generated fallible function says so: `"anyhow"`, `"thiserror"` or `"std"`. */
+  rust_error_style: string;
+  /** Inside an `impl`, write `Self` rather than the type's name. */
+  rust_self_in_impl: boolean;
   /** Max worker threads the whole-project validation sweep may use. `0` = auto (leaves ~half the
    *  cores free for the UI / go-to); set a small number (e.g. `1`) so a big project's validation
    *  can't peg every core and freeze the editor. Doesn't affect the initial index build. */
@@ -186,6 +202,10 @@ export interface LspConfigDto {
    *  in practice. rust-analyzer is most of a gigabyte resident, and nothing else reclaims one. A
    *  server a window opened is never stopped by this. */
   background_idle_timeout_secs: number;
+  /** How long a project may go without being on screen or asked about before its index, framework
+   *  models and language servers are released, in seconds. `0` keeps every project loaded. The
+   *  project on screen is never released. */
+  inactive_project_release_secs: number;
 }
 
 /** Mirrors the BE `CustomLspServer` — the same fields the built-in catalogue carries, because the

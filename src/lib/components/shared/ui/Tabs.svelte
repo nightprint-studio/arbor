@@ -319,23 +319,34 @@
   // one you cannot aim at. The hidden ones lead, because they are what the chevron is for.
   const overflowItems = $derived.by<DropdownItem[]>(() => {
     const entry = (t: TabItem): DropdownItem => ({
-      kind:     'item',
-      id:       t.id,
-      label:    t.label ?? t.id,
-      // A tab whose icon needs props of its own — a file-type glyph, a Java kind ring — cannot be
-      // drawn faithfully by a menu row, which renders `<Icon size={14} />` and nothing else. No
-      // icon beats the wrong one: rendered without them it comes out blank or generic.
-      icon:     t.iconProps ? undefined : t.icon,
-      meta:     t.badge === undefined || t.badge === null || t.badge === '' ? undefined : String(t.badge),
-      active:   t.id === value,
-      disabled: t.disabled,
-      onclick:  () => selectFromMenu(t),
+      kind:      'item',
+      id:        t.id,
+      label:     t.label ?? t.id,
+      // The tab's own glyph, with whatever it needs to draw itself: a file-type icon and a Java kind
+      // ring both take props, and a menu that dropped them showed a column of blanks beside names
+      // the strip draws in full.
+      icon:      t.icon,
+      iconProps: t.iconProps,
+      meta:      t.badge === undefined || t.badge === null || t.badge === '' ? undefined : String(t.badge),
+      // A file that is not this project's is tinted here as it is in the strip: the badge says `ext`
+      // either way, and reading it in the menu should not be a second thing to learn.
+      metaColor: toneColour(t.tone),
+      active:    t.id === value,
+      disabled:  t.disabled,
+      onclick:   () => selectFromMenu(t),
     });
     const hidden  = items.filter(t => hiddenIds.has(t.id));
     const visible = items.filter(t => !hiddenIds.has(t.id));
     if (hidden.length === 0 || visible.length === 0) return items.map(entry);
     return [...hidden.map(entry), { kind: 'separator' }, ...visible.map(entry)];
   });
+
+  /** The colour a tone wears — the same two the strip paints its left edge with. */
+  function toneColour(tone: TabItem['tone']): string | undefined {
+    if (tone === 'external') return 'var(--warning)';
+    if (tone === 'test') return 'var(--success)';
+    return undefined;
+  }
 
   function selectFromMenu(item: TabItem) {
     if (item.disabled) return;

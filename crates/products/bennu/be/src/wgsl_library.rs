@@ -200,11 +200,31 @@ pub(crate) fn for_file(file: &str) -> Arc<ShaderLibrary> {
 ///
 /// For the one case the memo's assumption does not cover: the user added a
 /// `#define_import_path` to a shader that had none, or pulled a dependency in mid-session.
-#[allow(dead_code)]
 pub(crate) fn forget(root: &Path) {
     if let Ok(mut guard) = cache().lock() {
         guard.remove(root);
     }
+}
+
+/// What the cached shader libraries hold, per project — for the memory breakdown.
+pub(crate) fn memory_items() -> Vec<arbor_be::prelude::MemoryItem> {
+    let libraries: Vec<(PathBuf, Arc<ShaderLibrary>)> = match cache().lock() {
+        Ok(guard) => guard.iter().map(|(root, lib)| (root.clone(), Arc::clone(lib))).collect(),
+        Err(_) => return Vec::new(),
+    };
+    libraries
+        .into_iter()
+        .filter(|(_, lib)| !lib.is_empty())
+        .map(|(root, lib)| {
+            let (_, symbols, bytes) = lib.footprint();
+            arbor_be::prelude::MemoryItem::estimate(
+                root.to_string_lossy(),
+                "Shader library — importable symbols",
+                symbols,
+                bytes,
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]

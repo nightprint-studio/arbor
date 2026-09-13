@@ -18,6 +18,9 @@ pub use crate::session::{
 // registry it hands the audio thread.
 pub use crate::control::{MerulaControl, Prepared};
 
+// What the live audio session keeps decoded, for the memory breakdown.
+pub use crate::audio_thread::resident_samples;
+
 // The typed global config the eval / render / audio / packs / models domains read.
 pub use crate::config::{MerulaConfig, MerulaRenderConfig};
 

@@ -88,6 +88,9 @@ export interface LspStatus {
   features: string[];
   /** The tail of its stderr. Usually the only place a failed start explains itself. */
   log_tail: string[];
+  /** The server process's id while it is alive — how the process monitor names a row and finds
+   *  its Restart. Absent for a slot that never started. */
+  pid?: number | null;
 }
 
 /** A server Bennu knows how to run, resolved against this machine. */

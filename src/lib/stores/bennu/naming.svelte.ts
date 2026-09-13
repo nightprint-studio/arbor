@@ -1,14 +1,24 @@
 /**
- * Bennu naming-convention store — the per-repo `[naming]` section, plus the BE's catalog of packs,
- * targets and conventions.
+ * Bennu naming-convention store — two documents of the same shape, the BE's catalog of packs,
+ * targets and conventions, and the bulk fix.
  *
- * Owns the *loaded* config for the open project and the *draft* the settings section edits. They
- * are separate on purpose: a settings screen the user can cancel out of must not have written
- * anything, and the diagnostics the editor is drawing come from the loaded one. `apply()` is the
- * only thing that writes — and writing bumps `revision`, which the editor's validation effect
- * watches so squiggles follow a rule change on the next debounce instead of on the next reopen.
+ * ## Two documents, one set of operations
  *
- * The catalog is fetched once per session: it is static data compiled into the BE.
+ * The **profile** holds your answer for every project; a **project** states only what it says
+ * differently, and the backend merges them. They are edited by two different screens but there is
+ * exactly one set of operations on them — set a convention, adopt a standard, add an exception —
+ * so {@link createNamingDocument} is written once and instantiated twice. The screens take a
+ * document as a prop and never name which one they are on: that is the whole reason the same grid
+ * can serve Settings and Project Configuration without a fork.
+ *
+ * Each document keeps its *loaded* copy apart from the *draft* the screen edits: a settings screen
+ * the user can cancel out of must not have written anything, and the diagnostics the editor is
+ * drawing come from the loaded one. `apply()` is the only thing that writes — and writing bumps
+ * `revision`, which the editor's validation effect watches so squiggles follow a rule change on
+ * the next debounce instead of on the next reopen.
+ *
+ * The catalog is shared: it is static data compiled into the BE, re-fetched only when the project
+ * changes because *which packs this project contains* is not static.
  *
  * Rune-store pattern: private `$state`, returned getters + methods (CLAUDE.md).
  */
@@ -18,9 +28,11 @@ import {
   cancelNamingFix as ipcCancelFix,
   emptyNamingConfig,
   getNamingConfig as ipcGet,
+  getNamingDefaults as ipcGetDefaults,
   namingCatalog as ipcCatalog,
   namingFixPlan as ipcFixPlan,
   setNamingConfig as ipcSet,
+  setNamingDefaults as ipcSetDefaults,
   type FixProgress,
   type NamingCatalog,
   type NamingFixPlan,
@@ -39,6 +51,9 @@ function cloneRules(rules: Record<string, NamingRules>): Record<string, NamingRu
 function clone(config: NamingConfig): NamingConfig {
   return {
     enabled: config.enabled,
+    // Defaulted rather than assumed: a section written before the profile level existed has no
+    // `inherit` key, and the backend's default for a missing one is `true`.
+    inherit: config.inherit ?? true,
     ignore: [...config.ignore],
     rules: cloneRules(config.rules),
     // Defaulted, not assumed: a config decoded from an older file has no `overrides` key, and
@@ -56,76 +71,75 @@ function patchAt<T>(list: T[], index: number, patch: (item: T) => T): T[] {
   return list.map((item, i) => (i === index ? patch(item) : item));
 }
 
-function createBennuNamingStore() {
-  let catalog = $state<NamingCatalog | null>(null);
-  // The root the catalog's `present` flags were computed for — see `loadCatalog`.
-  let catalogRoot = $state<string | null>(null);
-  let loadedRoot = $state<string | null>(null);
+/** Where a document reads and writes itself. The only thing the two levels differ by. */
+interface NamingIo {
+  read: () => Promise<NamingConfig>;
+  write: (config: NamingConfig) => Promise<void>;
+  /** Whether there is anything to read yet — a project document with no project open has not. */
+  ready: () => boolean;
+}
+
+/**
+ * One editable naming document.
+ *
+ * Everything a screen does to a set of rules, over whichever of the two levels it was handed.
+ */
+function createNamingDocument(io: NamingIo, onWrite: () => void) {
   let loaded = $state<NamingConfig>(emptyNamingConfig());
   let draft = $state<NamingConfig>(emptyNamingConfig());
   let saving = $state(false);
-  // The bulk fix, from "asked for" to "applied or dismissed". Held here rather than in a
-  // component so the palette can start one and the modal that reviews it is just a renderer —
-  // which is what lets the modal open before the work rather than after it.
-  let fixOpen = $state(false);
-  let pendingFix = $state<NamingFixPlan | null>(null);
-  let planningFix = $state(false);
-  let fixProgress = $state<FixProgress | null>(null);
-  /** What the pending plan covers, for the modal's title. */
-  let fixScope = $state<'file' | 'project'>('file');
+  /** In flight, so two screens mounting together read once. */
+  let reading: Promise<void> | null = null;
+  /** Whether this document has ever been read. What makes `load()` idempotent. */
+  let everRead = false;
 
-  // Attached on the first fix and kept: a listener costs nothing while no fix is running, and
-  // re-attaching per run is a race against the first event the backend emits.
-  let progressAttached = false;
-  async function attachProgress() {
-    if (progressAttached) return;
-    progressAttached = true;
+  async function read(): Promise<void> {
     try {
-      await listen<FixProgress>('arbor://bennu/naming-fix-progress', (e) => {
-        if (planningFix) fixProgress = e.payload;
-      });
+      loaded = await io.read();
     } catch {
-      progressAttached = false;
+      loaded = emptyNamingConfig();
     }
+    everRead = true;
+    draft = clone(loaded);
   }
-  // Bumped on every successful write — what the editor's validation effect watches.
-  let revision = $state(0);
+
+  /** The read, at most once per document — see `load` below for why. */
+  async function loadOnce(): Promise<void> {
+    if (!io.ready() || everRead) return;
+    reading ??= read().finally(() => {
+      reading = null;
+    });
+    await reading;
+  }
 
   return {
-    get catalog() { return catalog; },
-    get config() { return loaded; },
-    get draft() { return draft; },
-    get saving() { return saving; },
-    get revision() { return revision; },
-    /** Whether the draft differs from what is on disk — what gates the Apply button. */
-    get dirty() { return JSON.stringify(draft) !== JSON.stringify(loaded); },
-
-    /**
-     * Fetch the catalog for `root`.
-     *
-     * Re-fetched when the project changes rather than cached for the session: the packs are static,
-     * but *which of them this project contains* is not, and showing a Rust column on a Java project
-     * because a Rust one was open earlier is the bug this parameter exists to prevent.
-     */
-    async loadCatalog(root: string | null) {
-      if (catalog && catalogRoot === root) return;
-      try {
-        catalog = await ipcCatalog(root ?? undefined);
-        catalogRoot = root;
-      } catch {
-        catalog = null;
-      }
+    get config() {
+      return loaded;
+    },
+    get draft() {
+      return draft;
+    },
+    get saving() {
+      return saving;
+    },
+    /** Whether the draft differs from what is on disk — what gates an Apply button. */
+    get dirty() {
+      return JSON.stringify(draft) !== JSON.stringify(loaded);
     },
 
-    /** Load `root`'s section and seed the draft from it. */
-    async load(root: string) {
-      try {
-        loaded = await ipcGet(root);
-      } catch {
-        loaded = emptyNamingConfig();
-      }
-      loadedRoot = root;
-      draft = clone(loaded);
+    /**
+     * Read it from disk and seed the draft — **once**.
+     *
+     * Idempotent on purpose: a screen calls this from an effect, and an effect re-runs. A read that
+     * re-seeded every time would throw away conventions somebody was halfway through choosing the
+     * moment anything else on the page moved. {@link reload} is the explicit re-read.
+     */
+    load: loadOnce,
+
+    /** Read it again, discarding the draft — what a change of project means for this document. */
+    async reload(): Promise<void> {
+      everRead = false;
+      await loadOnce();
     },
 
     /** Throw the draft away and start again from what is on disk. */
@@ -135,6 +149,11 @@ function createBennuNamingStore() {
 
     setEnabled(on: boolean) {
       draft = { ...draft, enabled: on };
+    },
+
+    /** Whether this document starts from the level above it. Meaningless on the profile. */
+    setInherit(on: boolean) {
+      draft = { ...draft, inherit: on };
     },
 
     setIgnore(globs: string[]) {
@@ -148,17 +167,23 @@ function createBennuNamingStore() {
       draft = { ...draft, rules: { ...draft.rules, [packId]: rules } };
     },
 
-    /** Fill a pack's rules with the community standard the BE offers. Never applied on its own —
-     *  this is what the "Use the standard convention" button does. */
-    adoptStandard(packId: string) {
-      const pack = catalog?.packs.find((p) => p.id === packId);
-      if (!pack) return;
-      draft = { ...draft, rules: { ...draft.rules, [packId]: { ...pack.standard } } };
+    /** Fill a pack's rules with a standard. Never applied on its own — this is what the "Use the
+     *  standard convention" button does. */
+    adoptRules(packId: string, rules: NamingRules) {
+      draft = { ...draft, rules: { ...draft.rules, [packId]: { ...rules } } };
     },
 
     /** Switch every target of a pack back off. */
     clearPack(packId: string) {
       draft = { ...draft, rules: { ...draft.rules, [packId]: {} } };
+    },
+
+    /** Drop a pack's rules entirely, so the level above answers for it again. Distinct from
+     *  {@link clearPack}, which states "no rule" and therefore overrides an inherited one. */
+    unsetPack(packId: string) {
+      const rules = { ...draft.rules };
+      delete rules[packId];
+      draft = { ...draft, rules };
     },
 
     // ── path-scoped overrides ────────────────────────────────────────────────
@@ -198,6 +223,131 @@ function createBennuNamingStore() {
           rules: { ...o.rules, [packId]: { ...(o.rules[packId] ?? {}), [target]: convention } },
         })),
       };
+    },
+
+    /** Persist the draft. Returns whether it was written. */
+    async apply(): Promise<boolean> {
+      if (saving || !io.ready()) return false;
+      saving = true;
+      try {
+        await io.write(draft);
+        loaded = clone(draft);
+        onWrite();
+        return true;
+      } catch {
+        return false;
+      } finally {
+        saving = false;
+      }
+    },
+  };
+}
+
+/** One editable naming document, as a screen receives it. */
+export type NamingDocument = ReturnType<typeof createNamingDocument>;
+
+function createBennuNamingStore() {
+  let catalog = $state<NamingCatalog | null>(null);
+  // The root the catalog's `present` flags were computed for — see `loadCatalog`.
+  let catalogRoot = $state<string | null>(null);
+  let loadedRoot = $state<string | null>(null);
+  // Bumped on every successful write to either document — what the editor's validation effect
+  // watches. The profile counts: its rules reach every project, including the one on screen.
+  let revision = $state(0);
+  const bump = () => {
+    revision += 1;
+  };
+
+  const project = createNamingDocument(
+    {
+      read: () => ipcGet(loadedRoot ?? ''),
+      write: (config) => ipcSet(loadedRoot ?? '', config),
+      ready: () => !!loadedRoot,
+    },
+    bump,
+  );
+  const profile = createNamingDocument(
+    { read: ipcGetDefaults, write: ipcSetDefaults, ready: () => true },
+    bump,
+  );
+
+  // The bulk fix, from "asked for" to "applied or dismissed". Held here rather than in a
+  // component so the palette can start one and the modal that reviews it is just a renderer —
+  // which is what lets the modal open before the work rather than after it.
+  let fixOpen = $state(false);
+  let pendingFix = $state<NamingFixPlan | null>(null);
+  let planningFix = $state(false);
+  let fixProgress = $state<FixProgress | null>(null);
+  /** What the pending plan covers, for the modal's title. */
+  let fixScope = $state<'file' | 'project'>('file');
+
+  // Attached on the first fix and kept: a listener costs nothing while no fix is running, and
+  // re-attaching per run is a race against the first event the backend emits.
+  let progressAttached = false;
+  async function attachProgress() {
+    if (progressAttached) return;
+    progressAttached = true;
+    try {
+      await listen<FixProgress>('arbor://bennu/naming-fix-progress', (e) => {
+        if (planningFix) fixProgress = e.payload;
+      });
+    } catch {
+      progressAttached = false;
+    }
+  }
+
+  return {
+    get catalog() { return catalog; },
+    get revision() { return revision; },
+
+    /** The open project's own section — what it states differently. */
+    get project() { return project; },
+    /** The profile's defaults — your answer for every project. */
+    get profile() { return profile; },
+
+    /**
+     * Whether the check is actually on for the open project.
+     *
+     * Merged here and not on the backend because it is the one merged answer this side needs, and
+     * it is one line: the project's own switch, or the profile's when the project inherits. Reading
+     * only the project's switch is what made "Fix naming" grey on a project that had adopted the
+     * profile's conventions and stated nothing of its own.
+     */
+    get enabled() {
+      return project.config.enabled || (project.config.inherit && profile.config.enabled);
+    },
+
+    /**
+     * Fetch the catalog for `root`.
+     *
+     * Re-fetched when the project changes rather than cached for the session: the packs are static,
+     * but *which of them this project contains* is not, and showing a Rust column on a Java project
+     * because a Rust one was open earlier is the bug this parameter exists to prevent.
+     */
+    async loadCatalog(root: string | null) {
+      if (catalog && catalogRoot === root) return;
+      try {
+        catalog = await ipcCatalog(root ?? undefined);
+        catalogRoot = root;
+      } catch {
+        catalog = null;
+      }
+    },
+
+    /** Point the project document at `root` and read it. A different root is a different document,
+     *  so it is re-read rather than loaded — whatever was in the draft belonged to the old one. */
+    async load(root: string) {
+      if (loadedRoot === root) {
+        await project.load();
+        return;
+      }
+      loadedRoot = root;
+      await project.reload();
+    },
+
+    /** The standard a pack's community uses, for the "Use the standard convention" button. */
+    standardOf(packId: string): NamingRules {
+      return catalog?.packs.find((p) => p.id === packId)?.standard ?? {};
     },
 
     get fixOpen() { return fixOpen; },
@@ -254,23 +404,6 @@ function createBennuNamingStore() {
       pendingFix = null;
       fixOpen = false;
       fixProgress = null;
-    },
-
-    /** Persist the draft. Returns whether it was written. */
-    async apply(): Promise<boolean> {
-      const root = loadedRoot;
-      if (!root || saving) return false;
-      saving = true;
-      try {
-        await ipcSet(root, draft);
-        loaded = clone(draft);
-        revision += 1;
-        return true;
-      } catch {
-        return false;
-      } finally {
-        saving = false;
-      }
     },
   };
 }

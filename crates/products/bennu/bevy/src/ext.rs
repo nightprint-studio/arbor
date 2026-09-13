@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 
 use bennu_ext::prelude::{
-    ExtEntry, ExtGutterMark, ExtStat, ExtTarget, FileCtx, FrameworkExtension, ProjectScan,
+    ExtEntry, ExtGutterMark, ExtMemory, ExtStat, ExtTarget, FileCtx, FrameworkExtension, ProjectScan,
 };
 use bennu_proto::prelude::{CapabilitySet, Diagnostic};
 
@@ -57,6 +57,57 @@ impl FrameworkExtension for BevyExtension {
 
     fn applies(&self, caps: &CapabilitySet) -> bool {
         caps.bevy
+    }
+
+    /// The model's declarations, sized from the strings and lists each owns. The rendering half
+    /// (materials, uniforms, shader links, conflicts) is counted shallow — its slots, not what
+    /// they own — because it is small beside the rest and deep to walk.
+    fn memory(&self) -> Vec<ExtMemory> {
+        use std::mem::size_of_val;
+        let m = self.model();
+        let path = |p: &std::path::Path| p.as_os_str().len();
+        let strings = |v: &[String]| size_of_val(v) + v.iter().map(String::capacity).sum::<usize>();
+
+        let types = size_of_val(m.types.as_slice())
+            + m.types
+                .iter()
+                .map(|t| t.name.capacity() + path(&t.file) + size_of_val(t.roles.as_slice()) + strings(&t.fields))
+                .sum::<usize>();
+        let systems = size_of_val(m.systems.as_slice())
+            + m.systems
+                .iter()
+                .map(|s| {
+                    s.name.capacity()
+                        + path(&s.file)
+                        + strings(&s.schedules)
+                        + strings(&s.sets)
+                        + size_of_val(s.accesses.as_slice())
+                        + s.accesses
+                            .iter()
+                            .map(|a| a.target.capacity() + a.param.capacity() + size_of_val(a.filters.as_slice()))
+                            .sum::<usize>()
+                })
+                .sum::<usize>();
+        let inserts = size_of_val(m.inserts.as_slice())
+            + m.inserts
+                .iter()
+                .map(|i| i.type_name.capacity() + path(&i.file) + i.arg.capacity() + i.in_fn.capacity())
+                .sum::<usize>();
+        let rendering = size_of_val(m.materials.as_slice())
+            + size_of_val(m.uniforms.as_slice())
+            + size_of_val(m.shaders.as_slice())
+            + size_of_val(m.conflicts.as_slice());
+
+        vec![
+            ExtMemory::estimate("Types", m.types.len(), types),
+            ExtMemory::estimate("Systems and their accesses", m.systems.len(), systems),
+            ExtMemory::estimate("Spawn and insert sites", m.inserts.len(), inserts),
+            ExtMemory::estimate(
+                "Materials, uniforms, shaders and conflicts",
+                m.materials.len() + m.uniforms.len() + m.shaders.len() + m.conflicts.len(),
+                rendering,
+            ),
+        ]
     }
 
     fn reindex(&self, scan: &ProjectScan<'_>) {

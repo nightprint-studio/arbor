@@ -41,7 +41,6 @@
     isImageFile, isJavaFile as isJavaFileOf, isJspFile as isJspFileOf, isTestSource,
     isLspFile as isLspFileOf, isRustFile as isRustFileOf, isMarkdownFile,
     isRunnableScript, isHtmlFile, hasPushedDiagnostics, supportsCodeNav, supportsDiagnostics,
-    isToolConfigFile,
     isSpringConfigFile,
   } from './file-kind';
   import BennuHtmlPreview from './BennuHtmlPreview.svelte';
@@ -934,13 +933,15 @@
     // debounced so a burst of keystrokes coalesces. JSP checks read the file on the backend, so
     // they don't depend on the buffer.
     const isJava = /\.java$/i.test(path);
-    // The live buffer goes with the request for Java AND for XML: a bean XML's framework
-    // diagnostics are computed from the text, so reading the stale file from disk would
-    // squiggle the version you already fixed. JSP checks resolve against the project
-    // config on the backend and genuinely don't need it.
-    const src = isJava || /\.xml$/i.test(path) || isToolConfigFile(path)
-      ? projectStore.sourceOf(path)
-      : undefined;
+    // The live buffer goes with **every** request except a JSP's.
+    //
+    // It used to go only with Java, XML and the tool configs — whichever checks were computed from
+    // the text rather than from the project. That stopped being the line the moment the encoding
+    // check arrived: it reads a character the buffer holds, so a request that sent no buffer got
+    // no encoding answer, which is precisely the silence a corrupted `è` in a message bundle used
+    // to meet. JSP checks resolve against the project config on the backend and genuinely do not
+    // need it.
+    const src = isJspFileOf(path) ? undefined : projectStore.sourceOf(path);
     let cancelled = false;
     let fullDone = false;
     // The FULL (resolver-backed) pass — the authoritative set: drives the editor squiggles AND the
@@ -2718,9 +2719,22 @@
     bennuUiStore.openValidationCreator();
   }
 
-  /** Palette "Check file for mojibake": scan the active buffer for UTF-8-as-Cp1252 corruption
-   *  (`Ã©` → `é`, `â€™` → `'`) and surface each hit as a warning squiggle with a one-click
-   *  replace, plus a summary toast. One-shot (recomputed each run); cleared on file switch. */
+  /**
+   * Palette "Check file for mojibake": scan the active buffer for corrupted characters and answer
+   * with a summary.
+   *
+   * ## What it still draws, and what it no longer does
+   *
+   * The same scan now rides ordinary validation, so on a file that has diagnostics the squiggles
+   * are **already there** — and adding a second set over the same spans put two messages in one
+   * hover and made it a paragraph tall. So this command draws its own only where validation does
+   * not reach, which is the case it is still the only door for.
+   *
+   * Either way it answers out loud. That is what an on-demand check is for: "no mojibake found" is
+   * a real answer to a question you asked, and it is the one thing a squiggle cannot say.
+   *
+   * One-shot (recomputed each run); cleared on file switch.
+   */
   export async function checkMojibake() {
     const path = activePath;
     if (!path || !editorComp) return;
@@ -2728,23 +2742,42 @@
     let hits: Awaited<ReturnType<typeof ipcMojibakeCheck>> = [];
     try { hits = await ipcMojibakeCheck(path, src); } catch { hits = []; }
     if (projectStore.activeFilePath !== path) return; // file switched mid-scan → drop
-    mojibakeDiags = hits.map((h) => ({
-      from: h.start,
-      to: h.end,
-      severity: 'warning' as const,
-      message: `Likely mojibake: “${h.bad}” should be “${h.fix}”`,
-      actions: [{
-        name: `Replace with “${h.fix}”`,
-        apply: (view: EditorView, from: number, to: number) =>
-          view.dispatch({ changes: { from, to, insert: h.fix } }),
-      }],
-    }));
+    mojibakeDiags = supportsDiagnostics(path)
+      ? []
+      : hits.map((h) => ({
+        from: h.start,
+        to: h.end,
+        severity: 'warning' as const,
+        // A hit with no fix is the OTHER corruption: a byte that could not be decoded at all.
+        // Nothing can be known about what it was, so there is nothing to offer — and the
+        // "Replace with …" this used to build from an empty fix would have DELETED the
+        // character, which is the one edit that makes the file worse.
+        message: h.fix
+          ? `Mojibake: “${h.bad}” should be “${h.fix}”.`
+          : 'Unreadable character — the file is not in the encoding it is being decoded with. Reload it in the right one.',
+        actions: h.fix
+          ? [{
+            name: `Replace with “${h.fix}”`,
+            apply: (view: EditorView, from: number, to: number) =>
+              view.dispatch({ changes: { from, to, insert: h.fix } }),
+          }]
+          : [],
+      }));
+    const broken = hits.filter((h) => !h.fix).length;
+    const garbled = hits.length - broken;
     toastStore.show(
-      hits.length
-        ? `${hits.length} mojibake sequence${hits.length === 1 ? '' : 's'} found`
-        : 'No mojibake found',
+      hits.length ? mojibakeSummary(garbled, broken) : 'No broken characters found',
       hits.length ? 'warning' : 'success',
     );
+  }
+
+  /** "3 mojibake sequences", "2 unreadable characters", or both — named apart because only one of
+   *  the two can be repaired from the text. */
+  function mojibakeSummary(garbled: number, broken: number): string {
+    const parts: string[] = [];
+    if (garbled) parts.push(`${garbled} mojibake sequence${garbled === 1 ? '' : 's'}`);
+    if (broken) parts.push(`${broken} unreadable character${broken === 1 ? '' : 's'}`);
+    return `${parts.join(' and ')} found`;
   }
 
   // ── Intentions (Alt+Enter) ────────────────────────────────────────────────────

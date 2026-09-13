@@ -52,11 +52,15 @@ use serde_json::json;
 /// into memory to be searched. `rs` / `toml` / `ron` / `dig` are here for the Rust side:
 /// a project-wide search that silently skipped every `.rs` file would look like a broken
 /// search, not a narrow one.
-const SCAN_EXTS: [&str; 19] = [
+const SCAN_EXTS: [&str; 22] = [
     "java", "xml", "jsp", "jspf", "tag", "properties", "js", "css", "html", "sql", "yml",
     "yaml", "md", "txt", "jspx",
     // Rust projects: sources, manifests, RON game data, and geode's `.dig` scripts.
     "rs", "toml", "ron", "dig",
+    // Code templates. They are text somebody writes and reads like any other source, and a search
+    // — or the mojibake scan — that skipped them was skipping the files most likely to carry an
+    // accented message in the first place.
+    "jinja", "jinja2", "j2",
 ];
 
 /// Directory names never descended into during the scan (mirrors [`crate::todos`]).
@@ -504,7 +508,11 @@ fn is_scannable_entry(name: &str) -> bool {
 /// (`.gitignore`, `.editorconfig`, …).
 fn is_scannable(path: &Path) -> bool {
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        return SCAN_EXTS.contains(&ext);
+        // Case-folded: a `README.TXT` or a `Messages.PROPERTIES` is the same kind of file, and a
+        // case-sensitive match skipped them on the filesystems where the spelling survives.
+        // Compared rather than lower-cased: this runs once per directory entry of a whole-project
+        // walk, and an allocation per entry to answer a yes/no is a cost the walk does not need.
+        return SCAN_EXTS.iter().any(|known| known.eq_ignore_ascii_case(ext));
     }
     // No extension: scan only if it's a dotfile (a plain `Makefile`/binary is skipped).
     path.file_name()

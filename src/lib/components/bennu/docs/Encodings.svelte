@@ -53,6 +53,23 @@
   Each hit is squiggled with a one-click <strong>Replace with «…»</strong> quick fix, and a summary says how many were
   found.
 </p>
+<h3>The other kind: a byte that could not be read at all</h3>
+<p>
+  A file written in Cp1252 and decoded as UTF-8 loses the byte rather than garbling it: the editor shows a replacement
+  glyph — one character standing where <code>è</code> was written. There is no quick fix and there cannot be one, because
+  the byte that would say what it was is gone before the text reaches the editor. Reload the file in the encoding it is
+  actually written in — <strong>Project Configuration → Encoding</strong>, or the footer's encoding picker for one file.
+  Typing over the glyph saves a file the original byte has already been thrown away from.
+</p>
+<Callout variant="warning" title="Both are checked while you type, in any text file">
+  They ride the ordinary validation, so a message bundle, a code template, a <code>.sql</code> or a README is checked the
+  same way a <code>.java</code> is — which is where a legacy tree keeps almost all of its accented text.
+</Callout>
+<p>
+  The palette command and the project-wide scan are still there for asking on purpose. What the command adds is the
+  <em>answer out loud</em> — how many of each kind, or “no broken characters found”, which is the one thing a squiggle
+  cannot say. It draws squiggles of its own only in a file that validation does not reach.
+</p>
 <Callout variant="tip" title="Clean accents are never flagged">
   Detection is exact — a table of real corruption sequences, not a guess about which characters look odd — so correct
   accented text stays unmarked.

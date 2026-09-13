@@ -205,7 +205,6 @@
     { kind: 'separator', label: 'Project' },
     { kind: 'item', id: 'open',  label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+O', onclick: () => openPicker('open') },
     { kind: 'item', id: 'addproj', label: 'Add project to workspace…', icon: FolderPlus, disabled: !hasProject, onclick: () => openPicker('add') },
-    { kind: 'item', id: 'projectcfg', label: 'Project Configuration…', icon: SlidersHorizontal, disabled: !hasProject, onclick: () => bennuUiStore.openProjectConfig() },
     // MOCK — remove the "Load demo project" entry when bennu-be serves real data.
     { kind: 'item', id: 'demo',  label: 'Load demo project', icon: FlaskConical, onclick: () => projectStore.loadDemo() },
     // The same Tools section Corvus has. Bennu hosts plugins, so it needs the three doors a
@@ -264,6 +263,12 @@
 
   const settingsMenu = $derived<DropdownItem[]>([
     { kind: 'item', id: 'settings',  label: 'Settings…',           icon: Settings,  shortcut: 'Ctrl+,',   onclick: () => bennuUiStore.openSettings() },
+    // Beside Settings, and only here: it is the dialog next to the dialog, which is where somebody
+    // looking for "the settings of this project" looks first. It used to sit in the hamburger too,
+    // which is the Project menu — a place for opening and adding projects, not for finding a
+    // settings window, and a second door onto one dialog is a second thing to keep in step.
+    { kind: 'item', id: 'projectcfg', label: 'Project Configuration…', icon: SlidersHorizontal, shortcut: 'Ctrl+Shift+,',
+      disabled: !hasProject, onclick: () => bennuUiStore.openProjectConfig() },
     { kind: 'item', id: 'shortcuts', label: 'Keyboard shortcuts…', icon: Keyboard,  shortcut: 'F1',       onclick: () => bennuUiStore.toggleDocs() },
     // Same place Corvus keeps it — the gear rather than the hamburger, because it is about the
     // window's chrome and not about the project.

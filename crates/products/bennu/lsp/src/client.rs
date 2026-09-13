@@ -349,6 +349,20 @@ impl LspClient {
         self.write_frame(&body)
     }
 
+
+    /// The server process's id, while it is alive.
+    ///
+    /// Not for talking to it — the pipes do that — but so a screen that measures Arbor's own
+    /// processes can say *which server* a row of CPU and memory belongs to. A number on its own is
+    /// a number; `rust-analyzer, this project` is an answer.
+    pub fn pid(&self) -> Option<u32> {
+        self.child
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .map(|child| child.id())
+    }
+
     /// Ask the server to shut down, then make sure it did.
     ///
     /// The protocol's sequence is `shutdown` (a request) then `exit` (a notification), and
