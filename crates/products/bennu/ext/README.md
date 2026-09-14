@@ -53,6 +53,17 @@ returning nothing is always correct. Queries also arrive from several threads at
 backend dispatches each request on its own thread) — hence `Send + Sync` and `&self`
 throughout.
 
+## Intentions
+
+`intentions(ctx, offset, problems)` is what Alt+Enter offers at a caret: the fixes for the
+extension's own diagnostics among `problems` — the ones the editor is already showing under the
+caret, passed back as `ExtProblem { code, start, end }` rather than recomputed — and the rewrites
+that apply at the caret with no diagnostic behind them.
+
+An `ExtIntention` carries **several edits**, because a rewrite that needs an import is two places in
+one file and an offer that could hold only one would leave the file broken. Every offset is into the
+buffer as it was when asked; the host applies the set as one undo step, so edits must not overlap.
+
 ## Catalogs
 
 `catalog(kind)` is the generic backing for every list panel: beans, endpoints, property

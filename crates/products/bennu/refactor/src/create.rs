@@ -178,6 +178,113 @@ pub fn undeclared_calls(source: &str, type_decl: Node<'_>) -> Vec<LocalCall> {
     out
 }
 
+/// A method reference to a method **this class** would declare — `this::name`, or `Outer::name`
+/// naming the type it is written in.
+///
+/// As much a request for a method as a call is, and as common a way of making one:
+/// `.map(this::toIdentity)` gets written before `toIdentity` exists as often as `toIdentity(jwt)`
+/// does. What it cannot say on its own is the signature — a reference has no arguments to read.
+/// That is the functional interface it is passed as, which is a resolver's question, so this hands
+/// back where the reference is and the caller asks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalReference {
+    pub name: String,
+    /// `Outer::name` asks for a `static` method, `this::name` for an instance one.
+    pub is_static: bool,
+    /// The whole `method_reference` expression — the node whose target type is the signature.
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Every method reference `type_decl` makes to a method it does not declare, one per name.
+///
+/// Like [`undeclared_calls`], says nothing about whether the name is inherited; the caller filters.
+pub fn undeclared_references(source: &str, type_decl: Node<'_>) -> Vec<LocalReference> {
+    let mut out: Vec<LocalReference> = Vec::new();
+    for reference in descendants(type_decl, "method_reference") {
+        // A reference written inside a nested type is that type's request, not this one's.
+        if enclosing_type(reference).map(|t| t.id()) != Some(type_decl.id()) {
+            continue;
+        }
+        let Some(local) = read_local_reference(&reference, source) else { continue };
+        if out.iter().any(|r| r.name == local.name) || has_method(&type_decl, &local.name, source) {
+            continue;
+        }
+        out.push(local);
+    }
+    out
+}
+
+/// The reference whose **name** is at `[start, end)` — the span an `unknown-member` diagnostic
+/// underlines — when it names a method of the class it is written in that the class does not
+/// declare.
+pub fn local_reference_at(
+    root: Node<'_>,
+    source: &str,
+    start: usize,
+    end: usize,
+) -> Option<LocalReference> {
+    let at = node_at(root, start)?;
+    let reference = crate::selection::enclosing(at, &["method_reference"])?;
+    let name = reference.named_child(reference.named_child_count().checked_sub(1)?)?;
+    if end > start && (name.start_byte() > start || name.end_byte() < end) {
+        return None;
+    }
+    let local = read_local_reference(&reference, source)?;
+    let type_decl = enclosing_type(reference)?;
+    (!has_method(&type_decl, &local.name, source)).then_some(local)
+}
+
+/// Read `this::name` / `Outer::name` as a request to the class it is written in; `None` for a
+/// reference to anything else.
+fn read_local_reference<'t>(reference: &Node<'t>, source: &str) -> Option<LocalReference> {
+    let mut cursor = reference.walk();
+    let children: Vec<Node<'t>> = reference.named_children(&mut cursor).collect();
+    let (qualifier, name) = (children.first()?, children.last()?);
+    // One named child is `Foo::new`, where the "name" would be the qualifier itself.
+    if qualifier.id() == name.id() || name.kind() != "identifier" {
+        return None;
+    }
+    let written = text(qualifier, source);
+    let type_decl = enclosing_type(*reference)?;
+    let is_static = if written == "this" {
+        false
+    } else if type_decl.child_by_field_name("name").is_some_and(|n| text(&n, source) == written) {
+        true
+    } else {
+        // `System.out::println`, `list::add` — a method of another class, which this one would
+        // never be the place to declare.
+        return None;
+    };
+    Some(LocalReference {
+        name: text(name, source).to_string(),
+        is_static,
+        start: reference.start_byte(),
+        end: reference.end_byte(),
+    })
+}
+
+/// The plan that writes `call` just below the method `anchor` sits in — the placement and the stub
+/// [`create_method`] uses, for a signature the caller worked out itself (a method reference's comes
+/// from its functional interface, which takes a resolver).
+pub fn declare_local_method(root: Node<'_>, source: &str, anchor: usize, call: &LocalCall) -> Option<Plan> {
+    let (id, _) = ID;
+    let method = enclosing_callable(node_at(root, anchor)?)?;
+    let indent = indent_at(source, method.start_byte());
+    let nl = newline(source);
+    let member = call.render(&indent, nl);
+    let insert_at = method.end_byte();
+    let body = member.find('{').map_or(member.len(), |open| open + 1);
+    let plan = Plan::new(
+        id,
+        &format!("Create method '{}'", call.name),
+        vec![RefactorEdit::new(insert_at, insert_at, format!("{nl}{nl}{indent}{member}"), "declaration")],
+    )
+    .named(call.name.clone())
+    .caret_at(insert_at + 2 * nl.len() + indent.len() + body);
+    Some(plan)
+}
+
 /// What a call on **another object** is asking that object's class for.
 ///
 /// The half of "create method" that the call site can answer: the name, the parameter types and
@@ -671,5 +778,52 @@ mod tests {
         let names = call.type_names();
         assert!(names.contains(&"Customer"), "{names:?}");
         assert!(names.contains(&"Invoice"), "{names:?}");
+    }
+
+    // ── A method reference to a method this class does not declare ───────────────────────────
+
+    #[test]
+    fn a_reference_on_this_asks_for_an_instance_method() {
+        let source = "class A {\n    Object f(java.util.Optional<String> o) {\n        return o.map(this::shout);\n    }\n}";
+        let tree = parse_java(source).unwrap();
+        let at = source.find("shout").unwrap();
+        let reference = local_reference_at(tree.root_node(), source, at, at + 5).expect("a reference");
+        assert_eq!((reference.name.as_str(), reference.is_static), ("shout", false));
+    }
+
+    #[test]
+    fn a_reference_through_the_class_name_asks_for_a_static_one() {
+        let source = "class A {\n    void f(java.util.List<String> l) {\n        l.forEach(A::log);\n    }\n}";
+        let tree = parse_java(source).unwrap();
+        let class = tree.root_node().named_child(0).unwrap();
+        let found = undeclared_references(source, class);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!((found[0].name.as_str(), found[0].is_static), ("log", true));
+    }
+
+    /// `System.out::println` is another class's method, and `this::seen` already exists.
+    #[test]
+    fn another_class_and_a_declared_method_are_not_asked_for() {
+        let source = "class A {\n    void f(java.util.List<String> l) {\n        l.forEach(System.out::println);\n        l.forEach(this::seen);\n    }\n    void seen(String s) {}\n}";
+        let tree = parse_java(source).unwrap();
+        let class = tree.root_node().named_child(0).unwrap();
+        assert!(undeclared_references(source, class).is_empty());
+    }
+
+    #[test]
+    fn the_referenced_method_lands_below_its_user() {
+        let source = "class A {\n    Object f(java.util.Optional<String> o) {\n        return o.map(this::shout);\n    }\n\n    void z() {}\n}";
+        let tree = parse_java(source).unwrap();
+        let call = LocalCall {
+            name: "shout".to_string(),
+            params: vec![("String".to_string(), "string".to_string())],
+            returns: "Object".to_string(),
+            is_static: false,
+        };
+        let at = source.find("this::shout").unwrap();
+        let plan = declare_local_method(tree.root_node(), source, at, &call).expect("a plan");
+        let applied = plan.apply(source);
+        let stub = applied.find("private Object shout(String string) {").expect(&applied);
+        assert!(stub < applied.find("void z()").unwrap(), "{applied}");
     }
 }

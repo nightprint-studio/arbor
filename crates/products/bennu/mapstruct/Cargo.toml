@@ -1,0 +1,28 @@
+[package]
+name         = "bennu-mapstruct"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "MapStruct mappers read the way the annotation processor reads them: which target properties a mapping method leaves unmapped, which @Mapping names a property that does not exist, which combinations of @Mapping elements the processor refuses — reported in the editor, with the fixes, before the build says it. Silent wherever a type, a supertype or a policy cannot be seen."
+
+[dependencies]
+# The extension seam this crate implements.
+bennu-ext        = { path = "../ext" }
+# The wire types a contribution is made of (Diagnostic / CompletionItem / CapabilitySet).
+bennu-proto      = { path = "../proto" }
+# The annotation-shaped scan and the origin rule: `@Mapper` is MapStruct's only when the imports say so.
+bennu-facts      = { path = "../facts" }
+# The Java parse. `@Mappings({ @Mapping(...) })` nests annotations inside an array, and the facts model
+# flattens that away — the mapping elements are read off the tree directly.
+bennu-java       = { path = "../java" }
+# What Lombok generates. A DTO's accessors are very often not in its source, and deciding which ones
+# exist is Lombok's catalogue, not a second list kept here.
+bennu-lombok     = { path = "../lombok" }
+# Where an `import` line goes — the ignore-unmapped fix may need `org.mapstruct.Mapping`.
+bennu-intentions = { path = "../intentions" }
+# The capped, de-duplicated candidate list completions are built with.
+bennu-complete   = { path = "../complete" }
+# Pinned to the workspace-shared 0.25: a `links` native library, so one version only.
+tree-sitter      = "0.25"

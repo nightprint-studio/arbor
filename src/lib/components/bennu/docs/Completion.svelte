@@ -300,6 +300,9 @@ ConfigurazioneCors.MyProva prova;    // accepting "MyProva" writes this`, 'java'
   <li>It reads the calls made on this class from <strong>elsewhere in the file</strong>, which a <strong>nested</strong> class needs:
     <code>c.randomico("ciao")</code> written in the outer class, on an instance of the inner one, makes <code>ra</code> in the inner class offer it — as
     <code>public</code>, since another class calls it. Only a receiver whose type resolves to the class you are in counts.</li>
+  <li>A <strong>method reference</strong> asks as surely as a call: after <code>.map(this::toIdentity)</code>, <code>toId</code> in the class body offers
+    <code>toIdentity</code> with the signature of the functional interface it is passed as — and draws it as ghost text when it is the only
+    match.</li>
   <li>A method the class <strong>inherits</strong> is not missing: the supertypes are walked first, and an unreadable hierarchy means silence.</li>
 </ul>
 

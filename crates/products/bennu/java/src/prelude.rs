@@ -8,8 +8,8 @@
 // reuse-an-existing-tree variant for the hot reference-walk path.
 pub use crate::infer::is_inferred_type;
 pub use crate::infer::{
-    enclosing_type_fqn, infer_expression_type, infer_expression_type_at,
-    infer_expression_type_cached, infer_node_type_cached, infer_receiver_type,
+    enclosing_type_fqn, functional_descriptor, infer_expression_type, infer_expression_type_at,
+    infer_expression_type_cached, infer_node_type_cached, infer_receiver_type, FunctionalDescriptor,
     infer_receiver_type_at, infer_receiver_type_cached, method_admits_argc, type_decl_at,
     InferCache,
     MethodResolution,

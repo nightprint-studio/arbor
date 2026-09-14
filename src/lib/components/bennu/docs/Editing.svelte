@@ -328,6 +328,40 @@ import static org.junit.Assert.assertEquals;`, 'java')}</code></pre>
   </tbody>
 </table>
 
+<h2>Brackets and quotes</h2>
+<p>
+  <code>(</code>, <code>[</code> and <code>&#123;</code> insert their closing half when the caret is followed by whitespace, the end
+  of the line or another closer; typing the closer over one steps past it, and <kbd>Backspace</kbd> between an empty pair
+  removes both. The bracket matching the one at the caret is underlined.
+</p>
+<p><strong>With a selection</strong>, typing an opener wraps it instead of replacing it — and in Java that includes <code>&lt;</code>:</p>
+<table>
+  <thead><tr><th>Selected</th><th>Typed</th><th>Becomes</th></tr></thead>
+  <tbody>
+    <tr><td><code>String</code></td><td><code>&lt;</code></td><td><code>&lt;String&gt;</code></td></tr>
+    <tr><td><code>a + b</code></td><td><code>(</code></td><td><code>(a + b)</code></td></tr>
+    <tr><td><code>name</code></td><td><code>"</code></td><td><code>"name"</code></td></tr>
+  </tbody>
+</table>
+<p>
+  Without a selection <code>&lt;</code> is just typed: the same character opens a type argument list and a comparison, so there is
+  no right closer to guess.
+</p>
+<p>In Java, <code>"</code> and <code>'</code> pair only where a literal can start:</p>
+<ul>
+  <li>in code — never inside a string, a character literal or a comment, where a quote is text;</li>
+  <li>not straight after a letter, a digit or another quote, and only when what follows is whitespace, the end of the line, or
+    <code>)</code> <code>]</code> <code>&#125;</code> <code>,</code> <code>;</code>.</li>
+</ul>
+<p>
+  Typing the quote that closes the literal you are in steps over it, and <kbd>Backspace</kbd> inside an empty <code>""</code> or
+  <code>''</code> removes both quotes. A third <code>"</code> after an empty <code>""</code> opens a <strong>text block</strong>,
+  with the caret on its own indented line and the closing delimiter below it:
+</p>
+<pre><code>{@html highlightCode(`String html = """
+        |
+        """;`, 'java')}</code></pre>
+
 <h2>Pasting into a string</h2>
 <p>
   Paste inside a Java <code>"…"</code> and the text is <strong>escaped</strong> as it lands: quotes and backslashes are escaped,

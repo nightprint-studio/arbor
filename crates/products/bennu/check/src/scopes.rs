@@ -103,8 +103,10 @@ pub(crate) fn declares_name_in_scope(scope: Node, name: &str, bytes: &[u8]) -> b
                     }
                 }
             }
-            // A record-pattern / type-pattern binding: `if (o instanceof String s)` → `s`.
-            "pattern" | "type_pattern" => {
+            // A record-pattern / type-pattern binding: `if (o instanceof String s)` → `s`. A
+            // record-pattern COMPONENT (`case Point(int x, var label)`) binds positionally too — the
+            // grammar gives its name no field, only a trailing `identifier` child.
+            "pattern" | "type_pattern" | "record_pattern_component" => {
                 if let Some(nm) = n.child_by_field_name("name") {
                     if nm.utf8_text(bytes) == Ok(name) {
                         return true;

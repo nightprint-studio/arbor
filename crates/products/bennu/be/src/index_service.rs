@@ -3374,18 +3374,23 @@ impl IndexService {
         provider.infer_type_detail(source, start, end)
     }
 
-    /// Importable FQNs (dotted, sorted) for a simple type `name`, from the owning project's class-name
-    /// index (JDK + dependency + project types). Empty when no project owns `file` or its index isn't
-    /// built. Powers the "Import class" intention's candidate list.
-    pub fn import_candidates(&self, file: &str, name: &str) -> Vec<String> {
+    /// Importable FQNs for a simple type `name` written in `source`, **nearest first**, from the
+    /// owning project's class-name index (JDK + dependency + project types). Empty when no project
+    /// owns `file` or its index isn't built. Powers the "Import class" intention's candidate list.
+    pub fn import_choices(
+        &self,
+        file: &str,
+        source: &str,
+        name: &str,
+    ) -> bennu_intel::prelude::ImportChoices {
         let Some(slot) = self.slot_for_file(file) else {
-            return Vec::new();
+            return Default::default();
         };
         let provider = {
             let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
             Arc::clone(&g)
         };
-        provider.import_candidates(name).to_vec()
+        provider.import_choices(source, name)
     }
 
     /// A cheap snapshot of the index for the project rooted at `root` (the index

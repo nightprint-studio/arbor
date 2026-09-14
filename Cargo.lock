@@ -929,6 +929,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bennu-assertj"
+version = "0.3.0"
+dependencies = [
+ "bennu-ext",
+ "bennu-facts",
+ "bennu-intentions",
+ "bennu-java",
+ "bennu-proto",
+ "tree-sitter",
+]
+
+[[package]]
 name = "bennu-be"
 version = "0.3.0"
 dependencies = [
@@ -945,6 +957,7 @@ dependencies = [
  "arbor-rpc",
  "arbor-syntax",
  "base64 0.22.1",
+ "bennu-assertj",
  "bennu-bevy",
  "bennu-cargo",
  "bennu-check",
@@ -962,13 +975,17 @@ dependencies = [
  "bennu-intentions",
  "bennu-jackson",
  "bennu-jakarta",
+ "bennu-jakartaee",
  "bennu-java",
+ "bennu-jaxrs",
  "bennu-jdwp",
  "bennu-jpa",
  "bennu-jsp",
  "bennu-jsp-grammar",
  "bennu-lsp",
+ "bennu-mapstruct",
  "bennu-maven",
+ "bennu-mockito",
  "bennu-naming",
  "bennu-npm",
  "bennu-plugin",
@@ -1197,6 +1214,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-jakartaee"
+version = "0.3.0"
+dependencies = [
+ "bennu-complete",
+ "bennu-ext",
+ "bennu-facts",
+ "bennu-java",
+ "bennu-proto",
+ "tree-sitter",
+]
+
+[[package]]
 name = "bennu-java"
 version = "0.3.0"
 dependencies = [
@@ -1205,6 +1234,16 @@ dependencies = [
  "serde_json",
  "tree-sitter",
  "tree-sitter-java",
+]
+
+[[package]]
+name = "bennu-jaxrs"
+version = "0.3.0"
+dependencies = [
+ "bennu-complete",
+ "bennu-ext",
+ "bennu-facts",
+ "bennu-proto",
 ]
 
 [[package]]
@@ -1259,6 +1298,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-mapstruct"
+version = "0.3.0"
+dependencies = [
+ "bennu-complete",
+ "bennu-ext",
+ "bennu-facts",
+ "bennu-intentions",
+ "bennu-java",
+ "bennu-lombok",
+ "bennu-proto",
+ "tree-sitter",
+]
+
+[[package]]
 name = "bennu-maven"
 version = "0.3.0"
 dependencies = [
@@ -1269,6 +1322,18 @@ dependencies = [
  "bennu-xml",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bennu-mockito"
+version = "0.3.0"
+dependencies = [
+ "bennu-ext",
+ "bennu-facts",
+ "bennu-intentions",
+ "bennu-java",
+ "bennu-proto",
+ "tree-sitter",
 ]
 
 [[package]]

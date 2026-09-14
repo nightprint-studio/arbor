@@ -20,7 +20,8 @@
     BookOpen, Rocket, Boxes, PenLine, Keyboard, FolderGit2, FlaskConical, Beaker, Play, Replace,
     ServerCog, Cog, Languages, Network, Gamepad2, Search, Coffee, FileCode2, Bug, History,
     FileText, Compass, ListTree, Sparkles, ShieldCheck, Wrench, Download, Package, Braces,
-    Database, Layers, Palette, Flame, ScrollText, FileType2, SlidersHorizontal,
+    Database, Layers, Palette, Flame, ScrollText, FileType2, SlidersHorizontal, ArrowLeftRight,
+    ListChecks,
   } from 'lucide-svelte';
   import DocsShell, { type DocsNavItem, type DocsNavGroup } from '$lib/components/shared/DocsShell.svelte';
 
@@ -61,6 +62,11 @@
   import BeanValidation    from './docs/BeanValidation.svelte';
   import Scheduled         from './docs/Scheduled.svelte';
   import JsonTypes         from './docs/JsonTypes.svelte';
+  import MapStruct         from './docs/MapStruct.svelte';
+  import JakartaEE         from './docs/JakartaEE.svelte';
+  import JaxRs             from './docs/JaxRs.svelte';
+  import Mockito           from './docs/Mockito.svelte';
+  import AssertJ           from './docs/AssertJ.svelte';
   import DtoLab            from './docs/DtoLab.svelte';
   import Templates         from './docs/Templates.svelte';
   import TemplateLanguage  from './docs/TemplateLanguage.svelte';
@@ -136,6 +142,9 @@
       { id: 'bean-validation',  label: 'Bean Validation',   icon: ShieldCheck },
       { id: 'scheduled',        label: 'Scheduled jobs',    icon: History   },
       { id: 'json-types',       label: 'JSON types',        icon: Braces    },
+      { id: 'mapstruct',        label: 'MapStruct mappers', icon: ArrowLeftRight },
+      { id: 'jakarta-ee',       label: 'Jakarta EE (CDI, EJB, servlets)', icon: Boxes },
+      { id: 'jaxrs',            label: 'JAX-RS resources',  icon: Network   },
       { id: 'dto-lab',          label: 'DTO Lab',           icon: Beaker    },
       { id: 'message-bundles',  label: 'Message bundles',   icon: Languages },
       { id: 'i18n',             label: 'i18n labels',       icon: Languages },
@@ -152,6 +161,8 @@
       { id: 'debugging',    label: 'Debugging',              icon: Bug          },
       { id: 'debug-values', label: 'Frames, values & watches', icon: ListTree   },
       { id: 'testing',      label: 'Testing',                icon: FlaskConical },
+      { id: 'mockito',      label: 'Mockito',                icon: FlaskConical },
+      { id: 'assertj',      label: 'AssertJ',                icon: ListChecks   },
     ] },
     { id: 'reference', label: 'Reference', icon: Keyboard, items: [
       { id: 'lsp',       label: 'Language servers',           icon: ServerCog },
@@ -195,6 +206,11 @@
     'bean-validation':   BeanValidation,
     'scheduled':         Scheduled,
     'json-types':        JsonTypes,
+    'mapstruct':         MapStruct,
+    'jakarta-ee':        JakartaEE,
+    'jaxrs':             JaxRs,
+    'mockito':           Mockito,
+    'assertj':           AssertJ,
     'dto-lab':           DtoLab,
     'templates':         Templates,
     'template-language': TemplateLanguage,

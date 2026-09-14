@@ -12,7 +12,7 @@
 
 use bennu_java::prelude::{InferCache, TypeResolver};
 
-use crate::intentions::OfferWire;
+use crate::intentions::{EditWire, OfferWire};
 
 /// The fixes for whichever diagnostic of `code` covers `offset`, using the project's resolver.
 ///
@@ -31,9 +31,71 @@ pub(crate) fn resolver_fixes(
         "non-exhaustive-enum-switch" => enum_switch_fixes(source, start, end, resolver),
         // `order.total()` where `Order` declares no `total`. The pure transform refuses this — it
         // edits one buffer and cannot say which file the method belongs in — and the resolver can.
-        "unknown-member" => create_in_receiver_fixes(source, start, end, resolver),
+        // The same code marks `this::total`, whose signature only the resolver can read.
+        "unknown-member" => {
+            let mut out = create_in_receiver_fixes(source, start, end, resolver);
+            out.extend(create_for_reference_fixes(source, start, end, resolver));
+            out
+        }
         _ => Vec::new(),
     }
+}
+
+/// "Create method 'toIdentity'" — for a method reference to this class, `this::toIdentity` or
+/// `Outer::toIdentity`.
+///
+/// A reference has no arguments to read a signature off, so unlike a call this needs the resolver:
+/// the signature is the functional interface the reference is passed as. The imports the signature
+/// needs travel in the same offer, so the member compiles the moment it is written — and all of it
+/// is one undo.
+fn create_for_reference_fixes(
+    source: &str,
+    start: usize,
+    end: usize,
+    resolver: &dyn TypeResolver,
+) -> Vec<OfferWire> {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else { return Vec::new() };
+    let root = tree.root_node();
+    let Some(reference) = bennu_refactor::prelude::local_reference_at(root, source, start, end)
+    else {
+        return Vec::new();
+    };
+    let symbols = bennu_java::prelude::extract_symbols(source);
+    let Some(referenced) = bennu_intel::prelude::reference_call(
+        root,
+        source,
+        &symbols,
+        &reference,
+        resolver,
+        &InferCache::new(),
+    ) else {
+        return Vec::new();
+    };
+    let Some(plan) =
+        bennu_refactor::prelude::declare_local_method(root, source, reference.start, &referenced.call)
+    else {
+        return Vec::new();
+    };
+    let mut edits: Vec<EditWire> = plan
+        .edits
+        .iter()
+        .map(|e| EditWire { start: e.start, end: e.end, text: e.text.clone() })
+        .collect();
+    for fqn in &referenced.types {
+        if let Some((start, end, text)) = crate::intentions::import_edit_for(source, fqn) {
+            edits.push(EditWire { start, end, text });
+        }
+    }
+    let Some(first) = edits.first().cloned() else { return Vec::new() };
+    vec![OfferWire {
+        id: plan.id.clone(),
+        label: plan.label.clone(),
+        start: first.start,
+        end: first.end,
+        replacement: first.text,
+        action: None,
+        edits,
+    }]
 }
 
 /// "Create method 'total' in Order" — for a call on another object.
@@ -76,6 +138,7 @@ fn create_in_receiver_fixes(
         // The name, for a caller that wants to say what it wrote. The edits come from the handler.
         replacement: call.name,
         action: Some("create-method-in".to_string()),
+        edits: Vec::new(),
     }]
 }
 
@@ -108,6 +171,7 @@ pub(crate) fn tree_fixes(code: &str, source: &str, start: usize, end: usize) -> 
                 end,
                 replacement: missing.name,
                 action: Some("create-class".to_string()),
+                edits: Vec::new(),
             })
             .into_iter()
             .collect();
@@ -125,6 +189,7 @@ pub(crate) fn tree_fixes(code: &str, source: &str, start: usize, end: usize) -> 
             end: edit.end,
             replacement: edit.text.clone(),
             action: None,
+            edits: Vec::new(),
         })
         .collect()
 }
@@ -172,6 +237,7 @@ fn unhandled_exception_fixes(
                 end: at,
                 replacement: format!(" {simple},"),
                 action: None,
+                edits: Vec::new(),
             });
         }
     } else {
@@ -182,6 +248,7 @@ fn unhandled_exception_fixes(
             end: call.throws_insert,
             replacement: format!(" throws {simple}"),
             action: None,
+            edits: Vec::new(),
         });
     }
 
@@ -201,6 +268,7 @@ fn unhandled_exception_fixes(
                  {indent}{unit}throw new RuntimeException(e);\n{indent}}}"
             ),
             action: None,
+            edits: Vec::new(),
         });
     }
     out
@@ -278,6 +346,7 @@ fn enum_switch_fixes(
         end: close,
         replacement: text,
         action: None,
+        edits: Vec::new(),
     }]
 }
 

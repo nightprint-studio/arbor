@@ -16,7 +16,8 @@
     History,
     Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
     DownloadCloud, FileDown, Variable, Database, Clock, Columns3, ListPlus, SquarePen,
-    Languages, CaseSensitive, FileCog,
+    Languages, CaseSensitive, FileCog, Hammer, PackagePlus, SquarePlus, FilePlus2, Wrench, Puzzle,
+    Layers,
     // The gutter's ▶ and the two other things pressing it might have meant.
     Play, Bug, SlidersHorizontal, Beaker,
   } from 'lucide-svelte';
@@ -161,8 +162,7 @@
   import { NavFlow } from './nav-flow';
   import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
-  import { collectIntentions, type GenerateMode, type IntentionItem } from './bennu-intentions';
-  import { javaOutline } from './java-outline';
+  import { orderIntentions, type GenerateMode, type IntentionItem } from './bennu-intentions';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { openUrl } from '@tauri-apps/plugin-opener';
   // Path identity is one function, not one per component: the BE speaks forward slashes and the
@@ -2781,20 +2781,28 @@
   }
 
   // ── Intentions (Alt+Enter) ────────────────────────────────────────────────────
-  /** Collect the context actions at the caret and open the intentions popup
-   *  anchored there. No-op (with a toast) when no file is open or the caret has no
-   *  anchor. The two "Generate…" items route through `onGenerate`. */
-  /** Pick the Alt+Enter list icon for an intention offer by its stable id. */
-  function intentionIcon(id: string) {
+  /** Pick the Alt+Enter list icon for an intention offer by its stable id. The colour is the
+   *  section's (see `BennuIntentionsOverlay`), so the icon only has to say what the row does. */
+  function intentionIcon(o: IntentionOffer) {
+    const id = o.id;
+    if (id.startsWith('import-class:')) return PackagePlus;
+    if (id === 'create-method' || id === 'create-method-in') return SquarePlus;
+    if (id === 'create-class') return FilePlus2;
+    if (id.startsWith('declare-throws:') || id.startsWith('surround-try:')) return ShieldCheck;
+    if (id === 'fill-enum-switch') return ListPlus;
     if (id === 'log-parameterize') return Braces;
     if (id === 'np-equals') return ArrowLeftRight;
     if (id === 'change-package') return Package;
     if (id === 'move-to-package') return FolderInput;
     if (id === 'rename-type-to-file') return CaseSensitive;
     if (id === 'rename-file-to-type') return FileCog;
-    if (id === 'override-methods') return Wand2;
+    if (id === 'generate-constructor') return Hammer;
+    if (id === 'generate-getters-setters') return ArrowLeftRight;
+    if (id === 'override-methods') return Layers;
     if (id.startsWith('naming-fix:')) return CaseSensitive;
-    return Wand2; // the simplification family (isEmpty / boolean / negated comparison)
+    // A framework extension's offers are namespaced `<extension>.<name>`.
+    if (id.includes('.')) return Puzzle;
+    return o.category === 'fix' ? Wrench : Wand2;
   }
 
   /**
@@ -2811,6 +2819,8 @@
     if (o.action === 'create-class') { await createMissingClass(path, o); return; }
     if (o.action === 'create-method-in') { await createMethodInReceiver(path, o); return; }
     if (o.action === 'override-methods') { onOverride?.(); return; }
+    if (o.action === 'generate-constructor') { onGenerate?.('constructor'); return; }
+    if (o.action === 'generate-getters-setters') { onGenerate?.('getters-setters'); return; }
     if (o.action === 'rename-file') { await renameFileTo(path, o.replacement); return; }
     if (o.action !== 'rename-symbol' && o.action !== 'rename-symbol-preview') return;
     if (!editorComp) return;
@@ -2985,13 +2995,21 @@
           dynamic.push({
             id: o.id,
             label: o.label,
-            icon: intentionIcon(o.id),
+            icon: intentionIcon(o),
+            category: o.category ?? 'intention',
+            preferred: o.preferred,
             // A non-edit action is dispatched by whoever owns it — a filesystem move by the
             // store, a rename by the semantic engine (never by splicing the identifier in place,
             // which would leave every use of it behind). A plain edit applies the byte-range
-            // replacement.
-            run: o.action ? () => void runIntentionAction(o, path) : () =>
-              editorComp?.replaceByteRange(o.start, o.end, o.replacement),
+            // replacement — or, when the offer touches several places (a rewrite and its import),
+            // all of them as one undo.
+            run: o.action
+              ? () => void runIntentionAction(o, path)
+              : o.edits?.length
+                ? () => void editorComp?.replaceByteRanges(
+                  (o.edits ?? []).map((e) => ({ startByte: e.start, endByte: e.end, text: e.text })),
+                )
+                : () => editorComp?.replaceByteRange(o.start, o.end, o.replacement),
           });
         }
       }
@@ -3027,6 +3045,7 @@
             id: 'expand-macro',
             label: `Expand ${macro.name}!`,
             icon: Wand2,
+            category: 'intention',
             run: () => { macroView = macro; },
           });
         }
@@ -3038,6 +3057,13 @@
             id: `lsp:${a.title}`,
             label,
             icon: a.kind.startsWith('refactor') ? Wand2 : Braces,
+            // A server's own kinds map onto the sections: `quickfix` repairs, `refactor` reshapes,
+            // anything else (`source.organizeImports`, an unkinded assist) improves.
+            category: a.kind.startsWith('quickfix')
+              ? 'fix'
+              : a.kind.startsWith('refactor') ? 'refactor' : 'intention',
+            preferred: a.preferred && !a.disabled,
+            disabled: !!a.disabled,
             run: a.disabled ? () => {} : () => void runCodeAction(path, a),
           });
         }
@@ -3060,6 +3086,8 @@
             id: `refactor:${offer.id}`,
             label: offer.reason ? `${offer.label} — ${offer.reason}` : offer.label,
             icon: Wand2,
+            category: 'refactor',
+            disabled: !!offer.reason,
             run: offer.reason
               ? () => {}
               // A row that ends in `…` asks which type rather than editing. Two different
@@ -3073,21 +3101,9 @@
       }
     }
 
-    // The editor's own two entries — the Generate flows — and Java-only, because that is what they
-    // write. Offering them on a `.rs` put "Generate constructor…" and "Generate getters and setters…"
-    // above a Rust function, which is not a thing that exists: everything a Rust buffer can be
-    // offered comes from the server, above.
-    const local = isJavaFileOf(path)
-      ? collectIntentions(
-          {
-            src: projectStore.sourceOf(path),
-            wordUnderCaret: editorComp.wordAtCaret(),
-            outline: javaOutline(projectStore.sourceOf(path)),
-          },
-          { onGenerate: (mode) => onGenerate?.(mode) },
-        )
-      : [];
-    const items = [...dynamic, ...local];
+    // The Generate flows arrive with the Java offers: the backend is what can tell a caret among a
+    // class's members from one inside a method or on an unimported type, where they do not belong.
+    const items = orderIntentions(dynamic);
     if (!items.length) {
       toastStore.show('No context actions here', 'info');
       return;

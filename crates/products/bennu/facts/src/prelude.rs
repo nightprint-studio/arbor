@@ -13,4 +13,4 @@ pub use crate::scan::{
 
 // Deciding whether an annotation is the framework's or the project's own. The table is the
 // caller's; the resolution order is the compiler's.
-pub use crate::origin::{resolves_to, AnnotationTable, KnownAnnotation};
+pub use crate::origin::{resolves_to, static_call_resolves_to, AnnotationTable, KnownAnnotation};

@@ -50,7 +50,10 @@
 
 use bennu_complete::prelude::{MatchCase, Typed};
 use bennu_intentions::prelude::{accessor_name, offers, render_accessor, Accessor, FieldSpec};
-use bennu_java::prelude::{extract_symbols, parse_java, type_decl_at, TypeDecl, TypeResolver};
+use bennu_java::prelude::{
+    extract_symbols, parse_java, type_decl_at, FileSymbols, InferCache, TypeDecl, TypeRef, TypeResolver,
+};
+use bennu_refactor::prelude::{LocalCall, LocalReference};
 use bennu_proto::prelude::CompletionItem;
 use tree_sitter::Node;
 
@@ -224,6 +227,37 @@ fn missing_methods_at(site: &Site<'_>, resolver: &dyn TypeResolver) -> Vec<Compl
             ..Default::default()
         });
     }
+    // And what it REFERENCES without declaring: `.map(this::toIdentity)` is as much a request for
+    // `toIdentity` as a call is. A reference has no arguments to read a signature off — its
+    // signature is the functional interface it is passed as — so this family needs the resolver
+    // even to be described, and a target that cannot be read without guessing offers nothing.
+    let mut root = site.type_node;
+    while let Some(parent) = root.parent() {
+        root = parent;
+    }
+    for reference in bennu_refactor::prelude::undeclared_references(&site.sited, site.type_node) {
+        if !typed.matches(&reference.name) || out.iter().any(|i| i.label == reference.name) {
+            continue;
+        }
+        if let Some(owner) = owner.as_deref() {
+            let found = cache.resolve_methods(resolver, owner, &reference.name);
+            if !found.candidates.is_empty() || !found.complete {
+                continue;
+            }
+        }
+        let Some(referenced) =
+            reference_call(root, &site.sited, &site.symbols, &reference, resolver, &cache)
+        else {
+            continue;
+        };
+        out.push(CompletionItem {
+            label: referenced.call.name.clone(),
+            kind: "generate".to_string(),
+            detail: Some(referenced.call.detail()),
+            insert_text: Some(referenced.call.render(&site.indent, nl)),
+            ..Default::default()
+        });
+    }
     // And what OTHER classes ask this one for. `undeclared_calls` above reads this type's own
     // subtree, which is the whole story for a top-level class and half of it for a nested one:
     // `c.randomico()` is written in the outer class, on an instance of the inner, and standing
@@ -314,6 +348,102 @@ fn calls_on(
     // tie the same way `undeclared_calls` lets it.
     out.reverse();
     out
+}
+
+/// The method a reference to this class asks for, with the signature its functional interface gives
+/// it: `Optional<Jwt>.map(this::toIdentity)` asks for `toIdentity(Jwt jwt)` returning `Object`.
+///
+/// One answer for both places it is offered — the completion popup at a member position and the
+/// *Create method* quick fix on the reference — so the two cannot describe the member two ways.
+/// `None` when the target interface cannot be read without guessing: an overloaded callee, an
+/// interface with several abstract methods, a hierarchy that does not resolve.
+pub fn reference_call(
+    root: Node<'_>,
+    source: &str,
+    symbols: &FileSymbols,
+    reference: &LocalReference,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> Option<ReferencedMethod> {
+    let mut node = root.descendant_for_byte_range(reference.start, reference.end)?;
+    while node.kind() != "method_reference" {
+        node = node.parent()?;
+    }
+    let shape =
+        bennu_java::prelude::functional_descriptor(&root, source, symbols, &node, resolver, cache)?;
+    let mut params: Vec<(String, String)> = Vec::new();
+    for (i, ty) in shape.params.iter().enumerate() {
+        let mut name = parameter_name(ty).unwrap_or_else(|| format!("arg{}", i + 1));
+        if params.iter().any(|(_, taken)| *taken == name) {
+            name = format!("{name}{}", i + 1);
+        }
+        params.push((written_type(ty), name));
+    }
+    let mut types = Vec::new();
+    for ty in shape.params.iter().chain(std::iter::once(&shape.returns)) {
+        collect_classes(ty, &mut types);
+    }
+    Some(ReferencedMethod {
+        call: LocalCall {
+            name: reference.name.clone(),
+            params,
+            returns: written_type(&shape.returns),
+            is_static: reference.is_static,
+        },
+        types,
+    })
+}
+
+/// A method a reference asks for, and the classes its signature names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferencedMethod {
+    pub call: LocalCall,
+    /// Every class the signature names, dotted — what the file may have to import for the member to
+    /// compile. Written with simple names, so a class from another package is otherwise a red mark
+    /// the fix itself put there.
+    pub types: Vec<String>,
+}
+
+/// A type as a signature writes it: simple names, generics and array brackets kept.
+fn written_type(ty: &TypeRef) -> String {
+    format!("{}{}", bennu_query::prelude::render_type(ty), "[]".repeat(ty.dims as usize))
+}
+
+/// `Jwt` → `jwt`: the one name a parameter's type suggests.
+///
+/// Nothing for a primitive, an array or `Object` — `int`, `jwts` and `object` say nothing `arg1`
+/// does not — and nothing for a type whose lower-cased name is a keyword (`Class`, `Boolean`), which
+/// would not compile.
+fn parameter_name(ty: &TypeRef) -> Option<String> {
+    const KEYWORDS: &[&str] = &[
+        "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
+        "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float",
+        "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long",
+        "native", "new", "package", "private", "protected", "public", "return", "short", "static",
+        "strictfp", "super", "switch", "synchronized", "this", "throw", "throws", "transient", "try",
+        "void", "volatile", "while",
+    ];
+    if ty.dims > 0 || !ty.binary_name.contains('/') || ty.binary_name == "java/lang/Object" {
+        return None;
+    }
+    let simple = ty.binary_name.rsplit(['/', '$']).next()?;
+    let mut chars = simple.chars();
+    let first = chars.next()?;
+    let name = format!("{}{}", first.to_lowercase(), chars.as_str());
+    (!KEYWORDS.contains(&name.as_str())).then_some(name)
+}
+
+/// The classes `ty` names, its type arguments included, dotted and without repeats.
+fn collect_classes(ty: &TypeRef, out: &mut Vec<String>) {
+    if ty.binary_name.contains('/') {
+        let dotted = ty.binary_name.replace(['/', '$'], ".");
+        if !out.contains(&dotted) {
+            out.push(dotted);
+        }
+    }
+    for arg in &ty.type_args {
+        collect_classes(arg, out);
+    }
 }
 
 /// The one accessor the caret is **certainly** writing — the ghost-text answer.

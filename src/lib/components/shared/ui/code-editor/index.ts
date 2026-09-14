@@ -77,6 +77,8 @@ export {
 // that is a control rather than a decoration.
 export { codeLensLayer, setCodeLenses, type LensEntry } from './code-lens';
 export { hoverCardDom, parseDoc, renderDoc, type HoverCard } from './hover-card';
+// Typing an opener over a selection wraps it — for the pairs that must not auto-close too.
+export { wrapSelectionOnType, wrapSelectionWith, type DelimiterPairs } from './wrap-selection';
 export {
   pasteIntoLiteral,
   type LiteralPasteRenderer,

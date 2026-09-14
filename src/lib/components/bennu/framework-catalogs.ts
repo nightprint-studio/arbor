@@ -31,6 +31,8 @@ export type FrameworkCatalogId =
   | 'springdocumented'
   | 'constraints'
   | 'jobs'
+  | 'mappers'
+  | 'cdibeans'
   | 'jpaentities'
   | 'jparepositories'
   | 'taglibs'
@@ -315,6 +317,41 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
     ],
   },
   {
+    // One row per mapper, its mapping methods underneath — each saying what it maps to what, and
+    // which target properties nothing maps. The last is the column worth opening the panel for:
+    // MapStruct says it once, as a warning, at the bottom of a build log.
+    id: 'mappers',
+    kind: 'mapstruct.mappers',
+    title: 'Mappers',
+    command: 'MapStruct mappers',
+    icon: 'ArrowLeftRight',
+    placeholder: 'Filter by mapper, method, source or target type…',
+    empty: 'No @Mapper interfaces or abstract classes found in this project.',
+    groups: [
+      { id: 'owner', label: 'Group by package' },
+      { id: 'none', label: 'No grouping' },
+    ],
+    columns: { primary: 'mapper', secondary: 'class' },
+  },
+  {
+    // CDI and EJB beans, badged by scope, with the injection points each one satisfies underneath —
+    // "who gets this" is the question a container answers at deployment and nothing answers in the
+    // source.
+    id: 'cdibeans',
+    kind: 'jakartaee.beans',
+    title: 'CDI beans',
+    command: 'Jakarta EE beans (CDI and EJB)',
+    icon: 'Boxes',
+    placeholder: 'Filter by bean, class, scope or qualifier…',
+    empty: 'No CDI or EJB beans found in this project.',
+    groups: [
+      { id: 'kind', label: 'Group by scope' },
+      { id: 'owner', label: 'Group by package' },
+      { id: 'none', label: 'No grouping' },
+    ],
+    columns: { primary: 'bean', secondary: 'class' },
+  },
+  {
     id: 'taglibs',
     kind: 'jsp.taglibs',
     title: 'Tag libraries',
@@ -541,6 +578,55 @@ export function kindClass(kind: string): string {
       return 'k-delete';
     case 'ordered':
       return 'k-get';
+
+    // ── MapStruct ────────────────────────────────────────────────────────────
+    //
+    // A method that builds a new object, one that writes into an existing one, and one that maps a
+    // collection by calling another: three shapes a mapper method takes.
+    case '@Mapper':
+      return 'k-service';
+    case 'mapping':
+      return 'k-get';
+    case 'update':
+      return 'k-put';
+    case 'collection':
+      return 'k-any';
+
+    // ── Jakarta EE ───────────────────────────────────────────────────────────
+    //
+    // Coloured by lifecycle, the question a scope answers: one per application, one per request or
+    // session, one per injection, and the EJB container's own kinds.
+    case '@ApplicationScoped':
+    case '@Singleton':
+      return 'k-service';
+    case '@RequestScoped':
+    case '@SessionScoped':
+    case '@ConversationScoped':
+      return 'k-controller';
+    case '@Dependent':
+      return 'k-neutral';
+    case '@Stateless':
+    case '@Stateful':
+    case '@MessageDriven':
+      return 'k-repository';
+    case '@Produces':
+      return 'k-config';
+    case 'inject':
+      return 'k-get';
+    // A servlet or a filter answers whatever verb arrives — the same honest comparison as a Struts
+    // action's `ACTION`.
+    case 'SERVLET':
+    case 'FILTER':
+      return 'k-any';
+    // A JAX-RS sub-resource locator: a path with no verb of its own, handing the request on.
+    case 'LOCATOR':
+      return 'k-put';
+    case 'form':
+      return 'k-post';
+    case 'header':
+    case 'cookie':
+    case 'matrix':
+      return 'k-config';
     default:
       return 'k-neutral';
   }

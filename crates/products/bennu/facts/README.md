@@ -27,8 +27,9 @@ if mentions_any(&source, MARKERS) {                       // cheap pre-filter
 about Spring at all:
 
 - **`scan`** — a tree-sitter pass yielding annotation-shaped facts: types (classes, interfaces,
-  enums, **records** — whose components are read as fields), their methods, parameters and
-  fields, and every annotation argument with its byte span. Spans are the point: a framework
+  enums, **records** — whose components are read as fields), their methods (with whether each has
+  a body — the one thing that tells a method somebody else implements from one written by hand),
+  parameters and fields, and every annotation argument with its byte span. Spans are the point: a framework
   lives inside its annotation strings, and highlighting, navigating or linting one means knowing
   exactly where it is.
 - **`origin`** — resolving `@Service` / `@Entity` / `@Query` through the file's imports the way
@@ -60,7 +61,8 @@ The thing is missed; nothing false is claimed. The right direction when in doubt
 
 Through the [`prelude`](src/prelude.rs): `scan_java`, `mentions_any`, `JavaFacts` / `TypeFacts` /
 `MethodFacts` / `FieldFacts` / `ParamFacts` / `AnnFacts` / `AnnString`, `AnnotationTable`,
-`KnownAnnotation`, `resolves_to`.
+`KnownAnnotation`, `resolves_to`, and `static_call_resolves_to` — the same rule for a static method
+(`when`, `assertThat`), for the libraries that live in method calls rather than annotations.
 
 ## Consumers
 

@@ -74,6 +74,40 @@ pub struct CapabilitySet {
     /// payload, and the first person to notice is on the other side of an HTTP call.
     #[serde(default)]
     pub jackson: bool,
+    /// **MapStruct** — `org.mapstruct` on the classpath, or imported in the sources.
+    ///
+    /// A mapper's whole contract is written in annotation strings (`@Mapping(target = "zip",
+    /// source = "address.zipCode")`) that the compiler checks only when the annotation processor
+    /// runs, and a property nobody maps is a warning at the bottom of a build log.
+    #[serde(default)]
+    pub mapstruct: bool,
+    /// **Mockito** — a `mockito-*` artifact, Spring Boot's test starter, or `org.mockito` in the
+    /// sources.
+    ///
+    /// Its failures are thrown by the test that misuses it, at run time, with a message about the
+    /// test *after* the one that is wrong: an unfinished stubbing, matchers mixed with raw values,
+    /// `@Mock` fields nothing initialises.
+    #[serde(default)]
+    pub mockito: bool,
+    /// **AssertJ** — `assertj-core`, Spring Boot's test starter, or `org.assertj` in the sources.
+    ///
+    /// The assertion that asserts nothing compiles and passes: `assertThat(x);` is a statement.
+    #[serde(default)]
+    pub assertj: bool,
+    /// **Jakarta EE / Java EE** — the platform API, CDI, EJB or a CDI container on the classpath;
+    /// `jakarta.enterprise` / `javax.ejb` / `@WebServlet` in the sources.
+    ///
+    /// Not [`Self::bean_validation`], which is one specification of the platform with its own
+    /// failure mode: this is the container that wires beans, and an injection point it cannot
+    /// satisfy is a deployment that does not start.
+    #[serde(default)]
+    pub jakarta_ee: bool,
+    /// **JAX-RS** — `jakarta.ws.rs` / `javax.ws.rs`, Jersey, RESTEasy or CXF.
+    ///
+    /// Routes written as `@Path` on a class joined with `@Path` on a method — the same split as
+    /// Spring's mappings, and the same reason a URL appears nowhere in the source as one string.
+    #[serde(default)]
+    pub jaxrs: bool,
     /// Entando / jAPS platform (`org.entando.*` / `com.agiletec.*`, `<wp:*>`).
     pub entando_japs: bool,
     /// The **fulcrum engine's i18n convention**: an `i18n/` directory holding a `languages.toml`,

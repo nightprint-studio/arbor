@@ -326,6 +326,97 @@ pub fn detect_with(build: &BuildEvidence) -> CapabilitySet {
         src.jackson.then_some("com.fasterxml.jackson import / @Json* in source"),
     );
 
+    // ── MapStruct ────────────────────────────────────────────────────────────
+    //
+    // The source signal is the package, never `@Mapper`: MyBatis has an annotation of the same name
+    // and a legacy project is far likelier to have that one.
+    activate(
+        &mut set.mapstruct,
+        &mut hits,
+        "mapstruct",
+        build.has_dependency("mapstruct").then_some("dependency org.mapstruct:mapstruct"),
+        None,
+        src.mapstruct.then_some("org.mapstruct import in source"),
+    );
+
+    // ── Mockito / AssertJ ────────────────────────────────────────────────────
+    //
+    // Spring Boot's test starter brings both, and a Boot project declares nothing else for them.
+    let mockito_a = ["mockito", "spring-boot-starter-test"].iter().find(|c| build.has_dependency(c)).copied();
+    activate(
+        &mut set.mockito,
+        &mut hits,
+        "mockito",
+        mockito_a,
+        None,
+        src.mockito.then_some("org.mockito import in source"),
+    );
+    let assertj_a = ["assertj", "spring-boot-starter-test"].iter().find(|c| build.has_dependency(c)).copied();
+    activate(
+        &mut set.assertj,
+        &mut hits,
+        "assertj",
+        assertj_a,
+        None,
+        src.assertj.then_some("org.assertj import in source"),
+    );
+
+    // ── Jakarta EE ───────────────────────────────────────────────────────────
+    //
+    // The platform, CDI, EJB or a container that implements them. NOT the Servlet API on its own and
+    // NOT `javax.inject`: every war depends on the first and Spring reads the second, so either would
+    // switch this on for a Struts or Spring application that has no CDI container at all.
+    let ee_a = [
+        "jakarta.jakartaee-api",
+        "javaee-api",
+        "jakarta.jakartaee-web-api",
+        "javaee-web-api",
+        "cdi-api",
+        "jakarta.enterprise.cdi-api",
+        "ejb-api",
+        "weld-",
+        "openejb",
+        "tomee",
+        "quarkus-arc",
+    ]
+    .iter()
+    .find(|c| build.has_dependency(c))
+    .copied();
+    activate(
+        &mut set.jakarta_ee,
+        &mut hits,
+        "jakarta_ee",
+        ee_a,
+        files.beans_xml.then_some("META-INF/beans.xml or WEB-INF/beans.xml"),
+        src.jakarta_ee.then_some("jakarta.enterprise / javax.ejb / @WebServlet in source"),
+    );
+
+    // ── JAX-RS ───────────────────────────────────────────────────────────────
+    let jaxrs_a = [
+        "jakarta.ws.rs-api",
+        "javax.ws.rs-api",
+        "jsr311-api",
+        "jersey-",
+        "resteasy",
+        "cxf-rt-frontend-jaxrs",
+        "quarkus-resteasy",
+        "quarkus-rest",
+        // The full platform includes JAX-RS; the web profile does too from EE 7.
+        "jakarta.jakartaee-api",
+        "javaee-api",
+    ]
+    .iter()
+    .find(|c| build.has_dependency(c))
+    .copied();
+    activate(
+        &mut set.jaxrs,
+        &mut hits,
+        "jaxrs",
+        jaxrs_a,
+        None,
+        src.jaxrs.then_some("jakarta.ws.rs / javax.ws.rs import in source"),
+    );
+
     // ── EntandoJaps ──────────────────────────────────────────────────────────
     let entando_a = build.coordinates.iter().any(|d| {
         d.contains("org.entando") || d.contains("com.agiletec") || d.contains("entando")
@@ -523,6 +614,8 @@ struct ConfigFiles {
     /// A `ValidationMessages.properties` on a resource root — the bundle the spec names, and the
     /// one whose presence says somebody has written custom constraint messages.
     validation_messages: bool,
+    /// A `beans.xml` — the file that makes an archive a CDI bean archive. Nothing else reads one.
+    beans_xml: bool,
 }
 
 impl ConfigFiles {
@@ -595,6 +688,9 @@ impl ConfigFiles {
                 if lname.ends_with(".hbm.xml") {
                     f.hbm_xml = true;
                 }
+                if lname == "beans.xml" {
+                    f.beans_xml = true;
+                }
                 if lname.ends_with("mapper.xml") || lname == "sqlmapconfig.xml" {
                     f.mapper_xml = true;
                 }
@@ -643,6 +739,16 @@ struct SourceSignals {
     scheduled: bool,
     /// A source annotates something for Jackson, or imports it.
     jackson: bool,
+    /// A source imports MapStruct — the package, because `@Mapper` is MyBatis' name too.
+    mapstruct: bool,
+    /// A source imports Mockito.
+    mockito: bool,
+    /// A source imports AssertJ.
+    assertj: bool,
+    /// A source uses CDI or EJB, or declares a servlet by annotation.
+    jakarta_ee: bool,
+    /// A source imports JAX-RS.
+    jaxrs: bool,
     entando_showlet: bool,
     /// A Rust source declares an ECS item or registers a system — the corroborating half of the
     /// Bevy signal.
@@ -723,6 +829,17 @@ impl SourceSignals {
                 s.lombok_import |= text.contains("import lombok.")
                     || text.contains("@Data")
                     || text.contains("@Getter");
+                s.mapstruct |= text.contains("org.mapstruct");
+                s.mockito |= text.contains("org.mockito");
+                s.assertj |= text.contains("org.assertj");
+                // The CDI and EJB packages, and the servlet annotation — never `javax.inject`,
+                // which Spring reads as well and which would switch this on for every Spring app.
+                s.jakarta_ee |= text.contains("jakarta.enterprise.")
+                    || text.contains("javax.enterprise.")
+                    || text.contains("jakarta.ejb.")
+                    || text.contains("javax.ejb.")
+                    || text.contains("@WebServlet");
+                s.jaxrs |= text.contains("jakarta.ws.rs") || text.contains("javax.ws.rs");
             }
             if is_rust {
                 s.bevy_source |= text.contains("#[derive(Component)]")
@@ -900,6 +1017,41 @@ mod tests {
         let caps = detect(&root, &pom::parse(root_pom));
         let _ = std::fs::remove_dir_all(&root);
         assert!(caps.bean_validation, "hits: {:?}", caps.hits);
+    }
+
+    /// Spring Boot's test starter is how a Boot project gets both test libraries — it declares
+    /// neither by name.
+    #[test]
+    fn the_boot_test_starter_brings_mockito_and_assertj() {
+        let root = Path::new("C:/nonexistent-bennu-test-root");
+        let pom = pom::parse(
+            "<project><dependencies><dependency><groupId>org.springframework.boot</groupId>\
+             <artifactId>spring-boot-starter-test</artifactId></dependency></dependencies></project>",
+        );
+        let caps = detect(root, &pom);
+        assert!(caps.mockito && caps.assertj, "hits: {:?}", caps.hits);
+        assert!(!caps.mapstruct && !caps.jaxrs && !caps.jakarta_ee);
+    }
+
+    /// The platform API switches on both halves of it; a Spring application reading `javax.inject`
+    /// switches on neither — Spring answers `@Inject` itself, with no CDI container behind it.
+    #[test]
+    fn jakarta_ee_is_the_container_not_the_inject_annotation() {
+        let root = Path::new("C:/nonexistent-bennu-test-root");
+        let ee = pom::parse(
+            "<project><dependencies><dependency><groupId>jakarta.platform</groupId>\
+             <artifactId>jakarta.jakartaee-api</artifactId></dependency></dependencies></project>",
+        );
+        let caps = detect(root, &ee);
+        assert!(caps.jakarta_ee && caps.jaxrs, "hits: {:?}", caps.hits);
+
+        let spring = pom::parse(
+            "<project><dependencies>\
+             <dependency><groupId>javax.inject</groupId><artifactId>javax.inject</artifactId></dependency>\
+             <dependency><groupId>javax.servlet</groupId><artifactId>javax.servlet-api</artifactId></dependency>\
+             </dependencies></project>",
+        );
+        assert!(!detect(root, &spring).jakarta_ee);
     }
 
     #[test]

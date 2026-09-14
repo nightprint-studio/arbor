@@ -57,6 +57,16 @@ export interface CapabilitySet {
   scheduling: boolean;
   /** Jackson — `jackson-databind` or a starter that brings it, or Jackson annotations in the sources. */
   jackson: boolean;
+  /** MapStruct — `org.mapstruct` on the classpath or imported in the sources. */
+  mapstruct: boolean;
+  /** Mockito — a `mockito-*` artifact, Spring Boot's test starter, or `org.mockito` in the sources. */
+  mockito: boolean;
+  /** AssertJ — `assertj-core`, Spring Boot's test starter, or `org.assertj` in the sources. */
+  assertj: boolean;
+  /** Jakarta EE / Java EE — the platform API, CDI, EJB or a CDI container; `jakarta.enterprise`, `javax.ejb` or `@WebServlet` in the sources. */
+  jakarta_ee: boolean;
+  /** JAX-RS — `jakarta.ws.rs` / `javax.ws.rs`, Jersey, RESTEasy or CXF. */
+  jaxrs: boolean;
   /** The fulcrum engine's i18n convention — an `i18n/languages.toml` with `<lang>/<category>.toml`
    *  bundles beside it. Detected from the layout, so a project that only authors content has it. */
   fulcrum_i18n: boolean;

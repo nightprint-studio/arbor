@@ -70,9 +70,101 @@ pub fn insert_import_edit(source: &str, fqn: &str) -> Option<Edit> {
     Some(Edit { start: at, end: at, replacement: text })
 }
 
+/// Compute the edit that adds `import static <owner>.<member>;` to `source`, or `None` when the
+/// member is already imported — by name, or through `import static <owner>.*;`.
+///
+/// Its own function rather than a `"static …"` passed to [`insert_import_edit`], because a static
+/// import belongs in a different place: after the other static imports, as its own block after the
+/// plain ones — which is where every formatter and every reader expects it.
+///
+/// Placement, in order of preference:
+///   1. After the last existing `import static` line.
+///   2. After the last plain import, separated from it by a blank line.
+///   3. After the `package …;` line (with a blank line between).
+///   4. At the very top of the file.
+pub fn insert_static_import_edit(source: &str, owner: &str, member: &str) -> Option<Edit> {
+    let by_name = format!("import static {owner}.{member};");
+    let on_demand = format!("import static {owner}.*;");
+    let nl = if source.contains("\r\n") { "\r\n" } else { "\n" };
+
+    let mut package_end: Option<usize> = None;
+    let mut last_import_end: Option<usize> = None;
+    let mut last_static_end: Option<usize> = None;
+
+    let mut offset = 0usize;
+    for line in source.split_inclusive('\n') {
+        offset += line.len();
+        // Collapse runs of spaces so `import  static a.B.c ;` is recognised as the import it is.
+        let trimmed: String = line.split_whitespace().collect::<Vec<_>>().join(" ").replace(" ;", ";");
+        if trimmed == by_name || trimmed == on_demand {
+            return None;
+        }
+        if trimmed.starts_with("package ") {
+            package_end = Some(offset);
+        } else if trimmed.starts_with("import static ") {
+            last_import_end = Some(offset);
+            last_static_end = Some(offset);
+        } else if trimmed.starts_with("import ") {
+            last_import_end = Some(offset);
+        }
+    }
+
+    let (at, text) = if let Some(end) = last_static_end {
+        (end, format!("{by_name}{nl}"))
+    } else if let Some(end) = last_import_end {
+        (end, format!("{nl}{by_name}{nl}"))
+    } else if let Some(end) = package_end {
+        (end, format!("{nl}{by_name}{nl}"))
+    } else {
+        (0, format!("{by_name}{nl}"))
+    };
+    Some(Edit { start: at, end: at, replacement: text })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn applied_static(source: &str, owner: &str, member: &str) -> String {
+        let e = insert_static_import_edit(source, owner, member).expect("an edit");
+        format!("{}{}{}", &source[..e.start], e.replacement, &source[e.end..])
+    }
+
+    #[test]
+    fn a_static_import_joins_the_other_static_imports() {
+        let src = "package a;\n\nimport java.util.List;\n\nimport static org.junit.Assert.assertTrue;\n\nclass C {}\n";
+        assert_eq!(
+            applied_static(src, "org.mockito.Mockito", "when"),
+            "package a;\n\nimport java.util.List;\n\nimport static org.junit.Assert.assertTrue;\nimport static org.mockito.Mockito.when;\n\nclass C {}\n"
+        );
+    }
+
+    #[test]
+    fn the_first_static_import_starts_its_own_block_after_the_plain_ones() {
+        let src = "package a;\n\nimport java.util.List;\n\nclass C {}\n";
+        assert_eq!(
+            applied_static(src, "org.assertj.core.api.Assertions", "assertThat"),
+            "package a;\n\nimport java.util.List;\n\nimport static org.assertj.core.api.Assertions.assertThat;\n\nclass C {}\n"
+        );
+    }
+
+    #[test]
+    fn a_member_already_reachable_needs_no_import() {
+        let named = "import static org.mockito.Mockito.when;\nclass C {}\n";
+        assert!(insert_static_import_edit(named, "org.mockito.Mockito", "when").is_none());
+        let star = "import static org.mockito.Mockito.*;\nclass C {}\n";
+        assert!(insert_static_import_edit(star, "org.mockito.Mockito", "verify").is_none());
+        // A different owner's `when` is not this one.
+        let other = "import static com.acme.Stubs.when;\nclass C {}\n";
+        assert!(insert_static_import_edit(other, "org.mockito.Mockito", "when").is_some());
+    }
+
+    #[test]
+    fn a_static_import_keeps_the_files_newlines() {
+        let src = "package a;\r\n\r\nclass C {}\r\n";
+        let out = applied_static(src, "org.mockito.ArgumentMatchers", "eq");
+        assert!(out.contains("\r\nimport static org.mockito.ArgumentMatchers.eq;\r\n"), "{out:?}");
+    }
 
     /// Apply the edit and return the resulting source (for readable assertions).
     fn applied(source: &str, fqn: &str) -> String {

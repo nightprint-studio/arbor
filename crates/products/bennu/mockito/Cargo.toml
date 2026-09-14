@@ -1,0 +1,19 @@
+[package]
+name         = "bennu-mockito"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Mockito used wrongly, read from the test rather than from the stack trace of the test after it: a stubbing or a verification left unfinished, argument matchers mixed with plain values, and @Mock fields that nothing ever initialises."
+
+[dependencies]
+bennu-ext        = { path = "../ext" }
+bennu-proto      = { path = "../proto" }
+# The Java parser. Every check here is a question about the shape of a call chain.
+bennu-java       = { path = "../java" }
+# Imports and annotations, and the rule that tells Mockito's `when` from a helper of the same name.
+bennu-facts      = { path = "../facts" }
+# Where an import goes — the fixes add one, and placing it is already solved there.
+bennu-intentions = { path = "../intentions" }
+tree-sitter      = "0.25"

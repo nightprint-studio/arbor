@@ -5,8 +5,8 @@ use std::sync::Arc;
 use bennu_proto::prelude::{CapabilitySet, CompletionItem, Diagnostic};
 
 use crate::model::{
-    ExtAction, ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtStat, ExtTarget, FileCtx,
-    ProjectScan,
+    ExtAction, ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtIntention, ExtProblem, ExtStat,
+    ExtTarget, FileCtx, ProjectScan,
 };
 
 /// What a framework plugin implements.
@@ -97,6 +97,22 @@ pub trait FrameworkExtension: Send + Sync {
     /// actions. That makes the toolbar's contents the answer to "what kind of file is this",
     /// which is the affordance — a disabled button teaches nothing.
     fn actions(&self, _ctx: &FileCtx<'_>) -> Vec<ExtAction> {
+        Vec::new()
+    }
+
+    /// What Alt+Enter offers at a caret: the fixes for this extension's own diagnostics among
+    /// `problems` (the ones the editor is showing under the caret), and the rewrites that apply at
+    /// `offset` with no diagnostic behind them.
+    ///
+    /// Held to the bar every fix in bennu is: an offer is made only when its edit is certain to
+    /// do what its label says. A fix whose analysis no longer agrees there is a problem — the
+    /// buffer moved on a keystroke after the squiggle was drawn — offers nothing.
+    fn intentions(
+        &self,
+        _ctx: &FileCtx<'_>,
+        _offset: usize,
+        _problems: &[ExtProblem],
+    ) -> Vec<ExtIntention> {
         Vec::new()
     }
 
@@ -249,6 +265,25 @@ impl ExtensionRegistry {
         self.active.iter().flat_map(|e| e.actions(ctx)).collect()
     }
 
+    /// Every active extension's Alt+Enter offers at the caret, in registration order. Concatenated
+    /// rather than first-wins: a popup is a list, and a file that is both a mapper and a test has
+    /// offers from both.
+    ///
+    /// An offer with no edits is dropped here rather than trusted to each extension — the editor
+    /// would show it, and choosing it would do nothing.
+    pub fn intentions(
+        &self,
+        ctx: &FileCtx<'_>,
+        offset: usize,
+        problems: &[ExtProblem],
+    ) -> Vec<ExtIntention> {
+        self.active
+            .iter()
+            .flat_map(|e| e.intentions(ctx, offset, problems))
+            .filter(|i| !i.edits.is_empty())
+            .collect()
+    }
+
     /// Rows of `kind`. A **namespaced** kind (`"spring.beans"`) is answered by the extension
     /// that owns it; a **bare** kind (`"endpoints"`) is answered by every extension at once,
     /// concatenated in registration order.
@@ -260,10 +295,17 @@ impl ExtensionRegistry {
     /// used to, would have shown whichever framework registered earlier and silently hidden the
     /// other.
     pub fn catalog(&self, kind: &str) -> Vec<ExtEntry> {
-        if let Some((id, rest)) = kind.split_once('.') {
-            if let Some(e) = self.get(id) {
-                return e.catalog(rest);
-            }
+        // The owner is the extension whose id the kind starts with — the LONGEST, because an id may
+        // itself be dotted (`fulcrum.i18n`, `jakarta.validation`). Splitting at the first dot looked
+        // for an extension called `fulcrum`, found none, and asked every extension for the whole
+        // `fulcrum.i18n.labels` — which none of them answers, the owner included.
+        let owner = self
+            .active
+            .iter()
+            .filter(|e| kind.len() > e.id().len() + 1 && kind.starts_with(e.id()) && kind.as_bytes()[e.id().len()] == b'.')
+            .max_by_key(|e| e.id().len());
+        if let Some(e) = owner {
+            return e.catalog(&kind[e.id().len() + 1..]);
         }
         self.active.iter().flat_map(|e| e.catalog(kind)).collect()
     }
@@ -323,6 +365,34 @@ mod tests {
                 ExtStat { label: "Files".into(), value: 3, catalog: None },
             ]
         }
+        /// One real offer and one with nothing to write, so the registry's filter has both to see.
+        fn intentions(
+            &self,
+            _ctx: &FileCtx<'_>,
+            offset: usize,
+            problems: &[ExtProblem],
+        ) -> Vec<ExtIntention> {
+            let fix = problems.iter().find(|p| p.code == "stub.problem").map(|p| ExtIntention {
+                id: format!("{}.fix", self.0),
+                label: "Fix it".into(),
+                edits: vec![crate::model::ExtEdit::replace(p.start, p.end, "fixed")],
+            });
+            let empty = ExtIntention { id: format!("{}.empty", self.0), label: "Nothing".into(), edits: vec![] };
+            let _ = offset;
+            fix.into_iter().chain([empty]).collect()
+        }
+    }
+
+    /// A popup is a list: every extension's offers, in registration order — and never one that
+    /// would do nothing when chosen.
+    #[test]
+    fn intentions_union_every_extension_and_drop_the_empty_ones() {
+        let r = reg(vec![Arc::new(Stub("a", false)), Arc::new(Stub("b", false))], false);
+        let ctx = FileCtx { path: Path::new("/p/Foo.java"), source: "class Foo {}" };
+        let problems = [ExtProblem { code: "stub.problem".into(), start: 0, end: 5 }];
+        let ids: Vec<String> = r.intentions(&ctx, 2, &problems).into_iter().map(|i| i.id).collect();
+        assert_eq!(ids, ["a.fix", "b.fix"]);
+        assert!(r.intentions(&ctx, 2, &[]).is_empty(), "no problem, no fix — and the empty offer is gone");
     }
 
     fn reg(all: Vec<Arc<dyn FrameworkExtension>>, lombok: bool) -> ExtensionRegistry {
@@ -343,6 +413,18 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "b", "the prefix selects the extension, not the first match");
         assert!(r.catalog("b.nope").is_empty());
+    }
+
+    /// An extension id may itself contain a dot (`fulcrum.i18n`, `jakarta.validation`). The kind's
+    /// owner is the longest id it starts with — splitting at the first dot looked for an extension
+    /// called `fulcrum`, and the panel came back empty.
+    #[test]
+    fn a_dotted_extension_id_still_owns_its_namespaced_catalog() {
+        let r = reg(vec![Arc::new(Stub("x", false)), Arc::new(Stub("x.y", false))], false);
+        let rows = r.catalog("x.y.things");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "x.y", "the longer id owns it, not `x` asked for `y.things`");
+        assert_eq!(r.catalog("x.things")[0].id, "x");
     }
 
     /// A bare kind is the CONCEPT, not one framework's version of it: every extension that has

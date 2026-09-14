@@ -636,6 +636,60 @@ pub fn infer_node_type_cached(
     result
 }
 
+/// The shape a lambda or a method reference has to have where it is written: the parameter types
+/// and the return type of the functional interface's single abstract method.
+///
+/// `Optional<Jwt>.map(this::toIdentity)` wants a `Function<Jwt, U>`, so the method it names takes a
+/// `Jwt` and returns something. What that something is, the call does not say — `U` is bound by the
+/// method being written, not by anything around it — so a type variable nothing binds comes back as
+/// `Object`, which compiles, rather than as a name that does not.
+///
+/// The target is read exactly where a lambda parameter's type is read (an argument position, a
+/// declared variable, a `return`), with the same refusal to guess: an overloaded callee or an
+/// interface with more than one abstract method is `None`.
+pub fn functional_descriptor(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    expr: &Node,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> Option<FunctionalDescriptor> {
+    let bytes = source.as_bytes();
+    let ctx = Ctx {
+        root: *root,
+        bytes,
+        resolver,
+        symbols,
+        cache,
+        depth: Cell::new(0),
+    };
+    let enclosing = enclosing_type_fqn(expr, bytes, symbols);
+    let fi = ctx.lambda_target_type(expr, enclosing.as_deref())?;
+    let sam = ctx.sam_of(&fi)?;
+    let concrete = |declared: &TypeRef| {
+        let t = ctx.substitute_generics(declared, &fi);
+        if t.binary_name != "void" && ctx.is_type_variable(&t.binary_name) {
+            TypeRef { dims: t.dims, ..TypeRef::simple("java/lang/Object") }
+        } else {
+            t
+        }
+    };
+    Some(FunctionalDescriptor {
+        params: sam.params.iter().map(concrete).collect(),
+        returns: concrete(&sam.return_type),
+    })
+}
+
+/// What [`functional_descriptor`] reads off a functional interface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionalDescriptor {
+    /// The single abstract method's parameters, the interface's generics substituted.
+    pub params: Vec<TypeRef>,
+    /// Its return type — `void` as the primitive name.
+    pub returns: TypeRef,
+}
+
 /// Infer the receiver type at `byte_offset` reusing an ALREADY-parsed `root` and
 /// ALREADY-extracted `symbols` over `source` — the hot path for the reference-index walk.
 ///
@@ -1312,9 +1366,17 @@ impl Ctx<'_> {
 
     /// The type of parameter `idx` of a functional interface's SINGLE abstract method (its SAM),
     /// with the interface's generics substituted (`Consumer<Foo>` → its `accept(T)` param → `Foo`).
-    /// `None` when the interface's hierarchy isn't fully known, or it doesn't have exactly one
-    /// abstract instance method (so we never mistype against a non-functional interface).
     fn sam_param_type(&self, fi: &TypeRef, idx: usize) -> Option<TypeRef> {
+        let sam = self.sam_of(fi)?;
+        let pty = sam.params.get(idx)?;
+        Some(self.substitute_generics(pty, fi))
+    }
+
+    /// A functional interface's SINGLE abstract method (its SAM), as declared — generics not yet
+    /// substituted. `None` when the interface's hierarchy isn't fully known, or it doesn't have
+    /// exactly one abstract instance method (so we never mistype against a non-functional
+    /// interface).
+    fn sam_of(&self, fi: &TypeRef) -> Option<Member> {
         let mut abstracts: Vec<Member> = Vec::new();
         let walked = crate::hierarchy::walk::<()>(self.resolver, fi, |a| {
             for m in &a.members.methods {
@@ -1345,8 +1407,7 @@ impl Ctx<'_> {
             }
         }
         let [sam] = uniq.as_slice() else { return None };
-        let pty = sam.params.get(idx)?;
-        Some(self.substitute_generics(pty, fi))
+        Some((*sam).clone())
     }
 
     /// `a.b`: infer `a`, then look up field `b` on it. Handles `this.b`.
@@ -1559,12 +1620,19 @@ impl Ctx<'_> {
     /// correctly leaves it alone, and the chain that follows (`.orElse(…)` → `T`) stays unresolved.
     /// The binding was in the call all along: whatever was passed *as* `value`.
     ///
-    /// Deliberately limited to an **identity parameter** — one whose declared type is exactly the
-    /// variable, with no type arguments of its own. That covers the static factories real code is
-    /// full of (`Optional.of/ofNullable`, `Objects.requireNonNull`, `Collections.singletonList`) and
-    /// stops short of structural unification, which is what `Stream.map(Function<? super T, ? extends
-    /// R>)` would need: recovering `R` there means typing a lambda or method reference, which this
-    /// inference doesn't do. Those stay unresolved, exactly as before.
+    /// Two shapes, and only two:
+    ///
+    /// * an **identity parameter** — one whose declared type is exactly the variable, with no type
+    ///   arguments of its own. That covers the static factories real code is full of
+    ///   (`Optional.of/ofNullable`, `Objects.requireNonNull`, `Collections.singletonList`);
+    /// * a **functional parameter** whose single abstract method returns the variable —
+    ///   `Optional.map(Function<? super T, ? extends U>)` — passed a method reference or an
+    ///   expression lambda. `U` is whatever that produces (see
+    ///   [`Self::functional_return_binding`]). Without it, `opt.map(this::toIdentity)` was an
+    ///   `Optional` of nothing, and the lambda chained after it had no type to complete on.
+    ///
+    /// Anything else — a block lambda, a parameter the variable is nested inside — is structural
+    /// unification, which this does not attempt.
     ///
     /// Every step abstains rather than guesses: an argument we can't type, an argument that is itself
     /// a type variable, a variadic or wrapped parameter — each simply contributes no binding.
@@ -1582,7 +1650,20 @@ impl Ctx<'_> {
         }
         let mut bindings: Vec<(String, TypeRef)> = Vec::new();
         for (i, p) in m.params.iter().enumerate() {
-            if !p.type_args.is_empty() || !self.is_type_variable(&p.binary_name) {
+            if !p.type_args.is_empty() {
+                // Maybe a functional parameter: `map(Function<? super T, ? extends U>)` binds `U` to
+                // what the lambda or method reference passed there produces.
+                let binding =
+                    args.get(i).and_then(|arg| self.functional_return_binding(p, arg, enclosing));
+                if let Some((var, bound)) = binding {
+                    let taken = bindings.iter().any(|(v, _)| *v == var);
+                    if !taken && !from_receiver.contains(&var) {
+                        bindings.push((var, bound));
+                    }
+                }
+                continue;
+            }
+            if !self.is_type_variable(&p.binary_name) {
                 continue; // not an identity parameter
             }
             if bindings.iter().any(|(v, _)| *v == p.binary_name) {
@@ -1612,6 +1693,94 @@ impl Ctx<'_> {
             return ret.clone();
         }
         apply_bindings(ret, &bindings)
+    }
+
+    /// The binding a lambda or method reference `arg` makes for the variable its functional
+    /// parameter `param` returns: `(U, Identity)` for `map(this::toIdentity)` when `toIdentity`
+    /// returns an `Identity`.
+    ///
+    /// Abstains at every doubt, like the identity binding: a SAM that does not return a bare
+    /// variable, a block lambda (whose value is spread over its `return`s), a referenced method
+    /// whose overloads disagree on what they return, a result that is itself a variable or `void`.
+    /// A primitive is boxed, because a type argument cannot be one: `map(s -> s.length())` is an
+    /// `Optional<Integer>`.
+    fn functional_return_binding(
+        &self,
+        param: &TypeRef,
+        arg: &Node,
+        enclosing: Option<&str>,
+    ) -> Option<(String, TypeRef)> {
+        if !matches!(arg.kind(), "method_reference" | "lambda_expression") {
+            return None;
+        }
+        let sam = self.sam_of(param)?;
+        let wanted = self.substitute_generics(&sam.return_type, param);
+        if !wanted.type_args.is_empty() || wanted.dims > 0 || !self.is_type_variable(&wanted.binary_name) {
+            return None;
+        }
+        let produced = if arg.kind() == "method_reference" {
+            self.method_reference_return(arg, enclosing)?
+        } else {
+            let body = arg.child_by_field_name("body")?;
+            if body.kind() == "block" {
+                return None;
+            }
+            self.infer_expr(&body, enclosing)?
+        };
+        if produced.binary_name.is_empty()
+            || produced.binary_name == "void"
+            || self.is_type_variable(&produced.binary_name)
+        {
+            return None;
+        }
+        Some((wanted.binary_name, boxed(produced)))
+    }
+
+    /// What the method a reference names returns — `this::toIdentity`, `order::total`,
+    /// `Parser::parse`, and `Widget::new` (the type itself).
+    ///
+    /// A method declared in THIS file is read from its declaration, which is current while the
+    /// index may not be; anything else from the classpath. Several same-named methods have to agree
+    /// on the return type — which one a reference binds to depends on the interface's parameters,
+    /// and choosing between them here would be a guess.
+    fn method_reference_return(&self, reference: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
+        let mut cursor = reference.walk();
+        let children: Vec<Node> = reference.named_children(&mut cursor).collect();
+        let (qualifier, name) = (children.first()?, children.last()?);
+        // `Widget::new` has one named child: the `new` is a keyword, and the reference produces the
+        // qualifying type.
+        if qualifier.id() == name.id() {
+            let text = node_text(reference, self.bytes)?;
+            return if text.trim_end().ends_with("new") { self.type_receiver(qualifier) } else { None };
+        }
+        let owner = self
+            .infer_expr(qualifier, enclosing)
+            .or_else(|| self.type_receiver(qualifier))?;
+        let method = node_text(name, self.bytes)?;
+
+        let fqn = from_binary(&owner.binary_name);
+        if let Some(td) = self.symbols.types.iter().find(|t| t.fqn == fqn || t.name == fqn) {
+            let returns: Vec<&str> = td
+                .methods
+                .iter()
+                .filter(|m| m.name == method)
+                .map(|m| m.return_type_text.as_str())
+                .collect();
+            if let [first, rest @ ..] = returns.as_slice() {
+                return if rest.iter().all(|r| r == first) {
+                    self.resolve_type_text(first)
+                } else {
+                    None
+                };
+            }
+        }
+        let found = self.cache.resolve_methods(self.resolver, &owner.binary_name, &method);
+        let mut returns = found.candidates.iter().map(|m| &m.return_type);
+        let first = returns.next()?;
+        if !returns.all(|r| r == first) {
+            return None;
+        }
+        Some(self.substitute_generics(first, &owner))
     }
 
     /// Whether `ty` — at any depth — still names a type variable.
@@ -2776,6 +2945,26 @@ fn primitive_ref_clash(param: &str, arg: &str) -> bool {
 }
 
 /// A JVM primitive binary name.
+/// A primitive as the wrapper a type argument has to be — `int` → `Integer`. Anything else, arrays
+/// included (`int[]` is already a reference type), is returned as it is.
+fn boxed(ty: TypeRef) -> TypeRef {
+    if ty.dims > 0 {
+        return ty;
+    }
+    let wrapper = match ty.binary_name.as_str() {
+        "boolean" => "java/lang/Boolean",
+        "byte" => "java/lang/Byte",
+        "short" => "java/lang/Short",
+        "char" => "java/lang/Character",
+        "int" => "java/lang/Integer",
+        "long" => "java/lang/Long",
+        "float" => "java/lang/Float",
+        "double" => "java/lang/Double",
+        _ => return ty,
+    };
+    TypeRef::simple(wrapper)
+}
+
 fn is_primitive(bn: &str) -> bool {
     matches!(
         bn,
@@ -3588,6 +3777,113 @@ mod shadowing_tests {
         let r = resolver();
         let src = with_field("java.util.function.Consumer<Object> c = impresa -> impresa.id();");
         assert_eq!(infer_call(&src, "impresa.id()", &r), None);
+    }
+}
+
+/// A method-level type variable bound by the lambda or method reference passed to a functional
+/// parameter — `opt.map(this::toIdentity)` is an `Opt<Identity>`, and the lambda after it knows so.
+#[cfg(test)]
+mod functional_binding_tests {
+    use super::test_support::*;
+    use super::*;
+    use std::collections::HashMap;
+
+    fn generic(binary: &str, args: &[&str]) -> TypeRef {
+        TypeRef {
+            binary_name: binary.into(),
+            type_args: args.iter().map(|a| TypeRef::simple(*a)).collect(),
+            dims: 0,
+            wildcard: false,
+        }
+    }
+
+    /// `Opt<T>.map(Function<T, U>) -> Opt<U>`, the shape of `Optional.map` and `Stream.map`.
+    fn resolver() -> MapResolver {
+        let mut members = HashMap::new();
+        members.insert("java/lang/Object".to_string(), cm(vec![]));
+        members.insert("java/lang/String".to_string(), cm(vec![]));
+        let mut function = cm(vec![Member::method(
+            "apply",
+            TypeRef::simple("R"),
+            vec![TypeRef::simple("T")],
+        )
+        .abstract_()]);
+        function.type_params = vec!["T".into(), "R".into()];
+        members.insert("java/util/function/Function".to_string(), function);
+        let mut opt = cm(vec![Member::method(
+            "map",
+            generic("acme/Opt", &["U"]),
+            vec![generic("java/util/function/Function", &["T", "U"])],
+        )]);
+        opt.type_params = vec!["T".into()];
+        members.insert("acme/Opt".to_string(), opt);
+        members.insert(
+            "acme/Jwt".to_string(),
+            cm(vec![meth("token", "acme/Token", &[]), meth("size", "int", &[])]),
+        );
+        members.insert("acme/Token".to_string(), cm(vec![]));
+        members.insert("acme/Identity".to_string(), cm(vec![meth("name", "java/lang/String", &[])]));
+        let simple = [
+            ("Opt", "acme/Opt"),
+            ("Jwt", "acme/Jwt"),
+            ("Token", "acme/Token"),
+            ("Identity", "acme/Identity"),
+            ("String", "java/lang/String"),
+        ]
+        .into_iter()
+        .map(|(s, b)| (s.to_string(), b.to_string()))
+        .collect();
+        MapResolver { members, simple }
+    }
+
+    fn class_with(body: &str) -> String {
+        format!(
+            "class C {{\n    Identity identify(Jwt jwt) {{ return null; }}\n    Token first(Jwt jwt) {{ return null; }}\n    String first(Jwt jwt, int n) {{ return null; }}\n    void m(Opt<Jwt> o) {{\n        {body}\n    }}\n}}"
+        )
+    }
+
+    /// The first type argument of the expression's type.
+    fn element(src: &str, expr: &str) -> Option<String> {
+        let start = src.find(expr).expect("expression present");
+        let ty = infer_expression_type(src, start, start + expr.len(), &resolver())?;
+        ty.type_args.first().map(|a| a.binary_name.clone())
+    }
+
+    #[test]
+    fn a_method_reference_binds_what_its_method_returns() {
+        let src = class_with("Object x = o.map(this::identify);");
+        assert_eq!(element(&src, "o.map(this::identify)").as_deref(), Some("acme/Identity"));
+    }
+
+    #[test]
+    fn an_expression_lambda_binds_what_its_body_is() {
+        let src = class_with("Object x = o.map(j -> j.token());");
+        assert_eq!(element(&src, "o.map(j -> j.token())").as_deref(), Some("acme/Token"));
+    }
+
+    /// The case that was reported: the lambda chained after the first `map` had nothing to complete on.
+    #[test]
+    fn the_lambda_after_it_knows_its_parameter() {
+        let src = class_with("Object x = o.map(this::identify).map(it -> it.name());");
+        assert_eq!(infer_call(&src, "it.name()", &resolver()).as_deref(), Some("java/lang/String"));
+    }
+
+    #[test]
+    fn a_primitive_result_is_boxed() {
+        let src = class_with("Object x = o.map(j -> j.size());");
+        assert_eq!(element(&src, "o.map(j -> j.size())").as_deref(), Some("java/lang/Integer"));
+    }
+
+    /// Two `first`s returning different things: which one the reference means is the interface's
+    /// question, and guessing would type every chain after it wrongly.
+    #[test]
+    fn overloads_that_disagree_bind_nothing() {
+        let src = class_with("Object x = o.map(this::first);");
+        let got = element(&src, "o.map(this::first)");
+        assert!(
+            got.as_deref() != Some("acme/Token") && got.as_deref() != Some("java/lang/String"),
+            "{got:?}"
+        );
     }
 }
 

@@ -134,8 +134,18 @@ export const codeEditorTheme = EditorView.theme(
     '&.cm-focused .cm-selectionBackground': {
       backgroundColor: 'color-mix(in srgb, var(--accent) 34%, transparent) !important',
     },
+    // The pair matching the caret: a faint wash and an underline, never a box. The outline this
+    // used to be drew a 1px accent edge on the inner side of each bracket — exactly where the
+    // (accent) caret stands in `foo(|)` — and the caret disappeared into it. Nothing here paints
+    // a vertical edge. Two selectors because CodeMirror's base theme adds its own opaque teal wash
+    // under `.cm-focused`, and only an equally specific rule replaces it.
     '.cm-matchingBracket': {
-      outline: '1px solid var(--accent-strong, var(--accent))', borderRadius: '2px',
+      outline: 'none', borderRadius: '1px',
+      backgroundColor: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+      boxShadow: 'inset 0 -2px 0 color-mix(in srgb, var(--accent) 70%, transparent)',
+    },
+    '&.cm-focused .cm-matchingBracket': {
+      backgroundColor: 'color-mix(in srgb, var(--accent) 12%, transparent)',
     },
     // Ctrl/Cmd-hover go-to affordance: the token a click would navigate is underlined and
     // the pointer becomes a hand (the mouse is over this span while Ctrl is held).

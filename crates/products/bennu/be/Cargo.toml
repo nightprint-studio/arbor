@@ -111,6 +111,16 @@ bennu-jakarta = { path = "../jakarta" }
 bennu-scheduling = { path = "../scheduling" }
 # What a DTO actually serialises to.
 bennu-jackson = { path = "../jackson" }
+# The property paths a MapStruct mapper writes as strings, and the target properties nobody maps.
+bennu-mapstruct = { path = "../mapstruct" }
+# The Mockito misuses its runtime throws for, found before the test runs.
+bennu-mockito = { path = "../mockito" }
+# The AssertJ assertion that asserts nothing, and JUnit assertions rewritten as AssertJ.
+bennu-assertj = { path = "../assertj" }
+# Jakarta EE: CDI / EJB beans and injection points, and servlets.
+bennu-jakartaee = { path = "../jakartaee" }
+# JAX-RS resources, as routes in the shared Endpoints list.
+bennu-jaxrs = { path = "../jaxrs" }
 bennu-dtolab = { path = "../dtolab" }
 bennu-templates = { path = "../templates" }
 # The third extension: XML schemas (DTD + XSD → completion, ghost text, hover, go-to, checks).

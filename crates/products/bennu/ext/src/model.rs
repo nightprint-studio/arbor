@@ -335,6 +335,57 @@ impl ExtAction {
     }
 }
 
+/// A diagnostic as a fix needs it: which kind, and where.
+///
+/// What the editor already drew, handed back rather than recomputed — revalidating a file to answer
+/// one Alt+Enter would run every check in it for the one squiggle under the caret. Only the `code`
+/// and the span travel: a fix reads the source, never the message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtProblem {
+    /// The diagnostic's stable code (`"mapstruct.unmapped-target"`).
+    pub code: String,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// One replacement in the file an intention was asked about.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtEdit {
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+}
+
+impl ExtEdit {
+    /// Replace `start..end` with `text`.
+    pub fn replace(start: usize, end: usize, text: impl Into<String>) -> Self {
+        Self { start, end, text: text.into() }
+    }
+
+    /// Insert `text` at `at`.
+    pub fn insert(at: usize, text: impl Into<String>) -> Self {
+        Self { start: at, end: at, text: text.into() }
+    }
+}
+
+/// Something Alt+Enter offers at a caret — the fix for one of the extension's own diagnostics, or a
+/// rewrite that applies there with no diagnostic behind it at all.
+///
+/// **Several edits, one gesture.** A rewrite that needs an import is two places in the file, and an
+/// offer that could only carry one of them would leave the file not compiling after the fix. Every
+/// offset is into the buffer **as it was when asked** — the host applies the set in one transaction,
+/// so an extension never has to account for its own earlier edits shifting the later ones. Edits
+/// must not overlap.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtIntention {
+    /// Stable identity, namespaced by the extension id (`"assertj.convert-assert-equals"`).
+    pub id: String,
+    /// What the popup says (`"Replace with assertThat(…).isEqualTo(…)"`).
+    pub label: String,
+    /// Never empty: an intention with nothing to write is not offered.
+    pub edits: Vec<ExtEdit>,
+}
+
 /// A headline number an extension wants surfaced (index inspector / overview cards).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtStat {

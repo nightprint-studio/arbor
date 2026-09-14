@@ -646,6 +646,35 @@ impl NativeJavaProvider {
         self.class_names.candidates(simple)
     }
 
+    /// The "Import class" picker's candidates for `simple`, **nearest first** as seen from the
+    /// buffer `text`, and whether the first of them is a clear choice.
+    ///
+    /// Ranked by the proximity the completion list uses — what this file imports, its package, what
+    /// the project imports everywhere — so the popup and the picker agree about which `List` is
+    /// meant. Two rules only a picker needs on top: the classes nobody imports on purpose (the
+    /// JDK's internals, AWT's `List`) sink below everything, and a first place that only won
+    /// alphabetically is not called a recommendation.
+    pub fn import_choices(&self, text: &str, simple: &str) -> ImportChoices {
+        let here = Proximity::of(text, Some(&*self.imports));
+        let mut ranked: Vec<((bool, Rank), &String)> = self
+            .class_names
+            .candidates(simple)
+            .iter()
+            .map(|fqn| ((demoted_import(fqn), here.rank_one(fqn)), fqn))
+            .collect();
+        // Stable, so the index's own alphabetical order still breaks a real tie.
+        ranked.sort_by(|a, b| a.0.cmp(&b.0));
+        let clear_winner = match ranked.as_slice() {
+            [] => false,
+            [(only, _)] => !only.0,
+            [(first, _), (second, _), ..] => !first.0 && first < second,
+        };
+        ImportChoices {
+            fqns: ranked.into_iter().map(|(_, fqn)| fqn.clone()).collect(),
+            clear_winner,
+        }
+    }
+
     /// The **dependency jar** `binary` was decoded from, when a dependency declares it.
     ///
     /// What a hover card needs to say which library a type comes from. Cheap enough to ask on
@@ -2156,6 +2185,28 @@ impl<'a> Proximity<'a> {
 /// How many leading dot-separated segments two package names share.
 fn shared_segments(a: &str, b: &str) -> usize {
     a.split('.').zip(b.split('.')).take_while(|(x, y)| x == y && !x.is_empty()).count()
+}
+
+/// The candidates of an "Import class" pick, nearest first — see `import_choices`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImportChoices {
+    pub fqns: Vec<String>,
+    /// Whether the first is ahead of the second by a rule rather than by the alphabet — the one the
+    /// picker may mark as the suggestion.
+    pub clear_winner: bool,
+}
+
+/// Classes that share a very common simple name and are next to never what an import of it means.
+/// A trailing `.` is a package prefix; anything else is one class.
+///
+/// Sunk to the bottom rather than hidden: somebody writing a javac plugin does want
+/// `com.sun.tools.javac.util.List`, and a picker that cannot offer it is a picker they cannot use.
+const DEMOTED_IMPORTS: &[&str] = &["com.sun.", "sun.", "jdk.internal.", "java.awt.List"];
+
+fn demoted_import(fqn: &str) -> bool {
+    DEMOTED_IMPORTS
+        .iter()
+        .any(|d| if d.ends_with('.') { fqn.starts_with(d) } else { fqn == *d })
 }
 
 /// Whether `fqn` names an annotation type, according to the resolver that can read its flags.

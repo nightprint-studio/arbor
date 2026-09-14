@@ -21,8 +21,17 @@
   import { fly, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { animStore } from '$lib/stores/animations.svelte';
-  import { Lightbulb } from 'lucide-svelte';
+  import Badge from '$lib/components/shared/ui/Badge.svelte';
   import { bennuIntentionsStore } from '$lib/stores/bennu/intentions.svelte';
+  import { INTENTION_SECTIONS, type IntentionCategory } from './bennu-intentions';
+
+  /** The section header to draw above row `i`, when it starts one. The rows arrive ordered
+   *  (`orderIntentions`), so a section starts wherever the category changes. */
+  function sectionStartingAt(i: number) {
+    const category: IntentionCategory = items[i].category;
+    if (i > 0 && items[i - 1].category === category) return null;
+    return INTENTION_SECTIONS.find((s) => s.category === category) ?? null;
+  }
 
   let {
     /** Called after the popup closes (running an item or dismissing) so the host
@@ -51,7 +60,8 @@
   // ── Viewport clamping ─────────────────────────────────────────────────────────
   // Anchor is the caret's bottom-left in viewport coords; drop the panel just
   // below it, then pull it back inside the viewport on both axes once measured.
-  const PANEL_W = 260;
+  // Wide enough for an import's package to be read: the package is the whole choice.
+  const PANEL_W = 340;
   let pos = $state<{ x: number; y: number }>({ x: 0, y: 0 });
   $effect(() => {
     if (!open || !panelEl) return;
@@ -75,7 +85,7 @@
 
   function runItem(index: number) {
     const it = items[index];
-    if (!it) return;
+    if (!it || it.disabled) return;
     // Close first so the action (which may open a modal / toast) lands on a clean
     // stack, then run it.
     close();
@@ -139,24 +149,33 @@
     in:fly={{ y: -6, duration: animStore.dFast, easing: cubicOut }}
     out:fade={{ duration: animStore.dFast }}
   >
-    <div class="bennu-intentions-head">
-      <Lightbulb size={12} />
-      <span>Intentions</span>
-    </div>
     {#each items as item, i (item.id)}
       {@const ItemIcon = item.icon}
+      {@const section = sectionStartingAt(i)}
+      {#if section}
+        {@const SectionIcon = section.icon}
+        <div class="bennu-intentions-head cat-{section.category}" class:later={i > 0} role="presentation">
+          <span class="bh-icon"><SectionIcon size={12} /></span>
+          <span>{section.title}</span>
+        </div>
+      {/if}
       <button
         id="bennu-intention-{item.id}"
-        class="bennu-intention"
+        class="bennu-intention cat-{item.category}"
         class:active={i === active}
+        class:disabled={item.disabled}
         role="option"
         aria-selected={i === active}
+        aria-disabled={item.disabled}
         type="button"
         onmousemove={() => (active = i)}
         onclick={() => runItem(i)}
       >
         <span class="bi-icon"><ItemIcon size={14} /></span>
-        <span class="bi-label">{item.label}</span>
+        <span class="bi-label" title={item.label}>{item.label}</span>
+        {#if item.preferred}
+          <Badge variant="tone" tone="success" size="sm" label="suggested" />
+        {/if}
       </button>
     {/each}
   </div>
@@ -184,6 +203,13 @@
     outline: none;
   }
 
+  /* One colour per section, the IntelliJ reading: a red bulb repairs, a yellow one improves. The
+     token is set once on the header and the row, and everything inside reads `--cat`. */
+  .cat-fix { --cat: var(--error); }
+  .cat-intention { --cat: var(--warning); }
+  .cat-refactor { --cat: var(--accent); }
+  .cat-generate { --cat: var(--success); }
+
   .bennu-intentions-head {
     display: flex;
     align-items: center;
@@ -195,6 +221,12 @@
     text-transform: uppercase;
     color: var(--text-muted);
     user-select: none;
+  }
+  .bh-icon { display: inline-flex; color: var(--cat); }
+  .bennu-intentions-head.later {
+    margin-top: 3px;
+    padding-top: 7px;
+    border-top: 1px solid var(--border-subtle);
   }
 
   .bennu-intention {
@@ -213,12 +245,14 @@
     text-align: left;
   }
   .bennu-intention.active { background: var(--bg-selected); }
+  .bennu-intention.disabled { color: var(--text-muted); cursor: default; }
+  .bennu-intention.disabled .bi-icon { opacity: 0.5; }
 
   .bi-icon {
     display: inline-flex;
     align-items: center;
     flex-shrink: 0;
-    color: var(--accent);
+    color: var(--cat, var(--accent));
   }
   .bi-label {
     flex: 1;

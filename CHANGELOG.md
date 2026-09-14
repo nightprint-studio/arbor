@@ -9,6 +9,20 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **Typing around a selection in Java wraps it.** `<`, `"`, `'` and the brackets surround the selected text instead of replacing it, and `"""` opens a text block with the caret inside.
+
+- **Create method from a method reference.** <kbd>Alt</kbd>+<kbd>Enter</kbd> on `this::toIdentity` or `ClassName::toIdentity` writes the method with the signature of the functional interface it is passed as, imports included; the same member is offered, and drawn as ghost text, when you start typing its name in the class body.
+
+- **MapStruct in Bennu.** The property paths a mapper writes in `@Mapping` are checked against the types they name, completed, hovered and followed with Ctrl+B; target properties nothing maps are reported before the build does, with Alt+Enter to ignore them; a *Mappers* panel lists every mapper and what each method maps.
+
+- **Mockito in Bennu.** The misuses Mockito throws for at run time are marked while the test is written: an unfinished stubbing or verification, matchers mixed with plain values, and `@Mock` fields nothing initialises — with Alt+Enter to wrap the values in `eq(…)` or add the Mockito extension.
+
+- **AssertJ in Bennu.** An `assertThat(…)` that checks nothing, soft assertions never asserted, and `assertThat(list.size()).isEqualTo(3)` where a dedicated assertion exists; Alt+Enter rewrites JUnit assertions as AssertJ ones, one at a time or the whole file.
+
+- **Jakarta EE in Bennu.** CDI and EJB beans and the injection points they satisfy — gutter marks, go-to, hover and a *CDI beans* panel — with the injections nothing satisfies, unproxyable scoped beans, invalid EJB classes and conflicting servlet mappings reported before deployment; servlets appear in the Endpoints panel.
+
+- **JAX-RS in Bennu.** Resources appear in the Endpoints panel beside Spring and Struts routes, with the application path joined in; a `@PathParam` the path does not declare, two methods answering the same route and a second request body are reported, and `@PathParam` completes and jumps to its template.
+
 - **What a backend's memory is holding.** In the process monitor, every backend's row opens into a breakdown per project — Bennu's index and decoded classes, its framework models, the files it keeps for a language server, its shader library and crate catalogue, Garrulus's note text and word index, Picus's scripts and schemas, Merula's decoded samples, a recording's frames in Tyto, Corvus's memoised statistics, the explorer's git badges, and each plugin's Lua memory — with the measured total beside it, so the part the estimates do not cover is visible. Loaded on demand.
 
 - **A process monitor for the whole suite.** *Show Process Monitor* in any command palette: every process Arbor is running — the shell, each product's backend, the language servers and runs those started — with its CPU and memory in three tables — Arbor itself, the language servers, and everything else started through it — the product's own icon on each row, and totals against what the machine has. A warning threshold you set for memory and for sustained CPU, and Restart on a language server. It samples only while it is open, and it reports rather than caps: there is no portable way to hold a native process under a memory ceiling.
@@ -122,6 +136,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 
 ### Changed
+- **Bennu's Alt+Enter list is read in sections.** Quick fixes, intentions, refactorings and generators each have their own heading and colour, fixes first. The generators appear only where a member is written and never beside a fix, and imports are ordered the way completion ranks them — `java.util.List` before `java.awt.List`, the JDK's internals last — with the clear favourite marked *suggested*.
+
 - **Project Configuration is four sections with a sidebar.** The same layout as Settings — Project, Frameworks, Naming, Spelling — instead of one column scrolling through six unrelated subjects. It is reached from the title bar's gear, `Ctrl+Shift+,` or the palette; the duplicate entry in the Project menu is gone.
 
 
@@ -130,6 +146,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu's docs read as one manual.** Every page opens with its section and a summary, and lays its facts out as cards, steps, tables and callouts instead of long paragraphs.
 
 ### Fixed
+- **A `map(this::method)` or `map(x -> …)` lost its result type.** `opt.map(this::toIdentity)` was an `Optional` of nothing, so the lambda chained after it had no completion, no hover and no checks; the type is now read off the referenced method or the lambda's expression.
+- **Quotes in the Java editor pair only where they belong.** Not inside a string or a comment, not after a word; typing the closing quote steps over it, and the caret stays visible between matched brackets.
+- **An undeclared variable used as a receiver was not reported.** `profile.name()` with no `profile` anywhere compiled cleanly in Bennu; it is now marked like any other unresolved symbol.
+- **Framework panels whose framework has a two-part name stayed empty.** The i18n *Labels* list and any other catalog of an extension named like `fulcrum.i18n` was asked of an extension that does not exist, and answered nothing.
 - **Validation, the index, go-to and hover could disagree about what a type name meant.** Each read the file's imports in its own order; they now share one, Java's — an inherited nested type, then the file's imports, its package, its wildcards, `java.lang`. The first open after updating re-validates and re-indexes each project from scratch.
 - **Go to declaration on a wildcard-imported library type opened nothing, or the wrong class.** When the project declared a class with the same simple name in any package, that class answered — and was then either refused as project code or opened instead of the library type the file actually imports.
 - **Hover showed nothing on a library type imported with a wildcard.** `@Service` under `import org.springframework.stereotype.*;` had no card while the same annotation under a single-type import did; any star-imported class from a dependency behaved the same way.

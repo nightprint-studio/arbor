@@ -33,8 +33,23 @@ export interface IntentionOffer {
    *   the name being kept.
    * - `"create-class"` — create the file for the type named in `replacement`, then open it.
    * - `"override-methods"` — open the implement/override picker.
+   * - `"generate-constructor"` / `"generate-getters-setters"` — open the Generate modal in that mode.
    */
   action?: string;
+  /**
+   * The popup section it belongs to: a `fix` repairs a problem under the caret, an `intention`
+   * changes code that is already right, a `generate` opens a generator. The backend decides — it is
+   * the one that knows whether a diagnostic is involved.
+   */
+  category: 'fix' | 'intention' | 'generate';
+  /** The candidate to suggest among several — the nearest import. Absent when none stands out. */
+  preferred?: boolean;
+  /**
+   * The whole edit, when it touches more than one place — a rewrite and the import it needs.
+   * Offsets are all into the buffer as it was when asked, applied as one transaction (one undo).
+   * Absent for a single-range offer, which `start`/`end`/`replacement` describe on their own.
+   */
+  edits?: { start: number; end: number; text: string }[];
 }
 
 /** A diagnostic as a quick-fix needs it: what kind, and where. */

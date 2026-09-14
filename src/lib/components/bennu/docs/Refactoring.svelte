@@ -25,9 +25,22 @@
 
 <h2>Intentions</h2>
 <p>
+  The popup is read in sections, each with its colour: <strong>Quick fixes</strong> (red) repair the problem under the caret,
+  <strong>Intentions</strong> (yellow) change code that is already right, <strong>Refactor</strong> (blue) reshapes it, and
+  <strong>Generate</strong> (green) opens a generator. A row that cannot be done here stays at the bottom of its section, greyed, with the reason.
+</p>
+<p>
+  The generators — <em>Generate constructor</em>, <em>getters and setters</em>, <em>Implement / override methods</em> — are offered where a member
+  is written: in a class body, on a field, on the class header. Not inside a method, and not while a quick fix is on offer: on an
+  unimported type, the import is what the key was pressed for. <kbd>Alt</kbd> + <kbd>Insert</kbd> opens them anywhere.
+</p>
+<p>
   On a <strong>type that is not imported</strong>, <strong>Import '…'</strong> adds the <code>import</code> — after the package, sorted among the
   others. When several classes share the name each is its own entry, so you pick the package; a type in the same package, in
-  <code>java.lang</code>, or covered by a wildcard is not offered, needing none.
+  <code>java.lang</code>, or covered by a wildcard is not offered, needing none. The entries are ordered the way completion ranks the same
+  names — what the file already imports, its package, what the project imports everywhere — so <code>java.util.List</code> comes before
+  <code>java.awt.List</code>; the JDK's internal packages go last. When one candidate is ahead by those rules rather than by the alphabet, it is
+  marked <em>suggested</em>.
 </p>
 <table>
   <thead><tr><th>Offered on</th><th>Becomes</th></tr></thead>
@@ -194,6 +207,11 @@ total = a + b;`, 'java')}</code></pre>
     <div class="fc-desc">Written just below the calling method. The call site is the specification: argument types and names become the signature, how the result is used the return type — nothing means <code>void</code>, a condition <code>boolean</code> — and a <code>static</code> caller gets a <code>static</code> method. The body throws, so it compiles and fails loudly rather than returning a plausible <code>null</code>.</div>
   </div>
   <div class="feature-card">
+    <div class="fc-eyebrow">On <code>.map(this::toIdentity)</code></div>
+    <div class="fc-title">Create method from a method reference</div>
+    <div class="fc-desc">A reference has no arguments, so the signature comes from the <strong>functional interface</strong> it is passed as: <code>Optional&lt;Jwt&gt;.map</code> wants a <code>Function&lt;Jwt, U&gt;</code>, so <code>toIdentity(Jwt jwt)</code>. A return type nothing around it decides is <code>Object</code>. <code>this::name</code> writes an instance method, <code>ClassName::name</code> a <code>static</code> one, with the imports the signature needs. Declined when the callee is overloaded or the interface cannot be read.</div>
+  </div>
+  <div class="feature-card">
     <div class="fc-eyebrow">On <code>order.total(label)</code></div>
     <div class="fc-title">Create method in the receiver's class</div>
     <div class="fc-desc">Written at the end of <strong>that class's file</strong>, <code>public</code>, with the imports its types need, and the file opens. Declined for a receiver from a <strong>jar</strong>, a class that <strong>already declares</strong> the name at any arity, or a receiver whose type does not resolve.</div>
@@ -236,6 +254,11 @@ total = a + b;`, 'java')}</code></pre>
 <p>
   A fix is keyed to the <em>kind</em> of diagnostic and reads the source itself, never guessing from the wording. The two that need types are recomputed from
   the analysis that raised the diagnostic, so a fix that appears is one that clears the squiggle.
+</p>
+<p>
+  The frameworks a project uses add their own to the same list — ignoring the target properties a MapStruct mapper leaves unmapped, wrapping Mockito arguments in
+  <code>eq(…)</code>, rewriting a JUnit assertion as AssertJ. A fix that touches more than one place, a rewrite and the import it needs, is still one
+  <kbd>Ctrl</kbd> + <kbd>Z</kbd>.
 </p>
 
 <h2>Rename</h2>

@@ -33,9 +33,14 @@ use std::sync::{Arc, Mutex, OnceLock};
 use bennu_core::prelude::BennuState;
 use bennu_bevy::prelude::BevyExtension;
 use bennu_ext::prelude::{
-    ExtAction, ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtStat, ExtTarget,
-    ExtensionRegistry, FileCtx, FrameworkExtension, ProjectScan, ScannedFile,
+    ExtAction, ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtIntention, ExtProblem, ExtStat,
+    ExtTarget, ExtensionRegistry, FileCtx, FrameworkExtension, ProjectScan, ScannedFile,
 };
+use bennu_assertj::prelude::AssertJExtension;
+use bennu_jakartaee::prelude::JakartaEeExtension;
+use bennu_jaxrs::prelude::JaxRsExtension;
+use bennu_mapstruct::prelude::MapStructExtension;
+use bennu_mockito::prelude::MockitoExtension;
 use bennu_project::prelude::normalize_newlines;
 use bennu_proto::prelude::{CapabilitySet, CompletionItem, Diagnostic};
 use bennu_fulcrum_i18n::prelude::FulcrumI18nExtension;
@@ -423,6 +428,17 @@ impl FrameworkService {
                 // What a DTO actually puts in its JSON. The failure mode here is absence, and the
                 // first person to see it is on the other side of an HTTP call.
                 Arc::new(JacksonExtension::new()) as Arc<dyn FrameworkExtension>,
+                // A mapper's contract is property paths written as strings, which the compiler
+                // checks only when the annotation processor runs.
+                Arc::new(MapStructExtension::new()) as Arc<dyn FrameworkExtension>,
+                // The two test libraries whose misuse compiles and fails at run time — or, for an
+                // assertion that asserts nothing, never fails at all.
+                Arc::new(MockitoExtension::new()) as Arc<dyn FrameworkExtension>,
+                Arc::new(AssertJExtension::new()) as Arc<dyn FrameworkExtension>,
+                // The container that wires CDI and EJB beans, and the servlets it deploys.
+                Arc::new(JakartaEeExtension::new()) as Arc<dyn FrameworkExtension>,
+                // JAX-RS resources, answering the bare `endpoints` catalog beside Spring and Struts.
+                Arc::new(JaxRsExtension::new()) as Arc<dyn FrameworkExtension>,
                 Arc::clone(&jsp) as Arc<dyn FrameworkExtension>,
                 Arc::new(MessagesExtension::new()) as Arc<dyn FrameworkExtension>,
                 // The fifth framework, and the first that is not Java's: a Cargo root with an
@@ -1145,6 +1161,23 @@ pub fn diagnostics_for(file: &str, source: Option<&str>) -> Vec<Diagnostic> {
     with_file(
         &FileArgs { file: file.to_string(), source: source.map(str::to_string), offset: 0 },
         |r, ctx| r.diagnostics(ctx),
+    )
+}
+
+/// Framework-contributed Alt+Enter offers at a caret. Called by the `intentions` domain, so a
+/// framework's fixes arrive in the same popup — and the same round trip — as the language's own.
+///
+/// `problems` are the diagnostics the editor is showing under the caret; each extension picks out
+/// its own codes.
+pub fn intentions_for(
+    file: &str,
+    source: &str,
+    offset: usize,
+    problems: &[ExtProblem],
+) -> Vec<ExtIntention> {
+    with_file(
+        &FileArgs { file: file.to_string(), source: Some(source.to_string()), offset },
+        |r, ctx| r.intentions(ctx, offset, problems),
     )
 }
 

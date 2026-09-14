@@ -117,6 +117,18 @@ members = [
     # Jackson: what a DTO will and will not put in its JSON, read from the annotations and the
     # accessors rather than discovered from a payload that came out wrong.
     "crates/products/bennu/jackson",
+    # MapStruct: the property paths a mapper writes as strings, checked against the types they
+    # name — and the target properties nobody maps, before the annotation processor says so.
+    "crates/products/bennu/mapstruct",
+    # Mockito: the misuses its runtime throws for — an unfinished stubbing, matchers mixed with raw
+    # values, `@Mock` fields nothing initialises.
+    "crates/products/bennu/mockito",
+    # AssertJ: the assertion that asserts nothing, and JUnit assertions rewritten as AssertJ ones.
+    "crates/products/bennu/assertj",
+    # Jakarta EE: CDI and EJB beans, the injection points they satisfy, and servlets.
+    "crates/products/bennu/jakartaee",
+    # JAX-RS: resources as routes, in the same Endpoints list as Spring's and Struts'.
+    "crates/products/bennu/jaxrs",
     # The DTO Lab's pure half: a class read as its constraints, the cases they imply, and tests
     # rendered from a user-owned template — plus the Java harness that checks them on the JVM.
     # Code generated from templates the user owns: engine, store, the class model, and each kind's context.

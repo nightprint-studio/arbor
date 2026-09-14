@@ -53,6 +53,11 @@ pub struct MethodFacts {
     pub is_static: bool,
     pub is_public: bool,
     pub is_constructor: bool,
+    /// Whether the declaration carries a body. `false` is an abstract method, or an interface
+    /// method that is not `default` / `static` / `private` — which is to say, a method somebody
+    /// else implements. MapStruct generates exactly those and leaves the rest alone, and a
+    /// `default` method in a mapper interface is written by hand.
+    pub has_body: bool,
 }
 
 /// A field, with its annotations (`@Autowired`, `@Value`, `@Qualifier`).
@@ -292,6 +297,8 @@ fn method_facts(node: &Node, bytes: &[u8], is_constructor: bool) -> Option<Metho
         is_static: has_modifier(node, "static"),
         is_public: has_modifier(node, "public"),
         is_constructor,
+        // A constructor always has one, and the grammar names it `body` either way.
+        has_body: is_constructor || node.child_by_field_name("body").is_some(),
     })
 }
 
@@ -523,6 +530,24 @@ mod tests {
         let ctor = f.types[0].methods.iter().find(|m| m.is_constructor).expect("constructor");
         assert_eq!(ctor.params[0].annotations[0].value().unwrap().value, "primaryDs");
         assert!(f.types[0].methods.iter().any(|m| !m.is_constructor && m.name == "m"));
+    }
+
+    /// What MapStruct generates is exactly the methods with no body, so the fact has to tell an
+    /// abstract method and a plain interface method from a `default` one written by hand.
+    #[test]
+    fn a_method_says_whether_somebody_else_implements_it() {
+        let f = scan(
+            "interface M { Dto toDto(Entity e); default String name() { return \"x\"; } }\n\
+             abstract class A { abstract Dto a(Entity e); Dto b(Entity e) { return null; } A() {} }",
+        );
+        let body = |t: &str, m: &str| {
+            f.types.iter().find(|x| x.name == t).unwrap().methods.iter().find(|x| x.name == m).unwrap().has_body
+        };
+        assert!(!body("M", "toDto"));
+        assert!(body("M", "name"), "a default method is written by hand");
+        assert!(!body("A", "a"));
+        assert!(body("A", "b"));
+        assert!(body("A", "A"), "a constructor always has one");
     }
 
     #[test]

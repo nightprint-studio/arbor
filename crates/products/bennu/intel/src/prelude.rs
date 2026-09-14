@@ -5,7 +5,7 @@
 //! the prelude is the canonical call-site path.
 
 pub use crate::provider::{
-    declarable_type_at, declarable_type_detail, render_type_for_source, render_type_for_source_with, Declarable, DocumentSymbol, IntelError, IntelProvider, LibraryMember, LibraryTarget,
+    declarable_type_at, declarable_type_detail, render_type_for_source, render_type_for_source_with, Declarable, DocumentSymbol, ImportChoices, IntelError, IntelProvider, LibraryMember, LibraryTarget,
     CompletionOptions, Location, LspClientProvider, NativeJavaProvider, Position, ProjectMember,
     TextEdit,
 };
@@ -111,7 +111,7 @@ pub use crate::usage_marks::{usage_marks, UsageMark};
 // The accessors a class is missing, offered where they are reached for.
 pub use crate::accessor_completion::{
     accessor_completions, generated_hint, generated_members, missing_method_completions,
-    AccessorHint,
+    reference_call, AccessorHint, ReferencedMethod,
 };
 
 // Writing a method into the class of the object it was called on — the half that is a function

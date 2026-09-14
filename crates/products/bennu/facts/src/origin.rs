@@ -130,10 +130,82 @@ pub fn resolves_to(ann: &AnnFacts, facts: &JavaFacts, packages: &[&str]) -> bool
     false
 }
 
+/// Whether a call written `name(…)` — or `Qualifier.name(…)`, when `qualifier` is given — reaches a
+/// static method of one of `owners` (dotted class names), resolved through the file's imports.
+///
+/// The method-call twin of [`resolves_to`], for the libraries that live in static methods rather
+/// than in annotations: Mockito's `when` and `any`, AssertJ's `assertThat`. `when` is not a reserved
+/// word any more than `@Service` is, and a test helper of that name must not be read as Mockito.
+///
+/// - **Qualified** (`Mockito.when`): a dotted qualifier must be one of `owners` outright; a simple one
+///   must be imported as one of them, by name or through its package's on-demand import.
+/// - **Bare** (`when`): a static import of `<owner>.when` or `<owner>.*`. A single static import of
+///   the same name from anywhere else decides the other way, as it does for the compiler.
+/// - **Shadowed**: a method of that name declared in the file hides every static import of it
+///   (JLS §6.4.1), so the answer is `false`. An *inherited* one is not visible from here — the one
+///   case this can mistake, and a rare one: a test base class with its own `when`.
+pub fn static_call_resolves_to(
+    name: &str,
+    qualifier: Option<&str>,
+    facts: &JavaFacts,
+    owners: &[&str],
+) -> bool {
+    if let Some(q) = qualifier {
+        if q.contains('.') {
+            return owners.contains(&q);
+        }
+        let suffix = format!(".{q}");
+        if let Some(import) = facts.imports.iter().find(|i| i.ends_with(&suffix)) {
+            return owners.contains(&import.as_str());
+        }
+        return facts.imports.iter().any(|i| {
+            i.strip_suffix(".*").is_some_and(|pkg| owners.contains(&format!("{pkg}.{q}").as_str()))
+        });
+    }
+    if facts.types.iter().any(|t| t.methods.iter().any(|m| m.name == name && !m.is_constructor)) {
+        return false;
+    }
+    let suffix = format!(".{name}");
+    if let Some(import) = facts.imports.iter().find(|i| i.ends_with(&suffix)) {
+        let owner = &import[..import.len() - suffix.len()];
+        return owners.contains(&owner);
+    }
+    facts.imports.iter().any(|i| i.strip_suffix(".*").is_some_and(|owner| owners.contains(&owner)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scan::scan_java;
+
+    const MOCKITO: &[&str] = &["org.mockito.Mockito", "org.mockito.ArgumentMatchers", "org.mockito.BDDMockito"];
+
+    fn calls(src: &str, name: &str, qualifier: Option<&str>) -> bool {
+        static_call_resolves_to(name, qualifier, &scan_java("/p/T.java", src).unwrap(), MOCKITO)
+    }
+
+    #[test]
+    fn a_static_import_by_name_or_on_demand_reaches_the_method() {
+        assert!(calls("import static org.mockito.Mockito.when;\nclass T {}", "when", None));
+        assert!(calls("import static org.mockito.ArgumentMatchers.*;\nclass T {}", "any", None));
+        assert!(!calls("class T {}", "when", None), "nothing imports it");
+    }
+
+    #[test]
+    fn somebody_elses_method_of_the_same_name_is_not_the_librarys() {
+        assert!(!calls("import static com.acme.Stubs.when;\nimport static org.mockito.Mockito.*;\nclass T {}", "when", None));
+        // Declared in the file: it shadows every static import of that name.
+        assert!(!calls("import static org.mockito.Mockito.when;\nclass T { void when() {} }", "when", None));
+    }
+
+    #[test]
+    fn a_qualified_call_resolves_its_class_like_any_other_type() {
+        assert!(calls("import org.mockito.Mockito;\nclass T {}", "when", Some("Mockito")));
+        assert!(calls("import org.mockito.*;\nclass T {}", "mock", Some("Mockito")));
+        assert!(calls("class T {}", "when", Some("org.mockito.Mockito")));
+        assert!(!calls("import com.acme.Mockito;\nclass T {}", "when", Some("Mockito")));
+        assert!(!calls("class T {}", "when", Some("Mockito")), "same package: not the library's");
+    }
 
     /// A miniature two-framework table — enough to exercise every rule, and to show that two
     /// extensions with overlapping simple names do not interfere.

@@ -37,6 +37,17 @@
 //!
 //! Only when the name matches none of 1–6, the hierarchy is fully known, no unresolved static wildcard
 //! is present, and there's no intervening nested class / lambda, do we flag `Cannot resolve symbol `x``.
+//!
+//! RECEIVERS — a bare identifier heading a call or a field read (`profile.name()`, `profile.name`)
+//! is judged too, under two extra gates on top of everything above, because a qualifier head may
+//! also be a TYPE (`Math.max`) or a PACKAGE segment (`java.util.List.of()`):
+//!   * it must start with a lowercase letter, and no type of that simple name may be declared in the
+//!     file (on top of the resolver / same-package / inherited-member-type lookups every name gets);
+//!   * it must be the WHOLE receiver — `profile.x()` or a standalone `profile.x`. The head of a longer
+//!     dotted chain (`java.util.Collections.emptyList()`, `com.foo.Bar.baz()`, `a.b.c`) may be a
+//!     package, and the resolver cannot be asked about packages, so it is always skipped.
+//!
+//!   A qualified `Outer.super.m()` and `Outer.this` are skipped as receivers: their head is a type.
 
 use std::collections::HashSet;
 
@@ -50,7 +61,7 @@ use crate::scopes::{
     is_value_position, resolves_as_local, scope_is_directly_top, single_top_level_type,
 };
 
-use crate::nodes::has_generated_members;
+use crate::nodes::{child_field_name, has_generated_members};
 use crate::resolve::type_binary;
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
 
@@ -145,6 +156,14 @@ pub fn undefined_var_errors_in(
     let mut enum_constants: HashSet<String> = HashSet::new();
     collect_enum_constants(top.node, bytes, &mut enum_constants);
 
+    // Fields declared in the live buffer, read from the CST. The resolver's member list can lag the
+    // buffer (a field typed a second ago); over-inclusion only ever SUPPRESSES, so both are consulted.
+    collect_source_fields(top.node, bytes, &mut field_names);
+
+    // Every type simple name declared in this file (nested ones included) — a receiver `holder.V`
+    // may name a lowercase nested class the resolver does not see by its simple name.
+    let declared_types: HashSet<&str> = symbols.types.iter().map(|t| t.name.as_str()).collect();
+
     // ── Bare names supplied by `import static …` ─────────────────────────────────────────────────
     // A static import binds an owner's static members into the bare namespace, so such a name is NOT
     // undefined. We model this precisely instead of poisoning the whole file:
@@ -180,10 +199,21 @@ pub fn undefined_var_errors_in(
         }
         // Is this identifier a genuine bare *value* reference we're allowed to judge? (position +
         // scope guards). Every rejection here is a deliberate SKIP for soundness.
-        if !(is_value_position(n) && scope_is_directly_top(n, top.node)) {
+        // A whole-receiver head (`profile.x()`) is not a value position for the shared predicate —
+        // it is judged here under the extra type / package gates below.
+        let receiver = is_whole_receiver(n);
+        if !((receiver || is_value_position(n)) && scope_is_directly_top(n, top.node)) {
             continue;
         }
         let Ok(name) = n.utf8_text(bytes) else { continue };
+        // RECEIVER gate: an uppercase head is conventionally a type (left to the type checks), and a
+        // head named like a type declared in this file IS one.
+        if receiver
+            && (!name.chars().next().is_some_and(char::is_lowercase)
+                || declared_types.contains(name))
+        {
+            continue;
+        }
 
         // RESOLUTION 5: keyword-ish tokens. `this`/`super`/`true`/`false`/`null` parse as their own
         // node kinds, not `identifier`, so we won't even reach here for them — but guard defensively
@@ -237,6 +267,72 @@ pub fn undefined_var_errors_in(
         out.push(crate::check_id::CheckId::UnresolvedSymbol.at(n, format!("Cannot resolve symbol `{name}`")));
     }
     out
+}
+
+/// Whether `ident` is the ENTIRE receiver of a call or a field read — `profile.x()`, or a `profile.x`
+/// that is not itself qualifying something further.
+///
+/// The second half is the package guard: in `a.b.c()` / `a.b.C.d` the head `a` may be a package
+/// segment (and `b` a lowercase type), which nothing here can rule out. A call's result is never a
+/// package, so `profile.x().y()` keeps `profile` a whole receiver.
+fn is_whole_receiver(ident: Node) -> bool {
+    let Some(parent) = ident.parent() else { return false };
+    if child_field_name(parent, ident).as_deref() != Some("object") {
+        return false;
+    }
+    // `Outer.super.m()` / `Outer.super.f` — the head is a type, never a variable.
+    if has_child_of_kind(parent, "super") {
+        return false;
+    }
+    match parent.kind() {
+        "method_invocation" => true,
+        "field_access" => {
+            // `Outer.this` — the head is a type.
+            if parent.child_by_field_name("field").map(|f| f.kind()) != Some("identifier") {
+                return false;
+            }
+            // `a.b` heading a further `.c` / `.c()` / `::m` → `a` may be a package.
+            !parent.parent().is_some_and(|gp| {
+                matches!(gp.kind(), "field_access" | "method_invocation" | "method_reference")
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Whether `node` has a direct child (named or anonymous) of `kind`.
+fn has_child_of_kind(node: Node, kind: &str) -> bool {
+    let mut c = node.walk();
+    let found = node.children(&mut c).any(|ch| ch.kind() == kind);
+    found
+}
+
+/// Collect the field names declared directly in `top`'s body (`field_declaration` → declarator
+/// names, interface `constant_declaration`s too). Nested type bodies are not descended.
+fn collect_source_fields(top: Node, bytes: &[u8], out: &mut HashSet<String>) {
+    let Some(body) = top.child_by_field_name("body") else { return };
+    let mut stack = vec![body];
+    while let Some(n) = stack.pop() {
+        let mut c = n.walk();
+        for ch in n.named_children(&mut c) {
+            match ch.kind() {
+                "field_declaration" | "constant_declaration" => {
+                    let mut dc = ch.walk();
+                    for d in ch.named_children(&mut dc) {
+                        if d.kind() != "variable_declarator" {
+                            continue;
+                        }
+                        if let Some(Ok(t)) = d.child_by_field_name("name").map(|nm| nm.utf8_text(bytes)) {
+                            out.insert(t.to_string());
+                        }
+                    }
+                }
+                // An enum's members sit one wrapper deeper than a class's.
+                "enum_body_declarations" => stack.push(ch),
+                _ => {}
+            }
+        }
+    }
 }
 
 /// Collect the enum-constant names declared directly in `top` when it's an enum body. A no-op for a
@@ -609,5 +705,117 @@ mod tests {
     fn qualifier_head_that_is_a_local_is_resolved() {
         // `sb.append(...)` — `sb` is a resolved local; the head must not be flagged.
         assert!(diags("String sb = \"\"; int n = sb.length();").is_empty());
+    }
+
+    // ── RECEIVERS ────────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn undeclared_call_receiver_is_flagged() {
+        // Reduced from a real report: `profile` is declared nowhere — the parameter is `claim`.
+        let src = "package com.acme;\nclass C extends Base { int count;\n\
+                   Object identify(final String jwt, final String claim) {\n\
+                   return read(jwt, profile.name_claim());\n\
+                   }\n\
+                   Object read(Object a, Object b) { return a; } }";
+        let d = diags_with(src, &resolver());
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`profile`"), "{d:?}");
+    }
+
+    #[test]
+    fn undeclared_field_read_receiver_is_flagged() {
+        let d = diags("Object v = profile.name;");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`profile`"), "{d:?}");
+    }
+
+    #[test]
+    fn a_call_on_a_call_still_judges_the_head() {
+        // A call's result is never a package, so `profile` is still the whole receiver.
+        let d = diags("Object v = profile.name().trim();");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`profile`"), "{d:?}");
+    }
+
+    #[test]
+    fn local_receiver_is_resolved() {
+        assert!(diags("String profile = \"x\"; profile.trim();").is_empty());
+    }
+
+    #[test]
+    fn parameter_receiver_is_resolved() {
+        let src = "package com.acme;\nclass C extends Base { int count; void m(String profile) { profile.trim(); } }";
+        assert!(diags_with(src, &resolver()).is_empty(), "{:?}", diags_with(src, &resolver()));
+    }
+
+    #[test]
+    fn field_receiver_is_resolved() {
+        // `count` comes from the resolver; `fresh` only exists in the live buffer.
+        assert!(diags("count.toString();").is_empty());
+        let src = "package com.acme;\nclass C extends Base { int count; String fresh; void m() { fresh.trim(); } }";
+        assert!(diags_with(src, &resolver()).is_empty(), "{:?}", diags_with(src, &resolver()));
+    }
+
+    #[test]
+    fn inherited_field_receiver_is_resolved() {
+        assert!(diags("base.toString(); Object v = base.x;").is_empty());
+    }
+
+    #[test]
+    fn lambda_parameter_receiver_is_skipped() {
+        let src = "java.util.List<String> xs = null; xs.forEach(item -> item.trim());";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    #[test]
+    fn pattern_binding_receivers_are_resolved() {
+        let src = "Object o = null; if (o instanceof String s) { s.trim(); }";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+        let rec = "Object o = null; if (o instanceof Point(int x, String label)) { label.trim(); }";
+        assert!(diags(rec).is_empty(), "{:?}", diags(rec));
+        let sw = "Object o = null; switch (o) { case String str -> str.trim(); default -> {} }";
+        assert!(diags(sw).is_empty(), "{:?}", diags(sw));
+    }
+
+    #[test]
+    fn catch_foreach_and_resource_receivers_are_resolved() {
+        let src = "try (java.io.StringReader rd = null) { rd.close(); } catch (Exception ex) { ex.printStackTrace(); }\n\
+                   String[] xs = null; for (String it : xs) { it.trim(); }";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    #[test]
+    fn a_lowercase_package_chain_is_never_judged() {
+        assert!(diags("Object e = java.util.Collections.emptyList();").is_empty());
+        assert!(diags("java.lang.System.out.println(1);").is_empty());
+        assert!(diags("Object v = com.foo.bar();").is_empty());
+        assert!(diags("Object v = com.foo.Bar.BAZ;").is_empty());
+    }
+
+    #[test]
+    fn a_static_imported_receiver_is_resolved() {
+        let src = "package com.acme;\nimport static com.acme.Helper.cfg;\n\
+                   class C extends Base { int count; void m() { cfg.run(); } }";
+        assert!(diags_with(src, &resolver()).is_empty(), "{:?}", diags_with(src, &resolver()));
+    }
+
+    #[test]
+    fn a_type_named_receiver_is_not_flagged() {
+        // Uppercase heads are left to the type checks; a lowercase nested type declared here is a type.
+        assert!(diags("int y = Unknown.max(1);").is_empty());
+        let src = "package com.acme;\nclass C extends Base { int count; static class holder { static int V; } void m() { int y = holder.V; } }";
+        assert!(diags_with(src, &resolver()).is_empty(), "{:?}", diags_with(src, &resolver()));
+    }
+
+    #[test]
+    fn qualified_super_and_this_receivers_are_skipped() {
+        let src = "package com.acme;\nclass C extends Base { int count; void m() { iface.super.run(); Object o = outer.this; } }";
+        assert!(diags_with(src, &resolver()).is_empty(), "{:?}", diags_with(src, &resolver()));
+    }
+
+    #[test]
+    fn generated_members_skip_receivers_too() {
+        let src = "package com.acme;\n@Slf4j\nclass C extends Base { void m() { log.info(\"x\"); } }";
+        assert!(diags_with(src, &resolver()).is_empty());
     }
 }

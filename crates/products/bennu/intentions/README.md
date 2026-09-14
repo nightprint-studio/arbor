@@ -15,6 +15,7 @@ exhaustively unit-tested here (the frontend has no test runner).
 | `simplify_boolean_compare` | `flag == true` → `flag`, `flag == false` → `!flag` (+ `!=` mirrors). |
 | `simplify_negated_comparison` | `!(a == b)` → `a != b`, `!(a != b)` → `a == b`. |
 | `insert_import_edit` | Given a source + a fully-qualified name, compute the edit that adds `import <fqn>;` (after the package, sorted among existing imports, CRLF-aware; `None` if already imported). The **detection** of which simple name to import and the **candidate FQNs** are resolver-backed (they need the classpath), so they live in `bennu-java` (`simple_type_needing_import`) and the be handler — this crate stays pure. |
+| `insert_static_import_edit` | Given a source, an owner class and a member, compute the edit that adds `import static <owner>.<member>;` — after the other static imports, or as its own block after the plain ones; `None` when the member is already imported by name or through `<owner>.*`. Used by the framework extensions whose fixes write a Mockito matcher or an AssertJ `assertThat`. |
 
 ## The aggregation seam
 
