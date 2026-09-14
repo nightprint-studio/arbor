@@ -220,6 +220,16 @@ struct LibraryFacts {
     docs: bennu_java::prelude::FileDocs,
 }
 
+/// Why a project is being re-indexed — the one thing [`IndexService::reindex`] and
+/// [`IndexService::refresh_after_compile`] differ in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Rebuild {
+    /// The user asked: every cache is suspect, the dependency jar list included.
+    Distrust,
+    /// A compile moved `target/classes`: re-read, and keep everything still true.
+    Refresh,
+}
+
 /// [`bennu_query::prelude::LibraryParamNames`] over a project's source archives.
 ///
 /// The rule is one line and it is the whole feature: **only real source counts.** A decompiled stub
@@ -1343,6 +1353,26 @@ impl IndexService {
     /// the build picked up) are reflected in completion. Returns immediately; the
     /// rebuild runs on the same background thread `open` uses.
     pub fn reindex(&'static self, root: &str, sink: Arc<dyn EventSink>) {
+        self.rebuild(root, sink, Rebuild::Distrust);
+    }
+
+    /// Re-index after a successful compile — the sources are re-read, and **nothing remembered
+    /// about the project is thrown away**.
+    ///
+    /// A compile and a manual rebuild used to share [`Self::reindex`], and it is the right call for
+    /// only one of them. The button means "I no longer trust what you know", so it drops every
+    /// cache, the dependency jar list included, and Maven runs again. A compile means
+    /// "`target/classes` moved": no pom changed, the jar list is keyed on pom mtimes and is still
+    /// true, and the incremental caches exist precisely so an unchanged file is not walked twice.
+    /// Sharing the entry point made every ordinary build re-resolve the whole dependency tree —
+    /// seconds of Maven per launch, on the path whose entire design is not to pay Maven when it
+    /// does not have to.
+    pub fn refresh_after_compile(&'static self, root: &str, sink: Arc<dyn EventSink>) {
+        self.rebuild(root, sink, Rebuild::Refresh);
+    }
+
+    /// The one reopen both entry points above go through; `how` is the only thing they differ in.
+    fn rebuild(&'static self, root: &str, sink: Arc<dyn EventSink>, how: Rebuild) {
         let opened_with = {
             let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
             slots
@@ -1350,16 +1380,19 @@ impl IndexService {
                 .map(|s| (s.jdk_version.clone(), s.encoding_label.clone()))
         };
         if let Some((jdk, encoding_label)) = opened_with {
-            // A manual rebuild is authoritative: drop the incremental reference cache so the
-            // reopen re-walks every file from scratch (not just the changed ones), the diagnostic
-            // cache so a fresh full validation runs, and the persisted dependency jar LIST so Maven
-            // is re-run. That last one is the point of the button for a user whose library types
-            // aren't resolving: the list is keyed on pom mtimes, so without dropping it here a
-            // rebuild would faithfully re-serve the same wrong classpath forever.
-            let base = index_base_for(root);
-            bennu_intel::prelude::clear_ref_cache(&bennu_intel::prelude::ref_cache_path(&base));
-            bennu_intel::prelude::clear_diag_cache(&bennu_intel::prelude::diag_cache_path(&base));
-            crate::dep_classpath::clear_list_cache(Path::new(root));
+            if how == Rebuild::Distrust {
+                // A manual rebuild is authoritative: drop the incremental reference cache so the
+                // reopen re-walks every file from scratch (not just the changed ones), the
+                // diagnostic cache so a fresh full validation runs, and the persisted dependency
+                // jar LIST so Maven is re-run. That last one is the point of the button for a user
+                // whose library types aren't resolving: the list is keyed on pom mtimes, so without
+                // dropping it here a rebuild would faithfully re-serve the same wrong classpath
+                // forever.
+                let base = index_base_for(root);
+                bennu_intel::prelude::clear_ref_cache(&bennu_intel::prelude::ref_cache_path(&base));
+                bennu_intel::prelude::clear_diag_cache(&bennu_intel::prelude::diag_cache_path(&base));
+                crate::dep_classpath::clear_list_cache(Path::new(root));
+            }
             self.open(root, &jdk, &encoding_label, sink);
         }
     }

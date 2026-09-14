@@ -95,20 +95,18 @@ impl NameScope for FileScope<'_> {
                 }
             }
         }
-        for imp in &self.symbols.imports {
-            if imp.simple_name() == Some(simple) {
-                return Some(imp.path.replace('.', "/"));
-            }
-        }
-        // A type in the file's OWN package needs no import. Resolved to its exact binary before the
-        // flat lookup, for the same reason.
-        if let Some(pkg) = self.symbols.package.as_deref() {
-            if !pkg.is_empty() {
-                let candidate = format!("{}/{simple}", pkg.replace('.', "/"));
-                if self.resolver.members_of(&candidate).is_some() {
-                    return Some(candidate);
-                }
-            }
+        // What the FILE binds the name to — a single-type import, its own package, a static import
+        // of a nested type, the imports-on-demand, `java.lang` — through the workspace's one
+        // statement of Java's rule, confirmed against what this resolver can read. All of it before
+        // the resolver's project-wide map, which keeps one binary per simple name and would otherwise
+        // answer for a wildcard-imported type with whatever class shares its name elsewhere.
+        if let Some(bound) = bennu_java::prelude::bind_simple_name(
+            simple,
+            self.symbols.package.as_deref(),
+            &self.symbols.imports,
+            &|binary| self.resolver.members_of(binary).is_some(),
+        ) {
+            return Some(bound);
         }
         // Last: what any type in the file inherits. This is NOT a scope Java has — a name written
         // inside one nested class is never bound by a sibling's supertypes — so it can only stand
@@ -122,9 +120,8 @@ impl NameScope for FileScope<'_> {
         {
             return Some(bn);
         }
-        self.resolver
-            .resolve_simple_name(simple, &self.symbols.imports)
-            .or_else(|| bennu_java::prelude::java_lang_implicit(simple))
+        // `java.lang` needs no fallback of its own here: `bind_simple_name` already binds it.
+        self.resolver.resolve_simple_name(simple, &self.symbols.imports)
     }
 
     fn is_type(&self, binary: &str) -> bool {

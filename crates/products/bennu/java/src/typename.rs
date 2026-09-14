@@ -396,6 +396,177 @@ pub fn is_resolved_binary(binary: &str, resolver: &dyn crate::seam::TypeResolver
     resolver.members_of(binary).is_some()
 }
 
+/// Whether a compilation unit could name `binary` by the **simple name** `simple` — the scoping
+/// question, asked of a resolution somebody already made.
+///
+/// A resolver answers "what would this name MEAN", and it answers generously on purpose: its index
+/// is keyed by simple name, so `Foo` finds `com.acme.a.Foo` from anywhere in the project and
+/// completion, hover and go-to all want that. javac asks a narrower question — is the name actually
+/// **in scope here** (JLS §6.5.5, §7.5) — and it is the only one a "cannot resolve" may be built on.
+/// Without it, a class used across a package boundary with no `import` read as perfectly fine in
+/// Bennu and was rejected by the compiler, which is the failure a validator exists to prevent.
+///
+/// The test is written as "does any of the four things that put a simple name in scope produce this
+/// exact binary", rather than by taking `binary` apart: `a/b/Outer/Inner` cannot be split into
+/// package and class without already knowing the answer.
+///
+///   * a single-type import of it — `import a.b.Foo;`, and `import static a.b.Outer.Inner;`, the one
+///     static form that binds a type;
+///   * an import-on-demand of its package — `import a.b.*;`;
+///   * the compilation unit's own package, `package` being its dotted name (`None` / empty = the
+///     default package, where a bare `Foo` is a sibling);
+///   * `java.lang`, imported for you.
+///
+/// What it deliberately does NOT cover: a type declared in the file, a type parameter, and a member
+/// type inherited from a supertype (JLS §8.1.5). Those are in scope with no import and nothing to
+/// import, and the caller must have excluded them already — this function would say `false` for all
+/// three.
+pub fn simple_name_reaches(
+    binary: &str,
+    simple: &str,
+    package: Option<&str>,
+    imports: &[crate::symbols::Import],
+) -> bool {
+    // Compared with `same_binary_type` because an import slashes to `a/b/Outer/Inner` while the
+    // resolver may have handed back the bytecode spelling `a/b/Outer$Inner`.
+    scope_candidates(simple, package, imports)
+        .iter()
+        .any(|c| same_binary_type(&c.binary, binary))
+}
+
+/// What a simple name MEANS in a compilation unit: the first of its [`scope_candidates`] that is
+/// certain, or that `exists` confirms.
+///
+/// `None` is not "no such type" — only "nothing in this file's scope binds it". A caller that wants
+/// a project-wide guess after that makes it knowingly, and after this, never instead of it.
+///
+/// `exists` is whatever the caller can see — a resolver's `members_of`, a class index. It is asked
+/// in precedence order and stops at the first yes, so a name the file imports explicitly costs no
+/// lookup at all.
+pub fn bind_simple_name(
+    simple: &str,
+    package: Option<&str>,
+    imports: &[crate::symbols::Import],
+    exists: &dyn Fn(&str) -> bool,
+) -> Option<String> {
+    scope_candidates(simple, package, imports)
+        .into_iter()
+        .find(|c| c.confirmed_by(exists))
+        .map(|c| c.binary)
+}
+
+/// Which of Java's scoping routes a [`ScopeCandidate`] came from, in precedence order.
+///
+/// Public so a caller that cannot use every tier can say which it leaves out, rather than writing
+/// its own loop over the imports: `IndexResolver` is not told the file's package and drops
+/// [`ScopeKind::OwnPackage`], and splits the rest between the project index and the classpath.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScopeKind {
+    /// `import a.b.Foo;`
+    SingleImport,
+    /// A type of the file's own package — or of the default package, for a file with none.
+    OwnPackage,
+    /// `import static a.b.Outer.Inner;` — a type only when the path really is one.
+    StaticImport,
+    /// `import a.b.*;`
+    OnDemand,
+    /// `import static a.b.Outer.*;` — `Outer`'s static member types (JLS §7.5.4).
+    StaticOnDemand,
+    /// `java.lang`, imported for you.
+    JavaLang,
+}
+
+/// One way a simple name can come into scope — see [`scope_candidates`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeCandidate {
+    pub binary: String,
+    pub kind: ScopeKind,
+}
+
+impl ScopeCandidate {
+    /// Bound whether or not anything can confirm the type is there.
+    ///
+    /// A single-type import says what the name means, and a class that does not exist is the
+    /// import's own error, reported against the import — not a reason to bind the name to something
+    /// else. The curated `java.lang` names are certain too, so a caller whose view cannot read the
+    /// JDK still binds `String` to what it is.
+    pub fn is_certain(&self) -> bool {
+        match self.kind {
+            ScopeKind::SingleImport => true,
+            ScopeKind::JavaLang => self
+                .binary
+                .strip_prefix("java/lang/")
+                .is_some_and(|simple| java_lang_implicit(simple).is_some()),
+            _ => false,
+        }
+    }
+
+    /// Whether this candidate binds, given what `exists` can see.
+    ///
+    /// A static import-on-demand names a TYPE and imports its members, so the path has to be a type
+    /// before a member type is looked for inside it: `import static java.util.*;` names nothing, and
+    /// reading `java/util/LinkedHashMap` out of it would bind a class through an import that does
+    /// not exist.
+    pub fn confirmed_by(&self, exists: &dyn Fn(&str) -> bool) -> bool {
+        if self.is_certain() {
+            return true;
+        }
+        match self.kind {
+            ScopeKind::StaticOnDemand => {
+                self.binary.rsplit_once('/').is_some_and(|(owner, _)| exists(owner))
+                    && exists(&self.binary)
+            }
+            _ => exists(&self.binary),
+        }
+    }
+}
+
+/// Every binary a simple name COULD denote in a compilation unit, in the precedence Java gives them
+/// (JLS §6.4.1): a single-type import shadows the package's own types, which shadow every
+/// import-on-demand, `java.lang` included.
+///
+/// The ONE statement of that rule: [`simple_name_reaches`] asks whether a binary is among these,
+/// [`bind_simple_name`] takes the first one that exists. It used to be written out wherever it was
+/// needed — the validator, go-to into a library, the import intention, the Struts property
+/// navigator — and the copies did not agree. Go-to asked the project-wide simple-name map before the
+/// file's own wildcards, so a star-imported library type opened nothing whenever the project
+/// declared a class of the same simple name in any package at all.
+pub fn scope_candidates(
+    simple: &str,
+    package: Option<&str>,
+    imports: &[crate::symbols::Import],
+) -> Vec<ScopeCandidate> {
+    let slashed = |dotted: &str| dotted.replace('.', "/");
+    let mut out = Vec::new();
+    // `import a.b.Foo;` — the path IS the binary.
+    for imp in imports.iter().filter(|i| !i.star && !i.static_) {
+        if imp.simple_name() == Some(simple) {
+            out.push(ScopeCandidate { binary: slashed(&imp.path), kind: ScopeKind::SingleImport });
+        }
+    }
+    // The file's own package — or the default package, where a sibling has no prefix at all.
+    let own = match package.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(pkg) => format!("{}/{simple}", slashed(pkg)),
+        None => simple.to_string(),
+    };
+    out.push(ScopeCandidate { binary: own, kind: ScopeKind::OwnPackage });
+    // `import static a.b.Outer.Inner;` — the one static form that binds a TYPE, and only when the
+    // path really is one: it is just as often a method or a constant.
+    for imp in imports.iter().filter(|i| !i.star && i.static_) {
+        if imp.simple_name() == Some(simple) {
+            out.push(ScopeCandidate { binary: slashed(&imp.path), kind: ScopeKind::StaticImport });
+        }
+    }
+    // `import a.b.*;`, then `import static a.b.Outer.*;`.
+    for (static_, kind) in [(false, ScopeKind::OnDemand), (true, ScopeKind::StaticOnDemand)] {
+        for imp in imports.iter().filter(|i| i.star && i.static_ == static_) {
+            out.push(ScopeCandidate { binary: format!("{}/{simple}", slashed(&imp.path)), kind });
+        }
+    }
+    out.push(ScopeCandidate { binary: format!("java/lang/{simple}"), kind: ScopeKind::JavaLang });
+    out
+}
+
 /// The `java.lang` types that are implicitly imported (JLS §7.3), as a binary name.
 ///
 /// A curated set, not the whole package: a bare name that is NOT here stays unresolved rather than
@@ -597,6 +768,145 @@ mod tests {
     fn the_class_boundary_is_found_anywhere_in_a_qualified_name() {
         assert_eq!(bin("q.Host.Inner").as_deref(), Some("q/Host$Inner"));
         assert_eq!(bin("r.Thing.Part").as_deref(), Some("r/Thing/Part"));
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+    use crate::symbols::Import;
+
+    fn imp(path: &str, star: bool, static_: bool) -> Import {
+        Import { span: None, path: path.to_string(), star, static_ }
+    }
+
+    fn reaches(binary: &str, simple: &str, package: Option<&str>, imports: &[Import]) -> bool {
+        simple_name_reaches(binary, simple, package, imports)
+    }
+
+    #[test]
+    fn a_single_type_import_puts_the_name_in_scope() {
+        let imports = [imp("com.acme.util.Helper", false, false)];
+        assert!(reaches("com/acme/util/Helper", "Helper", Some("com.acme.web"), &imports));
+        // …and only that name: the import says nothing about a different type of the same package.
+        assert!(!reaches("com/acme/util/Other", "Other", Some("com.acme.web"), &imports));
+    }
+
+    #[test]
+    fn a_nested_type_reaches_under_either_spelling() {
+        // The import slashes to `a/b/Outer/Inner`; bytecode carries `a/b/Outer$Inner`.
+        let imports = [imp("a.b.Outer.Inner", false, false)];
+        assert!(reaches("a/b/Outer$Inner", "Inner", Some("p"), &imports));
+        assert!(reaches("a/b/Outer/Inner", "Inner", Some("p"), &imports));
+    }
+
+    #[test]
+    fn an_import_on_demand_covers_its_whole_package() {
+        let imports = [imp("com.acme.util", true, false)];
+        assert!(reaches("com/acme/util/Helper", "Helper", Some("com.acme.web"), &imports));
+        assert!(reaches("com/acme/util/Other", "Other", Some("com.acme.web"), &imports));
+        // A package it does not name is still out of scope.
+        assert!(!reaches("com/acme/dao/Helper", "Helper", Some("com.acme.web"), &imports));
+        // A static-import-on-demand brings member types in too (JLS §7.5.4).
+        let statics = [imp("a.b.Outer", true, true)];
+        assert!(reaches("a/b/Outer$Inner", "Inner", Some("p"), &statics));
+    }
+
+    #[test]
+    fn the_files_own_package_needs_no_import() {
+        assert!(reaches("com/acme/Sibling", "Sibling", Some("com.acme"), &[]));
+        assert!(!reaches("com/acme/util/Sibling", "Sibling", Some("com.acme"), &[]));
+        // The default package: no prefix at all, and a packaged type is NOT reachable from it.
+        assert!(reaches("Sibling", "Sibling", None, &[]));
+        assert!(reaches("Sibling", "Sibling", Some(""), &[]));
+        assert!(!reaches("com/acme/Sibling", "Sibling", None, &[]));
+    }
+
+    #[test]
+    fn java_lang_is_in_scope_and_nothing_else_of_the_jdk_is() {
+        assert!(reaches("java/lang/String", "String", Some("com.acme"), &[]));
+        assert!(!reaches("java/util/Set", "Set", Some("com.acme"), &[]));
+        assert!(reaches(
+            "java/util/Set",
+            "Set",
+            Some("com.acme"),
+            &[imp("java.util.Set", false, false)]
+        ));
+    }
+
+    // ── bind_simple_name: the same candidates, taken in precedence order ────────────────────
+
+    fn bind(simple: &str, package: Option<&str>, imports: &[Import], known: &[&str]) -> Option<String> {
+        bind_simple_name(simple, package, imports, &|b| known.contains(&b))
+    }
+
+    /// The go-to that broke: a wildcard-imported library type binds even when the project declares a
+    /// class of the same simple name somewhere else — that class is simply not in scope here.
+    #[test]
+    fn a_star_import_binds_what_its_package_holds() {
+        let imports = [imp("org.springframework.stereotype", true, false)];
+        let known = ["org/springframework/stereotype/Service", "com/acme/other/Service"];
+        assert_eq!(
+            bind("Service", Some("com.acme.web"), &imports, &known).as_deref(),
+            Some("org/springframework/stereotype/Service"),
+        );
+    }
+
+    #[test]
+    fn precedence_is_import_then_package_then_on_demand() {
+        let known = ["com/acme/web/Riga", "com/acme/dto/Riga", "com/lib/Riga"];
+        // The package beats a wildcard (JLS §6.4.1)…
+        let star_only = [imp("com.lib", true, false)];
+        assert_eq!(
+            bind("Riga", Some("com.acme.web"), &star_only, &known).as_deref(),
+            Some("com/acme/web/Riga"),
+        );
+        // …and a single-type import beats the package.
+        let with_single = [imp("com.lib", true, false), imp("com.acme.dto.Riga", false, false)];
+        assert_eq!(
+            bind("Riga", Some("com.acme.web"), &with_single, &known).as_deref(),
+            Some("com/acme/dto/Riga"),
+        );
+    }
+
+    /// An explicit import says what the name means whether or not anything can confirm the class.
+    #[test]
+    fn a_single_type_import_binds_without_asking() {
+        let imports = [imp("org.absent.Gone", false, false)];
+        assert_eq!(bind("Gone", Some("p"), &imports, &[]).as_deref(), Some("org/absent/Gone"));
+    }
+
+    /// From the library-view go-to this replaced: a sibling in the buffer's own package needs no
+    /// import, and a name the classpath does not have is never invented.
+    #[test]
+    fn a_sibling_binds_only_when_it_is_there() {
+        let known = ["org/springframework/context/MessageSource"];
+        let ctx = Some("org.springframework.context");
+        assert_eq!(
+            bind("MessageSource", ctx, &[], &known).as_deref(),
+            Some("org/springframework/context/MessageSource"),
+        );
+        assert_eq!(bind("Nonexistent", ctx, &[], &known), None);
+        assert_eq!(bind("MessageSource", Some("com.acme"), &[], &known), None);
+        assert_eq!(bind("MessageSource", None, &[], &known), None);
+        assert_eq!(bind("MessageSource", Some(""), &[], &known), None);
+    }
+
+    /// A static import-on-demand names a TYPE; one naming a package imports nothing.
+    #[test]
+    fn a_static_wildcard_binds_only_through_a_type() {
+        let known = ["a/b/Outer", "a/b/Outer/Inner", "java/util/LinkedHashMap"];
+        let through_type = [imp("a.b.Outer", true, true)];
+        assert_eq!(bind("Inner", Some("p"), &through_type, &known).as_deref(), Some("a/b/Outer/Inner"));
+        let through_package = [imp("java.util", true, true)];
+        assert_eq!(bind("LinkedHashMap", Some("p"), &through_package, &known), None);
+    }
+
+    #[test]
+    fn java_lang_binds_even_when_the_jdk_cannot_be_read() {
+        assert_eq!(bind("String", Some("p"), &[], &[]).as_deref(), Some("java/lang/String"));
+        // …but a class of that name in the file's own package shadows it.
+        assert_eq!(bind("String", Some("p"), &[], &["p/String"]).as_deref(), Some("p/String"));
     }
 }
 

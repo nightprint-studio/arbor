@@ -66,7 +66,14 @@ use crate::refs::{DeclKey, UsageLocation};
 /// owner key (`p/Outer/1`) did not read as a project type, so every one of them was dropped. Both
 /// change what the walk emits, so a cache written before this holds an index that is missing them
 /// and looks complete.
-pub const CACHE_VERSION: u32 = 13;
+///
+/// 14: simple type names bind in Java's precedence everywhere the walk and the index build ask —
+/// an inherited member type ahead of the file's imports, a static import of a nested type ahead of
+/// the wildcards, `java.lang` behind them — through `bennu_java::prelude::scope_candidates`, and the
+/// walk now binds the file's own wildcards before the project-wide simple-name map (its scope is
+/// shared with the caret classifier, `WalkNames`). Some names now bind to a different binary than
+/// the one an older walk filed their edges under.
+pub const CACHE_VERSION: u32 = 14;
 
 /// One file's cached contribution to the reference index.
 #[derive(Debug, Clone, Serialize, Deserialize)]

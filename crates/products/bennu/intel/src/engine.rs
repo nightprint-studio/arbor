@@ -706,16 +706,28 @@ impl SemanticEngine {
     /// build). `source` is the current (possibly-unsaved) buffer. `None` when the caret
     /// isn't on a symbol we can classify (a local variable / parameter isn't keyed here).
     pub fn hover(&self, file: &str, source: &str, offset: usize) -> Option<HoverInfo> {
+        // Classified with the FULL resolver when there is one — the same choice `card_for_key`
+        // makes below, for the same reason, one step earlier.
+        //
+        // The walk resolver is project-only, and project-only `resolve_simple_name` stops before
+        // the one probe that reads an import-on-demand of a LIBRARY package: a bare name bound by
+        // `import org.springframework.stereotype.*;` came back as nothing, so `@Service` under a
+        // star import had no key and no card, while the same annotation under
+        // `import org.springframework.stereotype.Service;` hovered fine — a single-type import binds
+        // before any probe. Not an annotation problem at all; every star-imported library type did it.
+        //
+        // Hover can afford the difference where find-usages cannot. Find-usages has to produce the
+        // key the walk filed its edges under, and the walk runs project-only; a hover only has to
+        // name what is under the caret. A PROJECT type still keys identically either way, because
+        // `project_types` answers before any resolver is asked.
+        let policy = self.full_policy();
+        let resolver: &dyn TypeResolver = match policy.as_deref() {
+            Some(full) => full,
+            None => &*self.resolver,
+        };
         let key = {
             let live = self.live();
-            classify_caret(
-                &live.index,
-                file,
-                source,
-                offset,
-                &*self.resolver,
-                &live.project_types,
-            )?
+            classify_caret(&live.index, file, source, offset, resolver, &live.project_types)?
         };
         // How many arguments the call under the caret passes — what tells two overloads apart.
         let argc = bennu_java::prelude::call_arity_at(source, offset);

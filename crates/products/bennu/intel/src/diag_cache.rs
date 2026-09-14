@@ -48,7 +48,13 @@ use serde::{Deserialize, Serialize};
 /// declares for it. The recorded members-hash of the enum would invalidate the files that read it
 /// anyway; the bump is here because a stale "no overload takes 1 argument" on working code is worth
 /// one cold re-validation to be certain of.
-pub const CACHE_VERSION: u32 = 3;
+///
+/// 4: a simple type name is judged by whether the file can NAME it, not merely by whether it exists
+/// somewhere — a missing `import java.util.Set;`, or a project class from another package used with
+/// no import, is now reported — and every name a check resolves goes through the one statement of
+/// Java's scoping order (`bennu_java::prelude::scope_candidates`), so a wildcard-imported type is no
+/// longer answered by a same-named class elsewhere. Cached lists from before hold neither.
+pub const CACHE_VERSION: u32 = 4;
 
 /// A deterministic content hash of a source buffer — the file's `own_hash`. Shares the
 /// reference cache's FNV-1a so the whole product hashes source the same way.

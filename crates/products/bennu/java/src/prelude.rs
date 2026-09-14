@@ -39,8 +39,9 @@ pub use crate::symbols::{
 };
 pub use crate::typename::{
     declared_type_in_scope, erase_type_arguments, inherited_member_type, inherited_member_type_of, is_primitive,
-    is_resolved_binary, java_lang_implicit, split_array_dims, known_spelling, resolve_written_type, same_binary_type,
-    NameScope, TypeName,
+    bind_simple_name, is_resolved_binary, java_lang_implicit, scope_candidates, simple_name_reaches,
+    split_array_dims, known_spelling, ScopeCandidate, ScopeKind,
+    resolve_written_type, same_binary_type, NameScope, TypeName,
 };
 
 pub use crate::import_hint::simple_type_needing_import;

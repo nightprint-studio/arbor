@@ -467,23 +467,20 @@ fn resolve_type_in_context(
     if let Some(c) = classes.iter().find(|c| c.simple == simple && same_file(&c.file, decl_file)) {
         return Some(c.fqcn.clone());
     }
+    // 2–4, through the workspace's one statement of Java's scoping rule. When the file BINDS the
+    // name — an import of it, a class in its package, a wildcard that holds it — that is the answer:
+    // the project class if it is one, and otherwise nothing. A getter whose type the file imports
+    // from a library is not a project class, and falling through to the project-wide guess below
+    // would walk the chain into an unrelated class that only shares the simple name.
     let syms = bennu_java::prelude::extract_symbols(decl_src);
-    if let Some(imp) = syms.imports.iter().find(|i| !i.star && i.simple_name() == Some(simple)) {
-        if let Some(c) = classes.iter().find(|c| c.fqcn == imp.path) {
-            return Some(c.fqcn.clone());
-        }
-    }
-    if let Some(pkg) = &syms.package {
-        let qualified = format!("{pkg}.{simple}");
-        if let Some(c) = classes.iter().find(|c| c.fqcn == qualified) {
-            return Some(c.fqcn.clone());
-        }
-    }
-    for imp in syms.imports.iter().filter(|i| i.star && !i.static_) {
-        let qualified = format!("{}.{simple}", imp.path);
-        if let Some(c) = classes.iter().find(|c| c.fqcn == qualified) {
-            return Some(c.fqcn.clone());
-        }
+    let project_class = |binary: &str| classes.iter().find(|c| c.fqcn.replace('.', "/") == binary);
+    if let Some(bound) = bennu_java::prelude::bind_simple_name(
+        simple,
+        syms.package.as_deref(),
+        &syms.imports,
+        &|b| project_class(b).is_some(),
+    ) {
+        return project_class(&bound).map(|c| c.fqcn.clone());
     }
     let mut same_name = classes.iter().filter(|c| c.simple == simple);
     let first = same_name.next()?;

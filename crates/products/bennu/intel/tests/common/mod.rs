@@ -123,6 +123,21 @@ impl Project {
         self.engine.upgrade_policy(full);
     }
 
+    /// Hand a PROJECT-ONLY engine (one built with [`Project::new`]) a policy that can see the
+    /// library tier ([`StreamJdk`]) — the production shape, where the walk resolver cannot read a
+    /// library type and the policy one can. [`grant_full_policy`](Self::grant_full_policy) cannot
+    /// build it: there the walk and the policy are the same resolver, so no test could tell which
+    /// of the two a feature asked.
+    pub fn grant_library_policy(&self) {
+        let index_dir = self._temp.path().join("g000");
+        let persisted =
+            PersistedIndex::open(&index_dir.join("symbols.blob"), &index_dir.join("names.fst"))
+                .expect("open index for the library policy");
+        let full: Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync> =
+            Arc::new(IndexResolver::new(persisted, StreamJdk));
+        self.engine.upgrade_policy(full);
+    }
+
     fn build(files: &[(&str, &str)], jdk: &str, stream_jdk: bool, provisional: bool) -> Self {
         let temp = TempDir::new();
         // A `gN` gen subdir so the engine's reference cache lands at `temp/…` (unique per

@@ -302,20 +302,15 @@ fn import_class_offers(file: &str, source: &str, simple: &str) -> Vec<OfferWire>
 /// by an `import pkg.*;`. The single place the "does this need importing?" policy lives — shared by
 /// the "Import class" intention (per candidate) and the auto-import-on-completion handler.
 pub(crate) fn import_edit_for(source: &str, fqn: &str) -> Option<(usize, usize, String)> {
-    let pkg = fqn.rsplit_once('.').map(|(p, _)| p).unwrap_or("");
-    if pkg == "java.lang" {
-        return None;
-    }
+    // "Does this need importing" is "is the name already in scope", and that question has one
+    // answer in the workspace — the one the validator reports a missing import with. Asking it
+    // separately here is how the two could come to disagree: an intention offering an import the
+    // check never asked for, or refusing one it did.
     let syms = bennu_java::prelude::extract_symbols(source);
-    if syms.package.as_deref() == Some(pkg) {
-        return None; // same package — no import needed
-    }
-    if syms
-        .imports
-        .iter()
-        .any(|i| i.star && !i.static_ && i.path.trim_end_matches(".*") == pkg)
-    {
-        return None; // covered by a wildcard import
+    let simple = fqn.rsplit('.').next().unwrap_or(fqn);
+    let binary = fqn.replace('.', "/");
+    if bennu_java::prelude::simple_name_reaches(&binary, simple, syms.package.as_deref(), &syms.imports) {
+        return None;
     }
     let edit = bennu_intentions::prelude::insert_import_edit(source, fqn)?; // None if already imported
     Some((edit.start, edit.end, edit.replacement))

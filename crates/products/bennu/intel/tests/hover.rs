@@ -45,6 +45,59 @@ fn ui() -> Project {
     ])
 }
 
+/// A library type reached through an import-on-demand hovers like any other.
+///
+/// The reported case was an annotation — `@Service` under `import org.springframework.stereotype.*;`
+/// showed nothing, the same annotation under a single-type import showed its card — but the
+/// annotation was incidental. The caret was classified with the WALK resolver, which is project-only
+/// and stops before the probe that reads a star import of a library package; a single-type import
+/// binds before any probe, which is why that shape always worked.
+#[test]
+fn a_library_type_under_a_star_import_hovers() {
+    let p = Project::new(&[(
+        "Mapper.java",
+        "package app;\n\
+         import java.util.function.*;\n\
+         public class Mapper {\n\
+         \x20   Function<String, String> f;\n\
+         }\n",
+    )]);
+    let s = p.source("Mapper.java").to_string();
+    let caret = at(&s, "Function<String");
+
+    // Before the library tier arrives the engine can see only the project — nothing to show, and
+    // nothing wrong shown either.
+    assert!(p.hover("Mapper.java", caret).is_none());
+
+    // Once it has, the star import binds the name exactly as a single-type import would.
+    p.grant_library_policy();
+    let h = p.hover("Mapper.java", caret).expect("hover on a star-imported library type");
+    assert_eq!(h.kind, "interface", "{h:?}");
+    assert!(h.signature.contains("Function"), "{h:?}");
+}
+
+/// Two packages declare `Riga`, and the file wildcard-imports one of them. The caret has to land on
+/// the key the WALK filed the type under — the imported one — not on whichever `Riga` the
+/// project's simple-name map happens to keep. The classifier used to ask that map first.
+#[test]
+fn a_star_imported_project_type_keys_to_the_package_it_was_imported_from() {
+    let p = Project::new(&[
+        ("a/Riga.java", "package a;\npublic class Riga {}\n"),
+        ("b/Riga.java", "package b;\npublic class Riga {}\n"),
+        (
+            "c/Uses.java",
+            "package c;\n\
+             import b.*;\n\
+             public class Uses {\n\
+             \x20   Riga r;\n\
+             }\n",
+        ),
+    ]);
+    let s = p.source("c/Uses.java").to_string();
+    let h = p.hover("c/Uses.java", at(&s, "Riga r")).expect("hover on the star-imported type");
+    assert_eq!(h.owner.as_deref(), Some("b/Riga"), "{h:?}");
+}
+
 #[test]
 fn hover_method_reports_signature_and_owner() {
     let p = ui();

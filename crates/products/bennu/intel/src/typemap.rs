@@ -113,14 +113,6 @@ impl<'a> FileNames<'a> {
         }
     }
 
-    /// The binary name of `simple`, were it a type in this file's own package.
-    fn same_package(&self, simple: &str) -> String {
-        if self.package.is_empty() {
-            simple.to_string()
-        } else {
-            format!("{}/{simple}", self.package.replace('.', "/"))
-        }
-    }
 }
 
 /// What binds a simple type name during an INDEX BUILD: the declaring type's own scope, the file's
@@ -144,40 +136,30 @@ impl bennu_java::prelude::NameScope for ProjectNameScope<'_> {
         if let Some(nested) = nested_in_scope(self.owner, simple, self.names.is_project) {
             return Some(nested);
         }
-        // A single-type import wins over the collision-prone project map.
-        for imp in self.names.imports {
-            if imp.simple_name() == Some(simple) {
-                return Some(imp.path.replace('.', "/"));
-            }
-        }
         // A member type inherited from a SUPERTYPE of the owner or of a type it is written inside.
+        // Class scope, so ahead of everything the FILE binds (JLS §6.4.1). It used to sit between
+        // the single-type imports and the package, which let an import of an unrelated `Entry`
+        // shadow the one the class inherits.
         if let Some(b) = self.inherited_nested(simple) {
             return Some(b);
         }
-        // A type in the OWNER's OWN PACKAGE is in scope with no import at all (JLS §6.5.5.1), and
-        // its exact binary is derivable from the owner's. Missing, a bare same-package name fell
-        // through to the project-wide map — which keeps ONE binary per simple name — so
-        // `implements Builder` inside `org.apache.commons.lang3.builder` bound to whichever nested
-        // `Builder` that map happened to hold, and the type was judged against the wrong contract.
-        let candidate = self.names.same_package(simple);
-        if (self.names.is_project)(&candidate) {
-            return Some(candidate);
+        // What the FILE binds — single-type imports, its own package (the FILE's: see `FileNames`),
+        // the imports-on-demand, `java.lang` — through the workspace's one statement of Java's rule.
+        // Only project types can be confirmed while the index is being built, and that is exactly
+        // what the two collisions this has had to handle needed: a same-package `Builder` bound
+        // ahead of the collapsed map (`implements Builder` inside `org.apache.commons.lang3.builder`),
+        // and a wildcard pinning the exact package of a JAXB `*Type` that several packages declare.
+        if let Some(b) = bennu_java::prelude::bind_simple_name(
+            simple,
+            Some(self.names.package),
+            self.names.imports,
+            self.names.is_project,
+        ) {
+            return Some(b);
         }
-        // A non-static wildcard import that brings in a PROJECT type of this simple name pins its
-        // exact package — the fix for a supertype or a `throws` whose simple name collides across
-        // packages (the JAXB `*Type` case), which the collapsed map below cannot express.
-        for imp in self.names.imports {
-            if imp.star && !imp.static_ {
-                let candidate = format!("{}/{simple}", imp.path.replace('.', "/"));
-                if (self.names.is_project)(&candidate) {
-                    return Some(candidate);
-                }
-            }
-        }
-        if let Some(b) = self.names.project_types.get(simple) {
-            return Some(b.clone());
-        }
-        bennu_java::prelude::java_lang_implicit(simple)
+        // Last, the project-wide map — one binary per simple name, so a guess, and taken only when
+        // the file's own scope reaches nothing this build can see.
+        self.names.project_types.get(simple).cloned()
     }
 
     fn is_type(&self, binary: &str) -> bool {
@@ -212,15 +194,15 @@ impl ProjectNameScope<'_> {
                         .unwrap_or(sup)
                         .trim();
                     // The supertype itself, by the cheap non-recursive routes only.
-                    let sup_binary = self
-                        .names
-                        .imports
-                        .iter()
-                        .find(|i| i.simple_name() == Some(sup_simple))
-                        .map(|i| i.path.replace('.', "/"))
-                        .or_else(|| Some(self.names.same_package(sup_simple)))
-                        .filter(|b| (self.names.is_project)(b))
-                        .or_else(|| self.names.project_types.get(sup_simple).cloned())?;
+                    // Only a project type can declare a nested type this build has indexed.
+                    let sup_binary = bennu_java::prelude::bind_simple_name(
+                        sup_simple,
+                        Some(self.names.package),
+                        self.names.imports,
+                        self.names.is_project,
+                    )
+                    .filter(|b| (self.names.is_project)(b))
+                    .or_else(|| self.names.project_types.get(sup_simple).cloned())?;
                     let candidate = format!("{sup_binary}/{simple}");
                     if (self.names.is_project)(&candidate) {
                         return Some(candidate);
@@ -457,6 +439,26 @@ mod tests {
             scope.simple("AbstractIterator").as_deref(),
             Some("a/b/AbstractIterator")
         );
+    }
+
+    /// A wildcard of a project package pins the exact class when several packages declare the
+    /// simple name — the JAXB `*Type` case, which the collapsed map below it cannot express.
+    #[test]
+    fn a_wildcard_pins_the_project_package_over_the_flat_map() {
+        use bennu_java::prelude::NameScope;
+        let project = |b: &str| matches!(b, "p/Owner" | "a/dto/Riga" | "z/Riga");
+        let mut map = BTreeMap::new();
+        map.insert("Riga".to_string(), "z/Riga".to_string()); // the collapsed map's pick
+        let imports = [Import { span: None, path: "a.dto".into(), star: true, static_: false }];
+        let names = FileNames {
+            package: "p",
+            imports: &imports,
+            project_types: &map,
+            is_project: &project,
+            file_types: &[],
+        };
+        let scope = ProjectNameScope { names, owner: "p/Owner" };
+        assert_eq!(scope.simple("Riga").as_deref(), Some("a/dto/Riga"));
     }
 
     #[test]

@@ -13,7 +13,9 @@
 //! So this module does the same two things, in order:
 //!
 //! 1. [`up_to_date`] — a few hundred `stat` calls over the modules' `src/main/{java,resources}`
-//!    against the stamp of the last successful compile. Unchanged → no Maven at all.
+//!    against the stamp of the last successful compile **of that module**. Unchanged → no Maven
+//!    at all. The two halves have to agree: step 2 compiles one module, so step 1 may only skip
+//!    for the module it actually compiled.
 //! 2. `-pl <module> -am` — when it must compile, only the module being run and the ones it is
 //!    built from, not the reactor.
 //!
@@ -183,7 +185,7 @@ pub(crate) fn compile_project(
         // the whole difference between "press ▷ and wait" and "press ▷": Maven's floor is
         // seconds even with nothing to do, and the most common launch of all is the one where
         // you have changed nothing.
-        match up_to_date(&root) {
+        match up_to_date(&root, module) {
             Some(stamp) => {
                 sink.emit(EVT_BUILD_OUTPUT, json!({ "text": "Everything is up to date." }));
                 CompileOutcome {
@@ -207,13 +209,13 @@ pub(crate) fn compile_project(
     // Remember what was on disk when this compile succeeded, so the next launch can tell
     // whether anything has changed. Recorded from the stamp taken BEFORE compiling: a build
     // writes into `target/`, and stamping afterwards would record a tree that includes its
-    // own output.
+    // own output. Against THIS module — a `-pl a -am` compile is not evidence about `b`.
     if outcome.ok {
         if let Some(stamp) = outcome.stamp {
             build_stamps()
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .insert(root_path.to_string(), stamp);
+                .insert(stamp_key(root_path, module), stamp);
         }
     }
 
@@ -229,10 +231,13 @@ pub(crate) fn compile_project(
     // project has no symbol index (see `bennu_open_project`), so there is nothing to
     // refresh and asking would light an "Indexing…" status over an empty build.
     // …but not when nothing was compiled: re-indexing after a no-op costs the user a whole
-    // index rebuild for nothing, and — since a rebuild deliberately forgets the build stamp —
-    // it would make the NEXT launch compile again. The skip would defeat itself.
+    // index rebuild for nothing.
+    //
+    // A REFRESH, never the manual rebuild: that one drops the dependency jar list and makes
+    // Maven resolve the whole tree again, which a compile — no pom touched — has no reason to
+    // ask for. See `IndexService::refresh_after_compile`.
     if outcome.ok && outcome.tool != "cargo" && outcome.tool != "up-to-date" {
-        IndexService::global().reindex(root_path, ctx.event_sink());
+        IndexService::global().refresh_after_compile(root_path, ctx.event_sink());
     }
 
     Ok(outcome)
@@ -806,30 +811,74 @@ fn jdk_major(level: &str) -> u32 {
 
 // ── "has anything changed since the last compile" ──────────────────────────────
 
-/// The source stamp of the last SUCCESSFUL compile, per project root.
+/// The source stamp of the last SUCCESSFUL compile, per project root **and module**.
+///
+/// The module is half the key because the compile is `-pl <module> -am`: it builds that module
+/// and the ones it is built from, and nothing else. A stamp kept per root said "this project was
+/// compiled" when what happened was "one module of it was" — so on a reactor, building or running
+/// module `a` and then launching module `b` found a matching stamp, skipped the compile entirely,
+/// and started a JVM against a `b/target/classes` that had never been written. The failure reads as
+/// `ClassNotFoundException` at launch, which is nothing like "your build was skipped".
+///
+/// The stamp VALUE stays project-wide (see [`source_stamp`]): an edit anywhere invalidates every
+/// module, which is the conservative direction — a module can depend on any other.
 ///
 /// In memory only. Persisting it would mean trusting a stamp written by a different version
 /// of Bennu, or one taken before someone ran `mvn clean` outside the editor — and the cost of
 /// being wrong is a run against stale classes, which is the single most confusing failure a
 /// build system can produce. One Maven invocation per session is a price worth paying for
 /// never being wrong about it.
-fn build_stamps() -> &'static Mutex<HashMap<String, u64>> {
-    static STAMPS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+fn build_stamps() -> &'static Mutex<HashMap<StampKey, u64>> {
+    static STAMPS: OnceLock<Mutex<HashMap<StampKey, u64>>> = OnceLock::new();
     STAMPS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// `Some(stamp)` when the project has not changed since its last successful compile — the
-/// caller can skip the build and keep the stamp. `None` when it must compile.
+/// What a [`build_stamps`] entry is about: a project root, and the module that was compiled
+/// (empty = the whole reactor).
+type StampKey = (String, String);
+
+/// The [`build_stamps`] key for one compile. `None` / blank is the whole-project build.
+fn stamp_key(root: &str, module: Option<&str>) -> StampKey {
+    let module = module.map(str::trim).filter(|m| !m.is_empty()).unwrap_or_default();
+    (root.to_string(), module.to_string())
+}
+
+/// `Some(stamp)` when `module` has not changed since ITS last successful compile — the caller can
+/// skip the build and keep the stamp. `None` when it must compile.
+///
+/// Two entries can answer, and the second is what keeps the fast path: a whole-reactor build
+/// compiled this module too, so a stamp recorded against the root satisfies a later per-module
+/// launch. The reverse is deliberately not true — module `a`'s stamp says nothing about `b`.
 ///
 /// The output has to still be there: `mvn clean` in a terminal, or a deleted `target/`, makes
-/// a matching stamp a lie.
-fn up_to_date(root: &Path) -> Option<u64> {
+/// a matching stamp a lie. Which output, though, is the module's own — `any_output_exists` asked
+/// whether ANY module had compiled, which a reactor with one built module answers `true` to
+/// forever.
+fn up_to_date(root: &Path, module: Option<&str>) -> Option<u64> {
     let key = root.display().to_string();
-    let previous = *build_stamps().lock().unwrap_or_else(|p| p.into_inner()).get(&key)?;
-    if !any_output_exists(root) {
+    let previous = {
+        let stamps = build_stamps().lock().unwrap_or_else(|p| p.into_inner());
+        *stamps
+            .get(&stamp_key(&key, module))
+            .or_else(|| stamps.get(&stamp_key(&key, None)))?
+    };
+    if !output_exists(root, module) {
         return None;
     }
     (source_stamp(root) == previous).then_some(previous)
+}
+
+/// Whether the compiled output a build of `module` would have produced is on disk.
+///
+/// For a module, that is its own `target/classes` and nothing else — the question is whether
+/// launching it would find its classes. For a whole-project build it stays "any module has output",
+/// because a reactor root is packaging `pom` and compiles nothing of its own, so asking for the
+/// root's `target/classes` would make the Build button recompile every time.
+fn output_exists(root: &Path, module: Option<&str>) -> bool {
+    match module.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) => root.join(m).join("target").join("classes").is_dir(),
+        None => any_output_exists(root),
+    }
 }
 
 /// Whether any module of the project has compiled output at all.
@@ -910,7 +959,7 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
 /// for a compile. The no-op case is checked here rather than left to [`compile_project`], which would
 /// print "Everything is up to date." into the Build panel on every question the lab asks.
 pub(crate) fn ensure_compiled(ctx: &BennuState, root: &str) -> Result<(), String> {
-    if up_to_date(Path::new(root)).is_some() {
+    if up_to_date(Path::new(root), None).is_some() {
         return Ok(());
     }
     let outcome = compile_project(ctx, root, None)?;
@@ -935,17 +984,25 @@ pub(crate) fn ensure_compiled(ctx: &BennuState, root: &str) -> Result<(), String
 pub(crate) fn lab_classpath(root: &str) -> (String, String) {
     use std::hash::{Hash, Hasher};
     let classpath = run_classpath(Path::new(root), None, None, "");
-    let stamp = build_stamps().lock().unwrap_or_else(|p| p.into_inner()).get(root).copied();
+    let stamp = build_stamps()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&stamp_key(root, None))
+        .copied();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     classpath.hash(&mut hasher);
     stamp.hash(&mut hasher);
     (classpath, format!("{:016x}", hasher.finish()))
 }
 
-/// Forget a project's build stamp, so the next build runs for real. Called when the index is
-/// rebuilt — the moment the user has told us not to trust what we remember.
+/// Forget a project's build stamps — every module's, not just the root's — so the next build runs
+/// for real. Called when the index is rebuilt: the moment the user has told us not to trust what we
+/// remember.
 pub(crate) fn forget_build_stamp(root: &str) {
-    build_stamps().lock().unwrap_or_else(|p| p.into_inner()).remove(root);
+    build_stamps()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .retain(|(r, _), _| r != root);
 }
 
 // ── run classpath ──────────────────────────────────────────────────────────────
@@ -1766,6 +1823,66 @@ mod tests {
         );
         // The jar paths themselves must not be in there — that is the whole point.
         assert!(!line.contains(".m2"), "the classpath must be summarised: {line}");
+    }
+
+    /// A build is evidence about the module it compiled, and not about its neighbours.
+    ///
+    /// The failure this pins was a `ClassNotFoundException` at launch with no explanation: a
+    /// `-pl a -am` compile stamped the whole ROOT, so running `b` afterwards found a matching
+    /// stamp, printed "Everything is up to date", skipped Maven entirely and started a JVM
+    /// against a `b/target/classes` that had never been written.
+    #[test]
+    fn one_modules_build_does_not_answer_for_another() {
+        let dir = std::env::temp_dir().join(format!(
+            "bennu-stamp-module-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let write = |rel: &str, text: &str| {
+            let p = dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, text).unwrap();
+        };
+        write("pom.xml", "<project><modules><module>a</module><module>b</module></modules></project>");
+        write("a/pom.xml", "<project></project>");
+        write("b/pom.xml", "<project></project>");
+        write("a/src/main/java/A.java", "class A {}\n");
+        write("b/src/main/java/B.java", "class B {}\n");
+        // Only `a` has been compiled.
+        std::fs::create_dir_all(dir.join("a/target/classes")).unwrap();
+
+        let root = dir.display().to_string();
+        let stamp = source_stamp(&dir);
+        build_stamps()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(stamp_key(&root, Some("a")), stamp);
+
+        assert!(up_to_date(&dir, Some("a")).is_some(), "`a` was compiled and nothing changed");
+        assert!(
+            up_to_date(&dir, Some("b")).is_none(),
+            "`b` has never been compiled — launching it must build it first",
+        );
+
+        // A WHOLE-reactor build answers for a module too: it compiled this one as well.
+        build_stamps()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(stamp_key(&root, None), stamp);
+        assert!(
+            up_to_date(&dir, Some("b")).is_none(),
+            "…but only where the output is actually on disk",
+        );
+        std::fs::create_dir_all(dir.join("b/target/classes")).unwrap();
+        assert!(up_to_date(&dir, Some("b")).is_some(), "now `b` really is up to date");
+
+        // Rebuilding the index forgets EVERY module's stamp, not only the root's.
+        forget_build_stamp(&root);
+        assert!(up_to_date(&dir, Some("a")).is_none());
+        assert!(up_to_date(&dir, Some("b")).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The stamp is stable when nothing moves, and changes when a source OR a resource does.

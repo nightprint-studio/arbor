@@ -862,11 +862,7 @@ impl<'a> FileWalker<'a> {
         // The file's imports, for the whole walk: they are what turns a bare `SharedService`
         // into `com/acme/SharedService` when the class lives in a dependency.
         self.imports = symbols.imports.clone();
-        self.file_types = symbols
-            .types
-            .iter()
-            .map(|t| (t.name.clone(), t.fqn.replace('.', "/")))
-            .collect();
+        self.file_types = file_type_map(symbols);
         self.package = symbols.package.clone();
         self.local_names = collect_bound_names(root, self.bytes);
         // What the BUFFER declares, which is not the same question as what the index holds.
@@ -1463,9 +1459,18 @@ impl<'a> FileWalker<'a> {
     /// The binary name a type EXPRESSION denotes — see [`bennu_java::prelude::resolve_written_type`],
     /// the one reading of a written type name this workspace has.
     fn resolve_type_simple(&self, text: &str) -> Option<String> {
-        bennu_java::prelude::resolve_written_type(text, self)
-            .resolved()
-            .filter(|b| bennu_java::prelude::is_resolved_binary(b, self.resolver))
+        self.names().binary_of(text)
+    }
+
+    /// This file's name scope — the one [`type_key`] also reads, see [`WalkNames`].
+    fn names(&self) -> WalkNames<'_> {
+        WalkNames {
+            file_types: &self.file_types,
+            package: self.package.as_deref(),
+            imports: &self.imports,
+            project_types: self.project_types,
+            resolver: self.resolver,
+        }
     }
 
     fn is_declaration_name(&self, node: &Node) -> bool {
@@ -1617,7 +1622,7 @@ fn classify_caret_at(
                     source,
                     resolver,
                     project_types,
-                    &symbols.imports,
+                    &symbols,
                 );
             }
             let owner = match parent.child_by_field_name("object") {
@@ -1668,7 +1673,7 @@ fn classify_caret_at(
                     source,
                     resolver,
                     project_types,
-                    &symbols.imports,
+                    &symbols,
                 );
             }
             let obj = parent.child_by_field_name("object")?;
@@ -1733,7 +1738,7 @@ fn classify_caret_at(
                 source,
                 resolver,
                 project_types,
-                &symbols.imports,
+                &symbols,
             )
         }
         // An annotation's NAME is a type reference, and the grammar does not say so: a
@@ -1753,7 +1758,7 @@ fn classify_caret_at(
             }
             let text = name.utf8_text(bytes).map(str::to_string).unwrap_or(ident_text);
             let symbols = extract_symbols_from_root(root, source);
-            type_key(&text, project_types, resolver, &symbols.imports)
+            type_key(&text, &symbols, project_types, resolver)
         }
         "type_identifier" | "scoped_type_identifier" | "generic_type" => {
             // Use the FULL type expression (the parent), not just the clicked segment, so a
@@ -1764,12 +1769,12 @@ fn classify_caret_at(
                 .map(str::to_string)
                 .unwrap_or_else(|_| ident_text.clone());
             let symbols = extract_symbols_from_root(root, source);
-            type_key(&text, project_types, resolver, &symbols.imports)
+            type_key(&text, &symbols, project_types, resolver)
         }
         _ => {
             if ident.kind() == "type_identifier" {
                 let symbols = extract_symbols_from_root(root, source);
-                return type_key(&ident_text, project_types, resolver, &symbols.imports);
+                return type_key(&ident_text, &symbols, project_types, resolver);
             }
             // `@org.junit.jupiter.api.Test` — the clicked segment sits inside a
             // `scoped_identifier` whose parent is the annotation. The whole dotted name is what
@@ -1779,7 +1784,7 @@ fn classify_caret_at(
                     if matches!(gp.kind(), "marker_annotation" | "annotation") {
                         let text = parent.utf8_text(bytes).unwrap_or(&ident_text).to_string();
                         let symbols = extract_symbols_from_root(root, source);
-                        return type_key(&text, project_types, resolver, &symbols.imports);
+                        return type_key(&text, &symbols, project_types, resolver);
                     }
                 }
             }
@@ -1885,7 +1890,7 @@ fn receiver_side_key(
     source: &str,
     resolver: &dyn TypeResolver,
     project_types: &HashMap<String, String>,
-    imports: &[bennu_java::prelude::Import],
+    symbols: &FileSymbols,
 ) -> Option<DeclKey> {
     // The receiver of a member access (`obj` in `obj.foo()` / `obj.field`, the qualifier of
     // `obj::foo`) is usually a VARIABLE, not a type. A field the enclosing type really declares
@@ -1913,7 +1918,7 @@ fn receiver_side_key(
     if let Some(owner) = declared {
         return Some(field(owner));
     }
-    type_key(ident_text, project_types, resolver, imports).or_else(|| enclosing.map(field))
+    type_key(ident_text, symbols, project_types, resolver).or_else(|| enclosing.map(field))
 }
 
 /// The owner type of `member` accessed on `obj` in `obj.member` (`obj.foo()` / `obj.field`).
@@ -1941,48 +1946,35 @@ fn receiver_owner(
     }
     let obj_text = obj.utf8_text(bytes).ok()?;
     if let Some(DeclKey::Type { binary }) =
-        type_key(obj_text, project_types, resolver, &symbols.imports)
+        type_key(obj_text, symbols, project_types, resolver)
     {
         return declaring_owner(resolver, &binary, member, is_method);
     }
     None
 }
 
+/// The [`DeclKey`] of the type a written name under the caret denotes.
+///
+/// It has to be byte-identical to the key the walk filed that type's uses under, so it is read
+/// through the walk's own scope ([`WalkNames`]) rather than a lookup of its own — that is what
+/// `Outer.Inner` versus `a.b.C`, the file's own types, inherited member types and every import form
+/// all come out of, identically on both sides.
 fn type_key(
-    simple: &str,
+    text: &str,
+    symbols: &FileSymbols,
     project_types: &HashMap<String, String>,
     resolver: &dyn TypeResolver,
-    imports: &[bennu_java::prelude::Import],
 ) -> Option<DeclKey> {
-    let base = simple.split('<').next().unwrap_or(simple).trim();
-    if base.contains('.') {
-        // A dotted type expression is EITHER a nested-type reference (`Outer.Inner`) OR a
-        // package-qualified FQN (`alpha.Widget`). If the FIRST segment is a known project TYPE
-        // it's nested → resolve the trailing simple name (nested types are indexed by it).
-        // Otherwise the prefix is a PACKAGE → the binary is the dotted path itself, which
-        // disambiguates two same-simple-name types in different packages (`alpha.Widget` vs
-        // `beta.Widget`) that the simple→binary map alone cannot.
-        let first = base.split('.').next().unwrap_or(base);
-        if project_types.contains_key(first) {
-            let last = base.rsplit('.').next().unwrap_or(base);
-            if let Some(b) = project_types.get(last) {
-                return Some(DeclKey::Type { binary: b.clone() });
-            }
-        }
-        return Some(DeclKey::Type {
-            binary: base.replace('.', "/"),
-        });
+    let file_types = file_type_map(symbols);
+    WalkNames {
+        file_types: &file_types,
+        package: symbols.package.as_deref(),
+        imports: &symbols.imports,
+        project_types,
+        resolver,
     }
-    if let Some(b) = project_types.get(base) {
-        return Some(DeclKey::Type { binary: b.clone() });
-    }
-    // With the file's imports — the only route by which a bare `SharedService` reaches a class
-    // that lives in a dependency. The key produced here has to be byte-identical to the one the
-    // walker indexed the use sites under, so this and `resolve_type_simple` must resolve the
-    // same way; an empty list here made find-usages silent even once the edges existed.
-    resolver
-        .resolve_simple_name(base, imports)
-        .map(|binary| DeclKey::Type { binary })
+    .binary_of(text)
+    .map(|binary| DeclKey::Type { binary })
 }
 
 fn declaring_owner(
@@ -3148,6 +3140,44 @@ mod tests {
 /// the nested one and every judgement about the type was made against the wrong contract.
 impl bennu_java::prelude::NameScope for FileWalker<'_> {
     fn simple(&self, simple: &str) -> Option<String> {
+        bennu_java::prelude::NameScope::simple(&self.names(), simple)
+    }
+
+    fn is_type(&self, binary: &str) -> bool {
+        bennu_java::prelude::NameScope::is_type(&self.names(), binary)
+    }
+}
+
+/// What binds a simple type name for the REFERENCE WALK — and for the caret classifier that reads
+/// the walk's index back.
+///
+/// One scope with two users, on purpose. The walk files every use of a type under a binary name,
+/// and find-usages, go-to and hover look that key up again from a caret; a key they spell
+/// differently is a use nothing will ever find. They used to be two lookups kept in step by a
+/// comment — `type_key` asked the project's simple-name map FIRST, where the walk asked the file's
+/// own imports first — and they drifted exactly where the map keeps one binary for a name several
+/// packages declare. Built from the same four facts about the file, they cannot disagree.
+struct WalkNames<'a> {
+    /// The types THIS file declares, simple name → binary — see [`file_type_map`].
+    file_types: &'a HashMap<String, String>,
+    package: Option<&'a str>,
+    imports: &'a [bennu_java::prelude::Import],
+    project_types: &'a HashMap<String, String>,
+    resolver: &'a dyn TypeResolver,
+}
+
+impl WalkNames<'_> {
+    /// The binary a written type EXPRESSION denotes (`Foo`, `Outer.Inner`, `a.b.C<X>`), or `None`
+    /// when nothing bound it — see [`bennu_java::prelude::resolve_written_type`].
+    fn binary_of(&self, text: &str) -> Option<String> {
+        bennu_java::prelude::resolve_written_type(text, self)
+            .resolved()
+            .filter(|b| bennu_java::prelude::is_resolved_binary(b, self.resolver))
+    }
+}
+
+impl bennu_java::prelude::NameScope for WalkNames<'_> {
+    fn simple(&self, simple: &str) -> Option<String> {
         // A type declared in THIS file is authoritative — its binary comes off the file itself.
         if let Some(b) = self.file_types.get(simple) {
             return Some(b.clone());
@@ -3160,33 +3190,35 @@ impl bennu_java::prelude::NameScope for FileWalker<'_> {
                 return Some(b);
             }
         }
-        for imp in &self.imports {
-            if imp.simple_name() == Some(simple) {
-                return Some(imp.path.replace('.', "/"));
-            }
-        }
-        // A type in the file's own package needs no import, and its exact binary is derivable.
-        if let Some(pkg) = self.package.as_deref() {
-            if !pkg.is_empty() {
-                let candidate = format!("{}/{simple}", pkg.replace('.', "/"));
-                if self.resolver.members_of(&candidate).is_some() {
-                    return Some(candidate);
-                }
-            }
+        // What the FILE binds — imports, its own package, wildcards, `java.lang` — through the
+        // workspace's one statement of Java's rule, ahead of the project-wide map: that map keeps
+        // one binary per simple name, and answered for a wildcard-imported type with whichever
+        // class of that name it happened to hold.
+        if let Some(bound) = bennu_java::prelude::bind_simple_name(
+            simple,
+            self.package,
+            self.imports,
+            &|binary| self.resolver.members_of(binary).is_some(),
+        ) {
+            return Some(bound);
         }
         if let Some(b) = self.project_types.get(simple) {
             return Some(b.clone());
         }
         // WITH the file's imports: a DEPENDENCY type is reachable by its simple name only through
         // the `import` that named it.
-        self.resolver
-            .resolve_simple_name(simple, &self.imports)
-            .or_else(|| bennu_java::prelude::java_lang_implicit(simple))
+        self.resolver.resolve_simple_name(simple, self.imports)
     }
 
     fn is_type(&self, binary: &str) -> bool {
         self.resolver.members_of(binary).is_some()
     }
+}
+
+/// The types a file declares, simple name → binary: the authoritative first tier of [`WalkNames`].
+/// Built in one place so the walk and the caret classifier cannot build it two ways.
+fn file_type_map(symbols: &FileSymbols) -> HashMap<String, String> {
+    symbols.types.iter().map(|t| (t.name.clone(), t.fqn.replace('.', "/"))).collect()
 }
 
 /// The in-session refresh: an edit reaches find-usages without rebuilding the project.

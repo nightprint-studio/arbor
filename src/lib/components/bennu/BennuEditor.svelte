@@ -4053,7 +4053,12 @@
     //     or a Spring bean id — go to the Java class it names.
     if (action && (await tryGoToXmlClass(action))) return;
     // 2. Instant offline class-index fallback (types) when the BE resolver is cold.
-    if (action && (await tryGoToClassDeclaration(action))) return;
+    //    Not yet for a Java buffer: the index is matched by SIMPLE name and reads no imports, so
+    //    ahead of the classpath steps below it hijacked every wildcard-imported library type the
+    //    project happened to share a simple name with — `@Service` under
+    //    `import org.springframework.stereotype.*;` opened the project's own `Service`. Java asks it
+    //    last, once the classpath has said the name is not a library type.
+    if (action && !isJavaFile && (await tryGoToClassDeclaration(action))) return;
     // 2b. A library/JDK **member** — `list.add(…)`, `LOGGER.info(…)`, `cipher.doFinal(…)`. The
     //     caret's receiver is typed against this project's classpath and the target is served
     //     member-precise, so it lands on the method rather than at the top of the class. Runs
@@ -4064,6 +4069,8 @@
     if (action) {
       // A library/JDK type with no project source → its decompiled-from-bytecode stub.
       if (await tryGoToDecompiled(action)) return;
+      // The class-index fallback, for Java, now that the classpath has declined the name.
+      if (isJavaFile && (await tryGoToClassDeclaration(action))) return;
     } else {
       if (!silent) toastStore.show('Nothing to go to here', 'info');
       return;

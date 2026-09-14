@@ -30,8 +30,11 @@ use bennu_java::prelude::{
 pub struct IndexResolver<M: CpMemberIndex> {
     project: PersistedIndex,
     jdk: M,
-    /// Simple-name → binary-name hints (the project's own types + common JDK names),
-    /// so `resolve_simple_name` works even without an explicit import.
+    /// Simple-name → binary-name hints (the project's own types + the `java.lang` names in
+    /// [`COMMON_SIMPLE`]), so `resolve_simple_name` works even without an explicit import.
+    ///
+    /// A name in here can never be reported as unresolved, so nothing that genuinely needs an
+    /// import belongs in it — see [`COMMON_SIMPLE`].
     simple_hints: HashMap<String, String>,
     /// The in-memory patch overlay for files edited since the last full build
     /// (interior-mutable so a patch mutates the live, `Arc`-shared provider in place).
@@ -465,16 +468,23 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
     }
 
     fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String> {
+        use bennu_java::prelude::ScopeKind;
+        // Every way the FILE can bring `name` into scope, in Java's precedence — the workspace's
+        // one statement of that rule (`bennu_java::prelude::scope_candidates`), where this used to
+        // walk the import list three times in three slightly different ways. Minus the file's own
+        // package: this seam is not told it, so that tier belongs to the caller (`FileScope`,
+        // `bind_simple_name`), and the project-wide map below stands in for it when nobody asked.
+        let candidates: Vec<_> = bennu_java::prelude::scope_candidates(name, None, imports)
+            .into_iter()
+            .filter(|c| c.kind != ScopeKind::OwnPackage)
+            .collect();
         // Imports win (a `java.util.List` import binds `List`) — but only the ones that bind a
         // TYPE. A static import binds a **member**: `import static java.lang.String.format;` makes
         // `format` a method, and reading its last segment as a type name answered
-        // `java/lang/String/format` — a binary that is not a class and never was. Nothing downstream
-        // could tell that apart from a real answer, so go-to on a statically imported name opened
-        // nothing and the caller's own fallback never ran, because this had already said `Some`.
-        for imp in imports {
-            if !imp.static_ && imp.simple_name() == Some(name) {
-                return Some(imp.path.replace('.', "/"));
-            }
+        // `java/lang/String/format` — a binary that is not a class and never was. So only a
+        // `SingleImport` binds unconfirmed; the static form has to prove itself further down.
+        if let Some(c) = candidates.iter().find(|c| c.kind == ScopeKind::SingleImport) {
+            return Some(c.binary.clone());
         }
         // From here on we probe the PROJECT for `name`: record the outcome (hit / miss) for the
         // diagnostic cache when recording. An import-bound name (above) is project-independent, so
@@ -500,15 +510,12 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         // BINARY name (a non-lossy key), so probe `<star-pkg>/<name>` there and prefer a real hit: it
         // pins the exact package the star import brought in. (Single-type imports and same-package types
         // were already tried above / by the caller, so they still take precedence.)
-        for imp in imports {
-            if imp.star && !imp.static_ {
-                let candidate = format!("{}/{name}", imp.path.replace('.', "/"));
-                if self.project.get(&candidate).is_some() {
-                    if recording {
-                        dep_record::note_simple_hit(name, &candidate);
-                    }
-                    return Some(candidate);
+        for c in candidates.iter().filter(|c| c.kind == ScopeKind::OnDemand) {
+            if self.project.get(&c.binary).is_some() {
+                if recording {
+                    dep_record::note_simple_hit(name, &c.binary);
                 }
+                return Some(c.binary.clone());
             }
         }
         // Then a project TYPE of that simple name (a member of that name is not one — see
@@ -529,39 +536,22 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         if let Some(hint) = self.simple_hints.get(name) {
             return Some(hint.clone());
         }
-        // Fall through to the JDK / library bytecode: `java.lang` is implicitly imported, and a
-        // non-static star import (`import pkg.*;`) can supply the type. Probe the member index —
-        // fast now (the resolver's per-name memo + the persistent JDK memo). A hit means the type
-        // genuinely EXISTS, so `None` here is a real "cannot resolve" — the definitive answer the
-        // validator's unresolved-type check needs. Skipped in `project_only` mode (the reference /
-        // semantic engine never resolves JDK receivers, so decoding bytecode for them is waste).
+        // Fall through to the JDK / library bytecode, for the remaining tiers in Java's order: a
+        // static import of a nested type, the imports-on-demand, `java.lang`. Each has to PROVE
+        // itself against the member index — fast now (the resolver's per-name memo + the persistent
+        // JDK memo) — which is what tells `import static a.b.Outer.Inner;` apart from the
+        // `String.format` shape above. A hit means the type genuinely EXISTS, so `None` here is a
+        // real "cannot resolve" — the definitive answer the validator's unresolved-type check needs.
+        // Skipped in `project_only` mode (the reference / semantic engine never resolves JDK
+        // receivers, so decoding bytecode for them is waste).
         if self.project_only {
             return None;
         }
-        let java_lang = format!("java/lang/{name}");
-        if self.jdk.members_of(&java_lang).is_some() {
-            return Some(java_lang);
-        }
-        for imp in imports {
-            if imp.star && !imp.static_ {
-                let candidate = format!("{}/{name}", imp.path.replace('.', "/"));
-                if self.jdk.members_of(&candidate).is_some() {
-                    return Some(candidate);
-                }
-            }
-        }
-        // `import static a.b.Outer.Inner;` DOES bind a type — the one static form that does. It is
-        // last and it has to prove itself: the path is accepted only if it really is a class, which
-        // is exactly what tells the nested type apart from the `String.format` shape above.
-        for imp in imports {
-            if imp.static_ && !imp.star && imp.simple_name() == Some(name) {
-                let candidate = imp.path.replace('.', "/");
-                if self.jdk.members_of(&candidate).is_some() {
-                    return Some(candidate);
-                }
-            }
-        }
-        None
+        let exists = |binary: &str| self.jdk.members_of(binary).is_some();
+        candidates
+            .iter()
+            .find(|c| c.kind != ScopeKind::SingleImport && c.confirmed_by(&exists))
+            .map(|c| c.binary.clone())
     }
 }
 
@@ -682,9 +672,21 @@ fn convert_typeref(t: &bennu_classpath::prelude::TypeRef) -> JTypeRef {
     }
 }
 
-/// A small simple→binary table for the ubiquitous JDK names, so bare `String`/`List`/…
-/// resolve even without an explicit import (java.lang is implicitly imported; the
-/// common java.util collections are everywhere in the target stack).
+/// A small simple→binary table for the names an unqualified program may use with **no import at
+/// all** — a fast path that answers before the bytecode probe, and the only thing that answers in
+/// `project_only` mode.
+///
+/// **`java.lang` only, and that is the whole rule.** `java.lang.*` is the one package the language
+/// imports for you (JLS §7.3); every other package needs an import, and a name bound here is a name
+/// no check can ever report as missing. The table used to carry `List`, `ArrayList`, `Map`,
+/// `HashMap`, `Set`, `Collection`, `Iterator` and `Optional` on the grounds that the target stack is
+/// full of them — which it is, and which is exactly why it mattered: a file using `Set<String>` in a
+/// method signature with no `import java.util.Set;` resolved here and compiled clean in Bennu while
+/// javac refused it. The other `java.util` names had no entry and were reported correctly, so the
+/// check looked like it worked.
+///
+/// Nothing is lost by their absence: an imported name is bound by the import loop long before this,
+/// and `import java.util.*;` is bound by the star-import probe below.
 const COMMON_SIMPLE: &[(&str, &str)] = &[
     ("String", "java/lang/String"),
     ("Object", "java/lang/Object"),
@@ -692,14 +694,6 @@ const COMMON_SIMPLE: &[(&str, &str)] = &[
     ("Long", "java/lang/Long"),
     ("Boolean", "java/lang/Boolean"),
     ("CharSequence", "java/lang/CharSequence"),
-    ("List", "java/util/List"),
-    ("ArrayList", "java/util/ArrayList"),
-    ("Map", "java/util/Map"),
-    ("HashMap", "java/util/HashMap"),
-    ("Set", "java/util/Set"),
-    ("Collection", "java/util/Collection"),
-    ("Iterator", "java/util/Iterator"),
-    ("Optional", "java/util/Optional"),
 ];
 
 #[cfg(test)]
@@ -749,7 +743,7 @@ mod tests {
         fn members_of(&self, binary_name: &str) -> Option<CpClassMembers> {
             matches!(
                 binary_name,
-                "java/lang/Runnable" | "java/util/LinkedHashMap"
+                "java/lang/Runnable" | "java/util/LinkedHashMap" | "java/util/Set"
             )
             .then(|| CpClassMembers {
                 type_params: Vec::new(),
@@ -815,6 +809,35 @@ mod tests {
         assert!(r
             .resolve_simple_name("LinkedHashMap", &static_star)
             .is_none());
+    }
+
+    #[test]
+    fn a_java_util_type_is_unresolved_until_something_imports_it() {
+        let r = empty_resolver_with_jdk(FakeJdk);
+        // The regression this pins. `Set` sat in `COMMON_SIMPLE`, so a file that never imported it
+        // resolved anyway — the unresolved-type check had nothing to report and javac did. Only
+        // `java.lang` is implicitly imported; `java.util` is not, however common it is.
+        assert!(r.resolve_simple_name("Set", &[]).is_none());
+        let single = vec![Import {
+            span: None,
+            path: "java.util.Set".into(),
+            star: false,
+            static_: false,
+        }];
+        assert_eq!(
+            r.resolve_simple_name("Set", &single).as_deref(),
+            Some("java/util/Set")
+        );
+        let star = vec![Import {
+            span: None,
+            path: "java.util".into(),
+            star: true,
+            static_: false,
+        }];
+        assert_eq!(
+            r.resolve_simple_name("Set", &star).as_deref(),
+            Some("java/util/Set")
+        );
     }
 
     #[test]

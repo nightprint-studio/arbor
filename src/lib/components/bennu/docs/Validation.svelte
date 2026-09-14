@@ -77,6 +77,13 @@
   <dd>A member brought in with <code>import static</code> and used unqualified — <code>PI</code>, <code>max(a, b)</code> — resolves to its type; a name no static import supplies is still caught.</dd>
   <dt>An annotation's import</dt>
   <dd><code>@SpringBootApplication</code> with no import is the same "cannot find symbol" — the easiest to leave behind, since the code around it still reads correctly.</dd>
+  <dt>A name has to be in scope, not merely to exist</dt>
+  <dd>
+    Four things put a simple name in scope: an <code>import</code> of it, a wildcard over its package, the file's own package, and
+    <code>java.lang</code>. So <code>String</code> and the throwables need no import, while <code>Set</code>, <code>List</code> and every other
+    <code>java.util</code> name do — and so does a class of <em>this project</em> that lives in another package, however findable it is elsewhere.
+    A name none of the four reaches reads as "cannot resolve", and <kbd>Alt</kbd> + <kbd>Enter</kbd> offers the import.
+  </dd>
   <dt>A nested type through its outer</dt>
   <dd><code>Cfg.MyProva</code> where <code>Cfg</code> declares no <code>MyProva</code> is caught, judged only when the qualifier is a type <em>this project declares</em> — so <code>com.acme.Foo</code> and a library's <code>Map.Entry</code> are left as written. <kbd>Alt</kbd> + <kbd>Enter</kbd> offers the import.</dd>
   <dt>Types</dt>

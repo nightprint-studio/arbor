@@ -19,8 +19,12 @@
 //!   * excluded too: a **member type inherited from a supertype** (JLS §8.1.5) — `class Sub extends
 //!     Base` has `Base`'s nested `Inner` in scope as a bare `Inner`, and there is no import to look
 //!     for because there is nothing to import;
-//!   * flagged only when the resolver — imports, project index, star-imports, `java.lang` — returns
-//!     nothing.
+//!   * flagged when the resolver — imports, project index, star-imports, `java.lang` — returns
+//!     nothing, **or** returns something this compilation unit could not have named. The second
+//!     half matters because the resolver answers generously on purpose: its project index is keyed
+//!     by simple name, so `Foo` finds `com.acme.a.Foo` from any package — right for completion and
+//!     go-to, wrong here. A class used across a package boundary with no `import` used to read as
+//!     clean while javac refused the file. See `bennu_java::prelude::simple_name_reaches`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -187,8 +191,26 @@ pub fn unresolved_types_in(
         // Resolvable via imports, the file's OWN package (no import needed), or the global lookup.
         // Uses the shared `type_binary` so a bare same-package type (`C` referencing a sibling class in
         // `com.acme`) resolves to `com/acme/C` instead of being falsely flagged.
-        if crate::resolve::type_binary(name, symbols, resolver).is_some() {
-            continue;
+        //
+        // …and then the scoping question, which is a DIFFERENT one. `type_binary` answers what the
+        // name would mean, and it answers generously by design: the project index is keyed by simple
+        // name, so `Foo` finds `com.acme.a.Foo` from any package in the project — which is what
+        // completion, hover and go-to want, and is exactly wrong here. A class used across a package
+        // boundary with no `import` resolved and read as clean while javac refused the file. So what
+        // resolved is asked whether this compilation unit could actually have named it.
+        //
+        // Declared-in-file types and type parameters were excluded by `known` above, and an
+        // inherited member type is the check right below — the three cases `simple_name_reaches`
+        // deliberately does not know about.
+        if let Some(binary) = crate::resolve::type_binary(name, symbols, resolver) {
+            if bennu_java::prelude::simple_name_reaches(
+                &binary,
+                name,
+                symbols.package.as_deref(),
+                &symbols.imports,
+            ) {
+                continue;
+            }
         }
         // A member type inherited from a supertype is in scope by its simple name with no
         // import (JLS §8.1.5) — `class Sub extends Base` writes `Inner` for `Base.Inner`,
@@ -366,8 +388,13 @@ mod tests {
         }
     }
 
+    /// `Widget` and `Gadget`, in the **default package** — because the sources below declare no
+    /// `package`, and since the check asks whether a name is in SCOPE the fixture has to be legal
+    /// Java rather than merely resolvable. A default-package file reaches a default-package type
+    /// with no import; it could not reach a `com.acme.Widget` without one, and a fixture that
+    /// pretended otherwise would be testing a file javac rejects.
     fn resolver() -> MapResolver {
-        let simple = [("Widget", "com/acme/Widget"), ("Gadget", "com/acme/Gadget")]
+        let simple = [("Widget", "Widget"), ("Gadget", "Gadget")]
             .into_iter()
             .map(|(s, b)| (s.to_string(), b.to_string()))
             .collect();
@@ -419,6 +446,35 @@ mod tests {
         assert!(d2[0].contains("Nonesuch"), "{d2:?}");
     }
 
+    /// A project type in ANOTHER package needs an import like any other.
+    ///
+    /// The resolver says yes to it either way — its index is keyed by simple name, so `Helper`
+    /// finds `com.acme.util.Helper` from anywhere in the project, which is what completion and
+    /// go-to are for. javac asks a narrower question, and this check has to ask javac's: a legacy
+    /// codebase with ten modules can lose an import in a move and see nothing at all about it
+    /// until the build runs.
+    #[test]
+    fn a_project_type_in_another_package_still_needs_its_import() {
+        let mut r = resolver();
+        r.simple.insert("Helper".to_string(), "com/acme/util/Helper".to_string());
+
+        let bare = "package com.acme.web;\nclass B { Helper h; }";
+        let d: Vec<String> = unresolved_types(bare, &r).into_iter().map(|x| x.message).collect();
+        assert_eq!(d.len(), 1, "resolving is not being in scope: {d:?}");
+        assert!(d[0].contains("Helper"), "{d:?}");
+
+        // The import — the repair `Alt+Enter` offers — settles it.
+        let imported = "package com.acme.web;\nimport com.acme.util.Helper;\nclass B { Helper h; }";
+        let d2: Vec<String> =
+            unresolved_types(imported, &r).into_iter().map(|x| x.message).collect();
+        assert!(d2.is_empty(), "{d2:?}");
+
+        // …and so does an import-on-demand of its package, which is how legacy code often has it.
+        let star = "package com.acme.web;\nimport com.acme.util.*;\nclass B { Helper h; }";
+        let d3: Vec<String> = unresolved_types(star, &r).into_iter().map(|x| x.message).collect();
+        assert!(d3.is_empty(), "{d3:?}");
+    }
+
     #[test]
     fn an_annotation_that_was_never_imported_is_flagged() {
         // The case that started this: the class around it is perfectly ordinary, so nothing else
@@ -440,9 +496,16 @@ mod tests {
     fn a_resolvable_annotation_is_not_flagged() {
         let mut r = resolver();
         r.simple.insert("Service".to_string(), "org/springframework/stereotype/Service".to_string());
+        let src = "import org.springframework.stereotype.Service;\n@Service\nclass C {}";
         let d: Vec<String> =
-            unresolved_types("@Service\nclass C {}", &r).into_iter().map(|x| x.message).collect();
+            unresolved_types(src, &r).into_iter().map(|x| x.message).collect();
         assert!(d.is_empty(), "{d:?}");
+        // Resolving is not the same as being in scope: the identical annotation with the import
+        // taken away is what javac refuses, and what this check is for.
+        let bare: Vec<String> =
+            unresolved_types("@Service\nclass C {}", &r).into_iter().map(|x| x.message).collect();
+        assert_eq!(bare.len(), 1, "{bare:?}");
+        assert!(bare[0].contains("Service"), "{bare:?}");
     }
 
     #[test]
@@ -575,11 +638,12 @@ mod tests {
     // because there is nothing to import — the name is in scope by inheritance — so
     // flagging it says a perfectly good build is broken.
 
-    /// `Base`, plus a nested `Inner` seeded under whichever binary form the test wants.
+    /// `Base`, plus a nested `Inner` seeded under whichever binary form the test wants. In the
+    /// default package, like the rest of the fixture — see [`resolver`].
     fn with_base(nested: &str) -> MapResolver {
         let mut r = resolver();
-        r.simple.insert("Base".to_string(), "com/acme/Base".to_string());
-        r.known.insert("com/acme/Base".to_string());
+        r.simple.insert("Base".to_string(), "Base".to_string());
+        r.known.insert("Base".to_string());
         r.known.insert(nested.to_string());
         r
     }
@@ -590,7 +654,7 @@ mod tests {
 
     #[test]
     fn nested_type_of_a_superclass_needs_no_import() {
-        let r = with_base("com/acme/Base$Inner");
+        let r = with_base("Base$Inner");
         let d = diags_with("class Sub extends Base { Inner i; }", &r);
         assert!(d.is_empty(), "{d:?}");
     }
@@ -599,7 +663,7 @@ mod tests {
     /// `…/Base/Inner` rather than `…$Inner`. Both forms have to answer.
     #[test]
     fn nested_type_in_the_project_slash_form_also_resolves() {
-        let r = with_base("com/acme/Base/Inner");
+        let r = with_base("Base/Inner");
         let d = diags_with("class Sub extends Base { Inner i; }", &r);
         assert!(d.is_empty(), "{d:?}");
     }
@@ -609,11 +673,11 @@ mod tests {
     #[test]
     fn nested_type_is_found_through_the_whole_chain() {
         let mut r = resolver();
-        r.simple.insert("Base".to_string(), "com/acme/Base".to_string());
-        r.known.insert("com/acme/Base".to_string());
-        r.known.insert("com/acme/Root".to_string());
-        r.known.insert("com/acme/Root$Inner".to_string());
-        r.supers.insert("com/acme/Base".to_string(), "com/acme/Root".to_string());
+        r.simple.insert("Base".to_string(), "Base".to_string());
+        r.known.insert("Base".to_string());
+        r.known.insert("Root".to_string());
+        r.known.insert("Root$Inner".to_string());
+        r.supers.insert("Base".to_string(), "Root".to_string());
         let d = diags_with("class Sub extends Base { Inner i; }", &r);
         assert!(d.is_empty(), "{d:?}");
     }
@@ -622,7 +686,7 @@ mod tests {
     /// including inside a subclass that does inherit other names.
     #[test]
     fn a_real_typo_in_a_subclass_is_still_flagged() {
-        let r = with_base("com/acme/Base$Inner");
+        let r = with_base("Base$Inner");
         let d = diags_with("class Sub extends Base { Innr i; }", &r);
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(d[0].contains("Innr"), "{d:?}");
@@ -632,7 +696,7 @@ mod tests {
     /// flagged exactly as before.
     #[test]
     fn a_class_with_no_supertype_gains_nothing() {
-        let r = with_base("com/acme/Base$Inner");
+        let r = with_base("Base$Inner");
         let d = diags_with("class Free { Inner i; }", &r);
         assert_eq!(d.len(), 1, "{d:?}");
     }

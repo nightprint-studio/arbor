@@ -71,6 +71,29 @@ fn javadoc_declarations(source: &str) -> FileDocs                       // for a
 // answers every hover into the type instead of re-reading the archive per pointer move. Overloads
 // that agree on arity are dropped rather than merged — the doc of the wrong overload is worse
 // than none.
+
+// Written type names — one reading of `Foo` / `Outer.Inner` / `a.b.C[]` for the whole workspace.
+fn resolve_written_type(text: &str, scope: &dyn NameScope) -> TypeName   // Resolved(binary) | Unknown(text)
+fn same_binary_type(a: &str, b: &str) -> bool             // `Map$Entry` and `Map/Entry` are one type
+fn java_lang_implicit(name: &str) -> Option<String>       // the implicitly imported package (JLS §7.3)
+fn scope_candidates(simple, package, imports) -> Vec<ScopeCandidate>   // { binary, kind: ScopeKind }
+//   THE statement of Java's scoping order — every other name lookup in the workspace is built on it.
+//   `ScopeKind` says which route a candidate came from (SingleImport, OwnPackage, StaticImport,
+//   OnDemand, StaticOnDemand, JavaLang), so a caller that cannot use a tier drops it by name —
+//   `IndexResolver` is not told the file's package — instead of writing its own loop over the imports.
+//   `ScopeCandidate::confirmed_by(exists)` is the one rule for when a candidate binds.
+fn bind_simple_name(simple, package, imports, exists: &dyn Fn(&str) -> bool) -> Option<String>
+//   What a simple name MEANS in a compilation unit, in JLS §6.4.1 precedence: a single-type import
+//   (bound without asking), the file's own package, a static import of a nested type, the
+//   imports-on-demand, `java.lang`. The first candidate `exists` confirms wins; `None` means nothing
+//   in this file's scope binds the name — a caller that wants a project-wide guess makes it AFTER.
+fn simple_name_reaches(binary, simple, package, imports) -> bool
+//   Whether a compilation unit could NAME that binary by that simple name: a single-type import,
+//   an import-on-demand of its package, its own package, or `java.lang`. The scoping question
+//   (JLS §6.5.5 / §7.5), which a resolver deliberately does not ask — its index is keyed by simple
+//   name, so it finds a type in any package, which is right for completion and wrong for a
+//   "cannot resolve". Only a validator needs this; it does NOT know about types declared in the
+//   file, type parameters or inherited member types, which its caller must exclude first.
 ```
 
 > The Alt+Enter **intention** transforms (parameterize logging, NP-safe equals) used to live here;
