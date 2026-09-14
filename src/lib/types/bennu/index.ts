@@ -452,6 +452,10 @@ export interface IndexStats {
    *  the editor's own poll, which already knows what it opened; filled for the agent surface,
    *  where the zero counters above would otherwise read as "not built yet". */
   engine?: string;
+  /** Which resolver the Java index has installed. `failed` means the build ended without one and
+   *  only syntax checks run — distinct from `building`, which it used to be indistinguishable from.
+   *  Empty when no project is open at the root. */
+  provider_stage?: '' | 'building' | 'failed' | 'project' | 'dependencies';
 }
 
 /** One match of `bennu_find_in_files` — a single line hit in a project file,

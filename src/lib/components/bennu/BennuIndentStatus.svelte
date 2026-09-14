@@ -13,7 +13,7 @@
    */
   import { IndentIncrease } from 'lucide-svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
-  import { tooltip } from '$lib/actions/tooltip';
+  import StatusBarItem from '$lib/components/shared/ui/StatusBarItem.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
 
   /** Offered tab widths — the common IntelliJ/VS Code set. */
@@ -65,40 +65,15 @@
 
 <Dropdown {items} position="fixed" direction="up" width="180px" selectionMode="single">
   {#snippet trigger({ toggle, open })}
-    <button
-      type="button"
-      class="bf-btn"
-      class:open
+    <StatusBarItem
+      tooltip="Select indentation"
+      active={open}
+      ariaHaspopup="menu"
+      ariaExpanded={open}
       onclick={toggle}
-      use:tooltip={'Select indentation'}
     >
       <IndentIncrease size={12} />
       {label}
-    </button>
+    </StatusBarItem>
   {/snippet}
 </Dropdown>
-
-<style>
-  /* Mirrors .bf-item from BennuStatusBar, but interactive (button reset + hover). */
-  .bf-btn {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    white-space: nowrap;
-    background: transparent;
-    border: none;
-    padding: 2px 6px;
-    margin: 0;
-    border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans);
-    font-size: var(--font-size-xs);
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .bf-btn :global(svg) { color: var(--text-disabled); }
-  .bf-btn:hover,
-  .bf-btn.open { background: var(--bg-hover); color: var(--text-secondary); }
-  .bf-btn:hover :global(svg),
-  .bf-btn.open :global(svg) { color: var(--text-secondary); }
-</style>

@@ -21,6 +21,14 @@
   Means "not yet", not "nothing there". The footer says which state the index is in.
 </Callout>
 
+<h2>When there is no index to answer</h2>
+<dl class="meta-grid">
+  <dt>A file outside every project</dt>
+  <dd>A Java file that no open project contains gets syntax checks only. The footer reads <em>Not indexed</em>, and the file carries one informational line at the top saying semantic checks are off. When a folder above it holds a <code>pom.xml</code>, clicking <em>Not indexed</em> — or <em>Open project …</em> in the command palette — opens that project (the outermost <code>pom.xml</code> of the chain, so a module opens as part of its reactor), or switches to it when it is already in the workspace.</dd>
+  <dt>An index that failed to build</dt>
+  <dd>A notification says what failed, the footer reads <em>Index failed</em>, and the index inspector says <em>build failed</em> instead of <em>building</em>. Only syntax checks run until a rebuild succeeds.</dd>
+</dl>
+
 <h2>The index inspector</h2>
 <p>
   <em>Index inspector…</em> in the command palette browses what the index holds — types, members, jars, the JDK, beans, actions and relations — with a filter and jump-to.
@@ -29,7 +37,7 @@
   <dt>Type names</dt>
   <dd>How many distinct class names completion can offer, counting the JDK's, every resolved jar's and your own. It tells <em>completion is not offering my library classes</em> from <em>the library classes were never loaded</em> — the same from the popup. A few thousand means the JDK alone answered; a project with jars runs to tens of thousands.</dd>
   <dt>Rebuild</dt>
-  <dd>When something looks stale or a class you know exists does not turn up: <strong>Rebuild</strong> there, or <em>Rebuild index</em> in the palette, invalidates the index and recomputes it. It re-scans the sources on disk — it does not compile; that is <kbd>Ctrl</kbd> + <kbd>F9</kbd>.</dd>
+  <dd>When something looks stale or a class you know exists does not turn up: <strong>Rebuild</strong> there, or <em>Rebuild index</em> in the palette, invalidates the index and recomputes it. It re-scans the sources on disk and reads the JDK level and source encoding from the poms again — it does not compile; that is <kbd>Ctrl</kbd> + <kbd>F9</kbd>. A rebuild of a project that is not open says so rather than doing nothing.</dd>
 </dl>
 
 <h2>What it walks</h2>

@@ -13,20 +13,24 @@
    * broken Java project instead of a Rust one. The strip states what it does know: the
    * toolchain it is, and how many crates the workspace holds.
    *
-   * bg-elevated strip (flows from the titlebar) — mirrors MerulaFooter / Corvus
-   * StatusBar. Subtle + keyboard-first (nothing here is mouse-only).
+   * Composed only of `StatusBarItem` / `StatusBarSeparator` — the look of a reading, and of a
+   * reading that can be clicked, lives in those widgets. bg-elevated strip (flows from the
+   * titlebar) — mirrors MerulaFooter / Corvus StatusBar. Keyboard-first: every actionable item is
+   * a real button.
    */
   import {
-    Coffee, Boxes, Database, FileType, Package, ServerCog, ServerCrash,
+    AlertTriangle, Coffee, Boxes, Database, FileType, Package, ServerCog, ServerCrash,
   } from 'lucide-svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import StatusBarItem from '$lib/components/shared/ui/StatusBarItem.svelte';
+  import StatusBarSeparator from '$lib/components/shared/ui/StatusBarSeparator.svelte';
   import BennuIndentStatus from './BennuIndentStatus.svelte';
-  import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { javaLevelStore } from '$lib/stores/bennu/java-level.svelte';
+  import { fileOwnerStore } from '$lib/stores/bennu/file-owner.svelte';
   import type { Snippet } from 'svelte';
 
   let { footerExtra }: { footerExtra?: Snippet } = $props();
@@ -78,48 +82,48 @@
     'override': 'overridden manually',
     'default': 'default (not inferred)',
   };
+
+  const openLanguageSettings = () => bennuUiStore.openSettings('languages');
 </script>
 
 <div class="bf">
   {#if projectStore.project}
     {#if isCargo}
-      <span class="bf-item" use:tooltip={'A Cargo project — editor features only (no symbol index yet)'}>
+      <StatusBarItem tooltip="A Cargo project — editor features only (no symbol index yet)">
         <Package size={12} /> Cargo
-      </span>
-      <span class="bf-sep"></span>
-      <span class="bf-item" use:tooltip={'Crates in this workspace (Cargo.toml members)'}>
+      </StatusBarItem>
+      <StatusBarSeparator />
+      <StatusBarItem tooltip="Crates in this workspace (Cargo.toml members)">
         <Boxes size={12} /> {crateCount} crate{crateCount === 1 ? '' : 's'}
-      </span>
+      </StatusBarItem>
     {:else if moduleJdk}
-      <span
-        class="bf-item"
-        use:tooltip={`JDK ${moduleJdk.version} in module ${moduleJdk.module} · ${
+      <StatusBarItem
+        tooltip={`JDK ${moduleJdk.version} in module ${moduleJdk.module} · ${
           jdkSourceLabel[moduleJdk.source] ?? moduleJdk.source
         }${jdk && jdk.version !== moduleJdk.version ? ` — the project as a whole reads as JDK ${jdk.version}` : ''}`}
       >
         <Coffee size={12} /> JDK {moduleJdk.version}
         <span class="bf-sub">{moduleJdk.module}</span>
-      </span>
+      </StatusBarItem>
     {:else if jdk}
-      <span class="bf-item" use:tooltip={`JDK ${jdk.version} · ${jdkSourceLabel[jdk.source] ?? jdk.source}`}>
+      <StatusBarItem tooltip={`JDK ${jdk.version} · ${jdkSourceLabel[jdk.source] ?? jdk.source}`}>
         <Coffee size={12} /> JDK {jdk.version}
         <span class="bf-sub">{jdk.source}</span>
-      </span>
+      </StatusBarItem>
     {:else}
-      <span class="bf-item bf-muted" use:tooltip={'JDK not inferred — set an override'}>
+      <StatusBarItem tone="muted" tooltip="JDK not inferred — set an override">
         <Coffee size={12} /> JDK —
-      </span>
+      </StatusBarItem>
     {/if}
 
     {#if !isCargo}
-      <span class="bf-sep"></span>
-
-      <span class="bf-item" use:tooltip={`${capCount} domain capabilit${capCount === 1 ? 'y' : 'ies'} detected`}>
+      <StatusBarSeparator />
+      <StatusBarItem tooltip={`${capCount} domain capabilit${capCount === 1 ? 'y' : 'ies'} detected`}>
         <Boxes size={12} /> {capCount} capabilit{capCount === 1 ? 'y' : 'ies'}
-      </span>
+      </StatusBarItem>
     {/if}
   {:else}
-    <span class="bf-item bf-muted">No project open</span>
+    <StatusBarItem tone="muted">No project open</StatusBarItem>
   {/if}
 
   <span class="bf-spacer"></span>
@@ -128,27 +132,58 @@
        (the store holds it back), and it is the only feedback there is: until the target
        opens, nothing else on screen changes. -->
   {#if bennuUiStore.navigatingTo}
-    <span class="bf-item bf-navigating" use:tooltip={'Resolving the declaration — a library type is read from the classpath'}>
+    <StatusBarItem tone="accent" tooltip="Resolving the declaration — a library type is read from the classpath">
       <Spinner size={11} /> Opening {bennuUiStore.navigatingTo}…
-    </span>
-    <span class="bf-sep"></span>
+    </StatusBarItem>
+    <StatusBarSeparator />
   {/if}
 
   {#if projectStore.project}
     <!-- Indexing status — driven by the real index-progress events / stats poll. A Cargo
          project builds no index, so "Indexed · 0" would be a reading of nothing. -->
     {#if !isCargo}
+      <!-- The file on screen is outside every indexed project: only syntax checks run on it, and
+           without this it reads as a file whose semantics were checked and found clean. -->
+      {#if fileOwnerStore.notIndexed}
+        {#if fileOwnerStore.suggestedRoot}
+          <StatusBarItem
+            tone="warning"
+            tooltip={`This file is not under an indexed project — semantic checks are off. Click to ${
+              fileOwnerStore.suggestionIsMember ? 'switch to' : 'open'
+            } ${fileOwnerStore.suggestedRoot}`}
+            onclick={() => void fileOwnerStore.openSuggested()}
+          >
+            <AlertTriangle size={12} /> Not indexed
+          </StatusBarItem>
+        {:else}
+          <StatusBarItem tone="warning" tooltip="This file is not under any Maven project — semantic checks are off">
+            <AlertTriangle size={12} /> Not indexed
+          </StatusBarItem>
+        {/if}
+        <StatusBarSeparator />
+      {/if}
       {#if bennuIndexStore.indexing}
         {@const rp = bennuIndexStore.refProgress}
-        <span class="bf-item bf-indexing" use:tooltip={`Building the project index${bennuIndexStore.phaseLabel ? ` · ${bennuIndexStore.phaseLabel}` : ''}`}>
+        <StatusBarItem
+          tone="accent"
+          tooltip={`Building the project index${bennuIndexStore.phaseLabel ? ` · ${bennuIndexStore.phaseLabel}` : ''}`}
+        >
           <Spinner size={11} /> Indexing{bennuIndexStore.phaseLabel ? ` ${bennuIndexStore.phaseLabel.toLowerCase()}` : ''}{rp ? ` ${rp.done.toLocaleString()}/${rp.total.toLocaleString()}` : ''}…
-        </span>
+        </StatusBarItem>
+      {:else if bennuIndexStore.failed}
+        <StatusBarItem
+          tone="warning"
+          tooltip="The index could not be built — only syntax checks run. Click for the index inspector, where it can be rebuilt"
+          onclick={() => bennuUiStore.openIndexInspector()}
+        >
+          <AlertTriangle size={12} /> Index failed
+        </StatusBarItem>
       {:else}
-        <span class="bf-item" use:tooltip={bennuIndexStore.typeCount ? `Index ready · ${bennuIndexStore.typeCount} types` : 'Project index is up to date'}>
+        <StatusBarItem tooltip={bennuIndexStore.typeCount ? `Index ready · ${bennuIndexStore.typeCount} types` : 'Project index is up to date'}>
           <Database size={12} /> Indexed{bennuIndexStore.typeCount ? ` · ${bennuIndexStore.typeCount}` : ''}
-        </span>
+        </StatusBarItem>
       {/if}
-      <span class="bf-sep"></span>
+      <StatusBarSeparator />
     {/if}
 
     <!-- The language server for the open file, when one owns it.
@@ -158,50 +193,50 @@
          and "the server is still loading the workspace" look identical. -->
     {#if lsp}
       {#if lsp.state === 'starting' || lsp.progress}
-        <button
-          type="button"
-          class="bf-item bf-btn bf-indexing bf-lsp-progress"
-          use:tooltip={`${lsp.name}${lsp.progress ? ` · ${lsp.progress}` : ' · starting'} — click for language server settings`}
-          onclick={() => bennuUiStore.openSettings('languages')}
+        <!-- A server's progress message is free text — rust-analyzer puts absolute paths in it —
+             and the footer is one row. The backend already caps the string; the width cap is the
+             second line of defence. -->
+        <StatusBarItem
+          tone="accent"
+          maxWidth={30}
+          tooltip={`${lsp.name}${lsp.progress ? ` · ${lsp.progress}` : ' · starting'} — click for language server settings`}
+          onclick={openLanguageSettings}
         >
           <Spinner size={11} /> {lsp.progress || `${lsp.name} starting`}…
-        </button>
+        </StatusBarItem>
       {:else if lsp.state === 'failed' || lsp.state === 'exited'}
-        <button
-          type="button"
-          class="bf-item bf-btn bf-lsp-failed"
-          use:tooltip={lsp.message || `${lsp.name} is not running — click to fix`}
-          onclick={() => bennuUiStore.openSettings('languages')}
+        <StatusBarItem
+          tone="warning"
+          tooltip={lsp.message || `${lsp.name} is not running — click to fix`}
+          onclick={openLanguageSettings}
         >
           <ServerCrash size={12} /> {lsp.name}
-        </button>
+        </StatusBarItem>
       {:else}
-        <button
-          type="button"
-          class="bf-item bf-btn"
-          use:tooltip={`${lsp.version ?? lsp.name} · ${lsp.features.length} features · ${tokens} semantic tokens in this buffer — click for language server settings`}
-          onclick={() => bennuUiStore.openSettings('languages')}
+        <StatusBarItem
+          tooltip={`${lsp.version ?? lsp.name} · ${lsp.features.length} features · ${tokens} semantic tokens in this buffer — click for language server settings`}
+          onclick={openLanguageSettings}
         >
           <ServerCog size={12} /> {lsp.name}
-        </button>
+        </StatusBarItem>
       {/if}
-      <span class="bf-sep"></span>
+      <StatusBarSeparator />
     {/if}
 
     <!-- Indentation (tabs/spaces + width) — click / keyboard to change; applies live. -->
     <BennuIndentStatus />
 
     {#if encoding}
-      <span class="bf-sep"></span>
-      <span class="bf-item" use:tooltip={isCargo ? 'Rust source is UTF-8 by language definition' : 'Project source encoding (pom sourceEncoding)'}>
+      <StatusBarSeparator />
+      <StatusBarItem tooltip={isCargo ? 'Rust source is UTF-8 by language definition' : 'Project source encoding (pom sourceEncoding)'}>
         <FileType size={12} /> {encoding}
-      </span>
+      </StatusBarItem>
     {/if}
     <!-- The open file's own encoding + caret Ln/Col live on the editor's footer (BennuEditor). -->
   {/if}
 
   {#if footerExtra}
-    <span class="bf-sep"></span>
+    <StatusBarSeparator />
     {@render footerExtra()}
   {/if}
 </div>
@@ -216,35 +251,9 @@
     font-size: var(--font-size-xs); color: var(--text-muted);
     user-select: none;
   }
-  .bf-item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
-  .bf-item :global(svg) { color: var(--text-disabled); }
-  .bf-indexing { color: var(--accent); }
-  .bf-indexing :global(svg) { color: var(--accent); }
-  .bf-navigating { color: var(--accent); }
-  .bf-navigating :global(svg) { color: var(--accent); }
-  .bf-muted { color: var(--text-disabled); }
-  /* A footer item that is actually actionable. Styled as text, not as a button: the strip is
-     information, and a real button chrome here would compete with the editor for attention. */
-  .bf-btn {
-    background: none; border: none; padding: 0; margin: 0;
-    font: inherit; color: inherit; cursor: pointer; border-radius: var(--radius-sm);
-    transition: color var(--transition-fast);
-  }
-  .bf-btn:hover { color: var(--text-primary); }
-  .bf-btn:hover :global(svg) { color: var(--text-secondary); }
-  .bf-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-  .bf-lsp-failed { color: var(--warning); }
-  .bf-lsp-failed :global(svg) { color: var(--warning); }
-  .bf-lsp-failed:hover { color: var(--warning); }
-  /* A server's progress message is free text — rust-analyzer puts absolute paths in it — and the
-     footer is one row. The backend already caps the string; this is the second line of defence, so
-     no message can ever push the rest of the strip sideways. `min-width: 0` is what lets a flex
-     child shrink below its content at all. */
-  .bf-lsp-progress { max-width: 30ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .bf-sub {
     font-size: var(--font-size-2xs); color: var(--text-disabled);
     padding-left: 2px; max-width: 160px; overflow: hidden; text-overflow: ellipsis;
   }
   .bf-spacer { flex: 1; }
-  .bf-sep { width: 1px; height: 12px; background: var(--border-subtle); flex-shrink: 0; }
 </style>

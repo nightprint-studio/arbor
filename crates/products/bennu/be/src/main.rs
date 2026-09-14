@@ -77,6 +77,8 @@ mod npm;
 // The Project tree's filesystem watcher — what makes a `git checkout` or an `npm install` show up
 // without reopening the project.
 mod tree_watch;
+// Its pure half: what a raw event means to the tree — classification, rename pairing, coalescing.
+mod tree_changes;
 // Code-intel: `bennu_completion` / `bennu_diagnostics` — completion serves from the
 // per-project index the `index_service` builds; diagnostics stay a stub for now.
 mod intel;
@@ -228,6 +230,9 @@ mod library_search;
 // an open project (fresh generation dir, off-thread), the escape hatch behind the Index
 // Inspector's "Rebuild" button. No compilation (that's `bennu_build`), just a re-scan.
 mod reindex;
+// Project health: vanished roots, reactor modules the disk lost, files no index covers.
+mod project_health;
+mod project_locate;
 // TODO scan (TODO tool window): `bennu_todos` — a line scan of `.java`/`.xml`/`.jsp`/
 // `.properties` for TODO/FIXME/XXX/HACK markers.
 mod todos;

@@ -13,8 +13,9 @@
 //! WHOLE-FILE guards (any → judge no bare call in the file):
 //!   * no single top-level class/enum, or its hierarchy not fully known — an un-indexed base class
 //!     could declare the overload that makes the call legal;
-//!   * a **member-generating annotation** on the top type ([`crate::nodes::has_generated_members`]) —
-//!     under Lombok the legal `getName()` is declared nowhere we can read;
+//!   * a **method-generating annotation** on the top type or a field
+//!     ([`crate::nodes::generated_names`]) — under Lombok the legal `getName()` is declared nowhere
+//!     we can read;
 //!   * an `import static X.*;` whose owner `X` is un-indexed — it can supply ANY name with any
 //!     signature.
 //!
@@ -42,7 +43,7 @@ use std::collections::{HashMap, HashSet};
 use bennu_java::prelude::{static_import_targets, FileSymbols, Member, TypeResolver};
 use tree_sitter::Node;
 
-use crate::nodes::has_generated_members;
+use crate::nodes::generated_names;
 use crate::resolve::type_binary;
 use crate::scopes::{scope_is_directly_top, single_top_level_type};
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
@@ -85,7 +86,7 @@ pub(crate) fn bare_call_scope<'t>(
 ) -> Option<BareCalls<'t>> {
     let bytes = source.as_bytes();
     let top = single_top_level_type(root, bytes)?;
-    if has_generated_members(top.node, bytes) {
+    if generated_names(top.node, bytes).calls {
         return None;
     }
     let top_binary = type_binary(&top.decl_name, symbols, resolver)?;

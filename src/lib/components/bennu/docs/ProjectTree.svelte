@@ -280,10 +280,35 @@ public class InvoiceService {
 <p>
   A <code>git checkout</code>, a <code>cargo new</code>, an <code>npm install</code>, another editor saving a file — all of them
   show up on their own, with nothing to press and nothing to reopen. Changes arrive in bursts, so a checkout touching four
-  hundred files is one reload, not four hundred.
+  hundred files is one reload, not four hundred — and a burst is never held for more than a few seconds, even while a build
+  keeps writing.
 </p>
+<p>
+  What the tree follows is its <strong>shape</strong>: files and folders created, deleted or renamed. Editing a file does not
+  reload it. The exceptions are <code>pom.xml</code> and <code>Cargo.toml</code>, which update the project's name and modules
+  in place, and <code>.gitignore</code>, which changes what is dimmed. A folder renamed while open stays open under its new
+  name.
+</p>
+<dl class="meta-grid">
+  <dt>When the structure changes</dt>
+  <dd>
+    A folder added or removed directly under the project, a top-level folder renamed, or a module added or renamed anywhere,
+    raises one notice naming what changed — a bulk rename is one notice, not dozens. When a module or a <code>pom.xml</code> is
+    involved the notice offers <strong>Rebuild index</strong>. Files never raise one.
+  </dd>
+  <dt>When the window comes back</dt>
+  <dd>
+    Returning to Bennu re-lists the project folder and every open folder, one level deep, and reloads the tree if anything
+    disagrees — the safety net for a change the watcher missed, such as the tail of a very large rename.
+  </dd>
+  <dt>By hand</dt>
+  <dd>
+    <strong>Reload project tree</strong> in the command palette re-reads the project from disk on the spot.
+  </dd>
+</dl>
 <Callout variant="info" title="Generated directories are not watched at all">
   <code>target</code>, <code>node_modules</code>, <code>.git</code>, <code>.svelte-kit</code>, <code>coverage</code> and their
   kind are not filtered afterwards but <em>unwatched</em>. A build writing into <code>target</code> would otherwise be a burst
-  that never goes quiet — the tree refusing to settle at exactly the moment the machine is busiest.
+  that never goes quiet — the tree refusing to settle at exactly the moment the machine is busiest. Such a folder
+  <em>appearing</em> at the top of the project — <code>.idea</code>, <code>.vscode</code> — still shows up.
 </Callout>

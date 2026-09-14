@@ -1133,6 +1133,11 @@ pub(crate) fn module_dirs(root: &Path) -> Vec<PathBuf> {
             if child == dir || out.contains(&child) {
                 continue; // a module reachable by two paths
             }
+            // A declared module whose directory is gone is not a module to build or scan. Skipped
+            // quietly: the broken reactor is announced once, by `project_health`.
+            if !child.is_dir() {
+                continue;
+            }
             out.push(child.clone());
             queue.push(child);
         }

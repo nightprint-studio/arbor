@@ -21,7 +21,9 @@
 //!   * [`annotations`] — the catalogue. Which simple names Lombok defines, and what each one emits:
 //!     [`generates_constructor`](annotations::generates_constructor),
 //!     [`initializes_blank_finals`](annotations::initializes_blank_finals),
-//!     [`generates_members`](annotations::generates_members).
+//!     [`generates_members`](annotations::generates_members), and — split by namespace, for the
+//!     checks about bare names — [`generates_fields`](annotations::generates_fields) and
+//!     [`generates_methods`](annotations::generates_methods).
 //!   * [`imports`] — the capability gate. Lombok only *does* anything when the annotation resolves
 //!     to it, which requires the import — so a project's own `@Data` in another package must never
 //!     silence a check. [`ImportPath`](imports::ImportPath) is the borrowed shape both consumers

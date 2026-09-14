@@ -5,6 +5,8 @@
   import type { Toast } from '$lib/feedback/stores/toasts.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  import Button from '$lib/components/shared/ui/Button.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
 
   let { toast }: { toast: Toast } = $props();
 
@@ -22,15 +24,16 @@
   <span class="stripe" aria-hidden="true"></span>
   <span class="icon"><Icon size={14} /></span>
   <span class="message">{toast.message}</span>
-  {#if toast.action}
-    <button
-      class="action"
-      onclick={() => { toast.action?.onClick(); uiStore.dismissToast(toast.id); }}
-    >{toast.action.label}</button>
-  {/if}
-  <button class="dismiss" onclick={() => uiStore.dismissToast(toast.id)} aria-label="Dismiss">
+  {#each toast.actions as action (action.label)}
+    <Button
+      variant="tonal"
+      size="xs"
+      onclick={() => { action.onClick(); uiStore.dismissToast(toast.id); }}
+    >{action.label}</Button>
+  {/each}
+  <IconButton tooltip="Dismiss" size={20} onclick={() => uiStore.dismissToast(toast.id)}>
     <X size={11} />
-  </button>
+  </IconButton>
 </div>
 
 <style>
@@ -91,39 +94,4 @@
     color: var(--text-primary);
   }
 
-  .dismiss {
-    flex-shrink: 0;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    color: var(--text-disabled);
-    width: 20px;
-    height: 20px;
-    border-radius: 5px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .dismiss:hover { color: var(--text-primary); background: var(--bg-overlay); }
-
-  /* Inline action button — same accent treatment as notification actions
-     so the two surfaces stay visually consistent. */
-  .action {
-    flex-shrink: 0;
-    background: transparent;
-    border: 1px solid var(--border-subtle);
-    color: var(--accent);
-    cursor: pointer;
-    padding: 3px 9px;
-    border-radius: var(--radius-sm);
-    font-size: var(--font-size-xs);
-    font-weight: 500;
-    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
-  }
-  .action:hover {
-    background: color-mix(in srgb, var(--accent) 18%, transparent);
-    border-color: var(--accent);
-    color: var(--accent);
-  }
 </style>

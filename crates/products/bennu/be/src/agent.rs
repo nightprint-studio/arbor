@@ -3668,6 +3668,7 @@ mod next_steps_tests {
             type_names: 0,
             ready: false,
             engine: String::new(),
+            provider_stage: String::new(),
         }
     }
 

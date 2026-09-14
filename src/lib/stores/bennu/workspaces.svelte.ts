@@ -206,10 +206,11 @@ function createWorkspacesStore() {
       await projectStore.addProject(dir);
     },
 
-    /** Remove project `root` from workspace `id`. For the active workspace this closes it live
-     *  (projectStore persists); for an inactive one it edits the stored member list directly. */
+    /** Remove project `root` from workspace `id`. For a live member of the active workspace this
+     *  closes it (projectStore persists); otherwise — an inactive workspace, or a remembered project
+     *  that never opened because its directory is gone — it edits the stored member list directly. */
     removeProjectFrom(id: string, root: string) {
-      if (id === activeId) {
+      if (id === activeId && projectStore.workspaceRoots.includes(root)) {
         projectStore.closeProject(root); // live path → saveActiveSession persists
         return;
       }

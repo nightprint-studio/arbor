@@ -663,42 +663,19 @@ type Stamp = (u128, u64);
 
 /// Every `target/surefire-reports` directory in the project — one per Maven module.
 ///
-/// Derived from where the poms are rather than by walking for the directory itself: the
+/// Derived from the reactor's poms rather than by walking for the directory itself: the
 /// directories do not exist yet on a first-ever test run, and a watcher that only knows the
-/// paths that existed at startup would report nothing at all that first time.
+/// paths that existed at startup would report nothing at all that first time. The module list is
+/// the build's own ([`crate::build::module_dirs`]) — a module Maven does not build runs no tests,
+/// and a second walker here was a second idea of what a module is.
 fn report_dirs(root: &Path) -> Vec<PathBuf> {
     let mut dirs = vec![root.join("target").join("surefire-reports")];
-    for module in module_dirs(root) {
+    for module in crate::build::module_dirs(root) {
         dirs.push(module.join("target").join("surefire-reports"));
     }
     dirs.sort();
     dirs.dedup();
     dirs
-}
-
-/// Directories under `root` holding a `pom.xml` (the Maven modules), skipping `target` and
-/// hidden trees.
-fn module_dirs(root: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-        for e in rd.flatten() {
-            let p = e.path();
-            if !p.is_dir() {
-                continue;
-            }
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if name == "target" || name == "node_modules" || name.starts_with('.') {
-                continue;
-            }
-            if p.join("pom.xml").is_file() {
-                out.push(p.clone());
-            }
-            stack.push(p);
-        }
-    }
-    out
 }
 
 /// Stamp every report that already exists, so the sweep can tell this run's output from the

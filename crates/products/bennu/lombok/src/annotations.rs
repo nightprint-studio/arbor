@@ -84,6 +84,40 @@ pub fn generates_members(simple: &str) -> bool {
         || CONSTRUCTOR_GENERATING.contains(&simple)
 }
 
+/// The annotations that generate methods when written on a **field** rather than on the type —
+/// `@Getter private String name;` is a `getName()` callable bare from anywhere in the class.
+/// `@Delegate` exists only in this position, and forwards every method of the field's type.
+pub const FIELD_METHOD_GENERATING: &[&str] = &["Getter", "Setter", "With", "Delegate"];
+
+/// Whether `simple` adds a **field** to the annotated type — a name the body can read bare.
+///
+/// Only the loggers do. Asked apart from [`generates_methods`] because a variable and a method live
+/// in separate namespaces: `@Data` makes `getName()` legal and does nothing for a bare `name`, so a
+/// check about undeclared variables that went silent on it would go silent on half the classes in a
+/// Lombok project for no reason.
+pub fn generates_fields(simple: &str) -> bool {
+    LOGGERS.contains(&simple)
+}
+
+/// Whether `simple`, written with the arguments `args` (the text between its parentheses, `None`
+/// for a marker annotation), adds a **method** the annotated type's body can call bare.
+///
+/// The constructor annotations generate none on their own — a constructor is not called by name —
+/// unless they carry `staticName`, which turns the constructor private and adds the static factory
+/// (`@RequiredArgsConstructor(staticName = "of")` → `of(…)`).
+pub fn generates_methods(simple: &str, args: Option<&str>) -> bool {
+    MEMBER_GENERATING.contains(&simple)
+        || FIELD_METHOD_GENERATING.contains(&simple)
+        || (CONSTRUCTOR_GENERATING.contains(&simple)
+            && args.is_some_and(|a| sets_element(a, "staticName")))
+}
+
+/// Whether an annotation's argument text assigns `key` at all — `staticName = "of"`.
+fn sets_element(args: &str, key: &str) -> bool {
+    let compact: String = args.chars().filter(|c| !c.is_whitespace()).collect();
+    compact.contains(&format!("{key}="))
+}
+
 /// Whether `simple` names an annotation that makes Lombok emit a constructor — regardless of what
 /// that constructor assigns. This is the "the type HAS a constructor, it is just not in the source"
 /// question: an enum whose constants pass arguments to one, a class whose `new` call has a target.
@@ -164,6 +198,36 @@ mod tests {
         for ann in LOGGERS {
             assert!(generates_members(ann), "{ann}");
         }
+    }
+
+    #[test]
+    fn only_the_loggers_add_a_field() {
+        for ann in LOGGERS {
+            assert!(generates_fields(ann), "{ann}");
+        }
+        for ann in ["Data", "Value", "Getter", "Builder", "RequiredArgsConstructor"] {
+            assert!(!generates_fields(ann), "{ann}");
+        }
+    }
+
+    #[test]
+    fn a_constructor_annotation_adds_a_method_only_with_a_static_name() {
+        // The report that found this: a `@RequiredArgsConstructor` class had every undeclared
+        // call and variable in it go unreported, because "generates members" was one bit.
+        for ann in ["RequiredArgsConstructor", "AllArgsConstructor", "NoArgsConstructor"] {
+            assert!(!generates_methods(ann, None), "{ann}");
+            assert!(!generates_methods(ann, Some("(access = AccessLevel.PRIVATE)")), "{ann}");
+            assert!(generates_methods(ann, Some("(staticName = \"of\")")), "{ann}");
+            assert!(generates_methods(ann, Some("(staticName=\"of\")")), "{ann}");
+        }
+    }
+
+    #[test]
+    fn accessors_builders_and_delegates_add_methods() {
+        for ann in ["Data", "Value", "Getter", "Setter", "With", "Builder", "Delegate"] {
+            assert!(generates_methods(ann, None), "{ann}");
+        }
+        assert!(!generates_methods("Slf4j", None));
     }
 
     #[test]

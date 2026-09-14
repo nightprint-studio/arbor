@@ -141,37 +141,55 @@ pub(crate) fn is_type_var(binary: &str) -> bool {
 /// suppressed here without a second edit. Only the non-Lombok generators are listed.
 const OTHER_MEMBER_GENERATING_ANNOTATIONS: &[&str] = &["AutoValue", "Immutable", "Generated"];
 
-/// Whether `simple` names an annotation whose output lands on the annotated type — Lombok's, or one
-/// of the [`OTHER_MEMBER_GENERATING_ANNOTATIONS`].
-fn generates_members(simple: &str) -> bool {
-    bennu_lombok::prelude::generates_members(simple)
-        || OTHER_MEMBER_GENERATING_ANNOTATIONS.contains(&simple)
+/// Which **bare** names a type's generator annotations add, one flag per namespace.
+///
+/// One bit used to answer both, and it was far too coarse: `@RequiredArgsConstructor` generates a
+/// constructor, which nobody calls by name, yet it silenced the undeclared-variable and
+/// undeclared-call checks for the whole class — in a Spring project, most classes. A variable and a
+/// method are separate namespaces (JLS §6.5), so each check asks only about its own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct GeneratedNames {
+    /// A bare field read — Lombok's logger `log`.
+    pub(crate) values: bool,
+    /// A bare call — accessors, `builder()`, a `staticName` factory, `@Delegate`'s forwards.
+    pub(crate) calls: bool,
 }
 
-/// Whether the type declaration `decl` carries a member-generating annotation — i.e. whether its
-/// members are partly invisible to the index.
+/// What the type declaration `decl` gets generated — from its own annotations and from those on its
+/// fields (`@Getter private String name;` is a `getName()` too).
 ///
-/// A `true` means every "does this name exist on this type?" check must stay silent for the file:
+/// A flag set means the matching "does this name exist here?" check must stay silent for the file:
 /// the honest answer is "we cannot see all of them".
-pub(crate) fn has_generated_members(decl: Node, bytes: &[u8]) -> bool {
-    let mut c = decl.walk();
-    for ch in decl.named_children(&mut c) {
-        // Annotations sit in the declaration's `modifiers` node, before the `class`/`enum` keyword.
-        if ch.kind() != "modifiers" {
-            continue;
-        }
-        let mut mc = ch.walk();
-        for m in ch.named_children(&mut mc) {
-            if !matches!(m.kind(), "annotation" | "marker_annotation") {
-                continue;
-            }
-            let Some(name) = m.child_by_field_name("name") else { continue };
-            let Ok(t) = name.utf8_text(bytes) else { continue };
-            let simple = t.rsplit('.').next().unwrap_or(t);
-            if generates_members(simple) {
-                return true;
+pub(crate) fn generated_names(decl: Node, bytes: &[u8]) -> GeneratedNames {
+    let mut out = GeneratedNames::default();
+    for a in crate::lombok::annotations_of(decl, bytes) {
+        note_generator(&mut out, &a);
+    }
+    let Some(body) = decl.child_by_field_name("body") else { return out };
+    let mut stack = vec![body];
+    while let Some(n) = stack.pop() {
+        let mut c = n.walk();
+        for member in n.named_children(&mut c) {
+            match member.kind() {
+                "field_declaration" => {
+                    for a in crate::lombok::annotations_of(member, bytes) {
+                        note_generator(&mut out, &a);
+                    }
+                }
+                // An enum's fields sit one wrapper deeper than a class's.
+                "enum_body_declarations" => stack.push(member),
+                _ => {}
             }
         }
     }
-    false
+    out
+}
+
+fn note_generator(out: &mut GeneratedNames, a: &crate::lombok::AnnotationRef) {
+    if OTHER_MEMBER_GENERATING_ANNOTATIONS.contains(&a.simple) {
+        out.values = true;
+        out.calls = true;
+    }
+    out.values |= bennu_lombok::prelude::generates_fields(a.simple);
+    out.calls |= bennu_lombok::prelude::generates_methods(a.simple, a.args);
 }

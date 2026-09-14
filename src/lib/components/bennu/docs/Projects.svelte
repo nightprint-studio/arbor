@@ -122,6 +122,30 @@
   <strong>badged with the project it belongs to</strong>.
 </p>
 
+<h2>When a project or a module goes missing</h2>
+<p>
+  A workspace remembers projects by their folder, and folders get renamed, moved and deleted outside Bennu.
+</p>
+<dl class="meta-grid">
+  <dt>A project folder that is gone</dt>
+  <dd>
+    Whether it disappears before Bennu starts or while the project is open, a notification says
+    <em>Project … no longer exists at …</em> and offers <strong>Locate…</strong> — a folder picker opened at the nearest
+    folder that still exists, which adds the project from its new place — or <strong>Remove from workspace</strong>. Both
+    stay in the command palette as <em>Locate missing project …</em> and <em>Remove missing project … from workspace</em>
+    after the notification fades. A project whose folder vanished while open has its index released at once.
+  </dd>
+  <dt>A module that is gone</dt>
+  <dd>
+    When a <code>pom.xml</code> lists a <code>&lt;module&gt;</code> whose folder or <code>pom.xml</code> is not there — the
+    usual result of renaming a module's folder — Bennu says <em>Module … declared in … was not found</em> once, with
+    <strong>Open pom.xml</strong>, and names a folder beside it that has a <code>pom.xml</code> no
+    <code>&lt;modules&gt;</code> lists, which is usually the renamed one. The <code>&lt;module&gt;</code> entry is
+    underlined as an error in the pom, and the dependency warning names it too: every type in the lost module stays
+    unresolved until the pom and the folder agree again.
+  </dd>
+</dl>
+
 <h2>Which profile, and where it is kept</h2>
 <p>
   A <strong>profile</strong> is an isolated Arbor environment — its own settings, plugins and, for Bennu, its own

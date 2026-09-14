@@ -206,8 +206,7 @@ pub(crate) fn open_and_start(
     // serves the empty list. Resolve the JDK level from the project (else the target
     // stack's JDK 8). The build emits `arbor://bennu/index-progress` events on the event
     // sink so the FE can show a live "Indexing…" status.
-    let jdk_version =
-        info.jdk.as_ref().map(|j| j.version.clone()).unwrap_or_else(|| DEFAULT_JDK.to_string());
+    let jdk_version = index_jdk_of(info.jdk.as_ref());
     // Index sources in the project's declared encoding (per-project override → pom
     // `sourceEncoding` → config default) so a legacy Cp1252 tree is indexed in its real
     // encoding; a mislabelled file is recovered + reported, not dropped.
@@ -217,6 +216,23 @@ pub(crate) fn open_and_start(
     IndexService::global().open(&args.root, &jdk_version, &encoding_label, ctx.event_sink());
 
     Ok(info)
+}
+
+/// The JDK level an index is built at, from what the manifest declared — the target stack's default
+/// when it declares nothing.
+fn index_jdk_of(jdk: Option<&bennu_proto::prelude::JdkInfo>) -> String {
+    jdk.map(|j| j.version.clone()).unwrap_or_else(|| DEFAULT_JDK.to_string())
+}
+
+/// Detect `root`'s JDK level again from its poms, the per-project override winning — the same answer
+/// an open gives, for a rebuild that must not reuse the level the project was opened at.
+pub(crate) fn detect_index_jdk(root: &str) -> String {
+    let cfg = bennu_core::config::load();
+    let override_version = cfg.jdk_overrides.get(root).map(|s| s.as_str());
+    let pom = std::fs::read_to_string(Path::new(root).join("pom.xml"))
+        .map(|xml| bennu_project::prelude::parse_pom(&xml))
+        .unwrap_or_default();
+    index_jdk_of(bennu_project::prelude::detect_jdk(Path::new(root), &pom, override_version).as_ref())
 }
 
 /// Args for [`bennu_project_info`].

@@ -117,6 +117,9 @@ pub fn ensure_running() {
 /// One pass: re-stamp every built project, and react to whichever of the two things moved.
 fn tick() {
     let service = IndexService::global();
+    // First, and over every slot rather than only the built ones: a root that vanished is released
+    // here (so the snapshot below no longer holds it), and a reactor that lost a module is announced.
+    crate::project_health::check_open_roots(service);
     for (root, jdk, jars) in service.classpath_snapshot() {
         // The poms first, and it is the more drastic of the two: a pom edit can change **which**
         // jars the project wants, so re-resolving is the answer and reloading the ones already in
@@ -141,7 +144,9 @@ fn tick() {
                     crate::library_beans::forget(&root);
                     // Reindex, not `reload_changed_classpath`: the jar LIST is what has to be
                     // computed again, and `reindex` is the path that drops its cache to force it.
-                    service.reindex(&root, std::sync::Arc::clone(&sink));
+                    // The slot came from the snapshot a moment ago; a close racing this tick is the
+                    // only way it is gone, and then there is nothing to rebuild.
+                    let _ = service.reindex(&root, std::sync::Arc::clone(&sink));
                     // The jar epoch it is about to be indexed against is not the one this loop
                     // recorded a moment ago, so forget it and let the next tick take the baseline.
                     remove_seen(&root);

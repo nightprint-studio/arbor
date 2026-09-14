@@ -48,6 +48,9 @@ import { bennuDiagnosticsStore } from './diagnostics.svelte';
 // of the ACTIVE workspace only. It reports its session snapshot up on every change (see
 // `persistWorkspace`). Circular import is safe: neither store touches the other at construction.
 import { workspacesStore } from './workspaces.svelte';
+// Projects that failed to open because their directory is gone. Circular import, safe for the same
+// reason as the workspace store's: neither store touches the other at construction.
+import { projectHealthStore } from './project-health.svelte';
 // Autosave gate — the user's persisted preference (config-backed).
 import { bennuSettingsStore } from './settings.svelte';
 import type { ProjectSession } from '$lib/ipc/bennu/config';
@@ -563,11 +566,21 @@ function createProjectStore() {
     isDemo = false;
   }
 
+  /** Latest tree request per root — see `loadTreeInto`. */
+  const treeLoadSeq = new Map<string, number>();
+
   /** Fetch `root`'s file tree in the background, updating BOTH the stashed session and — when it's
-   *  the active project — the live `tree`. The root guard drops a stale tree from a superseded open. */
+   *  the active project — the live `tree`. The root guard drops a stale tree from a superseded open.
+   *
+   *  The sequence guard drops a stale tree from a superseded *load*: a Bennu-side create reloads,
+   *  the watcher reloads again a moment later, and the first reply arriving last used to put the
+   *  folder that had just appeared back out of the tree. */
   function loadTreeInto(root: string): Promise<void> {
+    const seq = (treeLoadSeq.get(root) ?? 0) + 1;
+    treeLoadSeq.set(root, seq);
     return ipcProjectTree(root)
       .then((t) => {
+        if (treeLoadSeq.get(root) !== seq) return;
         const ct = canonTree(t);
         const s = sessions.get(root);
         if (s) s.tree = ct;
@@ -926,17 +939,19 @@ function createProjectStore() {
     },
 
     /** Add a project to the current workspace and switch to it (keeping the existing members).
-     *  The current project's tabs are stashed; the new project opens with an empty tab set. */
-    async addProject(dir: string) {
+     *  The current project's tabs are stashed; the new project opens with an empty tab set.
+     *  Resolves `false` when `dir` did not open (BE absent / not a project). */
+    async addProject(dir: string): Promise<boolean> {
       let info;
       try {
         info = await ipcOpenProject(dir);
       } catch {
-        return; // BE absent / not a project — no-op (openProject owns the demo fallback)
+        return false; // BE absent / not a project — openProject owns the demo fallback
       }
       const root = canonPath(info.root);
+      projectHealthStore.settle(root);
       // Already a member → just switch to it.
-      if (workspaceRoots.includes(root)) { void this.switchProject(root); return; }
+      if (workspaceRoots.includes(root)) { void this.switchProject(root); return true; }
       stashActive();
       const canonInfo: ProjectInfo = { ...info, root };
       sessions.set(root, { info: canonInfo, tree: null, openFilePaths: [], activeFilePath: null });
@@ -945,6 +960,7 @@ function createProjectStore() {
       rememberRecent(root);
       loadTreeInto(root);
       persistWorkspace();
+      return true;
     },
 
     /** Switch the active project to `root` (an existing workspace member). Instant — the target's
@@ -1079,8 +1095,9 @@ function createProjectStore() {
     /** Load a whole workspace's projects into the live runtime — the boot-restore / workspace-switch
      *  entry point (driven by the workspace store, which owns the persisted set). Opens each
      *  project's manifest, stashes a session per project, then activates `active` (or the first that
-     *  opened) and loads its active file. A vanished project is skipped; nothing opened leaves the
-     *  window empty (no demo fallback, no error). Persistence-free — the store persists after. */
+     *  opened) and loads its active file. A project that fails to open is skipped and explained — a
+     *  vanished directory is announced with Locate / Remove, anything else is logged; nothing opened
+     *  leaves the window empty (no demo fallback). Persistence-free — the store persists after. */
     async loadWorkspace(projects: ProjectSession[], active: string) {
       sessions.clear();
       workspaceRoots = [];
@@ -1100,8 +1117,14 @@ function createProjectStore() {
         // eslint-disable-next-line no-await-in-loop
         try {
           info = await ipcOpenProject(p.root, canonPath(p.root) === wanted);
-        } catch { continue; } // a project that's gone
+        } catch (err) {
+          // Not awaited: the status question is a round-trip, and the rest of the workspace should
+          // not wait on explaining one project that is not coming.
+          void projectHealthStore.explainFailedOpen(p.root, err);
+          continue;
+        }
         const root = canonPath(info.root);
+        projectHealthStore.settle(root);
         const paths = p.open_files.map(canonPath);
         // The carets ride positionally alongside the tabs, and a session written before they
         // existed simply has none — hence the index-wise read rather than a zip.

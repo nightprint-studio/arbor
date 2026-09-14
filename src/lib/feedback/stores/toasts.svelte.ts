@@ -28,9 +28,9 @@ export interface Toast {
    *  bottom-right stack to interleave toasts with notifications in
    *  chronological order. */
   addedAt: number;
-  /** Optional clickable action rendered as a button on the right side
-   *  of the toast (e.g. "Open" → deep-links to a pipeline run). */
-  action?: ToastAction;
+  /** Clickable actions rendered as buttons on the right side of the toast
+   *  (e.g. "Open" → deep-links to a pipeline run), in the order given. */
+  actions: ToastAction[];
 }
 
 function createToastStore() {
@@ -53,10 +53,11 @@ function createToastStore() {
     message: string,
     kind: ToastKind = 'info',
     duration = 3500,
-    action?: ToastAction,
+    action?: ToastAction | ToastAction[],
   ): string {
     const id = `toast-${++counter}`;
-    toasts.push({ id, kind, message, duration, addedAt: Date.now(), action });
+    const actions = action ? (Array.isArray(action) ? action : [action]) : [];
+    toasts.push({ id, kind, message, duration, addedAt: Date.now(), actions });
     // A non-positive duration is a sticky toast (dismissed only by the user or a
     // click action) — don't schedule an immediate auto-dismiss.
     if (duration > 0) {

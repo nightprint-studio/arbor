@@ -804,7 +804,15 @@ impl NativeJavaProvider {
             .into_iter()
             .filter(|name| bennu_complete::prelude::match_tier(name, &prefix, case).is_some())
             .collect();
-        ranked.sort_by_key(|simple| here.rank(self.class_names.candidates(simple)));
+        // The match tier leads the key. Sorting by proximity alone reordered the WHOLE list, so a
+        // camel-hump or case-insensitive hit in a sibling package went above the exact prefix match
+        // everyone in the project imports.
+        ranked.sort_by_key(|simple| {
+            (
+                bennu_complete::prelude::match_tier(simple, &prefix, case),
+                here.rank(self.class_names.candidates(simple)),
+            )
+        });
         ranked
             .into_iter()
             .map(|simple| {
@@ -911,7 +919,10 @@ impl NativeJavaProvider {
             kept.insert(simple, annotations);
             true
         });
-        let mut scored: Vec<(u8, Rank, String, Option<String>)> = Vec::new();
+        // How well the name matches comes first: the sweep produced names in match order, and
+        // sorting on `@Target` fit and proximity alone threw that away — a fuzzy hit could head the
+        // list above the exact prefix the project writes in hundreds of files.
+        let mut scored: Vec<(Option<u8>, u8, Rank, String, Option<String>)> = Vec::new();
         for simple in matched {
             let annotations = &kept[simple];
             let Some(first) = annotations.first() else { continue };
@@ -938,6 +949,7 @@ impl NativeJavaProvider {
                 simple,
             );
             scored.push((
+                bennu_complete::prelude::match_tier(simple, &site.prefix, case),
                 u8::from(!fits),
                 (certainty, score),
                 simple.to_string(),
@@ -948,7 +960,7 @@ impl NativeJavaProvider {
         scored.truncate(MAX);
         scored
             .into_iter()
-            .map(|(_, _, simple, import)| CompletionItem {
+            .map(|(_, _, _, simple, import)| CompletionItem {
                 label: simple,
                 kind: "annotation".to_string(),
                 detail: import.clone(),

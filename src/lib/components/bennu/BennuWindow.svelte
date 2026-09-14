@@ -149,7 +149,8 @@
   import { bennuNavStore } from '$lib/stores/bennu/nav-history.svelte';
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
-  import { watchRoots, TREE_CHANGED, type TreeChanged } from '$lib/ipc/bennu/tree-watch';
+  import { watchRoots } from '$lib/ipc/bennu/tree-watch';
+  import { bennuTreeSyncStore } from '$lib/stores/bennu/tree-sync.svelte';
   import { workspacesStore } from '$lib/stores/bennu/workspaces.svelte';
   import { isJavaFile, isJspFile, isLspFile, isMarkdownFile, isSpringConfigFile, supportsCodeNav } from './file-kind';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -170,6 +171,9 @@
   import { bennuCargoTestStore } from '$lib/stores/bennu/cargo-tests.svelte';
   import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
+  import { projectHealthStore } from '$lib/stores/bennu/project-health.svelte';
+  import { fileOwnerStore } from '$lib/stores/bennu/file-owner.svelte';
+  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
@@ -335,26 +339,12 @@
       void workspacesStore.restore();
       void bennuSettingsStore.loadConfig();
     }).then((un) => { unlistenBeUp = un; });
-    // The Project tree's filesystem watcher. Two halves and they are separate on purpose: this one
-    // is the subscription, and the `$effect` below is what tells the backend which roots to watch —
-    // that set changes as members are added and removed, and the subscription must not be torn
-    // down and rebuilt every time it does.
-    //
-    // The tree is reloaded wholesale rather than patched from the named paths. A reload is one
-    // call the backend already serves, it is right for every shape of change including a rename
-    // and a directory move, and the alternative is a second model of the tree that has to agree
-    // with the first one. The paths are still worth carrying: they say WHICH root changed.
-    let unlistenTree: (() => void) | undefined;
-    void listen<TreeChanged>(TREE_CHANGED, (e) => {
-      const root = e.payload?.root;
-      if (!root) return;
-      projectStore.refreshTreeOf(root);
-      // A manifest is the one file whose CONTENT the tree cannot express: rename an
-      // `<artifactId>` and the project is called something else, but nothing on screen was
-      // told — the title bar, the switcher and Canopy's recents all kept the old name until
-      // the project was closed and reopened. Re-read only the model, never re-open.
-      if (manifestChanged(e.payload)) void projectStore.refreshProjectInfo(root);
-    }).then((un) => { unlistenTree = un; });
+    // The Project tree's sync with the disk. Two halves and they are separate on purpose: this one
+    // is the subscription (watcher events + the focus safety net), and the `$effect` below is what
+    // tells the backend which roots to watch — that set changes as members are added and removed,
+    // and the subscription must not be torn down and rebuilt every time it does.
+    let detachTreeSync: (() => void) | undefined;
+    void bennuTreeSyncStore.attach().then((d) => { detachTreeSync = d; });
 
     // Subscribe to the build/run + index-progress event streams for this window;
     // detach on unmount.
@@ -373,6 +363,9 @@
     // the VM made of each breakpoint.
     void bennuDebugStore.attach().then((d) => { detachDebug = d; });
     void bennuIndexStore.attach().then((d) => { detachIndex = d; });
+    // Project roots that vanish mid-session, and reactors that lose a module.
+    let detachHealth: (() => void) | undefined;
+    void projectHealthStore.attach().then((d) => { detachHealth = d; });
     void bennuSpellStore.attach().then((d) => { detachSpell = d; });
     // Reload a decompiled tab when its dependency sources finish downloading.
     void decompiledStore.attach().then((d) => { detachDecompiled = d; });
@@ -388,11 +381,11 @@
       window.removeEventListener('focus', onWindowFocus);
       window.removeEventListener('blur', stopPolling);
       stopPolling();
-      detachRun?.(); detachIndex?.(); detachSpell?.(); detachDecompiled?.(); detachTests?.();
+      detachRun?.(); detachIndex?.(); detachHealth?.(); detachSpell?.(); detachDecompiled?.(); detachTests?.();
       detachCargoTests?.();
       unlistenClose?.();
       unlistenBeUp?.();
-      unlistenTree?.();
+      detachTreeSync?.();
       document.removeEventListener('visibilitychange', onHidden);
       detachDebug?.(); detachLsp?.();
       unlistenContributions();
@@ -523,6 +516,19 @@
     const path = projectStore.activeFilePath;
     if (projectStore.isDemo || projectStore.isCargo) return;
     void javaLevelStore.loadFile(path && isJavaFile(path) ? path : null);
+  });
+
+  // Whether an indexed project owns the open Java file — the footer's "Not indexed". Asked again
+  // when the set of open projects changes or an index starts/finishes, since either can turn the
+  // answer around without the tab changing.
+  $effect(() => {
+    const path = projectStore.activeFilePath;
+    const generation = `${projectStore.workspaceRoots.join('\n')}|${bennuIndexStore.indexing}`;
+    if (projectStore.isDemo || projectStore.isCargo) {
+      untrack(() => fileOwnerStore.reset());
+      return;
+    }
+    void fileOwnerStore.load(path && isJavaFile(path) ? path : null, generation);
   });
 
   // The Cargo workspace, on opening a Rust project. Read here rather than only by the Cargo panel
@@ -1308,18 +1314,6 @@
     JUnit: JUnitIcon as unknown as IconComponent,
     Bevy: BevyIcon as unknown as IconComponent,
   };
-  /** Whether a watcher burst touched a build manifest — the file the project's own name,
-   *  modules and JDK come out of.
-   *
-   *  A truncated burst counts: the paths are capped, so "not in the list" is not "did not
-   *  change", and re-reading one manifest is cheaper than being wrong about it. */
-  function manifestChanged(payload: TreeChanged): boolean {
-    if (payload.truncated) return true;
-    return payload.paths.some((p) => {
-      const name = p.split('/').pop() ?? p;
-      return name === 'pom.xml' || name === 'Cargo.toml';
-    });
-  }
 
   /** A brand mark first, then the one palette vocabulary every product shares. A plugin's
    *  contributed command names a lucide icon too, so it resolves on the same path. */
@@ -1764,6 +1758,23 @@
       { id: 'reindex', title: 'Rebuild index', icon: 'RotateCw',
         action: () => run(() => { const r = projectStore.project?.root; if (r) void bennuIndexStore.rebuild(r); }),
         when: !!projectStore.project && javaTools && !bennuIndexStore.indexing },
+      // The watcher and the focus check keep the tree in step on their own; this is the hand
+      // override for the change both missed.
+      { id: 'reloadtree', title: 'Reload project tree', icon: 'FolderTree',
+        action: () => run(() => void projectStore.refreshTree()), when: !!projectStore.project },
+      // The file on screen is outside every indexed project — the footer's "Not indexed", by name.
+      { id: 'open-enclosing-project',
+        title: `${fileOwnerStore.suggestionIsMember ? 'Switch to' : 'Open'} project ${fileOwnerStore.suggestedName ?? ''}`,
+        icon: 'FolderTree',
+        action: () => run(() => void fileOwnerStore.openSuggested()),
+        when: fileOwnerStore.notIndexed && !!fileOwnerStore.suggestedRoot },
+      // A workspace project whose directory is gone: the toast's two verbs, for when it has faded.
+      ...projectHealthStore.missing.flatMap((m) => [
+        { id: `locate-missing:${m.root}`, title: `Locate missing project ${m.name}…`, icon: 'FolderTree',
+          action: () => run(() => projectHealthStore.startLocate(m.root)), when: true },
+        { id: `remove-missing:${m.root}`, title: `Remove missing project ${m.name} from workspace`, icon: 'FolderTree',
+          action: () => run(() => projectHealthStore.remove(m.root)), when: true },
+      ]),
       // The one action in the dependency story that uses the network. Reachable by name because
       // the state it fixes — a jar that was never downloaded — announces itself as unresolvable
       // types in files that are fine, which is the least searchable symptom there is.
@@ -2560,6 +2571,18 @@
 
 {#if bennuUiStore.validationCreatorOpen}
   <BennuValidationModal onClose={() => bennuUiStore.closeValidationCreator()} />
+{/if}
+
+{#if projectHealthStore.locating}
+  {@const target = projectHealthStore.locating}
+  <FileExplorerModal
+    mode="folder"
+    title={`Locate project ${target.name}`}
+    initialPath={target.nearestExisting ?? undefined}
+    onConfirm={(dir) => void projectHealthStore.confirmLocate(dir)}
+    onCancel={() => projectHealthStore.cancelLocate()}
+    onClose={() => projectHealthStore.cancelLocate()}
+  />
 {/if}
 
 {#if bennuUiStore.workspaceManagerOpen}

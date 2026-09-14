@@ -8,7 +8,9 @@
 pub use crate::ext::MavenExtension;
 
 // The classpath, without Maven.
-pub use crate::resolve::{reactor, resolve as resolve_offline, Origin, Resolution};
+pub use crate::resolve::{
+    reactor, reactor_report, resolve as resolve_offline, MissingModule, Origin, Reactor, Resolution,
+};
 
 // Where the repository is, and what a coordinate is called inside it.
 pub use crate::repo::{compare_versions, local_repository, sort_versions_desc, Coord, LocalRepo};

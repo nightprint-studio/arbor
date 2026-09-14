@@ -71,6 +71,50 @@ pub struct Resolution {
     /// Both answers are known at the moment the walk gives up on the artifact; nothing but this
     /// carried them out.
     pub origins: HashMap<String, Origin>,
+    /// `<module>` declarations the disk does not have — a module directory renamed or deleted while
+    /// a pom still lists it.
+    ///
+    /// Recorded rather than skipped because skipping is exactly how this went unnoticed: the module's
+    /// dependencies silently dropped out of the walk, the resolve still looked complete, it was
+    /// cached, and Maven — which would have refused the reactor outright — was never asked.
+    pub missing_modules: Vec<MissingModule>,
+}
+
+/// A `<module>` a reactor pom declares that has no `pom.xml` on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingModule {
+    /// The name as written in `<module>`, trimmed.
+    pub name: String,
+    /// The `pom.xml` whose `<modules>` lists it.
+    pub declared_in: PathBuf,
+}
+
+impl MissingModule {
+    /// The pom the declaration expects — whose appearance means the module is back.
+    pub fn expected_pom(&self) -> PathBuf {
+        let dir = self.declared_in.parent().map(Path::to_path_buf).unwrap_or_default();
+        let target = dir.join(self.name.trim_end_matches('/'));
+        if target.extension().is_some_and(|e| e == "xml") { target } else { target.join("pom.xml") }
+    }
+
+    /// The sentence the user reads.
+    pub fn describe(&self) -> String {
+        let name = self.name.trim_end_matches('/');
+        format!("pom lists module `{name}` but `{name}/pom.xml` does not exist")
+    }
+}
+
+/// The reactor as declared, with what the declaration names and the disk does not have.
+#[derive(Debug, Clone, Default)]
+pub struct Reactor {
+    /// Every module that was read: `(directory, pom)`, the root first.
+    pub modules: Vec<(PathBuf, Pom)>,
+    /// The declarations that point at nothing.
+    pub missing: Vec<MissingModule>,
+    /// Directories holding a `pom.xml`, beside a pom that lists a missing module, that no `<modules>`
+    /// names — computed only when something is missing, where it is usually the renamed directory
+    /// itself.
+    pub unlisted: Vec<PathBuf>,
 }
 
 /// Where an unresolved coordinate came from.
@@ -98,7 +142,7 @@ impl Origin {
 
 impl Resolution {
     pub fn is_complete(&self) -> bool {
-        self.missing.is_empty() && self.unversioned.is_empty()
+        self.missing.is_empty() && self.unversioned.is_empty() && self.missing_modules.is_empty()
     }
 
     /// Where the graph reached `coord` from, when it is one of the unresolved ones.
@@ -141,6 +185,9 @@ impl Resolution {
             return None;
         }
         let mut parts = Vec::new();
+        if !self.missing_modules.is_empty() {
+            parts.push(sample(self.missing_modules.iter().map(MissingModule::describe)));
+        }
         if !self.missing.is_empty() {
             // Not parenthesised: each entry carries its own `(in module, via …)`, and a list in
             // brackets whose items are themselves bracketed is a sentence nobody can parse.
@@ -175,7 +222,7 @@ fn sample(items: impl Iterator<Item = String>) -> String {
 
 /// Resolve the whole reactor rooted at `root` against `repo`.
 pub fn resolve(root: &Path, repo: &LocalRepo) -> Resolution {
-    let modules = reactor(root);
+    let Reactor { modules, missing: missing_modules, .. } = reactor_report(root);
     let mut reader = PomReader::new(repo);
     let effectives: Vec<Effective> = modules
         .iter()
@@ -188,7 +235,11 @@ pub fn resolve(root: &Path, repo: &LocalRepo) -> Resolution {
     let reactor: HashSet<String> = effectives.iter().map(|e| e.coord.ga()).collect();
     let pinned = project_management(&effectives);
 
-    let mut out = Resolution { reactor: reactor.iter().cloned().collect(), ..Resolution::default() };
+    let mut out = Resolution {
+        reactor: reactor.iter().cloned().collect(),
+        missing_modules,
+        ..Resolution::default()
+    };
     out.reactor.sort();
 
     let mut chosen: HashMap<String, usize> = HashMap::new();
@@ -511,34 +562,74 @@ fn excluded_by_wildcard(excluded: &HashSet<String>, coord: &Coord) -> bool {
 /// vendored dependency with its own pom is not part of the reactor and its dependencies are not the
 /// project's.
 pub fn reactor(root: &Path) -> Vec<(PathBuf, Pom)> {
-    let mut out = Vec::new();
-    let mut seen: HashSet<PathBuf> = HashSet::new();
-    collect_modules(root, &mut out, &mut seen, 0);
-    out
+    reactor_report(root).modules
 }
 
-fn collect_modules(dir: &Path, out: &mut Vec<(PathBuf, Pom)>, seen: &mut HashSet<PathBuf>, depth: usize) {
+/// The reactor rooted at `root` as [`reactor`] reads it, plus the declarations it could not follow.
+pub fn reactor_report(root: &Path) -> Reactor {
+    let mut report = Reactor::default();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    collect_modules(root, &root.join("pom.xml"), &mut report, &mut seen, 0);
+    if !report.missing.is_empty() {
+        report.unlisted = unlisted_beside(&report);
+    }
+    report
+}
+
+fn collect_modules(dir: &Path, pom_file: &Path, report: &mut Reactor, seen: &mut HashSet<PathBuf>, depth: usize) {
     /// Deeper than any reactor anybody maintains, and a hard stop on a `<module>..</module>` loop.
     const MAX_REACTOR_DEPTH: usize = 12;
     if depth > MAX_REACTOR_DEPTH || !seen.insert(dir.to_path_buf()) {
         return;
     }
-    let Ok(bytes) = std::fs::read(dir.join("pom.xml")) else { return };
+    let Ok(bytes) = std::fs::read(pom_file) else { return };
     let pom = parse_pom(&String::from_utf8_lossy(&bytes));
     let modules = pom.modules.clone();
-    out.push((dir.to_path_buf(), pom));
+    report.modules.push((dir.to_path_buf(), pom));
     for module in modules {
+        let name = module.trim();
+        // An interpolated name is a directory only Maven's property expansion knows; a `.` is the
+        // pom itself. Neither is something to look for on disk.
+        if name.is_empty() || name == "." || name.contains("${") {
+            continue;
+        }
         // A `<module>` names a directory, but naming the pom inside it (`sub/pom.xml`) is legal and
         // some generators write it that way.
-        let mut child = dir.join(module.trim().trim_end_matches('/'));
-        if child.is_file() {
-            let up = child.parent().map(Path::to_path_buf);
-            if let Some(up) = up {
-                child = up;
+        let target = dir.join(name.trim_end_matches('/'));
+        let (child_dir, child_pom) = if target.is_file() {
+            (target.parent().map(Path::to_path_buf).unwrap_or_else(|| dir.to_path_buf()), target.clone())
+        } else {
+            (target.clone(), target.join("pom.xml"))
+        };
+        if !child_pom.is_file() {
+            report.missing.push(MissingModule { name: name.to_string(), declared_in: pom_file.to_path_buf() });
+            continue;
+        }
+        collect_modules(&child_dir, &child_pom, report, seen, depth + 1);
+    }
+}
+
+/// Pom-bearing directories next to a pom that lists a missing module, which no reactor pom names.
+///
+/// Only looked for beside the poms that lost a module, because that is where a rename leaves the
+/// new directory — and a whole-tree walk would find every `samples/` and vendored pom in the checkout.
+fn unlisted_beside(report: &Reactor) -> Vec<PathBuf> {
+    let known: HashSet<&Path> = report.modules.iter().map(|(dir, _)| dir.as_path()).collect();
+    let mut parents: Vec<&Path> = report.missing.iter().filter_map(|m| m.declared_in.parent()).collect();
+    parents.sort();
+    parents.dedup();
+    let mut out = Vec::new();
+    for parent in parents {
+        let Ok(entries) = std::fs::read_dir(parent) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path.join("pom.xml").is_file() && !known.contains(path.as_path()) {
+                out.push(path);
             }
         }
-        collect_modules(&child, out, seen, depth + 1);
     }
+    out.sort();
+    out
 }
 
 #[cfg(test)]
@@ -937,6 +1028,50 @@ mod tests {
         let r = f.resolve();
         assert_eq!(r.missing.len(), 1);
         assert_eq!(r.describe(&r.missing[0]), "com.acme:absent:2.4.0 (in app)");
+    }
+
+    /// The reported case: a module directory renamed while the root pom still lists the old name.
+    /// Skipping it silently made the resolve look complete — it was cached and Maven never ran — so
+    /// the missing module is recorded, the resolve is incomplete, and the renamed directory is named.
+    #[test]
+    fn a_module_the_reactor_lists_but_the_disk_lacks_makes_the_resolve_incomplete() {
+        let f = Fixture::new("missing-module");
+        f.write_pom(
+            "",
+            "<project><groupId>p</groupId><artifactId>root</artifactId><version>1</version>
+             <packaging>pom</packaging><modules><module>core</module><module>old-web</module></modules></project>",
+        );
+        f.write_pom("core", "<project><groupId>p</groupId><artifactId>core</artifactId><version>1</version></project>");
+        f.write_pom("new-web", "<project><groupId>p</groupId><artifactId>new-web</artifactId><version>1</version></project>");
+
+        let r = f.resolve();
+        assert!(!r.is_complete());
+        assert_eq!(r.missing_modules.len(), 1, "{:?}", r.missing_modules);
+        assert_eq!(r.missing_modules[0].name, "old-web");
+        assert_eq!(r.missing_modules[0].declared_in, f.project().join("pom.xml"));
+        assert_eq!(r.missing_modules[0].expected_pom(), f.project().join("old-web").join("pom.xml"));
+        assert!(r
+            .shortfall()
+            .unwrap()
+            .contains("pom lists module `old-web` but `old-web/pom.xml` does not exist"));
+
+        let report = reactor_report(&f.project());
+        assert_eq!(report.unlisted, vec![f.project().join("new-web")]);
+    }
+
+    /// A module naming its pom file directly is present, and an interpolated name is not second-guessed.
+    #[test]
+    fn a_module_naming_its_pom_file_or_a_property_is_not_missing() {
+        let f = Fixture::new("module-file");
+        f.write_pom(
+            "",
+            "<project><groupId>p</groupId><artifactId>root</artifactId><version>1</version>
+             <modules><module>api/pom.xml</module><module>${extra}</module></modules></project>",
+        );
+        f.write_pom("api", "<project><groupId>p</groupId><artifactId>api</artifactId><version>1</version></project>");
+        let report = reactor_report(&f.project());
+        assert!(report.missing.is_empty(), "{:?}", report.missing);
+        assert_eq!(report.modules.len(), 2);
     }
 
     /// The reported case, in miniature. `org.hibernate.orm:hibernate-jpamodelgen:7.4.5.Final` is a

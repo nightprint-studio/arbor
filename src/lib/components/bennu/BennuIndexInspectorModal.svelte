@@ -20,7 +20,7 @@
    * typing never re-scans the raw set. Click an openable row (a type / bean / action
    * with a file+line) to open it. Read-only.
    */
-  import { Database, RefreshCw, RotateCw, CircleCheckBig, Loader, ExternalLink } from 'lucide-svelte';
+  import { AlertTriangle, Database, RefreshCw, RotateCw, CircleCheckBig, Loader, ExternalLink } from 'lucide-svelte';
   import { kindGlyph } from './symbol-kind-glyph';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -291,8 +291,10 @@
       <Database size={14} />
       <span class="modal-title">Index inspector</span>
       {#if stats}
-        <span class="hdr-state" class:ready={stats.ready}>
-          {#if stats.ready}<CircleCheckBig size={12} /> ready{:else}<Loader size={12} /> building…{/if}
+        <span class="hdr-state" class:ready={stats.ready} class:failed={stats.provider_stage === 'failed'}>
+          {#if stats.ready}<CircleCheckBig size={12} /> ready
+          {:else if stats.provider_stage === 'failed'}<AlertTriangle size={12} /> build failed — no resolver, Rebuild to retry
+          {:else}<Loader size={12} /> building…{/if}
         </span>
       {/if}
       <button
@@ -423,6 +425,7 @@
   .modal-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .hdr-state { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-size-2xs); color: var(--text-muted); }
   .hdr-state.ready { color: var(--success); }
+  .hdr-state.failed { color: var(--warning); }
   .hdr-rebuild {
     display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
     background: transparent; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);

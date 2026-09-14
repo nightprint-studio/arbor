@@ -201,7 +201,10 @@ fn resolve_fresh(root: &Path, jdk_version: &str) -> Result<ResolvedList, String>
     // Maven installs what it downloads into the same local repository, so an artifact it fetched
     // from a mirror is now sitting exactly where the direct read looked for it and is no longer
     // missing at all. Reporting the pre-Maven list would warn about the artifacts Maven just fixed.
-    let (missing_paths, missing_coords) = still_missing(&offline, &repo);
+    let (mut missing_paths, missing_coords) = still_missing(&offline, &repo);
+    // A module whose pom reappears (the rename undone, or the directory restored) changes what the
+    // reactor contributes, so its expected pom is one more path whose arrival retires this answer.
+    missing_paths.extend(offline.missing_modules.iter().map(|m| m.expected_pom().display().to_string()));
 
     if jars.is_empty() {
         // Nothing from either resolver. Maven's own words when it ran, ours when it could not.
@@ -275,8 +278,17 @@ fn shortfall_message(
     /// than three because each entry now carries its module and what pulled it in, and a
     /// notification that has to be scrolled is one nobody reads to the end.
     const SHOW: usize = 2;
-    if missing.is_empty() && offline.unversioned.is_empty() {
+    if missing.is_empty() && offline.unversioned.is_empty() && offline.missing_modules.is_empty() {
         return None;
+    }
+    // A broken reactor comes first: it is the cause, and the unresolved coordinates below are often
+    // only its consequence — the lost module's own dependencies dropped out with it.
+    let reactor = (!offline.missing_modules.is_empty()).then(|| {
+        let lines: Vec<String> = offline.missing_modules.iter().map(|m| m.describe()).collect();
+        format!("The reactor is incomplete: {}.", sample(&lines, SHOW))
+    });
+    if missing.is_empty() && offline.unversioned.is_empty() {
+        return reactor;
     }
     let mut parts = Vec::new();
     if !missing.is_empty() {
@@ -301,8 +313,9 @@ fn shortfall_message(
         ));
     }
     Some(format!(
-        "{} of this project's dependencies could not be resolved: {}. Types from them will read as \
+        "{}{} of this project's dependencies could not be resolved: {}. Types from them will read as \
          unresolved until they are.{}",
+        reactor.map(|r| format!("{r} ")).unwrap_or_default(),
         missing.len() + offline.unversioned.len(),
         parts.join("; "),
         if auto_download() {

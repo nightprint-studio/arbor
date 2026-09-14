@@ -61,7 +61,7 @@ use crate::scopes::{
     is_value_position, resolves_as_local, scope_is_directly_top, single_top_level_type,
 };
 
-use crate::nodes::{child_field_name, has_generated_members};
+use crate::nodes::{child_field_name, generated_names};
 use crate::resolve::type_binary;
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
 
@@ -122,12 +122,12 @@ pub fn undefined_var_errors_in(
         return Vec::new();
     };
 
-    // A member-generating annotation means the type's real member list is bigger than anything we
-    // can read: under Lombok's `@Slf4j` the bare `log` is a legal field reference declared in no
-    // source file, and `@Data`'s accessors are the same story for the call check next door. Flagging
-    // those is the fastest way to make someone close the Problems panel. See
-    // `crate::nodes::has_generated_members`.
-    if has_generated_members(top.node, bytes) {
+    // A field-generating annotation means the type's real field list is bigger than anything we can
+    // read: under Lombok's `@Slf4j` the bare `log` is a legal reference declared in no source file.
+    // Only FIELDS matter here — `@Data`'s accessors or `@RequiredArgsConstructor`'s constructor add
+    // no bare value, and going silent on them hid every undeclared name in most Spring classes. See
+    // `crate::nodes::generated_names`.
+    if generated_names(top.node, bytes).values {
         return Vec::new();
     }
 
@@ -524,11 +524,52 @@ mod tests {
     // ── NEGATIVES (must NOT flag) ────────────────────────────────────────────────────────────────
 
     /// Lombok's `@Slf4j` injects a `log` field that exists in no source file. Reporting it was a
-    /// page of red on a class that compiles — see `crate::nodes::has_generated_members`.
+    /// page of red on a class that compiles — see `crate::nodes::generated_names`.
     #[test]
     fn a_member_generating_annotation_skips_the_file() {
         let src = "package com.acme;\n@Slf4j\nclass C extends Base { void m() { Object o = log; } }";
         assert!(diags_with(src, &resolver()).is_empty());
+    }
+
+    /// The report, verbatim: a Spring bean with `@RequiredArgsConstructor` passing an argument
+    /// declared nowhere. The constructor annotation adds no bare name, so it must not hide one.
+    #[test]
+    fn a_constructor_generator_does_not_hide_an_undeclared_name() {
+        let mut r = resolver();
+        r.members.insert(
+            "com/acme/PaMsRestClientApi".to_string(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: Some(TypeRef::simple("java/lang/Object")),
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: Vec::new(),
+                flags: Default::default(),
+            },
+        );
+        let src = "package com.acme;\n\
+                   @RequiredArgsConstructor\n\
+                   @Component\n\
+                   public class PaMsRestClientApi {\n\
+                   \x20   private final RestClient client;\n\
+                   \x20   public void do_stuff() {\n\
+                   \x20       ciao(voxb);\n\
+                   \x20   }\n\
+                   \x20   public void ciao(int miao) {\n\
+                   \x20   }\n\
+                   }\n";
+        let d = diags_with(src, &r);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`voxb`"), "{d:?}");
+    }
+
+    /// Accessors are methods: a bare undeclared VALUE in a `@Data` class is still an error.
+    #[test]
+    fn accessor_generators_do_not_hide_an_undeclared_name() {
+        let src = "package com.acme;\n@Data\nclass C extends Base { int count; void m() { Object o = mystery; } }";
+        let d = diags_with(src, &resolver());
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`mystery`"), "{d:?}");
     }
 
     #[test]

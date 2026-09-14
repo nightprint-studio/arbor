@@ -54,6 +54,9 @@ function createBennuIndexStore() {
   // and a footer/status hint so a long walk on a big project visibly moves. Null when not
   // in a counted phase.
   let refProgress = $state<{ phase: string; done: number; total: number } | null>(null);
+  // The last build ended without installing any resolver (`provider_stage: "failed"`): the footer
+  // must not read "Indexed" over a project where only syntax checks run.
+  let failed = $state(false);
   let currentRoot: string | null = null;
   // Latched true once the current index cycle finishes (event `ready` or poll fallback).
   // Guards against a late/duplicate non-`ready` progress event — or an in-flight poll
@@ -111,7 +114,11 @@ function createBennuIndexStore() {
     stopPoll();
     // A `ready` event can land before any poll returned a count → grab the final type
     // count once so the footer reads "Indexed · N". Best-effort, no token gate.
-    if (root) void ipcIndexStats(root).then((s) => { typeCount = s.types; }).catch(() => {});
+    if (root) {
+      void ipcIndexStats(root)
+        .then((s) => { typeCount = s.types; failed = s.provider_stage === 'failed'; })
+        .catch(() => {});
+    }
   }
 
   function stopPoll() {
@@ -165,6 +172,7 @@ function createBennuIndexStore() {
     currentRoot = root;
     classCache.delete(root);
     done = false;
+    failed = false;
     indexing = true;
     phase = 'project';
     typeCount = 0;
@@ -188,7 +196,9 @@ function createBennuIndexStore() {
       .then((s) => {
         if (token !== pollToken) return;
         typeCount = s.types;
-        if (s.ready) {
+        // A build that failed before its first resolver never becomes ready, and polling it for
+        // ever kept the footer on "Indexing…". The backend has already said why.
+        if (s.ready || s.provider_stage === 'failed') {
           markReady(root);
           return;
         }
@@ -221,6 +231,8 @@ function createBennuIndexStore() {
     get phase() { return phase; },
     get phaseLabel() { return phase ? phaseLabel(phase) : null; },
     get typeCount() { return typeCount; },
+    /** The last build installed no resolver — only syntax checks run until a rebuild succeeds. */
+    get failed() { return failed; },
     get buildRevision() { return buildRevision; },
     /** Live reference-walk progress (`{ phase, done, total }`) or null — for a footer/status
      *  hint showing the walk moving on a big project. */
@@ -286,14 +298,22 @@ function createBennuIndexStore() {
      *  rebuild, then re-arms the indexing job + poll once the BE has swapped in the fresh
      *  (empty, not-ready) slot — so the poll never reads the OLD slot's stale `ready`
      *  stats and finishes early. The BE emits index-progress like an open; `ready`
-     *  refreshes everything. Safe to call with no project (BE no-ops). */
+     *  refreshes everything. A refusal (no open project at `root`) is shown, not swallowed,
+     *  and leaves the footer as it was. */
     async rebuild(root: string): Promise<void> {
+      const before = { indexing, phase, done };
       // Instant feedback before the round-trip; `beginCycle` re-arms the real cycle after.
       indexing = true;
       phase = 'project';
       done = false;
       classCache.delete(root);
-      await ipcReindex(root).catch(() => {});
+      try {
+        await ipcReindex(root);
+      } catch (err) {
+        ({ indexing, phase, done } = before);
+        toastStore.show(`Couldn't rebuild the index: ${err}`, 'error');
+        return;
+      }
       beginCycle(root);
     },
 

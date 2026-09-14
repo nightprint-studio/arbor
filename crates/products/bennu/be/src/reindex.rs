@@ -9,8 +9,8 @@
 //! index store re-arms its "Indexing…" job and invalidates its class cache on `ready`).
 //!
 //! No compilation happens (that's `bennu_build`); this is a pure re-scan of the sources
-//! on disk. A no-op (still `Ok`) when no open project owns `root` — [`IndexService::reindex`]
-//! reads the JDK level off the existing slot, so there's nothing to rebuild without one.
+//! on disk. The JDK level and encoding are detected again from the poms. Errs when no open
+//! project owns `root`: a rebuild that silently did nothing read as one that found nothing to fix.
 
 use bennu_core::prelude::BennuState;
 use serde::Deserialize;
@@ -26,7 +26,7 @@ pub struct ReindexArgs {
 
 /// Invalidate + rebuild the whole semantic index for the project at `root`. Returns
 /// immediately; the rebuild runs off-thread and reports progress on the index-progress
-/// event stream. No-op when no open project owns `root`.
+/// event stream. Errs when no open project owns `root`.
 #[arbor_rpc::handler]
 fn bennu_reindex(ctx: &BennuState, args: ReindexArgs) -> Result<(), String> {
     // Keep the reverse channel current so the rebuild's warm-up job still tracks.
@@ -41,6 +41,8 @@ fn bennu_reindex(ctx: &BennuState, args: ReindexArgs) -> Result<(), String> {
     // And the "nothing has changed since the last compile" stamp: a re-index is the user
     // saying they no longer trust what we remember about this project.
     crate::build::forget_build_stamp(&args.root);
-    IndexService::global().reindex(&args.root, ctx.event_sink());
-    Ok(())
+    // And a broken reactor already announced this episode: the rebuild is the user asking to be
+    // told the current state again.
+    crate::project_health::forget_module_episode(&args.root);
+    IndexService::global().reindex(&args.root, ctx.event_sink())
 }

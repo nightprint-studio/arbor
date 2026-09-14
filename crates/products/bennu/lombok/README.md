@@ -31,6 +31,8 @@ same functions: `bennu-check` maps tree-sitter `import_declaration` nodes onto `
 | Item | Answers |
 |---|---|
 | `generates_members(simple)` | does this annotation add members to the annotated type? A `true` means the type's member list is partly invisible — a reason to stay silent, never to report. |
+| `generates_fields(simple)` | does it add a field the body can read bare? Only the loggers (`log`). |
+| `generates_methods(simple, args)` | does it add a method the body can call bare? Accessors, builders, `@With`, `@Delegate` and field-level `@Getter`/`@Setter`; a constructor annotation only with `staticName`. |
 | `generates_constructor(simple)` | does Lombok emit a constructor for it? `@NoArgsConstructor` / `@RequiredArgsConstructor` / `@AllArgsConstructor`, the bundles `@Data` / `@Value`, and `@Builder` / `@SuperBuilder`. |
 | `initializes_blank_finals(simple, args)` | does that constructor **assign** the blank `final` fields? Narrower: `@NoArgsConstructor` qualifies only with `force = true`. |
 | `is_inference_keyword(simple)` | is this `val` or `var`, which parse as ordinary type names? |

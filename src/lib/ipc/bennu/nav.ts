@@ -300,7 +300,8 @@ export function didChange(file: string, text: string | null): Promise<boolean> {
  *  `bennu_reindex`): drops the class cache / symbol index / config resolver / semantic engine
  *  / completion provider and rebuilds them from a fresh source scan off-thread, emitting
  *  `arbor://bennu/index-progress` like an open. No compilation happens (that's
- *  `bennu_build`). A no-op on the BE when no open project owns `root`.
+ *  `bennu_build`). The JDK level and encoding are detected again from the poms. Rejects when no
+ *  open project owns `root`.
  *  Wire: `bennu_reindex` — `ReindexArgs { root }`. */
 export function reindex(root: string): Promise<void> {
   return bennu('bennu_reindex', { args: { root } });

@@ -35,8 +35,9 @@
 //!   * no single top-level class/enum, or its hierarchy not FULLY known — an un-indexed base class
 //!     could declare the method;
 //!   * an `import static X.*;` whose owner `X` is un-indexed — it could supply ANY bare name;
-//!   * a **member-generating annotation** on the top type ([`crate::nodes::has_generated_members`]) —
-//!     under Lombok's `@Data` the legal bare call `getName()` is declared nowhere in the source.
+//!   * a **method-generating annotation** on the top type or one of its fields
+//!     ([`crate::nodes::generated_names`]) — under Lombok's `@Data` the legal bare call `getName()`
+//!     is declared nowhere in the source. A constructor-only one (`@RequiredArgsConstructor`) is not.
 //!
 //! PER-SITE guards (any failing → SKIP that call):
 //!   * it must be a `method_invocation` with NO `object` field — `x.foo()`, `Type.foo()`,
@@ -72,7 +73,7 @@ use bennu_java::prelude::{
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::nodes::has_generated_members;
+use crate::nodes::generated_names;
 use crate::resolve::type_binary;
 use crate::scopes::{scope_is_directly_top, single_top_level_type};
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
@@ -121,8 +122,9 @@ pub fn unresolved_call_errors_in(
         return Vec::new();
     };
 
-    // A generator annotation means the type's real member list is larger than anything we can read.
-    if has_generated_members(top.node, bytes) {
+    // A method-generating annotation means the type's real method list is larger than anything we
+    // can read.
+    if generated_names(top.node, bytes).calls {
         return Vec::new();
     }
 
@@ -392,6 +394,35 @@ mod tests {
         assert!(diags_with(src, &resolver()).is_empty());
         let qualified = "package com.acme;\n@lombok.Data\nclass C extends Base { void own() {} void m() { getName(); } }";
         assert!(diags_with(qualified, &resolver()).is_empty());
+    }
+
+    /// The report: `ciao(voxb)` with `ciao` deleted, in a `@RequiredArgsConstructor` bean. A
+    /// constructor is never called by name, so it must not hide a missing method.
+    #[test]
+    fn a_constructor_generator_does_not_hide_a_missing_method() {
+        let mut r = resolver();
+        r.members.insert(
+            "com/acme/PaMsRestClientApi".to_string(),
+            class(Some("java/lang/Object"), Vec::new()),
+        );
+        let src = "package com.acme;\n@RequiredArgsConstructor\n@Component\npublic class PaMsRestClientApi {\n    private final RestClient client;\n    public void do_stuff() {\n        ciao(voxb);\n    }\n}\n";
+        let d = diags_with(src, &r);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`ciao`"), "{d:?}");
+    }
+
+    /// …unless it names a static factory, which IS a method: `of(…)` exists and is declared nowhere.
+    #[test]
+    fn a_static_name_factory_skips_the_file() {
+        let src = "package com.acme;\n@AllArgsConstructor(staticName = \"of\")\nclass C extends Base { void own() {} void m() { of(); } }";
+        assert!(diags_with(src, &resolver()).is_empty());
+    }
+
+    /// Field-level accessors are as invisible as type-level ones.
+    #[test]
+    fn a_field_level_getter_skips_the_file() {
+        let src = "package com.acme;\nclass C extends Base { @Getter private String name; void own() {} void m() { getName(); } }";
+        assert!(diags_with(src, &resolver()).is_empty());
     }
 
     /// A call inside an anonymous class body resolves against THAT class and its supertype, neither

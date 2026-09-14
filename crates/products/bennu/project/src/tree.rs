@@ -21,7 +21,10 @@ use crate::ignored::IgnoreStack;
 /// Directories never walked. Not a "hidden" list: these are build output and machinery
 /// with five-figure file counts, and materialising them would cost more than the rest
 /// of the tree put together. Everything git merely *ignores* is walked and marked.
-const SKIP_DIRS: [&str; 3] = ["target", ".git", "node_modules"];
+///
+/// Public because the tree's filesystem watcher has to agree with it: a change to an entry the
+/// tree never lists is a reload that shows nothing new.
+pub const SKIP_DIRS: [&str; 3] = ["target", ".git", "node_modules"];
 
 /// Build the tree rooted at `root`, descending at most `max_depth` levels. A
 /// directory at the depth limit is returned with empty `children` (the FE re-requests

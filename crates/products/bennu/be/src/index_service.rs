@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
@@ -651,6 +651,32 @@ fn major_of(version: &str) -> Option<u32> {
     version.strip_prefix("1.").unwrap_or(version).trim().parse().ok()
 }
 
+/// Which provider a slot holds — what [`IndexStats::provider_stage`] reports.
+///
+/// `ready` alone cannot say it: a build that failed before its first provider went live never sets
+/// `ready`, and the placeholder provider it leaves answers nothing, so "still building" and "built
+/// nothing, for good" looked the same from every surface.
+mod stage {
+    /// The placeholder: the build has not installed a provider yet.
+    pub const BUILDING: u8 = 0;
+    /// The build ended without installing any provider — only syntax checks will run.
+    pub const FAILED: u8 = 1;
+    /// JDK + project types are live; the dependency tier is not (yet).
+    pub const PROJECT: u8 = 2;
+    /// The dependency tier is live too.
+    pub const DEPENDENCIES: u8 = 3;
+
+    /// The wire name of a stage.
+    pub fn label(stage: u8) -> &'static str {
+        match stage {
+            FAILED => "failed",
+            PROJECT => "project",
+            DEPENDENCIES => "dependencies",
+            _ => "building",
+        }
+    }
+}
+
 /// One project's slot in the cache: the paths + JDK level it was opened with, plus the
 /// hot-swappable provider the completion query reads.
 struct ProjectSlot {
@@ -722,6 +748,8 @@ struct ProjectSlot {
     /// live), so `index_stats.ready` — which the FE's "Indexing" card finishes on — stays
     /// false through the O(N) reference walk and the References-index step remains visible.
     ready: AtomicBool,
+    /// Which provider is installed — one of the [`stage`] constants.
+    provider_stage: AtomicU8,
     /// Content hash of every `.java` file **as the index currently understands it**, keyed by the
     /// normalized (forward-slash) path — the same key [`IndexService::patch_file`] uses.
     ///
@@ -1060,11 +1088,21 @@ impl IndexService {
             members: AtomicUsize::new(0),
             type_names: AtomicUsize::new(0),
             ready: AtomicBool::new(false),
+            provider_stage: AtomicU8::new(stage::BUILDING),
             indexed_hashes: Mutex::new(HashMap::new()),
             config_rebuild: ConfigRebuild::default(),
             sweep: Mutex::new(()),
         });
         self.slots.lock().unwrap_or_else(|p| p.into_inner()).insert(root_path.clone(), slot.clone());
+
+        // A reactor that lists a module the disk no longer has loses every type in it, and the build
+        // below cannot say so — it indexes what is there. Checked on every build (a rebuild included)
+        // and off this thread, since it reads a pom per module; announced once per episode.
+        {
+            let root = root.to_string();
+            let sink = Arc::clone(&sink);
+            std::thread::spawn(move || crate::project_health::announce_missing_modules(&root, &sink));
+        }
 
         // Claim a fresh build generation for this root: a later `open` (a rebuild, or a re-open)
         // bumps it again, and THIS thread bails the moment it sees a newer gen — so a superseded
@@ -1103,6 +1141,7 @@ impl IndexService {
             bennu_intel::prelude::set_excluded_dirs(cfg.excluded_dirs.clone());
             if let Err(e) = std::fs::create_dir_all(&index_dir) {
                 eprintln!("bennu-be: index dir {}: {e}", index_dir.display());
+                report_build_failure(&slot, &sink, &format!("its index directory could not be created ({e})"));
                 return;
             }
 
@@ -1134,6 +1173,7 @@ impl IndexService {
                 // leaving the previous good provider (on the prior slot/gen) in place — no
                 // retry loop, no corrupted slot.
                 eprintln!("bennu-be: index persist failed: {e}");
+                report_build_failure(&slot, &sink, &format!("the symbol index could not be written ({e})"));
                 emit_progress(&sink, &root_str, "project", "end");
                 return;
             }
@@ -1194,15 +1234,23 @@ impl IndexService {
                     slot.type_names.store(p.class_name_count(), Ordering::Relaxed);
                     *slot.provider.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(p);
                     slot.resolver_epoch.fetch_add(1, Ordering::Relaxed);
+                    slot.provider_stage.store(stage::PROJECT, Ordering::Relaxed);
                     eprintln!(
                         "bennu-be: provider live (JDK + project) for {} — dependency tier resolving",
                         root_path.display()
                     );
                 }
-                Err(e) => eprintln!(
-                    "bennu-be: JDK-only provider build failed ({}): {e}",
-                    root_path.display()
-                ),
+                Err(e) => {
+                    eprintln!("bennu-be: JDK-only provider build failed ({}): {e}", root_path.display());
+                    // Told, not only logged: without this provider the project keeps the empty
+                    // placeholder, and every semantic check quietly reports nothing. The dependency
+                    // stage may still build one from scratch, in which case the stage moves on.
+                    report_build_failure(
+                        &slot,
+                        &sink,
+                        &format!("the JDK {jdk_version} + project resolver could not be built ({e})"),
+                    );
+                }
             }
 
             // ── stage 2, on its own thread: resolve the dependency jars and rebuild the provider
@@ -1257,11 +1305,17 @@ impl IndexService {
             build_rename_engine(&slot, &root_path, &index_dir, &jdk_version, &pairs, &sources, &sink, &root_str);
             emit_progress(&sink, &root_str, "references", "end");
 
-            let _ = config_handle.join();
+            // A panic on either thread used to vanish into the ignored join result: the config graph
+            // or the dependency tier simply never arrived, with nothing anywhere saying why.
+            if config_handle.join().is_err() {
+                notify(&sink, "Config graph not built", "Building the Struts/Spring config graph crashed — see the backend log. Config navigation and checks are off until the project is re-indexed.", "warning");
+            }
             // The dependency tier is the last thing outstanding. Joining here (rather than not at
             // all) keeps `ready` meaning what it says — completion over library types is part of
             // being ready — while everything a reader touches has been live since the walk landed.
-            let _ = dep_handle.join();
+            if dep_handle.join().is_err() {
+                notify(&sink, "Dependency index not built", "Resolving the dependency tier crashed — see the backend log. Library types will read as unresolved until the project is re-indexed.", "warning");
+            }
             // Whichever of the two threads finished second installs the full-classpath policy on the
             // engine: the walk may have landed before the jars did, in which case the engine is
             // holding a provisional policy and rename / safe delete are refusing until now.
@@ -1347,13 +1401,17 @@ impl IndexService {
             .is_none_or(|&g| g != my_gen)
     }
 
-    /// Rebuild the index for an already-open project (by root), reusing the JDK level it
-    /// was opened at. A no-op when no slot owns `root`. Called after a successful
-    /// `bennu_build` so freshly-compiled `target/classes` output (and any source changes
-    /// the build picked up) are reflected in completion. Returns immediately; the
-    /// rebuild runs on the same background thread `open` uses.
-    pub fn reindex(&'static self, root: &str, sink: Arc<dyn EventSink>) {
-        self.rebuild(root, sink, Rebuild::Distrust);
+    /// Rebuild the index for an already-open project (by root), detecting its JDK level and
+    /// encoding again. Errs when no slot owns `root` — a rebuild of a project that is not open
+    /// does nothing, and saying nothing about it is how a "Rebuild" that never ran looks like one
+    /// that found nothing to fix. Returns immediately; the rebuild runs on the same background
+    /// thread `open` uses.
+    pub fn reindex(&'static self, root: &str, sink: Arc<dyn EventSink>) -> Result<(), String> {
+        if self.rebuild(root, sink, Rebuild::Distrust) {
+            Ok(())
+        } else {
+            Err(format!("{root} is not an open project — open it before rebuilding its index"))
+        }
     }
 
     /// Re-index after a successful compile — the sources are re-read, and **nothing remembered
@@ -1368,33 +1426,42 @@ impl IndexService {
     /// seconds of Maven per launch, on the path whose entire design is not to pay Maven when it
     /// does not have to.
     pub fn refresh_after_compile(&'static self, root: &str, sink: Arc<dyn EventSink>) {
-        self.rebuild(root, sink, Rebuild::Refresh);
+        // A compile of a project with no index (a Cargo root, a member never activated) has nothing
+        // to refresh, and that is not worth reporting.
+        let _ = self.rebuild(root, sink, Rebuild::Refresh);
     }
 
     /// The one reopen both entry points above go through; `how` is the only thing they differ in.
-    fn rebuild(&'static self, root: &str, sink: Arc<dyn EventSink>, how: Rebuild) {
+    /// `false` when no slot owns `root`, so there was nothing to rebuild.
+    fn rebuild(&'static self, root: &str, sink: Arc<dyn EventSink>, how: Rebuild) -> bool {
         let opened_with = {
             let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
             slots
                 .get(&PathBuf::from(root))
                 .map(|s| (s.jdk_version.clone(), s.encoding_label.clone()))
         };
-        if let Some((jdk, encoding_label)) = opened_with {
-            if how == Rebuild::Distrust {
-                // A manual rebuild is authoritative: drop the incremental reference cache so the
-                // reopen re-walks every file from scratch (not just the changed ones), the
-                // diagnostic cache so a fresh full validation runs, and the persisted dependency
-                // jar LIST so Maven is re-run. That last one is the point of the button for a user
-                // whose library types aren't resolving: the list is keyed on pom mtimes, so without
-                // dropping it here a rebuild would faithfully re-serve the same wrong classpath
-                // forever.
-                let base = index_base_for(root);
-                bennu_intel::prelude::clear_ref_cache(&bennu_intel::prelude::ref_cache_path(&base));
-                bennu_intel::prelude::clear_diag_cache(&bennu_intel::prelude::diag_cache_path(&base));
-                crate::dep_classpath::clear_list_cache(Path::new(root));
-            }
-            self.open(root, &jdk, &encoding_label, sink);
+        let Some((mut jdk, mut encoding_label)) = opened_with else { return false };
+        if how == Rebuild::Distrust {
+            // The level and the encoding are read from the poms, and the poms are exactly what a
+            // user who reaches for this button may have just changed — a module renamed, a
+            // `maven.compiler.release` bumped. Reusing what the slot was opened with rebuilt the
+            // index at the old answer until the project was closed and opened again.
+            jdk = crate::project::detect_index_jdk(root);
+            encoding_label = resolve_index_encoding(root);
+            // A manual rebuild is authoritative: drop the incremental reference cache so the
+            // reopen re-walks every file from scratch (not just the changed ones), the
+            // diagnostic cache so a fresh full validation runs, and the persisted dependency
+            // jar LIST so Maven is re-run. That last one is the point of the button for a user
+            // whose library types aren't resolving: the list is keyed on pom mtimes, so without
+            // dropping it here a rebuild would faithfully re-serve the same wrong classpath
+            // forever.
+            let base = index_base_for(root);
+            bennu_intel::prelude::clear_ref_cache(&bennu_intel::prelude::ref_cache_path(&base));
+            bennu_intel::prelude::clear_diag_cache(&bennu_intel::prelude::diag_cache_path(&base));
+            crate::dep_classpath::clear_list_cache(Path::new(root));
         }
+        self.open(root, &jdk, &encoding_label, sink);
+        true
     }
 
     /// The cached "Go to Class" navigator entries for the project rooted at `root`, or
@@ -1762,7 +1829,15 @@ impl IndexService {
                 java_major: None,
                 classpath_complete: false,
             };
-            return bennu_check::prelude::check_file(source, &ctx);
+            let mut diags = bennu_check::prelude::check_file(source, &ctx);
+            // Said once, at the top. Without it a file outside every project reads as a file whose
+            // semantics were checked and found clean. Only on the no-slot path: a project that is
+            // still building HAS a slot and goes through the branch below, so the brief window while
+            // an index builds never shows this.
+            if file.ends_with(".java") {
+                diags.insert(0, not_indexed_diagnostic(source));
+            }
+            return diags;
         };
         let status = bennu_classpath::prelude::jdk_status(&slot.jdk_version);
         let ctx = bennu_check::prelude::FileContext {
@@ -3419,6 +3494,7 @@ impl IndexService {
                 type_names: 0,
                 ready: false,
                 engine: String::new(),
+                provider_stage: String::new(),
             };
         };
 
@@ -3451,6 +3527,7 @@ impl IndexService {
             // Not here, because this method is also the editor's own poll and the editor already
             // knows which project it opened.
             engine: String::new(),
+            provider_stage: stage::label(slot.provider_stage.load(Ordering::Relaxed)).to_string(),
         }
     }
 
@@ -3526,6 +3603,18 @@ impl IndexService {
     /// opened at, rather than re-deriving it from the filesystem.
     pub fn root_for_file(&self, file: &str) -> Option<String> {
         self.slot_for_file(file).map(|s| norm_path(&s.root))
+    }
+
+    /// The open project owning `file` — its forward-slashed root and whether its build has finished —
+    /// or `None` when no indexed project contains it.
+    pub fn file_owner(&self, file: &str) -> Option<(String, bool)> {
+        self.slot_for_file(file).map(|s| (norm_path(&s.root), s.ready.load(Ordering::Relaxed)))
+    }
+
+    /// Every open project's root, in the form the slot map is keyed by (built or still building).
+    pub fn open_roots(&self) -> Vec<String> {
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        slots.keys().map(|root| root.to_string_lossy().to_string()).collect()
     }
 
     /// The config resolver of the project rooted at `root`, if built.
@@ -4061,6 +4150,19 @@ pub(crate) fn finish_bennu_job(
     );
 }
 
+/// Mark `slot`'s build as having installed no provider, and say so once. Only the placeholder is
+/// marked failed: a stage that already went live keeps answering, so it is not a failure of the index.
+fn report_build_failure(slot: &Arc<ProjectSlot>, sink: &Arc<dyn EventSink>, what: &str) {
+    let _ = slot.provider_stage.compare_exchange(stage::BUILDING, stage::FAILED, Ordering::Relaxed, Ordering::Relaxed);
+    let name = slot.root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    notify(
+        sink,
+        "Index not built",
+        &format!("{name}: {what}. Only syntax checks will run until the project is re-indexed."),
+        "warning",
+    );
+}
+
 /// Emit a toast notification to the bennu window (`plugin:notification`, re-emitted by the shell).
 /// `target:"bennu"` is REQUIRED: the feedback router (`makeAccepts`) drops untagged notifications
 /// for a non-main host, so without it the bennu window shows nothing at all.
@@ -4277,6 +4379,7 @@ fn build_dependency_tier(
                 // the diagnostic cache then keeps those marks (see `resolver_epoch`).
                 *slot.dep_jars.write().unwrap_or_else(|p| p.into_inner()) = jars;
                 slot.resolver_epoch.fetch_add(1, Ordering::Relaxed);
+                slot.provider_stage.store(stage::DEPENDENCIES, Ordering::Relaxed);
                 eprintln!("bennu-be: dependency tier live for {}", root_path.display());
                 // The tree is also where most capabilities are: nobody declares
                 // `jakarta.validation-api`, it arrives through a starter. A framework registry built
@@ -4776,6 +4879,20 @@ fn encoding_issue_of(s: &NonCompliantSource) -> EncodingIssue {
 }
 
 /// Normalize a path to forward slashes (the FE keys files by forward-slash paths).
+/// The one diagnostic a Java file outside every indexed project gets: informational, over the first
+/// line, so the Problems row and the gutter both say why nothing semantic is being reported.
+fn not_indexed_diagnostic(source: &str) -> bennu_proto::prelude::Diagnostic {
+    let first_line = source.find('\n').unwrap_or(source.len());
+    let end = if source[..first_line].ends_with('\r') { first_line - 1 } else { first_line };
+    bennu_proto::prelude::Diagnostic {
+        message: "This file is not under an indexed project — semantic checks are off".to_string(),
+        severity: bennu_proto::prelude::severity::INFO.to_string(),
+        code: "not-indexed".to_string(),
+        start: 0,
+        end,
+    }
+}
+
 fn norm_path(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }

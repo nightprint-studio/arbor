@@ -832,6 +832,14 @@ pub struct IndexStats {
     /// state. The field that stops the zeros above from reading as "not built yet".
     #[serde(default)]
     pub engine: String,
+    /// Which resolver the Java index has installed: `building` (none yet), `failed` (the build
+    /// ended without one — only syntax checks run), `project` (JDK + project types) or
+    /// `dependencies` (the dependency tier too). Empty when no project is open at the root.
+    ///
+    /// `ready` cannot carry this: a build that fails before its first resolver never becomes ready,
+    /// and without this field it looked like a build that was still running.
+    #[serde(default)]
+    pub provider_stage: String,
 }
 
 // ── encoding report (non-compliant source files) ─────────────────────────────

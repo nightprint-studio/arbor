@@ -29,7 +29,7 @@ Depends only on the shared contract (`bennu-proto`) + serde.
   unmappable-char fallback semantics differ from `encoding_rs`' encoder.
 - **Per-project JDK detection** (`jdk.rs`) — `maven.compiler.source/target`, compiler
   plugin, `<toolchains>`, plus override.
-- **Project file tree** (`tree.rs`) — depth-bounded, dirs-first, noise-dirs skipped.
+- **Project file tree** (`tree.rs`) — depth-bounded, dirs-first, noise-dirs skipped (`TREE_SKIP_DIRS`, shared with the tree watcher).
 - **Open orchestration** (`model.rs`) — `open_project` → `ProjectInfo`, `read_file` →
   decoded `FileContents`.
 

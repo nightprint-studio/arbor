@@ -51,10 +51,12 @@ export function activateProject(root: string): Promise<void> {
   return bennu('bennu_activate_project', { args: { root } });
 }
 
-/** Read the project file tree (directories + files) rooted at `root`. Wire:
+/** Read the project file tree (directories + files) rooted at `root`. `depth` bounds how far it
+ *  descends — `1` is one directory's listing, which is what a cheap "is this still right?" check
+ *  wants; omitted, the backend's default materialises the whole tree. Wire:
  *  `bennu_project_tree` — `ProjectTreeArgs { root, depth? }`. */
-export function projectTree(root: string): Promise<TreeNode> {
-  return bennu('bennu_project_tree', { args: { root } });
+export function projectTree(root: string, depth?: number): Promise<TreeNode> {
+  return bennu('bennu_project_tree', { args: { root, depth } });
 }
 
 /** Read a file's text + the encoding it was decoded from. `root` (the project root)

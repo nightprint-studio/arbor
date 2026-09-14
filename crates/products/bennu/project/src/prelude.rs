@@ -20,4 +20,4 @@ pub use crate::model::{
     file_stamp, open_project, read_file, rename_path, write_file, OpenOptions,
 };
 pub use crate::pom::{parse as parse_pom, Pom};
-pub use crate::tree::build as build_tree;
+pub use crate::tree::{build as build_tree, SKIP_DIRS as TREE_SKIP_DIRS};

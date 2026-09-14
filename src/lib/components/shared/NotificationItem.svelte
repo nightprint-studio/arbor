@@ -6,7 +6,8 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import type { AppNotification } from '$lib/feedback/stores/notifications.svelte';
-  import { tooltip } from '$lib/actions/tooltip';
+  import Button from '$lib/components/shared/ui/Button.svelte';
+  import IconButton from '$lib/components/shared/ui/IconButton.svelte';
 
   interface Props {
     notif: AppNotification;
@@ -89,21 +90,21 @@
         <span class="notif-plugin">{notif.plugin}</span>
       {/if}
       {#if notif.action}
-        <button class="notif-action" onclick={runAction}>
-          {notif.action.label} <ChevronRight size={10} />
-        </button>
+        <span class="notif-action">
+          <Button variant="tonal" size="xs" onclick={runAction}>
+            {notif.action.label}
+            {#snippet iconEnd()}<ChevronRight size={10} />{/snippet}
+          </Button>
+        </span>
       {/if}
     </div>
   </div>
 
-  <button
-    class="dismiss-btn"
-    onclick={() => notificationsStore.dismiss(notif.id)}
-    use:tooltip={'Dismiss'}
-    aria-label="Dismiss"
-  >
-    <X size={11} />
-  </button>
+  <span class="dismiss">
+    <IconButton tooltip="Dismiss" size={20} onclick={() => notificationsStore.dismiss(notif.id)}>
+      <X size={11} />
+    </IconButton>
+  </span>
 </div>
 
 <style>
@@ -141,8 +142,9 @@
     border-color: var(--border);
     background: var(--bg-elevated);
   }
-  .notif-row:hover .dismiss-btn { opacity: 1; }
-  .notif-row.always-x .dismiss-btn { opacity: 1; }
+  .notif-row:hover .dismiss,
+  .notif-row:focus-within .dismiss { opacity: 1; }
+  .notif-row.always-x .dismiss { opacity: 1; }
 
   .notif-stripe {
     position: absolute;
@@ -187,29 +189,12 @@
   .notif-dot    { width: 2px; height: 2px; border-radius: 50%; background: var(--text-disabled); }
   .notif-plugin { font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-code); }
 
-  .notif-action {
-    margin-left: auto;
-    display: inline-flex; align-items: center; gap: 3px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: var(--accent-subtle);
-    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-    color: var(--accent);
-    font-size: var(--font-size-2xs); font-weight: 500;
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .notif-action:hover { background: var(--accent); color: var(--text-on-accent); }
+  /* Layout slots only — the controls themselves are the shared Button / IconButton, the same pair
+     the toast uses, so the two surfaces cannot drift apart. */
+  .notif-action { margin-left: auto; display: inline-flex; }
 
-  .dismiss-btn {
-    flex-shrink: 0; opacity: 0;
-    width: 20px; height: 20px;
-    border-radius: 5px;
-    border: none; background: transparent;
-    color: var(--text-disabled);
-    cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center;
-    transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+  .dismiss {
+    display: inline-flex; flex-shrink: 0; opacity: 0;
+    transition: opacity var(--transition-fast);
   }
-  .dismiss-btn:hover { background: var(--bg-overlay); color: var(--text-primary); }
 </style>

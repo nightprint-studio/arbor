@@ -8,6 +8,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Added
+- **A Bennu project whose folder is gone can be located or removed.** Instead of vanishing silently from the workspace, it offers *Locate…* and *Remove from workspace*.
+- **Bennu warns about a module the pom lists but the disk doesn't have.** One notice names the module and the folder it was probably renamed to, with *Open pom.xml*.
+- **"Not indexed" in Bennu's footer.** A Java file outside every indexed project says so, with one click to open the project it belongs to.
+- **Bennu tells you when the project's shape changes.** Folders added, removed or renamed at the top of a project, or a module renamed in another IDE, show one notice — with *Rebuild index* when a module or `pom.xml` is involved.
+- **Reload project tree** in Bennu's command palette re-reads the project from disk on demand.
+- **Bennu's project tree repairs itself on focus.** Coming back to the window re-checks the root and the open folders, and reloads the tree if a change was missed.
 
 - **Typing around a selection in Java wraps it.** `<`, `"`, `'` and the brackets surround the selected text instead of replacing it, and `"""` opens a text block with the caret inside.
 
@@ -146,6 +152,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu's docs read as one manual.** Every page opens with its section and a summary, and lays its facts out as cards, steps, tables and callouts instead of long paragraphs.
 
 ### Fixed
+- **A failed Bennu index build looked like one still running.** It now says so: a notification, "Index failed" in the footer, "build failed" in the index inspector.
+- **Rebuild index could do nothing and say nothing.** It re-reads the JDK level and encoding from the poms, and reports an error when the project isn't open.
+- **A missing Maven module counted as a complete classpath.** The dependencies of a renamed module were silently left out; now the resolve is incomplete and says which module is missing.
+- **Bennu's project tree missed folder changes.** Folders added directly under the project root, module folders renamed from another IDE, and anything that happened during a build or while a log file grew could leave the tree out of date.
+- **Class and annotation completion put loose matches above exact ones.** A name found only by its humps or in another case could outrank the exact prefix the project imports everywhere; how well the name matches now decides first, and what the project uses orders what is left.
+- **A `@RequiredArgsConstructor` class hid its undeclared names.** Any Lombok annotation silenced the undeclared-variable and undeclared-method errors for the whole class; now only the ones that really generate such a name do.
 - **A `map(this::method)` or `map(x -> …)` lost its result type.** `opt.map(this::toIdentity)` was an `Optional` of nothing, so the lambda chained after it had no completion, no hover and no checks; the type is now read off the referenced method or the lambda's expression.
 - **Quotes in the Java editor pair only where they belong.** Not inside a string or a comment, not after a word; typing the closing quote steps over it, and the caret stays visible between matched brackets.
 - **An undeclared variable used as a receiver was not reported.** `profile.name()` with no `profile` anywhere compiled cleanly in Bennu; it is now marked like any other unresolved symbol.

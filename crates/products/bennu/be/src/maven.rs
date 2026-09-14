@@ -275,7 +275,7 @@ pub(crate) fn bennu_maven_download(ctx: &BennuState, args: MavenRootArgs) -> Res
                     "Rebuilding the index so library types resolve.",
                     "success",
                 );
-                crate::index_service::IndexService::global().reindex(&root_str, Arc::clone(&sink));
+                let _ = crate::index_service::IndexService::global().reindex(&root_str, Arc::clone(&sink));
             }
             Ok((false, log)) => {
                 let reason = go_offline_failure(&log);
@@ -341,7 +341,7 @@ pub(crate) fn bennu_maven_reload(ctx: &BennuState, args: MavenRootArgs) -> Resul
         );
         // Last, and after the job is closed: the reindex reports as its own job, and nesting the
         // two would leave the outer one open for the length of a whole-project read.
-        crate::index_service::IndexService::global().reindex(&root_str, Arc::clone(&sink));
+        let _ = crate::index_service::IndexService::global().reindex(&root_str, Arc::clone(&sink));
     });
     Ok("started".to_string())
 }
