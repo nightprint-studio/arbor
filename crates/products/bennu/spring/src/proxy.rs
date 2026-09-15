@@ -89,6 +89,7 @@ pub struct ProxyIssue {
 pub const CODE_SELF_INVOCATION: &str = "spring.proxy.self-invocation";
 pub const CODE_NOT_PUBLIC: &str = "spring.proxy.not-public";
 pub const CODE_FINAL: &str = "spring.proxy.final";
+pub const CODE_STATIC: &str = "spring.proxy.static";
 
 /// Read a source for the three ways a proxied annotation can be inert.
 ///
@@ -138,12 +139,25 @@ fn check_type(type_decl: Node<'_>, source: &str, out: &mut Vec<ProxyIssue>) {
             let Some(what) = proxied(&annotation) else { continue };
 
             let words = modifier_words(member, source);
+            let is_static = words.iter().any(|w| w == "static");
             if !words.iter().any(|w| w == "public") {
                 out.push(ProxyIssue {
                     code: CODE_NOT_PUBLIC,
                     message: format!(
                         "@{annotation} is ignored on a method that is not public — Spring's \
                          proxy-based AOP only advises public methods, so {what} never happens"
+                    ),
+                    severity: "warning",
+                    start: node.start_byte(),
+                    end: node.end_byte(),
+                });
+            } else if is_static {
+                out.push(ProxyIssue {
+                    code: CODE_STATIC,
+                    message: format!(
+                        "@{annotation} is ignored on a static method — the proxy only sees calls \
+                         made on the bean instance, and a static call never reaches it, so {what} \
+                         never happens"
                     ),
                     severity: "warning",
                     start: node.start_byte(),
@@ -162,6 +176,11 @@ fn check_type(type_decl: Node<'_>, source: &str, out: &mut Vec<ProxyIssue>) {
                     start: node.start_byte(),
                     end: node.end_byte(),
                 });
+            }
+            // A static method is reached without an instance at all: already reported above, and
+            // a call to it is not a self-invocation of anything.
+            if is_static {
+                continue;
             }
 
             advised.push(Advised {
@@ -343,6 +362,17 @@ public class ImportService {
         let found = issues();
         let issue = found.iter().find(|i| i.code == CODE_FINAL).expect("the final one");
         assert!(SRC[issue.start..issue.end].starts_with("@Async"));
+    }
+
+    /// A static method is never reached through the proxy — and a call to one is not reported as a
+    /// self-invocation on top of that.
+    #[test]
+    fn a_static_advised_method_is_reported_once() {
+        let src = "class A { @Transactional public static void a() { } public void b() { a(); } }";
+        let found = issues_in(src, ProxyMode::Proxy);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].code, CODE_STATIC);
+        assert!(src[found[0].start..found[0].end].starts_with("@Transactional"));
     }
 
     /// The whole check goes quiet on a project that weaves rather than proxies — where all three

@@ -101,6 +101,22 @@ impl OptionalShape {
     }
 }
 
+impl ValueShape {
+    /// Every name a template could declare for this value — the value's own, an element's, what an
+    /// `Optional` holds — passed through `spell`: how a project that writes `identity_resolver` gets
+    /// `for (Order first_order : …)` instead of Java's camelCase. The caller owns the conventions.
+    pub fn respell(&mut self, spell: impl Fn(&str) -> String) {
+        self.name = spell(&self.name);
+        let elements = [self.array_element.as_mut(), self.iterable_element.as_mut()];
+        for element in elements.into_iter().flatten() {
+            element.name = spell(&element.name);
+        }
+        if let Some(OptionalShape::Of(element)) = self.optional.as_mut() {
+            element.name = spell(&element.name);
+        }
+    }
+}
+
 /// Everything a template asks of a value's type.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ValueShape {
@@ -377,6 +393,23 @@ mod tests {
     use super::*;
     use crate::seam::ClassMembers;
     use crate::symbols::Import;
+
+    #[test]
+    fn respelling_renames_the_value_its_elements_and_what_an_optional_holds() {
+        let element = |name: &str| Element { ty: Written::default(), name: name.to_string(), primitive: None };
+        let mut shape = ValueShape {
+            name: "orderLines".to_string(),
+            array_element: Some(element("orderLine")),
+            iterable_element: Some(element("orderLine")),
+            optional: Some(OptionalShape::Of(element("orderLine"))),
+            ..Default::default()
+        };
+        shape.respell(|name| name.replace("orderLine", "order_line"));
+        assert_eq!(shape.name, "order_lines");
+        assert_eq!(shape.array_element.map(|e| e.name).as_deref(), Some("order_line"));
+        assert_eq!(shape.iterable_element.map(|e| e.name).as_deref(), Some("order_line"));
+        assert_eq!(shape.optional.as_ref().map(OptionalShape::value_name), Some("order_line"));
+    }
 
     #[derive(Default)]
     struct Hierarchy(HashMap<&'static str, ClassMembers>);

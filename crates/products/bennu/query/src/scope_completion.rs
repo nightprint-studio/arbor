@@ -44,7 +44,7 @@ use bennu_java::prelude::{
 use bennu_proto::prelude::CompletionItem;
 
 use crate::completion::{
-    collapse_overloads, collect_members, drop_call_syntax_if_written,
+    collect_members, drop_call_syntax_if_written,
     preselect_the_only_exact_fit, sort_ranked, split_prefix, Ranked,
 };
 use crate::member_text::render_type;
@@ -114,6 +114,7 @@ pub fn scope_completion<M: CpMemberIndex>(
             .map_or(rank::Fit::None, |t| ctx.fit(t, resolver));
         out.push(Ranked {
             fit,
+            tier,
             score: rank::score_binding(
                 &b.name,
                 b.is_parameter,
@@ -147,9 +148,9 @@ pub fn scope_completion<M: CpMemberIndex>(
             &mut members,
             &mut member_seen,
         );
-        collapse_overloads(&mut members);
+        // Overloads stay separate rows, as they do after a dot — see `completion_in`.
         for mut m in members {
-            if !seen.insert(format!("member:{}", m.item.label)) {
+            if !seen.insert(member_key(&m)) {
                 continue;
             }
             // Re-banded rather than re-scored: `score` already ordered these against each other
@@ -216,12 +217,11 @@ fn collect_static_imports<M: CpMemberIndex>(
             &mut found,
             &mut found_seen,
         );
-        collapse_overloads(&mut found);
         for mut m in found {
             if wanted.is_some_and(|w| m.item.label != w) {
                 continue;
             }
-            if !seen.insert(format!("member:{}", m.item.label)) {
+            if !seen.insert(member_key(&m)) {
                 continue;
             }
             m.score = rank::band::STATIC_IMPORT + m.score.clamp(-90, 90);
@@ -234,6 +234,21 @@ fn collect_static_imports<M: CpMemberIndex>(
             out.push(m);
         }
     }
+}
+
+/// The identity one member row is deduplicated on across the own-members and static-import lists:
+/// its kind, name and parameter list.
+///
+/// The parameters keep overloads apart — `render(String)` and `render(int)` are two rows — and the
+/// kind keeps a field and a method of the same name apart, while the same overload reached through
+/// both lists is still offered once.
+fn member_key(m: &Ranked) -> String {
+    format!(
+        "member:{}:{}{}",
+        m.item.kind,
+        m.item.label,
+        m.item.signature.as_deref().unwrap_or("")
+    )
 }
 
 fn dotted(binary: &str) -> String {

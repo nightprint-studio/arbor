@@ -40,6 +40,11 @@ constant = "UPPER_SNAKE_CASE"
 The value is its own example: `"camelCase"` *is* what camelCase looks like, so the file explains
 itself and a dropdown needs no second column.
 
+A project that declared nothing may still plainly have a convention. `Convention::prevailing(names)`
+reads it off names already written — camelCase or snake_case, one-word names and ties deciding
+nothing — which is how a proposed name (the editor's ghost text after a declaration's type) follows a
+file of `identity_resolver` fields instead of Java's default.
+
 ## Shape: a feature pack, with two ways to see a declaration
 
 A leaf — declarations in, `Diagnostic` out. It knows nothing about projects, the index, the

@@ -207,7 +207,7 @@ fn walk_enclosing(
 }
 
 /// The package name of a compilation unit, if declared.
-fn package_name(root: &Node, bytes: &[u8]) -> Option<String> {
+pub(crate) fn package_name(root: &Node, bytes: &[u8]) -> Option<String> {
     let mut cur = root.walk();
     for child in root.children(&mut cur) {
         if child.kind() == "package_declaration" {

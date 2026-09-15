@@ -2,31 +2,44 @@
 //! parameter (`foo("a", "b", "c")` called `foo(1, …)`). The type counterpart of [`crate::arity`]
 //! (which only counts arguments).
 //!
-//! Three call shapes are read: `recv.method(args)`, a **bare** `method(args)` (receiver = the
-//! implicit `this` — see [`crate::bare_call`]), and `new Foo(args)`. Only the first was read for a
-//! long time, which left a class passing the wrong thing to its own method, or to a constructor,
-//! entirely unjudged.
+//! Four call shapes are read: `recv.method(args)` — a value's method, `this.m(…)`, `super.m(…)`, or a
+//! static `Util.m(…)` (see [`crate::resolve::call_receiver_binary`]) —, a **bare** `method(args)`
+//! (receiver = the implicit `this`, see [`crate::bare_call`]), and `new Foo(args)`, anonymous bodies
+//! included: `new Foo(args) { … }` passes its arguments to `Foo`'s own constructors (JLS §15.9.5.1).
 //!
-//! Overload resolution is hard, so this is deliberately narrow and conservative (never a false
-//! positive):
-//!   * only a call whose candidate set is complete: an inferred receiver whose whole hierarchy is
-//!     resolvable, the enclosing type for a bare call, or a resolvable type for a `new`;
-//!   * only when there is **exactly one** candidate overload (same name + arity) after dedup, and it
-//!     is neither varargs nor generic (a type-variable parameter) — otherwise we can't be sure which
-//!     signature binds, so we skip;
-//!   * a single argument is flagged only for a **definite** mismatch: a `String` ↔ primitive pair, or
-//!     two unrelated concrete classes (the argument isn't a subtype of the parameter). Boxing,
-//!     widening, interfaces, generics and `null` are all treated as OK.
+//! Which overloads a call could bind to is NOT decided here: it is `bennu_java`'s `overload_fit`, the
+//! one applicability implementation go-to, hover, inference and parameter hints use (arity with
+//! varargs, strict / loose / varargs phases, lambdas against functional interfaces, `null`, boxing,
+//! subtyping — abstaining on anything the classpath cannot read). This check only turns a proven
+//! "nothing applies" into a message, and stays narrow on top of it (never a false positive):
+//!   * only a call whose candidate set is complete: a receiver whose whole hierarchy is resolvable,
+//!     the enclosing type for a bare call, or a resolvable type for a `new` — and, for a type this
+//!     file declares, an index that has already seen every signature the buffer declares;
+//!   * only when the shared rules find **no** applicable overload, and **every** overload the count
+//!     admits is refused at some position on evidence of its own ([`mismatch`]) — the shared rules
+//!     abstain in their own way, and a report must stand on this module's;
+//!   * a position is judged only where the parameter's type is concrete: never a type variable
+//!     (of the method or of its owner — the rest of a generic method is judged), never an array, and
+//!     never at or past a trailing array, which may be varargs;
+//!   * an argument is reported when every admitted overload refuses THAT position, naming each
+//!     expected type; when the overloads are refused at different positions, the call is reported.
+//!     Lambdas, method references, `null` and untyped arguments are never reported.
+
+mod mismatch;
+#[cfg(test)]
+mod tests;
 
 use bennu_java::prelude::{
-    infer_node_type_cached, FileSymbols, InferCache, Member, MemberKind, TypeRef, TypeResolver,
+    infer_node_type_cached, overload_fit, same_binary_type, FileSymbols, InferCache, Member,
+    MemberKind, OverloadFit, TypeRef, TypeResolver,
 };
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::nodes::{is_primitive, is_type_var, simple_name};
-
-use crate::walk::{hierarchy_fully_known, reaches};
+use crate::bare_call::{bare_call_scope, index_covers_file_sigs, BareCalls};
+use crate::check_id::CheckId;
+use crate::nodes::{is_type_var, simple_name};
+use mismatch::{arg_mismatch, Mismatch};
 
 /// Parse `source` and flag arguments of the wrong type.
 pub fn argument_type_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
@@ -48,81 +61,103 @@ pub fn argument_type_errors_in(
     resolver: &dyn TypeResolver,
     cache: &InferCache,
 ) -> Vec<Diagnostic> {
-    let bytes = source.as_bytes();
+    let file = FileCtx { root, source, symbols, resolver, cache };
+    let bare = bare_call_scope(root, source, symbols, resolver);
     let mut out = Vec::new();
-    let bare = crate::bare_call::bare_call_scope(root, source, symbols, resolver);
     for &n in nodes {
         match n.kind() {
+            "method_invocation" if n.child_by_field_name("object").is_some() => {
+                check_call(n, &file, &mut out)
+            }
             "method_invocation" => {
-                check_call(n, &root, source, bytes, symbols, resolver, cache, &mut out);
                 if let Some(bare) = &bare {
-                    check_bare_call(n, bare, &root, source, bytes, symbols, resolver, cache, &mut out);
+                    check_bare_call(n, bare, &file, &mut out);
                 }
             }
-            "object_creation_expression" => {
-                check_new(n, &root, source, bytes, symbols, resolver, cache, &mut out)
-            }
+            "object_creation_expression" => check_new(n, &file, &mut out),
             _ => {}
         }
     }
     out
 }
 
-/// A bare `method(a, b)`: the candidate set is the enclosing type's, and it counts as complete only
-/// when the index has already seen every signature the FILE declares under that name. A method typed
-/// a moment ago and not yet indexed would otherwise leave a stale overload set standing alone — the
-/// one shape in which "exactly one candidate" is a lie rather than a fact.
-#[allow(clippy::too_many_arguments)]
-fn check_bare_call(
-    n: Node,
-    bare: &crate::bare_call::BareCalls,
-    root: &Node,
-    source: &str,
-    bytes: &[u8],
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-    cache: &InferCache,
-    out: &mut Vec<Diagnostic>,
-) {
-    let Some(method) = bare.judgeable(n, bytes) else { return };
-    let Some(arg_list) = n.child_by_field_name("arguments") else { return };
-    let res = cache.resolve_methods(resolver, &bare.top_binary, method);
-    if !res.complete {
-        return;
-    }
-    if !bare.index_covers_file_sigs(method, &res.candidates, symbols, resolver) {
-        return; // the buffer declares an overload the index has not got → judge nothing
-    }
-    judge_args(&res.candidates, &arg_list, method, root, source, symbols, resolver, cache, out);
+/// Everything a judgement reads about the file, passed as one.
+struct FileCtx<'a, 't> {
+    root: Node<'t>,
+    source: &'a str,
+    symbols: &'a FileSymbols,
+    resolver: &'a dyn TypeResolver,
+    cache: &'a InferCache,
 }
 
-/// `new Foo(a, b)` — the candidates are `Foo`'s own constructors (never inherited). Anonymous-class
-/// creations are skipped: their arguments bind to the SUPERTYPE's constructor.
-#[allow(clippy::too_many_arguments)]
-fn check_new(
-    n: Node,
-    root: &Node,
-    source: &str,
-    bytes: &[u8],
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-    cache: &InferCache,
-    out: &mut Vec<Diagnostic>,
-) {
-    let Some(ty_node) = n.child_by_field_name("type") else { return };
-    let Some(arg_list) = n.child_by_field_name("arguments") else { return };
-    if arg_list.has_error() {
-        return;
+impl FileCtx<'_, '_> {
+    fn bytes(&self) -> &[u8] {
+        self.source.as_bytes()
     }
-    let mut cw = n.walk();
-    for c in n.named_children(&mut cw) {
-        if c.kind() == "class_body" {
-            return;
+
+    /// Whether this file declares `binary` — the types whose index entry can lag behind the buffer.
+    fn declares(&self, binary: &str) -> bool {
+        self.symbols
+            .types
+            .iter()
+            .any(|t| same_binary_type(&t.fqn.replace('.', "/"), binary))
+    }
+
+    /// `candidates` of `binary` under `name` are the whole overload set: trivially for a type of
+    /// another file, and for one of this file only once the index has seen every signature the
+    /// buffer declares — a method typed a moment ago would otherwise leave a stale set standing.
+    fn overloads_current(&self, binary: &str, name: &str, candidates: &[Member]) -> bool {
+        !self.declares(binary) || index_covers_file_sigs(name, candidates, self.symbols, self.resolver)
+    }
+}
+
+/// What a call calls, for its messages.
+#[derive(Clone, Copy)]
+enum Callee<'a> {
+    Method(&'a str),
+    Constructor(&'a str),
+}
+
+impl Callee<'_> {
+    fn name(&self) -> &str {
+        match self {
+            Callee::Method(n) | Callee::Constructor(n) => n,
         }
     }
-    let Ok(type_text) = ty_node.utf8_text(bytes) else { return };
-    let Some(binary) = crate::resolve::type_binary(type_text, symbols, resolver) else { return };
-    let Some(cm) = resolver.members_of(&binary) else { return };
+
+    fn none_accepts(&self) -> String {
+        match self {
+            Callee::Method(n) => format!("No overload of `{n}` accepts these arguments"),
+            Callee::Constructor(n) => format!("No constructor of `{n}` accepts these arguments"),
+        }
+    }
+}
+
+/// A bare `method(a, b)`: the candidate set is the enclosing type's.
+fn check_bare_call(n: Node, bare: &BareCalls, file: &FileCtx, out: &mut Vec<Diagnostic>) {
+    let Some(method) = bare.judgeable_member_call(n, file.bytes()) else { return };
+    let Some(name) = n.child_by_field_name("name") else { return };
+    let res = file.cache.resolve_methods(file.resolver, &bare.top_binary, method);
+    // `judgeable_member_call`'s contract: act only on a non-empty member set, which is what shadows
+    // every static import of the name.
+    if !res.complete || res.candidates.is_empty() {
+        return;
+    }
+    if !file.overloads_current(&bare.top_binary, method, &res.candidates) {
+        return;
+    }
+    judge_args(&res.candidates, n, name, Callee::Method(method), file, out);
+}
+
+/// `new Foo(a, b)` — the candidates are `Foo`'s own constructors (never inherited). An anonymous
+/// body changes nothing: its implicit constructor forwards to the one of `Foo` the arguments select.
+fn check_new(n: Node, file: &FileCtx, out: &mut Vec<Diagnostic>) {
+    let Some(ty_node) = n.child_by_field_name("type") else { return };
+    let Ok(type_text) = ty_node.utf8_text(file.bytes()) else { return };
+    let Some(binary) = crate::resolve::type_binary(type_text, file.symbols, file.resolver) else {
+        return;
+    };
+    let Some(cm) = file.resolver.members_of(&binary) else { return };
     let ctors: Vec<Member> = cm
         .methods
         .iter()
@@ -132,153 +167,145 @@ fn check_new(
     if ctors.is_empty() {
         return; // an index that omits constructors can assert nothing
     }
-    judge_args(&ctors, &arg_list, simple_name(&binary), root, source, symbols, resolver, cache, out);
-}
-
-#[allow(clippy::too_many_arguments)]
-fn check_call(
-    n: Node,
-    root: &Node,
-    source: &str,
-    bytes: &[u8],
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-    cache: &InferCache,
-    out: &mut Vec<Diagnostic>,
-) {
-    // only `receiver.method(...)`, like arity/members
-    let Some(obj) = n.child_by_field_name("object") else { return };
-    let Some(name) = n.child_by_field_name("name") else { return };
-    let Some(arg_list) = n.child_by_field_name("arguments") else { return };
-    if name.has_error() || arg_list.has_error() {
+    if !file.overloads_current(&binary, "<init>", &ctors) {
         return;
     }
-    let Ok(method) = name.utf8_text(bytes) else { return };
-    let Some(ty) = infer_node_type_cached(root, source, symbols, &obj, resolver, cache) else {
+    judge_args(&ctors, n, ty_node, Callee::Constructor(simple_name(&binary)), file, out);
+}
+
+/// `receiver.method(a, b)` — on a value, `this`, `super` or a type (a static call).
+fn check_call(n: Node, file: &FileCtx, out: &mut Vec<Diagnostic>) {
+    let Some(name) = n.child_by_field_name("name") else { return };
+    if name.has_error() {
+        return;
+    }
+    let Ok(method) = name.utf8_text(file.bytes()) else { return };
+    let Some(receiver) = crate::resolve::call_receiver_binary(
+        n,
+        &file.root,
+        file.source,
+        file.symbols,
+        file.resolver,
+        file.cache,
+    ) else {
         return;
     };
-    if ty.binary_name.is_empty() {
-        return;
-    }
     // Shared memoized hierarchy walk (see `InferCache::resolve_methods`): `complete` is the
     // hierarchy-fully-known gate, and the candidates are the overload set (one walk per call site).
-    let res = cache.resolve_methods(resolver, &ty.binary_name, method);
-    if !res.complete {
+    let res = file.cache.resolve_methods(file.resolver, &receiver, method);
+    if !res.complete || !file.overloads_current(&receiver, method, &res.candidates) {
         return;
     }
-    judge_args(&res.candidates, &arg_list, method, root, source, symbols, resolver, cache, out);
+    judge_args(&res.candidates, n, name, Callee::Method(method), file, out);
 }
 
-/// The shared decision: bind `arg_list` to the ONE candidate that can take it, and flag every
-/// argument whose type definitely cannot be passed. `owner_label` names the callee in the message.
-#[allow(clippy::too_many_arguments)]
+/// The shared decision: when no overload of `candidates` can take `call`'s arguments, and each one
+/// the count admits is refused at some position on this module's own evidence, report where.
+/// `head` (the method name, or the constructed type) starts the range of a whole-call report.
 fn judge_args(
     candidates: &[Member],
-    arg_list: &Node,
-    method: &str,
-    root: &Node,
-    source: &str,
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-    cache: &InferCache,
+    call: Node,
+    head: Node,
+    callee: Callee,
+    file: &FileCtx,
     out: &mut Vec<Diagnostic>,
 ) {
-    let args: Vec<Node> = named_args(*arg_list);
-    let argc = args.len();
-
-    // Every overload of matching ARITY, deduped by parameter list — INCLUDING the ones we can't
-    // type-check (varargs / generic). A non-checkable arity match MUST still count: if the call could
-    // bind to it, judging the args against a *different*, single checkable overload is unsound. E.g.
-    // `setRecipients(String, Addresses[])` + `setRecipients(String, String)`: passing an `Addresses[]`
-    // as the 2nd arg binds to the array overload, so we must NOT flag it against `String`. Two arity-2
-    // candidates → ambiguous → skip. (Before, the array overload was dropped as non-checkable, leaving
-    // the `String` one as the lone signature → false positive.)
-    let mut sigs: Vec<&Vec<TypeRef>> = Vec::new();
-    for m in candidates {
-        // A candidate can bind this call if its arity matches exactly, OR it is varargs (a trailing
-        // array parameter) and the call supplies at least its fixed prefix — SLF4J's `debug(String,
-        // Object...)` binds a 4-argument `debug(fmt, a, b, c)`. Both shapes MUST enter the ambiguity
-        // set: committing to a lone fixed-arity overload (`debug(Marker, String, Object, Object)`) while
-        // a varargs overload could also bind is exactly what produced a false "wrong argument type".
-        let admits = m.params.len() == argc
-            || (m.params.last().is_some_and(|p| p.is_array())
-                && argc + 1 >= m.params.len());
-        if admits && !sigs.iter().any(|p| **p == m.params) {
-            sigs.push(&m.params);
-        }
+    let Some(arg_list) = call.child_by_field_name("arguments") else { return };
+    if arg_list.has_error() {
+        return; // a list being edited is not a call to judge
     }
-    // Exactly one overload of this arity, and it must be fully type-checkable (no varargs / generic
-    // parameter) for us to bind the arguments to it with certainty. Otherwise → skip.
-    let [params] = sigs.as_slice() else { return };
-    let params: &Vec<TypeRef> = params;
-    if !params_checkable(params) {
+    // Applicable (one overload or several) is not an error, and neither is an arity no overload
+    // admits — that is `arity`'s finding. Every overload the count admits is weighed, varargs and
+    // generic ones included: `setRecipients(String, Addresses[])` beside `setRecipients(String,
+    // String)`, or SLF4J's `debug(String, Object...)` beside a fixed four-parameter `debug`, bind
+    // calls a lone checkable signature would have called wrong.
+    let OverloadFit::Inapplicable(admitted) = overload_fit(
+        &file.root,
+        file.source,
+        file.symbols,
+        &call,
+        candidates,
+        file.resolver,
+        file.cache,
+    ) else {
+        return;
+    };
+    let args = named_args(arg_list);
+    let arg_types: Vec<Option<TypeRef>> = args.iter().map(|a| judged_arg_type(*a, file)).collect();
+    let refusals: Vec<Vec<Option<Mismatch>>> = admitted
+        .iter()
+        .map(|m| position_mismatches(m, &arg_types, file.resolver))
+        .collect();
+    if refusals.iter().any(|r| r.iter().all(Option::is_none)) {
         return;
     }
-
+    let before = out.len();
     for (i, arg) in args.iter().enumerate() {
-        let Some(param) = params.get(i) else { break };
-        let Some(arg_ty) = infer_node_type_cached(root, source, symbols, arg, resolver, cache)
-        else {
-            continue;
-        };
-        if let Some((a, p)) = arg_mismatch(&arg_ty.binary_name, param, resolver) {
-            out.push(crate::check_id::CheckId::ArgumentType.at(
-                *arg,
-                format!(
-                    "Argument {} of `{method}`: `{a}` cannot be passed where `{p}` is expected",
-                    i + 1
-                ),
-            ));
+        let at_position: Option<Vec<Mismatch>> = refusals.iter().map(|r| r[i].clone()).collect();
+        if let Some(refused) = at_position {
+            out.push(CheckId::ArgumentType.at(*arg, argument_message(i, callee, &refused)));
         }
     }
+    if out.len() == before {
+        out.push(CheckId::ArgumentType.span(
+            head.start_byte(),
+            arg_list.end_byte(),
+            callee.none_accepts(),
+        ));
+    }
 }
 
-/// A parameter list we can type-check: none is a type variable (generic) or an array (possible
-/// varargs / element inference we don't model).
-fn params_checkable(params: &[TypeRef]) -> bool {
-    params.iter().all(|p| !is_type_var(&p.binary_name) && !p.is_array())
+/// Per argument position, the definite mismatch against overload `m` — `None` where the position is
+/// fine, untyped, or not one this module judges.
+fn position_mismatches(
+    m: &Member,
+    arg_types: &[Option<TypeRef>],
+    resolver: &dyn TypeResolver,
+) -> Vec<Option<Mismatch>> {
+    // A trailing array may be varargs (the seam carries no `ACC_VARARGS`): from its index on, an
+    // argument may be an element or the whole array, so nothing there is certain.
+    let varargs_from = m.params.last().filter(|p| p.is_array()).map(|_| m.params.len() - 1);
+    arg_types
+        .iter()
+        .enumerate()
+        .map(|(i, ty)| {
+            if varargs_from.is_some_and(|v| i >= v) {
+                return None;
+            }
+            let param = m.params.get(i)?;
+            if param.is_array() || is_type_var(&param.binary_name) {
+                return None;
+            }
+            arg_mismatch(ty.as_ref()?, param, resolver)
+        })
+        .collect()
 }
 
-/// A definite argument/parameter mismatch, or `None` when compatible / uncertain.
-fn arg_mismatch(arg: &str, param: &TypeRef, resolver: &dyn TypeResolver) -> Option<(String, String)> {
-    let pbin = param.binary_name.as_str();
-    // String ↔ primitive, either direction.
-    if is_primitive(pbin) && arg == "java/lang/String" {
-        return Some(("String".to_string(), pbin.to_string()));
-    }
-    if pbin == "java/lang/String" && is_primitive(arg) {
-        return Some((arg.to_string(), "String".to_string()));
-    }
-    // Boxing / widening / unbxoing — treat as OK.
-    if is_primitive(arg) || is_primitive(pbin) {
+/// The type an argument is judged by — never a lambda's, a method reference's or `null`'s, which
+/// have none of their own.
+fn judged_arg_type(arg: Node, file: &FileCtx) -> Option<TypeRef> {
+    if matches!(arg.kind(), "lambda_expression" | "method_reference" | "null_literal") {
         return None;
     }
-    // A reference parameter that's an interface / Object → skip (the argument may implement it).
-    if pbin == "java/lang/Object" {
-        return None;
+    infer_node_type_cached(&file.root, file.source, file.symbols, &arg, file.resolver, file.cache)
+}
+
+/// `Argument 3 of `m`: `Widget` cannot be passed where `Animal` is expected` — with every distinct
+/// expected type when several overloads refuse the position.
+fn argument_message(i: usize, callee: Callee, refused: &[Mismatch]) -> String {
+    let mut expected: Vec<&str> = Vec::new();
+    for r in refused {
+        if !expected.contains(&r.expected.as_str()) {
+            expected.push(&r.expected);
+        }
     }
-    let Some(pcm) = resolver.members_of(pbin) else { return None };
-    if pcm.flags.is_interface {
-        return None;
-    }
-    // Both concrete classes, argument hierarchy known: the argument must be a subtype of the parameter.
-    if is_type_var(arg) || arg.ends_with("[]") || resolver.members_of(arg).is_none() {
-        return None;
-    }
-    if !hierarchy_fully_known(resolver, arg) {
-        return None;
-    }
-    // Same SIMPLE name, different binaries → almost always the SAME logical type resolved to two
-    // different binary FORMS: a nested type spelled `Outer/Inner` (from a source FQN) vs `Outer$Inner`
-    // (from bytecode), or two files resolving the simple name through different packages. Passing a
-    // value where the SAME type is expected is legal, so the "`ComunicazioneType` cannot be passed
-    // where `ComunicazioneType` is expected" report is a false positive → don't flag (sound: at worst
-    // a missed genuine same-simple-name mismatch across packages, which is rare and low-value).
-    if simple_name(arg) == simple_name(pbin) {
-        return None;
-    }
-    (!reaches(resolver, arg, pbin))
-        .then(|| (simple_name(arg).to_string(), simple_name(pbin).to_string()))
+    let found = refused.first().map_or("", |r| r.found.as_str());
+    format!(
+        "Argument {} of `{}`: `{found}` cannot be passed where `{}` is expected",
+        i + 1,
+        callee.name(),
+        expected.join("` or `")
+    )
 }
 
 fn named_args(arg_list: Node) -> Vec<Node> {
@@ -287,216 +314,4 @@ fn named_args(arg_list: Node) -> Vec<Node> {
         .named_children(&mut c)
         .filter(|n| !matches!(n.kind(), "line_comment" | "block_comment"))
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bennu_java::prelude::{ClassFlags, ClassMembers, Import, Member};
-    use std::collections::HashMap;
-    use std::sync::Arc;
-
-    struct MapResolver {
-        members: HashMap<String, ClassMembers>,
-        simple: HashMap<String, String>,
-    }
-    impl TypeResolver for MapResolver {
-        fn members_of(&self, binary: &str) -> Option<Arc<ClassMembers>> {
-            self.members.get(binary).cloned().map(Arc::new)
-        }
-        fn resolve_simple_name(&self, name: &str, _i: &[Import]) -> Option<String> {
-            self.simple.get(name).cloned()
-        }
-    }
-
-    fn method(name: &str, params: &[&str]) -> Member {
-        let params = params.iter().map(|p| TypeRef::simple(p.to_string())).collect();
-        Member::method(name, TypeRef::simple("void"), params)
-    }
-
-    fn cls(methods: Vec<Member>) -> ClassMembers {
-        ClassMembers {
-            type_params: Vec::new(),
-            superclass: Some(TypeRef::simple("java/lang/Object")),
-            interfaces: Vec::new(),
-            methods,
-            fields: Vec::new(),
-            flags: ClassFlags::default(),
-        }
-    }
-
-    /// `Svc` with `label(String,String)`, `take(Animal)`, `overloaded(int)` + `overloaded(String)`.
-    /// Animal / Dog (Dog extends Animal) / Widget (unrelated).
-    fn resolver() -> MapResolver {
-        let mut members = HashMap::new();
-        members.insert("java/lang/Object".to_string(), cls(vec![]));
-        members.insert("java/lang/String".to_string(), cls(vec![]));
-        members.insert("com/acme/Animal".to_string(), cls(vec![]));
-        let mut dog = cls(vec![]);
-        dog.superclass = Some(TypeRef::simple("com/acme/Animal"));
-        members.insert("com/acme/Dog".to_string(), dog);
-        members.insert("com/acme/Widget".to_string(), cls(vec![]));
-        // A DIFFERENT type sharing the simple name `Widget` (another package) — for the same-name skip.
-        members.insert("com/other/Widget".to_string(), cls(vec![]));
-        members.insert(
-            "com/acme/Svc".to_string(),
-            cls(vec![
-                method("label", &["java/lang/String", "java/lang/String"]),
-                method("take", &["com/acme/Animal"]),
-                method("overloaded", &["int"]),
-                method("overloaded", &["java/lang/String"]),
-                method("animal", &[]), // returns Animal below via return_type override
-                // Two arity-2 overloads, ONE with an array param (non-checkable): a call must not be
-                // judged against the lone checkable `(String, String)` — mirrors the reported
-                // `setRecipients(String, Addresses[])` + `setRecipients(String, String)` case.
-                method("recip", &["java/lang/String", "com/acme/Widget[]"]),
-                method("recip", &["java/lang/String", "java/lang/String"]),
-                // A VARARGS overload of a DIFFERENT arity than a fixed sibling — SLF4J's
-                // `debug(String, Object...)` vs `debug(Marker, String, Object, Object)`. A 3-arg call
-                // could bind the varargs, so the fixed arity-3 must not be judged alone.
-                method("emit", &["java/lang/String", "java/lang/Object[]"]),
-                method("emit", &["com/acme/Widget", "java/lang/String", "java/lang/String"]),
-                // A parameter typed as a SAME-SIMPLE-NAME type in another package (`com/other/Widget`
-                // vs the argument's `com/acme/Widget`) — the same-name-collision case.
-                method("dup", &["com/other/Widget"]),
-            ]),
-        );
-        // Give Svc providers returning types, for building args.
-        if let Some(svc) = members.get_mut("com/acme/Svc") {
-            svc.methods.push({
-                let mut m = method("dog", &[]);
-                m.return_type = TypeRef::simple("com/acme/Dog");
-                m
-            });
-            svc.methods.push({
-                let mut m = method("widget", &[]);
-                m.return_type = TypeRef::simple("com/acme/Widget");
-                m
-            });
-        }
-        // The class the test sources are written in, so a BARE call has a fully-known `this`, plus a
-        // constructor to judge `new Ctor("x")` against.
-        members.insert("C".to_string(), cls(vec![method("own", &["int"])]));
-        members.insert("com/acme/Ctor".to_string(), cls(vec![method("<init>", &["int"])]));
-        let simple = [
-            ("C", "C"),
-            ("Ctor", "com/acme/Ctor"),
-            ("Svc", "com/acme/Svc"),
-            ("Animal", "com/acme/Animal"),
-            ("Dog", "com/acme/Dog"),
-            ("Widget", "com/acme/Widget"),
-            ("String", "java/lang/String"),
-            ("Object", "java/lang/Object"),
-        ]
-        .into_iter()
-        .map(|(s, b)| (s.to_string(), b.to_string()))
-        .collect();
-        MapResolver { members, simple }
-    }
-
-    fn diags(body: &str) -> Vec<String> {
-        let src = format!("class C {{ Svc s; void m() {{ {body} }} }}");
-        argument_type_errors(&src, &resolver()).into_iter().map(|d| d.message).collect()
-    }
-
-    #[test]
-    fn bare_call_with_a_bad_argument_is_flagged() {
-        let d = diags("own(\"x\");");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(d[0].contains("own"), "{d:?}");
-    }
-
-    #[test]
-    fn bare_call_with_a_good_argument_is_ok() {
-        assert!(diags("own(1);").is_empty());
-    }
-
-    #[test]
-    fn bare_call_the_buffer_overloads_is_not_judged() {
-        // The source adds `own(String)`, which the index has not seen. The stale overload set would
-        // otherwise stand alone and call a perfectly legal call wrong.
-        let src = "class C { void own(String t) {} void m() { own(\"x\"); } }";
-        assert!(argument_type_errors(src, &resolver()).is_empty());
-    }
-
-    #[test]
-    fn constructor_with_a_bad_argument_is_flagged() {
-        let d = diags("Ctor c = new Ctor(\"x\");");
-        assert_eq!(d.len(), 1, "{d:?}");
-    }
-
-    #[test]
-    fn constructor_with_a_good_argument_is_ok() {
-        assert!(diags("Ctor c = new Ctor(1);").is_empty());
-    }
-
-    #[test]
-    fn anonymous_class_creation_is_not_judged() {
-        // The arguments bind to the SUPERTYPE's constructor, not to the anonymous body's.
-        assert!(diags("Ctor c = new Ctor(\"x\") { };").is_empty());
-    }
-
-    #[test]
-    fn int_for_string_param_is_flagged() {
-        let d = diags("s.label(1, \"b\");");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(d[0].contains("Argument 1") && d[0].contains("String"), "{d:?}");
-    }
-
-    #[test]
-    fn correct_string_args_are_ok() {
-        assert!(diags("s.label(\"a\", \"b\");").is_empty());
-    }
-
-    #[test]
-    fn subtype_argument_is_ok() {
-        // take(Animal) with a Dog → OK.
-        assert!(diags("s.take(s.dog());").is_empty());
-    }
-
-    #[test]
-    fn unrelated_class_argument_is_flagged() {
-        let d = diags("s.take(s.widget());");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(d[0].contains("Widget") && d[0].contains("Animal"), "{d:?}");
-    }
-
-    #[test]
-    fn ambiguous_overload_is_skipped() {
-        // `overloaded` has two distinct 1-arg signatures → we don't guess which binds.
-        assert!(diags("s.overloaded(1);").is_empty());
-        assert!(diags("s.overloaded(\"x\");").is_empty());
-    }
-
-    #[test]
-    fn overload_with_array_param_sibling_is_skipped() {
-        // `recip` has `(String, Widget[])` and `(String, String)`. Passing a non-array `Widget` as the
-        // 2nd arg would, before the fix, be judged against the lone checkable `(String, String)` and
-        // flagged Widget↔String — but the call could bind to the array overload, so we must skip.
-        assert!(diags("s.recip(\"a\", s.widget());").is_empty());
-        // And a genuinely correct call still passes.
-        assert!(diags("s.recip(\"a\", \"b\");").is_empty());
-    }
-
-    #[test]
-    fn unknown_receiver_is_skipped() {
-        assert!(diags("Unknown u = null; u.whatever(1);").is_empty());
-    }
-
-    #[test]
-    fn same_simple_name_argument_is_not_flagged() {
-        // `dup(com.other.Widget)` called with a `com.acme.Widget` — same simple name, different
-        // packages. Very likely one logical type resolved through two packages; the
-        // "`Widget` cannot be passed where `Widget` is expected" message is unhelpful → never flagged.
-        assert!(diags("s.dup(s.widget());").is_empty());
-    }
-
-    #[test]
-    fn varargs_overload_of_other_arity_is_skipped() {
-        // `emit(String, Object...)` (varargs) can bind a 3-argument call, so the arity-3
-        // `emit(Widget, String, String)` must NOT be judged alone (that flagged `"a"` ↔ Widget). This
-        // is the SLF4J `LOG.debug("fmt", id, name, note)` false positive, where the call binds the
-        // varargs but the check committed to the arity-4 `debug(Marker, String, Object, Object)`.
-        assert!(diags("s.emit(\"a\", s.widget(), \"c\");").is_empty());
-    }
 }

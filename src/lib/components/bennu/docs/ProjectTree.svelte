@@ -258,6 +258,11 @@ public class InvoiceService {
   expanding the whole tree, and an options menu.
 </p>
 <p>
+  Which folders are open is remembered for each project — closing the panel, switching project or restarting brings the
+  tree back as you left it, including what <strong>Expand all</strong>, <strong>Collapse all</strong> and locating a file
+  opened or closed. A folder that no longer exists is forgotten.
+</p>
+<p>
   Right-clicking a file or folder opens: New · Open · Rename · Delete · Local History · Copy path · Reveal in Project · Reveal
   in File Explorer. <kbd>Shift</kbd> + <kbd>F10</kbd> — or the Menu key — opens the same menu on the focused row, so every entry
   is reachable without the mouse.

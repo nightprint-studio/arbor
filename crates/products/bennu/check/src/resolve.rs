@@ -73,6 +73,78 @@ pub fn type_binary_at(
     type_binary_in(text, enclosing_scope(node, bytes, symbols), symbols, resolver)
 }
 
+/// The binary type a `recv.method(…)` call is made ON: the receiver VALUE's inferred type, else —
+/// for a static call `Util.convert(…)` — the TYPE the receiver names. `None` for a bare call.
+///
+/// Inference types values only, so the receiver of every static call came back untyped and the
+/// call went unjudged by the checks reading it (argument count and argument types alike). The type
+/// reading is taken only where no value can be meant — a variable obscures a type of the same name
+/// (JLS §6.4.2) — so the receiver's head must be declared by no enclosing local or parameter and by
+/// no field of this file, its last segment must be capitalised, and the type must be readable.
+pub(crate) fn call_receiver_binary(
+    call: tree_sitter::Node,
+    root: &tree_sitter::Node,
+    source: &str,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &bennu_java::prelude::InferCache,
+) -> Option<String> {
+    let obj = call.child_by_field_name("object")?;
+    let inferred =
+        bennu_java::prelude::infer_node_type_cached(root, source, symbols, &obj, resolver, cache);
+    match inferred {
+        Some(ty) => (!ty.binary_name.is_empty()).then_some(ty.binary_name),
+        None => static_receiver_binary(obj, source.as_bytes(), symbols, resolver),
+    }
+}
+
+/// The type a receiver like `Util` / `java.util.Collections` / `Outer.Inner` names, when it cannot
+/// be a value — see [`call_receiver_binary`].
+fn static_receiver_binary(
+    obj: tree_sitter::Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<String> {
+    let head = leftmost_identifier(obj)?;
+    let text = obj.utf8_text(bytes).ok()?;
+    let last = text.rsplit('.').next()?.trim();
+    if !last.chars().next()?.is_uppercase() {
+        return None;
+    }
+    let head_name = head.utf8_text(bytes).ok()?;
+    let is_file_field = symbols.types.iter().any(|t| t.fields.iter().any(|f| f.name == head_name));
+    if is_file_field || crate::scopes::resolves_as_local(head, outermost_type(obj)?, bytes) {
+        return None;
+    }
+    let binary = type_binary_at(text, obj, bytes, symbols, resolver)?;
+    resolver.members_of(&binary).map(|_| binary)
+}
+
+/// The first identifier of a dotted receiver: `a` in `a.b.C`.
+fn leftmost_identifier(mut node: tree_sitter::Node) -> Option<tree_sitter::Node> {
+    loop {
+        match node.kind() {
+            "identifier" => return Some(node),
+            "field_access" => node = node.child_by_field_name("object")?,
+            "scoped_identifier" => node = node.child_by_field_name("scope")?,
+            _ => return None,
+        }
+    }
+}
+
+/// The top-level declaration `node` sits in — the node whose body ends a locals search.
+fn outermost_type(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
+    let mut cur = node;
+    while let Some(parent) = cur.parent() {
+        if parent.parent().is_none() {
+            return Some(cur);
+        }
+        cur = parent;
+    }
+    None
+}
+
 /// The scope a name written AT `node` is read in: the body of the type that encloses it, or the
 /// compilation unit when nothing does.
 ///

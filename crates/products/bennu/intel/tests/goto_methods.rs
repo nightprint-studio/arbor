@@ -480,3 +480,129 @@ fn bare_reference_to_a_statically_imported_constant() {
         .expect("goto a bare statically imported constant");
     assert_eq!(d.file, "Limits.java");
 }
+
+// ── overloads: the declaration the call binds to ─────────────────────────────────────────────
+//
+// Spring's `RestClient.UriSpec` shape, `uri(URI)` declared first. Go-to used to land on the first
+// declaration of the name whatever the call passed, so `uri(b -> …)` opened `uri(URI)`.
+
+const URI_SPEC: &str = "package app;\n\
+     public interface UriSpec {\n\
+     \x20   UriSpec uri(Uri uri);\n\
+     \x20   UriSpec uri(String uriTemplate, Object... uriVariables);\n\
+     \x20   UriSpec uri(String uriTemplate, Params uriVariables);\n\
+     \x20   UriSpec uri(String uriTemplate, Fn<UriBuilder, Uri> uriFunction);\n\
+     \x20   UriSpec uri(Fn<UriBuilder, Uri> uriFunction);\n\
+     \x20   UriSpec with(Fn<Uri, Uri> one);\n\
+     \x20   UriSpec with(BiFn<Uri, Uri, Uri> two);\n\
+     }\n";
+
+fn uri_project() -> Project {
+    Project::with_stream_jdk(&[
+        ("UriSpec.java", URI_SPEC),
+        ("Fn.java", "package app;\npublic interface Fn<T, R> {\n    R apply(T t);\n}\n"),
+        ("BiFn.java", "package app;\npublic interface BiFn<T, U, R> {\n    R apply(T t, U u);\n}\n"),
+        // Two abstract methods — an interface, but not a functional one (`Map` in Spring's version).
+        ("Params.java", "package app;\npublic interface Params {\n    Object get(String key);\n    int size();\n}\n"),
+        ("Uri.java", "package app;\npublic class Uri {\n}\n"),
+        (
+            "UriBuilder.java",
+            "package app;\npublic interface UriBuilder {\n    UriBuilder path(String path);\n    Uri build();\n}\n",
+        ),
+        ("Client.java", "package app;\npublic class Client {\n    public UriSpec post() { return null; }\n}\n"),
+        (
+            "Caller.java",
+            "package app;\n\
+             public class Caller {\n\
+             \x20   Uri build(UriBuilder b) { return null; }\n\
+             \x20   void lambda(Client client) {\n\
+             \x20       client.post()\n\
+             \x20               .uri(uri_builder ->\n\
+             \x20                   uri_builder.path(\"/v1/public/authorization/users-with-delegate\")\n\
+             \n\
+             \x20               );\n\
+             \x20   }\n\
+             \x20   void typed(Client client, Uri someUri) { client.post().uri(someUri); }\n\
+             \x20   void varargs(Client client) { client.post().uri(\"x\", 1, 2); }\n\
+             \x20   void template(Client client) { client.post().uri(\"x\", b -> b.build()); }\n\
+             \x20   void reference(Client client) { client.post().uri(this::build); }\n\
+             \x20   void twoParams(Client client) { client.post().with((a, b) -> a); }\n\
+             }\n",
+        ),
+        // A body still being typed, in a file of its own so its parse error cannot disturb the rest.
+        (
+            "Editing.java",
+            "package app;\n\
+             public class Editing {\n\
+             \x20   void editing(Client client) { client.post().uri(b -> b.path(\"/x\").); }\n\
+             }\n",
+        ),
+    ])
+}
+
+/// Go-to on the `uri` of `needle` in `file` must land on the `UriSpec` line holding `declaration`.
+fn assert_uri_goto(p: &Project, file: &str, needle: &str, declaration: &str) {
+    let src = p.source(file).to_string();
+    let d = p
+        .goto(file, at(&src, needle))
+        .unwrap_or_else(|| panic!("goto on `{needle}`"));
+    assert_eq!(d.file, "UriSpec.java");
+    assert_eq!(
+        d.line,
+        line_of(URI_SPEC, declaration),
+        "`{needle}` must open `{declaration}`"
+    );
+}
+
+#[test]
+fn a_lambda_argument_opens_the_function_overload() {
+    let p = uri_project();
+    assert_uri_goto(&p, "Caller.java", "uri(uri_builder", "UriSpec uri(Fn<");
+}
+
+#[test]
+fn a_typed_argument_opens_the_overload_of_its_type() {
+    let p = uri_project();
+    assert_uri_goto(&p, "Caller.java", "uri(someUri)", "UriSpec uri(Uri uri)");
+}
+
+#[test]
+fn extra_arguments_open_the_varargs_overload() {
+    let p = uri_project();
+    assert_uri_goto(&p, "Caller.java", "uri(\"x\", 1, 2)", "UriSpec uri(String uriTemplate, Object...");
+}
+
+#[test]
+fn a_template_and_a_lambda_open_the_string_function_overload() {
+    let p = uri_project();
+    assert_uri_goto(&p, "Caller.java", "uri(\"x\", b ->", "UriSpec uri(String uriTemplate, Fn<");
+}
+
+#[test]
+fn a_method_reference_opens_the_function_overload() {
+    let p = uri_project();
+    assert_uri_goto(&p, "Caller.java", "uri(this::build)", "UriSpec uri(Fn<");
+}
+
+#[test]
+fn a_lambda_still_being_written_opens_the_function_overload() {
+    let p = uri_project();
+    assert_uri_goto(&p, "Editing.java", "uri(b ->", "UriSpec uri(Fn<");
+}
+
+#[test]
+fn a_two_parameter_lambda_opens_the_two_parameter_function_overload() {
+    let p = uri_project();
+    assert_uri_goto(&p, "Caller.java", "with((a, b)", "UriSpec with(BiFn<");
+}
+
+/// Hover shares the choice: one argument each, and `uri(Uri)` is not the card for a lambda.
+#[test]
+fn hover_on_a_lambda_call_describes_the_function_overload() {
+    let p = uri_project();
+    let src = p.source("Caller.java").to_string();
+    let h = p
+        .hover("Caller.java", at(&src, "uri(uri_builder"))
+        .expect("hover on the overloaded call");
+    assert!(h.signature.contains("(Fn"), "hover card: {}", h.signature);
+}

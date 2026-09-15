@@ -83,26 +83,31 @@ pub fn safe_delete_plan(
     level: LangLevel,
 ) -> Option<SafeDelete> {
     let target = classify_target(index, file, source, offset, resolver, project_types, level)?;
+    let caret = Caret { file, source, offset };
     match target {
         // A local is not the index's business: it never leaves its method, so "is it used" is a
         // question the file answers on its own — see `bennu_check`'s unused-local check, which
         // finds them without being asked.
         RenameTarget::Local { .. } => None,
         RenameTarget::Member { key } => {
-            member_delete(index, source, file, &key, policy, subtypes, java_files)
+            member_delete(index, &caret, &key, policy, subtypes, java_files)
         }
-        RenameTarget::Type { binary, .. } => {
-            type_delete(index, source, file, &binary, java_files)
-        }
+        RenameTarget::Type { binary, .. } => type_delete(index, &caret, &binary, java_files),
     }
+}
+
+/// Where the delete was asked from.
+struct Caret<'a> {
+    file: &'a str,
+    source: &'a str,
+    offset: usize,
 }
 
 // ── members ──────────────────────────────────────────────────────────────────
 
 fn member_delete(
     index: &ReferenceIndex,
-    caret_source: &str,
-    caret_file: &str,
+    caret: &Caret,
     key: &DeclKey,
     policy: &dyn TypeResolver,
     subtypes: &SubtypeMap,
@@ -115,8 +120,10 @@ fn member_delete(
 
     // The declaration lives in the file that declares the OWNER, which is not necessarily the
     // caret's file — you can ask to delete a method from one of its call sites.
-    let (decl_file, decl_source) = declaring_source(owner, caret_file, caret_source, java_files)?;
-    let (start, end) = member_span(&decl_source, key)?;
+    let (decl_file, decl_source) = declaring_source(index, owner, caret, java_files)?;
+    let spans = crate::rename::find_member_name_spans(&decl_source, key);
+    let (name_start, _) = chosen_declaration(&spans, &decl_file, &decl_source, key, caret, policy)?;
+    let (start, end) = member_span(&decl_source, name_start)?;
 
     let mut blocked = None;
     if matches!(key, DeclKey::Method { .. }) {
@@ -214,12 +221,11 @@ fn implementing_subtype(
 
 fn type_delete(
     index: &ReferenceIndex,
-    caret_source: &str,
-    caret_file: &str,
+    caret: &Caret,
     binary: &str,
     java_files: &[PlanFile],
 ) -> Option<SafeDelete> {
-    let (decl_file, decl_source) = declaring_source(binary, caret_file, caret_source, java_files)?;
+    let (decl_file, decl_source) = declaring_source(index, binary, caret, java_files)?;
     let key = DeclKey::Type { binary: binary.to_string() };
     let (start, end) = type_span(&decl_source, binary)?;
 
@@ -260,13 +266,23 @@ fn usages_excluding_declaration(
 }
 
 /// The source of the file that declares `binary`, falling back to the caret's own file.
+///
+/// The index says which file that is. Matching a file NAME against the type's simple name — the
+/// only route this had — never finds a nested type, whose file is named after its outer type, so a
+/// delete asked from a call site in another file searched the caller's own file for the declaration.
 fn declaring_source(
+    index: &ReferenceIndex,
     binary: &str,
-    caret_file: &str,
-    caret_source: &str,
+    caret: &Caret,
     java_files: &[PlanFile],
 ) -> Option<(String, String)> {
-    let simple = binary.rsplit(['/', '$']).next().unwrap_or(binary);
+    if let Some(f) = index
+        .file_declaring(binary)
+        .and_then(|path| java_files.iter().find(|f| f.path == path))
+    {
+        return Some((f.path.clone(), f.source.clone()));
+    }
+    let simple = bennu_java::prelude::binary_simple_name(binary);
     let owner_file = java_files.iter().find(|f| {
         std::path::Path::new(&f.path)
             .file_stem()
@@ -274,14 +290,41 @@ fn declaring_source(
     });
     match owner_file {
         Some(f) => Some((f.path.clone(), f.source.clone())),
-        None => Some((caret_file.to_string(), caret_source.to_string())),
+        None => Some((caret.file.to_string(), caret.source.to_string())),
     }
 }
 
-/// The full span of the member `key` names, documentation comment and trailing newline included.
-fn member_span(source: &str, key: &DeclKey) -> Option<(usize, usize)> {
-    let spans = crate::rename::find_member_name_spans(source, key);
-    let (name_start, _) = spans.first().copied()?;
+/// Which of the name's declarations (`spans`, in `decl_source`) the delete is about.
+///
+/// Overloads share one key, so a file can declare the name several times, and removing the first
+/// one found removed a method nobody pointed at. The declaration the caret stands on wins; from a
+/// call, the overload the call binds to — the declaration go-to opens; otherwise the first.
+fn chosen_declaration(
+    spans: &[(usize, usize)],
+    decl_file: &str,
+    decl_source: &str,
+    key: &DeclKey,
+    caret: &Caret,
+    resolver: &dyn TypeResolver,
+) -> Option<(usize, usize)> {
+    let first = *spans.first()?;
+    if spans.len() == 1 || !matches!(key, DeclKey::Method { .. }) {
+        return Some(first);
+    }
+    if decl_file == caret.file {
+        if let Some(on) = spans.iter().find(|(s, e)| *s <= caret.offset && caret.offset <= *e) {
+            return Some(*on);
+        }
+    }
+    Some(
+        bennu_java::prelude::call_overload_at(caret.source, caret.offset, resolver)
+            .map_or(first, |m| crate::rename::choose_overload_span(decl_source, spans, &m.params)),
+    )
+}
+
+/// The full span of the member whose name starts at `name_start`, documentation comment and
+/// trailing newline included.
+fn member_span(source: &str, name_start: usize) -> Option<(usize, usize)> {
     let tree = parse_java(source)?;
     let node = tree.root_node().descendant_for_byte_range(name_start, name_start)?;
     let member = ancestor_of(
@@ -297,8 +340,8 @@ fn member_span(source: &str, key: &DeclKey) -> Option<(usize, usize)> {
 }
 
 fn type_span(source: &str, binary: &str) -> Option<(usize, usize)> {
-    let simple = binary.rsplit(['/', '$']).next().unwrap_or(binary);
-    let (name_start, _) = bennu_java::prelude::find_type_name_span(source, simple)?;
+    // By the whole binary: a nested `Inner` is the one inside its own outer type.
+    let (name_start, _) = bennu_java::prelude::find_binary_type_name_span(source, binary)?;
     let tree = parse_java(source)?;
     let node = tree.root_node().descendant_for_byte_range(name_start, name_start)?;
     let decl = ancestor_of(

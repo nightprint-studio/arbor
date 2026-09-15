@@ -17,10 +17,11 @@
 use bennu_complete::prelude::{match_tier, MatchCase};
 use bennu_intentions::prelude::insert_import_edit;
 use bennu_java::prelude::{
-    extract_symbols, infer_receiver_type, postfix_expansions, postfix_indent_unit, postfix_shape,
-    postfix_subject_start, supertype_names, PostfixContext, PostfixExpansion, PostfixSubject, TypeRef,
-    TypeResolver,
+    declared_variable_names, extract_symbols, infer_receiver_type, postfix_expansions, postfix_indent_unit,
+    postfix_shape, postfix_subject_start, supertype_names, PostfixContext, PostfixExpansion, PostfixSubject,
+    TypeRef, TypeResolver,
 };
+use bennu_naming::prelude::Convention;
 use bennu_proto::prelude::{CompletionItem, SnippetStop, SourceEdit};
 
 /// The level assumed when the module's is not known — the old language, which is the assumption
@@ -76,7 +77,16 @@ impl PostfixSite {
 /// forty templates under them would be forty rows nobody asked for. `None`, too, on a `package` or
 /// `import` line, and when the expression's type is not known — a template chosen by type is exactly the
 /// one that must not guess it.
-pub fn postfix_site(source: &str, caret: usize, resolver: &dyn TypeResolver) -> Option<PostfixSite> {
+///
+/// `naming` is the convention the project declared for local variables, if any. The names the templates
+/// declare (`.var`, `.for`) are spelled in it, or else in the one the file's names already follow — see
+/// [`Convention::for_variables`].
+pub fn postfix_site(
+    source: &str,
+    caret: usize,
+    resolver: &dyn TypeResolver,
+    naming: Option<Convention>,
+) -> Option<PostfixSite> {
     if caret > source.len() || !source.is_char_boundary(caret) {
         return None;
     }
@@ -89,7 +99,12 @@ pub fn postfix_site(source: &str, caret: usize, resolver: &dyn TypeResolver) -> 
         return None;
     }
     let start = postfix_subject_start(source, dot)?;
-    let (subject, receiver) = subject_of(source, (start, dot), (word_start, caret), resolver)?;
+    let (mut subject, receiver) = subject_of(source, (start, dot), (word_start, caret), resolver)?;
+    if let PostfixSubject::Value { shape, .. } = &mut subject {
+        if let Some(convention) = Convention::for_variables(naming, declared_variable_names(source)) {
+            shape.respell(|name| convention.render(name).unwrap_or_else(|| name.to_string()));
+        }
+    }
     Some(PostfixSite { start, caret, typed, subject, receiver })
 }
 
@@ -121,9 +136,10 @@ pub(crate) fn postfix_completions(
     caret: usize,
     resolver: &dyn TypeResolver,
     level: Option<u32>,
+    naming: Option<Convention>,
     case: MatchCase,
 ) -> Vec<CompletionItem> {
-    let Some(site) = postfix_site(source, caret, resolver) else { return Vec::new() };
+    let Some(site) = postfix_site(source, caret, resolver, naming) else { return Vec::new() };
     let unit = postfix_indent_unit(source);
     let ctx = PostfixContext { level: level.unwrap_or(POSTFIX_LEGACY_LEVEL), unit: &unit };
     let wanted = |name: &str| match_tier(name, &site.typed, case).is_some();
@@ -294,7 +310,7 @@ mod tests {
     fn a_dot_in_an_import_or_package_line_is_not_a_postfix_site() {
         let src = "package com.acme;\nimport java.util.fo";
         assert!(on_a_header_line(src, src.rfind('.').unwrap()));
-        assert!(postfix_site(src, src.len(), &Nothing).is_none());
+        assert!(postfix_site(src, src.len(), &Nothing, None).is_none());
         let body = "class A { void m() { orders.fo";
         assert!(!on_a_header_line(body, body.rfind('.').unwrap()));
     }
@@ -303,9 +319,9 @@ mod tests {
     #[test]
     fn no_site_before_a_name_is_started_or_inside_a_character() {
         let bare = "class A { void m() { orders.";
-        assert!(postfix_site(bare, bare.len(), &Nothing).is_none());
+        assert!(postfix_site(bare, bare.len(), &Nothing, None).is_none());
         let wide = "class A { void m() { è";
-        assert!(postfix_site(wide, wide.len() - 1, &Nothing).is_none());
+        assert!(postfix_site(wide, wide.len() - 1, &Nothing, None).is_none());
     }
 
     #[test]

@@ -3,7 +3,7 @@
    * BennuSidebar — the Project tool window (the Java project file tree).
    *
    * Fed by `bennu_project_tree` via the project store. Uses the shared `Tree` widget
-   * with **controlled expansion** (the UI store owns the expanded-id set) so the
+   * with **controlled expansion** (remembered per project by `treeExpansionStore`) so the
    * header toolbar can Collapse-all / Expand-all and Select-opened-file can reveal a
    * path. Clicking a file opens it in the editor.
    *
@@ -45,6 +45,7 @@
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { treeExpansionStore } from '$lib/stores/bennu/tree-expansion.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { buildUnits as ipcBuildUnits } from '$lib/ipc/bennu/inspect';
   import { isTestSource } from './file-kind';
@@ -285,9 +286,18 @@
     if (!node.is_dir) void projectStore.openFile(node.path);
   }
 
-  // ── Controlled expansion (UI store owns the set) ─────────────────────────────
+  // ── Controlled expansion (remembered per project, see `tree-expansion.svelte.ts`) ──
+  // Held outside this panel so closing it, switching project or restarting keeps the folders open;
+  // every change below — a click, Expand/Collapse all, a reveal — goes through the one store.
+  const projectRoot = $derived(projectStore.project?.root ?? '');
+  const expandedPaths = $derived(treeExpansionStore.openPaths(projectRoot));
+
+  function setFoldersOpen(paths: Iterable<string>, open: boolean) {
+    treeExpansionStore.setPathsOpen(projectRoot, paths, open);
+  }
+
   function onExpandToggle(id: string, next: boolean) {
-    bennuUiStore.setExpanded(id, next);
+    setFoldersOpen([id], next);
   }
 
   /** Every directory path in the (sub)tree — used by Expand-all. */
@@ -300,8 +310,8 @@
     return out;
   }
 
-  function collapseAll() { bennuUiStore.collapseAllTree(); }
-  function expandAll() { bennuUiStore.expandTreeIds(allDirIds(rootChildren)); }
+  function collapseAll() { treeExpansionStore.clearScope(projectRoot, 'project'); }
+  function expandAll() { setFoldersOpen(allDirIds(rootChildren), true); }
 
   /**
    * The ancestor directory ids leading to `path`, or `null` when the tree has no such row.
@@ -329,7 +339,7 @@
     const path = projectStore.activeFilePath;
     if (!path) return;
     focusedPath = null;
-    bennuUiStore.expandTreeIds(trailTo(path) ?? []);
+    setFoldersOpen(trailTo(path) ?? [], true);
     await tick();
     treeRef?.scrollToId(path);
   }
@@ -385,7 +395,7 @@
     }
     // The node itself too: focusing a crate and seeing its folder still shut answers "where is
     // it" but not "what is in it", which is the next question every time.
-    bennuUiStore.expandTreeIds([...trail, path]);
+    setFoldersOpen([...trail, path], true);
     focusedPath = path;
     await tick();
     treeRef?.scrollToId(path);
@@ -397,7 +407,7 @@
   async function revealPath(path: string) {
     focusedPath = null;
     await projectStore.openFile(path);
-    bennuUiStore.expandTreeIds(trailTo(path) ?? []);
+    setFoldersOpen(trailTo(path) ?? [], true);
     await tick();
     treeRef?.scrollToId(path);
   }
@@ -579,7 +589,7 @@
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
           { id: 'reveal-fs',     label: 'Reveal in File Explorer', icon: ExternalLink },
           { separator: true, id: 'sep-dir', label: '' },
-          bennuUiStore.isExpanded(node.path)
+          expandedPaths.has(node.path)
             ? { id: 'collapse', label: 'Collapse', icon: ChevronRight }
             : { id: 'expand',   label: 'Expand',   icon: ChevronDown },
         ]
@@ -636,8 +646,8 @@
         case 'hist-deleted':
           if (projectStore.project) bennuHistoryStore.showDeleted(projectStore.project.root);
           break;
-        case 'expand':    bennuUiStore.setExpanded(node.path, true); break;
-        case 'collapse':  bennuUiStore.setExpanded(node.path, false); break;
+        case 'expand':    setFoldersOpen([node.path], true); break;
+        case 'collapse':  setFoldersOpen([node.path], false); break;
       }
     });
   }
@@ -1031,7 +1041,7 @@
         getId={(n) => n.path}
         getChildren={(n) => (n.is_dir ? n.children : undefined)}
         selectedId={focusedPath ?? projectStore.activeFilePath}
-        expandedIds={bennuUiStore.treeExpanded}
+        expandedIds={expandedPaths}
         {onExpandToggle}
         {filter}
         ariaLabel="Project files"

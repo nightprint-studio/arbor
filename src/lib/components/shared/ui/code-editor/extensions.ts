@@ -38,6 +38,7 @@ import { inlayHints } from './inlay-hints';
 import { signatureHints } from './signature-hint';
 import { codeLensLayer } from './code-lens';
 import { snippetStops } from './snippet-stops';
+import { completionRowParts, rowClass, type RichOption } from './completion-render';
 import type { LanguageDescriptor, Tree, Node } from './types';
 import { createHighlightPlugin } from './highlight';
 import { createFoldingExtension, foldBlockCommentsOnLoad } from './folding';
@@ -258,17 +259,13 @@ function completionExtension(
       defaultKeymap: false,
       activateOnTyping: autoPopup,
       ...(prefs?.delayMs !== undefined ? { activateOnTypingDelay: Math.max(0, prefs.delayMs) } : {}),
-      // A third column, after the label and the detail: where the candidate comes FROM. It is
-      // what tells `List.of` from `Set.of`, and a method you inherited from one you declared —
-      // and it is the one thing a member list of forty rows cannot say any other way.
-      //
-      // Position 90 puts it after CodeMirror's own detail slot (80); the theme pushes it to the
-      // right edge with `margin-left: auto`.
-      addToOptions: [{ render: renderOrigin, position: 90 }],
-      // Deprecated is a property of the WHOLE row — the label is struck through, not the detail —
-      // so it is a class on the `li` rather than another rendered element.
-      optionClass: (option) =>
-        (option as RichOption).isDeprecated ? 'cm-completion-deprecated' : '',
+      // The row is drawn IntelliJ's way — our own kind icons, the parameter list beside the name,
+      // and where the candidate comes from on the right edge. See `completion-render`.
+      icons: false,
+      addToOptions: completionRowParts,
+      // Standing (own / inherited / implicit) and deprecated are properties of the WHOLE row — the
+      // label's weight, the icon's strike — so they are classes on the `li`.
+      optionClass: (option) => rowClass(option as RichOption),
     }),
     // Member-access trigger: CodeMirror's `activateOnTyping` only auto-opens the popup on
     // identifier characters, so a bare `receiver.` never queries the source. Fire completion
@@ -286,31 +283,6 @@ function completionExtension(
         })
       : [],
   ];
-}
-
-/**
- * A completion carrying the origin column and the deprecated mark.
- *
- * Structurally the same shape `components/bennu/completion-item` produces. Declared again here
- * rather than imported because this module is the app-agnostic editor core and must not reach
- * into a product's folder — and what crosses between them is two optional properties on a
- * CodeMirror type, not a dependency.
- */
-interface RichOption extends Completion {
-  origin?: string;
-  isDeprecated?: boolean;
-}
-
-/** The right-hand column: where a candidate comes from. `null` for a candidate that has no
- *  origin to name — a keyword, a local variable, a snippet — which leaves the row's width to
- *  the ones that do. */
-function renderOrigin(option: Completion): HTMLElement | null {
-  const origin = (option as RichOption).origin;
-  if (!origin) return null;
-  const el = document.createElement('span');
-  el.className = 'cm-completionOrigin';
-  el.textContent = origin;
-  return el;
 }
 
 /**

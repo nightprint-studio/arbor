@@ -87,7 +87,7 @@ pub(crate) fn declares_name_in_scope(scope: Node, name: &str, bytes: &[u8]) -> b
 
     // For a `block` (or any scope), scan its DIRECT and nested statements for declared names WITHOUT
     // crossing into a deeper NEW scope owned by a nested type/lambda — those own their names and we
-    // already SKIP identifiers inside them (via `scope_is_directly_top`), so here we simply gather
+    // already SKIP identifiers inside them (via the callers' own scope gates), so here we simply gather
     // broadly: any local/resource/pattern var textually inside `scope`. Over-collection is safe.
     let mut stack: Vec<Node> = Vec::new();
     let mut c = scope.walk();
@@ -174,6 +174,11 @@ pub(crate) fn enclosing_executable_scope(node: Node) -> Option<Node> {
 /// Whether a parameter-bearing scope declares `name` in its `parameters` list.
 pub(crate) fn params_declare(member: Node, name: &str, bytes: &[u8]) -> bool {
     let Some(params) = member.child_by_field_name("parameters") else { return false };
+    // `h -> …`: the single untyped lambda parameter IS the `parameters` field, not a list holding
+    // it — iterating its children found nothing, so `h` read as unbound inside its own lambda.
+    if params.kind() == "identifier" {
+        return params.utf8_text(bytes) == Ok(name);
+    }
     let mut c = params.walk();
     for p in params.named_children(&mut c) {
         match p.kind() {
@@ -353,9 +358,16 @@ pub(crate) fn single_top_level_type<'t>(root: Node<'t>, bytes: &[u8]) -> Option<
     found
 }
 
-/// Whether `node`'s nearest enclosing type is exactly `top`, crossing NO lambda and no
-/// nested/anonymous/local class body on the way up. Returns `false` (SKIP) on ANY intervening scope we
-/// don't fully model.
+/// Whether `node`'s nearest enclosing TYPE is exactly `top`, crossing no nested / anonymous / local
+/// class body on the way up — the scope in which a bare `foo()` binds to `top`'s methods. Returns
+/// `false` (SKIP) on ANY intervening type scope.
+///
+/// A **lambda** is crossed: its body is not a new scope for method names, because a lambda declares
+/// no members and does not rebind `this`. A lambda PARAMETER is typed by the same inference that
+/// types it in a receiver call (`list.forEach(x -> svc.take(x))`), so refusing bare calls there bought
+/// nothing the receiver-ful checks did not already do without — and cost real answers: `andThen` in
+/// commons-lang's `Failable*` interfaces is a one-line lambda that calls `accept(t)`, and
+/// `opt.ifPresent(h -> own(h, wrong))` is ordinary legacy code.
 ///
 /// Subtlety: walking UPWARD from a node inside `top`'s own method, we necessarily cross
 /// `top`'s OWN body node (`class_body` / `enum_body`) BEFORE reaching the `top` declaration node
@@ -363,24 +375,7 @@ pub(crate) fn single_top_level_type<'t>(root: Node<'t>, bytes: &[u8]) -> Option<
 /// to a nested or anonymous type). So we pin `top`'s body node id up front and only skip on a body
 /// whose id differs. An anonymous class `new T(){…}` introduces its own `class_body`; a nested/local
 /// `class`/`enum`/`interface` introduces its own declaration node AND body — either trips the guard.
-pub(crate) fn scope_is_directly_top(node: Node, top: Node) -> bool {
-    scope_is_top(node, top, false)
-}
-
-/// [`scope_is_directly_top`], except that a **lambda** may be crossed.
-///
-/// A lambda body is not a new scope for method names: a bare `foo()` written inside one binds to the
-/// enclosing type exactly as it would outside, because a lambda declares no members and does not
-/// rebind `this`. The stricter predicate refuses it anyway, and rightly so for the checks that need
-/// to *type the arguments* — a lambda parameter written without a type has no type to read. Where
-/// only the BINDING is at stake, refusing costs a real answer: `andThen` in commons-lang's
-/// `Failable*` interfaces is a one-line lambda that calls `accept(t)`, and reading nothing there
-/// left every extraction out of one of them without the `throws E` it needed.
 pub(crate) fn scope_is_top_across_lambdas(node: Node, top: Node) -> bool {
-    scope_is_top(node, top, true)
-}
-
-fn scope_is_top(node: Node, top: Node, allow_lambda: bool) -> bool {
     // `top`'s own body node id — the one body we're allowed to cross.
     let top_body_id = top.child_by_field_name("body").map(|b| b.id());
 
@@ -391,13 +386,6 @@ fn scope_is_top(node: Node, top: Node, allow_lambda: bool) -> bool {
             return true;
         }
         match p.kind() {
-            // A lambda: its parameters/captures live in a scope we don't fully model → SKIP,
-            // unless the caller only needs the name binding (see `scope_is_top_across_lambdas`).
-            "lambda_expression" => {
-                if !allow_lambda {
-                    return false;
-                }
-            }
             // Any nested/local type declaration between us and `top` → its members add/shadow names
             // the caller didn't gather (it gathered `top`'s members + supertypes, nothing else) → SKIP.
             "class_declaration"

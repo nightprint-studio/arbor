@@ -122,6 +122,41 @@ impl Convention {
         };
         Some(format!("{leading}{body}{trailing}"))
     }
+
+    /// The variable convention `names` already follow — camelCase or snake_case — or `None` when
+    /// they do not say.
+    ///
+    /// For a project that never *declared* a convention but plainly has one: a file of
+    /// `identity_resolver` fields should get `filter_configurator` proposed, not `filterConfigurator`.
+    /// A one-word name (`order`) satisfies both and counts for neither; a tie is not an answer.
+    pub fn prevailing<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<Convention> {
+        let (mut camel, mut snake) = (0usize, 0usize);
+        for name in names {
+            match (Convention::Camel.accepts(name), Convention::LowerSnake.accepts(name)) {
+                (true, false) => camel += 1,
+                (false, true) => snake += 1,
+                _ => {}
+            }
+        }
+        match camel.cmp(&snake) {
+            std::cmp::Ordering::Greater => Some(Convention::Camel),
+            std::cmp::Ordering::Less => Some(Convention::LowerSnake),
+            std::cmp::Ordering::Equal => None,
+        }
+    }
+
+    /// The convention a proposed variable name is spelled in: the one the project `declared` for that
+    /// kind of variable, or else the one the names already `written` in the file follow. `None` leaves
+    /// the proposal as Java writes it.
+    ///
+    /// The one rule every place that invents a variable name goes through — a declaration's ghost-text
+    /// name, `.var`, `.for` — so they cannot disagree about how a project spells.
+    pub fn for_variables<'a>(
+        declared: Option<Convention>,
+        written: impl IntoIterator<Item = &'a str>,
+    ) -> Option<Convention> {
+        declared.filter(|convention| !convention.is_off()).or_else(|| Convention::prevailing(written))
+    }
 }
 
 impl std::fmt::Display for Convention {
@@ -244,6 +279,31 @@ mod tests {
     fn synthetic_names_are_never_touched() {
         assert!(Camel.render("Outer$Inner").is_none());
         assert!(Camel.accepts("Outer$Inner"));
+    }
+
+    #[test]
+    fn the_prevailing_convention_is_read_off_the_names_that_say_one() {
+        let snake = ["identity_resolver", "order", "rest_client", "id"];
+        assert_eq!(Convention::prevailing(snake), Some(LowerSnake));
+        let camel = ["identityResolver", "order", "serialVersionUID", "restClient_x_y", "restClient"];
+        assert_eq!(Convention::prevailing(camel), Some(Camel));
+    }
+
+    #[test]
+    fn a_declared_convention_outweighs_the_written_names_and_any_declares_nothing() {
+        let snake = ["identity_resolver", "rest_client"];
+        assert_eq!(Convention::for_variables(Some(Camel), snake), Some(Camel));
+        assert_eq!(Convention::for_variables(Some(Any), snake), Some(LowerSnake));
+        assert_eq!(Convention::for_variables(None, snake), Some(LowerSnake));
+        assert_eq!(Convention::for_variables(None, ["order"]), None);
+    }
+
+    #[test]
+    fn one_word_names_and_ties_decide_nothing() {
+        assert_eq!(Convention::prevailing(["order", "id", "s"]), None);
+        assert_eq!(Convention::prevailing(["identity_resolver", "restClient"]), None);
+        assert_eq!(Convention::prevailing(std::iter::empty::<&str>()), None);
+        assert_eq!(Convention::prevailing(["MAX_VALUE"]), None);
     }
 
     #[test]

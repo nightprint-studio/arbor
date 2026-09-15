@@ -59,10 +59,16 @@
   </tbody>
 </table>
 <Callout variant="info" title="What counts as a place you went">
-  A stop is recorded when an <strong>action</strong> navigates — a go-to, a usage, a structure or find hit, a diagnostic, a switch
-  to another tab — and never when the caret merely moves. Arrow keys, a click, page-down and scrolling are reading, so the history
-  stays a list of places you chose. Each jump remembers <strong>both ends</strong>, so the first Back lands exactly where you left,
-  down to the column, and navigating after a Back starts a new branch the way a browser does.
+  A stop is recorded when an <strong>action</strong> navigates — a go-to, a usage, a structure or find hit, a diagnostic, a file
+  opened from the tree or the palette, a switch to another tab — and never when the caret merely moves. Arrow keys, a click,
+  page-down and scrolling are reading. What a navigation records is <strong>where you were when it started</strong>, down to the
+  column, so Back lands exactly where you left; Forward returns to where you were when you pressed Back, including anywhere you
+  read on to after arriving. Opening a file and landing on a line in it is one step, two places on the same line are one stop,
+  and navigating after a Back starts a new branch the way a browser does.
+</Callout>
+<Callout variant="info" title="Stops follow your edits">
+  Typing above a remembered place moves it with the text, so Back still lands on the same code after lines are added or removed
+  above it. A file that can no longer be opened is dropped from the history instead of stopping it.
 </Callout>
 <p>
   Typing has its own history, because "where was I reading" and "where was I editing" are different questions.
@@ -88,6 +94,7 @@
     <tr><td>A Java class, method, field or local</td><td>Its declaration</td></tr>
     <tr><td><code>helper</code> in <code>Reports::helper</code>, <code>run</code> in <code>this::run</code></td><td>The method — a method reference is a use of it</td></tr>
     <tr><td><code>Reports</code> in <code>Reports::helper</code></td><td>The type</td></tr>
+    <tr><td>A call to an <strong>overloaded</strong> method — <code>uri(b -&gt; …)</code>, <code>uri(someUri)</code></td><td>The overload the call binds to, in project code and in a library view alike: a lambda or method reference picks the one taking a matching functional interface, and <code>null</code>, literals and typed arguments pick by type. The hover card describes the same overload, with that overload's own Javadoc — from project source or a library's downloaded sources. When the arguments cannot settle it, the first declaration</td></tr>
     <tr><td>A declaration itself — a signature, a variable, class or record declaration</td><td>Its <strong>usages</strong>, since jumping there would go nowhere</td></tr>
     <tr><td>A JSP action reference — <code>action="…"</code>, <code>/do/Category/viewTree</code></td><td>Where the action is declared: the Struts config fragment, or its view JSP; for one that only resolves to a class, the class name is shown</td></tr>
     <tr><td>A Struts <code>&lt;result&gt;</code> JSP path, <code>/WEB-INF/x.jsp</code></td><td>That JSP</td></tr>

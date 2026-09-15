@@ -24,7 +24,8 @@ use bennu_classpath::prelude::{
 use bennu_index::prelude::PersistedIndex;
 use bennu_intel::prelude::{
     build_project_index_from_sources, rename_apply, CompletionItem, DeclarationLocation, Edit,
-    HierarchyDirection, HierarchyItem, HoverInfo, ReferencesResult, RenamePlan, SemanticEngine,
+    HierarchyDirection, HierarchyItem, HoverInfo, ReferencesResult, RenamePlan, SafeDelete,
+    SemanticEngine,
 };
 use bennu_query::prelude::{completion, IndexResolver, InheritedMember};
 
@@ -384,6 +385,11 @@ impl Project {
         self.engine.plan(file, self.source(file), offset, new_name)
     }
 
+    /// Safe-delete plan for the symbol at `file`:`offset` (`None` when there is nothing to delete).
+    pub fn safe_delete(&self, file: &str, offset: usize) -> Option<SafeDelete> {
+        self.engine.safe_delete(file, self.source(file), offset)
+    }
+
     /// The flat edit list a rename would apply (empty when the caret isn't renameable).
     pub fn rename_edits(&self, file: &str, offset: usize, new_name: &str) -> Vec<Edit> {
         self.rename(file, offset, new_name)
@@ -544,6 +550,12 @@ fn abstract_(mut m: CpMember) -> CpMember {
     m
 }
 
+/// Mark a fake-JDK method `protected` — `Object.clone` and `Object.finalize`.
+fn protected_(mut m: CpMember) -> CpMember {
+    m.visibility = CpVisibility::Protected;
+    m
+}
+
 /// A generic reference: `applied("java/util/List", ["E"])` is `List<E>`.
 fn applied(binary: &str, args: &[&str]) -> CpTypeRef {
     CpTypeRef {
@@ -631,11 +643,14 @@ impl CpMemberIndex for StreamJdk {
             "java/lang/Object" => CpClassMembers {
                 superclass: None,
                 interfaces: Vec::new(),
-                methods: vec![method(
-                    "toString",
-                    vec![],
-                    CpTypeRef::plain("java/lang/String"),
-                )],
+                // `clone` and `finalize` are PROTECTED, as in the JDK — what completion must not
+                // offer through another class's receiver.
+                methods: vec![
+                    method("toString", vec![], CpTypeRef::plain("java/lang/String")),
+                    method("getClass", vec![], applied("java/lang/Class", &["java/lang/Object"])),
+                    protected_(method("clone", vec![], CpTypeRef::plain("java/lang/Object"))),
+                    protected_(method("finalize", vec![], CpTypeRef::plain("void"))),
+                ],
                 fields: Vec::new(),
                 flags: CpClassFlags::default(),
                 type_params: Vec::new(),

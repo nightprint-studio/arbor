@@ -52,6 +52,11 @@
     <code>return</code> on the local or field of that type. With a generic return, <code>Optional&lt;RawIdentity&gt;</code>, the element type follows
     the outer one. A <code>void</code> method sinks where a value is wanted. It <em>ranks</em>, never filters: hiding the misses would hide the
     right answer whenever the type is not the one expected.</li>
+  <li><strong>Who declares it.</strong> After a dot, what the receiver's own type declares comes first, then what it inherits — the nearest
+    supertype first — then <code>java.lang.Object</code>'s, last. A record's components come before the <code>equals</code>,
+    <code>hashCode</code> and <code>toString</code> the compiler writes for it. Only the position's type and how literally your letters match
+    come before this: <code>route.</code> opens on <code>prefix()</code>, preselected, while <code>route.to</code> still offers
+    <code>toString</code> above a declared <code>targetOrigin</code>.</li>
   <li><strong>What you picked last time.</strong> A fact about you, not the code: on a <code>List</code> you reach for <code>stream</code>,
     not <code>listIterator</code>. Kept per <em>declaring type</em>, so what is learned about <code>java.util.List</code> carries to every
     receiver inheriting it. Frequency and recency both count, so a fresh choice can overtake an old habit and one stray pick cannot bury a
@@ -59,9 +64,6 @@
   <li><strong>What the receiver is.</strong> After a <em>type</em> — <code>Color.</code> — the statics are the answer and a constant goes to
     the very top, instance members to the bottom. Through a <em>value</em> — <code>color.</code> — the other way round, more gently: a
     static through an instance compiles, it is just rarely meant.</li>
-  <li><strong>How far up the hierarchy it was found.</strong> What the receiver's own class declares beats what it inherited — the further up, the weaker.</li>
-  <li><strong><code>java.lang.Object</code>.</strong> Its members match every prefix and are hardly ever wanted, so <code>list.</code> opens
-    on <code>add</code>, not on <code>clone</code> and <code>equals</code>.</li>
   <li><strong>Deprecated.</strong> Still offered, since you may be reading old code, but last — on your own source, since library members
     carry no annotations in compiled form.</li>
   <li><strong>What this file already uses.</strong> A name already in the buffer is likely wanted again. It decides between otherwise-equal
@@ -158,21 +160,32 @@
     and a class file carries no names anyway.</li>
   <li>When the call is <strong>already written</strong> — <code>t.si()</code> with the caret after <code>si</code>, correcting a name — the
     parentheses are left alone, not doubled.</li>
-  <li>An <strong>overloaded</strong> method is <em>one row</em>, its shape saying <em>+2 overloads</em>: three rows would be three chances with
-    one outcome, pushing other members off the popup. The parameter hints show the whole set once you type inside the parentheses. A method
-    that merely <strong>overrides</strong> an inherited one appears once; a <code>private</code> member of another class is not offered.</li>
+  <li>An <strong>overloaded</strong> method is <em>one row per overload</em>, fewest parameters first — <code>wait()</code>,
+    <code>wait(long timeoutMillis)</code>, <code>wait(long timeoutMillis, int nanos)</code> — since each leaves the caret in a different place.
+    After <code>::</code> they are one row, because a method reference writes only the name. A method that merely <strong>overrides</strong> an
+    inherited one appears once.</li>
+  <li>What could not be written there is not offered: a <code>private</code> member of another class, a package-private one from another package,
+    and a <code>protected</code> one through a receiver outside its package and your class — <code>route.clone()</code> and
+    <code>route.finalize()</code> are not Java, <code>this.clone()</code> is.</li>
 </ul>
 
 <h2>Reading a row</h2>
 <dl class="meta-grid">
   <dt>The icon</dt>
-  <dd>What it <strong>is</strong>.</dd>
+  <dd>What it <strong>is</strong>. A member is a circle — <code>m</code> method, <code>c</code> constructor, <code>f</code> field,
+    <code>v</code> variable, <code>p</code> parameter — and a type a rounded square — <code>c</code> class, <code>i</code> interface,
+    <code>e</code> enum, <code>r</code> record, <code>@</code> annotation; a package is a folder, a template <code>{'{}'}</code>. A dot in the
+    corner marks <em>static</em>, a lock <em>final</em>, a dashed outline <em>abstract</em>, a diagonal stroke <em>deprecated</em>.</dd>
   <dt>The name</dt>
-  <dd>What it is <strong>called</strong>, with the letters you typed marked. A deprecated one is struck through.</dd>
-  <dt>The shape</dt>
-  <dd><code>(String, int) : void</code>.</dd>
+  <dd>What it is <strong>called</strong>, with the letters you typed marked. <strong>Bold</strong> when the receiver's own type declares it,
+    regular when inherited, dimmed when it is <code>java.lang.Object</code>'s. A deprecated one is struck through.</dd>
+  <dt>The parameters</dt>
+  <dd>Beside the name, with their names where the member carries them: <code>equals(Object obj)</code>. A library compiled without
+    parameter names shows the types alone.</dd>
   <dt>The right edge</dt>
-  <dd>Where it <strong>comes from</strong> — what tells <code>List.of</code> from <code>Set.of</code>, and an inherited method from one your class declares.</dd>
+  <dd>What a method <strong>returns</strong> or a field holds — <code>getClass()</code> as <code>Class&lt;? extends ServiceRoute&gt;</code>,
+    typed after the receiver — and, for an inherited member only, where it <strong>comes from</strong>: what tells <code>List.of</code> from
+    <code>Set.of</code>.</dd>
 </dl>
 <p>
   The <strong>documentation</strong> of the highlighted row appears beside the list — the card hover draws, from the same answer, so the two
@@ -275,7 +288,8 @@ ConfigurazioneCors.MyProva prova;    // accepting "MyProva" writes this`, 'java'
 <p>
   What a template writes depends on the <strong>type</strong> of the expression, and a template is only listed where it applies:
   <code>.for</code> on a collection or an array, <code>.if</code> on a boolean, <code>.nn</code> on a value that can be <code>null</code>,
-  <code>.ifpe</code> on an <code>Optional</code>. The names it proposes come from the code — <code>orders.for</code> declares an <code>order</code>
+  <code>.ifpe</code> on an <code>Optional</code>. The names it proposes come from the code, spelled in the project's naming convention for local variables or, where none is set, in the one the
+  file's names follow — <code>orders.for</code> declares an <code>order</code>
   of the element type — and the imports its text needs are added with it. Templates appear once the type is known and you have started typing a name
   after the dot.
 </p>
@@ -347,6 +361,11 @@ ConfigurazioneCors.MyProva prova;    // accepting "MyProva" writes this`, 'java'
     <tr><td><code>Class&lt;?&gt; </code></td><td><code>clazz</code></td></tr>
   </tbody>
 </table>
+<p>
+  The name is spelled the project's way: with the convention its naming rules set for fields, local variables or parameters, and where they set none,
+  with the one the file's names already follow — among <code>identity_resolver</code> fields, <code>private final FilterConfigurator </code> suggests
+  <code>filter_configurator</code>.
+</p>
 <p>
   A name already declared where Java would refuse a second one gets a digit (<code>order1</code>). Once you start typing the name, the suggestion stays
   only while it continues what you typed. It never appears after <code>return</code>, <code>new</code> or an operator, inside arguments, strings or

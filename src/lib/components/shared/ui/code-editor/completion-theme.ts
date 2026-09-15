@@ -5,19 +5,19 @@
  *
  * IntelliJ's New UI popup, read as four columns on a comfortable row:
  *
- *   [kind badge]  label (typed part in accent)   signature / type ………   Origin
+ *   [icon]  name(Type param, …)   ………   ReturnType   Origin
  *
- * - **Kind badge**: a small tinted chip with one letter (`m`, `f`, `c`, …), coloured by kind.
- *   It is the only coloured thing on the row, so the list does not turn into a rainbow. It uses
- *   the theme's status tokens rather than syntax colours, because those are defined for every
- *   theme. **Members** (method, field, constant, variable) are round and **declarations** (class,
- *   interface, enum, type, package, keyword, …) are rounded squares. In the dark theme `--accent`
- *   and `--info` are close, so the shape is what separates a method from a class at a glance.
+ * - **Icon**: the SVG set of `completion-icons` — shape and colour by kind, with marks for static,
+ *   final, abstract and deprecated. It is the only coloured thing on the row, so the list does not
+ *   turn into a rainbow, and it uses the theme's status tokens rather than syntax colours, because
+ *   those are defined for every theme.
  * - **Label**: in the code font at the editor's size. The typed characters are drawn in the accent
- *   colour and bold, not underlined. A deprecated candidate is struck through and dimmed.
- * - **Detail**: the signature or type fills the middle of the row. It is right-aligned and muted,
- *   and is the first thing to truncate. **Origin** (where a member is declared) is quieter still and
- *   sits on the right edge.
+ *   colour and bold, not underlined. A member the receiver **declares** is bold, an **inherited**
+ *   one regular, an **implicit** one (what every object has) dimmed. A deprecated candidate is
+ *   struck through and dimmed.
+ * - **Signature**: the parameter list, straight after the name, in the regular weight and muted.
+ * - **Detail**: the return or field type, right-aligned and muted; the first thing to truncate.
+ *   **Origin** (where an inherited member is declared) is quieter still and sits on the right edge.
  * - **Selection**: an accent tint with rounded corners, inset from the popup edge by the list's own
  *   padding.
  *
@@ -32,6 +32,8 @@
  * Keyboard behaviour is untouched: this module is styling only.
  */
 
+import { COMPLETION_ICON_KINDS } from './completion-icons';
+
 /** The popup container. */
 const POPUP = '.cm-tooltip.cm-tooltip-autocomplete';
 /** One candidate row. The list is `ul[role=listbox]`, and CodeMirror sets that role itself. */
@@ -43,61 +45,14 @@ const ROW_EM = 1.85;
 /** How many rows the popup shows before it scrolls. */
 const VISIBLE_ROWS = 13;
 
-type BadgeShape = 'member' | 'declaration';
-
-interface CompletionKindStyle {
-  /** The CodeMirror completion `type`: `cm-completionIcon-<type>`. */
-  type: string;
-  /** The glyph inside the badge. */
-  glyph: string;
-  /** A theme colour expression. It tints the badge only, never the label. */
-  color: string;
-  shape: BadgeShape;
-}
-
-/** A violet made from two theme tokens, so it follows the theme instead of being hard-coded. It
- *  gives annotations their own hue without adding a colour the palette does not have. */
-const ANNOTATION_HUE = 'color-mix(in srgb, var(--accent) 50%, var(--error))';
-
-/**
- * One row per completion type any product emits: CodeMirror's standard set, plus Bennu's
- * `annotation` and `generate`.
- *
- * The colours group kinds instead of numbering them. Callables use the accent, stored values the
- * warning amber, types the info blue, and a row that writes new code uses success green. Grammar
- * (keywords, plain words) is muted so it recedes behind the symbols.
- */
-export const COMPLETION_KINDS: readonly CompletionKindStyle[] = [
-  { type: 'method',     glyph: 'm',  color: 'var(--accent)',         shape: 'member' },
-  { type: 'function',   glyph: 'm',  color: 'var(--accent)',         shape: 'member' },
-  { type: 'property',   glyph: 'f',  color: 'var(--warning)',        shape: 'member' },
-  { type: 'constant',   glyph: '#',  color: 'var(--warning)',        shape: 'member' },
-  { type: 'variable',   glyph: 'v',  color: 'var(--text-secondary)', shape: 'member' },
-  { type: 'class',      glyph: 'c',  color: 'var(--info)',           shape: 'declaration' },
-  { type: 'interface',  glyph: 'i',  color: 'var(--info)',           shape: 'declaration' },
-  { type: 'enum',       glyph: 'e',  color: 'var(--info)',           shape: 'declaration' },
-  { type: 'type',       glyph: 't',  color: 'var(--info)',           shape: 'declaration' },
-  { type: 'namespace',  glyph: 'p',  color: 'var(--text-secondary)', shape: 'declaration' },
-  { type: 'annotation', glyph: '@',  color: ANNOTATION_HUE,          shape: 'declaration' },
-  { type: 'generate',   glyph: '+',  color: 'var(--success)',        shape: 'declaration' },
-  { type: 'keyword',    glyph: 'k',  color: 'var(--text-muted)',     shape: 'declaration' },
-  { type: 'text',       glyph: '≡',  color: 'var(--text-muted)',     shape: 'declaration' },
-];
-
-const SHAPE_RADIUS: Record<BadgeShape, string> = {
-  member: '50%',
-  declaration: 'var(--radius-sm)',
-};
-
 type StyleRule = Record<string, string>;
 
-/** The per-kind rules. Each kind sets `--cm-kind` and the badge glyph, and the one generic badge
- *  rule turns that variable into its colour and tint. They are generated from
- *  {@link COMPLETION_KINDS} so a kind's letter and colour cannot drift apart. */
+/** The per-kind colours, generated from {@link COMPLETION_ICON_KINDS} so a kind's shape, glyph and
+ *  colour are declared in one place. Every part of the icon reads `currentColor`. */
 const kindRules: Record<string, StyleRule> = Object.fromEntries(
-  COMPLETION_KINDS.flatMap(({ type, glyph, color, shape }) => [
-    [`${POPUP} .cm-completionIcon-${type}`, { '--cm-kind': color, borderRadius: SHAPE_RADIUS[shape] }],
-    [`${POPUP} .cm-completionIcon-${type}::after`, { content: `'${glyph}'` }],
+  COMPLETION_ICON_KINDS.map(({ type, color }) => [
+    `${POPUP} .cm-completionKindIcon[data-kind="${type}"]`,
+    { color },
   ]),
 );
 
@@ -142,24 +97,38 @@ export const completionThemeSpec: Record<string, StyleRule> = {
     color: 'var(--text-primary)',
   },
 
-  // ── Kind badge ──
-  [`${POPUP} .cm-completionIcon`]: {
-    '--cm-kind': 'var(--text-muted)',
-    flex: '0 0 auto',
-    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-    boxSizing: 'border-box',
-    // The font size is set first, and the `em` sizes below are relative to it: a ~16px badge.
-    fontSize: '0.72em',
-    width: '1.75em', height: '1.75em',
-    padding: '0', opacity: '1',
-    fontFamily: 'var(--font-code)', fontWeight: '700', lineHeight: '1',
-    borderRadius: 'var(--radius-sm)',
-    color: 'var(--cm-kind)',
-    backgroundColor: 'color-mix(in srgb, var(--cm-kind) 18%, transparent)',
-    boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--cm-kind) 32%, transparent)',
+  // ── Kind icon ──
+  // In `em` of the list font, so it follows the user's font scale: about 17px at the default 13px.
+  [`${POPUP} .cm-completionKindIcon`]: {
+    flex: '0 0 auto', display: 'block',
+    width: '1.3em', height: '1.3em',
+    color: 'var(--text-muted)',
   },
-  // A type no product declared still gets a badge. An empty chip reads as a broken row.
-  [`${POPUP} .cm-completionIcon::after`]: { content: "'·'" },
+  [`${POPUP} .cm-completionKindIcon svg`]: {
+    display: 'block', width: '100%', height: '100%', overflow: 'visible',
+  },
+  [`${POPUP} .cm-ki-body`]: {
+    fill: 'color-mix(in srgb, currentColor 16%, transparent)',
+    stroke: 'currentColor', strokeWidth: '1.2',
+  },
+  // Abstract: nothing is there yet, so the body is outlined and left empty.
+  [`${POPUP} .cm-ki-abstract`]: { fill: 'transparent', strokeDasharray: '2.2 1.6' },
+  [`${POPUP} .cm-ki-glyph`]: {
+    fill: 'currentColor', stroke: 'none',
+    fontFamily: 'var(--font-code)', fontWeight: '700',
+  },
+  // The static dot and the final lock sit on a ring of the popup's own background, so they read as
+  // a mark on the icon rather than part of its outline.
+  [`${POPUP} .cm-ki-mark`]: {
+    fill: 'currentColor', stroke: 'var(--bg-elevated)', strokeWidth: '1.4', paintOrder: 'stroke',
+  },
+  [`${ROW}[aria-selected] .cm-ki-mark`]: {
+    stroke: 'color-mix(in srgb, var(--accent) 24%, var(--bg-elevated))',
+  },
+  [`${POPUP} .cm-ki-shackle`]: { fill: 'none', stroke: 'currentColor', strokeWidth: '1.2' },
+  [`${POPUP} .cm-ki-strike`]: {
+    stroke: 'var(--text-secondary)', strokeWidth: '1.5', strokeLinecap: 'round',
+  },
   ...kindRules,
 
   // ── Label ──
@@ -172,6 +141,20 @@ export const completionThemeSpec: Record<string, StyleRule> = {
   },
   [`${POPUP} .cm-completionMatchedText`]: {
     color: 'var(--accent)', fontWeight: '700', textDecoration: 'none',
+  },
+  // Standing: what the receiver declares is what is most likely being looked for; what every
+  // object has recedes.
+  [`${ROW}.cm-completion-own .cm-completionLabel`]: { fontWeight: '600' },
+  [`${ROW}.cm-completion-implicit .cm-completionLabel`]: { color: 'var(--text-secondary)' },
+  [`${ROW}.cm-completion-implicit .cm-completionKindIcon`]: { opacity: '0.7' },
+
+  // ── Signature ──
+  // Part of the name, so it follows the label with no gap (the row's `gap` is cancelled), and it
+  // gives way before the label does.
+  [`${POPUP} .cm-completionSignature`]: {
+    flex: '0 1 auto', minWidth: '0', marginLeft: '-8px',
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'pre',
+    color: 'var(--text-secondary)',
   },
 
   // ── Detail + origin ──
@@ -196,7 +179,7 @@ export const completionThemeSpec: Record<string, StyleRule> = {
   [`${ROW}.cm-completion-deprecated .cm-completionLabel`]: {
     textDecoration: 'line-through', color: 'var(--text-muted)',
   },
-  [`${ROW}.cm-completion-deprecated .cm-completionIcon`]: { opacity: '0.55' },
+  [`${ROW}.cm-completion-deprecated .cm-completionKindIcon`]: { opacity: '0.55' },
 
   // ── The documentation panel beside the list ──
   //

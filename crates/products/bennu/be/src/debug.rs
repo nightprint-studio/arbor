@@ -38,8 +38,9 @@
 //! is the same reverse-channel deadlock the Arbor shell hit going out-of-process, and it is
 //! why the session's locks are held to *store* results and never across a round trip.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{TcpListener, TcpStream};
+use std::path::Path;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -51,7 +52,7 @@ use bennu_core::prelude::BennuState;
 // `Result<T, String>`.
 use bennu_jdwp::prelude::{
     class_name, class_signature, classes_by_signature, clear_event, dispose, fields, frames,
-    kind, line_table, location_of_line, methods, object_type, request_class_prepare,
+    kind, line_table, location_of_line, methods, nested_types, object_type, request_class_prepare,
     request_exception, request_step, resume_thread, resume_vm, set_breakpoint, thread_name,
     type_signature, variable_table, version, Client, Composite, Event, Field, Frame, Id,
     LineEntry, Local, Location, Method, StepDepth, SuspendPolicy,
@@ -154,6 +155,10 @@ pub(crate) const MAX_ELEMENTS: i32 = 100;
 /// anticipated cannot turn one key press into a program that steps forever. Reaching it stops
 /// somewhere unhelpful, which is at least somewhere.
 const MAX_STEP_SKIPS: u32 = 40;
+
+/// How many loaded classes one file's nested-type walk visits before stopping. A compilation unit
+/// with more anonymous classes than this is generated code, and the walk is a round trip apiece.
+const MAX_NESTED_CLASSES: usize = 512;
 
 // ── launching ──────────────────────────────────────────────────────────────────
 
@@ -375,6 +380,20 @@ struct Bp {
     requests: Vec<(u8, i32)>,
     verified: bool,
     message: String,
+    /// The top-level class of a **library** breakpoint (see [`crate::debug_library`]); `None` for
+    /// one in the project's own code, which is found through the class index instead.
+    library: Option<String>,
+    /// The line it really bound to, when it is verified. Differs from the one set when that line
+    /// has no code in any class loaded so far — which a nested class loading later can still
+    /// change, so a moved breakpoint keeps listening.
+    bound_line: Option<u32>,
+}
+
+impl Bp {
+    /// Bound exactly where it was set: nothing that loads later can improve on it.
+    fn exact(&self) -> bool {
+        self.verified && self.bound_line == Some(self.at.line)
+    }
 }
 
 /// A configured breakpoint as the session holds it, with its condition parsed.
@@ -382,11 +401,15 @@ struct Bp {
 /// A condition that does not parse leaves the breakpoint **unconditional** and says so, rather than
 /// disabling it: a typo must not silently remove a breakpoint you are standing at, and a stop you
 /// did not want is recoverable in one keystroke while a stop that never happens is not.
-fn new_bp(at: Breakpoint) -> Bp {
+///
+/// `views` is where library source views are cached — what tells a library breakpoint from a
+/// project one when an older entry does not record its class.
+fn new_bp(at: Breakpoint, views: &Path) -> Bp {
     let (condition, condition_error) = match crate::debug_cond::parse(&at.condition) {
         Ok(parsed) => (parsed, String::new()),
         Err(why) => (None, format!("condition ignored — {why}")),
     };
+    let library = crate::debug_library::library_class_of(&at, views);
     Bp {
         at,
         condition,
@@ -395,6 +418,8 @@ fn new_bp(at: Breakpoint) -> Bp {
         requests: Vec::new(),
         verified: false,
         message: String::new(),
+        library,
+        bound_line: None,
     }
 }
 
@@ -471,11 +496,12 @@ impl Session {
                 classes.entry(entry.fqcn).or_insert(entry.file);
             }
         }
+        let views = crate::debug_library::library_views_root();
         let state = Mutable {
             breakpoints: config
                 .breakpoints
                 .into_iter()
-                .map(new_bp)
+                .map(|b| new_bp(b, &views))
                 .collect(),
             exceptions: config.exceptions.into_iter().map(|e| (e, Vec::new())).collect(),
             ..Mutable::default()
@@ -713,17 +739,30 @@ impl Session {
         self.emit_breakpoints();
     }
 
-    /// A class this project declares just loaded — install whatever was waiting for it.
+    /// A watched class just loaded — one this project declares, or one of a library file a
+    /// breakpoint was set in — so install whatever was waiting for it.
+    ///
+    /// A breakpoint that already bound *somewhere else* is still waiting: its line had no code in
+    /// the classes loaded so far, and this one (an anonymous class, a builder) may be where it is.
     fn on_class_prepare(&self, signature: &str) {
         let fqcn = class_name(signature);
-        let Some(file) = self.file_of(&fqcn) else { return };
+        // Generated code has no source to have set a breakpoint in, and must not borrow its outer
+        // class's — see `file_of`.
+        if arbor_logscan::prelude::is_synthetic(&fqcn) {
+            return;
+        }
+        let file = self.file_of(&fqcn);
         let indices: Vec<usize> = {
             let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state
                 .breakpoints
                 .iter()
                 .enumerate()
-                .filter(|(_, b)| b.at.enabled && !b.verified && same_file(&b.at.file, &file))
+                .filter(|(_, b)| b.at.enabled && !b.exact())
+                .filter(|(_, b)| match &b.library {
+                    Some(top) => crate::debug_library::declared_in(&fqcn, top),
+                    None => file.as_deref().is_some_and(|f| same_file(&b.at.file, f)),
+                })
                 .map(|(i, _)| i)
                 .collect()
         };
@@ -857,11 +896,12 @@ impl Session {
     /// Replace the whole set. The FE owns the model and pushes it entire, which is what makes
     /// "what the gutter shows" and "what the VM has" one thing rather than two that drift.
     fn set_breakpoints(&self, wanted: Vec<Breakpoint>) {
+        let views = crate::debug_library::library_views_root();
         let old: Vec<Bp> = {
             let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             std::mem::replace(
                 &mut state.breakpoints,
-                wanted.into_iter().map(new_bp).collect(),
+                wanted.into_iter().map(|b| new_bp(b, &views)).collect(),
             )
         };
         for bp in &old {
@@ -899,6 +939,7 @@ impl Session {
                 .iter_mut()
                 .map(|b| {
                     b.verified = false;
+                    b.bound_line = None;
                     b.message = if muted { "muted".to_string() } else { String::new() };
                     std::mem::take(&mut b.requests)
                 })
@@ -923,76 +964,170 @@ impl Session {
     /// inside an anonymous class body belongs to `Order$1`, which no source scan knows the name
     /// of. A lambda body needs neither: it compiles to a synthetic method *of the enclosing
     /// class*, so the enclosing class's line table already has it.
+    ///
+    /// A **library** breakpoint takes the same path with one difference: the classes come from the
+    /// view's top-level class rather than from the project's index (see [`crate::debug_library`]).
+    ///
+    /// Re-entered on every class-prepare of a class in its file while it is not bound exactly —
+    /// which is what lets a line inside a lazily loaded anonymous class, or a Spring builder, move a
+    /// breakpoint off the statement it first slid to.
     fn install_one(&self, i: usize) {
-        let Some((at, already, muted)) = ({
+        let Some((at, library, previous, muted, listening)) = ({
             let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-            state.breakpoints.get(i).map(|b| (b.at.clone(), b.verified, state.muted))
+            state.breakpoints.get(i).map(|b| {
+                (
+                    b.at.clone(),
+                    b.library.clone(),
+                    if b.verified { b.bound_line } else { None },
+                    state.muted,
+                    b.requests.iter().any(|(k, _)| *k == kind::CLASS_PREPARE),
+                )
+            })
         }) else {
             return;
         };
-        if !at.enabled || already || muted {
+        if !at.enabled || muted || previous == Some(at.line) {
             return;
         }
 
-        let declared = self.by_file.get(&normalize(&at.file)).cloned().unwrap_or_default();
+        let declared = match &library {
+            Some(top) => vec![top.clone()],
+            None => self.by_file.get(&normalize(&at.file)).cloned().unwrap_or_default(),
+        };
         if declared.is_empty() {
-            self.mark(i, false, "no class of this project is declared in that file", Vec::new());
+            self.mark(i, false, None, "no class of this project is declared in that file", Vec::new());
             return;
+        }
+
+        // Where it really lands: the NEAREST line at or after the one set, across every loaded class
+        // of the file. Only there — `location_of_line` answers per class, and taking every class's
+        // answer would also stop in the outer class a few lines further down whenever the line
+        // belongs to an anonymous one.
+        let candidates = self.locations_for_line(&declared, at.line);
+        let nearest = candidates.iter().map(|(_, line)| *line).min();
+        if nearest.is_some() && nearest == previous {
+            return; // what loaded holds nothing nearer than where it is already bound
         }
 
         let mut requests = Vec::new();
-        // Where it really landed. A comment or a blank line compiles to nothing, so the VM binds
-        // the statement under it — true to what the click meant, and worth saying out loud.
-        let mut bound: Option<u32> = None;
-        for fqcn in &declared {
-            for class in
-                classes_by_signature(&self.client, &class_signature(fqcn)).unwrap_or_default()
-            {
-                let methods = self.methods_of(class.id);
-                let Ok(Some(location)) =
-                    location_of_line(&self.client, class.id, &methods, at.line as i32)
-                else {
-                    continue;
-                };
-                if let Ok(request) = set_breakpoint(&self.client, location, SuspendPolicy::All) {
+        if let Some(line) = nearest {
+            // A nearer class loaded (or the first one did): whatever was bound further down goes.
+            for (request_kind, request) in self.take_breakpoint_requests(i) {
+                let _ = clear_event(&self.client, request_kind, request);
+            }
+            for (location, _) in candidates.iter().filter(|(_, l)| *l == line) {
+                if let Ok(request) = set_breakpoint(&self.client, *location, SuspendPolicy::All) {
                     requests.push((kind::BREAKPOINT, request));
-                    let line = self.line_of(location).unwrap_or(at.line);
-                    bound = Some(bound.map_or(line, |b| b.min(line)));
+                }
+            }
+        }
+        let bound = nearest.filter(|_| !requests.is_empty());
+
+        // Keep listening unless it bound exactly: not loaded yet is the normal case for everything
+        // but the class you launched from, and a line that slid may still belong to a nested class
+        // that has not loaded. One set of patterns per breakpoint — re-requesting on every
+        // class-prepare would multiply the events each later load delivers.
+        if bound != Some(at.line) && !listening {
+            for fqcn in declared.iter().filter(|f| !f.contains('$')) {
+                for pattern in crate::debug_library::class_prepare_patterns(fqcn) {
+                    if let Ok(r) = request_class_prepare(&self.client, &pattern) {
+                        requests.push((kind::CLASS_PREPARE, r));
+                    }
                 }
             }
         }
 
-        if let Some(line) = bound {
-            let message = if line == at.line {
-                String::new()
-            } else {
-                format!("line {} has no code — stopping at line {line}", at.line)
-            };
-            self.mark(i, true, &message, requests);
-            return;
-        }
-
-        // Not loaded yet — the normal case for everything but the class you launched from, and
-        // it resolves itself the moment the program touches it.
-        //
-        // Two patterns per top-level type: the type, and `Type$*`. The second is not
-        // redundant — a breakpoint inside an anonymous class body belongs to `Order$1`, and no
-        // scan of the source knows that name.
-        let mut waiting = requests;
-        for fqcn in declared.iter().filter(|f| !f.contains('$')) {
-            for pattern in [fqcn.to_string(), format!("{fqcn}$*")] {
-                if let Ok(r) = request_class_prepare(&self.client, &pattern) {
-                    waiting.push((kind::CLASS_PREPARE, r));
-                }
+        match bound {
+            Some(line) => {
+                // A comment or a blank line compiles to nothing, so the VM binds the statement under
+                // it — true to what the click meant, and worth saying out loud.
+                let message = if line == at.line {
+                    String::new()
+                } else {
+                    format!("line {} has no code — stopping at line {line}", at.line)
+                };
+                self.mark(i, true, Some(line), &message, requests);
+            }
+            None => {
+                let message = if library.is_some() {
+                    "waiting for the library class to load"
+                } else {
+                    "waiting for the class to load"
+                };
+                self.mark(i, false, None, message, requests);
             }
         }
-        self.mark(i, false, "waiting for the class to load", waiting);
     }
 
-    fn mark(&self, i: usize, verified: bool, message: &str, requests: Vec<(u8, i32)>) {
+    /// Every loaded class of `declared` with the location `line` binds to in it, and the line that
+    /// location really is.
+    fn locations_for_line(&self, declared: &[String], line: u32) -> Vec<(Location, u32)> {
+        let mut out = Vec::new();
+        for class in self.loaded_classes_of(declared) {
+            let methods = self.methods_of(class);
+            let Ok(Some(location)) = location_of_line(&self.client, class, &methods, line as i32)
+            else {
+                continue;
+            };
+            out.push((location, self.line_of(location).unwrap_or(line)));
+        }
+        out
+    }
+
+    /// The loaded classes a file declares: each named type, and — walked through `NestedTypes`,
+    /// level by level — every nested and anonymous class already loaded inside it.
+    ///
+    /// The walk is what the class index cannot do. `Order$1` is named by the compiler, not the
+    /// source, and a library file has no index entries at all; its line table is still the only
+    /// place a line inside that body can bind.
+    fn loaded_classes_of(&self, declared: &[String]) -> Vec<Id> {
+        let mut queue: VecDeque<Id> = declared
+            .iter()
+            .flat_map(|fqcn| {
+                classes_by_signature(&self.client, &class_signature(fqcn)).unwrap_or_default()
+            })
+            .map(|c| c.id)
+            .collect();
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        while let Some(class) = queue.pop_front() {
+            if !seen.insert(class) {
+                continue;
+            }
+            out.push(class);
+            if seen.len() >= MAX_NESTED_CLASSES {
+                break;
+            }
+            queue.extend(
+                nested_types(&self.client, class).unwrap_or_default().into_iter().map(|c| c.id),
+            );
+        }
+        out
+    }
+
+    /// Detach breakpoint `i`'s installed locations, leaving the class-prepare requests it is still
+    /// listening with. The caller clears what is returned — outside the lock.
+    fn take_breakpoint_requests(&self, i: usize) -> Vec<(u8, i32)> {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(bp) = state.breakpoints.get_mut(i) else { return Vec::new() };
+        let (installed, listening): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut bp.requests).into_iter().partition(|(k, _)| *k == kind::BREAKPOINT);
+        bp.requests = listening;
+        installed
+    }
+
+    fn mark(
+        &self,
+        i: usize,
+        verified: bool,
+        bound_line: Option<u32>,
+        message: &str,
+        requests: Vec<(u8, i32)>,
+    ) {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(bp) = state.breakpoints.get_mut(i) {
             bp.verified = verified;
+            bp.bound_line = bound_line;
             bp.message = message.to_string();
             bp.requests.extend(requests);
         }

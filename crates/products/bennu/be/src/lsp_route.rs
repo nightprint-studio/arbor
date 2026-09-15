@@ -676,6 +676,11 @@ fn completion_wire(e: bennu_lsp::prelude::CompletionEntry) -> CompletionItem {
         // `resolve_id` is the handle it fills documentation in by. This field is the native
         // engine's equivalent handle.
         owner: None,
+        // The layout and the origin of a member are the native engine's reading of a Java
+        // hierarchy; a server's `detail` stays what it sent.
+        signature: None,
+        member_origin: None,
+        modifiers: Vec::new(),
     }
 }
 

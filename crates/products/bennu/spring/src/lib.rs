@@ -40,6 +40,9 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_spring::prelude::...`.
 
+// Bean declarations Spring refuses at startup or silently ignores — a private @Bean, a final
+// @Configuration, @Autowired on a static field, a stereotype on an interface.
+pub mod bean_check;
 pub mod beans;
 // The curated stand-in used until the jars' own metadata is available.
 pub mod builtin_meta;
@@ -55,6 +58,8 @@ pub mod endpoint_check;
 // A configuration key → the environment variable that overrides it.
 pub mod env;
 pub mod ext;
+// Alt+Enter on the declaration checks: the modifier added, removed or swapped.
+pub mod fixes;
 pub mod highlight;
 pub mod java_intel;
 // Resolving an annotation's ORIGIN through the file's imports, the way the compiler does.

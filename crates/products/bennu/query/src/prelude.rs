@@ -17,7 +17,7 @@ pub use crate::functional_types::functional_argument_types;
 
 // The ranking's reading of a method reference's slot, and the fit test behind it — and how well a
 // candidate answers the type the position wants, the key every completion list is ordered by first.
-pub use crate::rank::{fits_reference, params_fit, Fit, ReferenceShape};
+pub use crate::rank::{fits_reference, origin as member_origin, params_fit, Fit, ReferenceShape};
 
 // Completion for a BARE identifier — what the lexical scope at the caret binds, the members of
 // the enclosing type, and the static imports. The half of completion that is not after a dot.
@@ -53,7 +53,7 @@ pub use crate::inherited::{inherited_members, InheritedMember, InheritedSource};
 pub use crate::overridable::{by_declaring_type, overridable_at, Overridable};
 
 // The accessibility rules the queries share (who can see what).
-pub use crate::access::{package_of, same_package, same_top_level};
+pub use crate::access::{package_of, protected_visible, same_package, same_top_level};
 
 // What the editor draws around a call: the signature of the one the caret is inside, and the
 // parameter names / inferred `var` types drawn between the code.

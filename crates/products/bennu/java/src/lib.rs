@@ -39,6 +39,9 @@ pub mod javadoc;
 // The name a variable of a written type reads as — `List<Order>` is `orders`. Built on the postfix
 // templates' word rules, so both features propose the same names.
 pub mod names;
+// A declared parameter list in the form that compares with a resolved member's — the one matcher
+// that picks an overload's declaration out of a file.
+pub mod param_shape;
 // Postfix templates — `orders.for`, `found.ifpe` — decided by the expression's type and the module's
 // language level. Pure: the provider infers the type and turns expansions into edits.
 pub mod postfix;
@@ -52,6 +55,8 @@ pub mod static_import;
 pub mod symbols;
 // The abbreviations a Java file expands — `psf`, `sout`, `psvm`. A vocabulary, not a feature.
 pub mod templates;
+// A type's declaration found by its binary name — the outer type, then the nested one inside it.
+pub mod type_decl;
 pub mod typename;
 pub mod typeparse;
 
@@ -185,6 +190,8 @@ mod tests {
                 ),
                 Member::method("orElse", TypeRef::simple("T"), vec![TypeRef::simple("T")]),
                 m("isPresent", tr("boolean")),
+                m("isEmpty", tr("boolean")),
+                m("get", TypeRef::simple("T")),
             ]);
             optional.type_params = vec!["T".into()];
             r.classes.insert("java/util/Optional".into(), optional);
@@ -230,6 +237,22 @@ mod tests {
             );
             r.classes.insert("com/acme/Token".into(), class(vec![]));
             r.classes.insert(
+                "com/acme/DelegateClient".into(),
+                ClassMembers {
+                    type_params: Vec::new(),
+                    superclass: None,
+                    interfaces: vec![],
+                    methods: vec![Member::method(
+                        "delegate_for_user",
+                        gen("java/util/Optional", vec![tr("com/acme/Token")]),
+                        vec![tr("java/lang/String"), tr("java/lang/String"), tr("com/acme/Token")],
+                    )
+                    .abstract_()],
+                    fields: vec![],
+                    flags: crate::seam::ClassFlags { is_interface: true, is_abstract: true, ..Default::default() },
+                },
+            );
+            r.classes.insert(
                 "com/acme/Util".into(),
                 class(vec![Member::method(
                     "convert",
@@ -253,6 +276,7 @@ mod tests {
                 ("ResolvedIdentity", "com/acme/ResolvedIdentity"),
                 ("Token", "com/acme/Token"),
                 ("Util", "com/acme/Util"),
+                ("DelegateClient", "com/acme/DelegateClient"),
             ] {
                 r.simple.insert(s.into(), b.into());
             }
@@ -397,6 +421,73 @@ mod tests {
         );
         let ty = type_of(&src, "delegate").expect("the local is typed");
         assert_eq!(ty.type_args.first().map(|a| a.binary_name.as_str()), Some("java/lang/String"));
+    }
+
+    /// The reported method, verbatim: three `val`s in a row, each typed from the one before, around
+    /// guard `if`s with no braces and a call split over several lines.
+    fn check_delegate_src() -> String {
+        "package com.acme;\n\
+         \n\
+         import lombok.RequiredArgsConstructor;\n\
+         import lombok.val;\n\
+         import org.springframework.stereotype.Component;\n\
+         \n\
+         @RequiredArgsConstructor @Component\n\
+         public class CheckAssignedUser implements AttributeValidator {\n\
+         \x20   private final IdentityResolver identity_resolver;\n\
+         \x20   private final DelegateClient client;\n\
+         \n\
+         \x20   private ValidationOutcome check_delegate(final String username) {\n\
+         \x20       val delegate_opt = identity_resolver.resolve_identity();\n\
+         \n\
+         \x20       if (delegate_opt.isEmpty())\n\
+         \x20           return STD_DENIED;\n\
+         \n\
+         \x20       val delegate = delegate_opt.get();\n\
+         \n\
+         \x20       val delegate_db_opt =\n\
+         \x20           client.delegate_for_user(\n\
+         \x20               username\n\
+         \x20               , delegate.identifier()\n\
+         \x20               , delegate_opt.get()\n\
+         \x20           );\n\
+         \n\
+         \x20       if (delegate_db_opt.isEmpty())\n\
+         \x20           return STD_DENIED;\n\
+         \n\
+         \x20       return ValidationOutcome.allow();\n\
+         \x20   }\n\
+         }\n"
+            .to_string()
+    }
+
+    #[test]
+    fn the_reported_vals_are_each_typed_from_the_one_before() {
+        let src = check_delegate_src();
+        let opt = type_of(&src, "delegate_opt").expect("`delegate_opt` is typed");
+        assert_eq!(opt.binary_name, "java/util/Optional");
+        assert_eq!(
+            opt.type_args.first().map(|a| a.binary_name.as_str()),
+            Some("com/acme/ResolvedIdentity")
+        );
+        let delegate = type_of(&src, "delegate").expect("`delegate` is typed");
+        assert_eq!(delegate.binary_name, "com/acme/ResolvedIdentity");
+        let db = type_of(&src, "delegate_db_opt").expect("`delegate_db_opt` is typed");
+        assert_eq!(db.binary_name, "java/util/Optional");
+        assert_eq!(db.type_args.first().map(|a| a.binary_name.as_str()), Some("com/acme/Token"));
+    }
+
+    /// Completion after `delegate.` inside the split call sees the `val`'s type, and so does the use
+    /// of `delegate_opt` in the guard.
+    #[test]
+    fn the_reported_vals_are_typed_at_their_uses() {
+        let src = check_delegate_src();
+        let after_delegate = src.find(", delegate.").expect("use present") + ", delegate.".len();
+        let ty = infer_receiver_type(&src, after_delegate, &FakeResolver::jdk()).expect("typed");
+        assert_eq!(ty.binary_name, "com/acme/ResolvedIdentity");
+        let after_opt = src.find("(delegate_opt.").expect("guard present") + "(delegate_opt.".len();
+        let ty = infer_receiver_type(&src, after_opt, &FakeResolver::jdk()).expect("typed");
+        assert_eq!(ty.binary_name, "java/util/Optional");
     }
 
     /// The type flows on: `….map(ResolvedIdentity::identifier).orElse(null).` completes a `String`.

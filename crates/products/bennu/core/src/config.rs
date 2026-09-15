@@ -715,6 +715,15 @@ pub struct ProjectSession {
     /// Read defensively: a shorter (or absent) list means "no remembered caret" for the tabs it
     /// does not reach, which is exactly what a file written by an older build looks like.
     pub open_carets: Vec<String>,
+    /// Rows of Bennu's trees the user opened against their default, as `<tree>:<stable key>` —
+    /// `project:core/src/main/java` (a folder, relative to the root), `maven:module/app/plugins`.
+    /// Opaque here: the FE owns the key scheme. Two flat lists rather than a `key → open` table
+    /// for the same array-of-tables reason as [`Self::open_carets`]. Omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub expanded: Vec<String>,
+    /// Rows closed against their default, same keys as [`Self::expanded`]. Omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub collapsed: Vec<String>,
 }
 
 /// One named **workspace** — an ordered set of Java projects, each with its own editor session,
@@ -852,6 +861,7 @@ mod tests {
                     open_files: vec![format!("{r}/A.java")],
                     active_file: format!("{r}/A.java"),
                     open_carets: vec!["12:5".to_string()],
+                    ..Default::default()
                 })
                 .collect(),
         }
@@ -990,6 +1000,42 @@ scroll = 42
         let old = parse_workspaces(older);
         assert_eq!(old.workspaces[0].projects[0].open_files.len(), 1, "the tabs survived");
         assert!(old.workspaces[0].projects[0].open_carets.is_empty(), "no caret is remembered");
+    }
+
+    /// The remembered tree rows survive the TOML round trip, are left out of the file when there
+    /// are none, and a session written before they existed still loads with its tabs.
+    #[test]
+    fn tree_expansion_round_trips_and_an_older_file_still_loads() {
+        let mut store = BennuWorkspaces {
+            active_id: "w1".to_string(),
+            workspaces: vec![ws("w1", "Backend", &["c:/a", "c:/b"])],
+        };
+        store.workspaces[0].projects[0].expanded =
+            vec!["maven:module/app".to_string(), "project:core/src".to_string()];
+        store.workspaces[0].projects[0].collapsed = vec!["maven:module/app/lifecycle".to_string()];
+
+        let text = toml::to_string_pretty(&store).expect("serializes");
+        let back = parse_workspaces(&text);
+        let first = &back.workspaces[0].projects[0];
+        assert_eq!(first.expanded, vec!["maven:module/app", "project:core/src"]);
+        assert_eq!(first.collapsed, vec!["maven:module/app/lifecycle"]);
+        assert_eq!(first.open_carets, vec!["12:5"], "the carets are not disturbed");
+
+        let second = &back.workspaces[0].projects[1];
+        assert!(second.expanded.is_empty() && second.collapsed.is_empty());
+        assert_eq!(text.matches("expanded").count(), 1, "an empty list is not written");
+
+        let older = "active_id = \"w1\"\n\
+                     [[workspaces]]\n\
+                     id = \"w1\"\n\
+                     active_project = \"/p\"\n\
+                     [[workspaces.projects]]\n\
+                     root = \"/p\"\n\
+                     open_files = [\"/p/A.java\"]\n\
+                     active_file = \"/p/A.java\"\n";
+        let old = parse_workspaces(older);
+        assert_eq!(old.workspaces[0].projects[0].open_files.len(), 1, "the tabs survived");
+        assert!(old.workspaces[0].projects[0].expanded.is_empty(), "nothing is remembered open");
     }
 
     /// An empty / unparseable body yields an empty store (no panic, no error).

@@ -7,15 +7,16 @@
 //!   * simple generics carry-through (`List<Foo>` -> `.get(i)` / `.iterator().next()`
 //!     element = `Foo`)
 //!
-//! Overload selection is arity-first (JLS §15.12.2 in miniature): among the same-named overloads on
-//! the receiver's hierarchy we keep those whose arity admits the call, and take their return type only
-//! when it is UNIQUE — narrowing a return-type tie by a conservative primitive/reference argument
-//! check, and yielding "unknown" rather than *guessing* an ambiguous overload (a wrong return type
-//! would mistype the expression and could surface a false diagnostic downstream).
+//! Overload selection (JLS §15.12.2 in miniature) lives in [`overload`]: arity, then per-phase
+//! applicability (lambdas and method references against functional interfaces, `null`, literals,
+//! widening, boxing, subtyping), then most-specific by the arguments that could be typed. A return
+//! type is taken only when the survivors agree on it — "unknown" rather than *guessing* an ambiguous
+//! overload (a wrong return type would mistype the expression and could surface a false diagnostic).
 //!
-//! Explicitly NOT handled (documented in the crate README): full argument-subtype overload resolution
-//! (boxing/varargs/most-specific), flow-typing / reassignment, conditional/ternary narrowing, raw-array
-//! element inference, static member access on bare type names, wildcard/bound modelling.
+//! Explicitly NOT handled (documented in the crate README): generic-method applicability (inference
+//! of a method's own type variables from its arguments beyond the identity / functional-return
+//! bindings), flow-typing / reassignment, conditional/ternary narrowing, raw-array element inference,
+//! wildcard/bound modelling.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -26,6 +27,10 @@ use tree_sitter::Node;
 use crate::seam::{Member, MemberKind, TypeRef, TypeResolver};
 use crate::symbols::{node_text, FileSymbols};
 use crate::typeparse::{parse_type_text, SimpleTypeRef};
+
+mod overload;
+pub use overload::{bound_overload, call_overload_at, overload_fit, subtype_verdict, OverloadFit};
+use overload::distinct_signatures;
 
 /// How a local variable is typed, captured once when its scope is scanned.
 enum LocalTy {
@@ -1265,23 +1270,9 @@ impl Ctx<'_> {
             return self.lambda_target_from_context(lambda, enclosing);
         }
         let call = arg_list.parent()?;
-        // The lambda's index among the REAL arguments (comments are named children — skip them).
-        let mut idx = 0usize;
-        let mut found = false;
-        let mut c = arg_list.walk();
-        for a in arg_list.named_children(&mut c) {
-            if matches!(a.kind(), "line_comment" | "block_comment") {
-                continue;
-            }
-            if a.id() == lambda.id() {
-                found = true;
-                break;
-            }
-            idx += 1;
-        }
-        if !found {
-            return None;
-        }
+        // The lambda's index among the REAL arguments — the same list overload selection counts.
+        let args = self.call_arg_nodes(&call);
+        let idx = args.iter().position(|a| a.id() == lambda.id())?;
         match call.kind() {
             "method_invocation" => {
                 let name = call
@@ -1298,13 +1289,26 @@ impl Ctx<'_> {
                     },
                     None => TypeRef::simple(to_binary(enclosing?)),
                 };
-                self.param_at(&recv, &name, idx)
+                // Only the overloads this call can bind to. `uri(b -> …)` against `uri(URI)` and
+                // `uri(Function<UriBuilder, URI>)` has ONE candidate a lambda fits, so `b` is a
+                // `UriBuilder` — where requiring every overload to agree left it untyped.
+                let chosen: Option<Vec<Member>> = self
+                    .methods_named(&recv.binary_name, &name)
+                    .map(|all| {
+                        let distinct = distinct_signatures(&all);
+                        self.narrow_overloads(&distinct, &args, enclosing)
+                            .into_iter()
+                            .cloned()
+                            .collect::<Vec<Member>>()
+                    })
+                    .filter(|chosen| !chosen.is_empty());
+                self.param_at(&recv, &name, idx, chosen.as_deref())
             }
             "object_creation_expression" => {
                 let ty = call.child_by_field_name("type")?;
                 let text = node_text(&ty, self.bytes)?;
                 let recv = self.resolve_type_text(&text)?;
-                self.param_at(&recv, "<init>", idx)
+                self.param_at(&recv, "<init>", idx, None)
             }
             _ => None,
         }
@@ -1361,7 +1365,15 @@ impl Ctx<'_> {
     /// every overload of that name agrees on that parameter's type (so an ambiguous overloaded call
     /// yields `None`, never a guess). The receiver's generics are then substituted, so
     /// `List<Foo>.forEach(Consumer<? super E>)` yields `Consumer<Foo>`.
-    fn param_at(&self, recv: &TypeRef, name: &str, idx: usize) -> Option<TypeRef> {
+    ///
+    /// `among`, when given, limits "every overload" to the signatures the call can bind to.
+    fn param_at(
+        &self,
+        recv: &TypeRef,
+        name: &str,
+        idx: usize,
+        among: Option<&[Member]>,
+    ) -> Option<TypeRef> {
         // The DECLARING class travels with each candidate. A method inherited from a supertype is
         // written in that supertype's type variables — `Iterable.forEach(Consumer<? super T>)` — and
         // substituting them against the RECEIVER's list (`List<E>`) matches nothing, leaves `T`
@@ -1373,7 +1385,8 @@ impl Ctx<'_> {
         let mut types: Vec<(TypeRef, TypeRef)> = Vec::new();
         let walked = crate::hierarchy::walk::<()>(self.resolver, recv, |a| {
             for m in &a.members.methods {
-                if m.kind == MemberKind::Method && m.name == name {
+                let bindable = among.map_or(true, |ms| ms.iter().any(|c| c.params == m.params));
+                if m.kind == MemberKind::Method && m.name == name && bindable {
                     if let Some(p) = m.params.get(idx) {
                         types.push((a.ty.clone(), p.clone()));
                     }
@@ -1415,6 +1428,19 @@ impl Ctx<'_> {
     /// exactly one abstract instance method (so we never mistype against a non-functional
     /// interface).
     fn sam_of(&self, fi: &TypeRef) -> Option<Member> {
+        let abstracts = self.abstract_methods(fi)?;
+        let [sam] = abstracts.as_slice() else { return None };
+        Some(sam.clone())
+    }
+
+    /// Every abstract instance method `fi`'s hierarchy leaves to implement, overrides deduplicated —
+    /// or `None` when the hierarchy is not fully known, since an unseen supertype could add one.
+    ///
+    /// The public `Object` methods an interface redeclares abstract (`boolean equals(Object)`,
+    /// `int hashCode()`, `String toString()`) do not count, per JLS §9.8: every implementation
+    /// inherits them from `Object`. That is what keeps `Comparator` — which redeclares `equals` — a
+    /// functional interface.
+    fn abstract_methods(&self, fi: &TypeRef) -> Option<Vec<Member>> {
         let mut abstracts: Vec<Member> = Vec::new();
         let walked = crate::hierarchy::walk::<()>(self.resolver, fi, |a| {
             for m in &a.members.methods {
@@ -1423,29 +1449,15 @@ impl Ctx<'_> {
                     && !m.is_default
                     && !m.is_static
                     && m.name != "<init>"
+                    && !is_public_object_method(m)
+                    && !abstracts.iter().any(|u| u.name == m.name && u.params == m.params)
                 {
                     abstracts.push(m.clone());
                 }
             }
             None
         });
-        if !walked.complete {
-            return None; // incomplete hierarchy → give up
-        }
-        // Dedup an override that appears at multiple hierarchy levels, then require EXACTLY one
-        // abstract method — the SAM. (A precise Object-method carve-out isn't modelled; more than one
-        // → give up rather than guess.)
-        let mut uniq: Vec<&Member> = Vec::new();
-        for m in &abstracts {
-            if !uniq
-                .iter()
-                .any(|u| u.name == m.name && u.params == m.params)
-            {
-                uniq.push(m);
-            }
-        }
-        let [sam] = uniq.as_slice() else { return None };
-        Some((*sam).clone())
+        walked.complete.then_some(abstracts)
     }
 
     /// `a.b`: infer `a`, then look up field `b` on it. Handles `this.b`.
@@ -1560,6 +1572,10 @@ impl Ctx<'_> {
     /// The real argument nodes of a call — the `arguments` (`argument_list`) named children, skipping
     /// comments (which ARE named children in tree-sitter). Their count + inferred types drive
     /// arity/argument overload selection.
+    ///
+    /// An `ERROR` with nothing named inside is skipped too: it is stray punctuation from a call
+    /// being edited (`uri(b -> b.path("/x").)` can leave the trailing `.` as one), not an argument,
+    /// and counting it would make every overload the wrong arity.
     fn call_arg_nodes<'t>(&self, call: &Node<'t>) -> Vec<Node<'t>> {
         let Some(list) = call.child_by_field_name("arguments") else {
             return Vec::new();
@@ -1568,6 +1584,9 @@ impl Ctx<'_> {
         let mut c = list.walk();
         for a in list.named_children(&mut c) {
             if matches!(a.kind(), "line_comment" | "block_comment") {
+                continue;
+            }
+            if a.kind() == "ERROR" && a.named_child_count() == 0 {
                 continue;
             }
             out.push(a);
@@ -1841,13 +1860,13 @@ impl Ctx<'_> {
     }
 
     /// Pick the return type of the overload a call of `args` binds to, from all same-named `candidates`
-    /// on the receiver's hierarchy — JLS §15.12.2 in miniature, deliberately conservative:
+    /// on the receiver's hierarchy — deliberately conservative:
     ///   1. keep candidates whose ARITY admits the call (a trailing array/varargs param admits 0+ extra);
     ///   2. if those all agree on a return type → use it (the common case, and what fixes a 1-arg
     ///      `df.format(date)` → `String` that the old first-by-name pick mis-resolved to a 3-arg
-    ///      `Format.format(…)` → `StringBuffer`);
-    ///   3. otherwise narrow the tie by argument types, rejecting only a DEFINITE primitive/reference
-    ///      clash, and use the return type iff it is now unique;
+    ///      `Format.format(…)` → `StringBuffer`) without typing a single argument;
+    ///   3. otherwise narrow by the shared applicability rules ([`Ctx::narrow_overloads`]) and use the
+    ///      return type iff it is now unique;
     ///   4. still not unique → `None` for the return type. An ambiguous overload is never guessed: a
     ///      wrong return type mistypes the expression and risks a false "cannot resolve member" /
     ///      assignment diagnostic.
@@ -1866,16 +1885,9 @@ impl Ctx<'_> {
     ) -> Option<(TypeRef, Option<&'m Member>)> {
         // Collapse OVERRIDE chains: the same method reachable at several hierarchy levels (a plain
         // inherit, or a COVARIANT override where the derived return type is more specific) arrives as
-        // several candidates with identical parameter signatures. Keep the most-derived occurrence —
-        // `resolve_methods` visits the receiver's own members first — so a covariant override reads as
-        // its derived return type, not as an "ambiguous overload". Only genuinely distinct signatures
-        // survive as real overloads to disambiguate.
-        let mut distinct: Vec<&Member> = Vec::new();
-        for m in candidates {
-            if !distinct.iter().any(|d| d.params == m.params) {
-                distinct.push(m);
-            }
-        }
+        // several candidates with identical parameter signatures. Keep the most-derived occurrence so
+        // a covariant override reads as its derived return type, not as an "ambiguous overload".
+        let distinct = distinct_signatures(candidates);
         // A single method of this name is NOT an overload — trust it whatever the arity. This keeps the
         // (correct) single-method behavior identical to the old first-by-name resolution and avoids
         // second-guessing an imperfect param model; only genuine overload sets go through arity/argument
@@ -1894,25 +1906,11 @@ impl Ctx<'_> {
         if arity_ok.is_empty() {
             return None;
         }
-        // Return types disagree → narrow by argument types (each inferred once; unknown args abstain).
-        let arg_types: Vec<Option<TypeRef>> =
-            args.iter().map(|a| self.infer_expr(a, enclosing)).collect();
-        let applicable: Vec<&Member> = arity_ok
-            .into_iter()
-            .filter(|m| args_admissible(&m.params, &arg_types))
-            .collect();
-        if let Some(ret) = unique_return(&applicable) {
-            return Some((ret, sole(&applicable)));
-        }
-        // Java picks the **most specific** applicable method, and for primitives that is the one
-        // needing no widening at all. `Math.max(int, int)` is applicable, and so are the `long`,
-        // `float` and `double` overloads, because an `int` widens to each of them — so a call to
-        // any numeric `max` / `min` / `abs`, which is as common as static calls get, came out
-        // "ambiguous" and therefore untyped. An exact signature is most-specific by definition,
-        // which is the whole rule this needs and none of the parts that are hard.
-        let exact: Vec<&Member> =
-            applicable.into_iter().filter(|m| args_exact(&m.params, &arg_types)).collect();
-        unique_return(&exact).map(|ret| (ret, sole(&exact)))
+        // Return types disagree → the shared applicability + most-specific rules. `Math.max(int,
+        // int)` is why most-specific matters here: the `long`, `float` and `double` overloads are all
+        // applicable too, and only "no widening needed" singles out the `int` one.
+        let applicable = self.narrow_overloads(&arity_ok, args, enclosing);
+        unique_return(&applicable).map(|ret| (ret, sole(&applicable)))
     }
 
     /// Walk the class + its superclass/interfaces, returning the first `f` hit.
@@ -2870,7 +2868,10 @@ fn is_type_var(bn: &str) -> bool {
 /// count from `nparams - 1` up (0+ variadic arguments). The seam carries no explicit varargs flag, so
 /// a trailing `T[]` is treated as varargs-capable; the extra matches this admits are harmless (a real
 /// call to a fixed `T[]` param supplies exactly one argument, matching the exact arm anyway).
-fn arity_admits(nparams: usize, last_is_array: bool, argc: usize) -> bool {
+///
+/// Public for the callers whose overloads are not `Member`s — the argument-count check reads a
+/// signature the buffer declares ahead of the index as a count and a varargs flag.
+pub fn arity_admits(nparams: usize, last_is_array: bool, argc: usize) -> bool {
     argc == nparams || (last_is_array && argc + 1 >= nparams)
 }
 
@@ -2938,48 +2939,14 @@ fn unique_return(members: &[&Member]) -> Option<TypeRef> {
     ret.cloned()
 }
 
-/// Whether a fixed-arity overload's `params` could accept arguments of `arg_types` — used ONLY to
-/// break a return-type tie. Conservative: rejects a candidate only on a DEFINITE primitive/reference
-/// clash (an `int` param can't take a `String` argument, nor vice versa). An unknown argument, a type
-/// variable, or an arity/varargs slack never rejects — we keep the candidate rather than risk dropping
-/// the real one and mistyping the call.
-fn args_admissible(params: &[TypeRef], arg_types: &[Option<TypeRef>]) -> bool {
-    if params.len() != arg_types.len() {
-        return true; // varargs / arity slack → no argument verdict
+/// The `Object` methods an interface may redeclare abstract without adding to its contract
+/// (JLS §9.8) — `equals(Object)`, `hashCode()`, `toString()`.
+fn is_public_object_method(m: &Member) -> bool {
+    match m.name.as_str() {
+        "equals" => m.params.len() == 1 && m.params[0].binary_name == "java/lang/Object",
+        "hashCode" | "toString" => m.params.is_empty(),
+        _ => false,
     }
-    for (p, a) in params.iter().zip(arg_types) {
-        let Some(a) = a else { continue }; // argument type unknown → abstain
-        if is_type_var(&p.binary_name) {
-            continue; // a generic parameter accepts anything
-        }
-        if primitive_ref_clash(&p.binary_name, &a.binary_name) {
-            return false;
-        }
-    }
-    true
-}
-
-/// Whether every argument's type is **exactly** the parameter's — no widening, no boxing, no
-/// unknown. The tie-break for an overload set several of whose members are applicable: an exact
-/// signature is the most specific one, so there is nothing to weigh. An unknown argument makes the
-/// answer `false`, which is the difference between this and [`args_admissible`]: that one keeps a
-/// candidate when it cannot tell, and this one only ever picks a winner it is sure of.
-fn args_exact(params: &[TypeRef], arg_types: &[Option<TypeRef>]) -> bool {
-    params.len() == arg_types.len()
-        && params.iter().zip(arg_types).all(|(p, a)| {
-            a.as_ref().is_some_and(|a| a.binary_name == p.binary_name && a.dims == p.dims)
-        })
-}
-
-/// Whether a parameter and argument sit on OPPOSITE sides of the primitive/reference divide with no
-/// autoboxing bridge — a definite non-match (`int` param vs `String` arg; `String` param vs `int`
-/// arg). A primitive paired with its own wrapper (`int`/`Integer`) is NOT a clash. Two primitives or
-/// two references are left undecided here (returns `false`).
-fn primitive_ref_clash(param: &str, arg: &str) -> bool {
-    if is_primitive(param) == is_primitive(arg) {
-        return false; // same side of the divide → not a primitive/reference clash
-    }
-    !boxes(param, arg) && !boxes(arg, param)
 }
 
 /// A JVM primitive binary name.
@@ -3008,22 +2975,6 @@ fn is_primitive(bn: &str) -> bool {
         bn,
         "int" | "long" | "short" | "byte" | "char" | "boolean" | "float" | "double" | "void"
     )
-}
-
-/// Whether primitive `a` autoboxes to reference wrapper `b` (`int` → `java/lang/Integer`).
-fn boxes(a: &str, b: &str) -> bool {
-    let wrapper = match a {
-        "int" => "java/lang/Integer",
-        "long" => "java/lang/Long",
-        "short" => "java/lang/Short",
-        "byte" => "java/lang/Byte",
-        "char" => "java/lang/Character",
-        "boolean" => "java/lang/Boolean",
-        "float" => "java/lang/Float",
-        "double" => "java/lang/Double",
-        _ => return false,
-    };
-    b == wrapper
 }
 
 /// The receiver type-arg index a type variable named `name` maps to, given a generic of `arity`
@@ -3389,27 +3340,6 @@ mod overload_tests {
             !arity_admits(3, true, 1),
             "varargs needs at least the fixed prefix"
         );
-    }
-
-    #[test]
-    fn primitive_reference_clash_is_definite_only() {
-        assert!(
-            primitive_ref_clash("int", "java/lang/String"),
-            "int param vs String arg"
-        );
-        assert!(
-            primitive_ref_clash("java/lang/String", "int"),
-            "String param vs int arg"
-        );
-        assert!(
-            !primitive_ref_clash("int", "java/lang/Integer"),
-            "autoboxing bridge, not a clash"
-        );
-        assert!(
-            !primitive_ref_clash("java/lang/Object", "java/lang/String"),
-            "both references"
-        );
-        assert!(!primitive_ref_clash("int", "long"), "both primitives");
     }
 
     #[test]

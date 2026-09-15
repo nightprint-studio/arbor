@@ -100,9 +100,19 @@
 <h3>Multi-module projects</h3>
 <p>
   The <strong>module</strong> is a configuration's first field because it decides the classpath — a reactor's root usually compiles nothing, and a run without a module launches against
-  a directory that does not exist. The classpath is the module's <code>target/classes</code>, then every other module's, then the dependencies: your inner loop is compile-and-run
-  without <code>mvn install</code>, so a call across modules must find the sibling's classes where they are.
+  a directory that does not exist. The classpath is the module's <code>target/classes</code>, then the <code>target/classes</code> of the modules it depends on, then the
+  dependencies: your inner loop is compile-and-run without <code>mvn install</code> or <code>package</code>, so a call across modules finds the sibling's classes where they are.
 </p>
+<ul>
+  <li><strong>Resolved from inside the reactor.</strong> The dependencies are asked of Maven as <code>-pl «module» -am</code> at the project root, so a sibling module arrives as its
+    <code>target/classes</code> — never as a jar a past <code>mvn install</code> left in <code>~/.m2</code>, and a sibling that was never installed does not break the resolve.
+    A sibling jar that still turns up is replaced by that module's classes.</li>
+  <li><strong>Only the modules it depends on.</strong> A sibling nothing depends on stays off the classpath, with its <code>application.yml</code>, its beans and its
+    <code>META-INF</code> files.</li>
+  <li><strong>Refreshed when any pom changes</strong> — the module's, a parent's or a sibling's, since a sibling's new dependency is this module's too — and when an entry has
+    disappeared from disk.</li>
+  <li><strong>A resolve that fails stops the launch</strong>, with Maven's reason in the console. Jars Maven named and could not find offline are listed at the top of the run.</li>
+</ul>
 <Callout variant="warning" title="The runtime scope, on purpose">
   Dependencies are resolved at the <strong>runtime</strong> scope — what <code>mvn spring-boot:run</code> and a packaged application see — narrower than the editor, which resolves every
   scope to edit tests. Launching with the wider one hands the JVM libraries Maven never supplies: a <code>@ConditionalOnClass</code> on a test-scoped library then fires here and nowhere
@@ -110,7 +120,7 @@
 </Callout>
 <p>
   <strong>Classpath</strong> in the configuration changes it — Compile, Test, or every scope — because a launcher wanting a test-scoped H2 or a provided servlet API is legitimate. The
-  first launch of a configuration resolves its classpath through Maven; later ones are instant until the pom changes. The working directory defaults to the module's, and both the
+  first launch of a configuration resolves its classpath through Maven; later ones are instant until a pom changes. The working directory defaults to the module's, and both the
   editor's list and the title-bar selector show a configuration's module.
 </p>
 <p>
@@ -183,9 +193,17 @@
 <h2>Things worth knowing</h2>
 <dl class="meta-grid">
   <dt>A launch builds first</dt>
-  <dd>And stops if the compile fails — the console says so, the Build panel has details. That build is <code>mvn compile</code>: no <code>clean</code>, so a class whose source you deleted stays in <code>target/classes</code>; no <code>package</code>, so no jar or war — the run starts from <code>target/classes</code> and the jars. Resources are copied, so an edited <code>application.yml</code> is picked up.</dd>
+  <dd>And stops if the compile fails — the console says so, the Build panel has details. That build is <code>mvn compile -pl «module» -am</code>: the run's module and the modules it is built from, and no <code>package</code> — the run starts from <code>target/classes</code> and the jars. Resources are copied, so an edited <code>application.yml</code> is picked up, and a deleted one is removed from <code>target/classes</code>. Without Maven there is no launch: the <code>javac</code> fallback only reports errors, and does not rebuild the classes a run uses.</dd>
   <dt>Nothing changed, nothing runs</dt>
-  <dd>Before Maven, Bennu stamps the modules' <code>src/main/java</code> and <code>src/main/resources</code> — sizes and times, no file opened — against the last successful compile. Unchanged, it says <em>Up to date</em> and launches at once: Maven's floor is seconds <em>with nothing to do</em>. When it must compile, only the run's module and the ones it is built from — and since that is what it compiles, that is also what the stamp is about: a build of one module never counts as a build of its neighbour, and launching a module whose <code>target/classes</code> is not there compiles it however quiet the rest of the project has been. A whole-project build counts for every module in it. The stamp is per session and dropped on reindex, so a terminal <code>mvn clean</code> cannot leave it lying.</dd>
+  <dd>Before Maven, Bennu compares each module in the build — its <code>src/main</code> and its poms, sizes and times, no file opened — with how it looked at its last successful compile. Unchanged, it says <em>Up to date</em> and launches at once: Maven's floor is seconds <em>with nothing to do</em>. A build of one module never counts for a module outside it, and a module whose <code>target/classes</code> is missing is compiled however quiet the rest has been. The record is per session and dropped on reindex; the first build of a session always runs Maven.</dd>
+  <dt>No <code>mvn clean</code> needed</dt>
+  <dd>Maven's incremental compile leaves three kinds of stale output, and Bennu removes them before compiling, rebuilding that module from scratch — its <code>.class</code> files, <code>target/generated-sources/annotations</code> and the compiler's status — and saying why in the Build log:
+    <ul>
+      <li><strong>A module it depends on changed</strong> since it was compiled — including when another launch has already recompiled that module, which Maven cannot see, and which otherwise ends in <code>NoSuchMethodError</code>. With no record from this session, a module whose classes are older than a dependency's counts too.</li>
+      <li><strong>A source was deleted or renamed</strong>, whose class would otherwise stay behind for Spring to scan.</li>
+      <li><strong>Its pom or a parent pom changed.</strong></li>
+    </ul>
+    A module rebuilt this way takes the modules built from it along. And a compile that fails inside <code>target/generated-sources</code>, or on <code>duplicate class</code> — MapStruct or Lombok output left from an earlier compile — is rebuilt from scratch and compiled once more on its own.</dd>
   <dt>Spring Boot runs the class directly</dt>
   <dd>As an IDE does, not through <code>spring-boot:run</code> — so devtools and the plugin's resource handling are not in play.</dd>
   <dt>One build at a time</dt>

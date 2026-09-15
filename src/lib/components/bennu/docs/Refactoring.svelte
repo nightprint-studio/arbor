@@ -224,7 +224,7 @@ total = a + b;`, 'java')}</code></pre>
   <div class="feature-card">
     <div class="fc-eyebrow">On a member</div>
     <div class="fc-title">Safe delete</div>
-    <div class="fc-desc">Removes it and its doc comment — or refuses and lists every use with file, line and text, because "it is used" is not an answer. Declined outright on an override of something from a jar, a method declared at several levels of one hierarchy, one something implements, and anything annotated, which a framework may reach by name.</div>
+    <div class="fc-desc">Removes it and its doc comment — or refuses and lists every use with file, line and text, because "it is used" is not an answer. Works from a declaration or a call, on members of nested types too; among overloads it is the one under the caret, or the one the call binds to. Declined outright on an override of something from a jar, a method declared at several levels of one hierarchy, one something implements, and anything annotated, which a framework may reach by name.</div>
   </div>
 </div>
 <Callout variant="tip" title="A refactoring that cannot be done says why">
@@ -272,7 +272,7 @@ total = a + b;`, 'java')}</code></pre>
   <thead><tr><th>The caret on</th><th>What is rewritten</th></tr></thead>
   <tbody>
     <tr><td>A <strong>local</strong> or <strong>parameter</strong></td><td>Scope-exact: that method only — never a same-named variable elsewhere, or a field.</td></tr>
-    <tr><td>A <strong>method</strong> or <strong>field</strong></td><td>Its declaration and every use in the project, including through a library generic — a lambda parameter off <code>list.stream().map(…)</code>. A method carries its whole <strong>override family</strong> and all its <strong>overloads</strong>: to a caller they are one.</td></tr>
+    <tr><td>A <strong>method</strong> or <strong>field</strong></td><td>Its declaration and every use in the project, including through a library generic — a lambda parameter off <code>list.stream().map(…)</code>. A method carries its whole <strong>override family</strong> and all its <strong>overloads</strong>: to a caller they are one. A member of a <strong>nested type</strong> — static, inner, enum or record — is matched inside its own outer type, never a same-named nested type elsewhere in the file.</td></tr>
     <tr><td>A <strong>record component</strong>, or a field <strong>Lombok</strong> writes accessors for</td><td>The field and the calls to accessors nobody wrote — <code>failure.sourcePath()</code>, <code>order.getCustomerName()</code> — getters, setters and <code>@With</code> copies. A hand-written accessor is its own declaration and stays.</td></tr>
     <tr><td>A <strong>class</strong> or <strong>interface</strong></td><td>Declaration, references, <code>import</code>s and Spring <code>&lt;bean class="…"&gt;</code> entries — a Struts <code>&lt;action class="…"&gt;</code> names a bean id and is left. A public top-level type's <strong>file is renamed with it</strong>; a nested type's file is its outer type's.</td></tr>
   </tbody>

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  bennu-check differential corpus: javac is the oracle.
+
+  Error modules `java8` / `java21` (one per language level) hold marked cases; clean modules `clean8` /
+  `clean21` hold realistic legal code that must compile with zero diagnostics. Plain `mvn compile` (or
+  opening this in IntelliJ) compiles the corpus the ordinary way and shows the errors the corpus is
+  MEANT to have. The `oracle` profile is
+  what `refresh-expected.ps1` / `refresh-expected.sh` run: it makes javac report everything, in
+  machine-readable form, into `<module>/target/javac-raw.txt`. See README.md.
+
+  JDK-only on purpose: no dependencies, so the golden files depend on nothing but the JDK.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>dev.arbor.bennu.corpus</groupId>
+  <artifactId>bennu-check-corpus</artifactId>
+  <version>0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <modules>
+    <module>java8</module>
+    <module>java21</module>
+    <module>clean8</module>
+    <module>clean21</module>
+  </modules>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.13.0</version>
+          <configuration>
+            <!-- `maven.compiler.release` is set per module (8 / 21). -->
+            <proc>none</proc>
+          </configuration>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+
+  <profiles>
+    <profile>
+      <!-- The oracle run. Kept out of the default build so IntelliJ, which imports compilerArgs as
+           its own javac options, is not told to redirect its output into a file. -->
+      <id>oracle</id>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-compiler-plugin</artifactId>
+              <configuration>
+                <!-- The corpus is full of errors by design: keep going, and keep the other module going. -->
+                <failOnError>false</failOnError>
+                <showWarnings>true</showWarnings>
+                <!--
+                  fork=true runs the real `javac` executable (the JDK Maven runs on) instead of the
+                  in-process javax.tools API. Two reasons:
+                    1. `-Xstdout` only redirects javac's own log. In-process, the plugin installs a
+                       DiagnosticListener and the log never sees the diagnostics, so the file would
+                       stay empty.
+                    2. In-process, the plugin formats each diagnostic itself from
+                       Diagnostic.getMessage(), which (as far as we know) is NOT affected by
+                       -XDrawDiagnostics, so the machine-readable key would be lost.
+                  With fork + -Xstdout the golden file is read from javac's raw transcript, and the
+                  way the plugin re-prints (or fails to parse) that output no longer matters.
+                -->
+                <fork>true</fork>
+                <compilerArgs>
+                  <!-- `File.java:LINE:COL: compiler.err.key: args` — one located diagnostic per line. -->
+                  <arg>-XDrawDiagnostics</arg>
+                  <!-- Never truncate at javac's default 100 errors / 100 warnings. -->
+                  <arg>-Xmaxerrs</arg>
+                  <arg>100000</arg>
+                  <arg>-Xmaxwarns</arg>
+                  <arg>100000</arg>
+                  <!--
+                    By default javac stops after ATTR once any error exists, so FLOW errors (unreachable
+                    code, definite assignment, unreported exceptions) are never reported for a project
+                    with an attribution error anywhere. `should-stop.ifError` is the JDK 9+ spelling
+                    (JDK 8 used `shouldStopPolicyIfError`); FLOW is the furthest safe phase — past it,
+                    javac desugars erroneous trees and may crash. The langtools tests use the sibling
+                    `-XDshould-stop.at=FLOW`, which sets the same policy. UNVERIFIED on this machine:
+                    if FLOW errors (wave 4) never show up in expected.txt, this option is the suspect.
+                  -->
+                  <arg>-XDshould-stop.ifError=FLOW</arg>
+                  <!-- `release 8` on JDK 21 warns that 8 is obsolete, with no source position. -->
+                  <arg>-Xlint:-options</arg>
+                  <!-- javac's raw transcript, independent of how the plugin re-prints it. -->
+                  <arg>-Xstdout</arg>
+                  <arg>${project.build.directory}/javac-raw.txt</arg>
+                </compilerArgs>
+              </configuration>
+            </plugin>
+          </plugins>
+        </pluginManagement>
+      </build>
+    </profile>
+  </profiles>
+</project>

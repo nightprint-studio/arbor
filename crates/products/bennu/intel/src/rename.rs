@@ -27,7 +27,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use bennu_java::prelude::{find_type_name_span, Member, TypeResolver};
+use bennu_java::prelude::{Member, TypeResolver};
 use bennu_query::prelude::PlanFile;
 use bennu_web::prelude::bean_class_value_spans;
 use tree_sitter::Node;
@@ -360,7 +360,6 @@ pub fn rename_plan(
                 new_name,
                 java_files,
                 xml_files,
-                project_types,
             );
             file_rename = index
                 .file_declaring(binary)
@@ -474,7 +473,19 @@ pub fn resolve_declaration(
             // isn't found there.
             let decl_file = index.file_declaring(key.owner_binary())?.to_string();
             let decl_src = project_source(java_files, &decl_file)?;
-            if let Some((s, e)) = find_member_name_span(decl_src, &key) {
+            // Overloads share one key, so the file may declare the name several times. The call
+            // under the caret says which one it binds to — read only when there is a choice, since
+            // reading it costs a parse of the buffer.
+            let spans = find_member_name_spans(decl_src, &key);
+            let span = match spans.as_slice() {
+                [] => None,
+                [only] => Some(*only),
+                [first, ..] => Some(
+                    bennu_java::prelude::call_overload_at(source, offset, resolver)
+                        .map_or(*first, |m| choose_overload_span(decl_src, &spans, &m.params)),
+                ),
+            };
+            if let Some((s, e)) = span {
                 let (line, col) = line_col_1based(decl_src, s);
                 return Some(DeclarationLocation {
                     file: decl_file,
@@ -515,8 +526,9 @@ pub fn resolve_declaration(
             // an IDE gives, and better than the fall-through, which sent go-to into a decompiled
             // `java.lang.Enum` stub that does not declare a one-argument `valueOf` at all.
             if is_enum_implicit(&key, resolver) {
-                let simple = simple_of(key.owner_binary());
-                if let Some((s, e)) = find_type_name_span(decl_src, &simple) {
+                if let Some((s, e)) =
+                    bennu_java::prelude::find_binary_type_name_span(decl_src, key.owner_binary())
+                {
                     let (line, col) = line_col_1based(decl_src, s);
                     return Some(DeclarationLocation {
                         file: decl_file,
@@ -535,8 +547,8 @@ pub fn resolve_declaration(
             // a file with a same-simple-named type in another package.
             let decl_file = index.file_declaring(&binary)?.to_string();
             let decl_src = project_source(java_files, &decl_file)?;
-            let simple = simple_of(&binary);
-            let (s, e) = find_type_name_span(decl_src, &simple)?;
+            // By the whole binary: `Outer.Inner` and `Other.Inner` can share a file.
+            let (s, e) = bennu_java::prelude::find_binary_type_name_span(decl_src, &binary)?;
             let (line, col) = line_col_1based(decl_src, s);
             Some(DeclarationLocation {
                 file: decl_file,
@@ -575,33 +587,66 @@ pub(crate) fn project_source<'a>(java_files: &'a [PlanFile], file: &str) -> Opti
 /// `class`/`interface`/`enum`/method/field declaration node, NOT just its name token — so
 /// a preceding Javadoc comment can be found immediately above it). `None` when `source`
 /// doesn't declare `key`.
-pub(crate) fn decl_site_for_key(source: &str, key: &DeclKey) -> Option<usize> {
+///
+/// Found the way go-to finds it, so the doc a hover shows sits above the declaration go-to opens:
+/// a member inside ITS owner type (not a same-named member of another type in the file), and — for
+/// a method — the overload whose parameters are `overload`, when the call under the caret settled
+/// that ([`find_overload_name_span`]). Several `uri` overloads each carry their own block, and the
+/// first one's was the answer for all of them. A type by its whole binary name, nesting included.
+///
+/// When that exact search finds nothing, the first declaration of the name answers, as before.
+pub(crate) fn decl_site_for_key(
+    source: &str,
+    key: &DeclKey,
+    overload: Option<&[bennu_java::prelude::TypeRef]>,
+) -> Option<usize> {
     let tree = bennu_java::prelude::parse_java(source)?;
     let bytes = source.as_bytes();
     let root = tree.root_node();
 
     match key {
-        DeclKey::Type { binary } => {
-            let simple = simple_of(binary);
-            find_decl_node_start(
-                &root,
-                bytes,
-                &[
-                    "class_declaration",
-                    "interface_declaration",
-                    "enum_declaration",
-                ],
-                &simple,
-                false,
-            )
-        }
-        DeclKey::Method { name, .. } => {
-            find_decl_node_start(&root, bytes, &["method_declaration"], name, false)
-        }
-        DeclKey::Field { name, .. } => {
-            find_decl_node_start(&root, bytes, &["variable_declarator"], name, true)
+        DeclKey::Type { binary } => bennu_java::prelude::find_type_declaration(&root, bytes, binary)
+            .map(|decl| decl.start_byte())
+            .or_else(|| {
+                find_decl_node_start(
+                    &root,
+                    bytes,
+                    &[
+                        "class_declaration",
+                        "interface_declaration",
+                        "enum_declaration",
+                    ],
+                    &simple_of(binary),
+                    false,
+                )
+            }),
+        DeclKey::Method { name, .. } => find_overload_name_span(source, key, overload)
+            .and_then(|(start, end)| member_declaration_start(&root, start, end))
+            .or_else(|| find_decl_node_start(&root, bytes, &["method_declaration"], name, false)),
+        DeclKey::Field { name, .. } => find_member_name_span(source, key)
+            .and_then(|(start, end)| member_declaration_start(&root, start, end))
+            .or_else(|| find_decl_node_start(&root, bytes, &["variable_declarator"], name, true)),
+    }
+}
+
+/// The start of the member declaration whose NAME token spans `[start, end)` — the node a leading
+/// Javadoc sits above (a field's whole `field_declaration`, not its declarator). `None` for a name
+/// that is not a method's or a field's, such as a record component.
+fn member_declaration_start(root: &Node, start: usize, end: usize) -> Option<usize> {
+    let mut cur = root.named_descendant_for_byte_range(start, end);
+    while let Some(n) = cur {
+        match n.kind() {
+            "method_declaration"
+            | "annotation_type_element_declaration"
+            | "field_declaration"
+            | "constant_declaration" => return Some(n.start_byte()),
+            kind if kind.ends_with("_body") || bennu_java::prelude::is_type_declaration(&n) => {
+                return None
+            }
+            _ => cur = n.parent(),
         }
     }
+    None
 }
 
 /// Walk `root` for a declaration node of one of `kinds` whose `name` child matches `name`,
@@ -684,6 +729,10 @@ pub struct HoverInfo {
     /// method whose overload could not be told apart — in which case it is genuinely unknown, and a
     /// consumer must not pick one.
     pub arity: Option<usize>,
+    /// The parameter types of the overload this card describes, when the call under the caret
+    /// settled which one it binds to. What a consumer holding the declaring SOURCE uses to find that
+    /// declaration's documentation — [`Self::arity`] cannot separate two overloads of one length.
+    pub params: Option<Vec<bennu_java::prelude::TypeRef>>,
 }
 
 /// Build a [`HoverInfo`] for a classified [`DeclKey`], resolving a member's signature from
@@ -694,12 +743,25 @@ pub(crate) fn hover_for_key(
     resolver: &dyn TypeResolver,
     argc: Option<usize>,
 ) -> HoverInfo {
+    hover_for_call(key, resolver, argc, None)
+}
+
+/// [`hover_for_key`] for a caret on a call, where `overload` is the parameter list of the overload
+/// the call binds to ([`bennu_java::prelude::call_overload_at`]) when that could be told. It wins
+/// over `argc`, which only separates overloads of different lengths.
+pub(crate) fn hover_for_call(
+    key: &DeclKey,
+    resolver: &dyn TypeResolver,
+    argc: Option<usize>,
+    overload: Option<&[bennu_java::prelude::TypeRef]>,
+) -> HoverInfo {
     match key {
         DeclKey::Type { binary } => {
             // What the type IS, not "class" for everything — an interface reported as a class
             // is the card stating something false about the thing you are pointing at. The
             // signature reads like the declaration; the package goes on the meta line.
-            let simple = simple_of(binary).replace('$', ".");
+            // `RestClient$UriSpec` reads `RestClient.UriSpec`, as it is written in Java.
+            let simple = binary.rsplit('/').next().unwrap_or(binary).replace('$', ".");
             let kind = resolver
                 .members_of(binary)
                 .map(|cm| {
@@ -726,10 +788,11 @@ pub(crate) fn hover_for_key(
                 owner: Some(binary.clone()),
                 member: None,
                 arity: None,
+                params: None,
             }
         }
         DeclKey::Method { owner, name } => {
-            let found = member_signature(resolver, owner, name, true, argc);
+            let found = member_signature(resolver, owner, name, true, argc, overload);
             let (signature, declaring, arity) =
                 found.unwrap_or_else(|| (format!("{name}(…)"), owner.clone(), None));
             HoverInfo {
@@ -742,10 +805,11 @@ pub(crate) fn hover_for_key(
                 owner: Some(declaring),
                 member: Some(name.clone()),
                 arity,
+                params: overload.map(<[bennu_java::prelude::TypeRef]>::to_vec),
             }
         }
         DeclKey::Field { owner, name } => {
-            let found = member_signature(resolver, owner, name, false, None);
+            let found = member_signature(resolver, owner, name, false, None, None);
             let (signature, declaring, _) =
                 found.unwrap_or_else(|| (name.clone(), owner.clone(), None));
             HoverInfo {
@@ -756,6 +820,7 @@ pub(crate) fn hover_for_key(
                 owner: Some(declaring),
                 member: Some(name.clone()),
                 arity: None,
+                params: None,
             }
         }
     }
@@ -773,28 +838,49 @@ pub(crate) fn hover_for_key(
 ///
 /// The third element is the picked overload's parameter count (methods only) — what a caller needs
 /// to find the same overload in the library's source, where the documentation is.
+///
+/// `overload` is the exact parameter list the call binds to, when known. It is looked for across the
+/// whole hierarchy FIRST: a subclass's own overload that merely has the right length must not answer
+/// for one its supertype declares.
 fn member_signature(
     resolver: &dyn TypeResolver,
     owner: &str,
     name: &str,
     is_method: bool,
     argc: Option<usize>,
+    overload: Option<&[bennu_java::prelude::TypeRef]>,
 ) -> Option<(String, String, Option<usize>)> {
-    // The shared walk ends a branch on a supertype it cannot resolve rather than the whole search —
-    // an un-indexed base class must not hide a member the subclass declares itself.
-    bennu_java::prelude::walk_up(resolver, &bennu_java::prelude::TypeRef::simple(owner), |a| {
-        let pool = if is_method { &a.members.methods } else { &a.members.fields };
-        let m = pick_member(pool, name, argc)?;
-        let bn = a.ty.binary_name.clone();
+    let start = bennu_java::prelude::TypeRef::simple(owner);
+    let describe = |m: &Member, declaring: &str| {
+        let bn = declaring.to_string();
         let arity = is_method.then_some(m.params.len());
         if !m.raw_signature.is_empty() {
             let sig = readable_signature(m, name, is_method, &bn);
-            return Some((sig, bn, arity));
+            return (sig, bn, arity);
         }
         // No recorded signature: synthesize a minimal one from the name (+ empty param list for a
         // method) so the hover still shows something meaningful.
         let sig = if is_method { format!("{name}()") } else { name.to_string() };
-        Some((sig, bn, arity))
+        (sig, bn, arity)
+    };
+    if let Some(params) = overload.filter(|_| is_method) {
+        let exact = bennu_java::prelude::walk_up(resolver, &start, |a| {
+            a.members
+                .methods
+                .iter()
+                .find(|m| m.name == name && m.params == params)
+                .map(|m| describe(m, &a.ty.binary_name))
+        });
+        if exact.is_some() {
+            return exact;
+        }
+    }
+    // The shared walk ends a branch on a supertype it cannot resolve rather than the whole search —
+    // an un-indexed base class must not hide a member the subclass declares itself.
+    bennu_java::prelude::walk_up(resolver, &start, |a| {
+        let pool = if is_method { &a.members.methods } else { &a.members.fields };
+        let m = pick_member(pool, name, argc)?;
+        Some(describe(m, &a.ty.binary_name))
     })
 }
 
@@ -1153,41 +1239,46 @@ pub fn generated_aliases(decl_source: &str, owner: &str, field: &str) -> Vec<Fie
 
 /// Whether `source` declares `name` as a component of the record whose binary name is `owner`.
 fn declares_record_component(source: &str, owner: &str, name: &str) -> bool {
-    let simple = simple_of(owner);
     let Some(tree) = bennu_java::prelude::parse_java(source) else {
         return false;
     };
     let bytes = source.as_bytes();
+    let root = tree.root_node();
 
-    let mut stack = vec![tree.root_node()];
+    // The record the owner's whole binary name points at; only a file where that path fits no
+    // declaration is read by simple name, which is what this did for every file.
+    if let Some(decl) = bennu_java::prelude::find_type_declaration(&root, bytes, owner) {
+        return record_declares_component(&decl, bytes, name);
+    }
+    let simple = simple_of(owner);
+    let mut stack = vec![root];
     while let Some(n) = stack.pop() {
         let mut cur = n.walk();
         for c in n.named_children(&mut cur) {
             stack.push(c);
         }
-        if n.kind() != "record_declaration" {
-            continue;
-        }
-        if n.child_by_field_name("name")
-            .and_then(|nm| nm.utf8_text(bytes).ok())
-            != Some(&simple)
-        {
-            continue;
-        }
-        let Some(params) = n.child_by_field_name("parameters") else {
-            continue;
-        };
-        let mut pc = params.walk();
-        for p in params.named_children(&mut pc) {
-            let component = p
-                .child_by_field_name("name")
-                .and_then(|nm| nm.utf8_text(bytes).ok());
-            if component == Some(name) {
-                return true;
-            }
+        let named_simple = n.child_by_field_name("name").and_then(|nm| nm.utf8_text(bytes).ok())
+            == Some(simple.as_str());
+        if named_simple && record_declares_component(&n, bytes, name) {
+            return true;
         }
     }
     false
+}
+
+/// Whether `decl` is a record declaration with a component called `name`.
+fn record_declares_component(decl: &Node, bytes: &[u8], name: &str) -> bool {
+    if decl.kind() != "record_declaration" {
+        return false;
+    }
+    let Some(params) = decl.child_by_field_name("parameters") else {
+        return false;
+    };
+    let mut pc = params.walk();
+    let found = params.named_children(&mut pc).any(|p| {
+        p.child_by_field_name("name").and_then(|nm| nm.utf8_text(bytes).ok()) == Some(name)
+    });
+    found
 }
 
 /// Whether this `formal_parameter` is a record component rather than a method parameter — the
@@ -1207,6 +1298,56 @@ pub fn find_member_name_span(source: &str, key: &DeclKey) -> Option<(usize, usiz
     find_member_name_spans(source, key).into_iter().next()
 }
 
+/// [`find_member_name_span`], choosing among overloads: the declaration whose parameter list is
+/// `overload` (the parameters of the member a call binds to — see
+/// [`bennu_java::prelude::call_overload_at`]). With no `overload`, or when `source` declares the
+/// name once, it is exactly [`find_member_name_span`].
+///
+/// A declaration is matched by what can be read off both sides — each parameter's simple type name
+/// and array depth — because the member's types are binary names while the source's are written
+/// ones. When no declaration matches that way (a type variable the classpath erased, say), the one
+/// with the same parameter COUNT is taken if it is the only one; failing that, the first.
+pub fn find_overload_name_span(
+    source: &str,
+    key: &DeclKey,
+    overload: Option<&[bennu_java::prelude::TypeRef]>,
+) -> Option<(usize, usize)> {
+    let spans = find_member_name_spans(source, key);
+    match (spans.as_slice(), overload) {
+        ([], _) => None,
+        ([only], _) | ([only, ..], None) => Some(*only),
+        (_, Some(params)) => Some(choose_overload_span(source, &spans, params)),
+    }
+}
+
+/// The span among `spans` (≥ 1, name spans of method declarations of one name in `source`, in
+/// source order) whose declaration takes `params`. See [`find_overload_name_span`] for the matching
+/// and the fallbacks.
+///
+/// Public for a caller that found the declarations its own way — a library view searching a whole
+/// file regardless of which nested type holds the name.
+pub fn choose_overload_span(
+    source: &str,
+    spans: &[(usize, usize)],
+    params: &[bennu_java::prelude::TypeRef],
+) -> (usize, usize) {
+    let first = spans[0];
+    let Some(tree) = bennu_java::prelude::parse_java(source) else {
+        return first;
+    };
+    let root = tree.root_node();
+    let written: Vec<Option<Vec<bennu_java::prelude::ParamShape>>> = spans
+        .iter()
+        .map(|&(start, end)| {
+            let decl = root.named_descendant_for_byte_range(start, end)?.parent()?;
+            bennu_java::prelude::declared_parameter_shapes(&decl, source)
+        })
+        .collect();
+    let written: Vec<Option<&[bennu_java::prelude::ParamShape]>> =
+        written.iter().map(|w| w.as_deref()).collect();
+    bennu_java::prelude::choose_overload(&written, params).map_or(first, |i| spans[i])
+}
+
 /// Every byte span in `source` where this member's name is DECLARED.
 ///
 /// More than one for overloads: `foo(int)` and `foo(String)` are two declarations of one name, and
@@ -1219,7 +1360,6 @@ pub fn find_member_name_spans(source: &str, key: &DeclKey) -> Vec<(usize, usize)
         DeclKey::Field { name, .. } => (name, true),
         DeclKey::Type { .. } => return Vec::new(),
     };
-    let owner_simple = simple_of(key.owner_binary());
     // A declaration's name appears textually in the file that declares it — skip the
     // tree-sitter parse when the token isn't even present (a cheap early-out for callers that
     // probe more than one file, e.g. rename's edit-site search). A substring false-positive
@@ -1232,6 +1372,7 @@ pub fn find_member_name_spans(source: &str, key: &DeclKey) -> Vec<(usize, usize)
     };
     let bytes = source.as_bytes();
     let root = tree.root_node();
+    let owner = OwnerScope::resolve(&root, bytes, key.owner_binary());
     // What this FILE says each of its types extends / implements, by simple name. An anonymous
     // class names the type it instantiates, which may be a SUB-type of the one whose member is
     // being renamed (`new Public() { … }` for a member declared on `Download`), and the file that
@@ -1274,7 +1415,7 @@ pub fn find_member_name_spans(source: &str, key: &DeclKey) -> Vec<(usize, usize)
         };
         if let Some(nm) = hit {
             if nm.utf8_text(bytes).ok() == Some(name.as_str())
-                && declared_in_type(&n, bytes, &owner_simple, &supertypes)
+                && declared_in_type(&n, bytes, &owner, &supertypes)
             {
                 found.push((nm.start_byte(), nm.end_byte()));
             }
@@ -1290,7 +1431,7 @@ pub fn find_member_name_spans(source: &str, key: &DeclKey) -> Vec<(usize, usize)
     found
 }
 
-/// Whether the declaration at `node` sits inside the type named `owner_simple`.
+/// Whether the declaration at `node` sits inside the type `owner` resolves to.
 ///
 /// One file can declare several types — a nested class, a second top-level one — and any of them
 /// may hold a member of the same name. Without this the span search took whichever the tree walk
@@ -1299,12 +1440,17 @@ pub fn find_member_name_spans(source: &str, key: &DeclKey) -> Vec<(usize, usize)
 /// A declaration with no enclosing named type is accepted: an anonymous class body or a shape the
 /// grammar spells differently should not silently lose its declaration edit, and the caller is
 /// already looking in the file that declares the owner.
+///
+/// A named enclosing type is compared by the declaration the owner's whole binary name resolves to
+/// ([`OwnerScope`]) — `Outer.Inner` and `Other.Inner` in one file are two owners, and
+/// `RestClient$UriSpec` is `UriSpec` inside `RestClient`.
 fn declared_in_type(
     node: &Node,
     bytes: &[u8],
-    owner_simple: &str,
+    owner: &OwnerScope,
     supertypes: &HashMap<String, Vec<String>>,
 ) -> bool {
+    let owner_simple = owner.simple.as_str();
     let mut cur = node.parent();
     while let Some(n) = cur {
         // An anonymous body is the enclosing type, and the first one going up. Climbing past it
@@ -1339,6 +1485,9 @@ fn declared_in_type(
                 | "record_declaration"
                 | "annotation_type_declaration"
         ) {
+            if let Some((start, end)) = owner.declaration {
+                return n.start_byte() == start && n.end_byte() == end;
+            }
             return match n
                 .child_by_field_name("name")
                 .and_then(|nm| nm.utf8_text(bytes).ok())
@@ -1350,6 +1499,25 @@ fn declared_in_type(
         cur = n.parent();
     }
     true
+}
+
+/// The type a member search is scoped to, resolved once per file.
+struct OwnerScope {
+    /// The owner's innermost simple name — what an anonymous body is compared against, and the
+    /// fallback when the file declares no type on the owner's path.
+    simple: String,
+    /// The byte range of the type declaration the owner's binary name points at in this file.
+    declaration: Option<(usize, usize)>,
+}
+
+impl OwnerScope {
+    fn resolve(root: &Node, bytes: &[u8], owner_binary: &str) -> Self {
+        OwnerScope {
+            simple: simple_of(owner_binary),
+            declaration: bennu_java::prelude::find_type_declaration(root, bytes, owner_binary)
+                .map(|decl| (decl.start_byte(), decl.end_byte())),
+        }
+    }
 }
 
 /// Each type this FILE declares, mapped to the simple names it extends / implements.
@@ -1458,7 +1626,6 @@ pub fn plan_types(
     renames: &[TypeRename],
     java_files: &[PlanFile],
     xml_files: &[PlanFile],
-    project_types: &HashMap<String, String>,
     on_file: &dyn Fn(usize, usize) -> bool,
 ) -> (Vec<Vec<Edit>>, bool) {
     let mut out: Vec<Vec<Edit>> = vec![Vec::new(); renames.len()];
@@ -1493,7 +1660,7 @@ pub fn plan_types(
         if !on_file(done, total) {
             return (out, false);
         }
-        collect_type_decls_and_imports(&f.source, &f.path, &targets, project_types, &mut out);
+        collect_type_decls_and_imports(&f.source, &f.path, &targets, &mut out);
     }
     on_file(total, total);
 
@@ -1836,7 +2003,6 @@ fn plan_type(
     new_name: &str,
     java_files: &[PlanFile],
     xml_files: &[PlanFile],
-    project_types: &HashMap<String, String>,
 ) -> Vec<Edit> {
     // A batch of one. Keeping a second implementation for the single case is how the two would
     // eventually disagree about what renaming a type means.
@@ -1850,7 +2016,6 @@ fn plan_type(
         &renames,
         java_files,
         xml_files,
-        project_types,
         &|_, _| true,
     );
     buckets.into_iter().next().unwrap_or_default()
@@ -1862,7 +2027,6 @@ fn collect_type_decls_and_imports(
     source: &str,
     path: &str,
     targets: &[TypeTarget],
-    project_types: &HashMap<String, String>,
     out: &mut [Vec<Edit>],
 ) {
     let Some(tree) = bennu_java::prelude::parse_java(source) else {
@@ -1870,6 +2034,7 @@ fn collect_type_decls_and_imports(
     };
     let bytes = source.as_bytes();
     let root = tree.root_node();
+    let package = bennu_java::prelude::declared_package(&root, bytes);
 
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
@@ -1894,16 +2059,20 @@ fn collect_type_decls_and_imports(
                 let Ok(text) = nm.utf8_text(bytes) else {
                     continue;
                 };
+                if !targets.iter().any(|t| t.old_simple == text) {
+                    continue;
+                }
+                // This declaration's own binary name — package and nesting — so a same-named type
+                // in another package, or nested in another outer type of this file, is not hit.
+                let declared =
+                    bennu_java::prelude::declared_type_binary(&n, bytes, package.as_deref());
                 for (i, target) in targets.iter().enumerate() {
                     if text != target.old_simple {
                         continue;
                     }
-                    // Confirm this really is the target type (same binary) so a same-named
-                    // class in another package isn't hit.
-                    let is_target = project_types
-                        .get(&target.old_simple)
-                        .map(|b| *b == target.binary)
-                        .unwrap_or(true);
+                    let is_target = declared.as_deref().is_none_or(|d| {
+                        bennu_java::prelude::same_binary_type(d, &target.binary)
+                    });
                     if is_target {
                         out[i].push(Edit {
                             file: path.to_string(),
@@ -1934,7 +2103,7 @@ fn collect_type_decls_and_imports(
                     if text != target.old_simple {
                         continue;
                     }
-                    if !declared_in_type(&n, bytes, &target.old_simple, &HashMap::new()) {
+                    if !constructor_of(&n, bytes, package.as_deref(), &target.binary) {
                         continue;
                     }
                     out[i].push(Edit {
@@ -1981,6 +2150,24 @@ fn collect_type_decls_and_imports(
     }
 }
 
+/// Whether the constructor `ctor` belongs to the type `binary` names: its nearest enclosing type
+/// declaration, compared by whole binary name, so the constructor of a nested namesake in another
+/// outer type stays put.
+fn constructor_of(ctor: &Node, bytes: &[u8], package: Option<&str>, binary: &str) -> bool {
+    let mut cur = ctor.parent();
+    while let Some(n) = cur {
+        if bennu_java::prelude::is_anonymous_body(&n) {
+            return false;
+        }
+        if bennu_java::prelude::is_type_declaration(&n) {
+            return bennu_java::prelude::declared_type_binary(&n, bytes, package)
+                .is_none_or(|d| bennu_java::prelude::same_binary_type(&d, binary));
+        }
+        cur = n.parent();
+    }
+    false
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────────
 
 fn member_name(key: &DeclKey) -> String {
@@ -1990,8 +2177,12 @@ fn member_name(key: &DeclKey) -> String {
     }
 }
 
+/// The innermost simple name of a binary name, `$`-nested (bytecode) or `/`-nested (source).
+///
+/// Only ever the NAME: to find the type in a file, go by the whole binary
+/// ([`bennu_java::prelude::find_type_declaration`]) — a file can declare two types of one simple name.
 fn simple_of(binary: &str) -> String {
-    binary.rsplit('/').next().unwrap_or(binary).to_string()
+    bennu_java::prelude::binary_simple_name(binary).to_string()
 }
 
 /// Replace the trailing simple name of a dotted FQCN (`com.x.Foo` + `Bar` → `com.x.Bar`).
@@ -2511,6 +2702,7 @@ mod tests {
             &DeclKey::Type {
                 binary: "p/Order".into(),
             },
+            None,
         )
         .expect("type decl found");
         let doc = bennu_java::prelude::leading_javadoc(src, start).expect("javadoc found");
@@ -2526,6 +2718,7 @@ mod tests {
                 owner: "p/C".into(),
                 name: "go".into(),
             },
+            None,
         )
         .expect("method decl found");
         let doc = bennu_java::prelude::leading_javadoc(src, start).expect("javadoc found");
@@ -2540,6 +2733,7 @@ mod tests {
             &DeclKey::Type {
                 binary: "p/C".into(),
             },
+            None,
         )
         .unwrap();
         assert!(bennu_java::prelude::leading_javadoc(src, start).is_none());

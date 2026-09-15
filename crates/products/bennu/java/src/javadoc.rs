@@ -119,6 +119,22 @@ pub struct FileDocs {
     ///
     /// [`methods`]: FileDocs::methods
     pub overloaded: HashSet<String>,
+    /// Every declaration of each OVERLOADED method name, in source order: its parameters as written
+    /// and its doc block (or none). What [`method_overload`](FileDocs::method_overload) picks from
+    /// when the caller knows which overload a call binds to — the only thing that separates two
+    /// overloads of one arity. Names declared once are not kept; [`methods`] answers those.
+    ///
+    /// [`methods`]: FileDocs::methods
+    pub overloads: HashMap<String, Vec<OverloadDoc>>,
+}
+
+/// One declaration of an overloaded method, as [`FileDocs::overloads`] keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OverloadDoc {
+    /// The parameters as written — `None` when the list could not be read.
+    pub parameters: Option<Vec<crate::param_shape::ParamShape>>,
+    /// Its own doc block, if it has one.
+    pub doc: Option<String>,
 }
 
 impl FileDocs {
@@ -153,6 +169,27 @@ impl FileDocs {
         let only = hits.next()?;
         hits.next().is_none().then_some(only.1)
     }
+
+    /// [`method`](Self::method) for a caller that knows the overload: `params` are the parameter
+    /// types of the member a call binds to. The declaration taking them is chosen by the same rule
+    /// go-to uses ([`crate::param_shape::choose_overload`]) and ITS doc is the answer — `None` when
+    /// that declaration has no block, rather than a sibling's. Without `params`, or when they settle
+    /// nothing, this is `method(name, arity)`.
+    pub fn method_overload(
+        &self,
+        name: &str,
+        params: Option<&[crate::seam::TypeRef]>,
+        arity: Option<usize>,
+    ) -> Option<&String> {
+        if let (Some(params), Some(decls)) = (params, self.overloads.get(name)) {
+            let written: Vec<Option<&[crate::param_shape::ParamShape]>> =
+                decls.iter().map(|d| d.parameters.as_deref()).collect();
+            if let Some(i) = crate::param_shape::choose_overload(&written, params) {
+                return decls[i].doc.as_ref();
+            }
+        }
+        self.method(name, arity)
+    }
 }
 
 /// Read every `/** … */` in `source` and key it by what it documents.
@@ -167,6 +204,9 @@ pub fn declarations(source: &str) -> FileDocs {
     // name is overloaded, since the map below keeps neither the collisions it drops nor the
     // declarations that carry no doc block.
     let mut declared: HashMap<String, usize> = HashMap::new();
+    // Every method declaration with its position, for `overloads` — sorted into source order at the
+    // end, since this walk is a stack.
+    let mut sites: HashMap<String, Vec<(usize, OverloadDoc)>> = HashMap::new();
     let mut outermost_seen = false;
 
     let mut stack = vec![tree.root_node()];
@@ -201,6 +241,13 @@ pub fn declarations(source: &str) -> FileDocs {
                 };
                 let Some(arity) = parameter_count(&n) else { continue };
                 *declared.entry(name.clone()).or_default() += 1;
+                sites.entry(name.clone()).or_default().push((
+                    n.start_byte(),
+                    OverloadDoc {
+                        parameters: crate::param_shape::declared_parameter_shapes(&n, source),
+                        doc: doc.clone(),
+                    },
+                ));
                 let Some(doc) = doc else { continue };
                 let key = (name, arity);
                 if ambiguous.contains(&key) {
@@ -224,6 +271,14 @@ pub fn declarations(source: &str) -> FileDocs {
         .into_iter()
         .filter(|&(_, count)| count > 1)
         .map(|(name, _)| name)
+        .collect();
+    out.overloads = sites
+        .into_iter()
+        .filter(|(name, _)| out.overloaded.contains(name))
+        .map(|(name, mut decls)| {
+            decls.sort_by_key(|(start, _)| *start);
+            (name, decls.into_iter().map(|(_, d)| d).collect())
+        })
         .collect();
     out
 }
@@ -339,6 +394,27 @@ public class Box<T> {
     fn a_lone_method_answers_for_an_arity_it_does_not_declare() {
         let docs = declarations("class A { /** Joins. */ String join(String sep, Object... parts) { return null; } }");
         assert_eq!(docs.method("join", Some(4)).map(String::as_str), Some("Joins."));
+    }
+
+    /// Two overloads of ONE arity are exactly what arity cannot separate — and what a call's bound
+    /// parameter types can. `uri(b -> …)` must read the `Function` overload's block, `uri(someUri)`
+    /// the `URI` one's.
+    #[test]
+    fn the_bound_overloads_own_doc_is_the_answer() {
+        use crate::seam::TypeRef;
+        let docs = declarations(
+            "interface UriSpec {\n\
+             /** By URI. */ UriSpec uri(java.net.URI uri);\n\
+             /** By function. */ UriSpec uri(Function<UriBuilder, URI> fn);\n\
+             UriSpec uri(String template);\n}",
+        );
+        let function = [TypeRef::simple("java/util/function/Function")];
+        let uri = [TypeRef::simple("java/net/URI")];
+        let string = [TypeRef::simple("java/lang/String")];
+        assert_eq!(docs.method_overload("uri", Some(&function), Some(1)).map(String::as_str), Some("By function."));
+        assert_eq!(docs.method_overload("uri", Some(&uri), Some(1)).map(String::as_str), Some("By URI."));
+        assert_eq!(docs.method_overload("uri", Some(&string), Some(1)), None, "its own block, or none");
+        assert_eq!(docs.method_overload("uri", None, Some(1)), None, "arity alone still settles nothing");
     }
 
     #[test]

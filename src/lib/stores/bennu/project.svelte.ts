@@ -53,6 +53,10 @@ import { workspacesStore } from './workspaces.svelte';
 import { projectHealthStore } from './project-health.svelte';
 // Autosave gate — the user's persisted preference (config-backed).
 import { bennuSettingsStore } from './settings.svelte';
+// Which tree rows are open, per project — written into each project's session (see
+// `snapshotSession`). A leaf store: it imports nothing back from here.
+import { treeExpansionStore } from './tree-expansion.svelte';
+import { directoryKeys } from '$lib/components/bennu/tree-expansion';
 import type { ProjectSession } from '$lib/ipc/bennu/config';
 import type { ProjectInfo, SourceEdit, TreeNode } from '$lib/types/bennu';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -438,6 +442,7 @@ function createProjectStore() {
           open_files: openFilePaths,
           active_file: activeFilePath ?? '',
           open_carets: caretsFor(openFilePaths),
+          ...treeExpansionStore.snapshot(r),
         };
       }
       const s = sessions.get(r);
@@ -447,6 +452,7 @@ function createProjectStore() {
         open_files: paths,
         active_file: s?.activeFilePath ?? '',
         open_carets: caretsFor(paths),
+        ...treeExpansionStore.snapshot(r),
       };
     });
     return { active_project: activeRoot, projects };
@@ -468,6 +474,11 @@ function createProjectStore() {
   }
   /** How long the caret must sit still before its position is worth a write. */
   const CARET_PERSIST_MS = 1500;
+  /** Folding a tree open is a burst — a folder, then the one inside it, then Expand all — so the
+   *  write waits for the burst to end, like the caret's. */
+  const EXPANSION_PERSIST_MS = 800;
+  // Which rows are open travels in the same session write as the tabs, through the same debounce.
+  treeExpansionStore.onChange(() => persistWorkspace(EXPANSION_PERSIST_MS));
 
   /** Open a file as the active tab (loads source + encoding if needed), refusing binaries.
    *  The persistence-free core, shared by the public {@link openFile} (which persists after)
@@ -585,6 +596,9 @@ function createProjectStore() {
         const s = sessions.get(root);
         if (s) s.tree = ct;
         if (project?.root === root) tree = ct;
+        // Only here — a complete tree that no newer request superseded — is it safe to forget the
+        // remembered folders that are gone. A failed or stale load forgets nothing.
+        treeExpansionStore.prune(root, 'project', directoryKeys(root, ct));
       })
       .catch(() => { /* leave the tree empty — the project still opened */ });
   }
@@ -1125,6 +1139,9 @@ function createProjectStore() {
         }
         const root = canonPath(info.root);
         projectHealthStore.settle(root);
+        // Before the tree load below, whose completion prunes against it. Replaces whatever was in
+        // memory: the same project in another workspace remembers its own rows, like its own tabs.
+        treeExpansionStore.seed(root, p);
         const paths = p.open_files.map(canonPath);
         // The carets ride positionally alongside the tabs, and a session written before they
         // existed simply has none — hence the index-wise read rather than a zip.

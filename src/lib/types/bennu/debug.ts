@@ -25,6 +25,12 @@ export interface BreakpointDto {
   condition: string;
   /** Stop on every Nth hit. `0` and `1` both mean every one. Counted after the condition. */
   hit_count: number;
+  /** For a breakpoint in a **library** source view (a `-sources.jar`, the JDK's `src.zip`): the
+   *  fully-qualified top-level class the view declares. Absent for the project's own files.
+   *
+   *  The library breakpoint's real identity — `file` is only where its view is cached. It is what
+   *  the VM is asked about, and what reopens the view from the Breakpoints list. */
+  class?: string;
 }
 
 /** A breakpoint on a **throw** rather than on a line.

@@ -12,7 +12,7 @@ pub use crate::codec::{Id, IdSizes, Location, Tag, Value};
 pub use crate::command::{
     array_length, array_values, class_name, class_signature, classes_by_signature, clear_event,
     dispose, fields, frame_this, frame_values, frames, id_sizes, line_table, location_of_line,
-    methods, object_type, object_values, request_class_prepare, request_exception, request_step,
+    methods, nested_types, object_type, object_values, request_class_prepare, request_exception, request_step,
     resume_thread, resume_vm, set_breakpoint, string_value, superclass, suspend_vm, thread_name,
     type_signature, variable_table, version, ClassRef, Field, Frame, LineEntry, Local, Method,
     StepDepth, MOD_STATIC,

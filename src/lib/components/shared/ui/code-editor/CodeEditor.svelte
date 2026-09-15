@@ -30,7 +30,7 @@
     type KeyBinding,
     type ViewUpdate,
   } from '@codemirror/view';
-  import { RangeSet } from '@codemirror/state';
+  import { RangeSet, type ChangeSet, type Text } from '@codemirror/state';
   import { indentUnit as cmIndentUnit } from '@codemirror/language';
   import { setDiagnostics as cmSetDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
   import { openSearchPanel } from '@codemirror/search';
@@ -92,6 +92,7 @@
     onFlagContext,
     onFlagsMoved,
     oninput,
+    ondocchange,
     oncaret,
     onViewState,
     onfocus,
@@ -279,8 +280,22 @@
      */
     onFlagsMoved?: (moves: readonly { from: number; to: number }[]) => void;
     oninput?: (text: string) => void;
-    /** Live caret position (1-based line/col) — drives a host footer Ln/Col. */
-    oncaret?: (line: number, col: number) => void;
+    /**
+     * Every document change, with the state before and after — for a host that remembers
+     * positions of its own and has to map them (CodeMirror's `ChangeSet.mapPos`, or lines).
+     * `external` is true for a change the host pushed through `value` rather than one made in the
+     * editor. `key` is the {@link stateKey} this view was mounted with.
+     */
+    ondocchange?: (change: { changes: ChangeSet; before: Text; after: Text; external: boolean }, key?: string) => void;
+    /**
+     * Live caret position (1-based line/col) — drives a host footer Ln/Col.
+     *
+     * `info.key` is the {@link stateKey} this view was MOUNTED with, so a caret is filed under the
+     * document it belongs to even while the host has already switched to another one. `info.user`
+     * is true when the move came from the user (a click, a cursor key, typing) rather than from a
+     * programmatic selection.
+     */
+    oncaret?: (line: number, col: number, info?: { key?: string; user: boolean }) => void;
     /** Cursor + scroll changed — the host can persist it for a later {@link initialState}.
      *  `key` is the {@link stateKey} this view was MOUNTED with: file the snapshot under that, never
      *  under whatever the host currently considers active. */
@@ -681,6 +696,12 @@
         lastEmitted = text;
         oninput?.(text);
       }
+      if (u.docChanged && ondocchange) {
+        ondocchange(
+          { changes: u.changes, before: u.startState.doc, after: u.state.doc, external: suppressEmit },
+          heldKey,
+        );
+      }
       if (u.docChanged && onFlagsMoved) {
         const moves = movedFlags(u);
         if (moves.length) onFlagsMoved(moves);
@@ -690,7 +711,10 @@
         if (oncaret) {
           const head = u.state.selection.main.head;
           const line = u.state.doc.lineAt(head);
-          oncaret(line.number, head - line.from + 1);
+          const user = u.transactions.some((tr) =>
+            ['select', 'input', 'delete', 'move', 'undo', 'redo'].some((ev) => tr.isUserEvent(ev)),
+          );
+          oncaret(line.number, head - line.from + 1, { key: heldKey, user });
         }
         emitViewState();
       }

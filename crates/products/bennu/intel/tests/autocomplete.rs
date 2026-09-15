@@ -244,22 +244,11 @@ fn method_detail_has_signature_shape() {
         .iter()
         .find(|c| c.label == "add")
         .expect("add present");
-    let detail = add.detail.clone().unwrap_or_default();
-    // `(int, int) : int` — the renderer strips packages and joins params. The NAME is not in it:
-    // the row already opens with the label, and repeating it there spends the width the
-    // parameters were the point of.
-    assert!(
-        detail.starts_with('(') && !detail.contains("add"),
-        "detail is the signature without the name, got {detail:?}"
-    );
-    assert!(
-        detail.contains(':'),
-        "method detail has a return-type separator, got {detail:?}"
-    );
-    assert!(
-        detail.contains("int"),
-        "add's types are int, got {detail:?}"
-    );
+    // The row reads `add(int a, int b)` on the left and `int` on the right, as IntelliJ draws it:
+    // the parameter list travels beside the name, with the names a source method carries, and the
+    // detail is what the method returns.
+    assert_eq!(add.signature.as_deref(), Some("(int a, int b)"));
+    assert_eq!(add.detail.as_deref(), Some("int"));
     assert_eq!(add.kind, "method");
 }
 

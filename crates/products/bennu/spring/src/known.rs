@@ -79,6 +79,13 @@ const KNOWN: &[Known] = &[
     Known { simple: "Name", packages: &["org.springframework.boot.context.properties.bind"] },
     // Property-bearing annotations elsewhere in Spring.
     Known { simple: "Scheduled", packages: &["org.springframework.scheduling.annotation"] },
+    // What the declaration checks judge (`bean_check`). The three Boot ones are `@Configuration`
+    // by definition — the only meta-annotations followed anywhere in this crate.
+    Known { simple: "Async", packages: &["org.springframework.scheduling.annotation"] },
+    Known { simple: "Lookup", packages: &[SPRING_BEANS] },
+    Known { simple: "SpringBootApplication", packages: &["org.springframework.boot.autoconfigure"] },
+    Known { simple: "SpringBootConfiguration", packages: &["org.springframework.boot"] },
+    Known { simple: "TestConfiguration", packages: &["org.springframework.boot.test.context"] },
     // The `@ConditionalOn…` family. A codebase that leans on injection to abstract lives in
     // these: whether a bean exists at all is decided here, so a bean model that can't read them
     // is describing a context that may never be built.

@@ -7,6 +7,7 @@
 //!
 //! Returns the wire [`CompletionItem`] the provider forwards unchanged.
 
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 
 use bennu_classpath::prelude::MemberIndex as CpMemberIndex;
@@ -15,10 +16,10 @@ use bennu_java::prelude::{
     TypeRef, TypeResolver, Visibility,
 };
 use bennu_complete::prelude::{MatchCase, Typed};
-use bennu_proto::prelude::{CompletionItem, SnippetStop};
+use bennu_proto::prelude::{CompletionItem, MemberOrigin, SnippetStop};
 
-use crate::access::{same_package, same_top_level};
-use crate::member_text::render_type;
+use crate::access::{protected_visible, same_package, same_top_level};
+use crate::member_text::{named_parameters, render_param, render_type, simple_of, split_top_level};
 use crate::rank;
 use crate::resolver::IndexResolver;
 
@@ -169,9 +170,14 @@ pub fn completion_in<M: CpMemberIndex>(
     if receiver_is_type {
         collect_nested_types(resolver, catalog, &recv.binary_name, typed, &ctx, &mut out, &mut seen);
     }
-    collapse_overloads(&mut out);
-    sort_ranked(&mut out);
+    // Overloads stay separate rows here: each shows its own parameters, and accepting `wait()` or
+    // `wait(long)` leaves the caret in different places. Only a method reference folds them — see
+    // `collapse_overloads`.
+    sort_members(&mut out);
     preselect_the_only_exact_fit(&mut out);
+    if prefix.is_empty() {
+        preselect_the_first_own_member(&mut out);
+    }
     let mut items: Vec<CompletionItem> = out
         .into_iter()
         .map(|r| match &needs_import {
@@ -273,11 +279,16 @@ fn collect_nested_types<M: CpMemberIndex>(
         };
         let score = ctx.score_nested_type(simple);
         // A type name is not a value, so it produces nothing a position could want.
-        out.push(Ranked { score, fit: rank::Fit::None, item });
+        out.push(Ranked { score, fit: rank::Fit::None, tier: typed.tier(simple).unwrap_or(0), item });
     }
 }
 
 /// Fold a method's overloads into ONE row, counted in its detail.
+///
+/// **Method references only.** After `::` accepting a row writes the bare name, so three overloads
+/// are three rows with one outcome. After a `.` it is different — the call's parentheses and the
+/// caret inside them depend on the overload, and each row shows its own parameter list — so the
+/// member list keeps them apart, as IntelliJ does.
 ///
 /// They are collected separately — an override has to be told from an overload, and the parameters
 /// are what tells them apart — but a *list* of them is a list of rows that all insert the same
@@ -312,6 +323,7 @@ pub(crate) fn collapse_overloads(out: &mut Vec<Ranked>) {
                 if r.score > kept[*idx].score {
                     kept[*idx].score = r.score;
                     kept[*idx].item.detail = r.item.detail.clone();
+                    kept[*idx].item.signature = r.item.signature.clone();
                 }
                 let n = *extra;
                 let base = kept[*idx]
@@ -339,6 +351,9 @@ pub(crate) struct Ranked {
     /// Whether it produces what the position wants — the key ordered BEFORE `score`. See
     /// [`rank::Fit`] for why it is not one more term in it.
     pub(crate) fit: rank::Fit,
+    /// How the typed letters reached the name (`0` = an exact prefix) — the key a member list
+    /// orders by right after [`Ranked::fit`]. See [`sort_members`].
+    pub(crate) tier: u8,
     pub(crate) item: CompletionItem,
 }
 
@@ -367,6 +382,63 @@ pub(crate) fn preselect_the_only_exact_fit(out: &mut [Ranked]) {
     let mut exact = out.iter_mut().filter(|r| r.fit == rank::Fit::Exact);
     if let (Some(only), None) = (exact.next(), exact.next()) {
         only.item.preselect = true;
+    }
+}
+
+/// Order a MEMBER list — what follows a `.` — IntelliJ's way: what fits the position, then how well
+/// the typed letters matched, then **where the member stands** ([`MemberOrigin`]), then relevance.
+///
+/// The origin is a key and not a term of the score on purpose. After `route.` the members
+/// `ServiceRoute` declares are what is reached for nine times in ten; as a weighted term, a use count
+/// or a habit could still lift `hashCode` above them, and a record's implicit `equals` sorted between
+/// its components alphabetically. Within one origin the score still decides — an inherited member of
+/// the nearer supertype first, statics after instance members on a value.
+///
+/// An item that is not a member (a nested type) ranks with the receiver's own.
+pub(crate) fn sort_members(out: &mut [Ranked]) {
+    let origin = |r: &Ranked| r.item.member_origin.unwrap_or(MemberOrigin::Own);
+    out.sort_by(|a, b| {
+        b.fit
+            .cmp(&a.fit)
+            .then(a.tier.cmp(&b.tier))
+            .then(origin(b).cmp(&origin(a)))
+            .then(b.score.cmp(&a.score))
+            .then(a.item.kind.cmp(&b.item.kind))
+            .then(a.item.label.cmp(&b.item.label))
+            // Overloads of one name: fewest parameters first, `wait()` before `wait(long)`.
+            .then(arity(&a.item).cmp(&arity(&b.item)))
+            .then(a.item.signature.cmp(&b.item.signature))
+    });
+}
+
+/// How many parameters a row's [`CompletionItem::signature`] lists — `0` for `()`, and for a row
+/// that has no signature at all.
+fn arity(item: &CompletionItem) -> usize {
+    let inner = item
+        .signature
+        .as_deref()
+        .map(|s| s.trim_start_matches('(').trim_end_matches(')').trim());
+    match inner {
+        Some(params) if !params.is_empty() => split_top_level(params).len(),
+        _ => 0,
+    }
+}
+
+/// Preselect the first row when it is a member the receiver itself declares and nothing else has
+/// claimed the selection.
+///
+/// Only the FIRST row, and only an own one: a preselected row is lifted above everything in the
+/// editor, so marking an own member further down would put it over an inherited one that fits the
+/// position better. The caller asks only with nothing typed yet — once letters are typed, how well
+/// they match is the editor's judgement to make, not a selection to pin.
+pub(crate) fn preselect_the_first_own_member(out: &mut [Ranked]) {
+    if out.iter().any(|r| r.item.preselect) {
+        return;
+    }
+    if let Some(first) = out.first_mut() {
+        if first.item.member_origin == Some(MemberOrigin::Own) {
+            first.item.preselect = true;
+        }
     }
 }
 
@@ -458,93 +530,145 @@ pub(crate) fn collect_members<M: CpMemberIndex>(
     out: &mut Vec<Ranked>,
     seen: &mut HashSet<String>,
 ) {
+    let query = MemberQuery {
+        resolver,
+        receiver: recv,
+        typed,
+        site,
+        statics_only,
+        ctx,
+        receiver_in_site: OnceCell::new(),
+    };
     // The shared supertype walk — breadth-first, so a member declared nearer the receiver reaches
     // `seen` before the one it hides, which is what the depth-based rank means to say.
     bennu_java::prelude::walk_up::<()>(resolver, recv, |a| {
-        let bn = &a.ty.binary_name;
-        // `private` members of this level are offered only when the caret's class is the same
-        // top-level class (a private is never inherited, so a supertype level's privates are simply
-        // never shown).
-        let allow_private = same_top_level(bn, site);
-        add_matching(
-            resolver, &a.members, bn, typed, allow_private, statics_only, site, a.depth, ctx, out,
-            seen,
-        );
+        query.add_matching(&a.members, &a.ty.binary_name, a.depth, out, seen);
         None
     });
 }
 
-#[allow(clippy::too_many_arguments)]
-fn add_matching(
-    resolver: &dyn TypeResolver,
-    cm: &ClassMembers,
-    declaring: &str,
-    typed: Typed<'_>,
-    allow_private: bool,
+/// One member walk's question, asked of every level of the hierarchy: what is being completed,
+/// through what, from where.
+struct MemberQuery<'a> {
+    resolver: &'a dyn TypeResolver,
+    receiver: &'a TypeRef,
+    typed: Typed<'a>,
+    site: Option<&'a str>,
+    /// A bare name written in a static context — only statics can be meant.
     statics_only: bool,
-    site: Option<&str>,
-    depth: usize,
-    ctx: &rank::Context,
-    out: &mut Vec<Ranked>,
-    seen: &mut HashSet<String>,
-) {
-    for m in cm.methods.iter().chain(cm.fields.iter()) {
-        let Some(tier) = typed.tier(&m.name) else {
-            continue;
-        };
-        // A constructor and a static initialiser are members of the class file, not things you can
-        // reach through a dot. `s.` used to open on eight `<init>` entries — they sort before every
-        // letter, so they were the first thing the popup showed on any String.
-        if m.name == "<init>" || m.name == "<clinit>" {
-            continue;
+    ctx: &'a rank::Context,
+    /// Whether an instance `protected` member outside its package may be reached through this
+    /// receiver from this site. The same for every such member, and a hierarchy walk to answer, so
+    /// it is asked once — see [`protected_visible`].
+    receiver_in_site: OnceCell<bool>,
+}
+
+impl MemberQuery<'_> {
+    fn add_matching(
+        &self,
+        cm: &ClassMembers,
+        declaring: &str,
+        depth: usize,
+        out: &mut Vec<Ranked>,
+        seen: &mut HashSet<String>,
+    ) {
+        for m in cm.methods.iter().chain(cm.fields.iter()) {
+            let Some(tier) = self.typed.tier(&m.name) else {
+                continue;
+            };
+            // A constructor and a static initialiser are members of the class file, not things you
+            // can reach through a dot. `s.` used to open on eight `<init>` entries — they sort before
+            // every letter, so they were the first thing the popup showed on any String.
+            if m.name == "<init>" || m.name == "<clinit>" {
+                continue;
+            }
+            // A bare name written in a static context can only be a static member: `count` inside
+            // `static void main` does not compile, however visible the field is. The receiver paths
+            // never set this — through a receiver an instance member is exactly what is wanted.
+            if self.statics_only && !m.is_static {
+                continue;
+            }
+            if !self.visible(m, declaring) {
+                continue;
+            }
+            if !seen.insert(dedup_key(m)) {
+                continue;
+            }
+            out.push(self.ranked(m, declaring, depth, cm, tier));
         }
-        // A bare name written in a static context can only be a static member: `count` inside
-        // `static void main` does not compile, however visible the field is. The receiver paths
-        // never set this — through a receiver an instance member is exactly what is wanted.
-        if statics_only && !m.is_static {
-            continue;
+    }
+
+    /// Whether `m`, declared in `declaring`, can be written here at all.
+    fn visible(&self, m: &Member, declaring: &str) -> bool {
+        match m.visibility {
+            Visibility::Public => true,
+            // Only from the same top-level class (a private is never inherited, so a supertype
+            // level's privates are simply never shown).
+            Visibility::Private => same_top_level(declaring, self.site),
+            // Package-private is visible only from the same package, and the JDK's own internals
+            // are full of it: `String.` opened on `COMPACT_STRINGS`, `LATIN1`, `UTF16` and
+            // `checkBoundsBeginEnd` before it reached anything you could write. See `same_package`
+            // for why this hides only when it is sure.
+            Visibility::Package => same_package(declaring, self.site),
+            // `route.clone()` and `route.finalize()` from another class are not Java, and every
+            // receiver used to offer them from `Object`. The instance answer does not depend on
+            // which protected member is asked about, so it is remembered for the walk.
+            Visibility::Protected if m.is_static || same_package(declaring, self.site) => {
+                protected_visible(self.resolver, declaring, self.receiver, m.is_static, self.site)
+            }
+            Visibility::Protected => *self.receiver_in_site.get_or_init(|| {
+                protected_visible(self.resolver, declaring, self.receiver, false, self.site)
+            }),
         }
-        // Hide a private member from an external / cross-class receiver (the common case: a field
-        // of another object). Protected stays visible — hiding it would need subclass context and
-        // risks dropping a genuinely-accessible member.
-        if m.visibility == Visibility::Private && !allow_private {
-            continue;
-        }
-        // Package-private is visible only from the same package, and the JDK's own internals are
-        // full of it: `String.` opened on `COMPACT_STRINGS`, `LATIN1`, `UTF16` and
-        // `checkBoundsBeginEnd` before it reached anything you could write. See `same_package` for
-        // why this hides only when it is sure.
-        if m.visibility == Visibility::Package && !same_package(declaring, site) {
-            continue;
-        }
-        if !seen.insert(dedup_key(m)) {
-            continue;
-        }
+    }
+
+    fn ranked(&self, m: &Member, declaring: &str, depth: usize, cm: &ClassMembers, tier: u8) -> Ranked {
+        let origin = rank::origin(m, declaring, depth, cm);
+        // A record's implicit `equals` sits on the record itself; scored as the inherited member it
+        // reads as, so the lists ordered by score alone (a bare name, a `::`) agree with this one.
+        let depth = if origin == MemberOrigin::Inherited { depth.max(1) } else { depth };
         let (insert, stops) = call_syntax(m);
         // A `void` method produces nothing, and `Fit::None` is what the walk answers for it.
         let fit = if m.return_type.binary_name == "void" && m.return_type.dims == 0 {
             rank::Fit::None
         } else {
-            ctx.fit(&m.return_type, resolver)
+            self.ctx.fit(&m.return_type, self.resolver)
         };
-        out.push(Ranked {
-            score: rank::score(m, declaring, depth, ctx) - rank::tier_penalty(tier),
+        Ranked {
+            score: rank::score(m, declaring, depth, self.ctx) - rank::tier_penalty(tier),
             fit,
+            tier,
             item: CompletionItem {
                 label: m.name.clone(),
                 kind: kind_tag(m.kind).to_string(),
-                detail: Some(render_detail(m)),
+                detail: Some(self.detail(m, declaring)),
+                signature: parameter_list(m),
                 insert_text: insert,
                 snippet_stops: stops,
                 auto_import: None, // a member has no import to add
-                // Carried on the wire for whoever draws it (the Java popup does not yet); the
-                // ranking is what puts it last today. One answer, asked once, so the two can
-                // never disagree about which member is meant.
+                // Drawn struck through, and ranked last by the same answer — one question, asked
+                // once, so the two can never disagree about which member is meant.
                 deprecated: rank::is_deprecated(m),
                 owner: Some(declaring.to_string()),
+                member_origin: Some(origin),
+                modifiers: modifiers_of(m),
                 ..Default::default()
             },
-        });
+        }
+    }
+
+    /// The right-hand column of a member row — [`render_detail`], except for the one member whose
+    /// declared type is a lie at every call site.
+    ///
+    /// `Object.getClass()` is declared `Class<?>` and typed by the compiler as
+    /// `Class<? extends |T|>`, the erasure of the receiver's static type. That is what IntelliJ
+    /// shows, and it is free to show: the receiver is right here.
+    fn detail(&self, m: &Member, declaring: &str) -> String {
+        if declaring == rank::OBJECT && m.name == "getClass" && m.params.is_empty() {
+            let dims = "[]".repeat(usize::from(self.receiver.dims));
+            return format!("Class<? extends {}{dims}>", simple_of(&self.receiver.binary_name));
+        }
+        render_detail(m)
     }
 }
 
@@ -631,22 +755,38 @@ pub(crate) fn kind_tag(k: MemberKind) -> &'static str {
     }
 }
 
-/// A readable signature line for the completion `detail`.
-/// What the popup shows to the RIGHT of a candidate's name: `(String, int) : void` for a method,
-/// the type for a field.
+/// What the popup shows on the RIGHT of a member row: the type a field holds, or a method returns.
 ///
-/// The name is deliberately not repeated. The row already opens with it — the label is the first
-/// thing on the line — so a detail that began with it again rendered as
-/// `addAllowedHeader  addAllowedHeader(String) : void`, which spends the width that the
-/// parameters and the return type were the point of showing.
+/// The parameters are not in it: they sit beside the name, where IntelliJ draws them — see
+/// [`parameter_list`] — so the right-hand column holds the one thing a reader compares down the
+/// list, what each candidate produces.
 pub(crate) fn render_detail(m: &Member) -> String {
-    match m.kind {
-        MemberKind::Field => render_type(&m.return_type),
-        MemberKind::Method => {
-            let params: Vec<String> = m.params.iter().map(render_type).collect();
-            format!("({}) : {}", params.join(", "), render_type(&m.return_type))
-        }
+    render_type(&m.return_type)
+}
+
+/// The parameter list a method row shows beside its name — `(String prefix, int limit)`.
+///
+/// With a name where the member carries one: a project method always does, a class file compiled
+/// without `-parameters` does not, and then the type stands alone rather than `arg0` stating a name
+/// that is not true (see [`named_parameters`]). `None` for a field.
+pub(crate) fn parameter_list(m: &Member) -> Option<String> {
+    if m.kind != MemberKind::Method {
+        return None;
     }
+    let params: Vec<String> = named_parameters(m)
+        .into_iter()
+        .map(|(ty, name)| render_param(&ty, name.as_deref().unwrap_or("")))
+        .collect();
+    Some(format!("({})", params.join(", ")))
+}
+
+/// The modifiers the popup marks on a member's icon, in the wire's fixed vocabulary.
+pub(crate) fn modifiers_of(m: &Member) -> Vec<String> {
+    [(m.is_static, "static"), (m.is_abstract, "abstract"), (m.is_final, "final")]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, word)| word.to_string())
+        .collect()
 }
 
 
@@ -659,6 +799,7 @@ mod overload_collapse_tests {
         Ranked {
             score,
             fit: rank::Fit::None,
+            tier: 0,
             item: CompletionItem {
                 label: label.to_string(),
                 kind: kind.to_string(),
@@ -785,6 +926,131 @@ mod overload_collapse_tests {
         let mut v = vec![fitting("of", 9, rank::Fit::None), fitting("of", 1, rank::Fit::Exact)];
         collapse_overloads(&mut v);
         assert_eq!(v[0].fit, rank::Fit::Exact);
+    }
+
+    /// A member row as the walk produces it: where it stands, how it matched, how it scored.
+    fn member(label: &str, origin: MemberOrigin, tier: u8, score: i32) -> Ranked {
+        let mut r = item("method", label, "", score);
+        r.tier = tier;
+        r.item.member_origin = Some(origin);
+        r
+    }
+
+    fn sorted_members(mut v: Vec<Ranked>) -> Vec<String> {
+        sort_members(&mut v);
+        labels(&v)
+    }
+
+    /// The reported popup: `route.` opened on the record's implicit `equals` and `hashCode` before
+    /// its own `prefix()`, and `Object`'s members came last only by score.
+    #[test]
+    fn own_members_come_before_inherited_ones_which_come_before_objects() {
+        let v = sorted_members(vec![
+            member("getClass", MemberOrigin::Object, 0, 90),
+            member("equals", MemberOrigin::Inherited, 0, 50),
+            member("target_uri", MemberOrigin::Own, 0, 0),
+            member("prefix", MemberOrigin::Own, 0, 0),
+        ]);
+        assert_eq!(v, ["prefix", "target_uri", "equals", "getClass"]);
+    }
+
+    /// A habit or a use count reorders WITHIN an origin, never across it.
+    #[test]
+    fn the_score_orders_within_one_origin() {
+        let v = sorted_members(vec![
+            member("legs", MemberOrigin::Inherited, 0, 1),
+            member("add", MemberOrigin::Inherited, 0, 30),
+            member("fetch", MemberOrigin::Own, 0, -40),
+        ]);
+        assert_eq!(v, ["fetch", "add", "legs"]);
+    }
+
+    /// `s.to` — what was literally typed matters more than who declares it.
+    #[test]
+    fn the_match_tier_comes_before_the_origin() {
+        let v = sorted_members(vec![
+            member("targetOrigin", MemberOrigin::Own, 2, 0),
+            member("toString", MemberOrigin::Inherited, 0, 0),
+        ]);
+        assert_eq!(v, ["toString", "targetOrigin"]);
+    }
+
+    /// And what the position wants comes before either.
+    #[test]
+    fn the_fit_comes_before_the_origin() {
+        let mut fits = member("toString", MemberOrigin::Object, 0, 0);
+        fits.fit = rank::Fit::Exact;
+        let v = sorted_members(vec![member("prefix", MemberOrigin::Own, 0, 0), fits]);
+        assert_eq!(v, ["toString", "prefix"]);
+    }
+
+    /// `wait()`, `wait(long)`, `wait(long, int)` — three rows, fewest parameters first.
+    #[test]
+    fn overloads_stay_apart_in_parameter_order() {
+        let overload = |sig: &str| {
+            let mut r = member("wait", MemberOrigin::Object, 0, 0);
+            r.item.signature = Some(sig.to_string());
+            r
+        };
+        let mut v = vec![overload("(long, int)"), overload("()"), overload("(long)")];
+        sort_members(&mut v);
+        let sigs: Vec<_> = v.iter().map(|r| r.item.signature.clone().unwrap()).collect();
+        assert_eq!(sigs, ["()", "(long)", "(long, int)"]);
+    }
+
+    #[test]
+    fn the_first_own_member_is_preselected() {
+        let mut v = vec![member("prefix", MemberOrigin::Own, 0, 0), member("equals", MemberOrigin::Inherited, 0, 0)];
+        preselect_the_first_own_member(&mut v);
+        assert!(v[0].item.preselect && !v[1].item.preselect);
+    }
+
+    /// An own member further down is not pulled over the inherited one the order put first.
+    #[test]
+    fn nothing_is_preselected_when_the_first_row_is_not_own() {
+        let mut v = vec![member("toString", MemberOrigin::Object, 0, 0), member("prefix", MemberOrigin::Own, 0, 0)];
+        preselect_the_first_own_member(&mut v);
+        assert!(v.iter().all(|r| !r.item.preselect));
+    }
+
+    #[test]
+    fn an_existing_preselection_is_left_alone() {
+        let mut v = vec![member("prefix", MemberOrigin::Own, 0, 0), member("build", MemberOrigin::Own, 0, 0)];
+        v[1].item.preselect = true;
+        preselect_the_first_own_member(&mut v);
+        assert!(!v[0].item.preselect && v[1].item.preselect);
+    }
+
+    /// The folded `::` row shows the signature of the overload whose detail it shows.
+    #[test]
+    fn a_folded_row_takes_the_signature_of_its_face() {
+        let mut weak = item("method", "run", "void", 1);
+        weak.item.signature = Some("(Object o)".to_string());
+        let mut strong = item("method", "run", "void", 9);
+        strong.item.signature = Some("()".to_string());
+        let mut v = vec![weak, strong];
+        collapse_overloads(&mut v);
+        assert_eq!(v[0].item.signature.as_deref(), Some("()"));
+    }
+
+    /// Names from a source signature; a class file's types stand alone.
+    #[test]
+    fn the_parameter_list_names_what_the_member_names() {
+        let source = Member::method("equals", TypeRef::simple("boolean"), vec![TypeRef::simple("java/lang/Object")])
+            .sig("boolean equals(Object obj)");
+        assert_eq!(parameter_list(&source).as_deref(), Some("(Object obj)"));
+        let bytecode = Member::method("wait", TypeRef::simple("void"), vec![TypeRef::simple("long"), TypeRef::simple("int")])
+            .sig("(JI)V");
+        assert_eq!(parameter_list(&bytecode).as_deref(), Some("(long, int)"));
+        assert_eq!(render_detail(&source), "boolean");
+        assert_eq!(parameter_list(&Member::field("name", TypeRef::simple("java/lang/String"))), None);
+    }
+
+    #[test]
+    fn the_modifiers_are_the_wire_vocabulary() {
+        let constant = Member::field("MAX", TypeRef::simple("int")).stat().final_();
+        assert_eq!(modifiers_of(&constant), ["static", "final"]);
+        assert!(modifiers_of(&Member::method("run", TypeRef::simple("void"), Vec::new())).is_empty());
     }
 
     /// Different methods are not overloads of each other.

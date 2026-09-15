@@ -1,9 +1,9 @@
 /**
  * Bennu window UI store — chrome state for the standalone Java-editor window:
- * which left / right / bottom dockable panel is open, the tree expansion set for
- * the Project tool, and the docs/settings/palette/find overlay flags. Pure
- * session UI state (no persistence needed yet) — mirrors the merula window's
- * `merula-store` shape at a smaller scale.
+ * which left / right / bottom dockable panel is open, and the docs/settings/palette/find
+ * overlay flags. Pure session UI state — mirrors the merula window's `merula-store` shape
+ * at a smaller scale. Which tree rows are open is NOT here: it is remembered per project,
+ * in `tree-expansion.svelte.ts`.
  *
  * Tool-window layout (IntelliJ New UI):
  *   • LEFT rail (top)     — Project (tree), Structure (symbols), Dependencies.
@@ -21,7 +21,6 @@
 
 import type { FrameworkCatalogId } from '$lib/components/bennu/framework-catalogs';
 
-import { SvelteSet } from 'svelte/reactivity';
 import type { GenerateMode } from '$lib/components/bennu/bennu-intentions';
 import type { TemplateKindId } from '$lib/ipc/bennu/templates';
 
@@ -222,10 +221,6 @@ function createBennuUiStore() {
   // `bennuIntentionsStore`; the window mounts it unconditionally. No flag needed
   // here — the openers below delegate to that store.
 
-  // Project-tree expansion set (controlled Tree expansion) so the toolbar can
-  // Collapse-all / Expand-all and Select-opened-file can reveal a path.
-  const treeExpanded = new SvelteSet<string>();
-
   // Goto relay — a panel (Structure / Problems / a find hit) requests a jump; the
   // editor watches this ticking target and scrolls there. A monotonically bumped
   // `nonce` makes a repeat jump to the same line fire again.
@@ -312,7 +307,6 @@ function createBennuUiStore() {
     get gotoOffsetTarget() { return gotoOffsetTarget; },
     get revealTarget() { return revealTarget; },
     get newTarget() { return newTarget; },
-    get treeExpanded() { return treeExpanded; },
 
     /** Toggle a left tool window (clicking the active one closes it). */
     toggleLeft(p: LeftPanel)  { leftPanel = leftPanel === p ? null : p; },
@@ -539,16 +533,6 @@ function createBennuUiStore() {
       leftPanel = 'project';
       newTarget = { what, nonce: newTarget.nonce + 1 };
     },
-
-    // ── Project-tree expansion (controlled) ──────────────────────────────────
-    isExpanded(id: string): boolean { return treeExpanded.has(id); },
-    setExpanded(id: string, next: boolean) {
-      if (next) treeExpanded.add(id); else treeExpanded.delete(id);
-    },
-    /** Collapse every folder in the Project tree. */
-    collapseAllTree() { treeExpanded.clear(); },
-    /** Expand a set of ids (the sidebar computes the full folder id list). */
-    expandTreeIds(ids: Iterable<string>) { for (const id of ids) treeExpanded.add(id); },
   };
 }
 

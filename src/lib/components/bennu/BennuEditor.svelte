@@ -137,6 +137,7 @@
   // Which lines compile to bytecode — the gutter offers a breakpoint only on those.
   import { isFontFile, isSpreadsheetFile, isWordFile, opensAsPreview } from '$lib/utils/preview-files';
   import { breakpointableLines } from './breakpoint-lines';
+  import { breakpointLanguageOf, libraryClassOfSource, outerClass } from './library-breakpoints';
   import { buildDiagnosticsFor } from './build-diags';
   import { spellcheck as ipcSpellcheck, type SpellHit } from '$lib/ipc/bennu/spell';
   import { mojibakeCheck as ipcMojibakeCheck } from '$lib/ipc/bennu/mojibake';
@@ -161,6 +162,8 @@
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import { bennuNavStore, type NavPlace } from '$lib/stores/bennu/nav-history.svelte';
   import { NavFlow } from './nav-flow';
+  import { lineEditsOf } from './nav-ring';
+  import type { ChangeSet, Text as CmText } from '@codemirror/state';
   import { bennuAstStore } from '$lib/stores/bennu/ast.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { orderIntentions, type GenerateMode, type IntentionItem } from './bennu-intentions';
@@ -391,18 +394,17 @@
   // ── Caret position (footer, via the UI store) ────────────────────────────────
   let caretLine = $state(1);
   let caretCol = $state(1);
+  /** The document `caretLine`/`caretCol` belong to — the editor that REPORTED them, which during a
+   *  tab switch is not yet the active file. Plain `let`: only read inside closures. */
+  let caretFile: string | null = null;
 
   // ── Navigation history (Ctrl+Alt+←/→) ─────────────────────────────────────────
   //
-  // **A stop is an ACTION, not a caret movement.** Go to declaration, a usage, a structure or
-  // find hit, a diagnostic, a switch to another tab — those navigate. Arrow keys, a click and
-  // page-down are reading, and while they pushed stops the ring filled with places nobody chose
-  // to go to, which is what Back then walked through.
-  //
-  // The other half of feeling like IntelliJ's is that **the stop you are sitting on follows your
-  // caret** (`refine`). Nothing is pushed by reading, but the entry for the file you are in always
-  // says where you are — so the moment you jump away it is already the place you left, and coming
-  // back lands there rather than on the line you first arrived at.
+  // **A stop is the place a NAVIGATION left.** Go to declaration, a usage, a structure or find
+  // hit, a diagnostic, a switch to another tab — those navigate, and each records where you were
+  // when it started. Arrow keys, a click and page-down are reading and record nothing. The present
+  // is never stored: Back hands the history where you are, and it goes onto Forward
+  // (`nav-ring.ts`, IntelliJ's two-stack model). Stored lines move with edits (`onDocChange`).
   //
   // ⚠️ The mechanism itself lives in `nav-flow.ts` and is **unit-tested** (`nav-flow.test.ts`).
   // It is there and not here because every failure this had was a question about ORDER — a tab is
@@ -443,14 +445,25 @@
     // A frame, not a microtask: what is being waited for is a buffer arriving and an editor
     // mounting, both of which the browser only finishes between frames.
     settle: () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
-    caret: () => {
-      const file = projectStore.activeFilePath;
-      return file ? { file, line: caretLine, col: caretCol } : null;
-    },
+    // Attributed to the document that reported the caret, never to the active file: a panel jump
+    // switches the tab before its go-to runs, and the outgoing editor's line filed under the
+    // incoming file's path was a stop that existed in neither — which is where Back then went.
+    caret: () => (caretFile ? { file: caretFile, line: caretLine, col: caretCol } : null),
+    sameFile: (a, b) => isSamePath(a, b),
     ring: {
-      push: (p) => bennuNavStore.push(p),
-      refine: (p) => bennuNavStore.refine(p),
+      leave: (p) => bennuNavStore.leave(p),
+      arrive: (p) => bennuNavStore.arrive(p),
     },
+  });
+
+  // A new project: where the flow thinks the reader was belongs to the old one, and the first
+  // arrival would record it as a stop. (The store itself is reset by the window.)
+  let navRoot: string | null | undefined;
+  $effect(() => {
+    const root = projectStore.project?.root ?? null;
+    if (root === navRoot) return;
+    navRoot = root;
+    untrack(() => navFlow.reset());
   });
 
   /**
@@ -483,8 +496,9 @@
     if (file) void goTo({ file, line, col }, true);
   }
 
-  function onCaret(line: number, col: number) {
+  function onCaret(line: number, col: number, info?: { key?: string; user: boolean }) {
     caretLine = line; caretCol = col;
+    caretFile = info?.key ?? activePath ?? null;
     bennuUiStore.setCaret(line, col);
     templateCaret = { line, col };
 
@@ -504,7 +518,9 @@
       void bennuAstStore.revealAt(editorComp.caretByteOffset());
     }
 
-    const path = activePath;
+    // The reporting document, not the active one: a late caret from the outgoing editor must not
+    // be remembered — or recorded — as a line of the file being switched to.
+    const path = caretFile;
     if (!path) return;
 
     // Remembered across restarts (debounced hard in the store — this runs on every arrow key).
@@ -512,23 +528,40 @@
     // survives closing it.
     projectStore.rememberCaret(path, line, col);
 
-    // And the history. Whether this event is a stop, a refinement or transit is the flow's
+    // And the history. Whether this event is an arrival, reading or transit is the flow's
     // question, not this one's — see `nav-flow.ts`.
-    navFlow.onCaret({ file: path, line, col });
+    navFlow.onCaret({ file: path, line, col }, info?.user ?? false);
   }
 
-  /** Ctrl+Alt+← — jump back to the previous place in the navigation history. */
+  /** Ctrl+Alt+← — back to where the last navigation started. */
   export function navBack() {
-    const place = bennuNavStore.back();
-    // `record: false` — the ring has already moved to this entry, and pushing the destination on
-    // top of it truncates the forward branch. That is why Forward used to stop working after any
-    // Back that crossed a file.
-    if (place) void goTo(place, false);
+    void stepHistory('back');
   }
-  /** Ctrl+Alt+→ — jump forward again after a Back. */
+  /** Ctrl+Alt+→ — forward again after a Back. */
   export function navForward() {
-    const place = bennuNavStore.forward();
-    if (place) void goTo(place, false);
+    void stepHistory('forward');
+  }
+
+  /**
+   * One step through the history, from where the reader is (or, mid-flight, from where the previous
+   * step was going). `record: false`: the history has already moved the present onto the opposite
+   * stack, and recording here would truncate Forward.
+   *
+   * A stop in a file that cannot be opened any more (deleted, renamed away) is forgotten and the
+   * step continues past it, instead of Back getting stuck on it.
+   */
+  async function stepHistory(dir: 'back' | 'forward') {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const here = navFlow.here;
+      const place = dir === 'back' ? bennuNavStore.back(here) : bennuNavStore.forward(here);
+      if (!place) return;
+      try {
+        await goTo(place, false);
+        return;
+      } catch {
+        bennuNavStore.forget(place.file);
+      }
+    }
   }
 
   /** Ctrl+Shift+Backspace — back to where you were last TYPING.
@@ -573,9 +606,8 @@
     if (!caret || (caret.line === 1 && caret.col === 1)) return;
     void tick().then(() => {
       if (projectStore.activeFilePath !== path) return;
-      // No history call here: the scroll moves the caret, and the caret handler refines the stop
-      // this tab switch pushed — which is what stops Back landing on line 1 of a tab you had been
-      // reading halfway down.
+      // No history call here: restoring the caret is not a navigation. It only moves where the
+      // reader is settled in this tab, which is what the next jump records as its origin.
       editorComp?.scrollToLineCol(caret.line, caret.col);
     });
   });
@@ -651,11 +683,30 @@
   function onInput(text: string) {
     if (activePath) {
       projectStore.setSource(activePath, text);
-      // Where you were typing, for Ctrl+Shift+Backspace. Merged by region in the store, so a
-      // burst of typing is one place rather than one per keystroke.
-      bennuNavStore.noteEdit({ file: activePath, line: caretLine, col: caretCol });
     }
     docRevision += 1;
+  }
+
+  /**
+   * Every change to the buffer, with CodeMirror's own record of what moved.
+   *
+   * The history remembers lines, and a line number is only true until someone types above it: the
+   * stops in this file move with the text. A change made IN the editor is also where you were
+   * typing (Ctrl+Shift+Backspace) — taken from the change itself, because the caret event for it
+   * arrives after the change and `caretLine` is still the line before.
+   */
+  function onDocChange(
+    c: { changes: ChangeSet; before: CmText; after: CmText; external: boolean },
+    key?: string,
+  ) {
+    const file = key ?? activePath;
+    if (!file) return;
+    bennuNavStore.applyEdits(file, lineEditsOf(c.changes, c.before, c.after));
+    if (c.external) return;
+    let end = 0;
+    c.changes.iterChanges((_fromA, _toA, _fromB, toB) => { end = toB; });
+    const line = c.after.lineAt(end);
+    bennuNavStore.noteEdit({ file, line: line.number, col: end - line.from + 1 });
   }
 
   // ── The markdown mount ───────────────────────────────────────────────────────
@@ -2283,17 +2334,33 @@
    * Whether this file can hold a breakpoint at all.
    *
    * Java **and Rust**: both have a debugger behind them now, and the two are the same gesture in the
-   * same margin — see `debug_backend` on the backend side. A decompiled view is excluded because its
-   * line numbers mean nothing to the VM, and everything else (a `.properties`, a `.xml`) compiles to
-   * nothing at all: offering a gutter there is offering a click that can only ever be pending.
+   * same margin — see `debug_backend` on the backend side. A **library** source view takes them too
+   * when it is real source (a `-sources.jar`, the JDK's `src.zip`); a decompiled stub does not,
+   * because its line numbers mean nothing to the VM — see `library-breakpoints.ts`. Everything else
+   * (a `.properties`, a `.xml`) compiles to nothing at all: offering a gutter there is offering a
+   * click that can only ever be pending.
    */
-  const breakLanguage: 'java' | 'rust' | null = $derived.by(() => {
-    if (!activePath || isDecompiledView) return null;
-    if (isJavaFileOf(activePath)) return 'java';
-    if (isRustFileOf(activePath)) return 'rust';
-    return null;
-  });
+  /** The buffer of a library view — read only there, to tell real source from a stub and to name
+   *  its class. Empty for a project file, so typing in one does not re-run any of this. */
+  const libraryViewSource = $derived(
+    isDecompiledView && activePath ? projectStore.sourceOf(activePath) : '',
+  );
+  const breakLanguage: 'java' | 'rust' | null = $derived(
+    breakpointLanguageOf({
+      path: activePath,
+      language: !activePath ? null : isJavaFileOf(activePath) ? 'java' : isRustFileOf(activePath) ? 'rust' : null,
+      libraryView: isDecompiledView,
+      source: libraryViewSource,
+    }),
+  );
   const canBreak = $derived(breakLanguage !== null);
+  /** The top-level class a library view declares — its breakpoints' identity. `undefined` for a
+   *  project file, and for a view that takes no breakpoints. */
+  const libraryClass: string | undefined = $derived(
+    isDecompiledView && breakLanguage && activePath
+      ? (libraryClassOfSource(activePath, libraryViewSource) ?? undefined)
+      : undefined,
+  );
 
   /**
    * The gutter's dots: solid where the VM accepted the breakpoint, hollow where it is waiting
@@ -2307,7 +2374,7 @@
   const breakpointMarks = $derived.by(() => {
     const root = projectStore.project?.root;
     if (!root || !activePath || !canBreak) return [];
-    return bennuDebugStore.breakpointsIn(root, activePath).map((b) => {
+    return bennuDebugStore.breakpointsIn(root, activePath, libraryClass).map((b) => {
       const status = bennuDebugStore.statusOf(b.file, b.line);
       const restricted = !!b.condition.trim() || b.hit_count > 1;
       const classes = ['cm-bp'];
@@ -2363,7 +2430,9 @@
 
   function onBreakpointClick(line: number) {
     const root = projectStore.project?.root;
-    if (root && activePath && canBreak) bennuDebugStore.toggleBreakpoint(root, activePath, line);
+    if (root && activePath && canBreak) {
+      bennuDebugStore.toggleBreakpoint(root, activePath, line, libraryClass);
+    }
   }
 
   /**
@@ -2378,11 +2447,11 @@
     if (!root || !activePath || !canBreak) return false;
     if (!breakpointable.has(caretLine)) {
       const existing = bennuDebugStore
-        .breakpointsIn(root, activePath)
+        .breakpointsIn(root, activePath, libraryClass)
         .some((b) => b.line === caretLine);
       if (!existing) return false;
     }
-    bennuDebugStore.toggleBreakpoint(root, activePath, caretLine);
+    bennuDebugStore.toggleBreakpoint(root, activePath, caretLine, libraryClass);
     return true;
   }
 
@@ -2392,7 +2461,11 @@
     const root = projectStore.project?.root;
     if (!root || !activePath || !canBreak) return;
     const path = activePath;
-    const existing = bennuDebugStore.breakpointsIn(root, path).find((b) => b.line === line);
+    const cls = libraryClass;
+    const existing = bennuDebugStore.breakpointsIn(root, path, cls).find((b) => b.line === line);
+    // The breakpoint's own file, not the tab's: a library breakpoint may have been set on a view
+    // cached at another path, and it is its stored file every edit below is keyed by.
+    const at = existing?.file ?? path;
     const conditional = !!existing?.condition.trim() || (existing?.hit_count ?? 0) > 1;
     const items: MenuItem[] = existing
       ? [
@@ -2406,14 +2479,14 @@
         ]
       : [{ id: 'add', label: 'Set breakpoint' }];
     bennuContextMenuStore.show(e.clientX, e.clientY, items, (id) => {
-      if (id === 'add') bennuDebugStore.toggleBreakpoint(root, path, line);
-      else if (id === 'remove') bennuDebugStore.removeBreakpoint(root, path, line);
+      if (id === 'add') bennuDebugStore.toggleBreakpoint(root, path, line, cls);
+      else if (id === 'remove') bennuDebugStore.removeBreakpoint(root, at, line);
       else if (id === 'clear') bennuDebugStore.clearBreakpoints(root);
       // The list, focused on this one. A popup hanging off the gutter would be a second place to
       // edit the same thing, and one the keyboard could not reach.
-      else if (id === 'condition') bennuUiStore.openBreakpoints({ file: path, line });
+      else if (id === 'condition') bennuUiStore.openBreakpoints({ file: at, line });
       else if (id === 'toggle' && existing) {
-        bennuDebugStore.setBreakpointEnabled(root, path, line, !existing.enabled);
+        bennuDebugStore.setBreakpointEnabled(root, at, line, !existing.enabled);
       }
     });
   }
@@ -2433,8 +2506,13 @@
    */
   const pausedLine = $derived.by(() => {
     const frame = bennuDebugStore.currentFrame;
-    if (!frame?.file || !frame.line || !activePath) return [];
-    if (canonFile(frame.file).toLowerCase() !== canonFile(activePath).toLowerCase()) return [];
+    if (!frame?.line || !activePath) return [];
+    const here = frame.file
+      ? canonFile(frame.file).toLowerCase() === canonFile(activePath).toLowerCase()
+      // A library frame carries no file: its view is recognised by the class it declares. Only a
+      // real-source view has one — a stub's lines are not the frame's lines.
+      : !!libraryClass && !!frame.class && outerClass(frame.class) === libraryClass;
+    if (!here) return [];
     return [{ line: frame.line, className: 'cm-paused-line' }];
   });
   const editorLineHighlights = $derived([
@@ -4741,6 +4819,7 @@
           initialState={viewStates.get(activePath)}
           stateKey={activePath}
           oninput={onInput}
+          ondocchange={onDocChange}
           oncaret={onCaret}
           onViewState={(s, key) => { if (key) viewStates.set(key, s); }}
           onGoto={onEditorGoto}

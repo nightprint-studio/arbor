@@ -11,7 +11,19 @@ fn name_at(marked: &str) -> Option<String> {
 fn found(marked: &str, case_sensitive: bool) -> Option<DeclarationName> {
     let offset = marked.find(CARET).expect("no caret marker");
     let source = marked.replacen(CARET, "", 1);
-    declaration_name_at(&source, offset, case_sensitive)
+    declaration_name_at(&source, offset, case_sensitive, |name, _| name)
+}
+
+/// What `spell` is told at the caret marked in `marked`: the kind, and the file's names in order.
+fn context_at(marked: &str) -> Option<(DeclarationKind, Vec<String>)> {
+    let offset = marked.find(CARET).expect("no caret marker");
+    let source = marked.replacen(CARET, "", 1);
+    let mut seen = None;
+    declaration_name_at(&source, offset, false, |name, context| {
+        seen = Some((context.kind, context.declared_in_file.iter().map(|n| n.to_string()).collect()));
+        name
+    });
+    seen
 }
 
 fn in_method(body: &str) -> String {
@@ -271,10 +283,49 @@ fn not_with_the_caret_inside_a_word() {
 
 #[test]
 fn an_offset_out_of_range_or_inside_a_character_is_refused() {
-    assert_eq!(declaration_name_at("class A { Order ", 99, false), None);
+    assert_eq!(declaration_name_at("class A { Order ", 99, false, |name, _| name), None);
     let src = "class A { è Order ";
     let inside = src.find('è').unwrap() + 1;
-    assert_eq!(declaration_name_at(src, inside, false), None);
+    assert_eq!(declaration_name_at(src, inside, false, |name, _| name), None);
+}
+
+// ── what the spelling is told ─────────────────────────────────────────────────
+
+#[test]
+fn the_kind_of_declaration_is_told() {
+    let kind = |marked: &str| context_at(marked).map(|(kind, _)| kind);
+    assert_eq!(kind("class A { private final Order ‸ }"), Some(DeclarationKind::Field));
+    assert_eq!(kind("enum E { RED; private Order ‸ }"), Some(DeclarationKind::Field));
+    assert_eq!(kind(&in_method("Order ‸")), Some(DeclarationKind::Local));
+    assert_eq!(kind(&in_method("for (Order ‸")), Some(DeclarationKind::Local));
+    assert_eq!(kind(&in_method("try (Connection c = open(); Statement ‸")), Some(DeclarationKind::Local));
+    assert_eq!(kind(&in_method("switch (k) { case 1: Order ‸")), Some(DeclarationKind::Local));
+    assert_eq!(kind("class A { void m(int a, Order ‸) {} }"), Some(DeclarationKind::Parameter));
+    assert_eq!(kind("class A { A(OrderRepository ‸) {} }"), Some(DeclarationKind::Parameter));
+    assert_eq!(kind("class A { void m() { run(new Runnable() { Order ‸ }); } }"), Some(DeclarationKind::Field));
+}
+
+#[test]
+fn every_variable_the_file_declares_is_told_whatever_its_scope() {
+    let src = "class A {\n    private IdentityResolver identity_resolver;\n    void m(String first_name) { int x = 1; }\n    private Order ‸\n}";
+    let (_, names) = context_at(src).expect("a declaration");
+    assert_eq!(names, ["identity_resolver", "first_name", "x"]);
+}
+
+#[test]
+fn the_names_a_file_declares_are_listed_even_mid_edit() {
+    let src = "class A {\n    private IdentityResolver identity_resolver;\n    void m(String first_name) { orders.fo";
+    assert_eq!(declared_variable_names(src), ["identity_resolver", "first_name"]);
+}
+
+/// The digit is added to the name that will be written, so a clash in the project's spelling counts.
+#[test]
+fn a_spelled_name_already_taken_gets_a_digit() {
+    let marked = "class A { private Order my_order; private MyOrder ‸ }";
+    let offset = marked.find(CARET).unwrap();
+    let source = marked.replacen(CARET, "", 1);
+    let found = declaration_name_at(&source, offset, false, |_, _| "my_order".to_string());
+    assert_eq!(found.map(|f| f.name).as_deref(), Some("my_order1"));
 }
 
 // ── names already taken ───────────────────────────────────────────────────────

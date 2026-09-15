@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * Debugging: starting a session and setting breakpoints, several sessions at once, Rust through a debug adapter and its
-   * formatters, where a breakpoint can go and what its dot says, the list, muting, and conditions with pass counts.
+   * formatters, where a breakpoint can go (library sources included) and what its dot says, the list, muting, and conditions with pass counts.
    */
   import Callout from '$lib/components/shared/ui/Callout.svelte';
 </script>
@@ -95,7 +95,23 @@
   <li>A field <em>with</em> an initializer is offered, since its initializer runs; so is any statement.</li>
   <li>A breakpoint already set stays clickable when an edit makes its line unqualified — otherwise you could not remove it.</li>
   <li>Breakpoints follow their lines as you edit above them. One landing on a line with no code binds to the statement below, and the tooltip names the line it really stops on.</li>
+  <li>A line inside an anonymous or nested class binds in that class, including one the program loads later.</li>
 </ul>
+
+<h3>In a library's source</h3>
+<p>
+  A dependency opened with its <strong>downloaded sources</strong>, or a JDK class, takes breakpoints like your own code: the margin, <kbd>Ctrl</kbd> + <kbd>F8</kbd>, conditions
+  and pass counts. The breakpoint is remembered by its <em>class</em> — <code>org.springframework.web.client.RestClient</code>, line 118 — so it is kept with the project and
+  installed on every launch, hollow until the program loads that class.
+</p>
+<ul>
+  <li>When one stops the program, the frame selected is that library line, not the nearest frame of your own code.</li>
+  <li>The breakpoint list shows it by class and package, marked <em>library</em>; choosing it reopens the source.</li>
+</ul>
+<Callout variant="info" title="Not in a decompiled view">
+  A class with no sources opens as signatures rebuilt from bytecode, whose line numbers are Bennu's rather than the class's — so its margin offers nothing. <em>Download sources</em>
+  replaces it with the real file, and breakpoints can be set from then on. They stop on the lines of the version on the classpath: sources of another version put them on the wrong statements.
+</Callout>
 
 <h3>What the dot says</h3>
 <table>

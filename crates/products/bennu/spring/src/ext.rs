@@ -24,8 +24,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use bennu_ext::prelude::{
-    ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtStat, ExtTarget, FileCtx,
-    FrameworkExtension, ProjectScan, ScannedFile,
+    ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtIntention, ExtProblem, ExtStat, ExtTarget,
+    FileCtx, FrameworkExtension, ProjectScan, ScannedFile,
 };
 use bennu_proto::prelude::{CapabilitySet, CompletionItem, Diagnostic};
 
@@ -349,6 +349,14 @@ impl FrameworkExtension for SpringExtension {
                     }
                 }));
                 out.extend(self.endpoint_issues(&model, &ctx.path_str(), ctx.source));
+                // The declarations Spring refuses at startup or silently ignores. Independent of
+                // the weaving mode: a @Configuration is subclassed and a static field is skipped
+                // under AspectJ too.
+                out.extend(
+                    crate::bean_check::issues_in(&ctx.path_str(), ctx.source)
+                        .into_iter()
+                        .map(Diagnostic::from),
+                );
                 out
             }
             "xml" if xml_intel::is_bean_xml(ctx.source) => {
@@ -356,6 +364,19 @@ impl FrameworkExtension for SpringExtension {
             }
             _ => Vec::new(),
         }
+    }
+
+    /// The repairs for the declaration and proxy checks — see [`crate::fixes`].
+    fn intentions(
+        &self,
+        ctx: &FileCtx<'_>,
+        _offset: usize,
+        problems: &[ExtProblem],
+    ) -> Vec<ExtIntention> {
+        if ctx.extension() != "java" {
+            return Vec::new();
+        }
+        crate::fixes::intentions(ctx.source, problems)
     }
 
     fn highlights(&self, ctx: &FileCtx<'_>) -> Vec<ExtHighlight> {

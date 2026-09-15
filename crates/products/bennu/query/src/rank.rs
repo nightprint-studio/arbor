@@ -48,7 +48,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use bennu_java::prelude::{Member, MemberKind, TypeRef, TypeResolver, Visibility};
+use bennu_java::prelude::{ClassMembers, Member, MemberKind, TypeRef, TypeResolver, Visibility};
+use bennu_proto::prelude::MemberOrigin;
 
 /// How well what a candidate PRODUCES answers the type the position wants — the leading sort key
 /// of every completion list that has an expected type. Ordered worst to best, so `max` is the
@@ -67,7 +68,7 @@ pub enum Fit {
 }
 
 /// The binary name whose members match everything and are wanted almost never.
-const OBJECT: &str = "java/lang/Object";
+pub(crate) const OBJECT: &str = "java/lang/Object";
 
 /// How many uses in the current buffer can still improve an item's standing. Past this the signal
 /// has said what it has to say, and letting it keep climbing would let a much-used `getClass()`
@@ -469,7 +470,32 @@ pub fn score(m: &Member, declaring: &str, depth: usize, ctx: &Context) -> i32 {
     s
 }
 
-/// Whether the member is marked `@Deprecated`./// Whether the member is marked `@Deprecated`.
+/// Where `m`, found `depth` levels up the walk in `declaring` (whose members are `declared`), stands
+/// relative to the receiver — see [`MemberOrigin`].
+///
+/// The one judgement call is a record: its `equals`, `hashCode` and `toString` are declared ON the
+/// record (so they resolve without `java.lang.Object` indexed), and yet nobody wrote them. They read
+/// as what they are — `Object`'s contract, implemented for you — so they rank with the inherited
+/// members, after the record's components, and are not drawn as the record's own. A record that
+/// writes one itself cannot be told apart from here and is treated the same way; that costs a row's
+/// position, not its presence.
+pub fn origin(m: &Member, declaring: &str, depth: usize, declared: &ClassMembers) -> MemberOrigin {
+    if declaring == OBJECT {
+        MemberOrigin::Object
+    } else if depth > 0 || (declared.flags.is_record && is_object_contract(m)) {
+        MemberOrigin::Inherited
+    } else {
+        MemberOrigin::Own
+    }
+}
+
+/// `equals(Object)`, `hashCode()`, `toString()` — the three methods of `Object` a record implements.
+fn is_object_contract(m: &Member) -> bool {
+    m.kind == MemberKind::Method
+        && matches!((m.name.as_str(), m.params.len()), ("equals", 1) | ("hashCode", 0) | ("toString", 0))
+}
+
+/// Whether the member is marked `@Deprecated`.
 ///
 /// Source-only, and knowingly: a member decoded from a class file carries no annotations through
 /// the seam, so this never fires for a JDK or dependency member. The effect is that the signal is
@@ -687,6 +713,38 @@ mod tests {
         c.uses.insert("toString".to_string(), 9);
         let familiar_noise = score(&method("toString"), OBJECT, 2, &c);
         assert!(unused > familiar_noise, "familiarity must not outrank relevance");
+    }
+
+    fn declared(is_record: bool) -> ClassMembers {
+        ClassMembers {
+            superclass: None,
+            interfaces: Vec::new(),
+            methods: Vec::new(),
+            fields: Vec::new(),
+            flags: bennu_java::prelude::ClassFlags { is_record, ..Default::default() },
+            type_params: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_member_is_own_inherited_or_objects() {
+        let plain = declared(false);
+        assert_eq!(origin(&method("prefix"), "acme/ServiceRoute", 0, &plain), MemberOrigin::Own);
+        assert_eq!(origin(&method("legs"), "zoo/Animal", 1, &plain), MemberOrigin::Inherited);
+        assert_eq!(origin(&method("getClass"), OBJECT, 1, &plain), MemberOrigin::Object);
+        // A class that writes its own `toString` owns it.
+        assert_eq!(origin(&method("toString"), "acme/Order", 0, &plain), MemberOrigin::Own);
+    }
+
+    /// A record's `equals`, `hashCode` and `toString` are declared on it and written by nobody.
+    #[test]
+    fn a_records_implicit_object_methods_read_as_inherited() {
+        let record = declared(true);
+        let equals = Member::method("equals", TypeRef::simple("boolean"), vec![TypeRef::simple(OBJECT)]);
+        assert_eq!(origin(&equals, "acme/ServiceRoute", 0, &record), MemberOrigin::Inherited);
+        assert_eq!(origin(&method("hashCode"), "acme/ServiceRoute", 0, &record), MemberOrigin::Inherited);
+        // Its component accessors are its own.
+        assert_eq!(origin(&method("prefix"), "acme/ServiceRoute", 0, &record), MemberOrigin::Own);
     }
 
     /// The counter is a scan, not a parse — but it must at least agree with itself.

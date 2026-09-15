@@ -15,8 +15,14 @@ of `bennu-intel` so it depends only on the base crates.
    `bennu_data_dir()/jdk-index/`). `new(source)` is the in-memory-only variant.
 
 `completion(source, byte_offset, &resolver)` is the member-access query: infer the receiver type at
-the `.`, walk its members (super + interfaces), filter by the typed prefix, return
-`Vec<CompletionItem>`.
+the `.`, walk its members (super + interfaces), filter by the typed prefix and by what can be written
+from the caret's class (private / package-private / protected, JLS §6.6.2), return
+`Vec<CompletionItem>`. A member list is ordered by expected-type `Fit`, then match tier, then
+`MemberOrigin` (own > inherited > `Object`; a record's implicit `equals`/`hashCode`/`toString` count as
+inherited), then relevance; overloads stay separate rows (fewest parameters first — only a `::` list
+folds them), and with nothing typed the first own member is preselected. Each member item carries
+`signature` (`(String prefix, int limit)`), `detail` = the return type (`getClass()` typed
+`Class<? extends Receiver>`), `member_origin` and `modifiers`.
 
 `dep_record` powers the **incremental validation cache**: a `record(|| …)` scope captures every
 project type a validation reads through the resolver (`members_of` / `resolve_simple_name` are the
@@ -59,6 +65,10 @@ fn params_fit(declared: &[TypeRef], wanted: &[TypeRef]) -> bool
 // None < Subtype < Exact. Every completion list is ordered by it FIRST, then by relevance; the
 // only exact fit is marked `preselect`.
 enum Fit { None, Subtype, Exact }
+// Where a member stands relative to the receiver (bennu_proto::MemberOrigin: Object < Inherited < Own).
+fn member_origin(m: &Member, declaring: &str, depth: usize, declared: &ClassMembers) -> MemberOrigin
+// Whether a `protected` member of `declaring` can be written through `receiver` from `site`; true when unsure.
+fn protected_visible(resolver, declaring: &str, receiver: &TypeRef, is_static: bool, site: Option<&str>) -> bool
 // The classes a function slot receives (`opt.map(Re|)` → the Optional's element), as type items.
 fn functional_argument_types(source, caret, resolver, case) -> Vec<CompletionItem>
 fn inherited_members(resolver, java_files: &[PlanFile], file, type_name, line) -> Vec<InheritedMember>

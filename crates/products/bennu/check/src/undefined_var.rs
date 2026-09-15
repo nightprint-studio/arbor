@@ -20,8 +20,9 @@
 //!     position, NOT a declaration name, NOT a method-invocation `name`, NOT a `field_access`/scoped
 //!     suffix, NOT a type / annotation / label / case-label / import / package context;
 //!   * its nearest enclosing type must be the file's TOP-LEVEL class/enum, and its enclosing method a
-//!     direct member of it — NO intervening nested/anonymous/local `class_body`, NO enclosing lambda
-//!     (either could capture / declare a name in a scope we don't model). Any ambiguity → SKIP.
+//!     direct member of it — NO intervening nested/anonymous/local `class_body` (it could declare or
+//!     inherit a field we don't model). A lambda IS crossed: its parameters and block locals are
+//!     scopes like any other and RESOLUTION 1 reads them. Any ambiguity → SKIP.
 //!
 //! RESOLUTION — only flagged when the name matches NONE of these AND the type hierarchy is fully known:
 //!   1. a local / parameter / for-var / catch-param / try-resource / pattern-var in any enclosing
@@ -36,7 +37,7 @@
 //!      or any member of a fully-known wildcard owner (`import static X.*;`).
 //!
 //! Only when the name matches none of 1–6, the hierarchy is fully known, no unresolved static wildcard
-//! is present, and there's no intervening nested class / lambda, do we flag `Cannot resolve symbol `x``.
+//! is present, and there's no intervening nested class, do we flag `Cannot resolve symbol `x``.
 //!
 //! RECEIVERS — a bare identifier heading a call or a field read (`profile.name()`, `profile.name`)
 //! is judged too, under two extra gates on top of everything above, because a qualifier head may
@@ -58,7 +59,7 @@ use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
 use crate::scopes::{
-    is_value_position, resolves_as_local, scope_is_directly_top, single_top_level_type,
+    is_value_position, resolves_as_local, scope_is_top_across_lambdas, single_top_level_type,
 };
 
 use crate::nodes::{child_field_name, generated_names};
@@ -202,7 +203,10 @@ pub fn undefined_var_errors_in(
         // A whole-receiver head (`profile.x()`) is not a value position for the shared predicate —
         // it is judged here under the extra type / package gates below.
         let receiver = is_whole_receiver(n);
-        if !((receiver || is_value_position(n)) && scope_is_directly_top(n, top.node)) {
+        // A lambda may be crossed: it declares no fields and does not rebind `this`, and the names it
+        // DOES bind — its parameters, its block's locals — are read by `resolves_as_local` exactly as
+        // a method's are. Refusing it left every renamed parameter still used in a callback unjudged.
+        if !((receiver || is_value_position(n)) && scope_is_top_across_lambdas(n, top.node)) {
             continue;
         }
         let Ok(name) = n.utf8_text(bytes) else { continue };
@@ -263,7 +267,7 @@ pub fn undefined_var_errors_in(
         }
 
         // Matched NONE of 1–6, hierarchy fully known, no unresolved static wildcard, no intervening
-        // nested class / lambda → the name genuinely resolves to nothing here.
+        // nested class → the name genuinely resolves to nothing here.
         out.push(crate::check_id::CheckId::UnresolvedSymbol.at(n, format!("Cannot resolve symbol `{name}`")));
     }
     out
@@ -689,9 +693,94 @@ mod tests {
     }
 
     #[test]
-    fn identifier_in_lambda_is_skipped() {
+    fn identifier_in_lambda_is_flagged() {
         let src = "package com.acme;\nclass C extends Base { int count; void m() { Runnable r = () -> System.out.println(mystery); } }";
-        assert!(diags_with(src, &resolver()).is_empty());
+        let d = diags_with(src, &resolver());
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`mystery`"), "{d:?}");
+    }
+
+    // ── LAMBDAS ──────────────────────────────────────────────────────────────────────────────────
+
+    /// The report, verbatim: the parameter was renamed `request` → `requestz` and the lambda still
+    /// reads `request`. Multi-line parameters with leading commas, `final`, snake_case.
+    fn renamed_param_src(param: &str) -> String {
+        format!(
+            "package com.acme;\n\
+             class C extends Base {{\n\
+             \x20   private void insert_header_opt(\n\
+             \x20           final HttpRequest {param}\n\
+             \x20           , final Headers header\n\
+             \x20       ) {{\n\
+             \x20       RequestInfo.opt_header(header)\n\
+             \x20           .ifPresent(h -> request.getHeaders().add(header.header_name(), h));\n\
+             \x20   }}\n\
+             }}\n"
+        )
+    }
+
+    #[test]
+    fn a_renamed_parameter_still_read_in_a_lambda_is_flagged() {
+        let d = diags_with(&renamed_param_src("requestz"), &resolver());
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`request`"), "{d:?}");
+    }
+
+    #[test]
+    fn a_parameter_captured_by_a_lambda_is_resolved() {
+        let src = renamed_param_src("request");
+        assert!(diags_with(&src, &resolver()).is_empty(), "{:?}", diags_with(&src, &resolver()));
+    }
+
+    #[test]
+    fn lambda_parameters_of_every_shape_are_resolved() {
+        let src = "java.util.List<String> xs = null;\n\
+                   xs.forEach(h -> h.trim());\n\
+                   xs.forEach((h) -> h.trim());\n\
+                   xs.forEach((String h) -> h.trim());\n\
+                   java.util.Map<String, String> m = null; m.forEach((k, v) -> k.concat(v));";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    #[test]
+    fn a_block_lambda_local_is_resolved() {
+        let src = "Runnable r = () -> { String inner = \"x\"; inner.trim(); System.out.println(inner); };";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    #[test]
+    fn nested_lambdas_see_every_enclosing_parameter() {
+        let src = "java.util.List<String> xs = null;\n\
+                   xs.forEach(a -> xs.forEach(b -> a.concat(b)));";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+        let bad = "java.util.List<String> xs = null;\n\
+                   xs.forEach(a -> xs.forEach(b -> a.concat(c)));";
+        let d = diags(bad);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`c`"), "{d:?}");
+    }
+
+    #[test]
+    fn a_method_reference_in_a_lambda_is_not_flagged() {
+        let src = "java.util.List<String> xs = null; Runnable r = () -> xs.forEach(System.out::println);";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    #[test]
+    fn a_field_captured_by_a_lambda_is_resolved() {
+        assert!(diags("Runnable r = () -> System.out.println(count + base);").is_empty());
+    }
+
+    #[test]
+    fn a_lambda_under_an_unknown_supertype_is_skipped() {
+        let src = in_method("Runnable r = () -> System.out.println(mystery);");
+        assert!(diags_with(&src, &resolver_unknown_super()).is_empty());
+    }
+
+    #[test]
+    fn a_lambda_inside_an_anonymous_class_is_still_skipped() {
+        let src = "Runnable r = new Runnable() { public void run() { Runnable q = () -> System.out.println(mystery); } };";
+        assert!(diags(src).is_empty(), "{:?}", diags(src));
     }
 
     #[test]

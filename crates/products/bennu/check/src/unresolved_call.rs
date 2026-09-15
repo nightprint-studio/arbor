@@ -42,8 +42,9 @@
 //! PER-SITE guards (any failing → SKIP that call):
 //!   * it must be a `method_invocation` with NO `object` field — `x.foo()`, `Type.foo()`,
 //!     `super.foo()` all belong to [`crate::members`] / [`crate::super_method`], not here;
-//!   * its enclosing type must be the top-level one, crossing no lambda and no nested / anonymous /
-//!     local class body ([`crate::scopes::scope_is_directly_top`]) — any of those can declare methods
+//!   * its enclosing type must be the top-level one, crossing no nested / anonymous /
+//!     local class body — lambdas may be crossed, they declare no methods
+//!     ([`crate::scopes::scope_is_top_across_lambdas`]) — any of those classes can declare methods
 //!     we did not gather.
 //!
 //! RESOLUTION — flagged only when the name matches NONE of these:
@@ -75,7 +76,7 @@ use tree_sitter::Node;
 
 use crate::nodes::generated_names;
 use crate::resolve::type_binary;
-use crate::scopes::{scope_is_directly_top, single_top_level_type};
+use crate::scopes::{scope_is_top_across_lambdas, single_top_level_type};
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
 
 /// `java.lang.Object`'s methods — callable bare from any class body. Hard-listed rather than trusted
@@ -204,9 +205,10 @@ pub fn unresolved_call_errors_in(
         if name_node.has_error() {
             continue;
         }
-        // The call must sit directly in the top type — no lambda, no nested / anonymous / local class
-        // in between, any of which could declare the method we're about to call missing.
-        if !scope_is_directly_top(n, top.node) {
+        // The call must bind to the top type — no nested / anonymous / local class in between, any of
+        // which could declare the method we're about to call missing. A lambda declares no methods and
+        // does not rebind `this`, so a bare call inside one binds exactly as it would outside.
+        if !scope_is_top_across_lambdas(n, top.node) {
             continue;
         }
         let Ok(name) = name_node.utf8_text(bytes) else { continue };
@@ -434,9 +436,25 @@ mod tests {
         assert!(diags_with(src, &resolver()).is_empty());
     }
 
+    /// A lambda declares no methods: a missing one called inside it is as missing as outside.
     #[test]
-    fn a_call_inside_a_lambda_is_skipped() {
-        let src = "package com.acme;\nclass C extends Base { void own() {} void m() { Runnable r = () -> whatever(); } }";
+    fn a_missing_call_inside_a_lambda_is_flagged() {
+        let d = diags("Runnable r = () -> whatever();");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`whatever`"), "{d:?}");
+        let nested = diags("java.util.function.Consumer<String> c = s -> { Runnable r = () -> alsoMissing(); };");
+        assert_eq!(nested.len(), 1, "{nested:?}");
+    }
+
+    #[test]
+    fn an_existing_call_inside_a_lambda_is_resolved() {
+        assert!(diags("Runnable r = () -> own(); Runnable i = () -> { inherited(); toString(); };").is_empty());
+    }
+
+    /// The anonymous class, not the lambda, is what hides the binding.
+    #[test]
+    fn a_lambda_inside_an_anonymous_class_is_still_skipped() {
+        let src = "package com.acme;\nclass C extends Base { void own() {} void m() { Object o = new Object() { void run() { Runnable r = () -> nothingAnywhere(); } }; } }";
         assert!(diags_with(src, &resolver()).is_empty());
     }
 

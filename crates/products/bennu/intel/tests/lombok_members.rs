@@ -243,27 +243,23 @@ fn fluent_accessors_reach_completion_as_one_row_that_counts_both() {
     let s = p.source("Use.java").to_string();
     let off = at(&s, "o.\n") + "o.".len();
     let items = p.complete("Use.java", off);
-    let accessors: Vec<&str> = items
+    let accessors: Vec<(String, String)> = items
         .iter()
         .filter(|i| i.label == "customer" && i.kind == "method")
-        .filter_map(|i| i.detail.as_deref())
+        .map(|i| (i.signature.clone().unwrap_or_default(), i.detail.clone().unwrap_or_default()))
         .collect();
-    // Completion folds a name's overloads into ONE row (`collapse_overloads`) — accepting a
-    // completion writes the name, not the arguments, so a second row would be a second chance to
-    // choose with one outcome. What this test is really about is that BOTH accessors reach the fold:
-    // Lombok generates them from one field, and a dedup keyed on the name alone used to drop one.
-    assert_eq!(accessors.len(), 1, "one folded row, got {accessors:?}");
+    // Both accessors reach the list, each as a row of its own showing its parameters. What this
+    // test is really about is that neither is lost: Lombok generates them from one field, and a
+    // dedup keyed on the name alone used to drop one.
+    assert_eq!(accessors.len(), 2, "a getter row and a setter row, got {accessors:?}");
     assert!(
-        accessors[0].contains("overload"),
-        "the row must say the setter is there too, got {accessors:?}"
-    );
-    assert!(
-        accessors.iter().any(|d| d.contains("() : String")),
+        accessors.iter().any(|(sig, ret)| sig == "()" && ret == "String"),
         "the fluent getter returns it, got {accessors:?}"
     );
-    // The chained setter's RETURN type (`Order`, from `chain = true`) is not asserted HERE: the
-    // fold shows one detail and it is the getter's. It is observable on hover, which picks the
-    // overload by the call's arity — see `the_chained_setter_is_what_hover_answers_for_a_one_arg_call`.
+    assert!(
+        accessors.iter().any(|(sig, _)| sig.starts_with("(String")),
+        "the fluent setter takes it, got {accessors:?}"
+    );
     // No get/set-prefixed names exist at all under `fluent`.
     let labels = p.complete_labels("Use.java", off);
     assert!(
@@ -326,11 +322,10 @@ fn the_chained_setter_is_what_hover_answers_for_a_one_arg_call() {
     );
 }
 
-/// The general case of the same thing: every overload of a name reaches completion and is folded
-/// into one row carrying the count. What the dedup must NOT do is lose one on the way — a row
-/// saying `+2 overloads` is the evidence all three arrived.
+/// The general case of the same thing: every overload of a name reaches completion as a row of its
+/// own, told apart by its parameter list. What the dedup must NOT do is lose one on the way.
 #[test]
-fn overloads_are_folded_into_one_row_that_counts_them() {
+fn overloads_are_offered_as_separate_rows() {
     let p = Project::new(&[
         (
             "Fmt.java",
@@ -355,13 +350,10 @@ fn overloads_are_folded_into_one_row_that_counts_them() {
         .complete("UseFmt.java", off)
         .into_iter()
         .filter(|i| i.label == "render")
-        .filter_map(|i| i.detail)
+        .filter_map(|i| i.signature)
         .collect();
-    assert_eq!(renders.len(), 1, "one folded row, got {renders:?}");
-    assert!(
-        renders[0].contains("+2 overloads"),
-        "all three arrived and the row says so, got {renders:?}"
-    );
+    // Fewest parameters first; equal counts by their parameter list.
+    assert_eq!(renders, ["(String s)", "(int n)", "(String s, int width)"], "got {renders:?}");
 }
 
 /// The dedup still has to do its actual job: an override must not appear twice, once from the

@@ -12,21 +12,36 @@
 //!
 //! WHOLE-FILE guards (any → judge no bare call in the file):
 //!   * no single top-level class/enum, or its hierarchy not fully known — an un-indexed base class
-//!     could declare the overload that makes the call legal;
+//!     could declare the overload that makes the call legal.
+//!
+//! NAME-SET guards — they decide which NAMES a bare call may bind to, so they matter to a check that
+//! asks whether a name binds at all or how many overloads it has ([`BareCalls::judgeable_across_lambdas`]),
+//! and not to one that already holds a non-empty member overload set ([`BareCalls::judgeable_member_call`]):
 //!   * a **method-generating annotation** on the top type or a field
 //!     ([`crate::nodes::generated_names`]) — under Lombok the legal `getName()` is declared nowhere
 //!     we can read;
 //!   * an `import static X.*;` whose owner `X` is un-indexed — it can supply ANY name with any
-//!     signature.
+//!     signature;
+//!   * a name an `import static` supplies.
 //!
 //! PER-SITE guards (any → skip that call):
 //!   * it must be a `method_invocation` with no `object` field;
-//!   * it must sit directly in the top type, crossing no lambda and no nested / anonymous / local
-//!     class body ([`crate::scopes::scope_is_directly_top`]) — each of those can declare methods of
-//!     its own that the top type's hierarchy knows nothing about;
-//!   * its name must not be one an `import static` supplies, nor one of `java.lang.Object`'s, nor an
-//!     `enum`'s compiler-generated `values` / `valueOf` — for all of those the binding exists but its
-//!     signature is not something we can enumerate here.
+//!   * it must sit in the top type, crossing no nested / anonymous / local class body
+//!     ([`crate::scopes::scope_is_top_across_lambdas`]) — each of those can declare methods of its
+//!     own that the top type's hierarchy knows nothing about. A lambda declares none and does not
+//!     rebind `this`, so it is crossed;
+//!   * its name must not be one of `java.lang.Object`'s, nor an `enum`'s compiler-generated `values` /
+//!     `valueOf` — the binding exists but its signature is not something we can enumerate here.
+//!
+//! ## Why a member overload set makes the import guards moot
+//!
+//! A method a class declares or inherits SHADOWS every statically imported method of the same name,
+//! whatever their arities (JLS §6.4.1, §15.12.1: the search stops at the innermost class that has a
+//! member of that name). So once the top type's hierarchy has a method named `m`, no `import static`
+//! can add an overload of `m` — and Lombok, which generates a method only when none of that name and
+//! parameter count exists, cannot add one at an arity the index already has. The argument-type check
+//! judges only such a set; refusing it the whole file for a `@Data` or an unreadable `import static
+//! X.*` left every call to an own method unjudged in exactly the legacy classes that most need it.
 //!
 //! ## Why the file's own declarations are re-read from the CST
 //!
@@ -40,12 +55,15 @@
 
 use std::collections::{HashMap, HashSet};
 
-use bennu_java::prelude::{static_import_targets, FileSymbols, Member, TypeResolver};
+use bennu_java::prelude::{
+    same_binary_type, split_array_dims, static_import_targets, FileSymbols, Member, TypeRef,
+    TypeResolver,
+};
 use tree_sitter::Node;
 
-use crate::nodes::generated_names;
+use crate::nodes::{generated_names, is_type_var};
 use crate::resolve::type_binary;
-use crate::scopes::{scope_is_directly_top, single_top_level_type};
+use crate::scopes::{scope_is_top_across_lambdas, single_top_level_type};
 use crate::walk::{for_each_supertype, hierarchy_fully_known};
 
 /// `java.lang.Object`'s methods, callable bare from any class body. Their overload sets (`wait()`,
@@ -71,6 +89,10 @@ pub(crate) struct BareCalls<'t> {
     /// The binary name of the single top-level type — the static type of the implicit `this`.
     pub(crate) top_binary: String,
     is_enum: bool,
+    /// A method-generating annotation (Lombok & co.) sits on the top type or one of its fields.
+    generates_methods: bool,
+    /// An `import static X.*;` whose owner cannot be read — it may supply any name.
+    unreadable_static_wildcard: bool,
     /// Names an `import static` binds; each is a candidate whose signature we cannot enumerate.
     static_names: HashSet<String>,
     /// Every method the file declares, by name — the buffer's own answer, ahead of the index.
@@ -86,14 +108,13 @@ pub(crate) fn bare_call_scope<'t>(
 ) -> Option<BareCalls<'t>> {
     let bytes = source.as_bytes();
     let top = single_top_level_type(root, bytes)?;
-    if generated_names(top.node, bytes).calls {
-        return None;
-    }
+    let generates_methods = generated_names(top.node, bytes).calls;
     let top_binary = type_binary(&top.decl_name, symbols, resolver)?;
     if !hierarchy_fully_known(resolver, &top_binary) {
         return None;
     }
 
+    let mut unreadable_static_wildcard = false;
     let mut static_names: HashSet<String> = HashSet::new();
     for t in static_import_targets(&symbols.imports) {
         match t.member {
@@ -101,9 +122,10 @@ pub(crate) fn bare_call_scope<'t>(
                 static_names.insert(m);
             }
             None => {
-                // A wildcard whose owner we cannot read could supply ANY name → judge nothing.
+                // A wildcard whose owner we cannot read could supply ANY name.
                 if !hierarchy_fully_known(resolver, &t.owner_binary) {
-                    return None;
+                    unreadable_static_wildcard = true;
+                    continue;
                 }
                 for_each_supertype(resolver, &t.owner_binary, &mut |_bn, cm| {
                     for member in &cm.methods {
@@ -129,34 +151,38 @@ pub(crate) fn bare_call_scope<'t>(
         top_node: top.node,
         top_binary,
         is_enum: top.node.kind() == "enum_declaration",
+        generates_methods,
+        unreadable_static_wildcard,
         static_names,
         file_sigs,
     })
 }
 
 impl<'t> BareCalls<'t> {
-    /// The method name this call names, when it is a bare call in a position we may judge.
-    pub(crate) fn judgeable<'a>(&self, call: Node, bytes: &'a [u8]) -> Option<&'a str> {
-        self.judgeable_in(call, bytes, false)
-    }
-
-    /// [`Self::judgeable`], but a lambda between the call and the top type is not a reason to
-    /// decline. For the checks that need the argument TYPES it is; for the ones that only need to
-    /// know which method the name binds to — `throws_of` — it never was.
+    /// The method name a bare call names, for a check that asks WHICH names bind or how many
+    /// overloads a name has (arity, `throws_of`): every guard applies, the name-set ones included.
     pub(crate) fn judgeable_across_lambdas<'a>(
         &self,
         call: Node,
         bytes: &'a [u8],
     ) -> Option<&'a str> {
-        self.judgeable_in(call, bytes, true)
+        if self.generates_methods || self.unreadable_static_wildcard {
+            return None;
+        }
+        let name = self.judgeable_site(call, bytes)?;
+        (!self.static_names.contains(name)).then_some(name)
     }
 
-    fn judgeable_in<'a>(
-        &self,
-        call: Node,
-        bytes: &'a [u8],
-        across_lambdas: bool,
-    ) -> Option<&'a str> {
+    /// The method name a bare call names, for a check that goes on only with a NON-EMPTY member
+    /// overload set of that name on the top type (argument types). Such a set shadows every static
+    /// import of the name, and Lombok never generates beside it at an arity it already has — see the
+    /// module doc — so the name-set guards do not apply. The caller must not act on an empty set.
+    pub(crate) fn judgeable_member_call<'a>(&self, call: Node, bytes: &'a [u8]) -> Option<&'a str> {
+        self.judgeable_site(call, bytes)
+    }
+
+    /// The per-site guards shared by both entry points.
+    fn judgeable_site<'a>(&self, call: Node, bytes: &'a [u8]) -> Option<&'a str> {
         if call.child_by_field_name("object").is_some() {
             return None;
         }
@@ -165,16 +191,11 @@ impl<'t> BareCalls<'t> {
         if name_node.has_error() || args.has_error() {
             return None;
         }
-        let in_scope = if across_lambdas {
-            crate::scopes::scope_is_top_across_lambdas(call, self.top_node)
-        } else {
-            scope_is_directly_top(call, self.top_node)
-        };
-        if !in_scope {
+        if !scope_is_top_across_lambdas(call, self.top_node) {
             return None;
         }
         let name = name_node.utf8_text(bytes).ok()?;
-        if self.static_names.contains(name) || OBJECT_METHODS.contains(&name) {
+        if OBJECT_METHODS.contains(&name) {
             return None;
         }
         if self.is_enum && ENUM_IMPLICIT_METHODS.contains(&name) {
@@ -187,47 +208,69 @@ impl<'t> BareCalls<'t> {
     pub(crate) fn file_sigs(&self, name: &str) -> &[FileSig] {
         self.file_sigs.get(name).map(Vec::as_slice).unwrap_or(&[])
     }
+}
 
-    /// Whether `candidates` (what the index knows) already covers every signature the FILE declares
-    /// under `name`, parameter type for parameter type.
-    ///
-    /// This is the gate for any judgement that needs the overload set to be **exact** rather than
-    /// merely non-empty — argument types, where committing to a lone candidate is the whole method.
-    /// Matching on arity alone is not enough and was the first thing tried: a buffer that adds
-    /// `own(String)` beside an indexed `own(int)` has an arity-1 candidate either way, so the stale
-    /// single candidate stood, and a legal `own("x")` came out as a wrong argument type. Anything
-    /// that will not resolve is a reason to say no, not to guess.
-    pub(crate) fn index_covers_file_sigs(
-        &self,
-        name: &str,
-        candidates: &[Member],
-        symbols: &FileSymbols,
-        resolver: &dyn TypeResolver,
-    ) -> bool {
-        for fs in self.file_sigs(name) {
-            let mut binaries = Vec::with_capacity(fs.param_texts.len());
-            for text in &fs.param_texts {
-                // A `T...` parameter is an array of `T` once resolved — the form the index carries.
-                let (text, varargs) = match text.trim().strip_suffix("...") {
-                    Some(base) => (base.trim().to_string(), true),
-                    None => (text.trim().to_string(), false),
-                };
-                let Some(mut binary) = type_binary(&text, symbols, resolver) else {
-                    return false;
-                };
-                if varargs {
-                    binary.push_str("[]");
-                }
-                binaries.push(binary);
-            }
-            let covered = candidates.iter().any(|m| {
-                m.params.len() == binaries.len()
-                    && m.params.iter().zip(&binaries).all(|(p, b)| p.binary_name == *b)
-            });
-            if !covered {
-                return false;
-            }
+/// Whether `candidates` (what the index knows) already covers every signature the FILE declares
+/// under `name` — on any of its types, constructors as `<init>` — parameter type for parameter type.
+///
+/// This is the gate for any judgement that needs the overload set to be **exact** rather than
+/// merely non-empty — argument types, where committing to a lone candidate is the whole method.
+/// Matching on arity alone is not enough and was the first thing tried: a buffer that adds
+/// `own(String)` beside an indexed `own(int)` has an arity-1 candidate either way, so the stale
+/// single candidate stood, and a legal `own("x")` came out as a wrong argument type. Anything
+/// that will not resolve is a reason to say no, not to guess. Signatures of every type in the file
+/// are gathered, nested ones included: an extra one can only make the answer "no".
+///
+/// Two shapes of parameter text are matched structurally rather than by resolved name, because
+/// neither HAS a resolved name to compare and both used to make every own method carrying one
+/// uncoverable — and so every call to it unjudged: a type variable (`<T> void put(T value)`),
+/// matched against an index parameter that is an unresolved variable too; and an array or
+/// varargs parameter, whose depth the index keeps beside the name (`dims`) and the text spells
+/// with brackets.
+pub(crate) fn index_covers_file_sigs(
+    name: &str,
+    candidates: &[Member],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> bool {
+    let declared = symbols.types.iter().flat_map(|t| &t.methods).filter(|m| m.name == name);
+    declared.into_iter().all(|fs| {
+        candidates.iter().any(|m| {
+            m.params.len() == fs.params.len()
+                && m.params
+                    .iter()
+                    .zip(&fs.params)
+                    .all(|(p, written)| param_matches_text(p, &written.type_text, symbols, resolver))
+        })
+    })
+}
+
+/// Whether the index parameter `p` is the parameter the file writes as `text`.
+fn param_matches_text(
+    p: &TypeRef,
+    text: &str,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> bool {
+    let written = text.trim();
+    let (written, varargs) = match written.strip_suffix("...") {
+        Some(base) => (base.trim_end(), 1),
+        None => (written, 0),
+    };
+    let (element, dims) = split_array_dims(written);
+    let p_element = p.binary_name.trim_end_matches("[]");
+    let p_dims = usize::from(p.dims) + p.binary_name.matches("[]").count();
+    if p_dims != dims + varargs {
+        return false;
+    }
+    match type_binary(element, symbols, resolver) {
+        Some(binary) => same_binary_type(p_element, &binary),
+        // Nothing binds the written name: a type variable. It is the same parameter only when the
+        // index could not bind it either — never a resolved class that happens to sit there.
+        None => {
+            !p_element.contains('/')
+                && resolver.members_of(p_element).is_none()
+                && (p_element == element || (is_type_var(element) && is_type_var(p_element)))
         }
-        true
     }
 }

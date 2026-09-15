@@ -223,6 +223,33 @@
   (2, 4 or 8). The change applies to the open editor at once.
 </p>
 
+<h3>Enter in Java</h3>
+<p>
+  <kbd>Enter</kbd> starts the new line where the code's structure puts it, in that same indentation, and drops the whitespace
+  left around the break:
+</p>
+<table>
+  <thead><tr><th>After</th><th>The new line</th></tr></thead>
+  <tbody>
+    <tr><td><code>&#123;</code></td><td>One level in. Between <code>&#123;</code> and <code>&#125;</code> the brace moves to a line of its own at the outer level.</td></tr>
+    <tr><td>A finished statement, <code>&#125;</code>, an annotation</td><td>The same level as that statement.</td></tr>
+    <tr><td>An unfinished statement — an operator, <code>=</code>, <code>-&gt;</code>, a call chain</td><td>Two levels in from where the statement starts, until its <code>;</code>.</td></tr>
+    <tr><td>An open <code>(</code></td><td>Two levels in from the line of the parenthesis.</td></tr>
+    <tr><td><code>if (…)</code>, <code>for (…)</code>, <code>while (…)</code>, <code>else</code> with no brace</td><td>One level in; after that single statement, back out.</td></tr>
+    <tr><td><code>case X:</code>, <code>case X -&gt;</code></td><td>One level in from the label.</td></tr>
+  </tbody>
+</table>
+<p>
+  A blank line is indented for where it is, not copied from the line above. Typing <code>&#125;</code>, <code>)</code> or a
+  <code>case</code> label at the start of a line moves it to its level — labels outdented from their statements or not, as
+  <strong>Settings → Java → Code Style → Formatter</strong> says.
+</p>
+<p>
+  In a comment, <kbd>Enter</kbd> after <code>/**</code> writes the closing <code>*/</code> below the caret, and inside a Javadoc
+  or <code>/* */</code> each new line starts with an aligned <code>*</code>. Splitting a <code>//</code> comment starts the rest
+  with <code>//</code> too. Inside a string or a text block, the line keeps its indentation.
+</p>
+
 <h2>Reformat</h2>
 <p>
   <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> reformats the open file. A language with a <strong>language server</strong> is

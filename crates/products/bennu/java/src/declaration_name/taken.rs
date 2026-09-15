@@ -96,6 +96,15 @@ fn declared_after<'s>(tokens: &[Token], source: &'s str, from: usize) -> Vec<&'s
     names
 }
 
+/// Every variable name the file declares — fields, locals, parameters — whatever its scope: what the
+/// file's own naming style is read from.
+pub(super) fn declared_in_file<'s>(tokens: &[Token], source: &'s str) -> Vec<&'s str> {
+    (0..tokens.len())
+        .filter(|&i| tokens[i].kind == Kind::Word && is_declared_name(tokens, source, i))
+        .map(|i| text(source, &tokens[i]))
+        .collect()
+}
+
 /// Whether the word at `index` is the name in a declaration: it follows a type and is followed by
 /// what ends a declarator — `Order order;`, `Order order = …`, `(Order order)`, `Order o : orders`.
 fn is_declared_name(tokens: &[Token], source: &str, index: usize) -> bool {

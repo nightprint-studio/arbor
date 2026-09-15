@@ -44,7 +44,8 @@ Two impl slots:
   inference, `bennu-java`'s catalogue asked at the module's language level (`CompletionOptions::level`),
   and each expansion made an item that replaces the whole expression and carries its import edits.
   The two halves are public so the backend's **user** postfix templates take the same path:
-  `postfix_site(source, caret, resolver)` → `PostfixSite { start, caret, typed, subject }` (with
+  `postfix_site(source, caret, resolver, naming)` → `PostfixSite { start, caret, typed, subject }`, the
+  subject's proposed names spelled by `Convention::for_variables(naming, <the file's names>)` (with
   `supertypes(resolver)` for a template that names a class), and `postfix_item(file, source, &site, PostfixItem)`
   → the `CompletionItem`. `POSTFIX_LEGACY_LEVEL` is the level assumed when the module's is unknown.
 
@@ -129,7 +130,14 @@ Two impl slots:
   `find_type_name_span` now lives in `bennu-java`, re-surfaced through this prelude) to return
   a `DeclarationLocation` (owning project file + declaration NAME span + 1-based line/col +
   label). A local/param resolves to its declarator in the current buffer; a method/field to
-  its name token on the owner type; a class/interface/enum to its type-declaration name.
+  its name token on the owner type — for an overloaded method, the declaration the call binds
+  to (`bennu_java::prelude::call_overload_at` + `find_overload_name_span`, which the be layer's
+  library views and the hover card share); a class/interface/enum to its type-declaration name.
+  Owners are located by their WHOLE binary name (`bennu_java::prelude::find_type_declaration`):
+  `p/Outer/Inner` and `p/Outer$Inner` are `Inner` inside `Outer`, so rename, safe delete and go-to
+  never take a same-named nested type of another outer in the same file. The hover card's Javadoc
+  comes from the same chosen declaration (`HoverInfo::params` carries the overload's parameter
+  types so the be layer picks a library doc with `FileDocs::method_overload`).
   A JDK / dep-jar declaration (no project source) yields `None` — nothing to open.
 - **inherited members** — the inherited ("super") members of a type (Structure panel's lazy
   "Inherited" bucket) now live in `bennu-query` (`inherited_members(...)`, a pure resolver

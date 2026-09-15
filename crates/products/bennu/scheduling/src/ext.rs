@@ -14,6 +14,7 @@ use crate::jobs::{enables_scheduling, jobs_in, Job, Trigger};
 pub const CODE_BAD_CRON: &str = "scheduling.bad-cron";
 pub const CODE_NOT_ENABLED: &str = "scheduling.not-enabled";
 pub const CODE_NO_TRIGGER: &str = "scheduling.no-trigger";
+pub const CODE_HAS_PARAMETERS: &str = "scheduling.has-parameters";
 
 #[derive(Default)]
 pub struct SchedulingExtension {
@@ -99,6 +100,20 @@ impl FrameworkExtension for SchedulingExtension {
                     ),
                     severity: "warning".to_string(),
                     code: CODE_NOT_ENABLED.to_string(),
+                    start: job.start,
+                    end: job.end,
+                });
+            }
+            if job.parameter_count > 0 {
+                out.push(Diagnostic {
+                    message: format!(
+                        "@Scheduled method `{}` takes parameters — nobody calls a job but the \
+                         scheduler, which passes nothing, and Spring refuses to start (\"Only \
+                         no-arg methods may be annotated with @Scheduled\")",
+                        job.method
+                    ),
+                    severity: "error".to_string(),
+                    code: CODE_HAS_PARAMETERS.to_string(),
                     start: job.start,
                     end: job.end,
                 });

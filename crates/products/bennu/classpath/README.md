@@ -119,6 +119,13 @@ stack plus a homegrown Signature decoder.
   deps degrades exactly to the JDK-only behavior. `MavenResolveOpts` runs Maven
   offline (`-o`) by default and can pin `JAVA_HOME` so the project's JDK is used.
 
+  **One module, for a launch.** `MavenResolveOpts::reactor_module` resolves a single module
+  from inside its reactor (`compile dependency:build-classpath -pl <module> -am`, compiler and
+  resources skipped) and reads only that module's file. A dependency on a sibling module then
+  arrives as the sibling's `target/classes` instead of a stale — or missing — jar in `~/.m2`.
+  `MavenClasspath::entries` keeps every existing entry, directories included, in Maven's order;
+  `jars` stays files only.
+
 ## Annotations (`annotations.rs`)
 
 `parse_class_annotations` decodes `RuntimeVisibleAnnotations` on the class and its members, with

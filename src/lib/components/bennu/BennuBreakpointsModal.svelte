@@ -30,12 +30,15 @@
   import Input from '$lib/components/shared/ui/Input.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import Badge from '$lib/components/shared/ui/Badge.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { openLibraryClass } from './log-link';
+  import { libraryClassLabel } from './library-breakpoints';
   import { checkBreakpointCondition } from '$lib/ipc/bennu/debug';
   import { bennuDebugStore } from '$lib/stores/bennu/debug.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
-  import type { ExceptionBreakpointDto } from '$lib/types/bennu/debug';
+  import type { BreakpointDto, ExceptionBreakpointDto } from '$lib/types/bennu/debug';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -139,8 +142,18 @@
     return path.split('/').pop() ?? path;
   }
 
-  function open(file: string, line: number) {
-    void projectStore.openFile(file).then(() => bennuUiStore.requestGoto(line));
+  /** A row's location as it reads: `Order.java` for the project's own file, the simple class name
+   *  for a library one — whose cached file name says nothing the class does not. */
+  function whereOf(bp: BreakpointDto): string {
+    return bp.class ? libraryClassLabel(bp.class).simple : fileName(bp.file);
+  }
+
+  /** Go to a breakpoint. A library one is reopened through its class, the same way a library stack
+   *  frame is — which re-serves the view if its cache was cleared, rather than opening a path that
+   *  may no longer exist. */
+  function open(bp: BreakpointDto) {
+    if (bp.class) void openLibraryClass(bp.class, undefined, bp.line);
+    else void projectStore.openFile(bp.file).then(() => bennuUiStore.requestGoto(bp.line));
     onClose();
   }
 
@@ -193,11 +206,20 @@
       </header>
 
       {#if !byFile.length}
-        <EmptyState message="None yet. Click the left margin of a Java file to set one." />
+        <EmptyState message="None yet. Click the left margin of a Java file, or of a library's source, to set one." />
       {:else}
         <div bind:this={listEl}>
           {#each byFile as group (group.file)}
-            <div class="bm-file" use:tooltip={group.file}>{fileName(group.file)}</div>
+            {@const lib = group.list[0]?.class}
+            {#if lib}
+              {@const label = libraryClassLabel(lib)}
+              <div class="bm-file" use:tooltip={lib}>
+                <Badge variant="tone" tone="info" size="sm" label="library" />
+                {label.simple}{#if label.pkg}<span class="bm-pkg">{label.pkg}</span>{/if}
+              </div>
+            {:else}
+              <div class="bm-file" use:tooltip={group.file}>{fileName(group.file)}</div>
+            {/if}
             {#each group.list as bp (bp.line)}
               {@const hits = bennuDebugStore.statusOf(bp.file, bp.line)?.hits ?? 0}
               {@const note = noteFor(bp.file, bp.line)}
@@ -207,8 +229,8 @@
                     checked={bp.enabled}
                     onchange={(v) => bennuDebugStore.setBreakpointEnabled(root, bp.file, bp.line, v)}
                   />
-                  <button class="bm-where" type="button" onclick={() => open(bp.file, bp.line)}>
-                    {fileName(bp.file)}<span class="bm-line">:{bp.line}</span>
+                  <button class="bm-where" type="button" onclick={() => open(bp)}>
+                    {whereOf(bp)}<span class="bm-line">:{bp.line}</span>
                   </button>
                   <!-- What it has actually done this session. Only once it has done something:
                        a `0×` on every row would be forty rows of noise before a launch. -->
@@ -233,7 +255,7 @@
                     value={bp.condition}
                     size="sm"
                     placeholder={CONDITION_HINT}
-                    ariaLabel="Condition for the breakpoint at {fileName(bp.file)}:{bp.line}"
+                    ariaLabel="Condition for the breakpoint at {whereOf(bp)}:{bp.line}"
                     error={note?.bad ? note.text : null}
                     oninput={(v) => editCondition(bp.file, bp.line, v)}
                   />
@@ -246,7 +268,7 @@
                       value={bp.hit_count || 1}
                       min={1}
                       size="sm"
-                      ariaLabel="Stop on every Nth hit at {fileName(bp.file)}:{bp.line}"
+                      ariaLabel="Stop on every Nth hit at {whereOf(bp)}:{bp.line}"
                       onchange={(v) =>
                         bennuDebugStore.setBreakpointHitCount(root, bp.file, bp.line, v)}
                     />
@@ -359,10 +381,13 @@
   }
 
   .bm-file {
+    display: flex; align-items: center; gap: 6px;
     margin: 8px 0 2px;
     font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* A library class's package: what tells two `Client`s from different artifacts apart. */
+  .bm-pkg { color: var(--text-disabled); overflow: hidden; text-overflow: ellipsis; }
 
   .bm-row {
     display: flex; align-items: center; gap: 8px;

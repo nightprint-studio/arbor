@@ -31,6 +31,8 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { buildUnitDir, openBuildUnitMenu } from './build-unit-menu';
+  import { mavenKeys } from './tree-expansion';
+  import type { ExpansionView } from '$lib/stores/bennu/tree-expansion.svelte';
   import type { MavenModule, MavenPhase, MavenPlugin } from '$lib/ipc/bennu/maven-build';
 
   let {
@@ -43,6 +45,9 @@
     onOpen,
     expanded,
     onToggle,
+    /** The Maven window's remembered rows for this project — the section's own groups and plugins
+     *  are keyed under this module through it. */
+    expansion,
   }: {
     module: MavenModule;
     phases: MavenPhase[];
@@ -50,6 +55,7 @@
     onOpen: (path: string, line?: number) => void;
     expanded: boolean;
     onToggle: () => void;
+    expansion: ExpansionView;
   } = $props();
 
   /** The name a person uses: the pom's `<name>` when it gives one, else the artifactId. */
@@ -63,9 +69,10 @@
 
   const unit = $derived({ name: title, manifest: module.pom });
 
-  let lifecycleOpen = $state(true);
-  let pluginsOpen = $state(false);
-  const pluginOpen = $state<Record<string, boolean>>({});
+  // What each group draws when nobody has touched it: the lifecycle is what most presses come from,
+  // the plugins are a list you go looking in.
+  const LIFECYCLE_OPEN_BY_DEFAULT = true;
+  const PLUGINS_OPEN_BY_DEFAULT = false;
 
   function pluginKey(p: MavenPlugin): string {
     return `${p.group_id}:${p.artifact_id}`;
@@ -109,8 +116,8 @@
 
   <SidebarSection
     label="Lifecycle"
-    expanded={lifecycleOpen}
-    onToggle={() => (lifecycleOpen = !lifecycleOpen)}
+    expanded={expansion.isOpen(mavenKeys.lifecycle(module), LIFECYCLE_OPEN_BY_DEFAULT)}
+    onToggle={() => expansion.toggle(mavenKeys.lifecycle(module), LIFECYCLE_OPEN_BY_DEFAULT)}
     badge={phases.length}
   >
     {#snippet icon()}<Play size={13} />{/snippet}
@@ -131,8 +138,8 @@
 
   <SidebarSection
     label="Plugins"
-    expanded={pluginsOpen}
-    onToggle={() => (pluginsOpen = !pluginsOpen)}
+    expanded={expansion.isOpen(mavenKeys.plugins(module), PLUGINS_OPEN_BY_DEFAULT)}
+    onToggle={() => expansion.toggle(mavenKeys.plugins(module), PLUGINS_OPEN_BY_DEFAULT)}
     badge={module.plugins.length}
   >
     {#snippet icon()}<Puzzle size={13} />{/snippet}
@@ -143,9 +150,8 @@
       {#if plugin.goals.length > 0}
         <SidebarSection
           label={plugin.artifact_id}
-          expanded={pluginOpen[pluginKey(plugin)] ?? false}
-          onToggle={() =>
-            (pluginOpen[pluginKey(plugin)] = !(pluginOpen[pluginKey(plugin)] ?? false))}
+          expanded={expansion.isOpen(mavenKeys.plugin(module, plugin))}
+          onToggle={() => expansion.toggle(mavenKeys.plugin(module, plugin))}
           badge={plugin.goals.length}
         >
           {#snippet icon()}<span class="mm-plugin"><Puzzle size={12} /></span>{/snippet}

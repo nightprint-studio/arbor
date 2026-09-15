@@ -5,6 +5,8 @@
 //! place: two copies of "can this be seen from here" is two chances to disagree about somebody's
 //! code, and the disagreement would show up as a member you can complete but not override.
 
+use bennu_java::prelude::{walk, TypeRef, TypeResolver};
+
 /// Whether a `private` member declared in `declaring` is accessible from within `site`: true iff
 /// they belong to the same top-level class — equal, or one nested in the other (its binary is the
 /// other's with a `/`-boundary suffix). Package vs nesting is `/`-ambiguous in a binary, but two
@@ -38,6 +40,43 @@ pub fn same_package(declaring: &str, site: Option<&str>) -> bool {
     }
 }
 
+/// Whether a `protected` member declared in `declaring` can be written through `receiver` from code
+/// inside `site` (JLS §6.6.2).
+///
+/// Two ways in. From the declaring type's own **package**, always. From anywhere else only from a
+/// subclass — and, for an instance member, only through a receiver of that subclass's own type: a
+/// `ServiceHandler` may call its own `clone()`, and may not call `route.clone()` on a `ServiceRoute`,
+/// which is exactly the `clone` / `finalize` pair every receiver used to offer from `java.lang.Object`.
+///
+/// **True when unsure**, like [`same_package`]: no site, or a hierarchy the resolver could not read
+/// to the end. A completion missing a member you can write is worse than one carrying a little noise.
+pub fn protected_visible(
+    resolver: &dyn TypeResolver,
+    declaring: &str,
+    receiver: &TypeRef,
+    is_static: bool,
+    site: Option<&str>,
+) -> bool {
+    let Some(site) = site else { return true };
+    if same_package(declaring, Some(site)) {
+        return true;
+    }
+    if is_static {
+        // A static belongs to no instance, so the receiver says nothing: what counts is that the
+        // code asking is inside a subclass of the declarer.
+        return reaches(resolver, &TypeRef::simple(site), |ancestor| ancestor == declaring);
+    }
+    // The receiver has to BE the site's type or a subtype of it. Nesting counts as the site: an
+    // inner class of the subclass is inside it for access purposes.
+    reaches(resolver, receiver, |ancestor| same_top_level(ancestor, Some(site)))
+}
+
+/// Whether walking up from `start` meets a type `hit` accepts — or cannot be sure it does not.
+fn reaches(resolver: &dyn TypeResolver, start: &TypeRef, hit: impl Fn(&str) -> bool) -> bool {
+    let walked = walk(resolver, start, |a| hit(&a.ty.binary_name).then_some(()));
+    walked.found.is_some() || !walked.complete
+}
+
 /// The package part of a binary name under the Java naming convention: the leading segments that
 /// do not begin with an uppercase letter. `java/lang/String` → `java/lang`. `None` for a type in
 /// the default package, or one whose first segment is already capitalised.
@@ -62,7 +101,71 @@ pub fn package_of(binary: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{package_of, same_package};
+    use super::{package_of, protected_visible, same_package};
+    use bennu_java::prelude::{ClassMembers, Import, TypeRef, TypeResolver};
+    use std::sync::Arc;
+
+    const OBJECT: &str = "java/lang/Object";
+
+    /// `ServiceRoute` and `ServiceHandler` both extend `Object`, in `com/acme`; `Missing` names a
+    /// superclass nothing can resolve.
+    struct Hierarchy;
+    impl TypeResolver for Hierarchy {
+        fn members_of(&self, binary: &str) -> Option<Arc<ClassMembers>> {
+            let superclass = match binary {
+                OBJECT => None,
+                "com/acme/ServiceRoute" | "com/acme/ServiceHandler" => Some(TypeRef::simple(OBJECT)),
+                "com/acme/Missing" => Some(TypeRef::simple("org/gone/Parent")),
+                _ => return None,
+            };
+            Some(Arc::new(ClassMembers {
+                superclass,
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: Vec::new(),
+                flags: Default::default(),
+                type_params: Vec::new(),
+            }))
+        }
+        fn resolve_simple_name(&self, _n: &str, _i: &[Import]) -> Option<String> {
+            None
+        }
+    }
+
+    fn visible(receiver: &str, is_static: bool, site: Option<&str>) -> bool {
+        protected_visible(&Hierarchy, OBJECT, &TypeRef::simple(receiver), is_static, site)
+    }
+
+    /// The reported case: `route.clone()` from another class is not Java.
+    #[test]
+    fn object_protected_members_are_hidden_on_another_classes_receiver() {
+        assert!(!visible("com/acme/ServiceRoute", false, Some("com/acme/ServiceHandler")));
+    }
+
+    #[test]
+    fn a_class_sees_the_protected_members_it_inherits_through_its_own_type() {
+        assert!(visible("com/acme/ServiceRoute", false, Some("com/acme/ServiceRoute")));
+        // An inner class of it is inside it for access purposes.
+        assert!(visible("com/acme/ServiceRoute", false, Some("com/acme/ServiceRoute/Builder")));
+    }
+
+    #[test]
+    fn a_protected_static_needs_only_a_subclass_site() {
+        assert!(visible("com/acme/ServiceRoute", true, Some("com/acme/ServiceHandler")));
+    }
+
+    /// The declaring package sees everything protected, whoever the receiver is.
+    #[test]
+    fn the_declaring_package_sees_protected_members() {
+        assert!(visible("com/acme/ServiceRoute", false, Some("java/lang/Integer")));
+    }
+
+    /// Unsure keeps the member: no site, and a hierarchy that cannot be walked to its end.
+    #[test]
+    fn unsure_keeps_a_protected_member() {
+        assert!(visible("com/acme/ServiceRoute", false, None));
+        assert!(visible("com/acme/Missing", false, Some("com/acme/ServiceHandler")));
+    }
 
     #[test]
     fn a_package_is_the_segments_before_the_first_capitalised_one() {

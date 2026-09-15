@@ -323,37 +323,54 @@ fn args_name_is_member(binary: &str, word: &str) -> bool {
     !last.is_empty() && last != simple
 }
 
+/// Where a library view opens for `member`: its declaration, the type's, or byte zero.
+///
+/// `binary` is the type the member was resolved on — a nested one as itself (`RestClient$UriSpec`),
+/// not the file it is served in — so the declaration is looked for inside THAT type. `text` is the
+/// served file, which for a nested type is its outer type's.
+///
+/// `overload` is the parameter list of the method a call binds to, when the caller could tell —
+/// what picks `uri(Function)` over `uri(URI)` when the file declares both. Without it the first
+/// declaration of the name is the answer.
 fn member_jump_offset(
     text: &str,
-    file_binary: &str,
+    binary: &str,
     member: Option<&bennu_intel::prelude::LibraryMember>,
+    overload: Option<&[bennu_java::prelude::TypeRef]>,
 ) -> usize {
-    use bennu_intel::prelude::{find_member_name_span, find_type_name_span, DeclKey};
+    use bennu_intel::prelude::{find_overload_name_span, DeclKey};
+    use bennu_java::prelude::find_binary_type_name_span;
     if let Some(m) = member {
         // Both kinds, preferred kind first. A caller that knows says so, but one that only has a
         // word under a caret — `http` in a static import — cannot know whether it names a method or
         // a constant, and guessing wrong should not cost the jump.
-        let owner = file_binary.to_string();
+        let owner = binary.to_string();
         let method = DeclKey::Method { owner: owner.clone(), name: m.name.clone() };
         let field = DeclKey::Field { owner, name: m.name.clone() };
         let (first, second) = if m.is_field { (field, method) } else { (method, field) };
         for key in [first, second] {
-            if let Some((start, _)) = find_member_name_span(text, &key) {
+            if let Some((start, _)) = find_overload_name_span(text, &key, overload) {
                 return start;
             }
         }
-        // The owner-scoped search insists the declaration sits inside a type of that name, which is
-        // right for a rename — editing a same-named member of an unrelated class would be a bug.
-        // Here the stakes are the opposite way round: this is one file, opened *because* it declares
-        // the thing, and the strict search misses whenever the member lives in a nested type of it
-        // (a static factory on an inner interface, an enum constant's body). Missing meant landing on
-        // the class header, which is the answer the user reads as "it did not work".
-        if let Some(start) = any_declaration_named(text, &m.name, m.is_field) {
+        // The owner-scoped search insists the declaration sits inside the owner type, which is right
+        // for a rename — editing a same-named member of an unrelated class would be a bug. It finds
+        // a nested type's member when the caller names the nested type. Here the stakes are the
+        // opposite way round, though: this is one file, opened *because* it declares the thing, and a
+        // caller holding only a word — a static import's `http` resolved to the outer type, when the
+        // factory lives on an inner interface, or an enum constant's body — names a type the member
+        // is not directly declared in. Missing meant landing on the class header, which is the
+        // answer the user reads as "it did not work".
+        if let Some(start) = any_declaration_named(text, &m.name, m.is_field, overload) {
             return start;
         }
     }
-    let simple = file_binary.rsplit(['/', '$']).next().unwrap_or(file_binary);
-    find_type_name_span(text, simple).map(|(s, _)| s).unwrap_or(0)
+    // The type itself — a nested one inside its own outer — else the served file's type, for a view
+    // (a stub) that does not spell the nested declaration out.
+    find_binary_type_name_span(text, binary)
+        .or_else(|| find_binary_type_name_span(text, &outer_binary(binary)))
+        .map(|(s, _)| s)
+        .unwrap_or(0)
 }
 
 /// The first declaration of `name` anywhere in `text`, whatever type encloses it.
@@ -361,41 +378,59 @@ fn member_jump_offset(
 /// The last resort of [`member_jump_offset`], and only ever compared against landing on the class
 /// header. One file, one name: a wrong guess here puts the caret on a member that is at least
 /// called what was asked for, in the file that was asked for.
-fn any_declaration_named(text: &str, name: &str, prefer_field: bool) -> Option<usize> {
+///
+/// It is also where a member is found when the caller's type is not the one that declares it —
+/// `http` resolved to `HandlerFunctions` but written on its nested `Factory` — so it has to honour
+/// `overload` too: among several methods of the name, the one the call binds to, not the first in
+/// the file.
+fn any_declaration_named(
+    text: &str,
+    name: &str,
+    prefer_field: bool,
+    overload: Option<&[bennu_java::prelude::TypeRef]>,
+) -> Option<usize> {
     let tree = bennu_java::prelude::parse_java(text)?;
     let bytes = text.as_bytes();
-    let (mut method_hit, mut field_hit) = (None, None);
+    let mut methods: Vec<(usize, usize)> = Vec::new();
+    let mut field_hit: Option<usize> = None;
     let mut stack = vec![tree.root_node()];
     while let Some(n) = stack.pop() {
         let mut c = n.walk();
         for ch in n.named_children(&mut c) {
             stack.push(ch);
         }
-        let (slot, node) = match n.kind() {
-            "method_declaration" | "annotation_type_element_declaration" => {
-                (&mut method_hit, n.child_by_field_name("name"))
-            }
+        let is_method = match n.kind() {
+            "method_declaration" | "annotation_type_element_declaration" => true,
             "variable_declarator"
                 if n.parent().is_some_and(|p| {
                     matches!(p.kind(), "field_declaration" | "constant_declaration")
                 }) =>
             {
-                (&mut field_hit, n.child_by_field_name("name"))
+                false
             }
-            "enum_constant" => (&mut field_hit, n.child_by_field_name("name")),
+            "enum_constant" => false,
             _ => continue,
         };
-        let Some(node) = node else { continue };
+        let Some(node) = n.child_by_field_name("name") else { continue };
         if node.utf8_text(bytes).ok() != Some(name) {
             continue;
         }
-        // The walk is a stack and arrives in no useful order — keep the EARLIEST, which reads as
-        // the first declaration in the file.
-        let start = node.start_byte();
-        if slot.is_none_or(|cur: usize| start < cur) {
-            *slot = Some(start);
+        if is_method {
+            methods.push((node.start_byte(), node.end_byte()));
+        } else if field_hit.is_none_or(|cur: usize| node.start_byte() < cur) {
+            // The walk is a stack and arrives in no useful order — keep the EARLIEST, which reads as
+            // the first declaration in the file.
+            field_hit = Some(node.start_byte());
         }
     }
+    methods.sort_unstable();
+    let method_hit = match (methods.as_slice(), overload) {
+        ([], _) => None,
+        ([first, ..], None) | ([first], Some(_)) => Some(first.0),
+        (_, Some(params)) => {
+            Some(bennu_intel::prelude::choose_overload_span(text, &methods, params).0)
+        }
+    };
     let (first, second) = if prefer_field { (field_hit, method_hit) } else { (method_hit, field_hit) };
     first.or(second)
 }
@@ -1578,12 +1613,13 @@ impl IndexService {
             Arc::clone(&g)
         };
         let level = level_of_file(&slot, file);
+        let naming = crate::naming::declared_convention(file, bennu_naming::prelude::Target::Local);
         let at = Position { file: file.to_string(), offset };
         provider
             .complete_at(
                 &at,
                 source,
-                CompletionOptions { census: import_census_enabled(), case, level },
+                CompletionOptions { census: import_census_enabled(), case, level, naming },
             )
             .unwrap_or_default()
     }
@@ -1605,7 +1641,8 @@ impl IndexService {
             Arc::clone(&g)
         };
         let resolver = provider.shared_resolver()?;
-        let site = bennu_intel::prelude::postfix_site(source, offset, &*resolver)?;
+        let naming = crate::naming::declared_convention(file, bennu_naming::prelude::Target::Local);
+        let site = bennu_intel::prelude::postfix_site(source, offset, &*resolver, naming)?;
         let level = level_of_file(&slot, file).unwrap_or(bennu_intel::prelude::POSTFIX_LEGACY_LEVEL);
         Some(PostfixAt { site, resolver, level })
     }
@@ -2880,7 +2917,9 @@ impl IndexService {
                 facts.docs.types.get(simple).or(facts.docs.type_doc.as_ref())
             }
             Some(name) if info.kind == "field" => facts.docs.fields.get(name),
-            Some(name) => facts.docs.method(name, info.arity),
+            // The overload the call bound to, by its parameter types — the block above THAT
+            // declaration, the one go-to opens; arity alone when the call did not settle it.
+            Some(name) => facts.docs.method_overload(name, info.params.as_deref(), info.arity),
         };
         doc.cloned()
     }
@@ -2927,7 +2966,7 @@ impl IndexService {
         });
         Some(DecompiledView {
             file: path,
-            offset: member_jump_offset(&text, &file_binary, member.as_ref()),
+            offset: member_jump_offset(&text, &binary, member.as_ref(), None),
             can_download: self.can_download_sources(&slot, &binary, is_stub),
         })
     }
@@ -2979,7 +3018,7 @@ impl IndexService {
             name: name.to_string(),
             is_field: false,
         });
-        let by_member = || member_jump_offset(&text, &file_binary, member.as_ref());
+        let by_member = || member_jump_offset(&text, &binary, member.as_ref(), None);
         let jump = if is_stub {
             by_member()
         } else {
@@ -3174,6 +3213,7 @@ impl IndexService {
         &self,
         slot: &ProjectSlot,
         target: &bennu_intel::prelude::LibraryTarget,
+        overload: Option<&[bennu_java::prelude::TypeRef]>,
     ) -> Option<DecompiledView> {
         let engine = slot.semantics()?;
         let file = engine.file_declaring(&target.binary)?;
@@ -3202,7 +3242,7 @@ impl IndexService {
                 };
                 // A record's accessor has no `method_declaration`: it is written once, as the
                 // component in the header, which the field key finds.
-                bennu_intel::prelude::find_member_name_span(&text, &key)
+                bennu_intel::prelude::find_overload_name_span(&text, &key, overload)
                     .or_else(|| {
                         bennu_intel::prelude::find_member_name_span(
                             &text,
@@ -3214,10 +3254,8 @@ impl IndexService {
                     })
                     .map(|(start, _)| start)
             }
-            None => {
-                let simple = target.binary.rsplit(['/', '$']).next().unwrap_or(&target.binary);
-                bennu_java::prelude::find_type_name_span(&text, simple).map(|(start, _)| start)
-            }
+            None => bennu_java::prelude::find_binary_type_name_span(&text, &target.binary)
+                .map(|(start, _)| start),
         }?;
 
         Some(DecompiledView { file, offset, can_download: false })
@@ -3248,6 +3286,15 @@ impl IndexService {
             Arc::clone(&g)
         };
         let target = provider.library_target_at(view_source, offset)?;
+        // Which overload the call under the caret binds to — what picks the declaration to land on
+        // when the name is declared more than once (`uri(Function)` for `uri(b -> …)`, not the
+        // `uri(URI)` declared above it). Asked of the full resolver, the one that can read a library
+        // method's parameter types; `None` keeps the first declaration, as before.
+        let overload = target.member.as_ref().filter(|m| !m.is_field).and_then(|_| {
+            let resolver = provider.shared_resolver()?;
+            bennu_java::prelude::call_overload_at(view_source, offset, &*resolver)
+        });
+        let overload = overload.as_ref().map(|m| m.params.as_slice());
 
         // This is the LIBRARY jump, and it must never serve code the project wrote. It can reach
         // one: the receiver's type is inferred with the full, JDK-aware resolver, which succeeds on
@@ -3264,7 +3311,7 @@ impl IndexService {
                 "library_declaration: {} is project code — resolving it in source",
                 target.binary
             ));
-            if let Some(view) = self.project_member_view(&slot, &target) {
+            if let Some(view) = self.project_member_view(&slot, &target, overload) {
                 return Some(view);
             }
             // The project owns the TYPE but not this MEMBER — it is INHERITED. `EEventoCode.name()`
@@ -3277,12 +3324,12 @@ impl IndexService {
             ));
             target = bennu_intel::prelude::LibraryTarget { binary: owner, member: target.member };
             if provider.owns_type(&target.binary) {
-                return self.project_member_view(&slot, &target);
+                return self.project_member_view(&slot, &target, overload);
             }
         }
 
         let (text, file_binary, is_stub) = self.serve_source_view(&provider, &root, &target.binary)?;
-        let jump = member_jump_offset(&text, &file_binary, target.member.as_ref());
+        let jump = member_jump_offset(&text, &target.binary, target.member.as_ref(), overload);
         let path = write_view(&file_binary, &text)?;
         Some(DecompiledView {
             file: path,
@@ -5407,7 +5454,6 @@ mod tests {
         assert_eq!(line_start_offset(text, 99), None);
     }
 
-    #[test]
     /// Go-to on a library MEMBER must land on the member, not at the top of the file — the shape a
     /// decompiled stub actually has, header comment and all.
     #[test]
@@ -5423,13 +5469,75 @@ mod tests {
             stub,
             "org/acme/handler/HandlerFunctions",
             Some(&bennu_intel::prelude::LibraryMember { name: "http".into(), is_field: false }),
+            None,
         );
         assert_eq!(&stub[at..at + 4], "http", "must land on the method's own name");
 
         // And with no member named, on the type's declaration rather than on byte zero — which on a
         // stub is the middle of the header comment.
-        let at = member_jump_offset(stub, "org/acme/handler/HandlerFunctions", None);
+        let at = member_jump_offset(stub, "org/acme/handler/HandlerFunctions", None, None);
         assert_eq!(&stub[at..at + 16], "HandlerFunctions");
+    }
+
+    /// An overloaded library member lands on the overload the call binds to, matched by the
+    /// parameter types — not on whichever `uri` the file happens to declare first.
+    ///
+    /// Asked with the OUTER file's binary, which is what a nested library type is served as: the
+    /// owner-scoped search misses a member of `UriSpec` when told `RestClient`, so this runs the
+    /// whole-file fallback, where Spring's real case ends up.
+    #[test]
+    fn an_overloaded_library_member_lands_on_the_bound_overload() {
+        use bennu_java::prelude::TypeRef;
+        let src = "package org.springframework.web.client;\n\
+                   public interface RestClient {\n\
+                   \x20   interface UriSpec<S extends RequestHeadersSpec<?>> {\n\
+                   \x20       S uri(URI uri);\n\
+                   \x20       S uri(String uri, Object... uriVariables);\n\
+                   \x20       S uri(String uri, Map<String, ?> uriVariables);\n\
+                   \x20       S uri(String uriTemplate, Function<UriBuilder, URI> uriFunction);\n\
+                   \x20       S uri(Function<UriBuilder, URI> uriFunction);\n\
+                   \x20   }\n\
+                   }\n";
+        let uri = bennu_intel::prelude::LibraryMember { name: "uri".into(), is_field: false };
+        let binary = "org/springframework/web/client/RestClient";
+        let function = [TypeRef::simple("java/util/function/Function")];
+        let at = member_jump_offset(src, binary, Some(&uri), Some(&function));
+        assert!(src[at..].starts_with("uri(Function<"), "landed on {:?}", &src[at..at + 20]);
+
+        let varargs = [
+            TypeRef::simple("java/lang/String"),
+            TypeRef { dims: 1, ..TypeRef::simple("java/lang/Object") },
+        ];
+        let at = member_jump_offset(src, binary, Some(&uri), Some(&varargs));
+        assert!(src[at..].starts_with("uri(String uri, Object..."), "landed on {:?}", &src[at..at + 20]);
+
+        // No overload known: the first declaration, as before.
+        let at = member_jump_offset(src, binary, Some(&uri), None);
+        assert!(src[at..].starts_with("uri(URI uri)"));
+    }
+
+    /// A member of a NESTED library type, asked with that type's own bytecode name, is looked for
+    /// inside it — not in a sibling nested type declaring the same name earlier in the file — and a
+    /// name it does not declare lands on the nested type, not on the file's header.
+    #[test]
+    fn a_nested_library_owner_scopes_the_jump_to_its_own_type() {
+        let src = "package org.acme;\n\
+                   public interface RestClient {\n\
+                   \x20   interface RequestSpec {\n\
+                   \x20       void uri(String other);\n\
+                   \x20   }\n\
+                   \x20   interface UriSpec {\n\
+                   \x20       void uri(java.net.URI uri);\n\
+                   \x20   }\n\
+                   }\n";
+        let binary = "org/acme/RestClient$UriSpec";
+        let uri = bennu_intel::prelude::LibraryMember { name: "uri".into(), is_field: false };
+        let at = member_jump_offset(src, binary, Some(&uri), None);
+        assert!(src[at..].starts_with("uri(java.net.URI"), "landed on {:?}", &src[at..at + 16]);
+
+        let nope = bennu_intel::prelude::LibraryMember { name: "nope".into(), is_field: false };
+        let at = member_jump_offset(src, binary, Some(&nope), None);
+        assert!(src[at..].starts_with("UriSpec {"), "landed on {:?}", &src[at..at + 16]);
     }
 
     /// Real source is not a stub: a static factory frequently lives on a NESTED type of the file,
@@ -5448,6 +5556,7 @@ mod tests {
             src,
             "org/acme/HandlerFunctions",
             Some(&bennu_intel::prelude::LibraryMember { name: "http".into(), is_field: false }),
+            None,
         );
         assert_eq!(&src[at..at + 4], "http", "the nested declaration is still the answer");
     }
@@ -5460,6 +5569,7 @@ mod tests {
             src,
             "org/acme/Foo",
             Some(&bennu_intel::prelude::LibraryMember { name: "nope".into(), is_field: false }),
+            None,
         );
         assert_eq!(&src[at..at + 3], "Foo");
     }

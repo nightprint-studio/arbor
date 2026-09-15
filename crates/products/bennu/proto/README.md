@@ -31,6 +31,9 @@ The debugger's **events** carry `DebugStatus` (`arbor://bennu/debug-status`), `D
 (`…/debug-paused`, with its `StackFrame`s) and `BreakpointStatus` (`…/debug-breakpoints`) —
 a breakpoint is identified by **file and line**, which is what the user set and what survives
 a rebuild; turning it into a location a VM understands is `bennu-be`'s job, redone per launch.
+A breakpoint in a **library** source view also carries `class` — the view's top-level class —
+because the cached view's path is not an identity the VM, another machine or a cleared cache
+shares.
 
 The `CapabilitySet` bitset is *produced* by `bennu-project` (the Spike D
 capability-detection ruleset); this crate only carries its serialized view.

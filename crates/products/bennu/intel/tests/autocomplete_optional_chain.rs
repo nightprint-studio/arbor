@@ -247,6 +247,114 @@ fn a_val_mapped_through_an_expression_lambda_is_an_optional_of_its_body() {
     assert_optional_of(&p, "delegate", "java/lang/String");
 }
 
+// ── 5. the reported method: three vals in a row, and a wrong third argument ──────────────────────
+
+const VALIDATION_OUTCOME: &str = "package com.acme;\n\
+     public class ValidationOutcome {\n\
+     \x20   public static ValidationOutcome allow() { return null; }\n\
+     \x20   public static ValidationOutcome deny() { return null; }\n\
+     }\n";
+
+/// The reported method verbatim, against a `DelegateClient` whose third parameter is `third`.
+fn delegate_project(third: &str) -> Project {
+    let client = format!(
+        "package com.acme;\n\
+         import java.util.Optional;\n\
+         public interface DelegateClient {{\n\
+         \x20   Optional<Token> delegate_for_user(String username, String identifier, {third} delegate);\n\
+         }}\n"
+    );
+    let user = "package com.acme;\n\
+         \n\
+         import lombok.RequiredArgsConstructor;\n\
+         import lombok.val;\n\
+         import org.springframework.stereotype.Component;\n\
+         \n\
+         @RequiredArgsConstructor @Component\n\
+         public class CheckAssignedUser implements AttributeValidator {\n\
+         \x20   private static final ValidationOutcome STD_DENIED = ValidationOutcome.deny();\n\
+         \x20   private final IdentityResolver identity_resolver;\n\
+         \x20   private final DelegateClient client;\n\
+         \n\
+         \x20   private ValidationOutcome check_delegate(final String username) {\n\
+         \x20       val delegate_opt = identity_resolver.resolve_identity();\n\
+         \n\
+         \x20       if (delegate_opt.isEmpty())\n\
+         \x20           return STD_DENIED;\n\
+         \n\
+         \x20       val delegate = delegate_opt.get();\n\
+         \n\
+         \x20       val delegate_db_opt =\n\
+         \x20           client.delegate_for_user(\n\
+         \x20               username\n\
+         \x20               , delegate.identifier()\n\
+         \x20               , delegate_opt.get()\n\
+         \x20           );\n\
+         \n\
+         \x20       if (delegate_db_opt.isEmpty())\n\
+         \x20           return STD_DENIED;\n\
+         \n\
+         \x20       return ValidationOutcome.allow();\n\
+         \x20   }\n\
+         }\n";
+    Project::new(&[
+        ("com/acme/IdentityResolver.java", IDENTITY_RESOLVER),
+        ("com/acme/ResolvedIdentity.java", RESOLVED_IDENTITY),
+        ("com/acme/LombokIdentity.java", LOMBOK_IDENTITY),
+        ("com/acme/Token.java", TOKEN),
+        ("com/acme/ValidationOutcome.java", VALIDATION_OUTCOME),
+        ("com/acme/DelegateClient.java", &client),
+        (USER, user),
+    ])
+}
+
+fn argument_type_messages(p: &Project) -> Vec<String> {
+    p.validate(USER)
+        .into_iter()
+        .filter(|d| d.code == "argument-type")
+        .map(|d| d.message)
+        .collect()
+}
+
+#[test]
+fn the_reported_vals_are_typed_one_from_the_other() {
+    let p = delegate_project("Token");
+    assert_optional_of(&p, "delegate_opt", "com/acme/ResolvedIdentity");
+    assert_eq!(
+        declared_type(&p, "delegate").map(|(b, _)| b).as_deref(),
+        Some("com/acme/ResolvedIdentity")
+    );
+    assert_optional_of(&p, "delegate_db_opt", "com/acme/Token");
+}
+
+#[test]
+fn completion_on_the_reported_val_offers_its_members() {
+    let p = delegate_project("Token");
+    let labels = p.complete_labels(USER, after(&p, ", delegate."));
+    assert!(labels.contains(&"identifier".to_string()), "{labels:?}");
+    let labels = p.complete_labels(USER, after(&p, "(delegate_opt."));
+    assert!(labels.contains(&"isEmpty".to_string()), "{labels:?}");
+}
+
+#[test]
+fn the_reported_wrong_third_argument_is_an_error() {
+    let p = delegate_project("Token");
+    let messages = argument_type_messages(&p);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].contains("Argument 3 of `delegate_for_user`")
+            && messages[0].contains("`ResolvedIdentity`")
+            && messages[0].contains("`Token`"),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn the_reported_call_with_a_matching_third_parameter_is_clean() {
+    let p = delegate_project("ResolvedIdentity");
+    assert!(argument_type_messages(&p).is_empty(), "{:?}", argument_type_messages(&p));
+}
+
 /// And the element flows on: `.orElse(…)` after the `map` is a `String`, and completion after the
 /// `map(…)` offers `Optional`'s members.
 #[test]

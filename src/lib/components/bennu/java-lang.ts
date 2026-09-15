@@ -56,6 +56,7 @@ import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
 import { makeHoverSource } from './bennu-hover';
 import { javaStringPaste } from './java-string-paste';
 import { javaTyping } from './java-typing';
+import { javaNewline } from './java-newline';
 import type { CompletionItem } from '$lib/types/bennu';
 
 const RUNTIME_WASM = '/bennu/tree-sitter.wasm';
@@ -584,7 +585,8 @@ export const javaLanguage: LanguageDescriptor = {
   // A paste into a string literal is escaped, and one that spans lines becomes
   // concatenated literals — Java has no syntax for a `"…"` across two lines. Quotes pair
   // only where a literal can start, and `<` wraps a selection without ever auto-closing.
-  editing: [javaStringPaste, javaTyping],
+  // Enter indents from the code's structure and continues comments.
+  editing: [javaStringPaste, javaTyping, javaNewline],
   intel: {
     completion: javaCompletionSource,
     hover: javaHoverSource,

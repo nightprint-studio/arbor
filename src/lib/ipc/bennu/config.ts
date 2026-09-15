@@ -261,6 +261,11 @@ export interface ProjectSession {
    *  {@link open_files}; `''` for a tab the caret never visited. May be shorter than — or absent
    *  from — a session written by an older build, so read it defensively. */
   open_carets?: string[];
+  /** Tree rows opened against their default, as `<tree>:<stable key>` (`project:core/src`,
+   *  `maven:module/app`) — see `components/bennu/tree-expansion.ts`. Absent when none. */
+  expanded?: string[];
+  /** Tree rows closed against their default, same keys as {@link expanded}. Absent when none. */
+  collapsed?: string[];
 }
 
 /** Mirrors the BE `BennuWorkspace` — one named workspace: an ordered set of Java projects with

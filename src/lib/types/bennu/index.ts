@@ -228,7 +228,21 @@ export interface CompletionItem {
    *  documentation panel (`bennu_completion_doc`) and the acceptance memory
    *  (`bennu_completion_accepted`) are keyed by. */
   owner?: string;
+  /** The parameter list a method row shows beside its name — `(Object obj)`, or `(long, int)` where
+   *  the member carries no names. When present, `detail` is the return type alone. */
+  signature?: string;
+  /** Where a member stands relative to the receiver: declared by it, inherited (a record's implicit
+   *  `equals` included), or `java.lang.Object`'s. Absent for anything that is not a member. */
+  member_origin?: MemberOrigin;
+  /** Modifiers the popup marks on the icon. */
+  modifiers?: CompletionModifier[];
 }
+
+/** See {@link CompletionItem.member_origin}. */
+export type MemberOrigin = 'own' | 'inherited' | 'object';
+
+/** The fixed modifier vocabulary of {@link CompletionItem.modifiers}. */
+export type CompletionModifier = 'static' | 'abstract' | 'final';
 
 /** A plain text edit: replace `[start, end)` of `file` with `new_text`. Byte offsets, applied
  *  through CodeMirror so undo works. */

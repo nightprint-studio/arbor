@@ -424,6 +424,42 @@ pub struct CompletionItem {
     /// four hundred archive reads for the one row that gets highlighted.
     #[serde(default)]
     pub owner: Option<String>,
+    /// The parameter list a method row shows beside its name — `(Object obj)`, or `(long, int)`
+    /// where the member carries no names (a class file compiled without `-parameters`).
+    ///
+    /// When it is present, [`CompletionItem::detail`] is the **return type** alone: the row reads
+    /// `equals(Object obj)` on the left and `boolean` on the right, the way IntelliJ draws it. The
+    /// two halves travel apart so the popup can lay them out rather than split a string. `None` for
+    /// anything that is not a method, and for every provider that does not send it — whose `detail`
+    /// keeps meaning whatever it meant.
+    #[serde(default)]
+    pub signature: Option<String>,
+    /// Where a member stands relative to the receiver it was offered on — see [`MemberOrigin`].
+    /// `None` for an item that is not a member of anything (a keyword, a local, a type name).
+    #[serde(default)]
+    pub member_origin: Option<MemberOrigin>,
+    /// The modifiers the popup marks on the icon, from the fixed vocabulary `"static"`,
+    /// `"abstract"`, `"final"`. Empty when there is nothing to mark, or nothing is known.
+    #[serde(default)]
+    pub modifiers: Vec<String>,
+}
+
+/// How near a completed member is to the receiver it was offered on — the question both the order
+/// and the look of a member list turn on.
+///
+/// Ordered worst to best, so `max` is the nearer of two. It is its own key and not one more term in
+/// a score: after `route.` the members `ServiceRoute` declares are what is reached for nine times in
+/// ten, and a weighted term let a habit or a use count lift `hashCode` above them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MemberOrigin {
+    /// Declared by `java.lang.Object` — offered on every receiver, wanted almost never.
+    Object,
+    /// Declared by a supertype, or implicit on the receiver itself: a record's `equals`, `hashCode`
+    /// and `toString` are written by the compiler, not by the author, and read as inherited.
+    Inherited,
+    /// Declared by the receiver's own type.
+    Own,
 }
 
 /// The severities a [`Diagnostic`] may carry, as the strings that ride on the wire.
@@ -1459,6 +1495,16 @@ pub struct Breakpoint {
     /// zero on each launch, and editing the breakpoint set restarts it.
     #[serde(default)]
     pub hit_count: u32,
+    /// For a breakpoint in a **library** source view — a class read out of a `-sources.jar` or the
+    /// JDK's `src.zip` — the fully-qualified **top-level** class that view declares
+    /// (`org.springframework.web.client.RestClient`). Empty for the project's own files.
+    ///
+    /// The identity of a library breakpoint, where [`Self::file`] is only where its view happens to
+    /// be cached: the class is what the VM is asked about, it is the same on every machine and
+    /// after the cache is cleared, and it is what reopens the view from the Breakpoints list.
+    /// Skipped when empty, so a project breakpoint persists exactly as it always has.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub class: String,
 }
 
 impl Default for Breakpoint {
@@ -1469,6 +1515,7 @@ impl Default for Breakpoint {
             enabled: true,
             condition: String::new(),
             hit_count: 0,
+            class: String::new(),
         }
     }
 }

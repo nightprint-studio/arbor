@@ -7,6 +7,7 @@
 //! place a type is *used*, not declared, and a name drawn there would be a name nobody can write.
 
 use super::tokens::{is, starts_uppercase, text, Kind, Token};
+use super::DeclarationKind;
 use crate::postfix::names::KEYWORDS;
 
 /// The modifiers a declaration's type may follow. `default` is left out: before a type it starts an
@@ -22,8 +23,9 @@ const PRIMITIVES: &[&str] = &["boolean", "byte", "char", "short", "int", "long",
 /// them is a value.
 const VALUE_WORDS: &[&str] = &["new", "return", "throw", "case", "yield", "assert"];
 
-/// Where the declared type starts, when `tokens` (everything before the name) end in one.
-pub(super) fn declared_type(tokens: &[Token], source: &str) -> Option<usize> {
+/// Where the declared type starts and what it declares, when `tokens` (everything before the name)
+/// end in one.
+pub(super) fn declared_type(tokens: &[Token], source: &str) -> Option<(usize, DeclarationKind)> {
     let mut end = tokens.len();
     // Array brackets and a varargs ellipsis.
     loop {
@@ -65,9 +67,9 @@ pub(super) fn declared_type(tokens: &[Token], source: &str) -> Option<usize> {
     let declares = match tokens[prev].kind {
         Kind::Punct(b'{' | b'}' | b';' | b':') => starts_statement_or_member(tokens, source, prev),
         Kind::Punct(b'(' | b',') => starts_parameter(tokens, source, prev),
-        _ => false,
+        _ => None,
     };
-    declares.then(|| tokens[first].start)
+    declares.map(|kind| (tokens[first].start, kind))
 }
 
 /// `index`, moved back over the modifiers and annotations that end there.
@@ -104,63 +106,59 @@ fn annotation_ending_at(tokens: &[Token], end: usize) -> Option<usize> {
     is(tokens, at, b'@').then_some(at)
 }
 
-/// A declaration after `{`, `}`, `;` or `:` — a field, or a local in a block.
-fn starts_statement_or_member(tokens: &[Token], source: &str, prev: usize) -> bool {
-    let Some((open, after_semicolon)) = enclosing_opener(tokens, prev + 1) else {
-        return false;
-    };
+/// A declaration after `{`, `}`, `;` or `:` — a field in a type body, or a local in a block.
+fn starts_statement_or_member(tokens: &[Token], source: &str, prev: usize) -> Option<DeclarationKind> {
+    let (open, after_semicolon) = enclosing_opener(tokens, prev + 1)?;
     match tokens[open].kind {
         // A second resource: `try (A a = x; B |`.
-        Kind::Punct(b'(') => {
-            is(tokens, prev, b';')
-                && open >= 1
-                && tokens[open - 1].kind == Kind::Word
-                && text(source, &tokens[open - 1]) == "try"
-        }
+        Kind::Punct(b'(') => (is(tokens, prev, b';')
+            && open >= 1
+            && tokens[open - 1].kind == Kind::Word
+            && text(source, &tokens[open - 1]) == "try")
+            .then_some(DeclarationKind::Local),
         Kind::Punct(b'{') => {
             if !opens_a_body(tokens, source, open) {
-                return false;
+                return None;
             }
             let header = header_of(tokens, open);
             let in_switch = has_top_level_word(tokens, source, header.clone(), "switch");
             // `case 1: Order |` declares; after any other `:` (a ternary, a label) nothing does.
             if is(tokens, prev, b':') {
-                return in_switch;
+                return in_switch.then_some(DeclarationKind::Local);
             }
             // Straight after a switch's `{` only a `case` can come.
             if in_switch && prev == open {
-                return false;
+                return None;
             }
             // An enum body lists its constants up to the first `;`, and `RED |` is not a declaration.
-            !(has_top_level_word(tokens, source, header, "enum") && !after_semicolon)
+            if has_top_level_word(tokens, source, header, "enum") && !after_semicolon {
+                return None;
+            }
+            Some(if opens_type_body(tokens, source, open) { DeclarationKind::Field } else { DeclarationKind::Local })
         }
-        _ => false,
+        _ => None,
     }
 }
 
-/// A declaration after the `(` or `,` of a parameter list — a method's, a constructor's, a record's,
-/// an enhanced `for`'s or a `try`'s resources.
-fn starts_parameter(tokens: &[Token], source: &str, prev: usize) -> bool {
-    let Some((open, _)) = enclosing_opener(tokens, prev + 1) else {
-        return false;
-    };
+/// A declaration after the `(` or `,` of a parameter list — a method's, a constructor's, a record's
+/// (all parameters), or an enhanced `for`'s or a `try`'s resources (locals).
+fn starts_parameter(tokens: &[Token], source: &str, prev: usize) -> Option<DeclarationKind> {
+    let (open, _) = enclosing_opener(tokens, prev + 1)?;
     if !is(tokens, open, b'(') {
-        return false;
+        return None;
     }
     // `m(Map<String, Order |` — the comma separates type arguments, not parameters.
     if is(tokens, prev, b',') && unclosed_angles(&tokens[open + 1..prev]) {
-        return false;
+        return None;
     }
-    let Some(callee) = open.checked_sub(1) else {
-        return false;
-    };
+    let callee = open.checked_sub(1)?;
     if tokens[callee].kind != Kind::Word {
-        return false;
+        return None;
     }
     match text(source, &tokens[callee]) {
-        "for" | "try" => prev == open,
-        word if KEYWORDS.contains(&word) => false,
-        _ => declares_parameters(tokens, source, callee),
+        "for" | "try" => (prev == open).then_some(DeclarationKind::Local),
+        word if KEYWORDS.contains(&word) => None,
+        _ => declares_parameters(tokens, source, callee).then_some(DeclarationKind::Parameter),
     }
 }
 

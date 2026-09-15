@@ -80,7 +80,22 @@ pub use crate::library_beans::{bean_defs_of,
 // When a Spring annotation on a method does nothing — the three ways to miss the proxy.
 pub use crate::proxy::{
     declares_aspectj, issues_in as proxy_issues, ProxyIssue, ProxyMode, CODE_FINAL,
-    CODE_NOT_PUBLIC, CODE_SELF_INVOCATION,
+    CODE_NOT_PUBLIC, CODE_SELF_INVOCATION, CODE_STATIC,
+};
+
+// Bean declarations Spring refuses at startup or silently ignores.
+pub use crate::bean_check::{
+    issues_in as bean_issues, BeanIssue, CODE_ASYNC_DISCARDED_RESULT, CODE_BEAN_NOT_OVERRIDABLE,
+    CODE_BEAN_VOID, CODE_CONFIGURATION_FINAL, CODE_CONFIGURATION_NO_VISIBLE_CONSTRUCTOR,
+    CODE_INNER_CLASS, CODE_NOT_INSTANTIABLE, CODE_POST_PROCESSOR_NOT_STATIC,
+    CODE_STATIC_INJECTION,
+};
+
+// Alt+Enter on those checks and on the proxy ones.
+pub use crate::fixes::{
+    intentions as declaration_fixes, INTENTION_CONFIGURATION_REMOVE_FINAL,
+    INTENTION_MAKE_CLASS_STATIC, INTENTION_MAKE_METHOD_STATIC, INTENTION_PROXY_MAKE_PUBLIC,
+    INTENTION_PROXY_REMOVE_FINAL, INTENTION_REMOVE_MODIFIERS, INTENTION_REMOVE_STEREOTYPE,
 };
 
 // A transaction held open across something that is not the database.

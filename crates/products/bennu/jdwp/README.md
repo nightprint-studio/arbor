@@ -62,7 +62,7 @@ shell hit going out-of-process. Handle events on a worker.
 | Area | Commands |
 |---|---|
 | VM | `Version`, `IDSizes`, `ClassesBySignature`, `Suspend`, `Resume`, `Dispose` |
-| Types | `ReferenceType.Signature` / `.Methods` / `.Fields`, `ClassType.Superclass` |
+| Types | `ReferenceType.Signature` / `.Methods` / `.Fields` / `.NestedTypes`, `ClassType.Superclass` |
 | Methods | `Method.LineTable`, `Method.VariableTable` |
 | Stopping | `EventRequest.Set` (breakpoint · class-prepare · step · exception), `EventRequest.Clear` |
 | Threads | `ThreadReference.Name` / `.Frames` / `.Resume` |

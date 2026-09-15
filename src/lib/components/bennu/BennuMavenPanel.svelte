@@ -40,6 +40,9 @@
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
   import BennuMavenModuleSection from './BennuMavenModuleSection.svelte';
+  import { mavenKeys } from './tree-expansion';
+  import { treeExpansionStore } from '$lib/stores/bennu/tree-expansion.svelte';
+  import type { MavenModule } from '$lib/ipc/bennu/maven-build';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuMavenStore } from '$lib/stores/bennu/maven.svelte';
@@ -79,15 +82,13 @@
   // panel you have to scroll past rather than read. The root stays open either way — it is the
   // one whose lifecycle most presses come from.
   const collapseByDefault = $derived(bennuMavenStore.modules.length > 6);
-  const open = $state<Record<string, boolean>>({});
-  function isOpen(id: string, fallback: boolean): boolean {
-    return open[id] ?? fallback;
-  }
-  function toggle(id: string, fallback: boolean) {
-    open[id] = !isOpen(id, fallback);
+  function moduleOpenByDefault(module: MavenModule): boolean {
+    return module.dir === '' || !collapseByDefault;
   }
 
-  let profilesOpen = $state(false);
+  // Which sections are open, remembered per project in its session — not in this component, which
+  // is unmounted every time the rail closes the window and used to come back with everything reset.
+  const expansion = $derived(treeExpansionStore.view(root ?? '', 'maven'));
 
   function openFile(path: string, line?: number) {
     void projectStore.openFile(path).then(() => {
@@ -250,8 +251,8 @@
         <!-- Above the modules, because a profile changes what every press below does. -->
         <SidebarSection
           label="Profiles"
-          expanded={profilesOpen}
-          onToggle={() => (profilesOpen = !profilesOpen)}
+          expanded={expansion.isOpen(mavenKeys.profiles)}
+          onToggle={() => expansion.toggle(mavenKeys.profiles)}
           badge={bennuMavenStore.activeProfiles.length || null}
           badgeTitle="Active — passed as -P on every goal run from here"
         >
@@ -287,8 +288,9 @@
           <BennuMavenModuleSection
             {module}
             phases={model.lifecycle}
-            expanded={isOpen(module.pom, module.dir === '' || !collapseByDefault)}
-            onToggle={() => toggle(module.pom, module.dir === '' || !collapseByDefault)}
+            expanded={expansion.isOpen(mavenKeys.module(module), moduleOpenByDefault(module))}
+            onToggle={() => expansion.toggle(mavenKeys.module(module), moduleOpenByDefault(module))}
+            {expansion}
             onRun={(goals) => run(module.dir, goals)}
             onOpen={openFile}
           />

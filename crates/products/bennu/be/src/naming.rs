@@ -350,6 +350,17 @@ pub(crate) fn template_naming(root: &str, file: &str) -> NamingFacts {
     NamingFacts::new(pack, rules.as_ref())
 }
 
+/// The convention the project **declared** for `target` where `file` is, or `None` when it declared
+/// none — naming switched off, the target left `any`, or no open project owning the file. Unlike
+/// [`template_naming`] it does not fall back to the language's standard: a caller that has other
+/// evidence of the project's style (the names a file already uses) must be able to tell "said
+/// nothing" from "said camelCase".
+pub(crate) fn declared_convention(file: &str, target: Target) -> Option<Convention> {
+    let (rel, config) = owning_project(file)?;
+    let pack = bennu_naming::prelude::pack_for_path(file)?;
+    Some(config.rules_for_path(pack.id, &rel).convention_for(target)).filter(|convention| !convention.is_off())
+}
+
 // ── which languages this project actually contains ──────────────────────────────
 
 /// How many directory entries the presence walk will look at before giving up.

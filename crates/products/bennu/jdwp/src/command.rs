@@ -232,6 +232,25 @@ pub fn superclass(client: &Client, class: Id) -> Result<Id> {
     Reader::new(&data, client.sizes()).reference_type_id()
 }
 
+/// `ReferenceType.NestedTypes` — the **loaded** types directly nested in `class`: named inner
+/// classes and anonymous ones (`Order$1`) alike, one level deep.
+///
+/// What finds the class a line really belongs to once its outer type is loaded. A line inside an
+/// anonymous class body is in `Order$1`'s line table, not in `Order`'s, and no scan of the source
+/// knows that name — so a debugger walks this, level by level, and asks each one's line table.
+pub fn nested_types(client: &Client, class: Id) -> Result<Vec<ClassRef>> {
+    let mut w = Writer::new(client.sizes());
+    w.reference_type_id(class);
+    let data = client.send(REFERENCE_TYPE, 8, w.into_bytes(), "ReferenceType.NestedTypes")?;
+    let mut r = Reader::new(&data, client.sizes());
+    let count = r.i32()?.max(0);
+    (0..count)
+        // The reply carries no status; a nested type the VM reports is loaded, which is all a
+        // line-table lookup needs.
+        .map(|_| Ok(ClassRef { type_tag: r.u8()?, id: r.reference_type_id()?, status: 0 }))
+        .collect()
+}
+
 /// `Method.LineTable` — which bytecode index each source line begins at.
 ///
 /// This is the whole of how a breakpoint on "line 118" becomes a location the VM understands.

@@ -3,10 +3,12 @@
 //! that's a separate, harder check), which makes it safe: boxing, generics and widening never change
 //! how many arguments a call has.
 //!
-//! Two shapes are read: `recv.method(…)`, whose receiver gives the type to ask, and a **bare**
+//! Two shapes are read: `recv.method(…)`, whose receiver gives the type to ask — a value, or the type
+//! of a static call (`Util.convert(…)`, see [`crate::resolve::call_receiver_binary`]) — and a **bare**
 //! `method(…)`, whose receiver is the implicit `this` — see [`crate::bare_call`] for the guards that
 //! make naming `this` safe. The bare one is the shape a class calling its own methods is made of,
-//! and it went unjudged for as long as the check only looked for a receiver.
+//! and it went unjudged for as long as the check only looked for a receiver. A bare call inside a
+//! lambda is judged too: a lambda adds no methods.
 //!
 //! Conservative to the bone (docs: never a false "cannot resolve"):
 //!   * only checked when the receiver type is inferred AND its whole hierarchy is resolvable — an
@@ -16,9 +18,7 @@
 //!   * a trailing array parameter is treated as possibly-varargs (we can't see `ACC_VARARGS` through
 //!     the seam), so a varargs call is never mis-flagged.
 
-use bennu_java::prelude::{
-    extract_symbols, infer_node_type_cached, FileSymbols, InferCache, MemberKind, TypeResolver,
-};
+use bennu_java::prelude::{extract_symbols, FileSymbols, InferCache, MemberKind, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
@@ -33,13 +33,11 @@ struct Sig {
 }
 
 impl Sig {
-    /// Whether a call with `argc` arguments could bind to this overload.
+    /// Whether a call with `argc` arguments could bind to this overload — the shared count rule
+    /// (`bennu_java`'s `arity_admits`), the same one overload applicability starts from. A varargs
+    /// flag on an empty parameter list cannot happen, and is not allowed to widen anything if it does.
     fn accepts(&self, argc: usize) -> bool {
-        if argc == self.params {
-            return true;
-        }
-        // Possible varargs: `foo(T... xs)` binds 0..=∞ trailing args, so argc may be params-1 or more.
-        self.last_is_array && self.params >= 1 && argc + 1 >= self.params
+        bennu_java::prelude::arity_admits(self.params, self.last_is_array && self.params >= 1, argc)
     }
 }
 
@@ -94,7 +92,11 @@ fn check_bare_call(
     cache: &InferCache,
     out: &mut Vec<Diagnostic>,
 ) {
-    let Some(method) = bare.judgeable(n, bytes) else { return };
+    // Across lambdas: a lambda declares no methods and does not rebind `this`, so the overload set
+    // is the same inside one as outside — and counting arguments never needs their types, which is
+    // the only thing the stricter scope protects. Refusing lambdas left every call to an own method
+    // from a callback (`opt.ifPresent(h -> own(h))`, a reactive filter's `map(r -> …)`) unjudged.
+    let Some(method) = bare.judgeable_across_lambdas(n, bytes) else { return };
     let Some(name) = n.child_by_field_name("name") else { return };
     let Some(args) = n.child_by_field_name("arguments") else { return };
 
@@ -132,24 +134,25 @@ fn check_call(
     cache: &InferCache,
     out: &mut Vec<Diagnostic>,
 ) {
-    // Only `receiver.method(...)` — a bare `foo()` resolves against `this`, whose source type the
-    // resolver may not fully carry (arity would be unreliable). Aligns with `members`.
-    let Some(obj) = n.child_by_field_name("object") else { return };
+    // Only `receiver.method(...)` — a bare `foo()` is `check_bare_call`'s, behind its own guards.
+    if n.child_by_field_name("object").is_none() {
+        return;
+    }
     let Some(name) = n.child_by_field_name("name") else { return };
     let Some(args) = n.child_by_field_name("arguments") else { return };
     if name.has_error() || args.has_error() {
         return;
     }
     let Ok(method) = name.utf8_text(bytes) else { return };
-    let Some(ty) = infer_node_type_cached(root, source, symbols, &obj, resolver, cache) else {
+    // A value's type, or the type a static call names (`Util.convert(…)`).
+    let Some(receiver) =
+        crate::resolve::call_receiver_binary(n, root, source, symbols, resolver, cache)
+    else {
         return;
     };
-    if ty.binary_name.is_empty() {
-        return;
-    }
     // Shared memoized hierarchy walk (see `InferCache::resolve_methods`) — `complete` is the
     // hierarchy-fully-known gate, the candidates are the overload set (no separate walk per call).
-    let res = cache.resolve_methods(resolver, &ty.binary_name, method);
+    let res = cache.resolve_methods(resolver, &receiver, method);
     if !res.complete {
         return;
     }
@@ -164,7 +167,7 @@ fn check_call(
             args.end_byte(),
             format!(
                 "No overload of `{method}` in `{}` takes {argc} argument{}",
-                simple_name(&ty.binary_name),
+                simple_name(&receiver),
                 plural(argc)
             ),
         ));
@@ -404,5 +407,129 @@ mod tests {
         // A nested class can declare its own `helper` that the top type's hierarchy knows nothing of.
         let src = "class C { void m() {} class Inner { void go() { helper(1, 2, 3); } } }";
         assert!(arity_errors(src, &resolver()).is_empty());
+    }
+
+    fn file_diags(src: &str) -> Vec<String> {
+        arity_errors(src, &resolver()).into_iter().map(|d| d.message).collect()
+    }
+
+    /// The report, verbatim: a private snake_case method whose parameters are `final`, one per line
+    /// with a leading comma, called with an enum constant that nothing here can type.
+    fn insert_header_src(call: &str) -> String {
+        format!(
+            "class C {{\n\
+             \x20   void run() {{\n\
+             \x20       {call}\n\
+             \x20   }}\n\
+             \x20   private void insert_header_opt(\n\
+             \x20           final HttpRequest request\n\
+             \x20           , final Headers header\n\
+             \x20       ) {{\n\
+             \x20       RequestInfo.opt_header(header)\n\
+             \x20           .ifPresent(h -> request.getHeaders().add(header.header_name(), h));\n\
+             \x20   }}\n\
+             }}\n"
+        )
+    }
+
+    #[test]
+    fn the_reported_call_missing_an_argument_is_flagged() {
+        let d = file_diags(&insert_header_src("insert_header_opt(Headers.TRACE_ID);"));
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("insert_header_opt") && d[0].contains("1 argument"), "{d:?}");
+    }
+
+    #[test]
+    fn the_reported_call_with_both_arguments_is_ok() {
+        let src = insert_header_src("insert_header_opt(null, Headers.TRACE_ID);");
+        assert!(file_diags(&src).is_empty(), "{:?}", file_diags(&src));
+    }
+
+    #[test]
+    fn the_reported_call_inside_a_lambda_is_flagged() {
+        let d = file_diags(&insert_header_src(
+            "java.util.Optional.of(1).ifPresent(x -> insert_header_opt(Headers.TRACE_ID));",
+        ));
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("insert_header_opt"), "{d:?}");
+    }
+
+    #[test]
+    fn an_overload_taking_one_argument_is_ok() {
+        let src = "class C {\n\
+                   void run() { own(Headers.TRACE_ID); }\n\
+                   private void own(final Object request, final Headers header) {}\n\
+                   private void own(final Headers header) {}\n\
+                   }";
+        assert!(file_diags(src).is_empty(), "{:?}", file_diags(src));
+    }
+
+    #[test]
+    fn a_varargs_method_of_the_file_accepts_any_trailing_count() {
+        let src = "class C {\n\
+                   void run() { log_all(); log_all(\"a\"); log_all(\"a\", \"b\", \"c\"); }\n\
+                   private void log_all(\n\
+                   \x20   final String... parts\n\
+                   ) {}\n\
+                   }";
+        assert!(file_diags(src).is_empty(), "{:?}", file_diags(src));
+    }
+
+    #[test]
+    fn an_unresolvable_supertype_silences_bare_calls() {
+        // The unknown base could declare `own(int)` — an inherited overload binds a bare call just as
+        // an own one does, `private` or not (JLS §15.12.2 searches every member method of that name).
+        let mut r = resolver();
+        r.members.insert(
+            "D".to_string(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: Some(TypeRef::simple("com/missing/Base")),
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: Vec::new(),
+                flags: Default::default(),
+            },
+        );
+        r.simple.insert("D".to_string(), "D".to_string());
+        let src = "class D extends Base { private void own(int a, int b) {} void m() { own(1); } }";
+        assert!(arity_errors(src, &r).is_empty());
+    }
+
+    #[test]
+    fn a_bare_call_inside_a_lambda_is_judged() {
+        let d = diags("Runnable r = () -> helper(1, 2);");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("helper"), "{d:?}");
+        assert!(diags("Runnable r = () -> helper(1); Runnable q = () -> { helper(2); };").is_empty());
+    }
+
+    #[test]
+    fn a_bare_call_inside_an_anonymous_class_is_still_skipped() {
+        // The anonymous body could declare its own `helper(int, int)`.
+        assert!(diags("Runnable r = new Runnable() { public void run() { helper(1, 2); } };").is_empty());
+    }
+
+    #[test]
+    fn a_call_on_this_is_judged() {
+        let d = diags("this.helper(1, 2);");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("helper"), "{d:?}");
+        assert!(diags("this.helper(1);").is_empty());
+    }
+
+    #[test]
+    fn a_static_method_of_the_file_is_judged() {
+        let src = "class C { static void s_helper(int a, int b) {} static void sm() { s_helper(1); } }";
+        let d = file_diags(src);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("s_helper"), "{d:?}");
+    }
+
+    #[test]
+    fn a_statically_imported_name_is_not_judged() {
+        // Its owner's overloads are not enumerated here.
+        let src = "import static com.acme.Util.util_call;\nclass C { void m() { util_call(1, 2, 3); } }";
+        assert!(file_diags(src).is_empty(), "{:?}", file_diags(src));
     }
 }

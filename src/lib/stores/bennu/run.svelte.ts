@@ -732,6 +732,18 @@ function createBennuRunStore() {
       patchTab(id, { finished: true });
       return;
     }
+    if (res.tool === 'javac') {
+      // The fallback compiles into `target/bennu-classes`, which no run classpath reads: launching
+      // now would run whatever `target/classes` held before, and look exactly like a fresh build.
+      pushTo(
+        id,
+        'Maven could not be started, so the classes this run would use were not rebuilt. ' +
+          'Check that Maven is installed (or the project has mvnw), then run again.',
+        'err',
+      );
+      patchTab(id, { finished: true });
+      return;
+    }
 
     patchTab(id, { live: true, startedAt: Date.now() });
     try {

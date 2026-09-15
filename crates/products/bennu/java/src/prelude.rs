@@ -7,8 +7,12 @@
 // The type-inference entry points: the one-off caret query (parses + extracts) and the
 // reuse-an-existing-tree variant for the hot reference-walk path.
 pub use crate::infer::is_inferred_type;
+// Overload applicability (JLS §15.12.2 in miniature, one copy): the overload a call binds to — at a
+// caret, or for a call node and candidate set in hand — and the full verdict for a check that must
+// tell "ambiguous" from "nothing applies". `arity_admits` is the count rule alone.
+pub use crate::infer::{arity_admits, bound_overload, overload_fit, subtype_verdict, OverloadFit};
 pub use crate::infer::{
-    enclosing_type_fqn, functional_descriptor, infer_expression_type, infer_expression_type_at,
+    call_overload_at, enclosing_type_fqn, functional_descriptor, infer_expression_type, infer_expression_type_at,
     infer_expression_type_cached, infer_node_type_cached, infer_receiver_type, FunctionalDescriptor,
     infer_receiver_type_at, infer_receiver_type_cached, method_admits_argc, type_decl_at,
     InferCache,
@@ -76,6 +80,17 @@ pub use crate::scaffold::{
 
 // Declaration-site name-span + binary-name CST scans (go-to-declaration / rename / inherited).
 pub use crate::spans::{binary_of_type_at, call_arity_at, enclosing_type_binary, find_type_name_span};
+// A type declaration located by BINARY name, nesting included (`Outer$Inner` is `Inner` inside
+// `Outer`, never a same-named type elsewhere in the file).
+pub use crate::type_decl::{
+    binary_simple_name, declared_package, declared_type_binary, find_binary_type_name_span, find_type_declaration,
+    is_type_declaration, type_nesting, TYPE_DECLARATION_KINDS,
+};
+// Which declaration of an overloaded name takes a member's parameters — shared by go-to, rename and
+// library Javadoc so they cannot disagree about which overload is which.
+pub use crate::param_shape::{
+    choose_overload, declared_parameter_shapes, parameter_shapes_match, ParamShape,
+};
 
 // The shared supertype walk — see `crate::hierarchy` for why there is only one.
 pub use crate::hierarchy::{
@@ -95,7 +110,9 @@ pub use crate::templates::{matching as matching_templates, Template, TEMPLATES};
 
 // Variable names: the one a written type reads as, and the one a declaration at a caret is about to
 // be given (the ghost text after `private final OrderRepository `).
-pub use crate::declaration_name::{declaration_name_at, DeclarationName};
+pub use crate::declaration_name::{
+    declaration_name_at, declared_variable_names, DeclarationKind, DeclarationName, NameContext,
+};
 pub use crate::names::suggested_name_for_type;
 
 // Postfix templates: the subject found by scanning, its shape read off its type, the expansions the

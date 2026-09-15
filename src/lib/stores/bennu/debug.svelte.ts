@@ -33,6 +33,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { SvelteMap } from 'svelte/reactivity';
 import { focusWindow } from '$lib/ipc/window';
 import { bennuUiStore } from './ui.svelte';
+import { isLibraryBreakpointAt, outerClass } from '$lib/components/bennu/library-breakpoints';
 import {
   getDebugConfig, setDebugConfig, debugResume, debugStep, debugDetach, debugMute,
   debugVariables, debugExpand, debugWatch, debugDump,
@@ -52,6 +53,14 @@ export function canonFile(path: string): string {
 /** A breakpoint keyed for lookup: `file:line`, case-folded (Windows). */
 function bpKey(file: string, line: number): string {
   return `${canonFile(file).toLowerCase()}:${line}`;
+}
+
+/** Whether `b` is the breakpoint in `file` — or, for a library view, of the top-level class `cls`.
+ *  The class is a library breakpoint's identity: the same class reopened from a cache at another
+ *  path is still the same breakpoint. */
+function inFile(b: BreakpointDto, file: string, cls?: string): boolean {
+  if (canonFile(b.file).toLowerCase() === canonFile(file).toLowerCase()) return true;
+  return !!cls && !!b.class && outerClass(b.class) === cls;
 }
 
 /**
@@ -327,12 +336,10 @@ function createBennuDebugStore() {
     breakpointsFor(root: string): BreakpointDto[] {
       return configs.get(root)?.breakpoints ?? [];
     },
-    /** The breakpoints in one file — what a gutter renders. */
-    breakpointsIn(root: string, file: string): BreakpointDto[] {
-      const want = canonFile(file).toLowerCase();
-      return (configs.get(root)?.breakpoints ?? []).filter(
-        (b) => canonFile(b.file).toLowerCase() === want,
-      );
+    /** The breakpoints in one file — what a gutter renders. `cls` is a library view's top-level
+     *  class, which matches its breakpoints wherever the view was cached when they were set. */
+    breakpointsIn(root: string, file: string, cls?: string): BreakpointDto[] {
+      return (configs.get(root)?.breakpoints ?? []).filter((b) => inFile(b, file, cls));
     },
     /** What the VM of the session in front made of a breakpoint, if one is running. Per session:
      *  two VMs on the same project can disagree about whether a class has loaded yet. */
@@ -372,13 +379,28 @@ function createBennuDebugStore() {
       }
     },
 
-    /** Set or clear a breakpoint on a line — what clicking the gutter does. */
-    toggleBreakpoint(root: string, file: string, line: number): void {
-      const key = bpKey(file, line);
+    /**
+     * Set or clear a breakpoint on a line — what clicking the gutter does.
+     *
+     * `cls` is given for a **library** source view: the top-level class it declares, recorded on the
+     * breakpoint as its identity (see `library-breakpoints.ts`).
+     */
+    toggleBreakpoint(root: string, file: string, line: number, cls?: string): void {
       const current = configOf(root).breakpoints;
-      const next = current.some((b) => bpKey(b.file, b.line) === key)
-        ? current.filter((b) => bpKey(b.file, b.line) !== key)
-        : [...current, { file: canonFile(file), line, enabled: true, condition: '', hit_count: 0 }];
+      const here = (b: BreakpointDto) => b.line === line && inFile(b, file, cls);
+      const next = current.some(here)
+        ? current.filter((b) => !here(b))
+        : [
+            ...current,
+            {
+              file: canonFile(file),
+              line,
+              enabled: true,
+              condition: '',
+              hit_count: 0,
+              ...(cls ? { class: cls } : {}),
+            },
+          ];
       patch(root, { breakpoints: next });
       void persist(root);
     },
@@ -567,8 +589,13 @@ function createBennuDebugStore() {
           const p = e.payload;
           // The innermost frame of THIS project, else the innermost of all. Landing on
           // `ArrayList.add` because that is frame 0 would be exactly where it stopped and
-          // never what anyone wanted to look at.
-          const own = p.frames.findIndex((f) => f.project);
+          // never what anyone wanted to look at — unless a breakpoint set IN that library is what
+          // stopped it, in which case frame 0 is exactly the line that was asked for.
+          const top = p.frames[0];
+          const onLibraryBreakpoint = p.reason === 'breakpoint' && !!top && !top.project
+            && [...configs.values()].some((cfg) =>
+              cfg.breakpoints.some((b) => b.enabled && isLibraryBreakpointAt(b, top.class, top.line)));
+          const own = onLibraryBreakpoint ? 0 : p.frames.findIndex((f) => f.project);
           patchSession(p.session_id, {
             status: 'paused',
             stopped: p,

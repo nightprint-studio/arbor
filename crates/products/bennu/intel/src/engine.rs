@@ -33,7 +33,7 @@ use crate::refs::{
     RenameTarget, SourceFile,
 };
 use crate::rename::{
-    decl_site_for_key, generated_aliases, hover_for_key, plan_types,
+    decl_site_for_key, generated_aliases, hover_for_call, plan_types,
     project_source, rename_plan, resolve_declaration, DeclarationLocation, Edit, HoverInfo,
     RenamePlan, SubtypeMap, TypeRename,
 };
@@ -559,7 +559,6 @@ impl SemanticEngine {
             renames,
             &live.java_files,
             &self.xml_files,
-            &live.project_types,
             on_file,
         )
     }
@@ -729,9 +728,14 @@ impl SemanticEngine {
             let live = self.live();
             classify_caret(&live.index, file, source, offset, resolver, &live.project_types)?
         };
-        // How many arguments the call under the caret passes — what tells two overloads apart.
+        // How many arguments the call under the caret passes, and — when the applicability rules can
+        // tell — which overload it binds to: `uri(b -> …)` and `uri(someUri)` pass one argument each
+        // and are different methods. Only a method has overloads worth the extra parse.
         let argc = bennu_java::prelude::call_arity_at(source, offset);
-        Some(self.card_for_key(&key, argc))
+        let overload = matches!(key, DeclKey::Method { .. })
+            .then(|| bennu_java::prelude::call_overload_at(source, offset, resolver))
+            .flatten();
+        Some(self.card_for_key(&key, argc, overload.as_ref().map(|m| m.params.as_slice())))
     }
 
     /// The hover card for a symbol named **directly**, rather than found under a caret.
@@ -756,13 +760,18 @@ impl SemanticEngine {
             }
             Some(name) => DeclKey::Method { owner: owner.to_string(), name: name.to_string() },
         };
-        Some(self.card_for_key(&key, None))
+        Some(self.card_for_key(&key, None, None))
     }
 
     /// The card for a resolved [`DeclKey`] — the half of [`Self::hover`] after the caret has been
     /// classified, shared so a card asked for by name says exactly what a card asked for by
     /// position says.
-    fn card_for_key(&self, key: &DeclKey, argc: Option<usize>) -> HoverInfo {
+    fn card_for_key(
+        &self,
+        key: &DeclKey,
+        argc: Option<usize>,
+        overload: Option<&[bennu_java::prelude::TypeRef]>,
+    ) -> HoverInfo {
         // The FULL resolver when there is one, and not the walk's.
         //
         // The walk resolver is project-only by design (see `for_project`), so `members_of` on
@@ -779,10 +788,11 @@ impl SemanticEngine {
             Some(full) => full,
             None => &*self.resolver,
         };
-        let mut info = hover_for_key(key, resolver, argc);
+        let mut info = hover_for_call(key, resolver, argc, overload);
         // Best-effort: attach the leading Javadoc of the PROJECT declaration this key
-        // resolves to (None for a classpath-only / JDK symbol we can't read the source of).
-        info.doc = self.project_doc_for_key(key);
+        // resolves to (None for a classpath-only / JDK symbol we can't read the source of) — the
+        // declaration of the overload the call binds to, the same one go-to opens.
+        info.doc = self.project_doc_for_key(key, overload);
         info
     }
 
@@ -796,11 +806,18 @@ impl SemanticEngine {
     /// legacy codebase), kept going through the rest anyway. On a 1300-file project that is 1300
     /// parses for one tooltip, which is why hovering a method took an age while hovering a local
     /// variable (one parse, on the fallback path) was instant.
-    fn project_doc_for_key(&self, key: &DeclKey) -> Option<String> {
+    ///
+    /// `overload` is the parameter list of the overload a call binds to, when known: each overload
+    /// carries its own block, and the doc must be the one above the declaration go-to would open.
+    fn project_doc_for_key(
+        &self,
+        key: &DeclKey,
+        overload: Option<&[bennu_java::prelude::TypeRef]>,
+    ) -> Option<String> {
         let live = self.live();
         let file = live.index.file_declaring(key.owner_binary())?;
         let source = project_source(&live.java_files, file)?;
-        let decl_start = decl_site_for_key(source, key)?;
+        let decl_start = decl_site_for_key(source, key, overload)?;
         bennu_java::prelude::leading_javadoc(source, decl_start)
     }
 }

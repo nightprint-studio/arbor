@@ -5,7 +5,7 @@
 
 // The extension itself — what a host registers.
 pub use crate::ext::{
-    SchedulingExtension, CODE_BAD_CRON, CODE_NOT_ENABLED, CODE_NO_TRIGGER,
+    SchedulingExtension, CODE_BAD_CRON, CODE_HAS_PARAMETERS, CODE_NOT_ENABLED, CODE_NO_TRIGGER,
 };
 
 // Cron expressions: valid or not, and in words.

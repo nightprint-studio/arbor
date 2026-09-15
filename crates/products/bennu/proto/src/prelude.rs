@@ -12,7 +12,7 @@ pub use crate::contract::{
     FileDiagnostics, FileStamp, FileValidationStat, FindHit, FormAnalysis, StackFrame,
     ERR_EXTERNALLY_MODIFIED,
     FormFieldInfo, FormInfo, HoverInfo, IndexEntry, IndexStats,
-    JdkStatus, JspActionBinding, JspActionOption, JspNav, PropertyLintHit,
+    JdkStatus, JspActionBinding, JspActionOption, JspNav, MemberOrigin, PropertyLintHit,
     InheritedMember, InheritedSource, JdkInfo, MainClassEntry, ProjectInfo, ProjectKind,
     ProjectValidationResult,
     RenameApplyResult, RenameEdit, RenameFileEdits, RenameFileMove, RenamePreview, RunConfig, RunConfigSet, RunHandle, SnippetStop, SpellHit,

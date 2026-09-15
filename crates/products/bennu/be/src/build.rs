@@ -12,12 +12,17 @@
 //!
 //! So this module does the same two things, in order:
 //!
-//! 1. [`up_to_date`] — a few hundred `stat` calls over the modules' `src/main/{java,resources}`
-//!    against the stamp of the last successful compile **of that module**. Unchanged → no Maven
-//!    at all. The two halves have to agree: step 2 compiles one module, so step 1 may only skip
-//!    for the module it actually compiled.
+//! 1. [`crate::build_freshness`] — a few hundred `stat` calls over `src/main` and the poms of the
+//!    module and the modules it is built from, against what each looked like at its last successful
+//!    compile. Unchanged → no Maven at all. Changed in a way Maven's own incremental compile gets
+//!    wrong (an upstream edit compiled by an earlier invocation, a deleted source, stale generated
+//!    sources) → that module's output is wiped first, so the compile starts from nothing.
 //! 2. `-pl <module> -am` — when it must compile, only the module being run and the ones it is
 //!    built from, not the reactor.
+//!
+//! The run classpath follows the same graph ([`crate::reactor`]): the module's `target/classes`,
+//! then the classes of the modules it is built from, then the dependencies — resolved from inside
+//! the reactor, so a sibling is its `target/classes` and never a jar `mvn install` left in `~/.m2`.
 //!
 //! Note that `spring-boot:run` would be *slower*, not faster: it is `mvn compile` plus a
 //! plugin to resolve, plus a lifecycle fork, plus a second JVM between us and the program —
@@ -66,13 +71,15 @@ use std::time::Duration;
 
 use arbor_ipc::prelude::EventSink;
 use arbor_process_ext::prelude::NoWindowExt;
-use bennu_classpath::prelude::{find_jdk_home, MavenClasspathCache, MavenResolveOpts};
+use bennu_classpath::prelude::{find_jdk_home, resolve_maven_classpath, MavenResolveOpts};
 use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::{BuildDiagnostic, BuildResult, RunHandle};
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::build_freshness;
 use crate::index_service::IndexService;
+use crate::reactor::{self, ReactorModule};
 use crate::log::{class_map, ClassMap, LogAnnotator};
 
 /// The JDK level to resolve `JAVA_HOME` against as a LAST resort — when the project isn't open
@@ -180,44 +187,8 @@ pub(crate) fn compile_project(
         let (ok, raw) = run_cargo_check(&root, module)?;
         finish_compile("cargo", ok, raw, &sink, &root)
     } else {
-        let java_home = resolve_java_home(root_path);
-        // Nothing has changed since the last successful compile → say so and stop. This is
-        // the whole difference between "press ▷ and wait" and "press ▷": Maven's floor is
-        // seconds even with nothing to do, and the most common launch of all is the one where
-        // you have changed nothing.
-        match up_to_date(&root, module) {
-            Some(stamp) => {
-                sink.emit(EVT_BUILD_OUTPUT, json!({ "text": "Everything is up to date." }));
-                CompileOutcome {
-                    tool: "up-to-date".into(),
-                    ok: true,
-                    diagnostics: Vec::new(),
-                    raw: String::new(),
-                    stamp: Some(stamp),
-                }
-            }
-            None => {
-                let stamp = source_stamp(&root);
-                let mut out =
-                    compile(&root, module, &resolve_mvn(&root), java_home.as_deref(), &sink)?;
-                out.stamp = Some(stamp);
-                out
-            }
-        }
+        compile_java(&root, root_path, module, &sink)?
     };
-
-    // Remember what was on disk when this compile succeeded, so the next launch can tell
-    // whether anything has changed. Recorded from the stamp taken BEFORE compiling: a build
-    // writes into `target/`, and stamping afterwards would record a tree that includes its
-    // own output. Against THIS module — a `-pl a -am` compile is not evidence about `b`.
-    if outcome.ok {
-        if let Some(stamp) = outcome.stamp {
-            build_stamps()
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .insert(stamp_key(root_path, module), stamp);
-        }
-    }
 
     sink.emit(EVT_BUILD_DONE, json!({
         "root": root_path,
@@ -240,6 +211,64 @@ pub(crate) fn compile_project(
         IndexService::global().refresh_after_compile(root_path, ctx.event_sink());
     }
 
+    Ok(outcome)
+}
+
+/// Compile a Maven project's `module` (`None` = the whole reactor), or say it is up to date.
+///
+/// Nothing changed since the last successful compile → no Maven at all. This is the whole
+/// difference between "press ▷ and wait" and "press ▷": Maven's floor is seconds even with nothing
+/// to do, and the most common launch of all is the one where you have changed nothing.
+///
+/// Otherwise the plan's wiping happens first (see [`build_freshness`]), then `mvn compile`. A compile
+/// that fails inside `target/generated-sources` — or on `duplicate class` — is the stale
+/// annotation-processor output a manual `mvn clean` used to be needed for, so it is rebuilt from
+/// nothing and compiled once more.
+///
+/// Only a Maven compile is recorded as compiled. The `javac` fallback writes to
+/// `target/bennu-classes`, which no run classpath reads, so recording it would make the next launch
+/// "up to date" against classes nobody rebuilt.
+fn compile_java(
+    root: &Path,
+    root_path: &str,
+    module: Option<&str>,
+    sink: &Arc<dyn EventSink>,
+) -> Result<CompileOutcome, String> {
+    let mut assessment = build_freshness::assess(root, module);
+    if !assessment.plan.needs_compile {
+        sink.emit(EVT_BUILD_OUTPUT, json!({ "text": "Everything is up to date." }));
+        return Ok(CompileOutcome {
+            tool: "up-to-date".into(),
+            ok: true,
+            diagnostics: Vec::new(),
+            raw: String::new(),
+        });
+    }
+
+    let java_home = resolve_java_home(root_path);
+    let mvn = resolve_mvn(root);
+    let compile_planned = |plan: &build_freshness::Plan| {
+        for line in build_freshness::apply(root, plan) {
+            sink.emit(EVT_BUILD_OUTPUT, json!({ "text": line }));
+        }
+        compile(root, module, &mvn, java_home.as_deref(), sink)
+    };
+
+    let mut outcome = compile_planned(&assessment.plan)?;
+    if !outcome.ok
+        && outcome.tool == "mvn"
+        && build_freshness::is_stale_generated_failure(&outcome.diagnostics, &outcome.raw)
+    {
+        sink.emit(
+            EVT_BUILD_OUTPUT,
+            json!({ "text": "The compile failed on output left by an earlier one — rebuilding from scratch and compiling again." }),
+        );
+        build_freshness::rebuild_all(&mut assessment);
+        outcome = compile_planned(&assessment.plan)?;
+    }
+    if outcome.ok && outcome.tool == "mvn" {
+        build_freshness::record_success(&assessment, true);
+    }
     Ok(outcome)
 }
 
@@ -326,7 +355,10 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
     // `None` is runtime, not every-scope: a caller that says nothing gets what Maven would give
     // it, which is the safe direction to default in.
     let scope = args.classpath_scope.as_deref().unwrap_or("runtime");
-    let classpath = run_classpath(&root, module, java_home.as_deref(), scope);
+    // A classpath that could not be resolved is a refusal, not a launch: a JVM started without its
+    // dependencies dies on `NoClassDefFoundError` far from the reason, which is Maven's.
+    let RunClasspath { classpath, warnings } =
+        run_classpath(&root, module, java_home.as_deref(), scope, Some(&ctx.event_sink()))?;
 
     // Working dir: an explicit non-empty override, else the module's own directory (the root
     // when there is none) — a program that reads `./config` means its module's.
@@ -402,6 +434,11 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
         // same thing to everything that has to correlate them (Stop, the frames panel, the
         // gutter) — which means it can only be started once the id exists.
         |run_id| {
+            // What the classpath is missing goes at the top of the run's own console, above the
+            // failure it may explain.
+            for text in &warnings {
+                sink.emit(EVT_RUN_OUTPUT, json!({ "run_id": run_id, "stream": "stderr", "text": text }));
+            }
             if let Some(launch) = launch {
                 crate::debug::start(run_id.to_string(), root_for_debug, launch, sink);
             }
@@ -597,9 +634,6 @@ pub(crate) struct CompileOutcome {
     /// an agent — has no other way to see a failure the diagnostic parser did not recognise, and
     /// "the build failed, no further information" is the least useful answer a build can give.
     pub(crate) raw: String,
-    /// The source stamp this compile corresponds to, recorded on success so the next one can
-    /// skip. `None` for a toolchain the staleness check doesn't cover (Cargo).
-    stamp: Option<u64>,
 }
 
 /// Run `mvn -q -o compile`; if the launcher can't be spawned, fall back to `javac`.
@@ -644,7 +678,6 @@ fn finish_compile(
         ok,
         diagnostics: parse_diagnostics(&raw),
         raw,
-        stamp: None,
     }
 }
 
@@ -810,147 +843,11 @@ fn jdk_major(level: &str) -> u32 {
 }
 
 // ── "has anything changed since the last compile" ──────────────────────────────
-
-/// The source stamp of the last SUCCESSFUL compile, per project root **and module**.
-///
-/// The module is half the key because the compile is `-pl <module> -am`: it builds that module
-/// and the ones it is built from, and nothing else. A stamp kept per root said "this project was
-/// compiled" when what happened was "one module of it was" — so on a reactor, building or running
-/// module `a` and then launching module `b` found a matching stamp, skipped the compile entirely,
-/// and started a JVM against a `b/target/classes` that had never been written. The failure reads as
-/// `ClassNotFoundException` at launch, which is nothing like "your build was skipped".
-///
-/// The stamp VALUE stays project-wide (see [`source_stamp`]): an edit anywhere invalidates every
-/// module, which is the conservative direction — a module can depend on any other.
-///
-/// In memory only. Persisting it would mean trusting a stamp written by a different version
-/// of Bennu, or one taken before someone ran `mvn clean` outside the editor — and the cost of
-/// being wrong is a run against stale classes, which is the single most confusing failure a
-/// build system can produce. One Maven invocation per session is a price worth paying for
-/// never being wrong about it.
-fn build_stamps() -> &'static Mutex<HashMap<StampKey, u64>> {
-    static STAMPS: OnceLock<Mutex<HashMap<StampKey, u64>>> = OnceLock::new();
-    STAMPS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// What a [`build_stamps`] entry is about: a project root, and the module that was compiled
-/// (empty = the whole reactor).
-type StampKey = (String, String);
-
-/// The [`build_stamps`] key for one compile. `None` / blank is the whole-project build.
-fn stamp_key(root: &str, module: Option<&str>) -> StampKey {
-    let module = module.map(str::trim).filter(|m| !m.is_empty()).unwrap_or_default();
-    (root.to_string(), module.to_string())
-}
-
-/// `Some(stamp)` when `module` has not changed since ITS last successful compile — the caller can
-/// skip the build and keep the stamp. `None` when it must compile.
-///
-/// Two entries can answer, and the second is what keeps the fast path: a whole-reactor build
-/// compiled this module too, so a stamp recorded against the root satisfies a later per-module
-/// launch. The reverse is deliberately not true — module `a`'s stamp says nothing about `b`.
-///
-/// The output has to still be there: `mvn clean` in a terminal, or a deleted `target/`, makes
-/// a matching stamp a lie. Which output, though, is the module's own — `any_output_exists` asked
-/// whether ANY module had compiled, which a reactor with one built module answers `true` to
-/// forever.
-fn up_to_date(root: &Path, module: Option<&str>) -> Option<u64> {
-    let key = root.display().to_string();
-    let previous = {
-        let stamps = build_stamps().lock().unwrap_or_else(|p| p.into_inner());
-        *stamps
-            .get(&stamp_key(&key, module))
-            .or_else(|| stamps.get(&stamp_key(&key, None)))?
-    };
-    if !output_exists(root, module) {
-        return None;
-    }
-    (source_stamp(root) == previous).then_some(previous)
-}
-
-/// Whether the compiled output a build of `module` would have produced is on disk.
-///
-/// For a module, that is its own `target/classes` and nothing else — the question is whether
-/// launching it would find its classes. For a whole-project build it stays "any module has output",
-/// because a reactor root is packaging `pom` and compiles nothing of its own, so asking for the
-/// root's `target/classes` would make the Build button recompile every time.
-fn output_exists(root: &Path, module: Option<&str>) -> bool {
-    match module.map(str::trim).filter(|m| !m.is_empty()) {
-        Some(m) => root.join(m).join("target").join("classes").is_dir(),
-        None => any_output_exists(root),
-    }
-}
-
-/// Whether any module of the project has compiled output at all.
-fn any_output_exists(root: &Path) -> bool {
-    if root.join("target").join("classes").is_dir() {
-        return true;
-    }
-    module_dirs(root).iter().any(|m| m.join("target").join("classes").is_dir())
-}
-
-/// A hash of the project's compilable inputs: every file under each module's `src/main/java`
-/// and `src/main/resources`, by relative path, size and modification time.
-///
-/// **Stats, not reads.** Nothing is opened and nothing is parsed, so this is a few hundred
-/// `stat` calls on a large project — milliseconds against Maven's seconds. That difference is
-/// the entire answer to "why is the IDE instant and this is not": an IDE keeps its own model
-/// of what changed and asks the build tool only when something has, while every `mvn`
-/// invocation re-reads every pom, re-resolves every plugin and re-checks every module before
-/// discovering there was nothing to do.
-///
-/// Modification time and size together, rather than content hashing: reading every source to
-/// decide whether to compile them would cost more than the compile it is trying to avoid. The
-/// failure mode is an edit that preserves both, which is not something an editor produces.
-///
-/// Resources are in it deliberately — an edited `application.yml` changes what the program
-/// does, and a stamp that ignored it would launch the old one.
-fn source_stamp(root: &Path) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-
-    let mut dirs = vec![root.to_path_buf()];
-    dirs.extend(module_dirs(root));
-    // Sorted so the hash does not depend on the order the reactor happens to be walked in.
-    dirs.sort();
-
-    for dir in dirs {
-        for rel in ["src/main/java", "src/main/resources"] {
-            let mut files = Vec::new();
-            collect_files(&dir.join(rel), &mut files);
-            files.sort();
-            for f in files {
-                f.to_string_lossy().hash(&mut hasher);
-                if let Ok(md) = std::fs::metadata(&f) {
-                    md.len().hash(&mut hasher);
-                    if let Ok(t) = md.modified() {
-                        if let Ok(d) = t.duration_since(std::time::UNIX_EPOCH) {
-                            d.as_nanos().hash(&mut hasher);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    hasher.finish()
-}
-
-/// Every file under `dir`, recursively. Dot-directories are skipped — nothing under `.git`
-/// is a compile input, and walking it would dwarf the rest.
-fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
-    for e in rd.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')) {
-                continue;
-            }
-            collect_files(&p, out);
-        } else {
-            out.push(p);
-        }
-    }
-}
+//
+// The model lives in `build_freshness`: per module, what its inputs and its upstream modules' code
+// looked like at its last successful compile. In memory only — persisting it would mean trusting a
+// record written before someone ran `mvn clean` outside the editor, and the cost of being wrong is a
+// run against stale classes, the single most confusing failure a build system can produce.
 
 /// Compile `root` unless nothing changed since its last successful compile.
 ///
@@ -959,7 +856,7 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
 /// for a compile. The no-op case is checked here rather than left to [`compile_project`], which would
 /// print "Everything is up to date." into the Build panel on every question the lab asks.
 pub(crate) fn ensure_compiled(ctx: &BennuState, root: &str) -> Result<(), String> {
-    if up_to_date(Path::new(root), None).is_some() {
+    if !build_freshness::assess(Path::new(root), None).plan.needs_compile {
         return Ok(());
     }
     let outcome = compile_project(ctx, root, None)?;
@@ -983,126 +880,265 @@ pub(crate) fn ensure_compiled(ctx: &BennuState, root: &str) -> Result<(), String
 /// list, or a new successful compile.
 pub(crate) fn lab_classpath(root: &str) -> (String, String) {
     use std::hash::{Hash, Hasher};
-    let classpath = run_classpath(Path::new(root), None, None, "");
-    let stamp = build_stamps()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .get(&stamp_key(root, None))
-        .copied();
+    let path = Path::new(root);
+    // The lab degrades rather than refuses: it loads project classes, and a missing library shows
+    // up as that class failing to load, which the lab reports on its own.
+    let classpath = run_classpath(path, None, None, "", None)
+        .map(|c| c.classpath)
+        .unwrap_or_else(|_| join_classpath(&[build_freshness::classes_dir(path, "")]));
+    let generation = build_freshness::generation(path);
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     classpath.hash(&mut hasher);
-    stamp.hash(&mut hasher);
+    generation.hash(&mut hasher);
     (classpath, format!("{:016x}", hasher.finish()))
 }
 
-/// Forget a project's build stamps — every module's, not just the root's — so the next build runs
-/// for real. Called when the index is rebuilt: the moment the user has told us not to trust what we
-/// remember.
+/// Forget what is known about a project's compiled state and its launch classpaths, so the next
+/// build runs Maven and the next launch resolves again. Called when the index is rebuilt: the
+/// moment the user has told us not to trust what we remember.
 pub(crate) fn forget_build_stamp(root: &str) {
-    build_stamps()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .retain(|(r, _), _| r != root);
+    build_freshness::forget(Path::new(root));
+    run_deps_cache().lock().unwrap_or_else(|p| p.into_inner()).retain(|(r, _, _), _| r != root);
 }
 
 // ── run classpath ──────────────────────────────────────────────────────────────
 
-/// The run classpath for a launch in `module` (`None` = the root module).
+/// A launch classpath, and what is worth saying about it in the run's console.
+struct RunClasspath {
+    /// OS-separated, ready for `-cp`.
+    classpath: String,
+    /// Entries Maven named and could not find, or a resolve Maven reported errors on. The launch
+    /// goes ahead — an optional library missing need not matter — and the console says so first.
+    warnings: Vec<String>,
+}
+
+/// The run classpath for a launch in `module` (`None` = the root module). `Err` when the dependencies
+/// could not be resolved at all, which the launch reports instead of starting a JVM without them.
 ///
-/// Order: **the module's own `target/classes` first**, then every OTHER reactor module's,
-/// then the root's, then the `.m2`-resolved dependency jars (offline). Dep resolution
-/// failure is non-fatal — the run degrades to the compiled output only.
+/// Order ([`assemble_classpath`]): **the module's own `target/classes`**, then the classes of the
+/// modules it is built from, then the dependencies.
 ///
-/// Why the sibling modules are all there: on a reactor, `web` depends on `core`, and until
-/// `core` is installed to `~/.m2` the only copy of its classes is `core/target/classes`. A
-/// developer's inner loop is compile-and-run without installing, so a classpath that only
-/// held the launched module's output would fail on the first call across a module boundary.
-/// They come *after* the launched module so its own classes always win a name collision.
+/// Only the modules it is **built from** — not every module of the reactor. A sibling nobody
+/// depends on brings its own `application.yml`, `spring.factories` and `@Component`s into a JVM that
+/// never asked for them, and the application then starts differently here than when packaged.
 ///
-/// This used to take only the root, which on a multi-module project is the one directory
-/// that never contains anything: a reactor root is packaging `pom` and compiles nothing.
+/// The dependencies depend on the scope asked for:
 ///
-/// `scope` is the Maven scope the dependencies are resolved at — `"runtime"` for what a
-/// packaged application sees, `""` for every scope (the index's own view). See
-/// [`bennu_proto::prelude::RunConfig::classpath_scope`].
+///   * **every scope** (`""`) — the index's own list, already in memory and free. It is what
+///     completion and navigation resolve against, so the run agrees with the editor.
+///   * **a narrower scope** — a resolve of its own, [`resolve_run_deps`]: from inside the reactor, so
+///     a sibling module is its `target/classes` rather than whatever `mvn install` last put in
+///     `~/.m2` — or nothing at all, when it was never installed.
+///
+/// Either way a jar that IS a reactor module's artifact is swapped for that module's classes
+/// ([`reactor::substitute_sibling_artifacts`]): a copy frozen at the last `package` holds the
+/// classes of sources that have since been edited, renamed or deleted.
 fn run_classpath(
     root: &Path,
     module: Option<&str>,
     java_home: Option<&Path>,
     scope: &str,
-) -> String {
-    let sep = if cfg!(windows) { ";" } else { ":" };
-    let base = module.map(|m| root.join(m)).unwrap_or_else(|| root.to_path_buf());
-
-    let mut parts: Vec<String> = Vec::new();
-    let mut push_classes = |dir: &Path, parts: &mut Vec<String>| {
-        let classes = dir.join("target").join("classes");
-        let s = classes.display().to_string();
-        if !parts.contains(&s) {
-            parts.push(s);
-        }
+    sink: Option<&Arc<dyn EventSink>>,
+) -> Result<RunClasspath, String> {
+    let rel = module.map(reactor::normalize_rel).unwrap_or_default();
+    let modules = reactor::load(root);
+    let classes_of = |m: &str| {
+        let dir = build_freshness::classes_dir(root, m);
+        dir.is_dir().then_some(dir)
     };
-    push_classes(&base, &mut parts);
-    for dir in module_dirs(root) {
-        push_classes(&dir, &mut parts);
-    }
-    push_classes(root, &mut parts);
+    // Nearest first: `web → core → model` is the order Maven lists them in.
+    let upstream: Vec<PathBuf> =
+        reactor::upstream_of(&modules, &rel).iter().rev().filter_map(|m| classes_of(m.as_str())).collect();
 
-    // ── the dependency jars ────────────────────────────────────────────────────
-    //
-    // Which set depends on the scope asked for, and the distinction is the whole reason this
-    // parameter exists:
-    //
-    //   * **every scope** — the index's own list, already in memory and free. It is what
-    //     completion and navigation resolve against, so the run agrees with the editor.
-    //   * **a narrower scope** — a resolve of its own. The index's list cannot be filtered
-    //     down to it: it is a flat list of paths with the scopes already thrown away, and
-    //     guessing which jars are test-only from their names is how you drop a real dependency.
-    //
-    // The narrow one is the default (`runtime`) because launching with the editing classpath
-    // hands the JVM libraries Maven would never put there — see `RunConfig::classpath_scope`.
-    let mut jars = if scope.is_empty() {
+    let index_jars = if scope.is_empty() {
         IndexService::global().dep_jars_of(&root.display().to_string())
     } else {
         Vec::new()
     };
+    let (deps, warnings) = if index_jars.is_empty() {
+        let resolved = resolve_run_deps(root, &rel, &modules, java_home, scope, sink)?;
+        let warnings = resolved.warnings();
+        (resolved.entries, warnings)
+    } else {
+        (index_jars.into_iter().map(PathBuf::from).collect(), Vec::new())
+    };
+    let deps = reactor::substitute_sibling_artifacts(deps, &modules, classes_of);
 
-    if jars.is_empty() {
-        let mut opts = MavenResolveOpts::default();
-        opts.mvn_path = resolve_mvn(root);
-        opts.offline = true;
-        opts.scope = (!scope.is_empty()).then(|| scope.to_string());
-        if let Some(jh) = java_home {
-            opts.java_home = Some(jh.to_path_buf());
-        }
-        // The MODULE's own dependencies when it has a pom of its own; the root's otherwise.
-        // Chosen by asking whether the pom EXISTS rather than by letting the resolve fail —
-        // a failed resolve is a Maven invocation, and falling back on it means paying twice.
-        let dir = if base.join("pom.xml").is_file() { base.as_path() } else { root };
-        // A cache that OUTLIVES the call. It used to be built fresh here — a cache with nothing
-        // in it, on every launch — so pressing ▷ shelled out to Maven and the run did not start
-        // until it had finished, every single time. Keyed by pom **and scope**, so a runtime
-        // resolve for a launch never becomes the answer the index gets.
-        if let Ok(cp) = run_classpath_cache()
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .get(dir, &opts)
-        {
-            jars = cp.jars.iter().map(|j| j.display().to_string()).collect();
-        }
-    }
-    parts.extend(jars);
-    parts.join(sep)
+    let own = build_freshness::classes_dir(root, &rel);
+    Ok(RunClasspath { classpath: join_classpath(&assemble_classpath(own, upstream, deps)), warnings })
 }
 
-/// The launch classpaths resolved so far, across launches.
+/// Put a classpath in launch order: `own`, then `upstream`, then `deps`, each entry once, at its
+/// first position — so the launched module's classes win a name collision, and a sibling Maven also
+/// listed among the dependencies is not there twice.
+fn assemble_classpath(own: PathBuf, upstream: Vec<PathBuf>, deps: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::with_capacity(1 + upstream.len() + deps.len());
+    for entry in std::iter::once(own).chain(upstream).chain(deps) {
+        if !out.contains(&entry) {
+            out.push(entry);
+        }
+    }
+    out
+}
+
+/// Join classpath entries with the OS separator.
+fn join_classpath(entries: &[PathBuf]) -> String {
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    entries.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(sep)
+}
+
+/// A launch's resolved dependencies.
+#[derive(Clone)]
+struct RunDeps {
+    /// Every existing entry, jars and directories, in Maven's order.
+    entries: Vec<PathBuf>,
+    /// Entries Maven named that are not on disk.
+    missing: Vec<PathBuf>,
+    /// Whether Maven exited cleanly.
+    mvn_ok: bool,
+}
+
+impl RunDeps {
+    fn warnings(&self) -> Vec<String> {
+        /// Enough names to recognise the problem; the rest is a count.
+        const NAMED: usize = 5;
+        let mut out = Vec::new();
+        if !self.missing.is_empty() {
+            let names: Vec<String> = self
+                .missing
+                .iter()
+                .take(NAMED)
+                .map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
+                .collect();
+            let more = self.missing.len().saturating_sub(NAMED);
+            out.push(format!(
+                "Classpath incomplete: {} entr{} could not be found in the local repository and are not on it — {}{}. \
+                 Run the Maven tool window's resolve with downloads allowed, or `mvn dependency:resolve`.",
+                self.missing.len(),
+                if self.missing.len() == 1 { "y" } else { "ies" },
+                names.join(", "),
+                if more > 0 { format!(" and {more} more") } else { String::new() },
+            ));
+        } else if !self.mvn_ok {
+            out.push(
+                "Maven reported errors while resolving the classpath; the program may be missing classes."
+                    .to_string(),
+            );
+        }
+        out
+    }
+}
+
+/// Resolve the dependencies of a launch in `rel` (empty = the root module) at `scope` — cached, see
+/// [`run_deps_cache`].
 ///
-/// Per session and per (pom, scope): the first ▷ of a configuration pays Maven once, every one
-/// after it is instant until the pom is edited.
-fn run_classpath_cache() -> &'static std::sync::Mutex<MavenClasspathCache> {
-    static CACHE: std::sync::OnceLock<std::sync::Mutex<MavenClasspathCache>> =
-        std::sync::OnceLock::new();
-    CACHE.get_or_init(|| std::sync::Mutex::new(MavenClasspathCache::new()))
+/// A module the reactor lists is resolved **from inside the reactor**, so its siblings arrive as their
+/// `target/classes`. If that fails the module is tried on its own, which still works when its siblings
+/// have been installed; if both fail, the reactor's error is the one reported, since it is the
+/// launch's real configuration. A module outside the reactor, or a single-module project, is resolved
+/// in its own directory.
+fn resolve_run_deps(
+    root: &Path,
+    rel: &str,
+    modules: &[ReactorModule],
+    java_home: Option<&Path>,
+    scope: &str,
+    sink: Option<&Arc<dyn EventSink>>,
+) -> Result<RunDeps, String> {
+    let base = if rel.is_empty() { root.to_path_buf() } else { root.join(rel) };
+    let dir = if base.join("pom.xml").is_file() { base.clone() } else { root.to_path_buf() };
+    if !dir.join("pom.xml").is_file() {
+        // No Maven project to ask: the compiled output is the whole classpath.
+        return Ok(RunDeps { entries: Vec::new(), missing: Vec::new(), mvn_ok: true });
+    }
+
+    let key = (root.display().to_string(), rel.to_string(), scope.to_string());
+    let fingerprint = poms_fingerprint(root, modules, &base);
+    if let Some(hit) = run_deps_cache().lock().unwrap_or_else(|p| p.into_inner()).get(&key) {
+        // The poms say whether the answer could have changed; the entries say whether it is still
+        // on disk (a purged `~/.m2`, a sibling's `target/` cleaned in a terminal).
+        if hit.fingerprint == fingerprint && hit.deps.entries.iter().all(|e| e.exists()) {
+            return Ok(hit.deps.clone());
+        }
+    }
+
+    let label = if rel.is_empty() { "the project".to_string() } else { rel.to_string() };
+    if let Some(sink) = sink {
+        sink.progress(&format!("Resolving the run classpath of {label} (mvn dependency:build-classpath)"), None, None);
+    }
+    let mut opts = MavenResolveOpts::default();
+    opts.mvn_path = resolve_mvn(root);
+    opts.offline = true;
+    opts.scope = (!scope.is_empty()).then(|| scope.to_string());
+    opts.java_home = java_home.map(Path::to_path_buf);
+
+    let in_reactor =
+        !rel.is_empty() && root.join("pom.xml").is_file() && modules.iter().any(|m| m.rel == rel);
+    let resolved = if in_reactor {
+        opts.reactor_module = Some(rel.to_string());
+        resolve_maven_classpath(root, &opts).or_else(|reactor_err| {
+            opts.reactor_module = None;
+            resolve_maven_classpath(&dir, &opts).map_err(|_| reactor_err)
+        })
+    } else {
+        resolve_maven_classpath(&dir, &opts)
+    }
+    .map_err(|e| format!("Could not resolve the run classpath of {label}: {e}"))?;
+
+    let deps = RunDeps {
+        entries: resolved.entries,
+        // A directory is not a missing jar: it is a sibling's classes, already in `entries`.
+        missing: resolved.unresolved.into_iter().filter(|p| !p.is_dir()).collect(),
+        mvn_ok: resolved.mvn_ok,
+    };
+    // Only a complete answer is kept. An incomplete one is asked again next launch — the missing jar
+    // may be downloaded by then — rather than served until the pom is next edited.
+    if deps.mvn_ok && deps.missing.is_empty() {
+        run_deps_cache()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(key, CachedRunDeps { fingerprint, deps: deps.clone() });
+    }
+    Ok(deps)
+}
+
+/// A hash of every pom that can change a module's resolved classpath: the reactor's (a sibling's
+/// new dependency is this module's new transitive one; a parent's managed version is everyone's)
+/// and the module's own when the reactor does not list it. Stats only.
+fn poms_fingerprint(root: &Path, modules: &[ReactorModule], base: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut poms: Vec<PathBuf> = modules
+        .iter()
+        .map(|m| if m.rel.is_empty() { root.join("pom.xml") } else { root.join(&m.rel).join("pom.xml") })
+        .collect();
+    poms.push(base.join("pom.xml"));
+    poms.sort();
+    poms.dedup();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for pom in poms {
+        pom.hash(&mut hasher);
+        if let Ok(md) = std::fs::metadata(&pom) {
+            md.len().hash(&mut hasher);
+            md.modified().ok().hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
+/// A cached [`RunDeps`] and the [`poms_fingerprint`] it was resolved under.
+struct CachedRunDeps {
+    fingerprint: u64,
+    deps: RunDeps,
+}
+
+/// The launch dependencies resolved so far, per (root, module, scope).
+///
+/// The first ▷ of a configuration pays Maven once; every one after it is instant until a pom of the
+/// reactor changes — any of them, not only the module's own, since a sibling's new dependency is
+/// this module's new transitive one.
+fn run_deps_cache() -> &'static Mutex<HashMap<(String, String, String), CachedRunDeps>> {
+    static CACHE: OnceLock<Mutex<HashMap<(String, String, String), CachedRunDeps>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Every module directory of the Maven reactor rooted at `root`, absolute, in declaration
@@ -1749,35 +1785,68 @@ mod tests {
 
     #[test]
     fn run_classpath_puts_target_classes_first() {
-        // No mvn / no deps needed: a nonexistent project resolves no dep jars, so the
+        // No mvn / no deps needed: a nonexistent project has no pom to resolve, so the
         // classpath is just target/classes — which is what we assert leads.
         let root = Path::new(if cfg!(windows) { r"C:\definitely\missing\proj" } else { "/definitely/missing/proj" });
-        let cp = run_classpath(root, None, None, "runtime");
+        let cp = run_classpath(root, None, None, "runtime", None).unwrap().classpath;
         let sep = if cfg!(windows) { ";" } else { ":" };
         let first = cp.split(sep).next().unwrap();
         assert!(first.ends_with("classes"), "target/classes must lead: {cp}");
     }
 
-    /// The module's own output leads, and the root's is still there behind it. The bug this
-    /// guards: on a reactor the root compiles nothing, so a classpath built from the root
-    /// alone contains one directory that does not exist.
+    /// The module's own output leads. The bug this guards: on a reactor the root compiles
+    /// nothing, so a classpath built from the root alone contains one directory that does not
+    /// exist.
     #[test]
     fn run_classpath_leads_with_the_module() {
         let root = Path::new(if cfg!(windows) { r"C:\definitely\missing\proj" } else { "/definitely/missing/proj" });
-        let cp = run_classpath(root, Some("services/core"), None, "runtime");
+        let cp = run_classpath(root, Some(r"services\core\"), None, "runtime", None).unwrap().classpath;
         let sep = if cfg!(windows) { ";" } else { ":" };
         let entries: Vec<&str> = cp.split(sep).collect();
         assert!(
             entries[0].replace('\\', "/").ends_with("services/core/target/classes"),
             "the launched module's classes must lead: {cp}",
         );
-        assert!(
-            entries.iter().any(|e| {
-                let e = e.replace('\\', "/");
-                e.ends_with("proj/target/classes")
-            }),
-            "the root's classes must still be on it: {cp}",
+    }
+
+    /// Own classes, then the modules it is built from, then the dependencies — and a sibling Maven
+    /// also listed among the dependencies keeps its earlier place instead of appearing twice.
+    #[test]
+    fn assemble_classpath_orders_and_deduplicates() {
+        let p = |s: &str| PathBuf::from(s);
+        let cp = assemble_classpath(
+            p("/p/web/target/classes"),
+            vec![p("/p/core/target/classes"), p("/p/model/target/classes")],
+            vec![p("/m2/spring.jar"), p("/p/core/target/classes"), p("/m2/jackson.jar")],
         );
+        assert_eq!(
+            cp,
+            vec![
+                p("/p/web/target/classes"),
+                p("/p/core/target/classes"),
+                p("/p/model/target/classes"),
+                p("/m2/spring.jar"),
+                p("/m2/jackson.jar"),
+            ]
+        );
+    }
+
+    /// Missing jars are named in the run's console; a clean resolve says nothing.
+    #[test]
+    fn run_deps_warn_about_what_is_missing() {
+        let clean = RunDeps { entries: vec![], missing: vec![], mvn_ok: true };
+        assert!(clean.warnings().is_empty());
+        let partial = RunDeps {
+            entries: vec![],
+            missing: (0..7).map(|i| PathBuf::from(format!("/m2/lib-{i}.jar"))).collect(),
+            mvn_ok: true,
+        };
+        let w = partial.warnings();
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains("7 entries"), "{w:?}");
+        assert!(w[0].contains("lib-0.jar") && w[0].contains("and 2 more"), "{w:?}");
+        let failed = RunDeps { entries: vec![], missing: vec![], mvn_ok: false };
+        assert_eq!(failed.warnings().len(), 1);
     }
 
     /// A reactor is walked through its poms, and a pom naming itself as a module cannot
@@ -1830,12 +1899,11 @@ mod tests {
         assert!(!line.contains(".m2"), "the classpath must be summarised: {line}");
     }
 
-    /// A build is evidence about the module it compiled, and not about its neighbours.
+    /// A build is evidence about the modules it compiled, and not about their neighbours.
     ///
     /// The failure this pins was a `ClassNotFoundException` at launch with no explanation: a
-    /// `-pl a -am` compile stamped the whole ROOT, so running `b` afterwards found a matching
-    /// stamp, printed "Everything is up to date", skipped Maven entirely and started a JVM
-    /// against a `b/target/classes` that had never been written.
+    /// `-pl a -am` compile counted for the whole project, so running `b` afterwards skipped Maven
+    /// entirely and started a JVM against a `b/target/classes` that had never been written.
     #[test]
     fn one_modules_build_does_not_answer_for_another() {
         let dir = std::env::temp_dir().join(format!(
@@ -1850,70 +1918,25 @@ mod tests {
             std::fs::write(&p, text).unwrap();
         };
         write("pom.xml", "<project><modules><module>a</module><module>b</module></modules></project>");
-        write("a/pom.xml", "<project></project>");
-        write("b/pom.xml", "<project></project>");
+        write("a/pom.xml", "<project><artifactId>a</artifactId></project>");
+        write("b/pom.xml", "<project><artifactId>b</artifactId></project>");
         write("a/src/main/java/A.java", "class A {}\n");
         write("b/src/main/java/B.java", "class B {}\n");
-        // Only `a` has been compiled.
         std::fs::create_dir_all(dir.join("a/target/classes")).unwrap();
 
         let root = dir.display().to_string();
-        let stamp = source_stamp(&dir);
-        build_stamps()
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(stamp_key(&root, Some("a")), stamp);
+        forget_build_stamp(&root);
+        build_freshness::record_success(&build_freshness::assess(&dir, Some("a")), true);
 
-        assert!(up_to_date(&dir, Some("a")).is_some(), "`a` was compiled and nothing changed");
+        assert!(!build_freshness::assess(&dir, Some("a")).plan.needs_compile, "`a` was compiled and nothing changed");
         assert!(
-            up_to_date(&dir, Some("b")).is_none(),
+            build_freshness::assess(&dir, Some("b")).plan.needs_compile,
             "`b` has never been compiled — launching it must build it first",
         );
 
-        // A WHOLE-reactor build answers for a module too: it compiled this one as well.
-        build_stamps()
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(stamp_key(&root, None), stamp);
-        assert!(
-            up_to_date(&dir, Some("b")).is_none(),
-            "…but only where the output is actually on disk",
-        );
-        std::fs::create_dir_all(dir.join("b/target/classes")).unwrap();
-        assert!(up_to_date(&dir, Some("b")).is_some(), "now `b` really is up to date");
-
-        // Rebuilding the index forgets EVERY module's stamp, not only the root's.
+        // Rebuilding the index forgets every module.
         forget_build_stamp(&root);
-        assert!(up_to_date(&dir, Some("a")).is_none());
-        assert!(up_to_date(&dir, Some("b")).is_none());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// The stamp is stable when nothing moves, and changes when a source OR a resource does.
-    /// Resources matter as much as sources here: an edited `application.yml` changes what the
-    /// program does, and a stamp that ignored it would launch the previous one.
-    #[test]
-    fn source_stamp_notices_sources_and_resources() {
-        let dir = std::env::temp_dir().join(format!("bennu-stamp-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let write = |rel: &str, text: &str| {
-            let p = dir.join(rel);
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(&p, text).unwrap();
-        };
-        write("pom.xml", "<project></project>");
-        write("src/main/java/com/acme/App.java", "class App {}\n");
-
-        let first = source_stamp(&dir);
-        assert_eq!(first, source_stamp(&dir), "an untouched tree stamps the same twice");
-
-        write("src/main/java/com/acme/App.java", "class App { void x() {} }\n");
-        let after_source = source_stamp(&dir);
-        assert_ne!(first, after_source, "an edited source must change the stamp");
-
-        write("src/main/resources/application.yml", "server:\n  port: 8080\n");
-        assert_ne!(after_source, source_stamp(&dir), "a new resource must change the stamp");
+        assert!(build_freshness::assess(&dir, Some("a")).plan.needs_compile);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

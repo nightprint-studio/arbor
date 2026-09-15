@@ -1,8 +1,8 @@
 <script lang="ts">
   /**
    * Spring: the wiring in the gutter, keys and names inside annotation strings, bean XML, configuration properties, the
-   * YAML side, property files, the Endpoints and bean panels, proxy annotations that do nothing, transactions held across
-   * network calls, and endpoints checked against each other.
+   * YAML side, property files, the Endpoints and bean panels, proxy annotations that do nothing, bean declarations Spring
+   * refuses or ignores, transactions held across network calls, and endpoints checked against each other.
    */
   import Callout from '$lib/components/shared/ui/Callout.svelte';
   import { highlightCode } from '$lib/utils/highlight';
@@ -247,12 +247,54 @@ public class OrderService {
   <div class="feature-card">
     <div class="fc-eyebrow">Cannot be overridden</div>
     <div class="fc-title">A final method or class</div>
-    <div class="fc-desc">The proxy cannot override it.</div>
+    <div class="fc-desc">The proxy cannot override it. <kbd>Alt</kbd> + <kbd>Enter</kbd> removes the <code>final</code>.</div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-eyebrow">Never through the bean</div>
+    <div class="fc-title">A static method</div>
+    <div class="fc-desc">A static call never reaches the proxy.</div>
   </div>
 </div>
+<p><kbd>Alt</kbd> + <kbd>Enter</kbd> on a non-public method makes it public.</p>
 <Callout variant="info" title="Quiet under AspectJ">
-  A project weaving with AspectJ — <code>mode = AdviceMode.ASPECTJ</code>, or <code>mode="aspectj"</code> in XML — gets none of this, since all three work there. Nor is
+  A project weaving with AspectJ — <code>mode = AdviceMode.ASPECTJ</code>, or <code>mode="aspectj"</code> in XML — gets none of this, since all of it works there. Nor is
   recursion reported (the first call went through the proxy), or a bare call inside a nested class, which resolves to the nested class's own member.
+</Callout>
+
+<h2>Bean declarations Spring refuses or ignores</h2>
+<p>
+  Some mistakes in a bean declaration stop the context at startup, a build and a deploy away from the line that caused them. Others do nothing at all: no error, and
+  the field stays <code>null</code>. Both are marked as you type:
+</p>
+<pre><code>{@html highlightCode(`@Configuration
+public class DataConfig {
+    @Bean
+    private DataSource dataSource() { … }   // Spring refuses to start: must not be private or final
+
+    @Autowired
+    private static Clock clock;              // never injected: stays null
+}`, 'java')}</code></pre>
+<table>
+  <thead><tr><th>Declaration</th><th>What happens</th><th><kbd>Alt</kbd> + <kbd>Enter</kbd></th></tr></thead>
+  <tbody>
+    <tr><td>A <code>private</code> or <code>final</code> <code>@Bean</code> method in a <code>@Configuration</code></td><td>Refused at startup — Spring subclasses the class to intercept its <code>@Bean</code> methods</td><td>Remove the modifiers</td></tr>
+    <tr><td>A <code>final</code> <code>@Configuration</code> class, or one whose constructors are all private</td><td>Refused at startup, for the same reason</td><td>Remove <code>final</code></td></tr>
+    <tr><td>A <code>void</code> <code>@Bean</code> method</td><td>Refused at startup — the bean is what the method returns</td><td>—</td></tr>
+    <tr><td>A non-static <code>@Bean</code> returning a <code>BeanFactoryPostProcessor</code>, such as <code>PropertySourcesPlaceholderConfigurer</code></td><td>The class is created too early, and its own <code>@Autowired</code>, <code>@Value</code> and <code>@PostConstruct</code> are skipped</td><td>Make it static</td></tr>
+    <tr><td><code>@Autowired</code>, <code>@Inject</code> or <code>@Value</code> on a static field or method</td><td>Skipped: the field stays <code>null</code></td><td>—</td></tr>
+    <tr><td><code>@Resource</code> on a static field or method</td><td>Refused at startup</td><td>—</td></tr>
+    <tr><td><code>@Component</code>, <code>@Service</code>, <code>@Controller</code> or <code>@RestController</code> on an interface or an abstract class</td><td>No bean: scanning only registers concrete classes, and subclasses do not inherit the annotation</td><td>Remove the annotation</td></tr>
+    <tr><td>The same annotations on a non-static inner class</td><td>No bean: it needs an instance of its enclosing class</td><td>Make it static</td></tr>
+    <tr><td>An <code>@Async</code> method returning a value that is not a <code>Future</code></td><td>The caller gets <code>null</code> — the call returns before the method runs</td><td>—</td></tr>
+  </tbody>
+</table>
+<Callout variant="info" title="What is left alone">
+  <code>@Configuration(proxyBeanMethods = false)</code> subclasses nothing, so the modifier and constructor rules do not apply to it — and a
+  <code>proxyBeanMethods</code> set from a constant is not judged either way. <code>@SpringBootApplication</code>, <code>@SpringBootConfiguration</code> and
+  <code>@TestConfiguration</code> count as <code>@Configuration</code>; your own annotations meta-annotated with it do not. <code>@Repository</code> on an
+  interface is never reported, since a Spring Data repository is a bean; neither is an interface that extends another or carries any other annotation, such as a
+  Feign client, nor an abstract class with <code>@Lookup</code> methods. An annotation of the same name that is not Spring's — your own <code>@Bean</code>, or
+  Lombok's <code>@Value</code> — is not judged by Spring's rules.
 </Callout>
 
 <h2>A transaction held open across a network call</h2>

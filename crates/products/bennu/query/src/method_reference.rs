@@ -158,6 +158,7 @@ fn constructor_reference<M: CpMemberIndex>(
     Some(Ranked {
         score: if fits { 45 } else { 0 },
         fit: rank::Fit::None,
+        tier: 0,
         item: CompletionItem {
             label: "new".to_string(),
             kind: "constructor".to_string(),

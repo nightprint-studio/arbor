@@ -2407,7 +2407,7 @@ impl NativeJavaProvider {
         source: Option<&str>,
         opts: CompletionOptions,
     ) -> Result<Vec<CompletionItem>, IntelError> {
-        let CompletionOptions { census, case, level } = opts;
+        let CompletionOptions { census, case, level, naming } = opts;
         // No index yet (pre-open / still building) → benign empty, not an error.
         let Some(resolver) = self.resolver.as_deref() else {
             return Ok(Vec::new());
@@ -2440,7 +2440,7 @@ impl NativeJavaProvider {
         // whichever list answers the dot: a `List` has members AND a `.for`, and an `int` has no
         // members at all and still has `.fori`.
         let postfix =
-            crate::postfix::postfix_completions(&at.file, text, offset, resolver, level, case);
+            crate::postfix::postfix_completions(&at.file, text, offset, resolver, level, naming, case);
         // The classpath's type-name catalog rides along: a receiver you have not imported yet
         // (`Arrays.`) is one you are in the middle of writing, and refusing it is refusing the very
         // gesture that adds the import. See `TypeNameCatalog`.
@@ -2559,6 +2559,9 @@ pub struct CompletionOptions {
     /// The Java language level of the module the file belongs to, when it is known. Postfix
     /// templates only write what that level compiles; `None` is taken as Java 8.
     pub level: Option<u32>,
+    /// The convention the project declared for local variables, when it declared one. The names
+    /// postfix templates declare are spelled in it — or, without one, as the file's names are.
+    pub naming: Option<bennu_naming::prelude::Convention>,
 }
 
 /// `items` with `preselect` kept on the FIRST item that carries it and cleared on the rest.

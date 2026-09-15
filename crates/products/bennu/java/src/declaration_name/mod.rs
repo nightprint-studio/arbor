@@ -13,8 +13,13 @@
 //! ## What it proposes
 //!
 //! The type's name as a variable, by [`crate::names::suggested_name_for_type`] — the one naming rule
-//! the postfix templates use too. A name already declared where the new one would clash gets a digit,
-//! IntelliJ's way: a second `Order` in the method is `order1`.
+//! the postfix templates use too — then **spelled** the project's way by the caller: `spell` is handed
+//! the camelCase name, what kind of declaration it is and every variable name the file already
+//! declares, so a file of `identity_resolver` fields gets `filter_configurator`. The spelling lives
+//! with the caller because the conventions do (`bennu-naming`, and the project's config).
+//!
+//! A name already declared where the new one would clash gets a digit, IntelliJ's way: a second
+//! `Order` in the method is `order1`. The clash is judged on the spelled name, the one written.
 //!
 //! With a partial name already typed (`OrderRepository ord|`), the proposal stands only if it
 //! continues what was typed; the typed part is what accepting replaces.
@@ -39,11 +44,36 @@ pub struct DeclarationName {
     pub typed_end: usize,
 }
 
+/// What the declaration at the caret declares — the naming rule its name answers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclarationKind {
+    /// A member of a class, interface, enum or record body.
+    Field,
+    /// A local in a block, a `for` variable, a `try` resource.
+    Local,
+    /// A method, constructor or record parameter.
+    Parameter,
+}
+
+/// What `spell` is told about the name it spells.
+#[derive(Debug, Clone, Copy)]
+pub struct NameContext<'a> {
+    pub kind: DeclarationKind,
+    /// Every variable name the file declares — fields, locals, parameters — whatever its scope.
+    pub declared_in_file: &'a [&'a str],
+}
+
 /// The name for the declaration whose type ends just before the caret at `offset`, or `None` — the
 /// ordinary answer everywhere a declaration's name is not what comes next.
 ///
 /// `case_sensitive` is the editor's match-case setting, applied to what has been typed of the name.
-pub fn declaration_name_at(source: &str, offset: usize, case_sensitive: bool) -> Option<DeclarationName> {
+/// `spell` turns the camelCase name into the one the project writes (`|name, _| name` keeps it).
+pub fn declaration_name_at(
+    source: &str,
+    offset: usize,
+    case_sensitive: bool,
+    spell: impl FnOnce(String, &NameContext<'_>) -> String,
+) -> Option<DeclarationName> {
     if offset > source.len() || !source.is_char_boundary(offset) {
         return None;
     }
@@ -73,10 +103,20 @@ pub fn declaration_name_at(source: &str, offset: usize, case_sensitive: bool) ->
     if gap.is_empty() || !gap.bytes().all(|b| b == b' ' || b == b'\t') {
         return None;
     }
-    let type_start = position::declared_type(before, source)?;
+    let (type_start, kind) = position::declared_type(before, source)?;
     let suggested = suggested_name_for_type(&source[type_start..type_end])?;
-    let name = unclaimed(suggested, &taken::declared_names(&tokens, source, name_at, after));
+    let in_file = taken::declared_in_file(&tokens, source);
+    let spelled = spell(suggested, &NameContext { kind, declared_in_file: &in_file });
+    let name = unclaimed(spelled, &taken::declared_names(&tokens, source, name_at, after));
     continues(&name, typed, case_sensitive).then_some(DeclarationName { name, typed_start, typed_end: offset })
+}
+
+/// Every variable name `source` declares — fields, locals, parameters — whatever its scope: what a
+/// proposed name's spelling is read from when the project declared none. Read off tokens, like the
+/// rest of this module, so a buffer mid-edit still answers.
+pub fn declared_variable_names(source: &str) -> Vec<&str> {
+    // No caret to protect: past the end, nothing hides it.
+    tokens::tokens(source, usize::MAX).map(|tokens| taken::declared_in_file(&tokens, source)).unwrap_or_default()
 }
 
 /// `name`, or `name1`, `name2`, … — the first that is not already declared.

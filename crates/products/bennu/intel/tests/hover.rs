@@ -263,3 +263,58 @@ fn hover_annotation_says_annotation() {
     assert_eq!(h.kind, "annotation");
     assert_eq!(h.signature, "annotation Marker");
 }
+
+// ── overloads: the doc above the declaration the call binds to ───────────────────────────────
+//
+// Each overload carries its own Javadoc. The card used to read the block above the FIRST
+// declaration of the name, so `uri(u -> …)` was documented as `uri(Uri)`.
+
+fn overloaded_docs() -> Project {
+    Project::with_stream_jdk(&[
+        ("Fn.java", "package app;\npublic interface Fn<T, R> {\n    R apply(T t);\n}\n"),
+        ("Uri.java", "package app;\npublic class Uri {\n}\n"),
+        (
+            "Spec.java",
+            "package app;\n\
+             public interface Spec {\n\
+             \x20   /** Takes a URI. */\n\
+             \x20   Spec uri(Uri uri);\n\
+             \x20   /** Takes a function. */\n\
+             \x20   Spec uri(Fn<Uri, Uri> fn);\n\
+             }\n",
+        ),
+        (
+            "Caller.java",
+            "package app;\n\
+             public class Caller {\n\
+             \x20   void lambda(Spec spec) { spec.uri(u -> u); }\n\
+             \x20   void typed(Spec spec, Uri someUri) { spec.uri(someUri); }\n\
+             }\n",
+        ),
+    ])
+}
+
+#[test]
+fn hover_on_a_lambda_call_shows_the_function_overloads_doc() {
+    let p = overloaded_docs();
+    let s = p.source("Caller.java").to_string();
+    let h = p.hover("Caller.java", at(&s, "uri(u ->")).expect("hover on the lambda call");
+    assert_eq!(h.doc.as_deref(), Some("Takes a function."), "card: {h:?}");
+}
+
+#[test]
+fn hover_on_a_uri_call_shows_the_uri_overloads_doc() {
+    let p = overloaded_docs();
+    let s = p.source("Caller.java").to_string();
+    let h = p.hover("Caller.java", at(&s, "uri(someUri)")).expect("hover on the typed call");
+    assert_eq!(h.doc.as_deref(), Some("Takes a URI."), "card: {h:?}");
+}
+
+/// A caret on a declaration is on no call: the card is the one it always was.
+#[test]
+fn hover_on_an_overload_declaration_is_unchanged() {
+    let p = overloaded_docs();
+    let s = p.source("Spec.java").to_string();
+    let h = p.hover("Spec.java", at(&s, "uri(Uri uri)")).expect("hover on the declaration");
+    assert_eq!(h.doc.as_deref(), Some("Takes a URI."), "card: {h:?}");
+}

@@ -43,6 +43,11 @@
     <div class="fc-title">No "when" at all</div>
     <div class="fc-desc">Exactly one of <code>cron</code>, <code>fixedRate</code> or <code>fixedDelay</code> is required.</div>
   </div>
+  <div class="feature-card">
+    <div class="fc-eyebrow">Refused at startup</div>
+    <div class="fc-title">A job that takes parameters</div>
+    <div class="fc-desc">The scheduler calls a job with no arguments, and Spring refuses a <code>@Scheduled</code> method that declares any.</div>
+  </div>
 </div>
 <pre><code>{@html highlightCode(`@Scheduled(cron = "0 2 * * *")      // five fields: a Unix crontab, not a Spring cron
 public void nightlyReport() { … }`, 'java')}</code></pre>

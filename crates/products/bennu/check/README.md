@@ -71,8 +71,8 @@ only when `jdk_available`.
 | `unresolved_imports` | `error` | a single-type `import a.b.C;` whose type the resolver can't find (a typo / removed class). `static`/wildcard skipped; nested types tried as `a/b/Outer$Inner`. Only `java.*` is checked unless `classpath_complete` — a `javax.*`/library import can't be judged missing without the dependency jars (never a false positive). |
 | `unknown_members` | `error` | a call `receiver.method(...)` whose `method` doesn't exist on the receiver's **inferred** type (walking supertypes). |
 | `unknown_fields` | `error` | a `receiver.field` access whose `field` doesn't exist on the inferred type. Skips array `length`, static qualifiers, package/type prefixes. |
-| `arity_errors` | `error` | a `recv.method(args)` / `new Foo(args)` whose argument count matches no overload (varargs-aware — a trailing array is treated as possibly-varargs). Silent when the method is *missing* (that's `unknown_members`). |
-| `argument_type_errors` | `error` | an argument whose type can't bind to the parameter (`foo(1)` where `foo(String)`). Only when exactly one overload matches by argument count — a sibling overload of the same arity (even a varargs/array or generic one we can't type-check) means we can't tell which binds, so we skip — and that lone overload is non-varargs, non-generic; flags a definite mismatch only (String↔primitive, or unrelated concrete classes). |
+| `arity_errors` | `error` | a `recv.method(args)` / bare `method(args)` / `new Foo(args)` whose argument count matches no overload (varargs-aware — a trailing array is treated as possibly-varargs; the count rule is `bennu-java`'s shared `arity_admits`). A bare call is judged against the single top-level type's fully-known hierarchy plus the file's own declarations, lambdas included (a lambda adds no methods), nested/anonymous classes excluded. Silent when the method is *missing* (that's `unknown_members` / `unresolved_call`). |
+| `argument_type_errors` | `error` | an argument whose type can't bind to the parameter (`foo(1)` where `foo(String)`). Which overloads apply is `bennu-java`'s shared `overload_fit` (arity with varargs, strict/loose/varargs phases, lambdas vs functional interfaces, `null`, boxing, subtyping; unknown never excludes): reported only when it proves **no** overload applicable and every overload the count admits is refused on definite evidence (String/boolean↔primitive, a primitive whose box can't reach the class, a non-box class for a primitive, a reference type the argument isn't a subtype of — over a readable superclass chain for a class, a `final` class regardless, the whole hierarchy for an interface; `Object` arguments abstain). Positions whose parameter is a type variable, an array, or at/after a trailing array are not judged; the rest of a generic or varargs method is. An argument refused by every admitted overload is flagged naming each expected type, otherwise the call is. Reads value, `this`, `super` and static (`Util.m(…)`) receivers, bare calls (lambdas crossed; Lombok and static imports don't block, a member name shadows them), and `new` including anonymous bodies. A lambda, method reference, `null` or untyped argument is never reported. |
 | `unresolved_types` | `error` | a simple type name in a type position (`Fooo x;`, `extends Barr`, `List<Bazz>`, `catch (Quxx e)`) the resolver can't resolve. Excludes in-scope type parameters, same-file types, `var`, `java.lang`, and **member types inherited from a supertype** (JLS §8.1.5 — `class Sub extends Base` sees `Base`'s nested `Inner` as a bare `Inner`, with nothing to import). |
 | `type_arg_arity_errors` | `error` | a `Base<A, B, …>` whose type-argument count ≠ the number of type parameters `Base` declares (`List<A, B>`, `Map<String>`) — using the seam's `type_params` (bytecode generic signature for library/JDK types, the `<T, …>` clause for project types). Flags only when the base resolves AND its `type_params` is non-empty (exact arity known); the diamond `<>`, wildcards, raw types, an unresolved base and a scoped/nested-generic base are skipped, so never a false positive. |
 | `type_compat_errors` | `error` | an inconvertible cast (`(String) anInteger`), and an assignment / `return` whose value's type is incompatible with the declared type — including a `String` ↔ primitive mismatch (`int x = "1";`, `int y = "1" + 1;`, `String s = 1;`), driven by literal + string-concatenation typing. Reference-to-reference is flagged only between unrelated concrete classes over a fully-known hierarchy; boxing / widening / interfaces / generics are left alone. `java/lang/Object` on either side of a cast/assignment is skipped (universal supertype; also an erased-generic value). A **chained** method call (`a.b().c()`) value is skipped: shallow generic substitution can mis-type a chain (`list.stream().map(X::getId).max(..).orElse(null)` → the element type, not the mapped result), so it's left to the compiler. |
@@ -146,6 +146,25 @@ ellipsis), and every entry point returns through `check::finish`, which orders b
 count at `MAX_DIAGNOSTICS` and each message at `MAX_MESSAGE_CHARS`. The span already points at the
 whole thing, so the message never needs to reproduce it — and a message that is not a sentence
 becomes a tooltip the size of the file.
+
+## Differential corpus (javac as the oracle)
+
+`tests/corpus/` is a Maven project (JDK-only). Its error modules `java8` / `java21` hold paired
+`*Bad.java` / `*Ok.java` cases; its clean modules `clean8` / `clean21` hold realistic, legal code of
+~100-300 lines per file that combines features the way real code does and must compile with zero
+diagnostics. The system `mvn` + JDK 21 compile it, and `refresh-expected.ps1` / `.sh` turn javac's raw
+diagnostics into committed golden files, flagging every inline `// error:` marker javac disagrees with
+and every javac diagnostic on a clean module. The Rust side, `bennu-intel`'s `check_corpus` test,
+validates every file against the real JDK: it **fails on any false positive** (a Bennu error on a line
+javac accepts, or any Bennu diagnostic, warnings included, on a clean module) and writes per-category /
+per-key coverage plus a clean-modules section to `CARGO_TARGET_TMPDIR/bennu-check-corpus.md`. It lives in `bennu-intel` because the
+real-JDK resolver is built from that crate's dependencies. Layout, marker syntax, the refresh
+workflow, how to add a case and the remaining waves: [`tests/corpus/README.md`](tests/corpus/README.md).
+
+```sh
+cd crates/products/bennu/check/tests/corpus && bash refresh-expected.sh   # or refresh-expected.ps1
+cargo test -p bennu-intel --test check_corpus -- --nocapture
+```
 
 ## Roadmap
 

@@ -69,11 +69,24 @@ fn scaffold_new_file(kind: NewFileKind, dir: &Path, name: &str) -> ScaffoldResul
 // Declaration-site CST scans (go-to-declaration / rename / inherited-members consume these).
 fn find_type_name_span(source: &str, simple: &str) -> Option<(usize, usize)>   // NAME token of a type decl
 fn binary_of_type_at(source: &str, simple: &str, line: i64) -> Option<String>  // JVM binary name by (name, line)
+// By BINARY name, nesting included: `p/Outer$Inner` and `p/Outer/Inner` are `Inner` inside `Outer`,
+// never a same-named type in another outer (or a top-level namesake) of the same file.
+fn find_type_declaration(root, bytes, binary: &str) -> Option<Node>          // package-exact, then longest path
+fn find_binary_type_name_span(source: &str, binary: &str) -> Option<(usize, usize)>
+fn declared_type_binary(decl, bytes, package) -> Option<String>              // `p/Outer/Inner` as the file spells it
+fn binary_simple_name(binary: &str) -> &str                                  // innermost name of either spelling
+
+// Overload declarations: which of a name's declarations takes a member's parameters. ONE matcher,
+// shared by go-to / rename (`bennu-intel`) and library Javadoc (`FileDocs::method_overload`).
+fn declared_parameter_shapes(decl, source) -> Option<Vec<ParamShape>>        // (simple type, array depth)
+fn choose_overload(declarations: &[Option<&[ParamShape]>], params: &[TypeRef]) -> Option<usize>
 
 // Javadoc: the `/** … */` above a declaration, cleaned of its markers and gutter.
 fn leading_javadoc(source: &str, decl_start: usize) -> Option<String>   // for ONE offset
 fn javadoc_declarations(source: &str) -> FileDocs                       // for a WHOLE file
-//   FileDocs { type_doc, types: {simple name}, methods: {(name, arity)}, fields: {name} }
+//   FileDocs { type_doc, types: {simple name}, methods: {(name, arity)}, fields: {name},
+//              overloads: {name → [OverloadDoc { parameters, doc }]} }
+//   `method_overload(name, params, arity)` answers with the doc of the declaration taking `params`.
 // The file-at-once form is how a LIBRARY's documentation is read: a `.class` has no comments, so
 // the only copy is in its `-sources.jar` (or the JDK's `src.zip`), and one parse of that entry
 // answers every hover into the type instead of re-reading the archive per pointer move. Overloads
@@ -110,7 +123,9 @@ Postfix templates — the catalogue, pure; the provider (`bennu-intel`) infers t
 fn postfix_subject_start(source: &str, dot: usize) -> Option<usize>     // where `expr.` begins (scan, not parse)
 fn postfix_shape(ty: &TypeRef, expr: &str, resolver: &dyn TypeResolver) -> PostfixShape
 //   what the type makes possible: element types (array / Iterable), Optional kind, length, closeable,
-//   switchable, … plus `repeatable` (no call, no `new`) and `non_null` (literal, `this`, `new X()`)
+//   switchable, … plus `repeatable` (no call, no `new`) and `non_null` (literal, `this`, `new X()`);
+//   `shape.respell(|name| …)` renames every name a template would declare (the caller owns conventions)
+fn declared_variable_names(source: &str) -> Vec<&str>  // every field/local/parameter name, from tokens
 fn postfix_expansions(subject: &PostfixSubject, ctx: &PostfixContext, wanted: &dyn Fn(&str) -> bool)
     -> Vec<PostfixExpansion>   // { name, detail, text, stops: Vec<PostfixStop { start, end, group }>, imports }
 fn postfix_indent_unit(source: &str) -> String                           // the file's indentation step
@@ -125,7 +140,10 @@ Variable names — what a declaration of a type is called, IntelliJ's way:
 fn suggested_name_for_type(written: &str) -> Option<String>
 //   `URLBuilder` → urlBuilder, `List<Order>` / `Order[]` / `Order...` → orders, `Optional<Order>` → order,
 //   `Map<K, V>` → map, `Class<?>` → clazz, `String` → s. The word rules are the postfix templates' own.
-fn declaration_name_at(source: &str, offset: usize, case_sensitive: bool) -> Option<DeclarationName>
+fn declaration_name_at(source: &str, offset: usize, case_sensitive: bool,
+                       spell: impl FnOnce(String, &NameContext) -> String) -> Option<DeclarationName>
+//   `spell` gets the camelCase name plus NameContext { kind: Field|Local|Parameter, declared_in_file }
+//   and returns it in the project's spelling (the caller owns the conventions); the digit is added after.
 //   DeclarationName { name, typed_start, typed_end } — the name for the declaration whose type ends
 //   before the caret (field after modifiers, local at a statement start, method/constructor/record/
 //   `for`/`try` parameter), with a digit when the name is taken in that scope (`order1`). Read from
@@ -199,12 +217,20 @@ a partial identifier).
   which in `bennu-be` means every file loses its diagnostics, so the cap is load-bearing rather
   than tidy. Hand-written code does not come close: a long fluent chain is tens of levels.
 
-- **Overload resolution is arity-first, not full argument-subtype** — among same-named
-  overloads we keep those whose arity admits the call and take their return type when it
-  is unique (breaking a return-type tie by a conservative primitive/reference argument
-  check); a still-ambiguous overload resolves to "unknown" rather than a guess. Covariant
-  overrides collapse to their derived return. Full argument-subtype selection (boxing,
-  varargs element types, most-specific) is not modelled.
+- **Overload resolution is conservative, not generic-aware** — one implementation
+  (`infer/overload.rs`) serves inference, lambda-parameter typing, `call_overload_at` (what
+  go-to and hover use to pick a declaration), `bound_overload` (the same answer for a call node
+  and candidate set in hand — parameter hints, the signature strip) and `overload_fit` (the full
+  verdict, `NoArity` / `Applicable` / `Inapplicable`, for the argument-type check, which must tell
+  "ambiguous" from "nothing applies"; `arity_admits` is the count rule alone; `subtype_verdict` is
+  its subtype question, for that check's per-position judgement — a hole in the argument's hierarchy
+  still answers "no" for a `final` class, or for a class its readable superclass chain misses): arity (varargs-aware), then the strict / loose /
+  varargs phases (a lambda fits only a functional interface whose SAM takes as many parameters,
+  a method reference any functional interface, `null` any reference; widening, boxing and
+  subtyping for typed arguments), then most-specific judged only at typed positions. Anything
+  the classpath cannot answer abstains and keeps the candidate; a still-ambiguous overload
+  resolves to "unknown" rather than a guess. Covariant overrides collapse to their derived
+  return. A method's own type variables are not inferred for applicability.
 - **No flow-typing / reassignment / narrowing** — a variable's declared type is used
   even after `x = somethingElse`, and `if (o instanceof Foo) { o.… }` does not narrow
   `o` itself (only a pattern variable of its own — `instanceof Foo f` — is typed).

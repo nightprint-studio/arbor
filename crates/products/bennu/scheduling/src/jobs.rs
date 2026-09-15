@@ -33,6 +33,8 @@ pub struct Job {
     pub end: usize,
     /// Byte offset of the method's name — the go-to target.
     pub offset: usize,
+    /// How many parameters the method declares. Spring calls a job with none.
+    pub parameter_count: usize,
 }
 
 /// Every `@Scheduled` method in the source.
@@ -85,7 +87,19 @@ fn read_method(member: Node<'_>, source: &str, owner: &str) -> Option<Job> {
         start: annotation.start_byte(),
         end: annotation.end_byte(),
         offset: name_node.start_byte(),
+        parameter_count: parameter_count(member),
     })
+}
+
+/// The declared parameters — a receiver parameter (`Reports this`) is not one a caller passes.
+fn parameter_count(method: Node<'_>) -> usize {
+    let Some(params) = method.child_by_field_name("parameters") else { return 0 };
+    let mut cursor = params.walk();
+    let count = params
+        .named_children(&mut cursor)
+        .filter(|p| matches!(p.kind(), "formal_parameter" | "spread_parameter"))
+        .count();
+    count
 }
 
 fn trigger_of(annotation: Node<'_>, source: &str) -> Trigger {
@@ -191,6 +205,17 @@ public class Reports {
         };
         assert_eq!(expression, "0 0 2 * * ?");
         assert_eq!(&SRC[*start..*end], "0 0 2 * * ?");
+    }
+
+    #[test]
+    fn parameters_are_counted_and_a_receiver_parameter_is_not_one() {
+        let src = r#"class R {
+            @Scheduled(fixedDelay = 1) public void none() { }
+            @Scheduled(fixedDelay = 1) public void two(String a, int b) { }
+            @Scheduled(fixedDelay = 1) public void receiver(R this) { }
+        }"#;
+        let counts: Vec<usize> = jobs_in(src).iter().map(|j| j.parameter_count).collect();
+        assert_eq!(counts, [0, 2, 0]);
     }
 
     #[test]

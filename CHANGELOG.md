@@ -8,20 +8,23 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Added
+- **Spring bean declarations checked as you type.** A `private`/`final` or `void` `@Bean`, a `final` `@Configuration`, injection into static members, a stereotype on an interface, abstract or inner class, a non-static post-processor `@Bean`, an `@Async` result the caller never gets, a static `@Transactional` method and a `@Scheduled` method with parameters — with Alt+Enter to fix the modifiers where that is the repair.
+- **Breakpoints in library sources.** Bennu sets, verifies and remembers breakpoints in a dependency's downloaded sources or the JDK's, and lists them by class.
 - **A Bennu project whose folder is gone can be located or removed.** Instead of vanishing silently from the workspace, it offers *Locate…* and *Remove from workspace*.
 - **Bennu warns about a module the pom lists but the disk doesn't have.** One notice names the module and the folder it was probably renamed to, with *Open pom.xml*.
 - **"Not indexed" in Bennu's footer.** A Java file outside every indexed project says so, with one click to open the project it belongs to.
 - **Bennu tells you when the project's shape changes.** Folders added, removed or renamed at the top of a project, or a module renamed in another IDE, show one notice — with *Rebuild index* when a module or `pom.xml` is involved.
 - **Reload project tree** in Bennu's command palette re-reads the project from disk on demand.
-- **Java postfix templates follow the expression's type and the module's Java level.** `ids.stream` on an array writes `Arrays.stream(ids)`, `orders.for` declares an `Order order`, `.fori` counts to `size()` or `length`; new `Optional` templates (`.ifp`, `.ifpe`, `.ifget`, `.orThrow`, `.orGet`, `.optof`) and IntelliJ's `.soutv`, `.souf`, `.twr`, `.castvar`, `.arg`, `.lambda`, `.reqnonnull`, `.format`, `.new`. Where a level lacks a method the older equivalent is written, and imports are added.
+- **Java postfix templates follow the expression's type and the module's Java level.** `ids.stream` on an array writes `Arrays.stream(ids)`, `orders.for` declares an `Order order`, `.fori` counts to `size()` or `length`; new `Optional` templates (`.ifp`, `.ifpe`, `.ifget`, `.orThrow`, `.orGet`, `.optof`) and IntelliJ's `.soutv`, `.souf`, `.twr`, `.castvar`, `.arg`, `.lambda`, `.reqnonnull`, `.format`, `.new`. Where a level lacks a method the older equivalent is written, and imports are added. The variables they declare follow the project's naming convention, or the one the file already uses.
 - **New postfix template…** in Bennu's command palette opens the new-template dialog directly on the Postfix kind.
 - **Postfix templates of your own.** A new *Postfix* kind of code template, offered after a value's dot beside the built-in ones, on the values it declares (`iterable`, `optional`, a class…), replacing a built-in of the same name.
 - **Method references complete.** After `Type::` or `value::` Bennu lists the methods and `new`, the ones fitting the expected function first, inserted without parentheses.
 - **The type a function argument receives is suggested first.** In `optional.map(|)` the value's type is preselected, also on Ctrl+Space with nothing typed.
 - **`prf` and `pf`** expand to `private final` and `public final`.
-- **The name of a declaration as ghost text.** After `private final OrderRepository ` Bennu draws `orderRepository` (`List<Order>` → `orders`), written with Tab — for fields, locals and parameters.
+- **The name of a declaration as ghost text.** After `private final OrderRepository ` Bennu draws `orderRepository` (`List<Order>` → `orders`), written with Tab — for fields, locals and parameters, in the project's naming convention or, where none is set, the one the file's names already follow (`filter_configurator`).
 - **Alt+Enter on a `final` field nothing initialises** offers Add constructor parameter (or all final fields at once), Initialize in constructor, Initialize variable and Make not final — and, on Lombok projects, Add `@RequiredArgsConstructor`, first when the project already uses it. Initialize variable and Initialize in constructor select the value they write, so typing replaces it.
 - **Bennu's project tree repairs itself on focus.** Coming back to the window re-checks the root and the open folders, and reloads the tree if a change was missed.
+- **Bennu remembers which folders and Maven sections are open, per project.** Reopening the Project or Maven tool window, switching project or restarting no longer resets them.
 
 - **Typing around a selection in Java wraps it.** `<`, `"`, `'` and the brackets surround the selected text instead of replacing it, and `"""` opens a text block with the caret inside.
 
@@ -150,9 +153,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 
 ### Changed
+- **Enter in Bennu's Java editor indents like IntelliJ.** Blocks, unfinished statements, braceless `if`/`for`/`else`, open parentheses and `case` labels each get their level, a typed `}` or label snaps into place, and Javadoc and block comments continue with ` * ` and close themselves.
 - **Bennu's completion no longer asks the backend — or a language server — on every key while you type fast.** A burst is asked once it pauses — and sampled while it lasts — and an identical question shares the answer already on its way.
 - **Alt+Enter fixes that write a placeholder select it.** Create method (from a call or a method reference), Surround with try/catch and Add the missing cases select the stub statement they write, so typing replaces it.
 - **A clearer completion popup** in every code editor: larger rows, colour-coded kind badges, highlighted matched letters, and signature and origin in right-aligned columns.
+- **Bennu's member completion reads like IntelliJ's.** After a dot the receiver's own members come first, in bold and preselected, then inherited ones, then `Object`'s, dimmed; overloads are separate rows showing parameter names, and `Object`'s protected `clone`/`finalize` are no longer offered from outside.
+- **New completion icons.** One per kind — method, field, class, interface, enum, record, annotation, package, template… — with marks for static, final, abstract and deprecated.
 
 - **Bennu's Alt+Enter list is read in sections.** Quick fixes, intentions, refactorings and generators each have their own heading and colour, fixes first. The generators appear only where a member is written and never beside a fix, and imports are ordered the way completion ranks them — `java.util.List` before `java.awt.List`, the JDK's internals last — with the clear favourite marked *suggested*.
 
@@ -164,6 +170,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu's docs read as one manual.** Every page opens with its section and a summary, and lays its facts out as cards, steps, tables and callouts instead of long paragraphs.
 
 ### Fixed
+- **Wrong Java argument types are reported on many more calls.** Static calls, calls inside lambdas, generic and overloaded methods, anonymous-class constructors and own-method calls in Lombok classes now flag an argument no overload can take; static calls also get the wrong-argument-count check.
+- **Go-to and hover on an overloaded Java method pick the overload the call binds to.** `uri(b -> …)` opens `uri(Function)`, not the `uri(URI)` declared above it — lambdas, method references, `null`, literals and argument types are all weighed, even while the lambda is still being written.
+- **Parameter-name hints and the signature strip follow the overload a Java call actually binds to.** `uri("/x", b -> …)` names its arguments after `uri(String, Function)`, and a wrong-argument-type error is raised only when no overload can take the arguments.
+- **Hovering a call to an overloaded Java method shows that overload's own Javadoc.** `uri(b -> …)` reads the `Function` overload's documentation instead of the first `uri`'s, in project code and in libraries with downloaded sources.
+- **Rename, safe delete and go-to on members of nested Java types stay inside their own type.** A method or field of `Outer.Inner` is no longer confused with a same-named nested `Inner` elsewhere in the file, safe delete finds it from a call in another file, and members of nested library types are located directly.
+- **Running a `main` in Bennu no longer needs a manual `mvn clean package`.** Modules that depend on a changed module are recompiled, leftovers from deleted sources and stale MapStruct/Lombok output are removed, and sibling modules run from their fresh classes instead of an old jar.
+- **A Bennu launch whose classpath cannot be resolved says so instead of starting.** Jars missing from the local repository are listed in the Run console, and pom changes in any module refresh the classpath.
+- **Back / Forward (Ctrl+Alt+←/→) in Bennu land where you actually were.** Jumps from panels no longer leave stops at line 1 or at a line of the wrong file, remembered places follow your edits, and files that no longer open are skipped.
+- **A call to one of the class's own methods with too few or too many arguments went unreported inside a lambda.** `opt.ifPresent(h -> insert(h))` against a two-parameter `insert` is now an error, as javac reports it.
+- **A name declared nowhere went unreported inside a lambda.** A parameter renamed while a callback still reads the old name is now "Cannot resolve symbol", as it already was outside one.
+- **A call to a method that does not exist went unreported inside a lambda.** `opt.ifPresent(h -> sendd(h))` is now "Cannot resolve method", as it already was outside one.
 - **A failed Bennu index build looked like one still running.** It now says so: a notification, "Index failed" in the footer, "build failed" in the index inspector.
 - **Rebuild index could do nothing and say nothing.** It re-reads the JDK level and encoding from the poms, and reports an error when the project isn't open.
 - **A missing Maven module counted as a complete classpath.** The dependencies of a renamed module were silently left out; now the resolve is incomplete and says which module is missing.

@@ -25,8 +25,8 @@
 //! only place that information can appear.
 
 use bennu_java::prelude::{
-    infer_node_type_cached, extract_symbols, parse_java, FileSymbols, InferCache, Member,
-    MemberKind, TypeRef, TypeResolver,
+    bound_overload, infer_node_type_cached, extract_symbols, method_admits_argc, parse_java,
+    FileSymbols, InferCache, Member, MemberKind, TypeResolver,
 };
 use tree_sitter::Node;
 
@@ -117,10 +117,18 @@ pub fn signature_at(
     let wanted = argc.max(active + 1);
     let admitting: Vec<&Member> = candidates
         .iter()
-        .filter(|m| arity_admits(m, wanted))
+        .filter(|m| method_admits_argc(m, wanted))
         .collect();
     let shown: Vec<&Member> = if admitting.is_empty() { candidates.iter().collect() } else { admitting };
-    let picked = *shown.first()?;
+    // The overload the written arguments bind to (the shared applicability rules), when they settle
+    // it and it still fits where the caret is; otherwise the first that does.
+    let bound = bound_overload(&root, source, &symbols, &call, &candidates, resolver, &cache)
+        .filter(|m| shown.iter().any(|s| std::ptr::eq(*s, *m)));
+    let picked = match bound {
+        Some(m) => m,
+        None => *shown.first()?,
+    };
+    let picked_index = shown.iter().position(|s| std::ptr::eq(*s, picked)).unwrap_or(0);
 
     // Rendered from the names the member actually carries: a parameter whose name is unknown shows
     // as its type alone (`get_genere(String)`), never as `String arg0` — which would say the
@@ -135,7 +143,7 @@ pub fn signature_at(
         label,
         active,
         anchor: args.start_byte(),
-        overload: (candidates.len() > 1).then_some((0, shown.len())),
+        overload: (candidates.len() > 1).then_some((picked_index, shown.len())),
     })
 }
 
@@ -283,17 +291,6 @@ fn substituted(m: &Member, params: &[String], args: &[bennu_java::prelude::TypeR
     }
 }
 
-/// Whether `m` could take a call of `argc` arguments (a trailing array parameter is varargs).
-fn arity_admits(m: &Member, argc: usize) -> bool {
-    let n = m.params.len();
-    if n == argc {
-        return true;
-    }
-    // A varargs parameter is an ARRAY, which is now `dims` and no longer a suffix on the name.
-    let variadic = m.params.last().is_some_and(|p| p.dims > 0);
-    variadic && argc + 1 >= n
-}
-
 /// How many arguments the list holds — 0 for an empty one.
 fn argument_count(args: Node) -> usize {
     let mut c = args.walk();
@@ -425,23 +422,18 @@ fn parameter_name_hints(
     else {
         return;
     };
-    // Only an unambiguous binding earns a hint. With two overloads admitting the same call, the
-    // names could come from either, and a name from the wrong one is a lie about the code.
-    let admitting: Vec<&Member> =
-        candidates.iter().filter(|m| arity_admits(m, arg_nodes.len())).collect();
-    let picked = match admitting.as_slice() {
-        [only] => *only,
-        // Arity alone leaves a real gap, and it is not a rare one: `addAllowedMethod(HttpMethod)`
-        // and `addAllowedMethod(String)` both take one argument, so a whole line lost its names
-        // beside four that kept theirs — which reads as the feature being unreliable rather than
-        // careful. The arguments say which overload it is, so ask them. See [`disambiguate`].
-        many if !many.is_empty() => {
-            match disambiguate(many, &arg_nodes, root, source, symbols, resolver, cache) {
-                Some(m) => m,
-                None => return,
-            }
-        }
-        _ => return,
+    // Only an unambiguous binding earns a hint. With two overloads still standing, the names could
+    // come from either, and a name from the wrong one is a lie about the code.
+    //
+    // Which overload it is comes from the one set of applicability rules go-to, hover and inference
+    // use (`bennu_java`'s `bound_overload`): arity, then the arguments — a lambda fits only a
+    // functional interface of its parameter count, `null` any reference, a typed value by boxing,
+    // widening and subtyping, and an argument nothing could type decides nothing. Arity alone lost
+    // the names of `addAllowedMethod("*")` beside `(HttpMethod)`, and of `uri("/x", b -> …)` beside
+    // `uri(String, Map)`.
+    let Some(picked) = bound_overload(root, source, symbols, call, &candidates, resolver, cache)
+    else {
+        return;
     };
     let params = named_parameters(picked);
     if params.len() != arg_nodes.len() {
@@ -484,73 +476,6 @@ fn parameter_name_hints(
                 .unwrap_or_default(),
         });
     }
-}
-
-/// The one overload of `candidates` whose parameters the written arguments fit, or `None`.
-///
-/// Only ever narrows on evidence. A parameter position rules a candidate out when the argument's
-/// type is **known**, the parameter's type is **known**, and the first is not the second nor
-/// anything below it — everything else (an argument that would not infer, a primitive, a type
-/// variable, a type the resolver cannot read) leaves the position silent, which means it neither
-/// keeps nor drops anybody. So the answer is a hint only where the code itself settles the
-/// question; two overloads that a reader would also have to think about still get nothing.
-#[allow(clippy::too_many_arguments)]
-fn disambiguate<'m>(
-    candidates: &[&'m Member],
-    args: &[Node],
-    root: &Node,
-    source: &str,
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-    cache: &InferCache,
-) -> Option<&'m Member> {
-    // Inferred once and shared: the candidates are asked about the same arguments, and inference
-    // is the expensive half.
-    let written: Vec<Option<TypeRef>> = args
-        .iter()
-        .map(|a| infer_node_type_cached(root, source, symbols, a, resolver, cache))
-        .collect();
-    if written.iter().all(Option::is_none) {
-        return None; // nothing to narrow WITH
-    }
-    let mut fitting = candidates.iter().filter(|m| {
-        m.params.len() == args.len()
-            && m.params
-                .iter()
-                .zip(written.iter())
-                .all(|(param, arg)| !rules_out(param, arg.as_ref(), resolver))
-    });
-    let first = fitting.next()?;
-    fitting.next().is_none().then_some(*first)
-}
-
-/// Whether this parameter position proves the candidate is NOT the call — see [`disambiguate`].
-fn rules_out(param: &TypeRef, arg: Option<&TypeRef>, resolver: &dyn TypeResolver) -> bool {
-    let Some(arg) = arg else { return false };
-    if param.binary_name == arg.binary_name && param.dims == arg.dims {
-        return false;
-    }
-    if param.dims != arg.dims {
-        // An array against a non-array is as clear as this gets — except against a varargs tail,
-        // which `arity_admits` may have let through, and which is not this function's to judge.
-        return param.dims > 0 && arg.dims > 0;
-    }
-    // A name with no slash is a primitive or a type variable. Boxing, widening and inference all
-    // live there, and none of them is worth reimplementing to order a tooltip.
-    if !param.binary_name.contains('/') || !arg.binary_name.contains('/') {
-        return false;
-    }
-    if param.binary_name == "java/lang/Object" {
-        return false;
-    }
-    // Only a type the resolver could actually READ can rule anything out: an unreadable one has an
-    // empty supertype chain, which is indistinguishable from having none.
-    if resolver.members_of(&arg.binary_name).is_none() {
-        return false;
-    }
-    !bennu_java::prelude::supertype_names(resolver, &arg.binary_name)
-        .iter()
-        .any(|s| *s == param.binary_name)
 }
 
 /// Whether an argument written as `text` is worth prefixing with the parameter name `name`.

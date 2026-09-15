@@ -82,6 +82,15 @@ pub struct MavenResolveOpts {
     /// large reactor is doing the work it was asked to do, and cutting that short would report a
     /// shortfall that is only "not finished yet".
     pub timeout: Duration,
+    /// Resolve ONE module of the reactor rooted at `project_dir` (relative path, `services/core`),
+    /// from inside the reactor — `-pl <module> -am` — and read only that module's classpath.
+    ///
+    /// `None` resolves `project_dir` as it stands and takes the union of every module's file (the
+    /// index's view). A **launch** wants `Some`: resolved from inside the reactor, a dependency on a
+    /// sibling module is answered with that sibling's `target/classes` rather than with a jar in
+    /// `~/.m2` — which is stale after every edit, and absent until someone runs `mvn install`, in
+    /// which case Maven resolves nothing at all for the module. See [`resolve_maven_classpath`].
+    pub reactor_module: Option<String>,
 }
 
 impl Default for MavenResolveOpts {
@@ -92,6 +101,7 @@ impl Default for MavenResolveOpts {
             offline: true,
             scope: None,
             timeout: Duration::from_secs(300),
+            reactor_module: None,
         }
     }
 }
@@ -126,6 +136,13 @@ pub struct MavenClasspath {
     /// Whether `mvn` exited 0. `false` means partial (see [`unresolved`](Self::unresolved))
     /// — the resolved jars are still usable.
     pub mvn_ok: bool,
+    /// Every entry that exists on disk — jars **and directories** — in Maven's classpath order.
+    ///
+    /// [`jars`](Self::jars) is the index's view and holds files only; a directory there is not a
+    /// jar to open. A launch needs the directories too: resolved from inside a reactor, a sibling
+    /// module arrives as its `target/classes`, and dropping it would drop the sibling. Directories
+    /// also still appear in [`unresolved`](Self::unresolved), as they always have.
+    pub entries: Vec<PathBuf>,
 }
 
 impl MavenClasspath {
@@ -179,6 +196,11 @@ impl MavenClasspath {
 /// The per-module file `dependency:build-classpath` writes its classpath into. **Relative** on
 /// purpose — see [`resolve_maven_classpath`].
 const OUTPUT_FILE_NAME: &str = "bennu-classpath.txt";
+
+/// The file a reactor-scoped resolve ([`MavenResolveOpts::reactor_module`]) writes. A name of its
+/// own, so a launch resolving at `runtime` scope can never overwrite — or be read back as — the
+/// every-scope file the index is reading at the same moment.
+const REACTOR_OUTPUT_FILE_NAME: &str = "bennu-run-classpath.txt";
 
 /// Run a child to completion, or kill it after `timeout`.
 ///
@@ -271,6 +293,15 @@ fn run_bounded(mut cmd: Command, timeout: Duration) -> std::io::Result<std::proc
 /// A sibling module's own artifact may appear on another module's classpath — as `target/classes` (a
 /// directory) or as its jar in `~/.m2`. Either is harmless: a directory fails to open as a jar and is
 /// skipped, and the module's types are indexed from source anyway, which is the better tier.
+///
+/// ## One module, from inside the reactor
+///
+/// With [`MavenResolveOpts::reactor_module`] set, the goal runs at the reactor root as
+/// `compile dependency:build-classpath -pl <module> -am`, with the compiler and resources skipped
+/// (the launch has just compiled). The `compile` phase is there for Maven's reactor resolution:
+/// before Maven 3.9 a sibling is answered with its `target/classes` only when the session includes
+/// that phase, and otherwise falls through to `~/.m2`. Only the module's own file is read, so a
+/// sibling's `<optional>` dependencies do not leak onto its classpath.
 pub fn resolve_maven_classpath(
     project_dir: &Path,
     opts: &MavenResolveOpts,
@@ -278,6 +309,9 @@ pub fn resolve_maven_classpath(
     let pom = project_dir.join("pom.xml");
     if !pom.is_file() {
         return Err(format!("no pom.xml in {}", project_dir.display()));
+    }
+    if let Some(module) = opts.reactor_module.as_deref().filter(|m| !m.trim().is_empty()) {
+        return resolve_reactor_module(project_dir, module.trim(), opts);
     }
 
     // Best-effort: clear every stale output under the tree so a module whose resolve fails this run
@@ -333,9 +367,76 @@ pub fn resolve_maven_classpath(
         ));
     }
 
-    let (jars, unresolved) = classify_entries(union_entries(&produced));
+    Ok(classpath_from(union_entries(&produced), mvn_ok))
+}
 
-    Ok(MavenClasspath { jars, unresolved, mvn_ok })
+/// [`resolve_maven_classpath`] for one module of a reactor — see "One module, from inside the
+/// reactor" there.
+fn resolve_reactor_module(
+    root: &Path,
+    module: &str,
+    opts: &MavenResolveOpts,
+) -> Result<MavenClasspath, String> {
+    let module = module.replace('\\', "/").trim_matches('/').to_string();
+    let output = root.join(&module).join("target").join(REACTOR_OUTPUT_FILE_NAME);
+    // Last run's answer must not be read as this run's.
+    let _ = fs::remove_file(&output);
+
+    let mut cmd = Command::new(&opts.mvn_path);
+    cmd.current_dir(root)
+        .arg("-q")
+        .arg("compile")
+        .arg("dependency:build-classpath")
+        .arg("-pl")
+        .arg(&module)
+        .arg("-am")
+        // The launch compiled a moment ago: the phase is wanted, the work is not.
+        .arg("-Dmaven.main.skip=true")
+        .arg("-Dmaven.resources.skip=true")
+        .arg(format!("-Dmdep.outputFile=target/{REACTOR_OUTPUT_FILE_NAME}"))
+        .arg("-Dmdep.ignoreMissing=true")
+        .arg("--fail-never")
+        .arg("--batch-mode");
+    if let Some(scope) = &opts.scope {
+        cmd.arg(format!("-Dmdep.includeScope={scope}"));
+    }
+    if opts.offline {
+        cmd.arg("-o");
+    }
+    if let Some(jh) = &opts.java_home {
+        cmd.env("JAVA_HOME", jh);
+    }
+
+    let run = run_bounded(cmd, opts.timeout)
+        .map_err(|e| format!("spawn mvn ({}): {e}", opts.mvn_path))?;
+    let Ok(raw) = fs::read_to_string(&output) else {
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        eprintln!(
+            "bennu-classpath: reactor resolve of {module} wrote nothing in {} (exit {:?})\n\
+             ----- mvn stdout -----\n{stdout}\n----- mvn stderr -----\n{stderr}",
+            root.display(),
+            run.status.code(),
+        );
+        return Err(format!(
+            "mvn dependency:build-classpath -pl {module} -am wrote no classpath. {}",
+            maven_failure_reason(&stdout, &stderr)
+        ));
+    };
+    Ok(classpath_from(split_entries(&raw), run.status.success()))
+}
+
+/// Classify raw classpath entries into a [`MavenClasspath`].
+fn classpath_from(raw_entries: Vec<String>, mvn_ok: bool) -> MavenClasspath {
+    let entries: Vec<PathBuf> = raw_entries
+        .iter()
+        .map(|e| e.trim())
+        .filter(|e| !e.is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .collect();
+    let (jars, unresolved) = classify_entries(raw_entries);
+    MavenClasspath { jars, unresolved, mvn_ok, entries }
 }
 
 /// What Maven said went wrong, in one line fit for a notification.
@@ -604,7 +705,7 @@ impl MavenClasspathCache {
         let mtime = fs::metadata(&pom)
             .and_then(|m| m.modified())
             .map_err(|e| format!("stat {}: {e}", pom.display()))?;
-        let key = (pom.clone(), opts.scope.clone().unwrap_or_default());
+        let key = (pom.clone(), cache_slot(opts.scope.as_deref(), opts.reactor_module.as_deref()));
 
         if let Some(hit) = self.entries.get(&key) {
             if hit.pom_mtime == mtime {
@@ -622,7 +723,7 @@ impl MavenClasspathCache {
     /// meaning the every-scope resolve, the same key [`Self::get`] uses.
     pub fn is_cached_at(&self, project_dir: &Path, scope: Option<&str>) -> bool {
         let pom = project_dir.join("pom.xml");
-        let key = (pom.clone(), scope.unwrap_or_default().to_string());
+        let key = (pom.clone(), cache_slot(scope, None));
         match (self.entries.get(&key), fs::metadata(&pom).and_then(|m| m.modified())) {
             (Some(hit), Ok(mtime)) => hit.pom_mtime == mtime,
             _ => false,
@@ -633,6 +734,15 @@ impl MavenClasspathCache {
     /// before scopes existed was asking.
     pub fn is_cached(&self, project_dir: &Path) -> bool {
         self.is_cached_at(project_dir, None)
+    }
+}
+
+/// The cache slot for a (scope, reactor module) pair. A module resolved from inside the reactor is
+/// a different classpath than the reactor's union, so it must never share a slot with it.
+fn cache_slot(scope: Option<&str>, reactor_module: Option<&str>) -> String {
+    match reactor_module.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) => format!("{}@{m}", scope.unwrap_or_default()),
+        None => scope.unwrap_or_default().to_string(),
     }
 }
 
@@ -696,6 +806,39 @@ mod tests {
         let (jars, unresolved) = split_classpath(raw);
         assert!(jars.is_empty());
         assert_eq!(unresolved.len(), 2);
+    }
+
+    /// A launch reads directories off the classpath — a sibling module resolved from inside the
+    /// reactor is its `target/classes` — while the index's `jars` stay files only.
+    #[test]
+    fn entries_keep_directories_in_order_and_jars_stay_files() {
+        let dir = std::env::temp_dir().join(format!("bennu-cp-entries-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let classes = dir.join("core/target/classes");
+        fs::create_dir_all(&classes).unwrap();
+        let jar = dir.join("lib.jar");
+        fs::write(&jar, b"PK").unwrap();
+        let missing = dir.join("gone.jar");
+
+        let cp = classpath_from(
+            vec![
+                classes.display().to_string(),
+                jar.display().to_string(),
+                missing.display().to_string(),
+            ],
+            true,
+        );
+        assert_eq!(cp.entries, vec![classes.clone(), jar.clone()], "order kept, missing dropped");
+        assert_eq!(cp.jars, vec![jar]);
+        assert!(cp.unresolved.contains(&missing));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_reactor_module_resolve_has_its_own_cache_slot() {
+        assert_eq!(cache_slot(Some("runtime"), None), "runtime");
+        assert_eq!(cache_slot(Some("runtime"), Some("web")), "runtime@web");
+        assert_eq!(cache_slot(None, Some("  ")), "", "a blank module is the reactor's union");
     }
 
     #[test]

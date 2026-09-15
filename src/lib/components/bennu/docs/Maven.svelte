@@ -38,6 +38,10 @@
     </div>
   </div>
 </div>
+<p>
+  Which modules, groups, plugins and the Profiles section are open is remembered for each project: closing the window,
+  switching project or restarting brings it back as you left it. A module or plugin that leaves the poms is forgotten.
+</p>
 
 <h2>What a press runs</h2>
 <p>

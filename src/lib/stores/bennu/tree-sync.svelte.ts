@@ -12,7 +12,7 @@
 
 import { listen } from '@tauri-apps/api/event';
 import { projectStore } from './project.svelte';
-import { bennuUiStore } from './ui.svelte';
+import { treeExpansionStore } from './tree-expansion.svelte';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import { TREE_CHANGED, type TreeChanged } from '$lib/ipc/bennu/tree-watch';
 import { projectTree } from '$lib/ipc/bennu';
@@ -54,9 +54,10 @@ function createBennuTreeSyncStore() {
     if (!payload || !root) return;
     if (needsTreeReload(payload)) {
       // Before the reload, so a renamed folder that was open is still open when its rows arrive.
-      for (const [from, to] of renamedExpansion(bennuUiStore.treeExpanded, root, payload.changes ?? [])) {
-        bennuUiStore.setExpanded(from, false);
-        bennuUiStore.setExpanded(to, true);
+      const moves = renamedExpansion(treeExpansionStore.openPaths(root), root, payload.changes ?? []);
+      if (moves.length) {
+        treeExpansionStore.setPathsOpen(root, moves.map(([from]) => from), false);
+        treeExpansionStore.setPathsOpen(root, moves.map(([, to]) => to), true);
       }
       projectStore.refreshTreeOf(root);
     }
@@ -111,7 +112,7 @@ function createBennuTreeSyncStore() {
     reconcileAt = now;
     reconciling = true;
     try {
-      const targets = reconcileTargets(root, bennuUiStore.treeExpanded, RECONCILE_MAX_DIRS);
+      const targets = reconcileTargets(root, treeExpansionStore.openPaths(root), RECONCILE_MAX_DIRS);
       const listings = await Promise.all(
         targets.map((dir) => projectTree(dir, 1).then((fresh) => ({ dir, fresh }), () => null)),
       );

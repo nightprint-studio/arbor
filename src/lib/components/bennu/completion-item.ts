@@ -29,21 +29,17 @@ import type { EditorView } from '@codemirror/view';
 // functions — the unit tests included.
 import { insertWithStops } from '$lib/components/shared/ui/code-editor/snippet-stops';
 import { makeByteToU16 } from '$lib/components/shared/ui/code-editor/highlight';
-import type { CompletionItem, SourceEdit } from '$lib/types/bennu';
+import type {
+  CompletionStanding, RichCompletionFields,
+} from '$lib/components/shared/ui/code-editor/completion-render';
+import type { CompletionItem, MemberOrigin, SourceEdit } from '$lib/types/bennu';
 
 /**
- * A completion carrying the **origin** the popup draws on the right of the row.
- *
- * CodeMirror's own `Completion` has a label and a detail and no third slot, and the third slot is
- * what tells `List.of` from `Set.of` — and an inherited method from one of your own. Declared as
- * an extension of the library's type rather than smuggled through `any`, so the renderer that
- * reads it and the converters that write it agree about the name.
+ * A completion carrying what the popup draws beyond a label and a detail — the origin, the
+ * parameter list, the member's standing and modifiers (see the shared `completion-render`, which
+ * reads them) — plus the one thing only Bennu's rows have, the ghost preview.
  */
-export interface RichCompletion extends Completion {
-  /** The simple name of the declaring type, or nothing when the item has no owner. */
-  origin?: string;
-  /** Struck through in the list. Still offered — it exists, and you may be reading old code. */
-  isDeprecated?: boolean;
+export interface RichCompletion extends Completion, RichCompletionFields {
   /**
    * Drawn in grey at the caret while this row is selected.
    *
@@ -104,21 +100,25 @@ export function applyAdditionalEdits(
 export function kindToType(kind: string): string {
   switch (kind) {
     case 'method':
-    case 'function':
-    case 'constructor':    return 'method';
+    case 'function':       return 'method';
+    case 'constructor':    return 'constructor';
     case 'field':
     case 'property':       return 'property';
     case 'class':
     case 'struct':
-    case 'interface':
-    case 'enum':
     case 'event':
     case 'type':           return 'class';
+    case 'interface':      return 'interface';
+    case 'enum':           return 'enum';
+    case 'record':         return 'record';
     case 'type-parameter': return 'type';
     case 'variable':       return 'variable';
-    case 'parameter':      return 'variable';
-    case 'keyword':
-    case 'postfix':        return 'keyword';
+    case 'parameter':      return 'parameter';
+    case 'keyword':        return 'keyword';
+    // A template writes code around what you typed; drawn as its own kind so it is never read as
+    // a keyword or as a member.
+    case 'postfix':
+    case 'snippet':        return 'template';
     case 'constant':
     case 'enum-member':    return 'constant';
     case 'annotation':     return 'annotation';
@@ -127,7 +127,6 @@ export function kindToType(kind: string): string {
     case 'generate':       return 'generate';
     case 'module':
     case 'package':        return 'namespace';
-    case 'snippet':        return 'text';
     default:               return 'text';
   }
 }
@@ -151,6 +150,14 @@ function headlineOf(text: string | undefined): string | undefined {
   return brace < 0 ? flat : `${flat.slice(0, brace).trimEnd()} { … }`;
 }
 
+/** The wire's member origin, in the shared popup's vocabulary: `java.lang.Object`'s members are
+ *  what every object has — implicit — which is how the row draws them. */
+const STANDING: Record<MemberOrigin, CompletionStanding> = {
+  own: 'own',
+  inherited: 'inherited',
+  object: 'implicit',
+};
+
 /** The simple name of a binary name — `org/springframework/web/cors/CorsConfiguration` →
  *  `CorsConfiguration`, `com/x/Outer$Inner` → `Inner`. What the popup has room to show. */
 export function simpleOwner(binary: string): string {
@@ -173,6 +180,9 @@ export function toCompletion(item: CompletionItem, boost: number, hooks: ItemHoo
     boost,
     origin: item.owner ? simpleOwner(item.owner) : undefined,
     isDeprecated: item.deprecated || undefined,
+    signature: item.signature ?? undefined,
+    standing: item.member_origin ? STANDING[item.member_origin] : undefined,
+    modifiers: item.modifiers?.length ? item.modifiers : undefined,
     // Only where the label cannot stand for the insertion: a generated member is several lines of
     // code behind a one-word row. An ordinary completion inserts what it says.
     ghost: item.kind === 'generate' ? headlineOf(item.insert_text) : undefined,
@@ -187,8 +197,13 @@ export function toCompletion(item: CompletionItem, boost: number, hooks: ItemHoo
   // a generated member arrives already indented to the class it goes into, and indenting it twice is
   // the same defect the other way round.
   const reindents = !!item.snippet && insert.includes('\n');
+  // A row with a parameter list is one overload among possibly several with the same label, the
+  // same return type and — at the tail of a long list — the same boost. CodeMirror drops a row equal
+  // to its neighbour in all of those and in `apply`, so an overload that inserts its bare name would
+  // vanish. Its own `apply` keeps it a row of its own.
   const needsCustomApply =
-    insert !== item.label || extras.length > 0 || stops.length > 0 || reindents || !!hooks.after;
+    insert !== item.label || extras.length > 0 || stops.length > 0 || reindents || !!hooks.after ||
+    !!item.signature;
 
   if (needsCustomApply) {
     completion.apply = (view, _c, from, to) => {

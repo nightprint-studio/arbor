@@ -47,7 +47,7 @@
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd></td><td>A <strong>file</strong> by name</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Y</kbd></td><td>A <strong>symbol</strong> — methods and fields; functions and constants on Rust</td></tr>
     <tr><td><kbd>Tab</kbd>, in the navigator</td><td>The next of <strong>All · Classes · Files · Symbols</strong></td></tr>
-    <tr><td><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td><strong>Back</strong> / <strong>forward</strong> through the places you jumped to. Actions make a stop; moving the caret does not</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td><strong>Back</strong> / <strong>forward</strong> through the places you navigated from. Actions make a stop; moving the caret does not</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Backspace</kbd></td><td>The <strong>last place you edited</strong>; again for the one before</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd></td><td><strong>Recent locations</strong>, filterable, with the line you were on and a toggle for edited places</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>F12</kbd></td><td><strong>File structure</strong> — a searchable outline; from the server on a language-server file</td></tr>

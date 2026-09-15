@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Clean corpus module at language level 21: var, records, sealed types, switch expressions and
+  patterns, text blocks. Realistic, legal Java that MUST compile with zero javac diagnostics: every
+  Bennu diagnostic on it, error or warning, is a false positive. No markers.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>dev.arbor.bennu.corpus</groupId>
+    <artifactId>bennu-check-corpus</artifactId>
+    <version>0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>corpus-clean21</artifactId>
+
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
+</project>

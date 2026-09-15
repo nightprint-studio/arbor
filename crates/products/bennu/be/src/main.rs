@@ -264,6 +264,12 @@ mod find;
 // cwd + env, stdin piped) / `bennu_run_input` / `bennu_cancel_run`. Makes the Run/Debug
 // buttons real + re-indexes target/classes.
 mod build;
+// What a launch's compile has to do: per-module inputs at the last successful compile, the upstream
+// changes Maven's incremental compile misses, and the stale output wiped before compiling.
+mod build_freshness;
+// The Maven reactor as a build graph: the modules a module is built from, for the compile scope,
+// the staleness model and the run classpath.
+mod reactor;
 // The other things a project is run with: the `deploy.sh` beside the pom, a `.cmd`, a `.ps1`.
 // One handler (`bennu_run_script`) over the same streaming spawner the JVM runner uses, so a
 // script gets the console tab, the stdin and the Stop that a Java run already has.
@@ -287,6 +293,9 @@ mod cargo_debug;
 mod debug_dap;
 mod debug_backend;
 mod debug;
+// Breakpoints in library source views (a `-sources.jar`, the JDK's `src.zip`): identified by the
+// view's top-level class, since the class index knows nothing a library file declares.
+mod debug_library;
 // Reading a stopped program: a frame's variables, what is inside an object or an array, and
 // watches (which are paths — `order.customer.name` — and deliberately not an expression
 // language). Split from `debug` because the session lifecycle and the value tree are two jobs.

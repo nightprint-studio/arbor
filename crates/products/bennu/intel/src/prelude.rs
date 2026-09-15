@@ -60,7 +60,8 @@ pub use bennu_query::prelude::{ProjectView, RecordedDeps};
 // Plus go-to-declaration (`resolve_declaration` + `DeclarationLocation`), which reuses the
 // same caret classifier + decl-site name-span finders.
 pub use crate::rename::{
-    file_rename_for, find_member_name_span, find_member_name_spans, plan_types, rename_apply,
+    choose_overload_span, file_rename_for, find_member_name_span, find_member_name_spans,
+    find_overload_name_span, plan_types, rename_apply,
     rename_plan, resolve_declaration, DeclarationLocation, Edit, EditReason, FileEdits, FileRename,
     HoverInfo, RenamePlan, SubtypeMap, TypeRename,
 };

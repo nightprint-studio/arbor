@@ -50,6 +50,47 @@ describe('kindToType', () => {
   it('falls back rather than inventing a kind', () => {
     expect(kindToType('something-new')).toBe('text');
   });
+
+  /// The icon set tells these apart, so the mapping must not fold them into one.
+  it('keeps the finer kinds a provider can name', () => {
+    const kinds = ['class', 'interface', 'enum', 'record', 'method', 'constructor', 'variable', 'parameter'];
+    expect(new Set(kinds.map(kindToType)).size).toBe(kinds.length);
+  });
+
+  it('draws a template as a template, not as a keyword', () => {
+    expect(kindToType('postfix')).toBe('template');
+    expect(kindToType('snippet')).toBe('template');
+    expect(kindToType('keyword')).toBe('keyword');
+  });
+});
+
+describe('toCompletion — the member row', () => {
+  const member = (over: Partial<CompletionItem> = {}) =>
+    item({ label: 'equals', owner: 'java/lang/Object', signature: '(Object obj)', detail: 'boolean', ...over });
+
+  it('carries the parameter list and the return type apart', () => {
+    const c = toCompletion(member(), 10);
+    expect(c.signature).toBe('(Object obj)');
+    expect(c.detail).toBe('boolean');
+  });
+
+  it('maps the member origin onto the row standing', () => {
+    expect(toCompletion(member({ member_origin: 'own' }), 10).standing).toBe('own');
+    expect(toCompletion(member({ member_origin: 'inherited' }), 10).standing).toBe('inherited');
+    expect(toCompletion(member({ member_origin: 'object' }), 10).standing).toBe('implicit');
+    expect(toCompletion(member(), 10).standing).toBeUndefined();
+  });
+
+  it('carries modifiers only when there are some', () => {
+    expect(toCompletion(member({ modifiers: ['static', 'final'] }), 10).modifiers).toEqual(['static', 'final']);
+    expect(toCompletion(member({ modifiers: [] }), 10).modifiers).toBeUndefined();
+  });
+
+  /// Overloads share a label and a return type; CodeMirror would drop all but one of them if they
+  /// also shared the default insertion.
+  it('keeps an overload a row of its own', () => {
+    expect(toCompletion(member({ label: 'wait', signature: '(long)', detail: 'void' }), 10).apply).toBeTypeOf('function');
+  });
 });
 
 describe('toCompletion', () => {

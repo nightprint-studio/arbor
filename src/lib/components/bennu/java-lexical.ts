@@ -1,8 +1,9 @@
 /**
  * What a position in a Java buffer is lexically inside: code, a comment, or a literal.
  *
- * Shared by the two editing behaviours that have to know — an escaped paste into a string
- * (`java-string-paste.ts`) and the quote typing rules (`java-typing.ts`). Getting the answer wrong
+ * Shared by the editing behaviours that have to know — an escaped paste into a string
+ * (`java-string-paste.ts`), the quote typing rules (`java-typing.ts`) and Enter's indentation and
+ * comment continuation (`java-indent.ts`, `java-newline.ts`). Getting the answer wrong
  * is worse than doing nothing in both, so this is a plain scanner over the text rather than a tree
  * query: it answers with no parser loaded, no wasm and no live tree, which is the state the editor
  * is in for the first moments of every file, and it cannot lag a keystroke behind the buffer.
@@ -21,11 +22,19 @@ export interface JavaLiteral {
   terminated: boolean;
 }
 
+/** A comment enclosing a position. */
+export interface JavaComment {
+  kind: 'comment';
+  /** `/* … *\/` (Javadoc included) rather than `// …`. */
+  block: boolean;
+  /** Offset of the opening `//` or `/*`. */
+  from: number;
+}
+
 /** The lexical context of a position. */
-export type JavaContext = { kind: 'code' } | { kind: 'comment' } | JavaLiteral;
+export type JavaContext = { kind: 'code' } | JavaComment | JavaLiteral;
 
 const CODE: JavaContext = { kind: 'code' };
-const COMMENT: JavaContext = { kind: 'comment' };
 
 interface Span {
   /** Offset just past the closing delimiter, or where the scan gave up. */
@@ -54,14 +63,14 @@ export function javaContextAt(src: string, offset: number): JavaContext {
       const nl = src.indexOf('\n', i + 2);
       const to = nl < 0 ? n : nl;
       // A quote inside a comment is text, not a delimiter.
-      if (pos > i && pos <= to) return COMMENT;
+      if (pos > i && pos <= to) return { kind: 'comment', block: false, from: i };
       i = to + 1;
       continue;
     }
     if (c === '/' && src[i + 1] === '*') {
       const close = src.indexOf('*/', i + 2);
       const to = close < 0 ? n : close + 2;
-      if (pos > i && pos < to) return COMMENT;
+      if (pos > i && pos < to) return { kind: 'comment', block: true, from: i };
       i = to;
       continue;
     }
@@ -87,6 +96,58 @@ export function javaContextAt(src: string, offset: number): JavaContext {
 export function javaLiteralAt(src: string, offset: number): JavaLiteral | null {
   const ctx = javaContextAt(src, offset);
   return ctx.kind === 'code' || ctx.kind === 'comment' ? null : ctx;
+}
+
+/**
+ * `src` with everything that is not code blanked out, offsets unchanged: comments become spaces and
+ * the whole of every literal — delimiters included — becomes `_`. Newlines survive both, so line
+ * starts and the indentation of each line stay where they were.
+ *
+ * What is left can be read for structure (brackets, `;`, `:`) with no chance of a brace inside a
+ * string or a `;` inside a comment being counted, and a literal still reads as *something* rather
+ * than as nothing.
+ */
+export function maskJava(src: string): string {
+  const n = src.length;
+  let out = '';
+  let kept = 0;
+  let i = 0;
+  const blank = (from: number, to: number, fill: string) => {
+    out += src.slice(kept, from) + src.slice(from, to).replace(/[^\n]/g, fill);
+    kept = to;
+  };
+
+  while (i < n) {
+    const c = src[i];
+    if (c === '/' && src[i + 1] === '/') {
+      const nl = src.indexOf('\n', i + 2);
+      const to = nl < 0 ? n : nl;
+      blank(i, to, ' ');
+      i = to;
+      continue;
+    }
+    if (c === '/' && src[i + 1] === '*') {
+      const close = src.indexOf('*/', i + 2);
+      const to = close < 0 ? n : close + 2;
+      blank(i, to, ' ');
+      i = to;
+      continue;
+    }
+    if (c === '"' && src[i + 1] === '"' && src[i + 2] === '"') {
+      const { to } = scanTextBlock(src, i);
+      blank(i, to, '_');
+      i = to;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      const { to } = scanQuoted(src, i, c);
+      blank(i, to, '_');
+      i = to;
+      continue;
+    }
+    i++;
+  }
+  return out + src.slice(kept);
 }
 
 function encloses(from: number, span: Span, pos: number): boolean {

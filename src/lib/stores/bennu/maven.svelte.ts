@@ -19,6 +19,8 @@
  */
 
 import { mavenModel, type MavenModel, type MavenModule } from '$lib/ipc/bennu/maven-build';
+import { mavenLiveKeys } from '$lib/components/bennu/tree-expansion';
+import { treeExpansionStore } from './tree-expansion.svelte';
 
 function createMavenStore() {
   let model = $state<MavenModel | null>(null);
@@ -93,6 +95,11 @@ function createMavenStore() {
           const next = await mavenModel(root);
           model = next;
           error = '';
+          // A complete model for this root is the one moment the panel's remembered rows can be
+          // checked against what exists — a module removed from the reactor stops being remembered.
+          // Here, keyed by the root this load was for, and not in the panel: an effect there can see
+          // the new root beside the previous project's model.
+          treeExpansionStore.prune(root, 'maven', mavenLiveKeys(next));
           // Seed the ticks on the first model for a project, and never again: re-reading after a
           // pom edit must not undo what the user ticked while looking at it.
           if (switching) {

@@ -78,6 +78,27 @@ That last guard is the one to keep in mind: `${server.port}` in a project that d
 `server.*` stays silent, because the honest answer is "it probably comes from the
 environment".
 
+### Declarations Spring refuses or ignores ([`bean_check`](src/bean_check))
+
+Decidable from one file, so they answer before an index exists. Every annotation is resolved
+through the imports; `@SpringBootApplication` / `@SpringBootConfiguration` / `@TestConfiguration`
+count as `@Configuration`.
+
+| Code | Severity | Only when |
+|---|---|---|
+| `spring.bean.not-overridable` | error | a non-static `@Bean` is `private`/`final` in a `@Configuration` whose `proxyBeanMethods` is absent or literally `true` |
+| `spring.bean.void` | error | a `@Bean` method returns `void` |
+| `spring.bean.post-processor-not-static` | warning | a non-static `@Bean` returns a **known** `BeanFactoryPostProcessor` by simple name |
+| `spring.configuration.final` / `.no-visible-constructor` | error | proxied, **and** at least one non-static `@Bean` method to intercept; Lombok constructor annotations turn the second off |
+| `spring.injection.static` | warning (`@Resource`: error) | `@Autowired`/`@Inject`/`@Value`/`@Resource` on an explicitly `static` member of a class, enum or record |
+| `spring.bean.not-instantiable` | warning (abstract: weak) | `@Component`/`@Service`/`@Controller`/`@RestController` on an interface that extends nothing and carries no other annotation, or on an abstract class with no `@Lookup` method — never `@Repository` |
+| `spring.bean.inner-class` | warning | the same stereotypes on a non-static member class |
+| `spring.async.discarded-result` | warning | `@Async` returns a type from a closed list that is certainly not a `Future` |
+
+The proxy checks ([`proxy`](src/proxy.rs)) add `spring.proxy.static`. Alt+Enter repairs for both
+live in [`fixes`](src/fixes.rs), keyed by code and span, and offer nothing once the span no longer
+holds the annotation.
+
 ## Layout
 
 | File | Holds |
@@ -98,6 +119,10 @@ environment".
 | `xml_intel.rs` | the editor's answers for a bean XML buffer |
 | `props_intel.rs` | the editor's answers for an `application*.yml` / `.properties` buffer |
 | `library_beans.rs` | beans declared **inside an allowlisted dependency**, read from bytecode — their own tier, never merged into `SpringModel` |
+| `bean_check/` | declarations Spring refuses at startup or silently ignores — `@Configuration`/`@Bean`, static injection, stereotypes on what scanning skips, `@Async` results |
+| `proxy.rs` | proxied annotations that do nothing: self-invocation, non-public, static, final |
+| `transaction.rs` | a transaction held open across a network call or a sleep |
+| `fixes.rs` | Alt+Enter for the two above: the modifier added, removed or swapped |
 | `ext.rs` | `FrameworkExtension` impl: file selection, model ownership, routing |
 
 ### Why library beans are a separate tier
