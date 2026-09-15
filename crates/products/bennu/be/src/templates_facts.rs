@@ -71,3 +71,12 @@ fn read(root: &str) -> TemplateFacts {
 pub(crate) fn facts_at(root: &str, file: &str) -> TemplateFacts {
     TemplateFacts { naming: crate::naming::template_naming(root, file), ..facts_for(root) }
 }
+
+/// [`facts_at`] for the project `file` belongs to — the defaults outside any project. What a template
+/// expanded in the editor renders with: an abbreviation, a postfix template.
+pub(crate) fn facts_of_file(file: &str) -> TemplateFacts {
+    crate::index_service::IndexService::global()
+        .root_for_file(file)
+        .map(|root| facts_at(&root, file))
+        .unwrap_or_default()
+}

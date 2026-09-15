@@ -56,15 +56,45 @@ pub fn init_check_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> 
 
 // ── check 1: blank final field never initialized ─────────────────────────────
 
-/// Flag every `final` field of type `n` that has no declarator initializer AND whose name is assigned
-/// nowhere in the type's own body. Skips as soon as *any* assignment to that name appears — no flow
-/// analysis, so any assignment means "possibly initialized".
+/// The name spans `(start, end)` of every blank `final` field in the file that the blank-final check
+/// reports — the same verdict, without the sentence.
+///
+/// For the quick-fixes that repair it ("Add constructor parameter", "Initialize variable", …): they
+/// are offered from the caret as well as from the squiggle, before validation has run, and an offer
+/// computed from a second idea of "uninitialized" would sooner or later fix a field the check never
+/// flagged — or miss one it did. One analysis, two renderings.
+pub fn uninitialized_final_fields(root: Node, source: &str) -> Vec<(usize, usize)> {
+    let nodes = crate::check::collect_nodes(root);
+    let bytes = source.as_bytes();
+    let imports = crate::lombok::imports_from_nodes(&nodes, bytes);
+    nodes
+        .iter()
+        .filter(|n| matches!(n.kind(), "class_declaration" | "enum_declaration"))
+        .flat_map(|n| blank_final_names(*n, bytes, &imports))
+        .map(|(_, name_node)| (name_node.start_byte(), name_node.end_byte()))
+        .collect()
+}
+
+/// Flag every blank final of type `n` — see [`blank_final_names`].
 fn check_uninitialized_final_fields(
     n: Node,
     bytes: &[u8],
     imports: &[ParsedImport],
     out: &mut Vec<Diagnostic>,
 ) {
+    for (name, name_node) in blank_final_names(n, bytes, imports) {
+        out.push(err(format!("Blank final field `{name}` is never initialized"), name_node));
+    }
+}
+
+/// Every `final` field of type `n` that has no declarator initializer AND whose name is assigned
+/// nowhere in the type's own body, as `(name, name node)`. Skips as soon as *any* assignment to that
+/// name appears — no flow analysis, so any assignment means "possibly initialized".
+fn blank_final_names<'t>(
+    n: Node<'t>,
+    bytes: &[u8],
+    imports: &[ParsedImport],
+) -> Vec<(String, Node<'t>)> {
     // Lombok generates a constructor that initializes the `final` (and `@NonNull`) fields at COMPILE
     // time — there's no textual assignment in source, so without this the blank-final check would
     // falsely flag every final field of a `@Data` / `@Value` / `@Builder` / `@AllArgsConstructor`
@@ -75,13 +105,13 @@ fn check_uninitialized_final_fields(
     if crate::lombok::has_lombok_annotation(n, bytes, imports, |a| {
         initializes_blank_finals(a.simple, a.args)
     }) {
-        return;
+        return Vec::new();
     }
-    let Some(body) = n.child_by_field_name("body") else { return };
+    let Some(body) = n.child_by_field_name("body") else { return Vec::new() };
 
     // (field name → name node) for each blank final candidate declared directly in this body. A field
     // WITH an initializer is never a candidate (it's already assigned).
-    let mut candidates: Vec<(String, Node)> = Vec::new();
+    let mut candidates: Vec<(String, Node<'t>)> = Vec::new();
     let mut bc = body.walk();
     for m in body.named_children(&mut bc) {
         if m.kind() != "field_declaration" || !has_keyword(m, bytes, "final") {
@@ -104,7 +134,7 @@ fn check_uninitialized_final_fields(
         }
     }
     if candidates.is_empty() {
-        return;
+        return candidates;
     }
 
     // Every identifier that appears as an assignment / update target ANYWHERE in this type body —
@@ -115,12 +145,9 @@ fn check_uninitialized_final_fields(
     // only ever *suppresses* a report — never a false positive, which is the invariant that matters.
     let assigned = collect_assigned_names(body, bytes);
 
-    for (name, name_node) in candidates {
-        if assigned.contains(&name) {
-            continue; // assigned somewhere → possibly initialized → skip
-        }
-        out.push(err(format!("Blank final field `{name}` is never initialized"), name_node));
-    }
+    // Assigned somewhere → possibly initialized → skip.
+    candidates.retain(|(name, _)| !assigned.contains(name));
+    candidates
 }
 
 /// The set of identifier names that appear as an assignment / update target anywhere under `body`.
@@ -347,6 +374,55 @@ mod tests {
         let d = errs("import lombok.*;\n@Getter\nclass C { private final int x; }");
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(d[0].contains("`x`"), "{d:?}");
+    }
+
+    #[test]
+    fn final_field_assigned_by_every_constructor_is_not_flagged() {
+        let src = "class C { private final String a; C() { this.a = \"\"; } C(String a) { this.a = a; } }";
+        assert!(errs(src).is_empty(), "{:?}", errs(src));
+    }
+
+    #[test]
+    fn final_field_assigned_in_an_instance_initializer_is_not_flagged() {
+        let src = "class C { private final int x; { x = 1; } }";
+        assert!(errs(src).is_empty(), "{:?}", errs(src));
+    }
+
+    #[test]
+    fn a_record_is_exempt() {
+        // A record's components are initialised by its canonical constructor — nothing to report.
+        let src = "record R(int x, String y) { R { } }";
+        assert!(errs(src).is_empty(), "{:?}", errs(src));
+    }
+
+    #[test]
+    fn the_real_world_shape_is_flagged_on_the_field_name() {
+        let src = "public class CheckAssignedUser implements AttributeValidator {\n    private final PaMsRestClientApi client;\n}\n";
+        let d = errs(src);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`client`"), "{d:?}");
+    }
+
+    /// The spans the quick-fixes read are exactly the diagnostics' spans — one verdict, not two.
+    #[test]
+    fn uninitialized_final_fields_agrees_with_the_diagnostic() {
+        let src = "import lombok.Getter;\n@Getter\nclass C { final int a; final int b = 1; static final int S; final int c; C() { c = 1; } }";
+        let tree = parse(src);
+        let spans = uninitialized_final_fields(tree.root_node(), src);
+        let diag_spans: Vec<(usize, usize)> = init_check_errors(tree.root_node(), src)
+            .into_iter()
+            .map(|d| (d.start, d.end))
+            .collect();
+        assert_eq!(spans, diag_spans);
+        let names: Vec<&str> = spans.iter().map(|(s, e)| &src[*s..*e]).collect();
+        assert_eq!(names, ["a", "S"]);
+    }
+
+    #[test]
+    fn a_lombok_constructor_leaves_no_field_to_fix() {
+        let src = "import lombok.RequiredArgsConstructor;\n@RequiredArgsConstructor\nclass C { private final int x; }";
+        let tree = parse(src);
+        assert!(uninitialized_final_fields(tree.root_node(), src).is_empty());
     }
 
     #[test]

@@ -20,8 +20,8 @@ pub struct ListTemplatesArgs {
     /// Absolute path to a project root, to say which template that project uses for each kind.
     #[serde(default)]
     pub root: Option<String>,
-    /// One kind — `new-file`, `class`, `config-properties`, `config-class`, `validation-tests` or `live`. Every kind
-    /// when omitted.
+    /// One kind — `new-file`, `class`, `config-properties`, `config-class`, `validation-tests`, `live` or
+    /// `postfix`. Every kind when omitted.
     #[serde(default)]
     pub kind: Option<String>,
 }
@@ -46,7 +46,7 @@ pub struct KindTemplates {
 
 /// List the code templates Bennu generates from, by kind: New file templates, templates that generate
 /// from a class (a builder, a repository for an entity), configuration properties for a
-/// `@ConfigurationProperties` class, the DTO Lab's validation tests, and abbreviations. Each template
+/// `@ConfigurationProperties` class, the DTO Lab's validation tests, abbreviations and postfix templates. Each template
 /// comes with its description and whether it is built in; with a project, the one that project uses.
 ///
 /// Use it before `bennu_render_template`, to find the template that produces what you are about to
@@ -75,13 +75,17 @@ fn bennu_list_templates(_ctx: &BennuState, args: ListTemplatesArgs) -> Result<Ve
         .collect())
 }
 
-/// What a name has to be for a kind, on top of [`check_template_name`]: an abbreviation's name is what
-/// gets typed, so it has to be a word the editor completes.
+/// What a name has to be for a kind, on top of [`check_template_name`]: an abbreviation's name and a postfix
+/// template's are what gets typed, so each has to be a word the editor completes.
 fn check_name_for(kind: TemplateKind, name: &str) -> Result<(), String> {
     check_template_name(name)?;
-    match kind == TemplateKind::Live && !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-        true => Err("An abbreviation is a word: letters, digits and `_`".to_string()),
-        false => Ok(()),
+    let word = name.chars().all(|c| c.is_alphanumeric() || c == '_');
+    match (kind, word) {
+        (TemplateKind::Live, false) => Err("An abbreviation is a word: letters, digits and `_`".to_string()),
+        (TemplateKind::Postfix, false) => {
+            Err("A postfix template is typed after a dot: letters, digits and `_`".to_string())
+        }
+        _ => Ok(()),
     }
 }
 

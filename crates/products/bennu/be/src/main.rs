@@ -122,6 +122,9 @@ mod hierarchy;
 // text-only ones live in the pure `bennu-intentions` crate; both reach the editor through
 // `intentions`, which is where Alt+Enter asks.
 mod quick_fix;
+// The repairs for a blank `final` field — constructor parameter, placeholder, not-final, Lombok's
+// `@RequiredArgsConstructor` — offered on the whole declaration through `intentions`.
+mod final_field_fixes;
 // Go-to-declaration (Ctrl+Click / Ctrl+B): `bennu_declaration` — resolves the symbol under
 // the caret to its declaration site (method / field / local / class) off the same engine.
 mod declaration;
@@ -335,6 +338,8 @@ mod maven_goals;
 // The abbreviations a Java file expands (`psf`, `sout`, `psvm`) — the table lives in `bennu-java`,
 // the wire shaping here. Appended to the Java completion, never replacing it.
 mod abbreviations;
+// The user's postfix templates (`orders.logv`), merged into the Java completion beside the built-in ones.
+mod postfix_templates;
 // Maven Central (`bennu_maven_version_hints`): which of a pom's pinned dependencies have a newer
 // release. The Java mirror of `crates_io`, and the only Java-side call that opens a socket — behind
 // its own switch, its own cache and its own TTL, for the same three reasons.

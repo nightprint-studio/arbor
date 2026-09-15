@@ -27,10 +27,14 @@
 //! completed. Answering it needs overload resolution over a half-written call, and a wrong answer
 //! there would rank confidently against the truth. Silence is the honest result until then.
 //!
-//! **Not assignability.** The caller compares by name (see `bennu-query`'s ranking), so a method
-//! returning `ArrayList` does not match an expected `List`. It is a *ranking* input — a missed
-//! match costs a place in the list, never a candidate — and computing the real rule means walking
-//! every candidate's hierarchy on every keystroke.
+//! **A type, not a rule.** This answers what the hole is typed as, generic arguments included —
+//! `List<Order>`, not `List`. Whether a candidate fits it (the exact type, its box, a subtype) is
+//! the caller's question: see `bennu-query`'s `rank::Fit`, which walks the hierarchy once per
+//! produced type. It stays a *ranking* input — a missed match costs a place in the list, never a
+//! candidate.
+//!
+//! A `return` inside a lambda BODY answers to the lambda, not to the method around it: the
+//! functional interface's return, when the lambda's target type resolves to one abstract method.
 
 use crate::seam::{TypeRef, TypeResolver};
 use crate::symbols::FileSymbols;
@@ -88,6 +92,88 @@ pub fn expected_type(
     expected_type_at(&tree.root_node(), &buf, &symbols, at, resolver)
 }
 
+/// The shape of the functional interface the expression being written at `byte_offset` is passed
+/// to — the one question an argument slot CAN answer without overload resolution.
+///
+/// [`expected_type`] declines argument slots on purpose, because which parameter is meant depends on
+/// which overload binds. A functional parameter is the exception that makes completion inside one
+/// worth having: `opt.map(|)` has one `map`, its parameter is a `Function<? super T, ? extends U>`,
+/// and after the receiver's `T` is substituted the function **receives** a `ResolvedIdentity`. That
+/// is the type the user is about to name — `map(ResolvedIdentity::identifier)`, or a lambda whose
+/// parameter is one — and nothing else on the classpath is anywhere near as likely.
+///
+/// Answers for three carets, all of them "an expression is being written where a function goes":
+///
+/// * a bare word, or nothing at all, directly in the argument list — `map(Re|)`, `map(|)`;
+/// * the member half of a method reference — `map(ResolvedIdentity::|)`, `map(ResolvedIdentity::re|)`;
+/// * the initializer of a declared variable and a `return`, which the descriptor reads the same way.
+///
+/// `None` everywhere else, and wherever [`crate::infer::functional_descriptor`] refuses to guess (an
+/// overloaded callee, an interface with more than one abstract method, a hierarchy that does not
+/// resolve).
+///
+/// The buffer is repaired the way [`expected_type`] repairs it — an identifier at the caret — and,
+/// when the rest of the line is blank, with the `)` and `;` a half-written call has not been given
+/// yet. Each repair is tried in turn, cheapest first, because each one breaks a line the previous
+/// one already parsed.
+pub fn functional_descriptor_at(
+    source: &str,
+    byte_offset: usize,
+    resolver: &dyn TypeResolver,
+) -> Option<crate::infer::FunctionalDescriptor> {
+    let mut at = byte_offset.min(source.len());
+    while at > 0 && !source.is_char_boundary(at) {
+        at -= 1;
+    }
+    let rest = &source[at..];
+    let line_tail_is_blank = rest
+        .split('\n')
+        .next()
+        .is_some_and(|l| l.trim().is_empty());
+    let fillers: &[&str] = if line_tail_is_blank { &["x", "x)", "x);"] } else { &["x"] };
+    fillers.iter().find_map(|filler| {
+        let buf = format!("{}{filler}{}", &source[..at], rest);
+        descriptor_of_slot(&buf, at, resolver)
+    })
+}
+
+/// [`functional_descriptor_at`] over a buffer already repaired so that `at` sits inside an
+/// identifier.
+fn descriptor_of_slot(
+    buf: &str,
+    at: usize,
+    resolver: &dyn TypeResolver,
+) -> Option<crate::infer::FunctionalDescriptor> {
+    let tree = crate::grammar::parse_java(buf)?;
+    let root = tree.root_node();
+    // `[at, at + 1)` is the spliced identifier character, so the leaf found is the word being
+    // written — never the `(` or `::` in front of it, which an empty range at `at` could return.
+    let mut node = root.named_descendant_for_byte_range(at, at + 1)?;
+    loop {
+        let parent = node.parent()?;
+        let is_slot = match parent.kind() {
+            "argument_list" | "return_statement" => true,
+            // The initializer, not the NAME: `Function<A, B> f|` is a declaration being written, and
+            // offering `A` there would be answering a question about a different hole.
+            "variable_declarator" => {
+                parent.child_by_field_name("value").map(|v| v.id()) == Some(node.id())
+            }
+            _ => false,
+        };
+        if is_slot {
+            let symbols = crate::symbols::extract_symbols(buf);
+            let cache = crate::infer::InferCache::new();
+            return crate::infer::functional_descriptor(&root, buf, &symbols, &node, resolver, &cache);
+        }
+        // Only the two shapes that ARE the expression being written. Climbing further — through a
+        // field access, a call, a cast — would describe the slot some enclosing expression sits in.
+        if !matches!(node.kind(), "identifier" | "method_reference") {
+            return None;
+        }
+        node = parent;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,12 +224,84 @@ mod tests {
         assert_eq!(expected(src, "ZZZ").as_deref(), Some("java/lang/String"));
     }
 
-    /// A lambda declares no return type to read, and reaching past it to the enclosing method's
-    /// would constrain the hole with the wrong signature entirely.
+    /// Reaching past a lambda to the enclosing method would constrain the hole with the wrong
+    /// signature entirely — here `String`, where the `forEach` consumer returns nothing. When the
+    /// lambda's interface cannot be read, the answer is nothing rather than the method's type.
     #[test]
-    fn a_return_inside_a_lambda_wants_nothing() {
+    fn a_return_inside_an_unresolved_lambda_wants_nothing() {
         let src = r#"class A { String m(java.util.List<String> xs) { xs.forEach(x -> { return ZZZ; }); return ""; } }"#;
         assert_eq!(expected(src, "ZZZ"), None);
+    }
+
+    /// A resolver that also knows one functional interface: `interface Maker { Order make(); }`.
+    struct WithMaker(Names);
+    impl TypeResolver for WithMaker {
+        fn members_of(&self, binary: &str) -> Option<Arc<ClassMembers>> {
+            if binary != "shop/Maker" {
+                return None;
+            }
+            let mut make = crate::seam::Member::method("make", TypeRef::simple("shop/Order"), Vec::new());
+            make.is_abstract = true;
+            Some(Arc::new(ClassMembers {
+                superclass: None,
+                interfaces: Vec::new(),
+                methods: vec![make],
+                fields: Vec::new(),
+                flags: crate::seam::ClassFlags { is_interface: true, ..Default::default() },
+                type_params: Vec::new(),
+            }))
+        }
+        fn resolve_simple_name(&self, n: &str, i: &[Import]) -> Option<String> {
+            if n == "Maker" {
+                return Some("shop/Maker".to_string());
+            }
+            self.0.resolve_simple_name(n, i)
+        }
+    }
+
+    fn expected_with_maker(src: &str, offset: usize) -> Option<String> {
+        expected_type(src, offset, &WithMaker(resolver())).map(|t| t.binary_name)
+    }
+
+    /// `Maker m = () -> { return | };` — the lambda returns to `Maker.make`, which returns `Order`,
+    /// not to the `String` method it is written in.
+    #[test]
+    fn a_return_inside_a_lambda_wants_what_its_interface_returns() {
+        let src = "class A { String m() { Maker k = () -> { return ZZZ; }; return \"\"; } }";
+        let offset = src.find("ZZZ").expect("marker");
+        assert_eq!(expected_with_maker(src, offset).as_deref(), Some("shop/Order"));
+    }
+
+    /// The user's caret: `return builder.` with nothing after the dot and no `;` yet.
+    #[test]
+    fn a_half_written_member_access_after_return_wants_the_return_type() {
+        let src = "class A {\n    Order create(Order builder) {\n        return builder.\n    }\n}\n";
+        let offset = src.find("builder.\n").expect("marker") + "builder.".len();
+        assert_eq!(expected_type(src, offset, &resolver()).map(|t| t.binary_name).as_deref(), Some("shop/Order"));
+    }
+
+    /// `return Ra|` — a class name being started, the line not finished.
+    #[test]
+    fn a_half_written_type_name_after_return_wants_the_return_type() {
+        let src = "class A {\n    Order create() {\n        return Ra\n    }\n}\n";
+        let offset = src.find("return Ra").expect("marker") + "return Ra".len();
+        assert_eq!(expected_type(src, offset, &resolver()).map(|t| t.binary_name).as_deref(), Some("shop/Order"));
+    }
+
+    /// The generic arguments are part of the answer: a `List<Order>` is not any `List`.
+    #[test]
+    fn a_generic_return_type_keeps_its_arguments() {
+        let names = Names(HashMap::from([("List", "java/util/List"), ("Order", "shop/Order")]));
+        let src = "class A { List<Order> m() { return ZZZ; } }";
+        let t = expected_type(src, src.find("ZZZ").unwrap(), &names).expect("an expected type");
+        assert_eq!(t.binary_name, "java/util/List");
+        assert_eq!(t.type_args.first().map(|a| a.binary_name.as_str()), Some("shop/Order"));
+    }
+
+    #[test]
+    fn a_primitive_return_wants_the_primitive() {
+        let src = "class A { int m() { return ZZZ; } }";
+        assert_eq!(expected(src, "ZZZ").as_deref(), Some("int"));
     }
 
     #[test]

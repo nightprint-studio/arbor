@@ -377,6 +377,35 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 {# bennu.requires: slf4j-api -#}
 private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger({{ class_name }}.class);$0`, 'jinja-java')}</code></pre>
 
+<h2>Postfix</h2>
+<p>
+  Typed after a value's dot, a postfix template replaces the value with its text: <code>orders.logv</code>. The template's name is what is typed.
+  <code>bennu.applies</code> says which values it is offered on — alternatives separated by commas, any of which will do:
+  <code>any</code> (the default), <code>reference</code>, <code>primitive</code>, <code>boolean</code>, <code>number</code>, <code>string</code>,
+  <code>array</code>, <code>iterable</code>, <code>collection</code>, <code>map</code>, <code>optional</code>, <code>closeable</code>,
+  <code>throwable</code>, or a class name with its package, meaning that class and its subtypes. A word that names nothing leaves the template out
+  rather than offering it everywhere. <code>bennu.level</code> offers it only on modules at that Java level or later.
+</p>
+<ul class="prop-list">
+  <li><code>expr</code>the value's source text</li>
+  <li><code>type</code>, <code>type_simple</code>its type as a declaration writes it, and the class name alone</li>
+  <li><code>name</code>a name for a variable holding it</li>
+  <li><code>element_type</code>, <code>element_name</code>one element of an array, an <code>Iterable</code> or an <code>Optional</code> — empty otherwise</li>
+  <li><code>level</code>, <code>var</code>the module's Java level, and whether it has <code>var</code></li>
+  <li><code>indent</code>one indentation step, as the file writes it</li>
+  <li><code>class_name</code>, <code>package</code>, <code>file_name</code>, <code>date</code>, <code>year</code>as for abbreviations</li>
+</ul>
+<p>
+  The result is a snippet, like an abbreviation's, and the classes its text names are imported. One of yours named like a built-in postfix template
+  replaces it on the values yours applies to.
+</p>
+<pre><code>{@html highlightCode(`{# bennu.description: For-each over the value -#}
+{# bennu.applies: iterable, array -#}
+{# bennu.level: 8 -#}
+for ({{ element_type }} \${1:{{ element_name }}} : {{ expr }}) {
+{{ indent }}$0
+}`, 'jinja-java')}</code></pre>
+
 <h2>Preview and parameters</h2>
 <p>
   The eye button in a template's toolbar renders it beside the source as you type. It renders with the first

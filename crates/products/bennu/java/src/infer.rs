@@ -229,8 +229,9 @@ pub(crate) fn expected_at(
                     return ctx.infer_expr(&left, enclosing.as_deref());
                 }
             }
-            // `return <caret>;` — the enclosing method's declared return type. A constructor and
-            // a lambda both stop the walk: neither declares one to read.
+            // `return <caret>;` — the enclosing method's declared return type, or, inside a lambda
+            // body, what the lambda's functional interface returns. A constructor stops the walk:
+            // it declares nothing to read.
             "return_statement" => {
                 let mut up = n.parent();
                 while let Some(m) = up {
@@ -240,7 +241,21 @@ pub(crate) fn expected_at(
                             let text = node_text(&t, bytes)?;
                             return ctx.resolve_type_text(&text);
                         }
-                        "lambda_expression" | "constructor_declaration" => return None,
+                        // The NEAREST lambda answers, never the method around it: `() -> { return
+                        // x; }` returns to the interface. Its return type is the one the target
+                        // type spells — `Maker m = () -> {…}`, `make(() -> {…})` — and nothing when
+                        // that does not resolve to a single abstract method. A `void` wants no
+                        // value, and `Object` is what an unbound type variable reads as: neither
+                        // is a constraint worth ranking by.
+                        "lambda_expression" => {
+                            return functional_descriptor(root, source, symbols, &m, resolver, &cache)
+                                .map(|d| d.returns)
+                                .filter(|t| {
+                                    t.dims > 0
+                                        || (t.binary_name != "void" && t.binary_name != "java/lang/Object")
+                                });
+                        }
+                        "constructor_declaration" => return None,
                         _ => {}
                     }
                     up = m.parent();
@@ -435,21 +450,44 @@ pub fn infer_receiver_type(
         source.as_bytes().get(byte_offset),
         None | Some(b' ' | b'\t' | b'\n' | b'\r' | b'}' | b')' | b';')
     );
-    let (buf, off) = if needs_stub {
-        let mut s = String::with_capacity(source.len() + 11);
-        s.push_str(&source[..byte_offset]);
-        // A call, not a bare name: `s.__bennu__` alone parses as a scoped *type*
-        // (declaration ambiguity); `s.__bennu__()` is unambiguously an expression.
-        s.push_str("__bennu__()");
-        s.push_str(&source[byte_offset..]);
-        (s, byte_offset)
-    } else {
-        (source.to_string(), byte_offset)
-    };
+    if !needs_stub {
+        return infer_receiver_in(source, byte_offset, None, resolver);
+    }
+    // A call, not a bare name: `s.__bennu__` alone parses as a scoped *type* (declaration
+    // ambiguity); `s.__bennu__()` is unambiguously an expression.
+    if let Some(found) = infer_receiver_in(source, byte_offset, Some("__bennu__()"), resolver) {
+        return Some(found);
+    }
+    // The same stub, finished as a STATEMENT — and only as a second try, when the rest of the line
+    // is blank. `identity_resolver.resolve_identity().|` at the end of a line is the ordinary state
+    // of a method body being written: there is no `;` yet, and on a class whose header carries
+    // annotations and a clause or two, tree-sitter's recovery for the missing token can fold the
+    // statement into an ERROR node that no longer sits inside the method — so the field on the left
+    // could not be found and the popup fell back to answering a bare word. Tried second because a
+    // fluent chain continued on the next line (`builder.|` above `.build();`) parses the first way
+    // and would be broken by a `;` spliced in front of it.
+    let line_tail_is_blank =
+        source[byte_offset..].split('\n').next().is_some_and(|l| l.trim().is_empty());
+    if line_tail_is_blank {
+        return infer_receiver_in(source, byte_offset, Some("__bennu__();"), resolver);
+    }
+    None
+}
 
+/// [`infer_receiver_type`] over `source` with `stub` spliced in at the caret, when there is one.
+fn infer_receiver_in(
+    source: &str,
+    byte_offset: usize,
+    stub: Option<&str>,
+    resolver: &dyn TypeResolver,
+) -> Option<TypeRef> {
+    let buf = match stub {
+        Some(stub) => format!("{}{stub}{}", &source[..byte_offset], &source[byte_offset..]),
+        None => source.to_string(),
+    };
     let tree = crate::grammar::parse_java(&buf)?;
     let symbols = crate::symbols::extract_symbols(&buf);
-    infer_receiver_type_at(&tree.root_node(), &buf, &symbols, off, resolver)
+    infer_receiver_type_at(&tree.root_node(), &buf, &symbols, byte_offset, resolver)
 }
 
 /// Infer the static type of the **whole expression** spanning `[start, end)` (an assigned value, a

@@ -40,6 +40,13 @@ Two impl slots:
   JDK classpath source (the JDK-8 `JarSource` is `!Sync`; the mutex restores `Sync` so the
   provider can live in the multi-threaded backend state).
 - **`completion`** — the caret → candidates query.
+- **`postfix`** — postfix templates beside the members after a dot: the receiver typed with the same
+  inference, `bennu-java`'s catalogue asked at the module's language level (`CompletionOptions::level`),
+  and each expansion made an item that replaces the whole expression and carries its import edits.
+  The two halves are public so the backend's **user** postfix templates take the same path:
+  `postfix_site(source, caret, resolver)` → `PostfixSite { start, caret, typed, subject }` (with
+  `supertypes(resolver)` for a template that names a class), and `postfix_item(file, source, &site, PostfixItem)`
+  → the `CompletionItem`. `POSTFIX_LEGACY_LEVEL` is the level assumed when the module's is unknown.
 
 ## Config-graph integration (Struts / Spring / Tiles)
 

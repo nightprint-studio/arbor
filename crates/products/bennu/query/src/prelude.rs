@@ -6,6 +6,19 @@
 // Member-access completion (the SEAM's `completion(pos)`).
 pub use crate::completion::{completion, completion_in, TypeNameCatalog};
 
+// Completion after `::`: the site reading, and the methods (and `new`) a reference can name there,
+// the ones that fit the slot's functional interface first. `completion_in` already dispatches to it.
+pub use crate::method_reference::{
+    method_reference_completion, method_reference_site, MethodReferenceSite,
+};
+
+// The types a function slot receives — offered first when a type is named in `opt.map(Re|)`.
+pub use crate::functional_types::functional_argument_types;
+
+// The ranking's reading of a method reference's slot, and the fit test behind it — and how well a
+// candidate answers the type the position wants, the key every completion list is ordered by first.
+pub use crate::rank::{fits_reference, params_fit, Fit, ReferenceShape};
+
 // Completion for a BARE identifier — what the lexical scope at the caret binds, the members of
 // the enclosing type, and the static imports. The half of completion that is not after a dot.
 pub use crate::scope_completion::scope_completion;

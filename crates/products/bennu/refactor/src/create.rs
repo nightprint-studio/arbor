@@ -32,7 +32,7 @@
 
 use tree_sitter::Node;
 
-use crate::plan::{Outcome, Plan, RefactorEdit, Refusal};
+use crate::plan::{EditSelection, Outcome, Plan, RefactorEdit, Refusal};
 use crate::selection::{descendants, enclosing_callable, enclosing_type, indent_at, is_static, newline, node_at, text};
 
 const ID: (&str, &str) = ("create-method", "Create method");
@@ -73,26 +73,55 @@ pub fn create_method(root: Node<'_>, source: &str, start: usize, end: usize) -> 
         return None; // it exists here; the diagnostic was about something else
     }
 
-    let parameters = parameters_for(&call, &method, &type_decl, source);
-    let returns = return_type_for(&call, &method, source);
-    // `private static`, in that order: any order compiles, and every Java style guide and the JLS's
-    // own examples write the access modifier first. A generated method that does not look like the
-    // ones around it is one the reader stops to check.
-    let statics = if is_static(&method, source) { "static " } else { "" };
+    let request = LocalCall {
+        params: parameters_for(&call, &method, &type_decl, source),
+        returns: return_type_for(&call, &method, source),
+        is_static: is_static(&method, source),
+        name,
+    };
+    Some(Ok(stub_below(&method, source, &request)))
+}
 
+/// The plan that writes `call`'s stub just below `method` — one placement and one stub for every
+/// way a method gets created, so a call and a method reference never produce two shapes.
+///
+/// The caret lands just inside the body, and the body's placeholder statement is selected, the way
+/// IntelliJ leaves it: the stub's body is the only line the user has to replace, and with it
+/// selected the first keystroke does.
+fn stub_below(method: &Node<'_>, source: &str, call: &LocalCall) -> Plan {
+    let (id, _) = ID;
     let indent = indent_at(source, method.start_byte());
     let nl = newline(source);
-    let signature = format!("private {statics}{returns} {name}({})", render_params(&parameters));
-    let stub = format!(
-        "{nl}{nl}{indent}{signature} {{{nl}{indent}    throw new UnsupportedOperationException(\"TODO: {name}\");{nl}{indent}}}"
-    );
+    let text = format!("{nl}{nl}{indent}{}", call.render(&indent, nl));
     let insert_at = method.end_byte();
+    // Just past the body's `{`. Never a fixed count past it: one byte further is the middle of a
+    // CRLF, which is where the caret used to land on a Windows file.
+    let body_at = text.find('{').map_or(text.len(), |open| open + 1);
+    // Derived from the caret rather than from the render, so the two can never point at different
+    // bodies.
+    let select = placeholder_statement(&text, body_at).map(|(start, end)| EditSelection { edit: 0, start, end });
+    Plan::new(
+        id,
+        &format!("Create method '{}'", call.name),
+        vec![RefactorEdit::new(insert_at, insert_at, text, "declaration")],
+    )
+    .named(call.name.clone())
+    .caret_at(insert_at + body_at)
+    .selecting(select)
+}
 
-    let plan = Plan::new(id, &format!("Create method '{name}'"), vec![RefactorEdit::new(insert_at, insert_at, stub, "declaration")])
-        .named(name)
-        // The caret lands on the stub's body, which is the only line the user has to replace.
-        .caret_at(insert_at + 2 * nl.len() + indent.len() + signature.len() + 3);
-    Some(Ok(plan))
+/// The statement a body starts with, read from `body_at` (just inside its `{`): `[start, end)` bytes
+/// of `text` over the first line of the body, without the indent before it or the newline after.
+/// `None` when the body holds nothing to select — its `}` is the next thing written.
+fn placeholder_statement(text: &str, body_at: usize) -> Option<(usize, usize)> {
+    let rest = text.get(body_at..)?;
+    let start = body_at + (rest.len() - rest.trim_start().len());
+    let line = &text[start..];
+    let statement = line[..line.find(['\r', '\n']).unwrap_or(line.len())].trim_end();
+    if statement.is_empty() || statement.starts_with('}') {
+        return None;
+    }
+    Some((start, start + statement.len()))
 }
 
 /// Whether this type already declares a method of that name — any arity.
@@ -268,21 +297,8 @@ fn read_local_reference<'t>(reference: &Node<'t>, source: &str) -> Option<LocalR
 /// [`create_method`] uses, for a signature the caller worked out itself (a method reference's comes
 /// from its functional interface, which takes a resolver).
 pub fn declare_local_method(root: Node<'_>, source: &str, anchor: usize, call: &LocalCall) -> Option<Plan> {
-    let (id, _) = ID;
     let method = enclosing_callable(node_at(root, anchor)?)?;
-    let indent = indent_at(source, method.start_byte());
-    let nl = newline(source);
-    let member = call.render(&indent, nl);
-    let insert_at = method.end_byte();
-    let body = member.find('{').map_or(member.len(), |open| open + 1);
-    let plan = Plan::new(
-        id,
-        &format!("Create method '{}'", call.name),
-        vec![RefactorEdit::new(insert_at, insert_at, format!("{nl}{nl}{indent}{member}"), "declaration")],
-    )
-    .named(call.name.clone())
-    .caret_at(insert_at + 2 * nl.len() + indent.len() + body);
-    Some(plan)
+    Some(stub_below(&method, source, call))
 }
 
 /// What a call on **another object** is asking that object's class for.
@@ -825,5 +841,52 @@ mod tests {
         let applied = plan.apply(source);
         let stub = applied.find("private Object shout(String string) {").expect(&applied);
         assert!(stub < applied.find("void z()").unwrap(), "{applied}");
+    }
+
+    // ── What is selected once the stub is written ────────────────────────────────────────────
+
+    /// The slice of the applied source the plan selects. These plans hold one edit, so it lands at
+    /// its own `start`.
+    fn selected(plan: &Plan, source: &str) -> String {
+        let select = plan.select.expect("a selection");
+        let edit = &plan.edits[select.edit];
+        let applied = plan.apply(source);
+        applied[edit.start + select.start..edit.start + select.end].to_string()
+    }
+
+    /// IntelliJ leaves the stub's body selected, so typing the real body replaces it.
+    #[test]
+    fn the_stubs_placeholder_statement_is_selected_to_be_typed_over() {
+        let source = "class A {\n    void f() {\n        report();\n    }\n}";
+        let Some(Ok(plan)) = run(source, "report()") else { panic!("no plan") };
+        assert_eq!(selected(&plan, source), "throw new UnsupportedOperationException(\"TODO: report\");");
+        let caret = plan.caret.expect("a caret");
+        assert!(plan.apply(source)[..caret].ends_with("report() {"), "{}", plan.apply(source));
+    }
+
+    /// One byte past the `{` is the middle of a CRLF: the caret stays before it, and the selection
+    /// takes the statement without its `\r`.
+    #[test]
+    fn a_crlf_file_selects_the_statement_without_its_line_break() {
+        let source = "class A {\r\n    void f() {\r\n        report();\r\n    }\r\n}";
+        let Some(Ok(plan)) = run(source, "report()") else { panic!("no plan") };
+        assert_eq!(selected(&plan, source), "throw new UnsupportedOperationException(\"TODO: report\");");
+        let applied = plan.apply(source);
+        assert!(applied[plan.caret.unwrap()..].starts_with("\r\n"), "{applied:?}");
+    }
+
+    #[test]
+    fn a_method_created_from_a_reference_selects_its_placeholder_too() {
+        let source = "class A {\n    Object f(java.util.Optional<String> o) {\n        return o.map(this::shout);\n    }\n}";
+        let tree = parse_java(source).unwrap();
+        let call = LocalCall {
+            name: "shout".to_string(),
+            params: vec![("String".to_string(), "string".to_string())],
+            returns: "Object".to_string(),
+            is_static: false,
+        };
+        let plan = declare_local_method(tree.root_node(), source, source.find("this::shout").unwrap(), &call)
+            .expect("a plan");
+        assert_eq!(selected(&plan, source), "throw new UnsupportedOperationException(\"TODO: shout\");");
     }
 }

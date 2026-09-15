@@ -31,22 +31,40 @@
 //!   likely the one you want again, and the buffer is right there. Capped, so a name used forty
 //!   times cannot outrank relevance itself.
 //!
-//! ## What is deliberately NOT here
+//! - **What you picked last time** ([`crate::picked`]) — a habit, weighed like the rest.
 //!
-//! **The expected type.** Knowing that `String s = order.|` wants something `String`-shaped is the
-//! strongest signal an IDE has, and it needs the enclosing expression rather than the receiver —
-//! the assignment target, the parameter slot, the return type. That is a real addition to the query
-//! and it belongs in its own change.
+//! ## The expected type is not one of the terms
 //!
-//! **What you picked last time.** Frequency across a session ranks even better than frequency in a
-//! file, and it needs somewhere to remember it plus a verb for the editor to say "this one was
-//! accepted". Also its own change.
+//! Knowing that `return builder.|` in a method returning `Order` wants something `Order`-shaped is
+//! the strongest signal there is, and it is a different KIND of signal: every term above says how
+//! likely a candidate is, and this one says whether it can be written there at all. As a weighted
+//! term it lost exactly where it mattered — `builder.customer(..)` written three times in the
+//! method and picked twice this session outscored `build()`, the one member that compiles after
+//! that `return`.
 //!
-//! Both are additive: they become terms in [`score`], and everything here keeps its meaning.
+//! So it is a [`Fit`], and the list is ordered by fit FIRST and by [`score`] within each fit
+//! (IntelliJ's "smart" ordering). Nothing is hidden: what does not fit is still offered, below.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
-use bennu_java::prelude::{Member, MemberKind, TypeRef, Visibility};
+use bennu_java::prelude::{Member, MemberKind, TypeRef, TypeResolver, Visibility};
+
+/// How well what a candidate PRODUCES answers the type the position wants — the leading sort key
+/// of every completion list that has an expected type. Ordered worst to best, so `max` is the
+/// better of two.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Fit {
+    /// No expected type, or a candidate that does not produce it.
+    #[default]
+    None,
+    /// A proper subtype of the expected type — `ArrayList<Order>` where a `List<Order>` is
+    /// returned. It compiles, and it is ranked under the exact type because the declared type is
+    /// what the author spelled.
+    Subtype,
+    /// The expected type itself, a primitive and its box counted as one.
+    Exact,
+}
 
 /// The binary name whose members match everything and are wanted almost never.
 const OBJECT: &str = "java/lang/Object";
@@ -71,6 +89,83 @@ pub struct Context {
     /// the candidate: `String name = order.|` has forty members to offer and a handful that can
     /// be written there at all.
     pub expected: Option<TypeRef>,
+    /// The shape a METHOD REFERENCE being written has to have — set only after a `::`, and only
+    /// when the slot the reference is passed to describes one. See [`ReferenceShape`].
+    pub reference: Option<ReferenceShape>,
+    /// Produced binary name → whether it is a subtype of [`Context::expected`], asked once per
+    /// type rather than once per candidate: forty members of one receiver return a handful of
+    /// distinct types, and each answer is a hierarchy walk.
+    subtype_memo: RefCell<HashMap<String, bool>>,
+}
+
+/// What a method reference has to look like to compile where it is being written: the functional
+/// interface's parameters and return, and what stands left of the `::`.
+///
+/// `opt.map(ResolvedIdentity::|)` wants a `Function<ResolvedIdentity, U>`. Through a TYPE, three
+/// kinds of method can be written there, and each consumes the parameters differently:
+///
+/// * a **static** method takes them all — `static Token convert(ResolvedIdentity)`;
+/// * an **instance** method is unbound: the first parameter IS the receiver, and the method takes
+///   the rest — `String identifier()`;
+/// * through a VALUE (`resolver::`), an instance method is bound and takes them all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferenceShape {
+    /// The single abstract method's parameters, generics substituted; an unbound variable is `Object`.
+    pub params: Vec<TypeRef>,
+    /// What it returns — `void` as the primitive name.
+    pub returns: TypeRef,
+    /// The binary name of the type the qualifier denotes or has.
+    pub qualifier: String,
+    /// The qualifier names a TYPE (`Foo::`), not a value (`foo::`).
+    pub through_type: bool,
+}
+
+/// Whether `m`, referenced through `shape`'s qualifier, compiles in `shape`'s slot.
+///
+/// A ranking test, deliberately loose where the loose answer is the harmless one: a parameter the
+/// slot types as `Object` (a variable nothing binds yet) accepts anything, and a method parameter
+/// that is itself a type variable accepts anything — `static <T> T id(T)` fits every slot of arity
+/// one. What it is strict about is what does not compile at all: the wrong number of arguments, a
+/// `void` where a value is wanted, a static through a value.
+pub fn fits_reference(m: &Member, shape: &ReferenceShape) -> bool {
+    if m.kind != MemberKind::Method {
+        return false;
+    }
+    if shape.returns.binary_name != "void"
+        && m.return_type.binary_name == "void"
+        && m.return_type.dims == 0
+    {
+        return false;
+    }
+    if m.is_static {
+        return shape.through_type && params_fit(&m.params, &shape.params);
+    }
+    if !shape.through_type {
+        return params_fit(&m.params, &shape.params);
+    }
+    let Some((receiver, rest)) = shape.params.split_first() else {
+        return false;
+    };
+    let receiver_fits = receiver.dims == 0
+        && (receiver.binary_name == shape.qualifier || receiver.binary_name == OBJECT);
+    receiver_fits && params_fit(&m.params, rest)
+}
+
+/// Whether a method declared with `declared` parameters can be handed `wanted` — see
+/// [`fits_reference`] for which differences count.
+pub fn params_fit(declared: &[TypeRef], wanted: &[TypeRef]) -> bool {
+    declared.len() == wanted.len()
+        && declared.iter().zip(wanted).all(|(d, w)| {
+            let takes_anything = d.dims == 0 && (d.binary_name == OBJECT || is_type_variable_name(&d.binary_name));
+            let gives_anything = w.dims == 0 && w.binary_name == OBJECT;
+            takes_anything || gives_anything || (d.dims == w.dims && boxes_to(&d.binary_name, &w.binary_name))
+        })
+}
+
+/// A bare capitalised name — `T`, `Source` — is a type variable: every class reaches the ranking as
+/// a slashed binary name, and every primitive is lower-case.
+fn is_type_variable_name(name: &str) -> bool {
+    !name.contains('/') && name.starts_with(|c: char| c.is_uppercase())
 }
 
 impl Context {
@@ -100,7 +195,19 @@ impl Context {
                 i += 1;
             }
         }
-        Self { receiver_is_type, uses, expected: None }
+        Self {
+            receiver_is_type,
+            uses,
+            expected: None,
+            reference: None,
+            subtype_memo: RefCell::default(),
+        }
+    }
+
+    /// Tell the ranking the shape a method reference must have here — see [`ReferenceShape`].
+    pub fn for_reference(mut self, shape: Option<ReferenceShape>) -> Self {
+        self.reference = shape;
+        self
     }
 
     /// Tell the ranking what type the position wants — see [`Context::expected`].
@@ -113,21 +220,79 @@ impl Context {
         self
     }
 
-    /// Whether `produced` is what the position wants.
+    /// Whether `produced` is exactly what the position wants.
     ///
     /// Compared by **name**, with the primitive/boxed pairs treated as one — Java's own
     /// autoboxing, and the difference between `int n = order.getCount()` ranking the `Integer`
-    /// getter first or not at all.
-    ///
-    /// Not assignability: a method returning `ArrayList` does not match an expected `List`. The
-    /// real rule is a hierarchy walk *per candidate*, on every keystroke, for a term that only
-    /// moves an item up a list. A missed match costs a place, never an answer.
+    /// getter first or not at all — and by the type ARGUMENTS where both sides spell them, so a
+    /// `List<String>` is not taken for the `List<Order>` a method returns. See [`arguments_agree`].
     fn wants(&self, produced: &TypeRef) -> bool {
         let Some(expected) = &self.expected else {
             return false;
         };
-        expected.dims == produced.dims && boxes_to(&expected.binary_name, &produced.binary_name)
+        expected.dims == produced.dims
+            && boxes_to(&expected.binary_name, &produced.binary_name)
+            && arguments_agree(&expected.type_args, &produced.type_args)
     }
+
+    /// How well a candidate producing `produced` fits the position — see [`Fit`].
+    ///
+    /// A subtype is found by walking UP from what is produced, through `resolver`, and remembered
+    /// per produced type. Only class types are walked: a primitive has no hierarchy, and an
+    /// expected `Object` is a supertype of everything, which would make every candidate a fit and
+    /// the key mean nothing.
+    pub fn fit(&self, produced: &TypeRef, resolver: &dyn TypeResolver) -> Fit {
+        let Some(expected) = &self.expected else {
+            return Fit::None;
+        };
+        if self.wants(produced) {
+            return Fit::Exact;
+        }
+        let walkable = expected.dims == produced.dims
+            && expected.binary_name != OBJECT
+            && expected.binary_name != produced.binary_name
+            && expected.binary_name.contains('/')
+            && produced.binary_name.contains('/');
+        if !walkable {
+            return Fit::None;
+        }
+        let cached = self.subtype_memo.borrow().get(&produced.binary_name).copied();
+        let is_subtype = match cached {
+            Some(hit) => hit,
+            None => {
+                let start = TypeRef::simple(produced.binary_name.clone());
+                let found = bennu_java::prelude::walk_up::<()>(resolver, &start, |a| {
+                    (a.ty.binary_name == expected.binary_name).then_some(())
+                })
+                .is_some();
+                self.subtype_memo
+                    .borrow_mut()
+                    .insert(produced.binary_name.clone(), found);
+                found
+            }
+        };
+        if is_subtype { Fit::Subtype } else { Fit::None }
+    }
+}
+
+/// Whether two type-argument lists can be the same parameterisation.
+///
+/// Lenient wherever leniency is the harmless answer: a side that spells no arguments (a raw type,
+/// a diamond, a member decoded without its signature), a different arity, and an argument that is
+/// `Object` or a bare type variable all agree. What it rejects is two class arguments that are
+/// visibly different types — `List<String>` for `List<Order>`.
+fn arguments_agree(expected: &[TypeRef], produced: &[TypeRef]) -> bool {
+    if expected.is_empty() || produced.is_empty() || expected.len() != produced.len() {
+        return true;
+    }
+    expected.iter().zip(produced).all(|(e, p)| {
+        let open = |t: &TypeRef| t.binary_name == OBJECT || is_type_variable_name(&t.binary_name);
+        open(e)
+            || open(p)
+            || (e.dims == p.dims
+                && boxes_to(&e.binary_name, &p.binary_name)
+                && arguments_agree(&e.type_args, &p.type_args))
+    })
 }
 
 /// Whether two type names are the same type, counting a primitive and its box as one.
@@ -263,15 +428,27 @@ pub fn score(m: &Member, declaring: &str, depth: usize, ctx: &Context) -> i32 {
         s -= 8;
     }
 
-    // What the POSITION wants. The strongest term here, and deliberately so: after `String s =`
-    // the members that return a `String` are not merely more likely, they are the only ones that
-    // can be written. Still a ranking term and not a filter — the match is by name, so a genuine
-    // subtype is a miss, and hiding on a miss would hide the right answer.
+    // What the POSITION wants. The list is ordered by [`Fit`] before it is ordered by this score
+    // (see the module docs), so this term does not decide between a fit and a miss. It stays for
+    // what the score is still asked alone: which overload of a folded row is its face, and how a
+    // `void` sinks among the misses.
     if ctx.wants(&m.return_type) {
         s += 40;
     } else if ctx.expected.is_some() && m.return_type.binary_name == "void" {
         // `String s = list.clear()` does not compile. Nothing else about `clear` says so.
         s -= 20;
+    }
+
+    // After a `::`, the methods the slot can actually take. As strong as the expected type, for the
+    // same reason: `map(ResolvedIdentity::|)` has a handful of methods that compile and a class full
+    // that do not. Ranked, not filtered — the fit is by name, and a subtype parameter is a miss.
+    // A static reached through a VALUE never compiles (`resolver::staticMethod`), so it sinks hard.
+    if let Some(shape) = &ctx.reference {
+        if fits_reference(m, shape) {
+            s += 45;
+        } else if m.is_static && !shape.through_type {
+            s -= 60;
+        }
     }
 
     // Something this file already says. Weak on its own, decisive between equals.
@@ -313,7 +490,143 @@ mod tests {
     }
 
     fn ctx(receiver_is_type: bool) -> Context {
-        Context { receiver_is_type, uses: HashMap::new(), expected: None }
+        Context::new("", receiver_is_type)
+    }
+
+    /// A resolver over a tiny hand-written hierarchy: `ArrayList implements List`,
+    /// `Order extends Object`.
+    struct Hierarchy;
+    impl TypeResolver for Hierarchy {
+        fn members_of(&self, binary: &str) -> Option<std::sync::Arc<bennu_java::prelude::ClassMembers>> {
+            let (superclass, interfaces) = match binary {
+                "java/util/ArrayList" => (Some(TypeRef::simple(OBJECT)), vec![TypeRef::simple("java/util/List")]),
+                "java/util/List" | OBJECT => (None, Vec::new()),
+                "shop/Order" => (Some(TypeRef::simple(OBJECT)), Vec::new()),
+                _ => return None,
+            };
+            Some(std::sync::Arc::new(bennu_java::prelude::ClassMembers {
+                superclass,
+                interfaces,
+                methods: Vec::new(),
+                fields: Vec::new(),
+                flags: Default::default(),
+                type_params: Vec::new(),
+            }))
+        }
+        fn resolve_simple_name(&self, _n: &str, _i: &[bennu_java::prelude::Import]) -> Option<String> {
+            None
+        }
+    }
+
+    fn generic(name: &str, args: &[&str]) -> TypeRef {
+        TypeRef { type_args: args.iter().map(|a| TypeRef::simple(*a)).collect(), ..TypeRef::simple(name) }
+    }
+
+    fn expecting(t: TypeRef) -> Context {
+        ctx(false).expecting(Some(t))
+    }
+
+    #[test]
+    fn the_expected_type_itself_is_an_exact_fit() {
+        let c = expecting(TypeRef::simple("shop/Order"));
+        assert_eq!(c.fit(&TypeRef::simple("shop/Order"), &Hierarchy), Fit::Exact);
+        assert_eq!(c.fit(&TypeRef::simple("java/lang/String"), &Hierarchy), Fit::None);
+    }
+
+    /// `return size()` in a method returning `int` — and the boxed getter fits it too.
+    #[test]
+    fn a_primitive_and_its_box_are_one_fit() {
+        let c = expecting(TypeRef::simple("int"));
+        assert_eq!(c.fit(&TypeRef::simple("int"), &Hierarchy), Fit::Exact);
+        assert_eq!(c.fit(&TypeRef::simple("java/lang/Integer"), &Hierarchy), Fit::Exact);
+        assert_eq!(c.fit(&TypeRef::simple("long"), &Hierarchy), Fit::None);
+    }
+
+    /// `List<Order>` is wanted: `List<Order>` and a raw `List` fit, `List<String>` does not.
+    #[test]
+    fn type_arguments_that_visibly_differ_are_not_a_fit() {
+        let c = expecting(generic("java/util/List", &["shop/Order"]));
+        assert_eq!(c.fit(&generic("java/util/List", &["shop/Order"]), &Hierarchy), Fit::Exact);
+        assert_eq!(c.fit(&TypeRef::simple("java/util/List"), &Hierarchy), Fit::Exact);
+        assert_eq!(c.fit(&generic("java/util/List", &["E"]), &Hierarchy), Fit::Exact);
+        assert_eq!(c.fit(&generic("java/util/List", &["java/lang/String"]), &Hierarchy), Fit::None);
+    }
+
+    #[test]
+    fn a_subtype_fits_below_the_exact_type() {
+        let c = expecting(generic("java/util/List", &["shop/Order"]));
+        assert_eq!(c.fit(&generic("java/util/ArrayList", &["shop/Order"]), &Hierarchy), Fit::Subtype);
+        assert!(Fit::Exact > Fit::Subtype && Fit::Subtype > Fit::None);
+    }
+
+    /// Everything is an `Object`, so an expected `Object` walks nothing and lifts nothing.
+    #[test]
+    fn an_expected_object_makes_no_subtype_a_fit() {
+        let c = expecting(TypeRef::simple(OBJECT));
+        assert_eq!(c.fit(&TypeRef::simple("shop/Order"), &Hierarchy), Fit::None);
+    }
+
+    #[test]
+    fn with_nothing_expected_nothing_fits() {
+        assert_eq!(ctx(false).fit(&TypeRef::simple("shop/Order"), &Hierarchy), Fit::None);
+    }
+
+    /// `map(ResolvedIdentity::|)` — a `Function<ResolvedIdentity, U>` written through the type.
+    fn function_of_identity() -> ReferenceShape {
+        ReferenceShape {
+            params: vec![TypeRef::simple("acme/ResolvedIdentity")],
+            returns: TypeRef::simple(OBJECT),
+            qualifier: "acme/ResolvedIdentity".to_string(),
+            through_type: true,
+        }
+    }
+
+    fn returning(name: &str, ret: &str, params: &[&str]) -> Member {
+        Member::method(name, TypeRef::simple(ret), params.iter().map(|p| TypeRef::simple(*p)).collect())
+    }
+
+    /// Unbound: the element IS the receiver, so a no-argument instance method fits.
+    #[test]
+    fn a_no_argument_instance_method_fits_a_function_of_its_own_type() {
+        let shape = function_of_identity();
+        assert!(fits_reference(&returning("identifier", "java/lang/String", &[]), &shape));
+        assert!(!fits_reference(&returning("rename", "java/lang/String", &["java/lang/String"]), &shape));
+    }
+
+    /// A static takes the element as its argument.
+    #[test]
+    fn a_static_taking_the_element_fits_and_one_taking_nothing_does_not() {
+        let shape = function_of_identity();
+        let convert = returning("convert", "acme/Token", &["acme/ResolvedIdentity"]).stat();
+        let create = returning("create", "acme/ResolvedIdentity", &[]).stat();
+        assert!(fits_reference(&convert, &shape));
+        assert!(!fits_reference(&create, &shape));
+    }
+
+    /// A `Function` returns a value, and a `void` method has none to give.
+    #[test]
+    fn a_void_method_does_not_fit_a_slot_that_wants_a_value() {
+        assert!(!fits_reference(&returning("touch", "void", &[]), &function_of_identity()));
+    }
+
+    /// Through a VALUE the method is bound, and a static cannot be reached at all.
+    #[test]
+    fn through_a_value_the_method_takes_every_parameter_and_statics_never_fit() {
+        let shape = ReferenceShape { through_type: false, ..function_of_identity() };
+        assert!(fits_reference(&returning("describe", "java/lang/String", &["acme/ResolvedIdentity"]), &shape));
+        assert!(!fits_reference(&returning("identifier", "java/lang/String", &[]), &shape));
+        let convert = returning("convert", "acme/Token", &["acme/ResolvedIdentity"]).stat();
+        assert!(!fits_reference(&convert, &shape));
+    }
+
+    /// The fit is worth a lot: it lifts `identifier` above an alphabetically-earlier `hashCode`-like
+    /// neighbour declared on the same class that takes an argument.
+    #[test]
+    fn a_fitting_method_outranks_one_that_does_not_fit() {
+        let c = ctx(false).for_reference(Some(function_of_identity()));
+        let fits = score(&returning("identifier", "java/lang/String", &[]), "acme/ResolvedIdentity", 0, &c);
+        let misses = score(&returning("equalsIgnoring", "boolean", &["java/lang/String"]), "acme/ResolvedIdentity", 0, &c);
+        assert!(fits > misses, "{fits} should beat {misses}");
     }
 
     /// The headline case: `list.` should not open on `clone`, `equals` and `getClass`.

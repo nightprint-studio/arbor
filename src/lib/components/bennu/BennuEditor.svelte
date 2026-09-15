@@ -128,6 +128,7 @@
   import BennuEnvVarModal from './BennuEnvVarModal.svelte';
   import BennuMacroExpandModal from './BennuMacroExpandModal.svelte';
   import { makeByteToU16, makeU16ToByte } from '$lib/components/shared/ui/code-editor';
+  import { offerEdits, selectionAfterEdits } from './offer-selection';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
   // The gutter's breakpoints and the paused line — both are the debugger's state seen from
@@ -3002,10 +3003,13 @@
             // store, a rename by the semantic engine (never by splicing the identifier in place,
             // which would leave every use of it behind). A plain edit applies the byte-range
             // replacement — or, when the offer touches several places (a rewrite and its import),
-            // all of them as one undo.
+            // all of them as one undo. An offer that names a selection (the placeholder it wrote)
+            // applies the same way and then selects it.
             run: o.action
               ? () => void runIntentionAction(o, path)
-              : o.edits?.length
+              : o.select
+                ? () => applyOfferSelecting(o)
+                : o.edits?.length
                 ? () => void editorComp?.replaceByteRanges(
                   (o.edits ?? []).map((e) => ({ startByte: e.start, endByte: e.end, text: e.text })),
                 )
@@ -3349,6 +3353,23 @@
     editorComp.replaceByteRanges(
       edits.map((e) => ({ startByte: e.start, endByte: e.end, text: e.replacement })),
     );
+  }
+
+  /**
+   * Apply an Alt+Enter offer's edits as ONE undo step, then select the range its `select` names —
+   * `this.client = null;` with `null` selected, so typing the real value replaces it.
+   *
+   * The range is resolved in bytes of the edited document before dispatching (the pure
+   * `selectionAfterEdits`), and `selectByteRange` maps it to UTF-16 against the buffer the edits just
+   * produced. A selection that resolves to nothing still applies the edits.
+   */
+  function applyOfferSelecting(offer: IntentionOffer) {
+    if (!editorComp || !offer.select) return;
+    const edits = offerEdits(offer);
+    const range = selectionAfterEdits(edits, offer.select);
+    editorComp.replaceByteRanges(edits.map((e) => ({ startByte: e.start, endByte: e.end, text: e.text })));
+    if (range) editorComp.selectByteRange(range.start, range.end);
+    editorComp.focus();
   }
 
   /**

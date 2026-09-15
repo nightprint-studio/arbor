@@ -42,6 +42,10 @@ pub struct Template {
 /// is the third row down.
 pub const TEMPLATES: &[Template] = &[
     // ── modifiers, which is what an abbreviation is really for ────────────────
+    // `pf` and `prf` are the non-static pair: a constructor-injected dependency is a `private final`
+    // field, and in code written since that became the norm it is the commonest modifier run there is.
+    Template { abbrev: "pf", body: "public final $0", detail: "public final" },
+    Template { abbrev: "prf", body: "private final $0", detail: "private final" },
     Template { abbrev: "psf", body: "public static final $0", detail: "public static final" },
     Template {
         abbrev: "psfi",
@@ -91,8 +95,8 @@ pub const TEMPLATES: &[Template] = &[
 /// The templates whose abbreviation starts with `prefix`, in table order.
 ///
 /// An **empty prefix yields nothing**, and that is the rule that keeps this from being noise: the
-/// popup opened on a bare caret is already a list of everything in scope, and thirteen
-/// abbreviations at the top of it would be thirteen rows nobody asked for. They are for somebody
+/// popup opened on a bare caret is already a list of everything in scope, and fifteen
+/// abbreviations at the top of it would be fifteen rows nobody asked for. They are for somebody
 /// who has started typing one.
 pub fn matching(prefix: &str) -> Vec<&'static Template> {
     if prefix.is_empty() {
@@ -110,6 +114,18 @@ mod tests {
     fn a_prefix_offers_its_family_with_the_bare_one_first() {
         let found: Vec<&str> = matching("psf").iter().map(|t| t.abbrev).collect();
         assert_eq!(found, ["psf", "psfi", "psfs"]);
+    }
+
+    /// `prf` is not a prefix of `prsf`, so `private final` and `private static final` are two
+    /// families: typing the static one never offers the other, and `pr` offers both.
+    #[test]
+    fn the_final_pair_stays_out_of_the_static_families() {
+        let found = |prefix: &str| matching(prefix).iter().map(|t| t.abbrev).collect::<Vec<_>>();
+        assert_eq!(found("prf"), ["prf"]);
+        assert_eq!(found("pf"), ["pf"]);
+        assert_eq!(found("prsf"), ["prsf", "prsfi", "prsfs"]);
+        assert_eq!(found("pr"), ["prf", "prsf", "prsfi", "prsfs"]);
+        assert_eq!(matching("prf")[0].body, "private final $0");
     }
 
     /// The rule that keeps the popup usable: nothing without a prefix.

@@ -5,6 +5,7 @@
 //! intention is a change in the pure crate only. Replaces the old per-transform handlers.
 
 use bennu_core::prelude::BennuState;
+use bennu_refactor::prelude::{EditSelection, RefactorEdit};
 use serde::{Deserialize, Serialize};
 
 use crate::index_service::IndexService;
@@ -58,6 +59,14 @@ pub struct OfferWire {
     /// offer.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub edits: Vec<EditWire>,
+    /// What the editor selects once the edits are applied — a placeholder the offer wrote, so the
+    /// next keystroke replaces it. Bytes into the inserted text of ONE edit: `edits[edit]`, or, for a
+    /// single-range offer (`edits` empty), `replacement` as edit `0`. Not a document offset, which
+    /// would be ambiguous about whether it was measured before or after the edits (see
+    /// [`EditSelection`]). Absent — and not sent — for an offer that leaves the caret where the
+    /// editor puts it, so a reader that never learned the field applies every offer as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub select: Option<EditSelection>,
 }
 
 /// One replacement of a multi-place offer — see [`OfferWire::edits`].
@@ -123,6 +132,7 @@ fn bennu_intentions_at(_ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<Ra
                         replacement: o.replacement,
                         action: None,
                         edits: Vec::new(),
+                        select: None,
                     }
                     .in_section(OfferCategory::Intention)
                 },
@@ -130,6 +140,8 @@ fn bennu_intentions_at(_ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<Ra
         );
         offers.extend(java_file_offers(&args));
         offers.extend(quick_fix_offers(&args).into_iter().map(|o| o.in_section(OfferCategory::Fix)));
+        // A blank `final` field: offered on its whole declaration, squiggle or not — see the module.
+        offers.extend(crate::final_field_fixes::final_field_offers(&args));
     }
 
     // What the project's frameworks offer here: the fixes for their own diagnostics under the caret,
@@ -162,6 +174,7 @@ fn bennu_intentions_at(_ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<Ra
             replacement: violation.suggested,
             action: Some(action.to_string()),
             edits: Vec::new(),
+            select: None,
         }
         .in_section(OfferCategory::Fix));
     }
@@ -185,7 +198,7 @@ fn settle(mut offers: Vec<RankedOffer>) -> Vec<RankedOffer> {
 /// The diagnostics under the caret: its span contains it, or the caret is at either end of it — a
 /// squiggle you have just walked the caret onto is the one you want to fix, and "inside" is a
 /// distinction nobody makes while pressing Alt+Enter.
-fn under_caret(args: &IntentionsArgs) -> impl Iterator<Item = &DiagRef> {
+pub(crate) fn under_caret(args: &IntentionsArgs) -> impl Iterator<Item = &DiagRef> {
     args.diagnostics.iter().filter(move |d| args.offset >= d.start && args.offset <= d.end)
 }
 
@@ -199,7 +212,38 @@ fn action_offer(id: &str, label: &str, at: usize) -> OfferWire {
         replacement: String::new(),
         action: Some(id.to_string()),
         edits: Vec::new(),
+        select: None,
     }
+}
+
+/// An edit offer: the first edit repeated in the single-range fields, the whole list only when there
+/// is more than one (see [`OfferWire::edits`]). `select` indexes `edits` in the order given, which is
+/// the order the wire keeps — and a single edit travelling in the single-range fields is edit `0`,
+/// so a transform's selection indexes the offer unchanged.
+///
+/// The one place an offer with a selection is built, so the guard below is written once.
+pub(crate) fn offer_of(id: &str, label: &str, edits: Vec<EditWire>, select: Option<EditSelection>) -> OfferWire {
+    let first = edits.first().cloned().unwrap_or(EditWire { start: 0, end: 0, text: String::new() });
+    // A selection pointing past the list would select nothing the editor can find: dropped here,
+    // so the wire never carries one.
+    let select = select.filter(|s| {
+        edits.get(s.edit).is_some_and(|e| s.start <= s.end && s.end <= e.text.len())
+    });
+    OfferWire {
+        id: id.to_string(),
+        label: label.to_string(),
+        start: first.start,
+        end: first.end,
+        replacement: first.text,
+        action: None,
+        edits: if edits.len() > 1 { edits } else { Vec::new() },
+        select,
+    }
+}
+
+/// A transform's edit, as the wire carries it.
+pub(crate) fn edit_wire(edit: &RefactorEdit) -> EditWire {
+    EditWire { start: edit.start, end: edit.end, text: edit.text.clone() }
 }
 
 /// The **fixes** for the diagnostics under the caret (see [`under_caret`]).
@@ -224,6 +268,7 @@ fn quick_fix_offers(args: &IntentionsArgs) -> Vec<OfferWire> {
                     replacement: f.replacement,
                     action: None,
                     edits: Vec::new(),
+                    select: None,
                 }),
         );
         // Tree-only fixes for a diagnostic the resolver raised: offered whether or not an index is
@@ -277,6 +322,7 @@ fn framework_offers(args: &IntentionsArgs) -> Vec<RankedOffer> {
                     .into_iter()
                     .map(|e| EditWire { start: e.start, end: e.end, text: e.text })
                     .collect(),
+                select: None,
             };
             Some(offer.in_section(if fixes { OfferCategory::Fix } else { OfferCategory::Intention }))
         })
@@ -308,6 +354,7 @@ fn java_file_offers(args: &IntentionsArgs) -> Vec<RankedOffer> {
                 replacement,
                 action: None,
                 edits: Vec::new(),
+                select: None,
             });
             // The move alternative — a filesystem action, not an edit (dispatched by the editor).
             if let Some(declared) = bennu_java::prelude::extract_symbols(source).package {
@@ -319,6 +366,7 @@ fn java_file_offers(args: &IntentionsArgs) -> Vec<RankedOffer> {
                     replacement: String::new(),
                     action: Some("move-to-package".to_string()),
                     edits: Vec::new(),
+                    select: None,
                 });
             }
         }
@@ -469,6 +517,7 @@ fn name_mismatch_offers(file: &str, source: &str) -> Vec<OfferWire> {
             replacement: stem.to_string(),
             action: Some("rename-symbol-preview".to_string()),
             edits: Vec::new(),
+            select: None,
         },
         OfferWire {
             id: "rename-file-to-type".to_string(),
@@ -480,6 +529,7 @@ fn name_mismatch_offers(file: &str, source: &str) -> Vec<OfferWire> {
             replacement: format!("{}.java", mismatch.name),
             action: Some("rename-file".to_string()),
             edits: Vec::new(),
+            select: None,
         },
     ]
 }
@@ -506,6 +556,7 @@ fn import_class_offers(file: &str, source: &str, simple: &str) -> Vec<RankedOffe
                 replacement,
                 action: None,
                 edits: Vec::new(),
+                select: None,
             },
             category: OfferCategory::Fix,
             preferred: place == 0 && choices.clear_winner,
@@ -567,8 +618,53 @@ fn bennu_import_edit(_ctx: &BennuState, args: ImportEditArgs) -> Result<Option<I
 #[cfg(test)]
 mod tests {
     use super::{
-        import_edit_for, member_site, name_mismatch_offers, settle, OfferCategory, OfferWire,
+        import_edit_for, member_site, name_mismatch_offers, offer_of, settle, EditWire, OfferCategory,
+        OfferWire,
     };
+    use bennu_refactor::prelude::EditSelection;
+
+    // ── how an edit offer travels ────────────────────────────────────────────────────────────
+
+    fn edit(start: usize, text: &str) -> EditWire {
+        EditWire { start, end: start, text: text.to_string() }
+    }
+
+    #[test]
+    fn a_single_edit_travels_in_the_single_range_fields_only() {
+        let offer = offer_of("initialize-variable", "Initialize variable 'client'", vec![edit(40, " = null")], None);
+        assert_eq!((offer.start, offer.replacement.as_str()), (40, " = null"));
+        assert!(offer.edits.is_empty());
+        assert!(offer.select.is_none());
+    }
+
+    #[test]
+    fn several_edits_travel_whole_and_repeat_the_first() {
+        let offer = offer_of("add-constructor-parameter", "Add constructor parameter", vec![edit(90, "b"), edit(30, "a")], None);
+        assert_eq!(offer.start, 90);
+        assert_eq!(offer.edits.len(), 2);
+    }
+
+    /// On a single-range offer, edit `0` is `replacement` — the selection names the placeholder there.
+    #[test]
+    fn a_selection_travels_with_the_offer_and_points_into_its_replacement() {
+        let select = EditSelection { edit: 0, start: 3, end: 7 };
+        let offer = offer_of("initialize-variable", "Initialize variable 'client'", vec![edit(40, " = null")], Some(select));
+        assert_eq!(offer.select, Some(select));
+        assert_eq!(&offer.replacement[select.start..select.end], "null");
+        let json = serde_json::to_value(&offer).unwrap();
+        assert_eq!(json["select"], serde_json::json!({ "edit": 0, "start": 3, "end": 7 }));
+    }
+
+    #[test]
+    fn a_selection_that_points_past_its_edit_is_not_sent() {
+        let past_the_list = EditSelection { edit: 1, start: 0, end: 1 };
+        let past_the_text = EditSelection { edit: 0, start: 3, end: 99 };
+        for select in [past_the_list, past_the_text] {
+            let offer = offer_of("initialize-variable", "x", vec![edit(40, " = null")], Some(select));
+            assert!(offer.select.is_none(), "{select:?}");
+            assert!(serde_json::to_value(&offer).unwrap().get("select").is_none());
+        }
+    }
 
     // ── where the generators are offered ─────────────────────────────────────────────────────
 
@@ -607,6 +703,7 @@ mod tests {
             replacement: String::new(),
             action: None,
             edits: Vec::new(),
+            select: None,
         };
         let with_fix = settle(vec![
             offer("import-class:java.util.List").in_section(OfferCategory::Fix),

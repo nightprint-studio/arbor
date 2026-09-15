@@ -10,7 +10,7 @@
 //!   (`bennu_render_template`), so the two cannot produce different text from the same template;
 //! - [`crate::templates_kinds`] — each kind's context, out of the class at the caret or the Spring
 //!   model's bindings; the configuration class is [`crate::config_class`]'s, the tests [`crate::dtolab`]'s;
-//! - [`crate::templates_live`] — the user's abbreviations, for Java completion.
+//! - [`crate::templates_live`] — the user's abbreviations and postfix templates, for completion.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,7 +18,8 @@ use std::sync::OnceLock;
 
 use bennu_templates::prelude::{
     builtins, kind_dir, list_templates, load_template, schema_of, unmet, with_fact_schemas, Builtin, ClassTemplateContext, ConfigClassContext,
-    ConfigPropertiesContext, LiveContext, NewFileContext, Template, TemplateFacts, TemplateInfo, TemplateKind,
+    ConfigPropertiesContext, LiveContext, NewFileContext, PostfixTemplateContext, Template, TemplateFacts, TemplateInfo,
+    TemplateKind,
 };
 use serde_json::Value;
 
@@ -66,6 +67,7 @@ pub(crate) fn schema(kind: TemplateKind) -> Value {
         TemplateKind::ConfigProperties => schema_of::<ConfigPropertiesContext>(),
         TemplateKind::ConfigClass => schema_of::<ConfigClassContext>(),
         TemplateKind::Live => schema_of::<LiveContext>(),
+        TemplateKind::Postfix => schema_of::<PostfixTemplateContext>(),
     })
 }
 

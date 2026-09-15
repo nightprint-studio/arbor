@@ -30,6 +30,9 @@ pub mod diag_cache;
 // The project's semantic model — the one view of the index + sources + type maps that rename,
 // find-usages, go-to, hover, inherited members and the hierarchies all answer from.
 pub mod engine;
+// Internal: which class names a position's expected type asks for — the type-name completion's
+// leading key after `return Ra|`. An implementation detail of the provider, so no prelude entry.
+mod expected_types;
 pub mod hierarchy;
 pub mod framework_entry;
 pub mod import_census;
@@ -39,6 +42,9 @@ pub mod memory;
 // Internal: Lombok generated-member synthesis, an implementation detail of index-building
 // (java_index). Not part of the public surface, so it stays a private module (no prelude entry).
 mod lombok;
+// Postfix templates in the completion list: the receiver typed, handed to `bennu-java`'s catalogue — and the
+// site and item shape the backend's user-written postfix templates share with it.
+pub mod postfix;
 pub mod prelude;
 pub mod provider;
 pub mod refcache;

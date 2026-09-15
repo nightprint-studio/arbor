@@ -19,12 +19,13 @@ use crate::templates_kinds as kinds;
 pub struct RenderArgs {
     /// Absolute path to the project root.
     pub root: String,
-    /// `new-file`, `class`, `config-properties`, `config-class`, `validation-tests` or `live`.
+    /// `new-file`, `class`, `config-properties`, `config-class`, `validation-tests`, `live` or `postfix`.
     pub kind: String,
     /// The template's name; the one the project uses for the kind when omitted.
     #[serde(default)]
     pub template: Option<String>,
-    /// For `class`, `config-properties`, `validation-tests` and `live`: the Java file holding the class.
+    /// For `class`, `config-properties`, `validation-tests` and `live`: the Java file holding the class. For
+    /// `postfix`, optionally the file the sample value is typed in.
     #[serde(default)]
     pub file: Option<String>,
     /// That file's text, when it differs from what is on disk.
@@ -179,6 +180,7 @@ fn render_kind(args: &RenderArgs, kind: TemplateKind, template: &Template) -> Re
         TemplateKind::ConfigClass => crate::config_class::render(args, template),
         TemplateKind::ValidationTests => crate::dtolab::render_predicted(args, template),
         TemplateKind::Live => kinds::live(args, template),
+        TemplateKind::Postfix => kinds::postfix(args, template),
     }
 }
 

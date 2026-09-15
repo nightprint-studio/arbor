@@ -23,6 +23,7 @@ import type { FrameworkCatalogId } from '$lib/components/bennu/framework-catalog
 
 import { SvelteSet } from 'svelte/reactivity';
 import type { GenerateMode } from '$lib/components/bennu/bennu-intentions';
+import type { TemplateKindId } from '$lib/ipc/bennu/templates';
 
 /** Left tool windows (activity bar, top group).
  *
@@ -194,6 +195,8 @@ function createBennuUiStore() {
   let generateMode = $state<GenerateMode>('getters-setters');
   // Generate from one of the user's code templates, on the class at the caret — which kind.
   let templateGenerateKind = $state<'class' | 'config-properties' | null>(null);
+  // A new code template of this kind, named from the palette — Settings has its own dialog.
+  let newTemplateKind = $state<TemplateKindId | null>(null);
   // A @ConfigurationProperties class written from the configuration file at the caret.
   let configClassOpen = $state(false);
   // JPA generation (repository / projection / query method). Its own modal rather than a mode of
@@ -296,6 +299,7 @@ function createBennuUiStore() {
     get pluginsOpen()     { return pluginsOpen; },
     get generateOpen() { return generateOpen; },
     get templateGenerateKind() { return templateGenerateKind; },
+    get newTemplateKind() { return newTemplateKind; },
     get configClassOpen() { return configClassOpen; },
     get jpaGenerateOpen() { return jpaGenerateOpen; },
     get jpaGenerateFile() { return jpaGenerateFile; },
@@ -428,6 +432,8 @@ function createBennuUiStore() {
     closeGenerate()      { generateOpen = false; },
     openTemplateGenerate(kind: 'class' | 'config-properties') { templateGenerateKind = kind; },
     closeTemplateGenerate() { templateGenerateKind = null; },
+    openNewTemplate(kind: TemplateKindId) { newTemplateKind = kind; },
+    closeNewTemplate() { newTemplateKind = null; },
     openConfigClass() { configClassOpen = true; },
     closeConfigClass() { configClassOpen = false; },
     /** `action` is a contributed action id — the kind is chosen before the dialog opens, so the

@@ -67,6 +67,16 @@ export { createHighlightPlugin, makeByteToU16, makeU16ToByte, parserReady } from
 // Tab stops of an inserted completion — see `snippet-stops.ts` for why this is not CodeMirror's own
 // `snippet()`.
 export { insertWithStops, snippetStops } from './snippet-stops';
+// Backend completion requests paced to the typing — settle during a burst, sample a long one, share
+// an identical question in flight.
+export {
+  createCompletionRequests,
+  BURST_MS,
+  SETTLE_MS,
+  MAX_STALE_MS,
+  type CompletionRequests,
+  type Clock as CompletionClock,
+} from './completion-requests';
 // Layers a provider supplies and the buffer cannot — occurrences of the symbol under the caret,
 // where the file folds, and which declarations nothing reaches.
 export {
@@ -84,16 +94,6 @@ export {
   type LiteralPasteRenderer,
   type LiteralPasteRefusal,
 } from './paste-literal';
-// Postfix templates — `expr.if` → `if (expr) { … }`. The engine is language-agnostic; each language
-// supplies its own table.
-export {
-  postfixCompletion,
-  expressionStart,
-  extractStops,
-  CARET,
-  type PostfixTemplate,
-  type PostfixOptions,
-} from './postfix';
 // Parameter hints — the signature of the call the caret is inside, with the active argument marked.
 export {
   signatureHints,

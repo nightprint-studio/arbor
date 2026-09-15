@@ -20,6 +20,7 @@ use bennu_classpath::prelude::ClassSource;
 use bennu_query::prelude::{ClasspathIndex, IndexResolver, JdkMemberIndex};
 
 use crate::class_names::ClassNameIndex;
+use crate::expected_types::{Closeness, WantedTypes};
 
 /// One project member (method / field) enumerated from the built symbol index, for the
 /// index inspector's "members" list. A be-agnostic view: the be layer maps this onto its
@@ -798,25 +799,74 @@ impl NativeJavaProvider {
         // The index searches case-insensitively — it is also what "Import class" and Go-to-class
         // read, where finding a name you half-remember is the whole point. The user's setting
         // applies to COMPLETION's answer, which is here.
-        let mut ranked: Vec<&str> = self
+        let mut ranked: Vec<String> = self
             .class_names
             .matches_for_prefix(&prefix, MAX)
             .into_iter()
             .filter(|name| bennu_complete::prelude::match_tier(name, &prefix, case).is_some())
+            .map(str::to_string)
             .collect();
+        // The index caps its sweep shortest name first, before anything knows what the project uses —
+        // so a long name imported everywhere was cut behind fifty short ones imported nowhere. The
+        // names this file and the project import join the sweep before it is ranked and cut again.
+        for simple in here.used_names(&prefix, case) {
+            if !ranked.contains(&simple) && !self.class_names.candidates(&simple).is_empty() {
+                ranked.push(simple);
+            }
+        }
+        // What the position wants — `return Ra|` in a method returning `RawIdentity`. See
+        // `expected_types`. Its names join the sweep for the same reason the imported ones do: a cap
+        // applied shortest-name-first knows nothing about the `return`.
+        let wanted = self
+            .resolver
+            .as_deref()
+            .and_then(|r| bennu_java::prelude::expected_type(text, offset, r))
+            .and_then(|t| WantedTypes::of(&t));
+        if let Some(w) = &wanted {
+            for simple in w.names() {
+                let answers = bennu_complete::prelude::match_tier(simple, &prefix, case).is_some();
+                if answers
+                    && !ranked.iter().any(|r| r == simple)
+                    && !self.class_names.candidates(simple).is_empty()
+                {
+                    ranked.push(simple.to_string());
+                }
+            }
+        }
+        let closeness = |simple: &str| {
+            wanted.as_ref().map_or(Closeness::Unrelated, |w| {
+                w.closeness(simple, self.class_names.candidates(simple), &|candidate, binary| {
+                    self.is_subtype_of(candidate, binary)
+                })
+            })
+        };
         // The match tier leads the key. Sorting by proximity alone reordered the WHOLE list, so a
         // camel-hump or case-insensitive hit in a sibling package went above the exact prefix match
-        // everyone in the project imports.
-        ranked.sort_by_key(|simple| {
+        // everyone in the project imports. The expected type is next — above proximity, because a
+        // `Random` this file imports is still not what `return Ra|` in a `RawIdentity` method means.
+        // Cached, since the subtype half of it walks a hierarchy.
+        ranked.sort_by_cached_key(|simple| {
             (
                 bennu_complete::prelude::match_tier(simple, &prefix, case),
+                closeness(simple.as_str()),
                 here.rank(self.class_names.candidates(simple)),
             )
         });
+        ranked.truncate(MAX);
+        // Preselected when the expected type itself heads the list — the provider saying "this one",
+        // which the editor ranks above its own fuzzy score. Not when a better-matching name is above
+        // it: that name is what was typed.
+        let lead_is_wanted = ranked.first().is_some_and(|simple| {
+            wanted.as_ref().is_some_and(|w| {
+                w.closeness(simple, self.class_names.candidates(simple), &|_, _| false)
+                    == Closeness::Exact
+            })
+        });
         ranked
             .into_iter()
-            .map(|simple| {
-                let candidates = self.class_names.candidates(simple);
+            .enumerate()
+            .map(|(index, simple)| {
+                let candidates = self.class_names.candidates(&simple);
                 // A NESTED type written by its simple name does not compile on its own. See
                 // `nested_form`: it answers the qualified spelling and the import that makes it
                 // work, and `None` for everything that is already fine.
@@ -843,6 +893,7 @@ impl NativeJavaProvider {
                     // and documenting one of them would document the wrong one half the time.
                     owner: (candidates.len() == 1)
                         .then(|| candidates[0].replace('.', "/")),
+                    preselect: index == 0 && lead_is_wanted,
                     ..Default::default()
                 }
             })
@@ -907,7 +958,7 @@ impl NativeJavaProvider {
         // the JDK alone has more than three hundred classes beginning with `S`, so the sweep behind
         // `@S` ended long before `SuppressWarnings`, and the popup fell through to the buffer's own
         // words. See [`ClassNameIndex::matches_for_prefix_where`].
-        let mut kept: HashMap<&str, Arc<Vec<String>>> = HashMap::new();
+        let mut kept: HashMap<String, Arc<Vec<String>>> = HashMap::new();
         let matched = self.class_names.matches_for_prefix_where(&site.prefix, MAX, &mut |simple| {
             if bennu_complete::prelude::match_tier(simple, &site.prefix, case).is_none() {
                 return false;
@@ -916,14 +967,31 @@ impl NativeJavaProvider {
             if annotations.is_empty() {
                 return false;
             }
-            kept.insert(simple, annotations);
+            kept.insert(simple.to_string(), annotations);
             true
         });
+        let mut names: Vec<String> = matched.into_iter().map(str::to_string).collect();
+        // The sweep walks names shortest first and stops at the cap, so it is blind to how much the
+        // project uses one: behind `@R` there are more than forty shorter annotations in the JDK and
+        // Spring alone, and `RequiredArgsConstructor`, imported in hundreds of files, was cut before
+        // the census that knows it could rank it. The names this file and the project import are
+        // added before ranking — a few hundred at most, and exactly the ones a cap must not cut.
+        for simple in here.used_names(&site.prefix, case) {
+            if kept.contains_key(&simple) {
+                continue;
+            }
+            let annotations = self.annotations_named(&simple, resolver);
+            if annotations.is_empty() {
+                continue;
+            }
+            kept.insert(simple.clone(), annotations);
+            names.push(simple);
+        }
         // How well the name matches comes first: the sweep produced names in match order, and
         // sorting on `@Target` fit and proximity alone threw that away — a fuzzy hit could head the
         // list above the exact prefix the project writes in hundreds of files.
         let mut scored: Vec<(Option<u8>, u8, Rank, String, Option<String>)> = Vec::new();
-        for simple in matched {
+        for simple in &names {
             let annotations = &kept[simple];
             let Some(first) = annotations.first() else { continue };
             // Legal here, by its own `@Target`. Ranked ahead rather than kept alone — see above.
@@ -1923,18 +1991,76 @@ fn in_import_statement(text: &str, pos: usize) -> bool {
 }
 
 /// Whether the identifier starting at `ident_start` is a member access — the nearest non-whitespace
-/// char before it is a `.` (`recv.Foo`), so it's a member, not a bare type reference.
+/// text before it is a `.` (`recv.Foo`) or a `::` (`Type::foo`), so it names a member, never a bare
+/// variable or type.
 fn is_member_access(text: &str, ident_start: usize) -> bool {
-    let bytes = text.as_bytes();
-    let mut i = ident_start;
-    while i > 0 {
-        match bytes[i - 1] {
-            b' ' | b'\t' | b'\r' | b'\n' => i -= 1,
-            b'.' => return true,
-            _ => return false,
+    let head = text[..ident_start.min(text.len())].trim_end();
+    head.ends_with('.') || head.ends_with("::")
+}
+
+#[cfg(test)]
+mod member_access_tests {
+    use super::{is_member_access, led_by, with_one_preselect};
+    use bennu_proto::prelude::CompletionItem;
+
+    fn word_start(marked: &str) -> (String, usize) {
+        let caret = marked.find('|').expect("a caret marker");
+        let src = marked.replacen('|', "", 1);
+        let start = src[..caret]
+            .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .map_or(0, |i| i + 1);
+        (src, start)
+    }
+
+    /// Every one of these is a member being written — the carets where nothing bare may be offered,
+    /// whatever member inference made of the receiver.
+    #[test]
+    fn a_word_after_a_dot_or_a_double_colon_is_a_member_access() {
+        for marked in [
+            "identity_resolver.resolve_identity().ma|",
+            "identity_resolver.resolve_identity().|",
+            "builder\n    .bu|",
+            "map(ResolvedIdentity::|)",
+            "map(ResolvedIdentity::ide|)",
+            "map(this :: ru|)",
+        ] {
+            let (src, start) = word_start(marked);
+            assert!(is_member_access(&src, start), "{marked}");
         }
     }
-    false
+
+    #[test]
+    fn a_bare_word_is_not_a_member_access() {
+        for marked in ["map(Re|)", "return ch|", "cond ? a : ch|", "case X: ch|", "|"] {
+            let (src, start) = word_start(marked);
+            assert!(!is_member_access(&src, start), "{marked}");
+        }
+    }
+
+    fn class(label: &str) -> CompletionItem {
+        CompletionItem { label: label.into(), kind: "class".into(), ..Default::default() }
+    }
+
+    /// The type the slot receives leads, and its second copy from the name index is dropped.
+    #[test]
+    fn the_lead_types_come_first_and_are_not_repeated() {
+        let lead = vec![CompletionItem { preselect: true, ..class("ResolvedIdentity") }];
+        let rest = vec![class("Record"), class("ResolvedIdentity"), class("Reference")];
+        let labels: Vec<String> = led_by(lead, rest).into_iter().map(|i| i.label).collect();
+        assert_eq!(labels, ["ResolvedIdentity", "Record", "Reference"]);
+    }
+
+    /// The leading list's pick is kept; a later list's pick would tie it for first in the editor.
+    #[test]
+    fn only_the_first_preselected_item_stays_preselected() {
+        let items = with_one_preselect(vec![
+            class("Record"),
+            CompletionItem { preselect: true, ..class("RawIdentity") },
+            CompletionItem { preselect: true, ..class("raw") },
+        ]);
+        let picked: Vec<&str> = items.iter().filter(|i| i.preselect).map(|i| i.label.as_str()).collect();
+        assert_eq!(picked, ["RawIdentity"]);
+    }
 }
 
 /// The single FQN to auto-import for a type completion, or `None` when it shouldn't auto-import: an
@@ -2158,6 +2284,29 @@ impl<'a> Proximity<'a> {
         }
     }
 
+    /// The simple type names this file imports and — with the census on — every type the project
+    /// imports, that answer `prefix` under `case`. Sorted, without duplicates.
+    ///
+    /// For the name searches that sweep a capped number of names before ranking them: the sweep's
+    /// order knows nothing about use, so these are added to what it found and ranked with it.
+    fn used_names(&self, prefix: &str, case: MatchCase) -> Vec<String> {
+        let project = self.census.into_iter().flat_map(|census| census.imported_types());
+        let mut out: Vec<String> = self
+            .imported
+            .iter()
+            .map(String::as_str)
+            .chain(project)
+            .filter_map(|fqn| fqn.rsplit('.').next())
+            // A `.*` import's package segment and a static import's member are not type names.
+            .filter(|simple| simple.starts_with(|c: char| c.is_ascii_uppercase()))
+            .filter(|simple| bennu_complete::prelude::match_tier(simple, prefix, case).is_some())
+            .map(str::to_string)
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// A sort key over a simple name's candidate FQNs — **lower is nearer**. The name is ranked by
     /// its nearest candidate: one good reading is what makes a name worth offering.
     fn rank(&self, candidates: &[String]) -> Rank {
@@ -2258,7 +2407,7 @@ impl NativeJavaProvider {
         source: Option<&str>,
         opts: CompletionOptions,
     ) -> Result<Vec<CompletionItem>, IntelError> {
-        let CompletionOptions { census, case } = opts;
+        let CompletionOptions { census, case, level } = opts;
         // No index yet (pre-open / still building) → benign empty, not an error.
         let Some(resolver) = self.resolver.as_deref() else {
             return Ok(Vec::new());
@@ -2287,20 +2436,40 @@ impl NativeJavaProvider {
         // out-of-range offset would panic on the first `&text[..]` — but it kept the clamped value
         // to itself, so the two paths below were still indexing with the raw one.
         let offset = char_boundary_at_or_before(text, at.offset);
+        // The templates that wrap the expression before the dot — `orders.for`. They ride beside
+        // whichever list answers the dot: a `List` has members AND a `.for`, and an `int` has no
+        // members at all and still has `.fori`.
+        let postfix =
+            crate::postfix::postfix_completions(&at.file, text, offset, resolver, level, case);
         // The classpath's type-name catalog rides along: a receiver you have not imported yet
         // (`Arrays.`) is one you are in the middle of writing, and refusing it is refusing the very
         // gesture that adds the import. See `TypeNameCatalog`.
         let member =
             bennu_query::prelude::completion_in(text, offset, resolver, Some(&self.class_names), case);
         if !member.is_empty() {
-            return Ok(member);
+            return Ok(followed_by(member, postfix));
         }
         // No member candidates. A dotted path is the next thing it could be — an `import`, or a
         // name written out qualified — and that is a question about the classpath's *names*,
         // which is the one thing member inference cannot answer: a package has no members.
         let qualified = self.qualified_completions(text, offset);
         if !qualified.is_empty() {
-            return Ok(qualified);
+            return Ok(followed_by(qualified, postfix));
+        }
+        // After a dot with a typed receiver, the templates are the whole answer: everything below
+        // answers a BARE word, and offering locals after `count.` offers what cannot follow a dot.
+        if !postfix.is_empty() {
+            return Ok(postfix);
+        }
+        // …and when there are no templates either, the answer after a separator is NOTHING. This
+        // used to fall through: a receiver inference could not type (`resolve_identity().ma|`
+        // before the index was warm, a chain it does not model) was answered as if `ma` were a bare
+        // word, and the popup offered the class's own methods, its locals and every type on the
+        // classpath — none of which can follow a `.` or a `::`. An empty list is the truth there,
+        // and it is what lets the editor say "no suggestions" instead of offering nonsense.
+        let (word_start, _) = ident_prefix(text, offset);
+        if is_member_access(text, word_start) {
+            return Ok(Vec::new());
         }
         // An `@` narrows the legal names harder than anything else in Java — from every type on the
         // classpath to the annotation types on it — so it gets its own answer rather than being
@@ -2334,14 +2503,44 @@ impl NativeJavaProvider {
             out = merged;
         }
         let types = self.type_completions(text, offset, census, case);
+        // The types a function slot receives lead both orders: in `opt.map(Re|)` the call has
+        // already said which type is about to be named, and nothing the name index or the scope
+        // knows is as specific. With nothing typed they are the ONLY type names offered — which is
+        // what makes Ctrl+Space in `opt.map(|)` open on `ResolvedIdentity`.
+        let functional = self.functional_argument_types(text, offset, resolver, case);
         let (_, prefix) = bennu_query::prelude::split_completion_prefix(text, offset);
         if looks_like_a_type_name(&prefix) {
             let mut typed = types;
             typed.extend(out);
-            return Ok(typed);
+            return Ok(with_one_preselect(led_by(functional, typed)));
         }
         out.extend(types);
-        Ok(out)
+        Ok(with_one_preselect(led_by(functional, out)))
+    }
+
+    /// [`bennu_query::prelude::functional_argument_types`], written the way this file can name them —
+    /// a nested type through its outer, with the outer's import, as every other type completion is.
+    fn functional_argument_types<M: bennu_classpath::prelude::MemberIndex>(
+        &self,
+        text: &str,
+        offset: usize,
+        resolver: &bennu_query::prelude::IndexResolver<M>,
+        case: MatchCase,
+    ) -> Vec<CompletionItem> {
+        let mut items = bennu_query::prelude::functional_argument_types(text, offset, resolver, case);
+        if items.is_empty() {
+            return items;
+        }
+        let symbols = bennu_java::prelude::extract_symbols(text);
+        let site = bennu_java::prelude::enclosing_type_binary(text, offset);
+        for item in &mut items {
+            let Some(fqn) = item.detail.clone() else { continue };
+            if let Some((written, outer)) = self.nested_form(&fqn, &symbols, site.as_deref()) {
+                item.insert_text = Some(written);
+                item.auto_import = Some(outer);
+            }
+        }
+        items
     }
 }
 
@@ -2357,6 +2556,43 @@ pub struct CompletionOptions {
     pub census: bool,
     /// How strictly the typed letters must agree with a candidate's — see [`MatchCase`].
     pub case: MatchCase,
+    /// The Java language level of the module the file belongs to, when it is known. Postfix
+    /// templates only write what that level compiles; `None` is taken as Java 8.
+    pub level: Option<u32>,
+}
+
+/// `items` with `preselect` kept on the FIRST item that carries it and cleared on the rest.
+///
+/// Each list the bare-word answer is merged from may preselect its own best — the type a function
+/// slot receives, the one local of the returned type, the returned class name — and the editor
+/// ranks every preselected row above everything else. Two of them would be two "this one"s, tied
+/// for first by label. The merge order already says which list leads, so its pick is the one kept.
+fn with_one_preselect(mut items: Vec<CompletionItem>) -> Vec<CompletionItem> {
+    let mut taken = false;
+    for item in &mut items {
+        if item.preselect && std::mem::replace(&mut taken, true) {
+            item.preselect = false;
+        }
+    }
+    items
+}
+
+/// `items`, then `more`.
+fn followed_by(mut items: Vec<CompletionItem>, more: Vec<CompletionItem>) -> Vec<CompletionItem> {
+    items.extend(more);
+    items
+}
+
+/// `lead`, then `rest` without the type names `lead` already offers — the same class twice, once
+/// preselected at the top and once in its alphabetical place, is two rows that insert one thing.
+fn led_by(lead: Vec<CompletionItem>, rest: Vec<CompletionItem>) -> Vec<CompletionItem> {
+    if lead.is_empty() {
+        return rest;
+    }
+    let taken: std::collections::HashSet<String> = lead.iter().map(|i| i.label.clone()).collect();
+    let mut out = lead;
+    out.extend(rest.into_iter().filter(|i| !(i.kind == "class" && taken.contains(&i.label))));
+    out
 }
 
 impl CompletionOptions {

@@ -19,10 +19,14 @@ pub mod access;
 pub mod classpath_index;
 pub mod completion;
 pub mod dep_record;
+// The types a function slot receives — `opt.map(Re|)` names the Optional's element first.
+pub mod functional_types;
 pub mod hints;
 pub mod inherited;
 pub mod jdk;
 pub mod member_text;
+// Completion after `::` — the member half of a method reference.
+pub mod method_reference;
 pub mod overridable;
 // What you picked last time — the session-scoped completion memory ("frecency").
 pub mod picked;

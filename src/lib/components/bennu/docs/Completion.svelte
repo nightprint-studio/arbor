@@ -26,6 +26,8 @@
   <kbd>Shift</kbd> is for.
 </Callout>
 <ul>
+  <li>Typing fast does not send a question per key. Within a burst the list is asked for when you pause, and at least every few hundred
+    milliseconds while the burst lasts; the first letter, a <code>.</code> and <kbd>Ctrl</kbd> + <kbd>Space</kbd> are answered at once.</li>
   <li>When an explicit request finds nothing, the footer says so for a moment — <em>No suggestions here</em>, or <em>No engine answered for
     this file</em> when no server or index is up. Silence would look like a shortcut that never arrived, and those two have opposite fixes.</li>
   <li>If a shortcut seems to do nothing at all, turn on <strong>Show keyboard inputs</strong> (<kbd>Alt</kbd> + <kbd>Shift</kbd> +
@@ -44,9 +46,12 @@
   <li><strong>What the position wants.</strong> The only term about the <em>hole</em> rather than the candidate. In
     <code>String name = order.</code> there are forty members on <code>order</code> and a handful that can be written there — and nothing
     about <code>order</code> says which, because the constraint is left of the <code>=</code>. It is read from a declaration with a written
-    type, an assignment to something typed, a <code>return</code>, and a condition, which wants a <code>boolean</code> and turns a member
-    list into its predicates. A <code>void</code> method sinks where a value is wanted. It <em>ranks</em>, never filters: the match is by
-    name, so a real subtype is a miss, and hiding misses would hide the right answer.</li>
+    type, an assignment to something typed, a <code>return</code> — a lambda's too — and a condition, which wants a <code>boolean</code> and
+    turns a member list into its predicates. The exact type comes before a subtype, and the only exact match is preselected: <code>return Ra</code>
+    in a method returning <code>RawIdentity</code> opens on <code>RawIdentity</code>, <code>return builder.</code> on <code>build()</code>, a bare
+    <code>return</code> on the local or field of that type. With a generic return, <code>Optional&lt;RawIdentity&gt;</code>, the element type follows
+    the outer one. A <code>void</code> method sinks where a value is wanted. It <em>ranks</em>, never filters: hiding the misses would hide the
+    right answer whenever the type is not the one expected.</li>
   <li><strong>What you picked last time.</strong> A fact about you, not the code: on a <code>List</code> you reach for <code>stream</code>,
     not <code>listIterator</code>. Kept per <em>declaring type</em>, so what is learned about <code>java.util.List</code> carries to every
     receiver inheriting it. Frequency and recency both count, so a fresh choice can overtake an old habit and one stray pick cannot bury a
@@ -237,7 +242,7 @@ ConfigurazioneCors.MyProva prova;    // accepting "MyProva" writes this`, 'java'
 <table>
   <thead><tr><th>Family</th><th>Abbreviations</th></tr></thead>
   <tbody>
-    <tr><td>Modifiers</td><td><code>psf</code>, <code>psfi</code>, <code>psfs</code>, <code>prsf</code>, <code>prsfi</code>, <code>prsfs</code>, <code>psvm</code> for a <code>main</code></td></tr>
+    <tr><td>Modifiers</td><td><code>pf</code>, <code>prf</code>, <code>psf</code>, <code>psfi</code>,<code>psfs</code>, <code>prsf</code>, <code>prsfi</code>, <code>prsfs</code>, <code>psvm</code> for a <code>main</code></td></tr>
     <tr><td>Printing</td><td><code>sout</code>, <code>souf</code>, <code>serr</code></td></tr>
     <tr><td>Statements</td><td><code>fori</code>, <code>ifn</code>, <code>inn</code>, <code>thr</code></td></tr>
   </tbody>
@@ -267,18 +272,85 @@ ConfigurazioneCors.MyProva prova;    // accepting "MyProva" writes this`, 'java'
   The point is not keystrokes: it lets you think in the order you think — the value, then the control flow around it — instead of committing to an
   <code>if (</code> before you know what goes in it. They appear in the completion list under the name you type, with IntelliJ's names on purpose.
 </p>
+<p>
+  What a template writes depends on the <strong>type</strong> of the expression, and a template is only listed where it applies:
+  <code>.for</code> on a collection or an array, <code>.if</code> on a boolean, <code>.nn</code> on a value that can be <code>null</code>,
+  <code>.ifpe</code> on an <code>Optional</code>. The names it proposes come from the code — <code>orders.for</code> declares an <code>order</code>
+  of the element type — and the imports its text needs are added with it. Templates appear once the type is known and you have started typing a name
+  after the dot.
+</p>
 <table>
   <thead><tr><th>Family</th><th>Templates</th></tr></thead>
   <tbody>
-    <tr><td>Null checks</td><td><code>.nn</code>, <code>.null</code></td></tr>
-    <tr><td>Control flow</td><td><code>.if</code>, <code>.else</code>, <code>.while</code>, <code>.for</code>, <code>.fori</code>, <code>.forr</code>, <code>.switch</code>, <code>.try</code>, <code>.synchronized</code></td></tr>
-    <tr><td>Statements</td><td><code>.var</code>, <code>.return</code>, <code>.throw</code>, <code>.assert</code>, <code>.sout</code>, <code>.serr</code></td></tr>
-    <tr><td>Expressions</td><td><code>.not</code>, <code>.par</code>, <code>.cast</code>, <code>.instanceof</code>, <code>.opt</code>, <code>.stream</code>, <code>.forEach</code></td></tr>
+    <tr><td>Null checks</td><td><code>.nn</code> / <code>.notnull</code>, <code>.null</code>, <code>.reqnonnull</code></td></tr>
+    <tr><td>Conditions</td><td><code>.if</code>, <code>.else</code>, <code>.while</code>, <code>.not</code>, <code>.assert</code>, <code>.switch</code></td></tr>
+    <tr><td>Loops</td><td><code>.for</code> / <code>.iter</code>, <code>.fori</code>, <code>.forr</code>, <code>.forEach</code>, <code>.stream</code></td></tr>
+    <tr><td>Optional</td><td><code>.opt</code>, <code>.optof</code>, <code>.ifp</code>, <code>.ifpe</code>, <code>.ifget</code>, <code>.orThrow</code>, <code>.orGet</code></td></tr>
+    <tr><td>Statements</td><td><code>.var</code>, <code>.return</code>, <code>.throw</code>, <code>.try</code>, <code>.twr</code>, <code>.synchronized</code>, <code>.sout</code>, <code>.soutv</code>, <code>.souf</code>, <code>.serr</code></td></tr>
+    <tr><td>Expressions</td><td><code>.inst</code> / <code>.instanceof</code>, <code>.cast</code>, <code>.castvar</code>, <code>.par</code>, <code>.arg</code>, <code>.lambda</code>, <code>.format</code>, <code>.new</code> on a class name</td></tr>
   </tbody>
 </table>
 <p>
-  They follow the project's <strong>Java level</strong>: below Java 10, <code>.var</code> and <code>.for</code> leave a stop where the type goes instead
-  of writing <code>var</code>. Rust gets its own postfix set from rust-analyzer, in the same list.
+  They follow the <strong>Java level</strong> of the file's module, and write what that level compiles rather than disappearing:
+</p>
+<table>
+  <thead><tr><th>Template</th><th>Below</th><th>From</th></tr></thead>
+  <tbody>
+    <tr><td><code>.var</code>, <code>.for</code>, <code>.twr</code></td><td>the declared type, <code>Order order</code></td><td>Java 10: <code>var order</code></td></tr>
+    <tr><td><code>.inst</code></td><td><code>instanceof</code> and a cast into a local</td><td>Java 16: a type pattern</td></tr>
+    <tr><td><code>.ifpe</code></td><td><code>if (…isPresent()) … else …</code></td><td>Java 9: <code>ifPresentOrElse</code></td></tr>
+    <tr><td><code>.stream</code> on an <code>Optional</code></td><td><code>map(Stream::of).orElseGet(Stream::empty)</code></td><td>Java 9: not listed, <code>stream()</code> is its member</td></tr>
+  </tbody>
+</table>
+<p>
+  An expression that does work is never written twice: where the older form needs the value in two places, <code>repo.findById(id).ifget</code>
+  declares a local for it first, and <code>.fori</code>, whose bound runs on every iteration, is not offered on a call. Templates with no equivalent
+  at the level — <code>Optional</code> before Java 8, <code>.twr</code> before 7 — are not listed. Rust gets its own postfix set from rust-analyzer, in
+  the same list.
+</p>
+<p>
+  Postfix templates of your own sit beside them — a template of the <strong>Postfix</strong> kind, offered on the values it says it applies to. See
+  <strong>Code templates</strong>.
+</p>
+
+<h2>After a dot</h2>
+<p>
+  The list is the members of the value on the left, and its postfix templates — nothing else: no keywords, no words from the file, no local names. When
+  the value's type cannot be worked out, the popup says there are no suggestions rather than offering what cannot follow a dot.
+</p>
+
+<h2>Method references</h2>
+<p>
+  After <code>Type::</code> or <code>value::</code> the list is the methods a reference can name, and <code>new</code> for a class that can be
+  instantiated. The ones that fit the function expected there come first — in <code>optional.map(ResolvedIdentity::|)</code>, the instance methods with
+  no parameters and the static methods taking a <code>ResolvedIdentity</code> — and accepting one writes only the name.
+</p>
+
+<h2>Functions passed as arguments</h2>
+<p>
+  Inside a call that takes a function, the type the function receives is offered first: in <code>identity_resolver.resolve_identity().map(|)</code> it
+  is <code>ResolvedIdentity</code>, the value inside the <code>Optional</code>. <kbd>Ctrl</kbd> + <kbd>Space</kbd> with nothing typed opens on it,
+  preselected, with its import.
+</p>
+
+<h2>A declaration's name</h2>
+<p>
+  After the type of a declaration — a field after its modifiers, a local variable, a method or constructor parameter, a <code>for</code> or
+  <code>try</code> resource — the name IntelliJ would suggest is drawn ahead of the caret, and <kbd>Tab</kbd> writes it:
+</p>
+<table>
+  <thead><tr><th>Written</th><th>Suggested</th></tr></thead>
+  <tbody>
+    <tr><td><code>private final OrderRepository </code></td><td><code>orderRepository</code></td></tr>
+    <tr><td><code>List&lt;Order&gt; </code>, <code>Order[] </code></td><td><code>orders</code></td></tr>
+    <tr><td><code>Optional&lt;Order&gt; </code></td><td><code>order</code></td></tr>
+    <tr><td><code>Class&lt;?&gt; </code></td><td><code>clazz</code></td></tr>
+  </tbody>
+</table>
+<p>
+  A name already declared where Java would refuse a second one gets a digit (<code>order1</code>). Once you start typing the name, the suggestion stays
+  only while it continues what you typed. It never appears after <code>return</code>, <code>new</code> or an operator, inside arguments, strings or
+  comments, or in a class header.
 </p>
 
 <h2>Members that do not exist yet</h2>

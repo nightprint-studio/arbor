@@ -27,12 +27,21 @@ pub mod expected;
 // The four questions every framework rule asks of a declaration — annotations, modifiers,
 // literals — read as nodes rather than as text.
 pub mod decl;
+// The name a declaration is about to be given — `private final OrderRepository ` → `orderRepository`.
+// Read from tokens, not the parse: the declaration is unfinished by definition.
+pub mod declaration_name;
 pub mod grammar;
 pub mod hierarchy;
 pub mod import_hint;
 pub mod infer;
 // The `/** … */` block above a declaration, for one offset or for a whole file.
 pub mod javadoc;
+// The name a variable of a written type reads as — `List<Order>` is `orders`. Built on the postfix
+// templates' word rules, so both features propose the same names.
+pub mod names;
+// Postfix templates — `orders.for`, `found.ifpe` — decided by the expression's type and the module's
+// language level. Pure: the provider infers the type and turns expansions into edits.
+pub mod postfix;
 pub mod prelude;
 // What the lexical scope at a caret binds — the names a bare identifier there could mean.
 pub mod scope;
@@ -156,6 +165,80 @@ mod tests {
                 },
             );
 
+            // `Object` itself, so a hierarchy that ends in it is a COMPLETE one. The functional
+            // interface reads (a lambda parameter's type, a method reference's descriptor) refuse to
+            // answer over a hierarchy with a hole in it, and every class here names `Object` as its
+            // superclass.
+            r.classes.insert("java/lang/Object".into(), class(vec![]));
+
+            // `final class Optional<T>` — `<U> Optional<U> map(Function<? super T, ? extends U>)`,
+            // `T orElse(T)`, `boolean isPresent()`. The wildcards are what the bytecode decoder
+            // collapses onto their bounds, so the fake spells the bounds.
+            let mut optional = class(vec![
+                Member::method(
+                    "map",
+                    gen("java/util/Optional", vec![TypeRef::simple("U")]),
+                    vec![gen(
+                        "java/util/function/Function",
+                        vec![TypeRef::simple("T"), TypeRef::simple("U")],
+                    )],
+                ),
+                Member::method("orElse", TypeRef::simple("T"), vec![TypeRef::simple("T")]),
+                m("isPresent", tr("boolean")),
+            ]);
+            optional.type_params = vec!["T".into()];
+            r.classes.insert("java/util/Optional".into(), optional);
+
+            // `interface Function<T, R> { R apply(T t); }` — the one abstract method is the SAM.
+            r.classes.insert(
+                "java/util/function/Function".into(),
+                ClassMembers {
+                    type_params: vec!["T".into(), "R".into()],
+                    superclass: None,
+                    interfaces: vec![],
+                    methods: vec![Member::method(
+                        "apply",
+                        TypeRef::simple("R"),
+                        vec![TypeRef::simple("T")],
+                    )
+                    .abstract_()],
+                    fields: vec![],
+                    flags: crate::seam::ClassFlags { is_interface: true, is_abstract: true, ..Default::default() },
+                },
+            );
+
+            // The user's project: a snake_case method on an INTERFACE, returning an `Optional`.
+            r.classes.insert(
+                "com/acme/IdentityResolver".into(),
+                ClassMembers {
+                    type_params: Vec::new(),
+                    superclass: None,
+                    interfaces: vec![],
+                    methods: vec![Member::method(
+                        "resolve_identity",
+                        gen("java/util/Optional", vec![tr("com/acme/ResolvedIdentity")]),
+                        vec![],
+                    )
+                    .abstract_()],
+                    fields: vec![],
+                    flags: crate::seam::ClassFlags { is_interface: true, is_abstract: true, ..Default::default() },
+                },
+            );
+            r.classes.insert(
+                "com/acme/ResolvedIdentity".into(),
+                class(vec![m("identifier", tr("java/lang/String")), m("roles", tr("int"))]),
+            );
+            r.classes.insert("com/acme/Token".into(), class(vec![]));
+            r.classes.insert(
+                "com/acme/Util".into(),
+                class(vec![Member::method(
+                    "convert",
+                    tr("com/acme/Token"),
+                    vec![tr("com/acme/ResolvedIdentity")],
+                )
+                .stat()]),
+            );
+
             for (s, b) in [
                 ("String", "java/lang/String"),
                 ("List", "java/util/List"),
@@ -164,6 +247,12 @@ mod tests {
                 ("Customer", "com/acme/Customer"),
                 ("Pair", "com/acme/Pair"),
                 ("Object", "java/lang/Object"),
+                ("Optional", "java/util/Optional"),
+                ("Function", "java/util/function/Function"),
+                ("IdentityResolver", "com/acme/IdentityResolver"),
+                ("ResolvedIdentity", "com/acme/ResolvedIdentity"),
+                ("Token", "com/acme/Token"),
+                ("Util", "com/acme/Util"),
             ] {
                 r.simple.insert(s.into(), b.into());
             }
@@ -196,6 +285,183 @@ mod tests {
     }
     fn m(name: &str, ret: TypeRef) -> Member {
         Member::method(name, ret, vec![]).sig(String::new())
+    }
+    /// A plain class extending `Object`, with `methods`.
+    fn class(methods: Vec<Member>) -> ClassMembers {
+        ClassMembers {
+            type_params: Vec::new(),
+            superclass: Some(TypeRef::simple("java/lang/Object")),
+            interfaces: vec![],
+            methods,
+            fields: vec![],
+            flags: Default::default(),
+        }
+    }
+
+    // ---- the reported Spring/Lombok class, exactly as written ----
+    //
+    // A snake_case method on a field typed by a project INTERFACE, returning `Optional<…>`, inside a
+    // class whose header carries two annotations and an `implements` — and a statement with no `;`
+    // yet, because the caret is at the end of the line being written.
+
+    /// The reported class with `body` as the one statement of `check_delegate`.
+    fn check_assigned_user(body: &str) -> String {
+        format!(
+            "package com.acme;\n\
+             \n\
+             import lombok.RequiredArgsConstructor;\n\
+             import lombok.val;\n\
+             import org.springframework.stereotype.Component;\n\
+             \n\
+             @RequiredArgsConstructor @Component\n\
+             public class CheckAssignedUser implements AttributeValidator {{\n\
+             \x20   private final IdentityResolver identity_resolver;\n\
+             \n\
+             \x20   private void check_delegate(final String username) {{\n\
+             \x20       {body}\n\
+             \x20   }}\n\
+             }}\n"
+        )
+    }
+
+    /// The type of the local `name` at its DECLARATION — what hover asks of a local's name. Found as
+    /// ` name =`, because the bare word also occurs inside `check_delegate`.
+    fn type_of(src: &str, name: &str) -> Option<TypeRef> {
+        let start = src.find(&format!(" {name} =")).expect("declaration present") + 1;
+        infer_expression_type(src, start, start + name.len(), &FakeResolver::jdk())
+    }
+
+    /// Bug 1's receiver, with the caret right after the dot (member completion excises whatever
+    /// prefix was typed before it asks, so `.ma|` arrives here as `.|`).
+    #[test]
+    fn a_snake_case_call_on_a_field_typed_by_a_project_interface_is_its_optional() {
+        let src = check_assigned_user("identity_resolver.resolve_identity().");
+        let ty = infer(&src);
+        assert_eq!(ty.binary_name, "java/util/Optional");
+        assert_eq!(
+            ty.type_args.first().map(|a| a.binary_name.as_str()),
+            Some("com/acme/ResolvedIdentity")
+        );
+    }
+
+    /// Bug 4: `val delegate = ….map(ResolvedIdentity::identifier)` hovers as `Optional<String>`. The
+    /// hover of a local asks exactly this — the type of its NAME at the declaration.
+    #[test]
+    fn a_lombok_val_bound_to_a_map_over_a_method_reference_is_an_optional_of_its_result() {
+        let src = check_assigned_user(
+            "val delegate = identity_resolver.resolve_identity().map(ResolvedIdentity::identifier);",
+        );
+        let ty = type_of(&src, "delegate").expect("the local is typed");
+        assert_eq!(ty.binary_name, "java/util/Optional");
+        assert_eq!(ty.type_args.first().map(|a| a.binary_name.as_str()), Some("java/lang/String"));
+    }
+
+    #[test]
+    fn a_final_val_is_typed_the_same_way() {
+        let src = check_assigned_user(
+            "final val delegate = identity_resolver.resolve_identity().map(ResolvedIdentity::identifier);",
+        );
+        let ty = type_of(&src, "delegate").expect("the local is typed");
+        assert_eq!(ty.type_args.first().map(|a| a.binary_name.as_str()), Some("java/lang/String"));
+    }
+
+    /// `Foo::new` produces a `Foo`.
+    #[test]
+    fn a_constructor_reference_binds_the_type_it_constructs() {
+        let src = check_assigned_user(
+            "val delegate = identity_resolver.resolve_identity().map(ResolvedIdentity::new);",
+        );
+        let ty = type_of(&src, "delegate").expect("the local is typed");
+        assert_eq!(
+            ty.type_args.first().map(|a| a.binary_name.as_str()),
+            Some("com/acme/ResolvedIdentity")
+        );
+    }
+
+    /// A STATIC method taking the element: `Util::convert(ResolvedIdentity) -> Token`.
+    #[test]
+    fn a_static_method_reference_binds_what_the_static_returns() {
+        let src = check_assigned_user(
+            "val delegate = identity_resolver.resolve_identity().map(Util::convert);",
+        );
+        let ty = type_of(&src, "delegate").expect("the local is typed");
+        assert_eq!(ty.type_args.first().map(|a| a.binary_name.as_str()), Some("com/acme/Token"));
+    }
+
+    /// The lambda spelling of the same thing: its parameter is typed from `Optional<T>`, its body
+    /// from that parameter.
+    #[test]
+    fn an_expression_lambda_binds_what_its_body_returns() {
+        let src = check_assigned_user(
+            "val delegate = identity_resolver.resolve_identity().map(r -> r.identifier());",
+        );
+        let ty = type_of(&src, "delegate").expect("the local is typed");
+        assert_eq!(ty.type_args.first().map(|a| a.binary_name.as_str()), Some("java/lang/String"));
+    }
+
+    /// The type flows on: `….map(ResolvedIdentity::identifier).orElse(null).` completes a `String`.
+    #[test]
+    fn the_bound_element_flows_into_the_next_call_in_the_chain() {
+        let src = check_assigned_user(
+            "identity_resolver.resolve_identity().map(ResolvedIdentity::identifier).orElse(null).",
+        );
+        assert_eq!(infer(&src).binary_name, "java/lang/String");
+    }
+
+    // ---- what a function slot receives (bug 2, bug 3) ----
+
+    /// The descriptor at the caret marked `|` in `body`.
+    fn descriptor(body: &str) -> Option<crate::infer::FunctionalDescriptor> {
+        let marked = check_assigned_user(body);
+        let at = marked.find('|').expect("a caret marker");
+        let src = marked.replacen('|', "", 1);
+        functional_descriptor_at(&src, at, &FakeResolver::jdk())
+    }
+
+    fn params(d: Option<crate::infer::FunctionalDescriptor>) -> Vec<String> {
+        d.map(|d| d.params.into_iter().map(|p| p.binary_name).collect()).unwrap_or_default()
+    }
+
+    /// `map(Re|)`: the function receives the `Optional`'s element.
+    #[test]
+    fn a_word_in_optional_map_is_where_the_element_goes() {
+        assert_eq!(
+            params(descriptor("identity_resolver.resolve_identity().map(Re|)")),
+            vec!["com/acme/ResolvedIdentity".to_string()]
+        );
+    }
+
+    /// Nothing typed yet, and no `)` written either — the explicit Ctrl+Space case.
+    #[test]
+    fn an_empty_argument_still_has_a_descriptor() {
+        assert_eq!(
+            params(descriptor("identity_resolver.resolve_identity().map(|)")),
+            vec!["com/acme/ResolvedIdentity".to_string()]
+        );
+        assert_eq!(
+            params(descriptor("identity_resolver.resolve_identity().map(|")),
+            vec!["com/acme/ResolvedIdentity".to_string()]
+        );
+    }
+
+    /// The member half of a method reference is the same slot.
+    #[test]
+    fn the_member_half_of_a_method_reference_has_the_slots_descriptor() {
+        for body in [
+            "identity_resolver.resolve_identity().map(ResolvedIdentity::|)",
+            "identity_resolver.resolve_identity().map(ResolvedIdentity::ide|)",
+        ] {
+            let d = descriptor(body);
+            assert_eq!(params(d.clone()), vec!["com/acme/ResolvedIdentity".to_string()], "{body}");
+            // `U` is bound by the reference being written, not by anything around it.
+            assert_eq!(d.map(|d| d.returns.binary_name).as_deref(), Some("java/lang/Object"), "{body}");
+        }
+    }
+
+    /// `orElse(T)` takes a value, not a function — there is no shape to describe.
+    #[test]
+    fn a_value_argument_has_no_descriptor() {
+        assert!(descriptor("identity_resolver.resolve_identity().orElse(Re|)").is_none());
     }
 
     /// Byte offset just after the LAST `.` in `src`.

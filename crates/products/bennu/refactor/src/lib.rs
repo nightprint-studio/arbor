@@ -14,6 +14,7 @@
 //! | [`inline_var`] | a local goes back into its uses, parenthesised where the context binds tighter, refused where the value would move |
 //! | [`inline_method`] | a one-expression method goes back into its call, with its parameters substituted structurally |
 //! | [`field`] | a local becomes a field, with its initialisation left where it ran |
+//! | [`final_field`] | a blank `final` field gets initialised: a constructor parameter, a placeholder in the constructor or the declaration, or no `final` |
 //! | [`switch`] | an `if` chain on one value becomes a `switch`, with the `break`s javac will accept |
 //! | [`move_member`] | a member changes type — pulled up, pushed down, or moved across |
 //! | [`move_class`] | a nested type gets its own file, beside the one it left |
@@ -51,6 +52,8 @@ pub mod extract_var;
 pub mod declaration;
 // A local becomes a field.
 pub mod field;
+// A blank `final` field gets initialised — a constructor parameter, a placeholder, or no `final`.
+pub mod final_field;
 pub mod if_statement;
 pub mod inline_method;
 // A local goes back into its uses.

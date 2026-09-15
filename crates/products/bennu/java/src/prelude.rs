@@ -52,7 +52,7 @@ pub use crate::scope::{caret_is_static, visible_bindings, Binding};
 
 // The type a position wants — the strongest completion signal there is, and the one that is
 // about the hole rather than about the candidate.
-pub use crate::expected::{expected_type, expected_type_at};
+pub use crate::expected::{expected_type, expected_type_at, functional_descriptor_at};
 
 // Static-import targets — `import static …` parsed into (owner, member) for inference + undefined-var.
 pub use crate::static_import::{static_import_targets, StaticImportTarget};
@@ -92,3 +92,17 @@ pub use crate::decl::{
 
 // The abbreviations a Java file expands, as a table the caller shapes for the wire.
 pub use crate::templates::{matching as matching_templates, Template, TEMPLATES};
+
+// Variable names: the one a written type reads as, and the one a declaration at a caret is about to
+// be given (the ghost text after `private final OrderRepository `).
+pub use crate::declaration_name::{declaration_name_at, DeclarationName};
+pub use crate::names::suggested_name_for_type;
+
+// Postfix templates: the subject found by scanning, its shape read off its type, the expansions the
+// module's language level allows.
+pub use crate::postfix::{
+    expansions as postfix_expansions, indent_unit as postfix_indent_unit, shape_of as postfix_shape,
+    subject_start as postfix_subject_start, Element as PostfixElement, Expansion as PostfixExpansion,
+    Length as PostfixLength, OptionalShape as PostfixOptional, PostfixContext, Stop as PostfixStop,
+    Subject as PostfixSubject, ValueShape as PostfixShape, Written as PostfixWritten,
+};

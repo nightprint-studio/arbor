@@ -1,10 +1,9 @@
 /**
  * The Java language level the open project targets.
  *
- * Small, and it earns its place: several editor-side decisions are only correct with it. Postfix
- * templates are the first — `.var` and `.for` want `var` on a modern project and must not emit it on
- * a Java 8 one, where it doesn't compile. Getting that wrong is worse than not offering the template
- * at all, because the code looks right until it is built.
+ * What the status bar shows beside the JDK: the level in force for the open file, and the module
+ * that declares it when that differs from the project. (Postfix templates need the same answer and
+ * get it in the backend, per request, from the same pom reading — so the two cannot disagree.)
  *
  * The level comes from `bennu_jdk_status`, which reads it out of the build file (`maven.compiler.
  * source`, the Gradle toolchain, …) — the same number the validator gates version-specific features
@@ -54,10 +53,6 @@ function createJavaLevelStore() {
     /** The level the PROJECT declares, whatever the open file's module says. */
     get projectLevel() {
       return projectLevel;
-    },
-    /** Whether the project can be given `var` (Java 10) and everything after it. */
-    get hasVar() {
-      return level >= 10;
     },
     /** Load the level for `root`, unless it is already the one loaded. Never throws. */
     async load(root: string) {

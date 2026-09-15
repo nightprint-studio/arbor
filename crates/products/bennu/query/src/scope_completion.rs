@@ -26,6 +26,13 @@
 //! one would be inventing a comparison. What actually decides is distance from the caret, and the
 //! bands in [`crate::rank::band`] are that distance made explicit. Inside a band, the ordinary
 //! member ranking applies.
+//!
+//! ## …except for what the position wants
+//!
+//! One thing does cross the bands: [`crate::rank::Fit`]. After `return |` in a method returning
+//! `Order`, the field `current` of type `Order` can be written there and the local `label` two lines
+//! up cannot, and nearness has nothing to say about that. So the fit is the leading key and the
+//! bands order what is left inside each fit — the same rule the member list after a dot follows.
 
 use std::collections::HashSet;
 
@@ -37,7 +44,8 @@ use bennu_java::prelude::{
 use bennu_proto::prelude::CompletionItem;
 
 use crate::completion::{
-    collapse_overloads, collect_members, drop_call_syntax_if_written, split_prefix, Ranked,
+    collapse_overloads, collect_members, drop_call_syntax_if_written,
+    preselect_the_only_exact_fit, sort_ranked, split_prefix, Ranked,
 };
 use crate::member_text::render_type;
 use bennu_complete::prelude::{MatchCase, Typed};
@@ -100,7 +108,12 @@ pub fn scope_completion<M: CpMemberIndex>(
         if !seen.insert(format!("local:{}", b.name)) {
             continue;
         }
+        let fit = b
+            .ty
+            .as_ref()
+            .map_or(rank::Fit::None, |t| ctx.fit(t, resolver));
         out.push(Ranked {
+            fit,
             score: rank::score_binding(
                 &b.name,
                 b.is_parameter,
@@ -148,12 +161,8 @@ pub fn scope_completion<M: CpMemberIndex>(
 
     collect_static_imports(resolver, &symbols, typed, site.as_deref(), &ctx, &mut out, &mut seen);
 
-    out.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then(a.item.kind.cmp(&b.item.kind))
-            .then(a.item.label.cmp(&b.item.label))
-    });
+    sort_ranked(&mut out);
+    preselect_the_only_exact_fit(&mut out);
     let mut items: Vec<CompletionItem> = out.into_iter().map(|r| r.item).collect();
     drop_call_syntax_if_written(&mut items, source, at);
     items

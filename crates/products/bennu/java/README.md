@@ -53,6 +53,14 @@ fn infer_receiver_type(source: &str, byte_offset: usize, resolver: &dyn TypeReso
 // takes an ALREADY-located node (the check found it while walking), skipping the descendant search.
 fn infer_expression_type(source: &str, start: usize, end: usize, resolver: &dyn TypeResolver)
     -> Option<TypeRef>
+// `infer_receiver_type` repairs a trailing `recv.` with a call stub, and — only when that does not
+// parse and the rest of the line is blank — with the same stub finished by `;`.
+
+// The shape of the functional interface the expression at a caret is passed to: `opt.map(|)`,
+// `opt.map(Foo::|)`, a declared variable's initializer, a `return`. Params come back with the
+// receiver's generics substituted (`Optional<Foo>.map` → `[Foo]`); an unbound variable is `Object`.
+fn functional_descriptor_at(source: &str, byte_offset: usize, resolver: &dyn TypeResolver)
+    -> Option<FunctionalDescriptor>   // { params: Vec<TypeRef>, returns: TypeRef }
 
 // New-file scaffolding: infer a Java package from a target dir + render initial content.
 fn infer_package(dir: &Path) -> Option<String>          // ".../src/main/java/com/x" -> "com.x"
@@ -94,6 +102,36 @@ fn simple_name_reaches(binary, simple, package, imports) -> bool
 //   name, so it finds a type in any package, which is right for completion and wrong for a
 //   "cannot resolve". Only a validator needs this; it does NOT know about types declared in the
 //   file, type parameters or inherited member types, which its caller must exclude first.
+```
+
+Postfix templates — the catalogue, pure; the provider (`bennu-intel`) infers the type and makes edits:
+
+```rust
+fn postfix_subject_start(source: &str, dot: usize) -> Option<usize>     // where `expr.` begins (scan, not parse)
+fn postfix_shape(ty: &TypeRef, expr: &str, resolver: &dyn TypeResolver) -> PostfixShape
+//   what the type makes possible: element types (array / Iterable), Optional kind, length, closeable,
+//   switchable, … plus `repeatable` (no call, no `new`) and `non_null` (literal, `this`, `new X()`)
+fn postfix_expansions(subject: &PostfixSubject, ctx: &PostfixContext, wanted: &dyn Fn(&str) -> bool)
+    -> Vec<PostfixExpansion>   // { name, detail, text, stops: Vec<PostfixStop { start, end, group }>, imports }
+fn postfix_indent_unit(source: &str) -> String                           // the file's indentation step
+//   PostfixContext { level, unit } — the level decides the form: `var` from 10, type patterns from 16,
+//   `ifPresentOrElse` from 9, with the older equivalent written below; an expression that does work is
+//   never written twice (declared into a local first, or the template is not offered).
+```
+
+Variable names — what a declaration of a type is called, IntelliJ's way:
+
+```rust
+fn suggested_name_for_type(written: &str) -> Option<String>
+//   `URLBuilder` → urlBuilder, `List<Order>` / `Order[]` / `Order...` → orders, `Optional<Order>` → order,
+//   `Map<K, V>` → map, `Class<?>` → clazz, `String` → s. The word rules are the postfix templates' own.
+fn declaration_name_at(source: &str, offset: usize, case_sensitive: bool) -> Option<DeclarationName>
+//   DeclarationName { name, typed_start, typed_end } — the name for the declaration whose type ends
+//   before the caret (field after modifiers, local at a statement start, method/constructor/record/
+//   `for`/`try` parameter), with a digit when the name is taken in that scope (`order1`). Read from
+//   tokens, not the parse. `None` after `return`/`new`/`throw`/`case`/an operator, in arguments, type
+//   arguments, strings and comments, after an annotation, in a type header, for an enum constant.
+//   A partial name typed after the type must be continued by the prediction; it is what accepting replaces.
 ```
 
 > The Alt+Enter **intention** transforms (parameterize logging, NP-safe equals) used to live here;

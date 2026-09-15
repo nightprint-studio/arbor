@@ -8,9 +8,9 @@
 import { bennu } from '../rpc';
 
 /** What a template generates, which decides what it is rendered with and where its output goes. */
-export type TemplateKindId = 'new-file' | 'class' | 'config-properties' | 'config-class' | 'validation-tests' | 'live';
+export type TemplateKindId = 'new-file' | 'class' | 'config-properties' | 'config-class' | 'validation-tests' | 'live' | 'postfix';
 
-export const TEMPLATE_KINDS: readonly TemplateKindId[] = ['new-file', 'class', 'config-properties', 'config-class', 'validation-tests', 'live'];
+export const TEMPLATE_KINDS: readonly TemplateKindId[] = ['new-file', 'class', 'config-properties', 'config-class', 'validation-tests', 'live', 'postfix'];
 
 export interface TemplateInfo {
   name: string;
@@ -26,6 +26,8 @@ export interface TemplateInfo {
   requires: string[];
   /** An abbreviation's `bennu.abbrev` — the word that expands it when that is not its file name. */
   abbrev: string | null;
+  /** A postfix template's `bennu.applies`: the values it is offered on — empty means any value. */
+  applies: string[];
   /** The first of them the open project does not meet (`Needs Java 16 or later`), or `null`. */
   unmet: string | null;
 }
@@ -93,7 +95,8 @@ export interface RenderTemplateRequest {
   kind: TemplateKindId;
   /** The project's template for the kind when absent. */
   template?: string | null;
-  /** The Java file holding the class — every kind but `new-file`. */
+  /** The Java file holding the class — every kind but `new-file`; for `postfix`, optionally the file the
+   *  sample value is typed in. */
   file?: string | null;
   /** That file's unsaved text. */
   source?: string | null;

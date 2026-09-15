@@ -35,6 +35,9 @@ pub struct TemplateInfo {
     pub requires: Vec<String>,
     /// Its `bennu.abbrev`, for an abbreviation whose trigger word is not its file name.
     pub abbrev: Option<String>,
+    /// Its `bennu.applies`, for a postfix template: the values it is offered on — see [`crate::applies`].
+    #[serde(default)]
+    pub applies: Vec<String>,
     /// The first of them the project at hand does not meet — filled in by whoever knows the project.
     pub unmet: Option<String>,
     /// The file, for a template that has one.
@@ -100,6 +103,7 @@ pub fn list_templates(root: &Path, kind: TemplateKind, builtins: &[Builtin]) -> 
             description: Directives::read(b.text).get("description").map(str::to_string),
             requires: Directives::read(b.text).list("requires"),
             abbrev: Directives::read(b.text).get("abbrev").map(str::to_string),
+            applies: Directives::read(b.text).list("applies"),
             unmet: None,
             path: None,
         })
@@ -113,6 +117,7 @@ pub fn list_templates(root: &Path, kind: TemplateKind, builtins: &[Builtin]) -> 
             description: Directives::read(&text).get("description").map(str::to_string),
             requires: Directives::read(&text).list("requires"),
             abbrev: Directives::read(&text).get("abbrev").map(str::to_string),
+            applies: Directives::read(&text).list("applies"),
             unmet: None,
             name,
             extension,

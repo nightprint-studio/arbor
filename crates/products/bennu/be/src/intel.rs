@@ -72,7 +72,18 @@ fn bennu_completion(_ctx: &BennuState, args: CompletionArgs) -> Result<Vec<Compl
         Some(source) => crate::abbreviations::completions(&args.file, source, args.offset),
         None => Vec::new(),
     };
-    let engine = engine_completion(&args)?;
+    // Your postfix templates, merged in where the engine's built-in ones are — and in place of a built-in of
+    // the same name. Asked here for the same reason as the abbreviations: the template store is the backend's.
+    let postfix = match args.source.as_deref() {
+        Some(source) => crate::postfix_templates::completions(
+            &args.file,
+            source,
+            args.offset,
+            bennu_complete::prelude::MatchCase::from_flag(args.case_sensitive),
+        ),
+        None => Vec::new(),
+    };
+    let engine = crate::postfix_templates::merge(engine_completion(&args)?, postfix);
     Ok(match abbreviations.is_empty() {
         true => engine,
         false => abbreviations.into_iter().chain(engine).collect(),

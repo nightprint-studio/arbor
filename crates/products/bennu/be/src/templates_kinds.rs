@@ -11,7 +11,7 @@ use bennu_lsp::prelude::parse_snippet;
 use bennu_proto::prelude::SnippetStop;
 use bennu_templates::prelude::{
     insert_members, render_code, render_with, ClassTemplateContext, ConfigPropertiesContext, ConfigProperty,
-    Directives, LiveContext, NewFileContext, Template,
+    Directives, LiveContext, NewFileContext, PostfixApplicability, PostfixTemplateContext, Template,
 };
 
 use crate::frameworks::FrameworkService;
@@ -136,6 +136,43 @@ pub(crate) fn live(args: &RenderArgs, template: &Template) -> Result<Rendered, S
     let output = render_code(&template.text, &context, &facts, args.parameters.as_ref())?;
     let mut notes = vec!["An abbreviation expands in the editor, where Tab walks its $1, $2 stops.".to_string()];
     if !output.imports.is_empty() {
+        notes.push("Typed in a file, it adds the imports it needs.".to_string());
+    }
+    Ok(Rendered::text(&template.name, output.text, notes))
+}
+
+/// A postfix template, as it would expand after a sample value — `orders`, a `List<Order>` — typed in the
+/// file given when there is one. The value is the preview's to invent, since none is being typed after;
+/// parameters change it (`{"expr": "ids", "type": "int[]"}`).
+pub(crate) fn postfix(args: &RenderArgs, template: &Template) -> Result<Rendered, String> {
+    // Read first, so a mistake in `bennu.applies` is what the preview shows — it is what keeps the template
+    // out of the popup.
+    PostfixApplicability::read(&template.text)?;
+    let opened = source_of(args).ok();
+    let typed_in = opened.as_ref().map(|(file, source)| (file.as_str(), source.as_str()));
+    let facts = match typed_in {
+        Some((file, _)) => facts_at(&args.root, file),
+        None => facts_for(&args.root),
+    };
+    let level = match facts.project.java {
+        0 => bennu_intel::prelude::POSTFIX_LEGACY_LEVEL,
+        known => known,
+    };
+    let context = PostfixTemplateContext::sample(typed_in, level);
+    let output = render_code(&template.text, &context, &facts, args.parameters.as_ref())?;
+    let directives = Directives::read(&template.text);
+    let applies = directives.list("applies");
+    let mut offered = match applies.is_empty() {
+        true => "Offered after the dot of any value".to_string(),
+        false => format!("Offered after the dot of: {}", applies.join(", ")),
+    };
+    if let Some(level) = directives.get("level") {
+        offered.push_str(&format!(", from Java {level}"));
+    }
+    let mut notes = vec![
+        format!("{offered}. It replaces the value, and Tab walks its $1, $2 stops."),
+    ];
+    if !output.imports.is_empty() || !context.implied_imports(&output.text).is_empty() {
         notes.push("Typed in a file, it adds the imports it needs.".to_string());
     }
     Ok(Rendered::text(&template.name, output.text, notes))

@@ -8,7 +8,7 @@
    * coloured as the language it generates, with everything the row could not say — what the project
    * requires of it, the word that expands it, where its file is.
    *
-   * With no `kind` it is the overview instead: the six kinds, what each generates, and how many
+   * With no `kind` it is the overview instead: every kind, what each generates, and how many
    * templates you have of it. The tree has a page per kind under it, and this is the way in.
    */
   import { onMount } from 'svelte';
@@ -226,6 +226,15 @@
                   : 'The word that expands it'}
               >{wordOf(t)}</button>
             {/if}
+          </div>
+        {/if}
+
+        {#if group.kind === 'postfix'}
+          <!-- Its `bennu.applies`: which values the popup offers it after. Written in the template, so read
+               here rather than edited — the words are the template's own vocabulary. -->
+          <div class="det-row">
+            <span class="det-k">Offered on</span>
+            <span class="det-requires">{t.applies?.length ? t.applies.join(', ') : 'any value'}</span>
           </div>
         {/if}
 

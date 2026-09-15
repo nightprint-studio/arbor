@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Code templates, as a guide: what a template is, the six kinds, a first one made step by step, where
+   * Code templates, as a guide: what a template is, the seven kinds, a first one made step by step, where
    * they live and how each is used. Read first; the language is `TemplateLanguage`, and every variable
    * and directive is in `TemplateReference`.
    */
@@ -47,7 +47,7 @@
   template can read.
 </p>
 
-<h2>Six kinds of template</h2>
+<h2>Seven kinds of template</h2>
 <p>
   Every template has a <em>kind</em>. The kind decides where you use the template, what it can read, and
   where what it writes ends up.
@@ -84,6 +84,11 @@
     <div class="fc-title">Abbreviations</div>
     <div class="fc-desc">A word you type that expands into a snippet, next to <code>psf</code> and <code>sout</code>, with <kbd>Tab</kbd> stops to fill in. In any language: the name says which.</div>
   </div>
+  <div class="feature-card">
+    <div class="fc-eyebrow">Java completion, after a dot</div>
+    <div class="fc-title">Postfix</div>
+    <div class="fc-desc">A name typed after a value — <code>orders.logv</code> — that replaces the value with a snippet built around it, offered only on the values it says it applies to.</div>
+  </div>
 </div>
 
 <h2>Your first template, step by step</h2>
@@ -94,7 +99,7 @@
 
 <ol class="step-list">
   <li>Open <strong>Settings › Code Templates</strong> — or run <em>Code templates…</em> from the command palette. The
-    six kinds are listed, and each has a page of its own: the templates of that kind on the left, and the one you pick
+    seven kinds are listed, and each has a page of its own: the templates of that kind on the left, and the one you pick
     on the right — what it writes, what the project needs for it, and where its file is.</li>
   <li>Under <em>From a class</em>, press the copy button on <strong>builder</strong> and name the copy — <code>team-builder</code>. It opens in the editor.</li>
   <li>Open any Java class in another tab, go back to the template and press the <strong>eye button</strong> in its toolbar. The preview beside it renders the template against that class, and follows every key you type.</li>
@@ -112,6 +117,10 @@
   A template of yours can be <strong>renamed</strong> from the same list — the file moves, a tab open on it
   follows, and a project generating with it keeps generating with it. For an abbreviation the name is the word
   you type, so renaming one is how you change what expands it.
+</p>
+<p>
+  A postfix template can be started without opening Settings: <em>New postfix template…</em> in the command
+  palette opens the same dialog on the Postfix kind, and the copy opens in the editor.
 </p>
 
 <h2>Where templates live</h2>
@@ -184,6 +193,11 @@
       <td>Abbreviations</td>
       <td>Typing the abbreviation in a file of the language it writes</td>
       <td>The snippet replaces the word, and <kbd>Tab</kbd> walks its stops.</td>
+    </tr>
+    <tr>
+      <td>Postfix</td>
+      <td>Typing the template's name after a value's dot, on the values it applies to</td>
+      <td>The snippet replaces the value, its imports are added, and <kbd>Tab</kbd> walks its stops.</td>
     </tr>
   </tbody>
 </table>

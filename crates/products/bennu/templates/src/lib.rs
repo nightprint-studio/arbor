@@ -11,6 +11,7 @@
 //! | `config-class` | the keys under a prefix of a configuration file ([`config_tree`], [`config_class`]) | a class file |
 //! | `validation-tests` | the DTO Lab's cases (context in `bennu-dtolab`) | a test file |
 //! | `live` | the file an abbreviation is typed in | a snippet at the caret |
+//! | `postfix` | the value before the dot, typed ([`applies`] says which values) | a snippet over that value |
 //!
 //! The pieces every kind shares live here: the engine and its filters ([`engine`]), the directives a
 //! template writes about itself (`{# bennu.output: file #}`), where templates are kept ([`store`]),
@@ -26,6 +27,7 @@
 //! cannot be overwritten, so every kind always has one that works — or, for a kind where a built-in
 //! would only duplicate what Bennu already does, a *starter* that exists to be copied.
 
+pub mod applies;
 pub mod config_class;
 pub mod config_keys;
 pub mod config_props;

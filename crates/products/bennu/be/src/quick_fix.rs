@@ -11,8 +11,13 @@
 //! work". One source of truth, two renderings of it.
 
 use bennu_java::prelude::{InferCache, TypeResolver};
+use bennu_refactor::prelude::{EditSelection, Plan};
 
-use crate::intentions::{EditWire, OfferWire};
+use crate::intentions::{edit_wire, offer_of, EditWire, OfferWire};
+
+/// The catch body *Surround with try/catch* writes: rethrown unchecked, so nothing is swallowed
+/// while the user decides what handling the exception really needs.
+const CATCH_BODY: &str = "throw new RuntimeException(e);";
 
 /// The fixes for whichever diagnostic of `code` covers `offset`, using the project's resolver.
 ///
@@ -76,26 +81,25 @@ fn create_for_reference_fixes(
     else {
         return Vec::new();
     };
-    let mut edits: Vec<EditWire> = plan
-        .edits
+    let imports: Vec<EditWire> = referenced
+        .types
         .iter()
-        .map(|e| EditWire { start: e.start, end: e.end, text: e.text.clone() })
+        .filter_map(|fqn| crate::intentions::import_edit_for(source, fqn))
+        .map(|(start, end, text)| EditWire { start, end, text })
         .collect();
-    for fqn in &referenced.types {
-        if let Some((start, end, text)) = crate::intentions::import_edit_for(source, fqn) {
-            edits.push(EditWire { start, end, text });
-        }
+    plan_offer(&plan, imports).into_iter().collect()
+}
+
+/// A plan as ONE offer — its edits, then `extra` (the imports its signature needs) — carrying the
+/// plan's selection. The plan's edits lead the list in their own order, so the index the selection
+/// names is the same edit on the wire. `None` for a plan with nothing to write.
+fn plan_offer(plan: &Plan, extra: Vec<EditWire>) -> Option<OfferWire> {
+    if plan.edits.is_empty() {
+        return None;
     }
-    let Some(first) = edits.first().cloned() else { return Vec::new() };
-    vec![OfferWire {
-        id: plan.id.clone(),
-        label: plan.label.clone(),
-        start: first.start,
-        end: first.end,
-        replacement: first.text,
-        action: None,
-        edits,
-    }]
+    let mut edits: Vec<EditWire> = plan.edits.iter().map(edit_wire).collect();
+    edits.extend(extra);
+    Some(offer_of(&plan.id, &plan.label, edits, plan.select))
 }
 
 /// "Create method 'total' in Order" — for a call on another object.
@@ -139,6 +143,7 @@ fn create_in_receiver_fixes(
         replacement: call.name,
         action: Some("create-method-in".to_string()),
         edits: Vec::new(),
+        select: None,
     }]
 }
 
@@ -172,6 +177,7 @@ pub(crate) fn tree_fixes(code: &str, source: &str, start: usize, end: usize) -> 
                 replacement: missing.name,
                 action: Some("create-class".to_string()),
                 edits: Vec::new(),
+                select: None,
             })
             .into_iter()
             .collect();
@@ -180,18 +186,7 @@ pub(crate) fn tree_fixes(code: &str, source: &str, start: usize, end: usize) -> 
     else {
         return Vec::new(); // a refusal here is about another file; the menu says nothing
     };
-    plan.edits
-        .iter()
-        .map(|edit| OfferWire {
-            id: plan.id.clone(),
-            label: plan.label.clone(),
-            start: edit.start,
-            end: edit.end,
-            replacement: edit.text.clone(),
-            action: None,
-            edits: Vec::new(),
-        })
-        .collect()
+    plan_offer(&plan, Vec::new()).into_iter().collect()
 }
 
 /// "Add `throws IOException`" and "Surround with try/catch", for the call the diagnostic underlines.
@@ -238,6 +233,7 @@ fn unhandled_exception_fixes(
                 replacement: format!(" {simple},"),
                 action: None,
                 edits: Vec::new(),
+                select: None,
             });
         }
     } else {
@@ -249,29 +245,35 @@ fn unhandled_exception_fixes(
             replacement: format!(" throws {simple}"),
             action: None,
             edits: Vec::new(),
+            select: None,
         });
     }
 
     // (b) Catch it. The statement, not the call — `byte[] b = try { … }` is not Java.
-    let (s0, s1) = call.statement;
-    if s1 > s0 && s1 <= source.len() {
-        let indent = line_indent(source, s0);
-        let unit = "    ";
-        let body = source[s0..s1].to_string();
-        out.push(OfferWire {
-            id: format!("surround-try:{}", call.exception),
-            label: format!("Surround with try/catch ({simple})"),
-            start: s0,
-            end: s1,
-            replacement: format!(
-                "try {{\n{indent}{unit}{body}\n{indent}}} catch ({simple} e) {{\n\
-                 {indent}{unit}throw new RuntimeException(e);\n{indent}}}"
-            ),
-            action: None,
-            edits: Vec::new(),
-        });
-    }
+    out.extend(surround_with_try(source, call.statement, &call.exception, &simple));
     out
+}
+
+/// *Surround with try/catch* around the statement at `[s0, s1)`, with the catch body selected — the
+/// line IntelliJ leaves for the user to replace with the handling the exception really needs.
+fn surround_with_try(source: &str, (s0, s1): (usize, usize), exception: &str, simple: &str) -> Option<OfferWire> {
+    if s1 <= s0 || s1 > source.len() {
+        return None;
+    }
+    let indent = line_indent(source, s0);
+    let unit = "    ";
+    let body = &source[s0..s1];
+    let text = format!(
+        "try {{\n{indent}{unit}{body}\n{indent}}} catch ({simple} e) {{\n{indent}{unit}{CATCH_BODY}\n{indent}}}"
+    );
+    // The LAST occurrence: the wrapped statement sits above the catch and may itself rethrow that way.
+    let select = text.rfind(CATCH_BODY).map(|start| EditSelection { edit: 0, start, end: start + CATCH_BODY.len() });
+    Some(offer_of(
+        &format!("surround-try:{exception}"),
+        &format!("Surround with try/catch ({simple})"),
+        vec![EditWire { start: s0, end: s1, text }],
+        select,
+    ))
 }
 
 /// "Add the missing cases" for a `switch` the exhaustiveness check flagged.
@@ -327,27 +329,33 @@ fn enum_switch_fixes(
     let close = body.end_byte().saturating_sub(1);
     let arrow = source[body.start_byte()..body.end_byte()].contains("->");
     let indent = format!("{}    ", line_indent(source, switch.start_byte()));
+    let missing: Vec<&str> = missing.iter().map(|s| s.as_str()).collect();
+    missing_cases_offer(close, &indent, arrow, &missing).into_iter().collect()
+}
+
+/// *Add the missing cases*: an arm per constant in `missing`, inserted at `close` (the body's `}`),
+/// with the FIRST arm's placeholder `throw` selected — one selection is what a keystroke replaces,
+/// and the first arm is where the eye already is.
+fn missing_cases_offer(close: usize, indent: &str, arrow: bool, missing: &[&str]) -> Option<OfferWire> {
+    fn placeholder(name: &str) -> String {
+        format!("throw new UnsupportedOperationException(\"{name}\");")
+    }
+    let first = placeholder(missing.first()?);
     let mut text = String::new();
-    for name in &missing {
+    for &name in missing {
         if arrow {
-            text.push_str(&format!("{indent}case {name} -> throw new UnsupportedOperationException(\"{name}\");\n"));
+            text.push_str(&format!("{indent}case {name} -> {}\n", placeholder(name)));
         } else {
-            text.push_str(&format!("{indent}case {name}:\n{indent}    throw new UnsupportedOperationException(\"{name}\");\n"));
+            text.push_str(&format!("{indent}case {name}:\n{indent}    {}\n", placeholder(name)));
         }
     }
-    vec![OfferWire {
-        id: "fill-enum-switch".to_string(),
-        label: format!(
-            "Add the missing case{} ({})",
-            if missing.len() == 1 { "" } else { "s" },
-            missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
-        ),
-        start: close,
-        end: close,
-        replacement: text,
-        action: None,
-        edits: Vec::new(),
-    }]
+    let select = text.find(&first).map(|start| EditSelection { edit: 0, start, end: start + first.len() });
+    let label = format!(
+        "Add the missing case{} ({})",
+        if missing.len() == 1 { "" } else { "s" },
+        missing.join(", ")
+    );
+    Some(offer_of("fill-enum-switch", &label, vec![EditWire { start: close, end: close, text }], select))
 }
 
 /// The constant names the switch's labels already name.
@@ -390,5 +398,73 @@ fn covered_labels(body: tree_sitter::Node, bytes: &[u8]) -> Vec<String> {
 fn line_indent(source: &str, offset: usize) -> String {
     let line_start = source[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
     source[line_start..].chars().take_while(|c| *c == ' ' || *c == '\t').collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{missing_cases_offer, plan_offer, surround_with_try, tree_fixes};
+    use crate::intentions::{EditWire, OfferWire};
+    use bennu_refactor::prelude::{declare_local_method, LocalCall};
+
+    /// The text an offer's selection covers inside the edit it names: `edits[edit]`, or the
+    /// replacement as edit `0` on a single-range offer.
+    fn selected(offer: &OfferWire) -> &str {
+        let select = offer.select.expect("the offer selects");
+        let text = if offer.edits.is_empty() { &offer.replacement } else { &offer.edits[select.edit].text };
+        &text[select.start..select.end]
+    }
+
+    #[test]
+    fn create_method_reaches_the_offer_with_its_placeholder_selected() {
+        let source = "class A {\n    void f() {\n        report();\n    }\n}\n";
+        let at = source.find("report").unwrap();
+        let offers = tree_fixes("unresolved-call", source, at, at + "report".len());
+        let [offer] = offers.as_slice() else { panic!("one offer: {offers:?}") };
+        assert_eq!(offer.id, "create-method");
+        assert_eq!(selected(offer), "throw new UnsupportedOperationException(\"TODO: report\");");
+        assert!(serde_json::to_value(offer).unwrap().get("select").is_some());
+    }
+
+    /// The imports a reference's signature needs travel AFTER the stub, so the selection still
+    /// names the stub.
+    #[test]
+    fn a_reference_offer_with_imports_still_selects_the_stubs_body() {
+        let source = "class A {\n    Object f(java.util.Optional<String> o) {\n        return o.map(this::shout);\n    }\n}\n";
+        let tree = bennu_java::prelude::parse_java(source).unwrap();
+        let call = LocalCall {
+            name: "shout".to_string(),
+            params: vec![("String".to_string(), "string".to_string())],
+            returns: "Object".to_string(),
+            is_static: false,
+        };
+        let plan = declare_local_method(tree.root_node(), source, source.find("this::shout").unwrap(), &call)
+            .expect("a plan");
+        let import = EditWire { start: 0, end: 0, text: "import java.util.List;\n".to_string() };
+        let offer = plan_offer(&plan, vec![import]).expect("an offer");
+        assert_eq!(offer.edits.len(), 2);
+        assert_eq!(selected(&offer), "throw new UnsupportedOperationException(\"TODO: shout\");");
+    }
+
+    #[test]
+    fn surround_with_try_selects_the_catch_body() {
+        let source = "class A {\n    void f() {\n        read();\n    }\n}\n";
+        let s0 = source.find("read();").unwrap();
+        let offer = surround_with_try(source, (s0, s0 + "read();".len()), "java/io/IOException", "IOException")
+            .expect("an offer");
+        assert_eq!(
+            offer.replacement,
+            "try {\n            read();\n        } catch (IOException e) {\n            throw new RuntimeException(e);\n        }"
+        );
+        assert_eq!(selected(&offer), "throw new RuntimeException(e);");
+    }
+
+    #[test]
+    fn the_first_missing_case_has_its_placeholder_selected() {
+        for arrow in [true, false] {
+            let offer = missing_cases_offer(40, "        ", arrow, &["PAID", "SHIPPED"]).expect("an offer");
+            assert_eq!(selected(&offer), "throw new UnsupportedOperationException(\"PAID\");", "arrow: {arrow}");
+            assert!(offer.label.ends_with("(PAID, SHIPPED)"), "{}", offer.label);
+        }
+    }
 }
 

@@ -144,6 +144,15 @@ impl ImportCensus {
         let via_package = band(self.package_count(fqn)).saturating_sub(1);
         direct.max(via_package)
     }
+
+    /// Every type the project imports outright, by fully-qualified name.
+    ///
+    /// For the searches that cap how many names they look at: the names the project actually uses
+    /// are the ones a cap must never cut, and a sweep in any other order — shortest name first, say —
+    /// cuts `RequiredArgsConstructor` behind forty shorter annotations nobody here writes.
+    pub fn imported_types(&self) -> impl Iterator<Item = &str> {
+        self.types.keys().map(String::as_str)
+    }
 }
 
 /// Add one to `key`'s count, saturating, and stop learning new names past [`MAX_NAMES`].

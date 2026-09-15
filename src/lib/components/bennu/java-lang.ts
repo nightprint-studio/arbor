@@ -27,17 +27,15 @@
 
 import { Parser, Language, type Node } from 'web-tree-sitter';
 import {
-  makeU16ToByte, makeByteToU16, renderDoc,
+  makeU16ToByte, makeByteToU16, renderDoc, createCompletionRequests,
   type LanguageDescriptor, type TokenClass, type CompletionSource,
   type InlineCompletionSource,
 } from '$lib/components/shared/ui/code-editor';
 import { toCompletion } from './completion-item';
+import { offersFallbackWords, shouldAskForCompletion } from './java-completion-trigger';
 import {
-  boostForRank, FALLBACK, RESOLVED,
+  boostForRank, FALLBACK, RESOLVED, TEMPLATE,
 } from '$lib/components/shared/ui/code-editor/completion-rank';
-import { expressionStart, postfixCompletion } from '$lib/components/shared/ui/code-editor/postfix';
-import { javaPostfixTemplates } from './java-postfix';
-import { javaLevelStore } from '$lib/stores/bennu/java-level.svelte';
 import {
   type Completion, type CompletionContext, type CompletionResult,
 } from '@codemirror/autocomplete';
@@ -329,7 +327,8 @@ async function applyAutoImport(view: EditorView, fqn: string): Promise<void> {
   view.dispatch({ changes: { from: b2u(edit.start), to: b2u(edit.end), insert: edit.replacement } });
 }
 
-let completionSeq = 0;
+/** Java's backend completion requests, paced to the typing — one for the whole window's editors. */
+const completionRequests = createCompletionRequests<CompletionItem[]>();
 
 // Java keyword/primitive/constant labels offered as completion fallback (identifier-
 // shaped only — `non-sealed` & co. are dropped). Built once.
@@ -400,18 +399,11 @@ function insideStringLiteral(ctx: CompletionContext): boolean {
 const javaCompletionSource: CompletionSource = async (
   ctx: CompletionContext,
 ): Promise<CompletionResult | null> => {
-  // Trigger on `.` explicitly, on `@`, or on an in-progress identifier word. Bail on an
-  // empty word unless the completion was explicitly requested (Ctrl+Space) or we
-  // just typed one of the two characters that narrow the answer on their own.
-  //
-  // The `@` earns its place: it is the only character in Java that cuts the legal names from
-  // *every type on the classpath* to *the annotation types on it*, and above a declaration it
-  // narrows further still — so the popup at that instant is short and nearly always contains the
-  // answer. Waiting for a letter first would hide the one list worth opening unasked.
-  const before = ctx.matchBefore(/\.?[\w$]*$/);
-  const dotTrigger = ctx.matchBefore(/\.$/) != null;
-  const atTrigger = ctx.matchBefore(/@$/) != null;
-  if (!ctx.explicit && !dotTrigger && !atTrigger && (!before || before.from === before.to)) {
+  // Trigger on a word being typed, right after `.` / `::` / `@`, or on an explicit request — see
+  // `java-completion-trigger`, where the rule lives so it can be tested.
+  const line = ctx.state.doc.lineAt(ctx.pos);
+  const textBefore = line.text.slice(0, ctx.pos - line.from);
+  if (!shouldAskForCompletion(textBefore, ctx.explicit)) {
     return null;
   }
 
@@ -427,16 +419,23 @@ const javaCompletionSource: CompletionSource = async (
   const u2b = makeU16ToByte(src);
   const byteOffset = u2b(ctx.pos);
 
-  // Debounce: only the latest request resolves into a popup (a stale earlier
-  // response is dropped). CM already coalesces, but the async IPC can race.
-  const seq = ++completionSeq;
-  let items: Awaited<ReturnType<typeof ipcCompletion>>;
+  // Paced to the typing (see `completion-requests`): a burst of keys asks once it pauses — and at
+  // least every few hundred milliseconds while it lasts — an identical question shares the answer in
+  // flight, and only the newest request resolves into a popup.
+  const caseSensitive = bennuSettingsStore.caseSensitive;
+  const key = `${path} ${byteOffset} ${caseSensitive} ${src}`;
+  let items: CompletionItem[] | null;
   try {
-    items = await ipcCompletion(path, byteOffset, src, bennuSettingsStore.caseSensitive);
+    items = await completionRequests.request(
+      key,
+      () => ipcCompletion(path, byteOffset, src, caseSensitive),
+      ctx.explicit,
+    );
   } catch {
     items = []; // BE absent / not indexed yet — fall back to keywords + buffer words.
   }
-  if (seq !== completionSeq) return null; // superseded by a newer keystroke
+  if (items === null || ctx.aborted) return null; // superseded by a newer keystroke
+  const seq = completionRequests.generation;
 
   // Inside a string literal the Java resolver has nothing to offer by construction — and
   // that is exactly where `@Value("${app.…}")` and `@Qualifier("…")` live. Ask the
@@ -445,7 +444,7 @@ const javaCompletionSource: CompletionSource = async (
   // while typing ordinary code.
   if ((items?.length ?? 0) === 0 && insideStringLiteral(ctx)) {
     const extItems = await extCompletion(path, src, byteOffset).catch(() => []);
-    if (seq !== completionSeq) return null;
+    if (!completionRequests.isCurrent(seq)) return null;
     if (extItems.length > 0) {
       // A property key is dotted and a bean name may be hyphenated, so the token to
       // replace is not the Java word — `app.tim` must be replaced whole, not appended to.
@@ -470,26 +469,36 @@ const javaCompletionSource: CompletionSource = async (
   // CodeMirror re-scores by fuzzy match and would throw all of that away, so the position in the
   // list is carried across as a `boost` (see `completion-rank`).
   const resolved = items ?? [];
-  const options: Completion[] = resolved.map((it, rank) =>
-    toCompletion(it, boostForRank(rank, RESOLVED, it.preselect), {
-      info: completionInfo,
-      after: (view, item) => {
-        reportAccepted(item);
-        // A type-name completion with a single importable class carries its FQN — accepting it
-        // inserts the name AND (when auto-import is on) adds its import in the same gesture.
-        if (item.auto_import) void applyAutoImport(view, item.auto_import);
-      },
-    }),
-  );
+  // Postfix templates arrive in the same answer, after the members, and rank in their own band —
+  // below every resolved member, so `orders.fo` still puts a real `forEach` member first. Their imports
+  // travel as edits, applied whatever the auto-import setting says: the text they write names the
+  // class, and without the import it does not compile.
+  const members = resolved.filter((it) => it.kind !== 'postfix');
+  const postfix = resolved.filter((it) => it.kind === 'postfix');
+  const options: Completion[] = [
+    ...members.map((it, rank) =>
+      toCompletion(it, boostForRank(rank, RESOLVED, it.preselect), {
+        info: completionInfo,
+        after: (view, item) => {
+          reportAccepted(item);
+          // A type-name completion with a single importable class carries its FQN — accepting it
+          // inserts the name AND (when auto-import is on) adds its import in the same gesture.
+          if (item.auto_import) void applyAutoImport(view, item.auto_import);
+        },
+      }),
+    ),
+    ...postfix.map((it, rank) => toCompletion(it, boostForRank(rank, TEMPLATE))),
+  ];
 
-  // After a `.` only the BE's member list makes sense; elsewhere the language's own keywords are
-  // worth adding, since no index is needed to know them and the backend does not send them.
+  // After a `.` or `::` — with or without a member name already started — only the BE's member list
+  // makes sense; elsewhere the language's own keywords are worth adding, since no index is needed
+  // to know them and the backend does not send them.
   //
   // The buffer's own words come LAST and only when the backend answered nothing at all. They are
   // a regex over the text — the answer an editor with no index gives — and they belong on screen
   // exactly while there is no index: before it has finished building, or in a file no project
   // owns. Offering them beside resolved names buries the resolved ones under look-alikes.
-  if (!dotTrigger) {
+  if (offersFallbackWords(textBefore)) {
     appendFallbackCompletions(
       ctx,
       word ? word.text : '',
@@ -499,61 +508,18 @@ const javaCompletionSource: CompletionSource = async (
     );
   }
 
-  appendPostfixCompletions(ctx, from, options);
-
   if (options.length === 0) {
     // An explicit press asked a question; answering it with nothing on screen is what makes a
     // working shortcut look like a dead one. See `sayNoSuggestions`.
     if (ctx.explicit) sayNoSuggestions(ctx);
     return null;
   }
-  return { from, options, validFor: /^[\w$]*$/ };
+  // No `validFor`: every keystroke asks again. Reusing this list while the word grows is only right
+  // when the list was complete, and neither half of it is — type and annotation names are a capped,
+  // ranked slice of the classpath (a list cut at `@R` does not contain what `@Requi` means), and the
+  // postfix templates are only computed once a name after the dot has been started.
+  return { from, options };
 };
-
-// ── Postfix templates ───────────────────────────────────────────────────────────
-//
-// Merged into the member list rather than registered as a second source, because they occupy the
-// same completion range: both replace the word after the dot, so two sources would produce two
-// popups competing for one caret. The templates themselves are a table (`java-postfix.ts`) read by
-// the shared engine — the level is consulted per keystroke because a project can be opened, closed
-// and reopened without this module being reloaded.
-
-/**
- * Whether the text a postfix template would wrap is a TYPE NAME rather than a value.
- *
- * Every template wraps its subject in an expression — `.nn` becomes `if (subject != null)`, `.var`
- * declares a local holding it — and a type name is not one: `Headers.nn` is `if (Headers != null)`,
- * which does not compile. Offering them after `Headers.` fills the popup with things that cannot be
- * accepted, which is worst exactly where they crowd out the enum constants you were reaching for.
- *
- * The test is Java's own naming convention, which the type-name completion already relies on: a
- * SINGLE identifier in PascalCase — an initial capital and at least one lowercase letter. That
- * leaves every value alone, including the ones a capital could be mistaken for: `CODICE` and
- * `MAX_VALUE` are constants, `order` and `x` are locals, and `Headers.CODICE` is a chain whose
- * subject is the constant, not the type.
- */
-function subjectIsTypeName(doc: string, dot: number): boolean {
-  const start = expressionStart(doc, dot);
-  if (start === null) return false;
-  const subject = doc.slice(start, dot);
-  return /^[A-Z][A-Za-z0-9_$]*$/.test(subject) && /[a-z]/.test(subject);
-}
-
-/** Append the postfix templates applicable at the caret, if the ranges line up. */
-function appendPostfixCompletions(ctx: CompletionContext, from: number, options: Completion[]) {
-  // The dot the subject ends at — one before the word being completed.
-  const word = ctx.matchBefore(/[\w$]*$/);
-  const dot = (word ? word.from : ctx.pos) - 1;
-  if (dot >= 0 && ctx.state.doc.sliceString(dot, dot + 1) === '.'
-      && subjectIsTypeName(ctx.state.doc.toString(), dot)) {
-    return;
-  }
-  const source = postfixCompletion(javaPostfixTemplates({ level: javaLevelStore.level }));
-  const result = source(ctx);
-  // Same `from` or nothing: an item whose range disagrees with the list's would be applied over the
-  // wrong text. This is a guard on an invariant, not a fallback — they are computed the same way.
-  if (result && result.from === from) options.push(...result.options);
-}
 
 // ── Hover source (symbol signature + `var`/`val` inferred type) ──────────────────
 //

@@ -109,6 +109,9 @@
   import BennuGenerateModal from './BennuGenerateModal.svelte';
   import BennuTemplateGenerateModal from './templates/BennuTemplateGenerateModal.svelte';
   import BennuConfigClassModal from './templates/BennuConfigClassModal.svelte';
+  import BennuNewTemplateModal from './templates/BennuNewTemplateModal.svelte';
+  import { TEMPLATE_KIND_ICONS } from './templates/template-kinds';
+  import type { TemplateKindId } from '$lib/ipc/bennu/templates';
   import BennuOverrideModal from './BennuOverrideModal.svelte';
   import BennuSafeDeleteModal from './BennuSafeDeleteModal.svelte';
   import {
@@ -1315,9 +1318,17 @@
     Bevy: BevyIcon as unknown as IconComponent,
   };
 
-  /** A brand mark first, then the one palette vocabulary every product shares. A plugin's
-   *  contributed command names a lucide icon too, so it resolves on the same path. */
+  /** A template kind names its glyph as `template:<kind>`, so a palette entry about a kind wears the
+   *  icon the settings tree gives it — one table, `template-kinds.ts`. */
+  const TEMPLATE_ICON_PREFIX = 'template:';
+
+  /** A brand mark first, then a template kind, then the one palette vocabulary every product
+   *  shares. A plugin's contributed command names a lucide icon too, so it resolves on the same path. */
   function iconResolver(name: string): IconComponent {
+    if (name.startsWith(TEMPLATE_ICON_PREFIX)) {
+      const kindIcon = TEMPLATE_KIND_ICONS[name.slice(TEMPLATE_ICON_PREFIX.length) as TemplateKindId];
+      if (kindIcon) return kindIcon;
+    }
     return BRAND_ICONS[name] ?? paletteIcon(name);
   }
 
@@ -1488,6 +1499,10 @@
         action: () => run(() => bennuUiStore.openConfigClass()), when: isSpringConfigFile(path) },
       { id: 'code-templates', title: 'Code templates…', icon: 'Command',
         action: () => run(() => bennuUiStore.openSettings('templates')), when: true },
+      // Postfix templates are Java-only, gated like the Java-only kinds in Settings: absent on a
+      // Cargo workspace rather than a dialog for a kind that project never offers.
+      { id: 'newpostfixtemplate', title: 'New postfix template…', icon: `${TEMPLATE_ICON_PREFIX}postfix`,
+        action: () => run(() => bennuUiStore.openNewTemplate('postfix')), when: !projectStore.isCargo },
       { id: 'test-values', title: 'Test values for the DTO Lab…', icon: 'Command',
         action: () => run(() => bennuUiStore.openSettings('test-values')), when: !projectStore.isCargo },
       { id: 'override', title: 'Implement / override methods…', icon: 'Wand2', shortcut: 'Ctrl+I',
@@ -2530,6 +2545,14 @@
     applyEdits={(edits) => editor?.applyGeneratedEdits(edits)}
     insertSnippet={(offset, text, stops) => editor?.insertGeneratedSnippet(offset, text, stops)}
     onClose={() => { bennuUiStore.closeTemplateGenerate(); editor?.focusEditor(); }}
+  />
+{/if}
+
+{#if bennuUiStore.newTemplateKind}
+  <!-- Created templates open in the editor (the store does it), which takes the focus there. -->
+  <BennuNewTemplateModal
+    kind={bennuUiStore.newTemplateKind}
+    onClose={() => bennuUiStore.closeNewTemplate()}
   />
 {/if}
 

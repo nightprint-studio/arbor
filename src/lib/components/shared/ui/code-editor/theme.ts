@@ -12,6 +12,7 @@ import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { namespaceThemeSpec } from './namespace-palette';
+import { completionThemeSpec } from './completion-theme';
 
 /**
  * Lezer highlight style for CodeMirror-built-in / legacy-mode languages (the ones a
@@ -485,95 +486,12 @@ export const codeEditorTheme = EditorView.theme(
     // `namespace-palette.ts` for what the hues do and do not mean.
     ...namespaceThemeSpec,
 
-    // ── Autocomplete + hover docs ──
+    // ── Autocomplete popup + its documentation panel ──
     //
-    // The row is a three-column line, laid out rather than concatenated: what it IS (the icon),
-    // what it is CALLED (the label, with the typed part marked), what its SHAPE is (the
-    // signature), and — pushed to the right edge — where it comes FROM. Reading a member list is
-    // scanning one of those columns at a time, and a run-on line of `name name(String) : void`
-    // makes every one of them harder to find.
-    '.cm-tooltip-autocomplete': {
-      backgroundColor: 'var(--bg-elevated)',
-      border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',
-      boxShadow: '0 8px 24px rgba(0,0,0,0.28)',
-      overflow: 'hidden',
-    },
-    '.cm-tooltip-autocomplete > ul': {
-      // Twelve or so rows: enough to hold the answer, short enough that the popup does not become
-      // the window. Past that it scrolls, which is what the ranking is for.
-      maxHeight: '19em',
-      fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-sm)',
-    },
-    '.cm-tooltip-autocomplete > ul > li': {
-      display: 'flex', alignItems: 'baseline', gap: '0.5em',
-      padding: '3px 9px 3px 6px', color: 'var(--text-primary)',
-      lineHeight: '1.45',
-    },
-    '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
-      backgroundColor: 'var(--accent-subtle)', color: 'var(--text-primary)',
-    },
-    // The label never shrinks: it is the thing being chosen. Everything else on the row gives way
-    // to it, and the signature is what truncates when the popup runs out of width.
-    '.cm-completionLabel': { color: 'var(--text-primary)', flex: '0 0 auto', whiteSpace: 'pre' },
-    '.cm-completionDetail': {
-      color: 'var(--text-muted)', fontStyle: 'normal', margin: '0',
-      flex: '0 1 auto', minWidth: '0',
-      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-    },
-    '.cm-completionOrigin': {
-      marginLeft: 'auto', paddingLeft: '1.2em',
-      flex: '0 0 auto',
-      color: 'var(--text-subtle, var(--text-muted))', opacity: '0.75',
-      fontSize: '0.92em',
-    },
-    '.cm-completionMatchedText': { color: 'var(--accent)', textDecoration: 'none', fontWeight: '700' },
-    // Still offered — it exists, and you may be reading old code — and struck through, which is
-    // the same mark the editor puts on a deprecated symbol in the text itself.
-    '.cm-tooltip-autocomplete > ul > li.cm-completion-deprecated .cm-completionLabel': {
-      textDecoration: 'line-through', opacity: '0.7',
-    },
-    // CodeMirror ships a glyph for its own dozen completion types and none for this one, so an
-    // annotation would render with an empty icon column — a gap in a list where every other row has
-    // a mark, which reads as a broken row rather than as a kind. The `@` is the same character that
-    // asked for the list.
-    '.cm-completionIcon-annotation::after': { content: "'@'" },
-    // A member that does not exist yet — the row offers to WRITE it, and the glyph is the only
-    // thing on the line that says so before it is accepted.
-    '.cm-completionIcon-generate::after': { content: "'+'" },
-    '.cm-completionIcon-generate': { color: 'var(--accent)' },
-    '.cm-completionIcon': { opacity: '0.85', paddingRight: '0.35em' },
-
-    // ── The documentation panel beside the list ──
-    //
-    // The same card the hover tooltip draws, from the same backend answer — see
-    // `completion-item`. Sized so it cannot outgrow the popup it hangs off: a panel taller than
-    // the screen is a panel whose top you cannot read.
-    '.cm-tooltip.cm-completionInfo': {
-      backgroundColor: 'var(--bg-elevated)',
-      border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',
-      boxShadow: '0 8px 24px rgba(0,0,0,0.28)',
-      padding: '0', margin: '0 6px',
-      maxWidth: '460px', maxHeight: '340px', overflow: 'auto',
-      overscrollBehavior: 'contain',
-      fontFamily: 'var(--font-ui-sans)', fontSize: 'var(--font-size-sm)',
-    },
-    '.cm-completionInfo .cm-hc-info': { padding: '8px 11px 9px' },
-    '.cm-completionInfo .cm-hc-info-sig': {
-      fontFamily: 'var(--font-code)', color: 'var(--text-primary)', whiteSpace: 'pre-wrap',
-    },
-    '.cm-completionInfo .cm-hc-info-meta': {
-      color: 'var(--text-muted)', fontSize: '0.9em', marginTop: '2px',
-    },
-    // The member a `generate` row will write, shown before it is accepted.
-    '.cm-completionInfo .cm-hc-generate': {
-      fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-xs)',
-      color: 'var(--text-primary)', margin: '0', whiteSpace: 'pre',
-      overflowX: 'auto',
-    },
-    '.cm-completionInfo .cm-hc-doc': {
-      marginTop: '7px', paddingTop: '7px', borderTop: '1px solid var(--border-subtle)',
-      color: 'var(--text-secondary, var(--text-primary))',
-    },
+    // Badge / label / signature / origin, IntelliJ New UI style. See `completion-theme.ts` for
+    // the design and for why its selectors must carry the `.cm-tooltip.cm-tooltip-autocomplete`
+    // prefix.
+    ...completionThemeSpec,
   },
   { dark: true },
 );

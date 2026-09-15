@@ -1,8 +1,9 @@
 //! Canonical entry point for `bennu-templates`' public API.
 
+pub use crate::applies::{PostfixApplicability, PostfixTarget};
 pub use crate::contexts::{
     builtins, ClassTemplateContext, ConfigPropertiesContext, ConfigProperty, LiveContext,
-    NewFileContext, YamlLine,
+    NewFileContext, PostfixTemplateContext, YamlLine,
 };
 pub use crate::config_class::{class_name_for, ConfigClassContext, ConfigField, ConfigType};
 pub use crate::config_keys::{common_group, key_at, key_nodes, keys_in, narrow, relative_to, KeyNode};

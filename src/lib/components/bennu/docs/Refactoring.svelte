@@ -249,6 +249,7 @@ total = a + b;`, 'java')}</code></pre>
     <tr><td>Switch fall-through</td><td>Add the <code>break;</code>, indented with its group</td></tr>
     <tr><td>A stray <code>;</code></td><td>Remove it</td></tr>
     <tr><td>A missing import</td><td>Add it, one entry per candidate package</td></tr>
+    <tr><td>A <code>final</code> field nothing initialises</td><td>Add it as a constructor parameter — a constructor is written when there is none, and one calling <code>this(…)</code> is left alone — or all such fields at once; initialise it in the constructor or on the declaration; or drop <code>final</code>. With Lombok, <code>@RequiredArgsConstructor</code>, listed first when the project already uses it. Offered anywhere on the declaration, before validation has run.</td></tr>
   </tbody>
 </table>
 <p>

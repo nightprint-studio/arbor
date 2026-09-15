@@ -6,6 +6,7 @@
 
 use std::path::Path;
 
+use bennu_java::prelude::{postfix_indent_unit, PostfixOptional, PostfixShape};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -22,6 +23,7 @@ pub fn builtins(kind: TemplateKind) -> &'static [Builtin] {
         TemplateKind::ConfigProperties => CONFIG_PROPERTIES,
         TemplateKind::ConfigClass => CONFIG_CLASS,
         TemplateKind::Live => LIVE,
+        TemplateKind::Postfix => POSTFIX,
         TemplateKind::ValidationTests => &[],
     }
 }
@@ -55,6 +57,13 @@ const CONFIG_CLASS: &[Builtin] = &[
 // would be one nobody asked for.
 const LIVE: &[Builtin] = &[
     Builtin { name: "example", extension: "java", starter: true, text: include_str!("../builtin/live/example.java.jinja") },
+];
+
+// A starter for the same reason: `for`, `nn` and the rest are the built-in postfix templates. Named `logv`
+// rather than `log`, because a built-in's name is one the user can no longer give a template of their own,
+// and `log` is the one they are likeliest to want.
+const POSTFIX: &[Builtin] = &[
+    Builtin { name: "logv", extension: "java", starter: true, text: include_str!("../builtin/postfix/logv.java.jinja") },
 ];
 
 /// What a New file template is rendered with.
@@ -297,6 +306,166 @@ impl LiveContext {
     }
 }
 
+/// What a postfix template is rendered with, before its snippet stops are read: the value before the dot,
+/// and the file it is typed in.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct PostfixTemplateContext {
+    /// The expression before the dot, as written (`repo.findAll()`). What accepting the template replaces.
+    pub expr: String,
+    /// Its type, as a declaration writes it (`List<Order>`, `int[]`). Empty for a call that returns nothing.
+    /// Writing it adds the imports it needs.
+    #[serde(rename = "type")]
+    pub type_name: String,
+    /// The type without its package or arguments (`List`).
+    pub type_simple: String,
+    /// A name for a variable holding the value (`orders`).
+    pub name: String,
+    /// What the value holds, for an array, an `Iterable` or an `Optional` (`Order`) — empty otherwise.
+    pub element_type: String,
+    /// A name for one of those (`order`) — empty when `element_type` is.
+    pub element_name: String,
+    /// The Java language level of the module the file belongs to (`8`, `17`).
+    pub level: u32,
+    /// Whether `var` can declare a local here: Java 10 or later.
+    pub var: bool,
+    /// The file the template is typed in, without its extension (`OrderService`).
+    pub file_name: String,
+    /// The class that file declares.
+    pub class_name: String,
+    /// The file's package.
+    pub package: String,
+    /// Today, `YYYY-MM-DD`.
+    pub date: String,
+    pub year: String,
+    /// One indentation step, as the file writes it — for a template whose text spans lines.
+    pub indent: String,
+    /// The classes `type` names, to import when the output writes it.
+    #[serde(skip)]
+    pub type_imports: Vec<String>,
+    /// The classes `element_type` names, likewise.
+    #[serde(skip)]
+    pub element_imports: Vec<String>,
+}
+
+impl PostfixTemplateContext {
+    /// The context for `expr`, whose type is described by `shape`, typed in `file` at a module of `level`.
+    pub fn new(expr: &str, shape: &PostfixShape, level: u32, file: &str, source: &str) -> Self {
+        let live = LiveContext::new(file, source);
+        let element = element_of(shape);
+        Self {
+            expr: expr.trim().to_string(),
+            type_simple: match shape.ty.text.is_empty() {
+                true => String::new(),
+                false => type_simple(&shape.ty.text),
+            },
+            type_name: shape.ty.text.clone(),
+            name: shape.name.clone(),
+            element_type: element.type_name,
+            element_name: element.name,
+            level,
+            var: level >= 10,
+            file_name: live.file_name,
+            class_name: live.class_name,
+            package: live.package,
+            date: live.date,
+            year: live.year,
+            indent: postfix_indent_unit(source),
+            type_imports: shape.ty.imports.clone(),
+            element_imports: element.imports,
+        }
+    }
+
+    /// What a preview renders with, where no value is being typed after: `orders`, a `List<Order>`. The file's
+    /// own fields come from `file` when one is open, else from an `OrderService` that is not.
+    pub fn sample(file: Option<(&str, &str)>, level: u32) -> Self {
+        let live = match file {
+            Some((file, source)) => LiveContext::new(file, source),
+            None => {
+                let (date, year) = today();
+                LiveContext {
+                    file_name: "OrderService".to_string(),
+                    class_name: "OrderService".to_string(),
+                    package: "com.example".to_string(),
+                    date,
+                    year,
+                }
+            }
+        };
+        Self {
+            expr: "orders".to_string(),
+            type_name: "List<Order>".to_string(),
+            type_simple: "List".to_string(),
+            name: "orders".to_string(),
+            element_type: "Order".to_string(),
+            element_name: "order".to_string(),
+            level,
+            var: level >= 10,
+            file_name: live.file_name,
+            class_name: live.class_name,
+            package: live.package,
+            date: live.date,
+            year: live.year,
+            indent: file.map_or_else(|| "    ".to_string(), |(_, source)| postfix_indent_unit(source)),
+            type_imports: vec!["java.util.List".to_string()],
+            element_imports: vec!["com.example.Order".to_string()],
+        }
+    }
+
+    /// The imports `text` needs because it writes `type` or `element_type`: each class of theirs whose simple
+    /// name `text` uses as a word. Sorted, each once.
+    ///
+    /// Read off the output rather than asked of the template, because `{{ type }}` is how a template says it
+    /// declares one — an `imported` filter around every use would be the template doing Bennu's bookkeeping.
+    /// A class the file already imports, or never needs to, is the caller's to skip.
+    pub fn implied_imports(&self, text: &str) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .type_imports
+            .iter()
+            .chain(&self.element_imports)
+            .filter(|fqn| names_word(text, fqn.rsplit('.').next().unwrap_or(fqn)))
+            .cloned()
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+}
+
+/// The element half of a postfix context.
+struct ElementFields {
+    type_name: String,
+    name: String,
+    imports: Vec<String>,
+}
+
+/// What an array, an `Iterable` or an `Optional` holds — empty fields for anything else.
+fn element_of(shape: &PostfixShape) -> ElementFields {
+    let held = shape.array_element.as_ref().or(shape.iterable_element.as_ref()).or(match &shape.optional {
+        Some(PostfixOptional::Of(element)) => Some(element),
+        _ => None,
+    });
+    if let Some(element) = held {
+        return ElementFields { type_name: element.ty.text.clone(), name: element.name.clone(), imports: element.ty.imports.clone() };
+    }
+    let primitive = match &shape.optional {
+        Some(PostfixOptional::Int) => "int",
+        Some(PostfixOptional::Long) => "long",
+        Some(PostfixOptional::Double) => "double",
+        _ => return ElementFields { type_name: String::new(), name: String::new(), imports: Vec::new() },
+    };
+    ElementFields { type_name: primitive.to_string(), name: "value".to_string(), imports: Vec::new() }
+}
+
+/// Whether `word` occurs in `text` with no identifier character on either side.
+fn names_word(text: &str, word: &str) -> bool {
+    let identifier = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+    !word.is_empty()
+        && text.match_indices(word).any(|(at, _)| {
+            !text[..at].chars().next_back().is_some_and(identifier)
+                && !text[at + word.len()..].chars().next().is_some_and(identifier)
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,5 +526,69 @@ mod tests {
         assert_eq!(context.package, "com.example");
         let out = render(builtins(TemplateKind::Live)[0].text, &context).unwrap();
         assert!(out.contains("getLogger(OrderService.class);$0"), "{out}");
+    }
+
+    fn list_of_orders() -> PostfixShape {
+        use bennu_java::prelude::{PostfixElement, PostfixWritten};
+        let written = |text: &str, imports: &[&str]| PostfixWritten {
+            text: text.to_string(),
+            imports: imports.iter().map(|i| i.to_string()).collect(),
+        };
+        PostfixShape {
+            ty: written("List<Order>", &["com.example.Order", "java.util.List"]),
+            name: "orders".to_string(),
+            iterable_element: Some(PostfixElement { ty: written("Order", &["com.example.Order"]), name: "order".to_string(), primitive: None }),
+            collection: true,
+            ..PostfixShape::default()
+        }
+    }
+
+    const ORDER_SERVICE: (&str, &str) = ("/p/src/main/java/com/example/OrderService.java", "package com.example;\nclass OrderService {}\n");
+
+    #[test]
+    fn a_postfix_context_is_the_value_its_type_what_it_holds_and_the_file() {
+        let context = PostfixTemplateContext::new(" this.orders ", &list_of_orders(), 17, ORDER_SERVICE.0, ORDER_SERVICE.1);
+        assert_eq!(context.expr, "this.orders");
+        assert_eq!((context.type_name.as_str(), context.type_simple.as_str()), ("List<Order>", "List"));
+        assert_eq!((context.element_type.as_str(), context.element_name.as_str()), ("Order", "order"));
+        assert!(context.var, "Java 17 has var");
+        assert!(!PostfixTemplateContext::new("orders", &list_of_orders(), 8, ORDER_SERVICE.0, ORDER_SERVICE.1).var);
+        assert_eq!((context.class_name.as_str(), context.package.as_str()), ("OrderService", "com.example"));
+        // `type` is the name a template reads it by, whatever the field is called in Rust.
+        assert_eq!(render("{{ type }} {{ element_type }} {{ name }}", &context).unwrap(), "List<Order> Order orders");
+    }
+
+    #[test]
+    fn a_primitive_optional_holds_a_value_of_its_primitive() {
+        let shape = PostfixShape { optional: Some(PostfixOptional::Long), ..PostfixShape::default() };
+        let context = PostfixTemplateContext::new("total", &shape, 11, ORDER_SERVICE.0, ORDER_SERVICE.1);
+        assert_eq!((context.element_type.as_str(), context.element_name.as_str()), ("long", "value"));
+        let plain = PostfixTemplateContext::new("flag", &PostfixShape::default(), 11, ORDER_SERVICE.0, ORDER_SERVICE.1);
+        assert_eq!((plain.element_type.as_str(), plain.element_name.as_str()), ("", ""));
+    }
+
+    #[test]
+    fn the_postfix_starter_logs_the_expression_by_its_text_and_its_value() {
+        let context = PostfixTemplateContext::new("repo.count()", &PostfixShape::default(), 17, ORDER_SERVICE.0, ORDER_SERVICE.1);
+        let out = render(builtins(TemplateKind::Postfix)[0].text, &context).unwrap();
+        assert_eq!(out.trim_end(), "log.debug(\"repo.count() = {}\", repo.count());$0");
+    }
+
+    /// Only what the output writes is imported: a template that logs a list never declares a `List`.
+    #[test]
+    fn a_postfix_output_imports_the_types_it_writes_and_no_other() {
+        let context = PostfixTemplateContext::new("orders", &list_of_orders(), 17, ORDER_SERVICE.0, ORDER_SERVICE.1);
+        assert_eq!(context.implied_imports("for (Order order : orders) {}"), ["com.example.Order"]);
+        assert_eq!(context.implied_imports("List<Order> copy = orders;"), ["com.example.Order", "java.util.List"]);
+        assert!(context.implied_imports("log.debug(\"{}\", orders.size()); // OrderList").is_empty(), "a word, not a substring");
+    }
+
+    #[test]
+    fn a_postfix_preview_renders_a_list_of_orders_in_the_open_file_or_a_sample_one() {
+        let sample = PostfixTemplateContext::sample(None, 21);
+        assert_eq!((sample.expr.as_str(), sample.type_name.as_str(), sample.element_type.as_str()), ("orders", "List<Order>", "Order"));
+        assert_eq!(sample.class_name, "OrderService");
+        let open = PostfixTemplateContext::sample(Some(("/p/src/Invoice.java", "package billing;\nclass Invoice {}\n")), 8);
+        assert_eq!((open.class_name.as_str(), open.package.as_str(), open.var), ("Invoice", "billing", false));
     }
 }

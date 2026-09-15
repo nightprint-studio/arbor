@@ -17,11 +17,20 @@ pub enum TemplateKind {
     ValidationTests,
     /// An abbreviation that expands where it is typed.
     Live,
+    /// A postfix template: typed after a value's dot, it rewrites the value — `orders.logv`.
+    Postfix,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 6] =
-        [Self::NewFile, Self::Class, Self::ConfigProperties, Self::ConfigClass, Self::ValidationTests, Self::Live];
+    pub const ALL: [TemplateKind; 7] = [
+        Self::NewFile,
+        Self::Class,
+        Self::ConfigProperties,
+        Self::ConfigClass,
+        Self::ValidationTests,
+        Self::Live,
+        Self::Postfix,
+    ];
 
     /// The stable id — the directory name and the wire name.
     pub fn id(self) -> &'static str {
@@ -32,6 +41,7 @@ impl TemplateKind {
             Self::ConfigClass => "config-class",
             Self::ValidationTests => "validation-tests",
             Self::Live => "live",
+            Self::Postfix => "postfix",
         }
     }
 
@@ -47,6 +57,7 @@ impl TemplateKind {
             Self::ConfigClass => "Configuration class",
             Self::ValidationTests => "Validation tests",
             Self::Live => "Abbreviations",
+            Self::Postfix => "Postfix",
         }
     }
 
@@ -58,6 +69,7 @@ impl TemplateKind {
             Self::ConfigClass => "A @ConfigurationProperties class written from the keys under a prefix of application.yml or .properties — a record or a class, with a nested type for each group of keys.",
             Self::ValidationTests => "The DTO Lab's tests: one case per way each constraint can fail, with what the project's validator reported for it.",
             Self::Live => "Abbreviations: the name is what you type, the template is the snippet it expands to. The language in the file name says where it is offered — logd.java.jinja in Java, dbg.rs.jinja in Rust, and one with no language in every file.",
+            Self::Postfix => "Postfix templates: typed after a value's dot, they rewrite the value — orders.logv. The name is what you type; bennu.applies says which values it is offered on (iterable, optional, a class name…), and the template reads the expression, its type and a name for it.",
         }
     }
 
@@ -71,10 +83,10 @@ impl TemplateKind {
 
     /// Whether the kind can only run on a Java project.
     ///
-    /// Four of the six read a Java class, the Spring model or Bean Validation, so on a Cargo project
-    /// they have nothing to run on and are not offered. The other two are about the file rather than
-    /// the language: a **New file** template writes whatever its name says it writes, and an
-    /// **abbreviation** is offered in the language it was written for.
+    /// Five of the seven read a Java class, the Spring model, Bean Validation or a Java value's type,
+    /// so on a Cargo project they have nothing to run on and are not offered. The other two are about
+    /// the file rather than the language: a **New file** template writes whatever its name says it
+    /// writes, and an **abbreviation** is offered in the language it was written for.
     pub fn java_only(self) -> bool {
         !matches!(self, Self::NewFile | Self::Live)
     }
@@ -109,6 +121,8 @@ mod tests {
         assert!(TemplateKind::ConfigClass.java_only());
         assert!(TemplateKind::ConfigProperties.java_only());
         assert!(TemplateKind::ValidationTests.java_only());
+        // A postfix template is chosen by the Java type of the value it is typed after.
+        assert!(TemplateKind::Postfix.java_only());
         assert!(!TemplateKind::NewFile.java_only());
         assert!(!TemplateKind::Live.java_only());
         // A kind that is not Java's is one whose language the author chooses.
@@ -123,6 +137,7 @@ mod tests {
             assert_eq!(TemplateKind::from_id(kind.id()), Some(kind));
             assert_eq!(serde_json::to_value(kind).unwrap(), kind.id());
         }
+        assert_eq!(TemplateKind::from_id("postfix"), Some(TemplateKind::Postfix));
         assert_eq!(TemplateKind::from_id("nope"), None);
     }
 }

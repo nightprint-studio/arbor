@@ -9,7 +9,7 @@ pub use crate::offers::{plan_for, plans_at, refactorings_at};
 
 // What comes back.
 pub use crate::plan::{
-    language_level, merge_throws, written_name, MemberTransfer, NeedsLevel, NewSource, Outcome,
+    language_level, merge_throws, written_name, EditSelection, MemberTransfer, NeedsLevel, NewSource, Outcome,
     Plan, RefactorEdit, Refusal, SelectorGuard, ThrowsSlot, TypeGuard, TypeNeed, TypeSlot,
     SWITCHABLE,
 };
@@ -26,6 +26,7 @@ pub use crate::declaration::{from_var, join_declaration, split_declaration, to_v
 pub use crate::if_statement::{invert_if, merge_nested_if};
 pub use crate::inline_method::inline_method;
 pub use crate::field::introduce_field;
+pub use crate::final_field::{final_field_fixes, FinalFieldFix, FinalFieldFixes};
 pub use crate::inline_var::inline_variable;
 pub use crate::copy_class::{copy_class, CopyPlan};
 pub use crate::move_class::move_class;

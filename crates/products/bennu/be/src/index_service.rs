@@ -651,6 +651,22 @@ fn major_of(version: &str) -> Option<u32> {
     version.strip_prefix("1.").unwrap_or(version).trim().parse().ok()
 }
 
+/// The level in force for `file`: its module's when its pom declares one, else the project's — the same
+/// answer the status bar and the version-gated checks give.
+fn level_of_file(slot: &ProjectSlot, file: &str) -> Option<u32> {
+    module_jdk(&slot.root, Path::new(file)).and_then(|m| m.major).or_else(|| major_of(&slot.jdk_version))
+}
+
+/// A postfix site in a Java buffer and what deciding a template there needs — see
+/// [`IndexService::postfix_site`].
+pub struct PostfixAt {
+    pub site: bennu_intel::prelude::PostfixSite,
+    /// The resolver the site was typed on, for a template that asks about the value's supertypes.
+    pub resolver: Arc<dyn bennu_java::prelude::TypeResolver + Send + Sync>,
+    /// The Java level of the file's module — the legacy level when it is not known.
+    pub level: u32,
+}
+
 /// Which provider a slot holds — what [`IndexStats::provider_stage`] reports.
 ///
 /// `ready` alone cannot say it: a build that failed before its first provider went live never sets
@@ -1561,14 +1577,37 @@ impl IndexService {
             let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
             Arc::clone(&g)
         };
+        let level = level_of_file(&slot, file);
         let at = Position { file: file.to_string(), offset };
         provider
             .complete_at(
                 &at,
                 source,
-                CompletionOptions { census: import_census_enabled(), case },
+                CompletionOptions { census: import_census_enabled(), case, level },
             )
             .unwrap_or_default()
+    }
+
+    /// The postfix site at `offset` in a Java buffer — the expression before the dot, typed on the resolver
+    /// completion runs on — with the level of the file's module. What the user's postfix templates are offered
+    /// by, beside the built-ins the provider offers from the same site.
+    ///
+    /// `None` for a file that is not Java, one no project owns, an index still building, and a caret that is
+    /// not after `expression.name` — each of which means "offer nothing".
+    pub fn postfix_site(&self, file: &str, source: &str, offset: usize) -> Option<PostfixAt> {
+        let java = Path::new(file).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("java"));
+        if !java {
+            return None;
+        }
+        let slot = self.slot_for_file(file)?;
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        let resolver = provider.shared_resolver()?;
+        let site = bennu_intel::prelude::postfix_site(source, offset, &*resolver)?;
+        let level = level_of_file(&slot, file).unwrap_or(bennu_intel::prelude::POSTFIX_LEGACY_LEVEL);
+        Some(PostfixAt { site, resolver, level })
     }
 
     /// Every method the class enclosing `offset` in `source` could override — the
@@ -3466,6 +3505,15 @@ impl IndexService {
             Arc::clone(&g)
         };
         provider.import_choices(source, name)
+    }
+
+    /// How many files of the project owning `file` import `fqn` outright, from its import census.
+    /// `0` when no project owns the file or the census has not been built — "not used here" is the
+    /// safe reading of "not known yet" for a caller that only ranks with it.
+    pub fn import_count(&self, file: &str, fqn: &str) -> u32 {
+        let Some(slot) = self.slot_for_file(file) else { return 0 };
+        let census = Arc::clone(&slot.imports.read().unwrap_or_else(|p| p.into_inner()));
+        census.count(fqn)
     }
 
     /// A cheap snapshot of the index for the project rooted at `root` (the index

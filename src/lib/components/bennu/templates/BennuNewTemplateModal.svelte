@@ -9,6 +9,7 @@
    * Renaming shares this dialog because the rules for a name are the rules for a name — an
    * abbreviation has to stay a word you can type whether it is being created or corrected.
    */
+  import { onMount } from 'svelte';
   import { FilePlus2, TextCursorInput } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -36,6 +37,10 @@
     onClose: () => void;
     onCreated?: (name: string) => void;
   } = $props();
+
+  // Opened from the palette, nothing has read this kind yet — and without its list the name cannot
+  // be checked against the ones taken, nor a template to start from be offered.
+  onMount(() => { if (!templates.of(kind)) void templates.load(kind); });
 
   const info = $derived(templates.of(kind));
   const sources = $derived(info?.templates ?? []);
@@ -71,8 +76,10 @@
       : null,
   );
   const trimmed = $derived(name.trim());
-  // An abbreviation's name is what gets typed, so it has to be a word the editor completes.
-  const pattern = $derived(kind === 'live' ? /^\w+$/ : /^[A-Za-z0-9_-]+$/);
+  /** An abbreviation's name and a postfix template's are what gets typed, so each has to be a word the
+   *  editor completes. */
+  const typedName = $derived(kind === 'live' || kind === 'postfix');
+  const pattern = $derived(typedName ? /^\w+$/ : /^[A-Za-z0-9_-]+$/);
   // Its own name is not taken — and a change of case alone is a rename, so the comparison is exact.
   const taken = $derived(sources.some((t) => t.name === trimmed && t.name !== rename));
   const error = $derived(
@@ -81,7 +88,9 @@
       : !pattern.test(trimmed)
         ? kind === 'live'
           ? 'An abbreviation is one word: letters, digits and “_”.'
-          : 'Letters, digits, “-” and “_”.'
+          : kind === 'postfix'
+            ? 'A postfix template is typed after a dot: letters, digits and “_”.'
+            : 'Letters, digits, “-” and “_”.'
         : taken
           ? `There is already a template called “${trimmed}”.`
           : null,
@@ -122,13 +131,17 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="body" onkeydown={onKeydown}>
     <FormField
-      label={kind === 'live' ? 'Abbreviation' : 'Name'}
+      label={kind === 'live' ? 'Abbreviation' : kind === 'postfix' ? 'Typed after the dot' : 'Name'}
       hint={renaming
         ? 'The file is renamed in your profile; a project that generates with it follows.'
         : 'Kept in your profile, so every project sees it — and opened in the editor, with a preview beside it.'}
       {error}
     >
-      <Input bind:value={name} placeholder={kind === 'live' ? 'logd' : 'team-style'} autofocus />
+      <Input
+        bind:value={name}
+        placeholder={kind === 'live' ? 'logd' : kind === 'postfix' ? 'dbg' : 'team-style'}
+        autofocus
+      />
     </FormField>
     {#if !renaming && picksLanguage}
       <!-- What it writes. It is not decoration: the file is named `<name>.<ext>.jinja`, which is how

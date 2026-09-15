@@ -53,6 +53,21 @@ impl RefactorEdit {
     }
 }
 
+/// What the editor should select once a list of edits has been applied: `[start, end)` **bytes into
+/// the `text` of `edits[edit]`**.
+///
+/// Relative to one of the edits rather than to the document, because a document offset is ambiguous
+/// until someone says whether it was measured before or after the edits — and every edit before the
+/// chosen one moves it. An offset into the inserted text means one thing only: wherever that text
+/// lands, the selection is that slice of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditSelection {
+    /// Index into the edit list the selection travels with, in that list's own order.
+    pub edit: usize,
+    pub start: usize,
+    pub end: usize,
+}
+
 /// A refactoring, planned.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Plan {
@@ -68,6 +83,12 @@ pub struct Plan {
     pub name: Option<String>,
     /// Where the caret should land afterwards — the introduced name, so it can be typed over.
     pub caret: Option<usize>,
+    /// A placeholder the plan wrote, to be selected once the edits are applied so the next
+    /// keystroke replaces it — the body statement of a generated method stub. Indexes [`Self::edits`]
+    /// in their order; [`Plan::reorder`] keeps it pointing at the same edit. `None` for a plan that
+    /// writes no placeholder.
+    #[serde(default)]
+    pub select: Option<EditSelection>,
     /// A type this plan could not name on its own; see [`TypeSlot`].
     #[serde(default)]
     pub type_slot: Option<TypeSlot>,
@@ -301,6 +322,7 @@ impl Plan {
             edits,
             name: None,
             caret: None,
+            select: None,
             type_slot: None,
             type_guard: None,
             throws_slot: None,
@@ -318,6 +340,13 @@ impl Plan {
 
     pub fn caret_at(mut self, offset: usize) -> Self {
         self.caret = Some(offset);
+        self
+    }
+
+    /// Attach the placeholder to select once applied; see [`Plan::select`]. Indexes the edits as
+    /// they are ordered NOW, which after [`Plan::new`] is the application order.
+    pub fn selecting(mut self, select: Option<EditSelection>) -> Self {
+        self.select = select;
         self
     }
 
@@ -379,8 +408,13 @@ impl Plan {
     /// A consumer that appends an edit — the backend adds the `import` line — has to put the list
     /// back in order, and doing that with its own `sort_by` is how the tie-break below silently
     /// went missing once already. One rule, in one place, reachable from both.
+    ///
+    /// The selection is carried through the sort: it names an edit by index, and an index that
+    /// stayed put while the edits moved would select a slice of some other edit's text.
     pub fn reorder(&mut self) {
-        reorder(&mut self.edits);
+        let (edits, select) = in_application_order(std::mem::take(&mut self.edits), self.select);
+        self.edits = edits;
+        self.select = select;
     }
 
     /// Whether the edits hold the descending invariant. Cheap, and used by the tests that would
@@ -395,12 +429,34 @@ impl Plan {
 /// Descending by start, and by end within the same start — see [`Plan::new`] for why the second
 /// half is load-bearing rather than a tidy-up.
 fn reorder(edits: &mut [RefactorEdit]) {
+    edits.sort_by(application_order);
+}
+
+/// `edits` put in the order they are applied in, with `select` — which indexes them as **passed** —
+/// moved to name the same edit afterwards.
+///
+/// The one place that sorts edits a selection travels with. Every producer of an edit list with a
+/// placeholder in it goes through here — a [`Plan`] through [`Plan::reorder`], a quick fix that is not
+/// a plan directly — because two copies had already drifted: one sorted by start alone, leaving two
+/// insertions at the same offset in whatever order they arrived.
+pub(crate) fn in_application_order(
+    edits: Vec<RefactorEdit>,
+    select: Option<EditSelection>,
+) -> (Vec<RefactorEdit>, Option<EditSelection>) {
+    let mut indexed: Vec<(usize, RefactorEdit)> = edits.into_iter().enumerate().collect();
+    indexed.sort_by(|a, b| application_order(&a.1, &b.1));
+    let select = select.and_then(|s| {
+        let edit = indexed.iter().position(|(original, _)| *original == s.edit)?;
+        Some(EditSelection { edit, ..s })
+    });
+    (indexed.into_iter().map(|(_, edit)| edit).collect(), select)
+}
+
+fn application_order(a: &RefactorEdit, b: &RefactorEdit) -> std::cmp::Ordering {
     // By file first, so each file's run is contiguous and descending within itself: a consumer
     // applies one file's edits back to front, which is the only order under which nothing it has
     // yet to apply has moved. Across files the order says nothing and needs to say nothing.
-    edits.sort_by(|a, b| {
-        a.file.cmp(&b.file).then(b.start.cmp(&a.start)).then(b.end.cmp(&a.end))
-    });
+    a.file.cmp(&b.file).then(b.start.cmp(&a.start)).then(b.end.cmp(&a.end))
 }
 
 /// A type the plan needs written into the source and could not name by reading the text.
@@ -687,6 +743,32 @@ mod tests {
         assert_eq!(plan.edits[0].text, "List<String> name = x;");
         assert_eq!(plan.caret, Some(10 + "List<String> ".len()));
         assert!(plan.type_slot.is_none());
+    }
+
+    /// A consumer that appends an edit and reorders must not leave the selection on the wrong one.
+    #[test]
+    fn reordering_keeps_the_selection_on_the_edit_it_named() {
+        let mut plan = Plan::new("t", "t", vec![RefactorEdit::new(10, 10, "stub();", "declaration")])
+            .selecting(Some(EditSelection { edit: 0, start: 0, end: "stub();".len() }));
+        plan.edits.push(RefactorEdit::new(40, 40, "import x;", "import"));
+        plan.reorder();
+        let select = plan.select.expect("still selecting");
+        assert_eq!(select.edit, 1);
+        assert_eq!(&plan.edits[select.edit].text[select.start..select.end], "stub();");
+    }
+
+    /// Two edits starting at one offset are ordered by where they end, and the selection follows the
+    /// one it named — the case a sort by start alone left to the order the edits arrived in.
+    #[test]
+    fn the_selection_follows_its_edit_when_two_share_a_start() {
+        let edits = vec![
+            RefactorEdit::new(10, 10, "value = null;", "insertion"),
+            RefactorEdit::new(10, 16, "final ", "replacement"),
+        ];
+        let (ordered, select) = in_application_order(edits, Some(EditSelection { edit: 0, start: 8, end: 12 }));
+        assert_eq!(ordered[0].end, 16, "the longer edit is applied first");
+        let select = select.expect("still selecting");
+        assert_eq!(&ordered[select.edit].text[select.start..select.end], "null");
     }
 
     /// A plan whose type nobody filled still applies, and still compiles from Java 10 on.

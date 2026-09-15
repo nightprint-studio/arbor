@@ -47,6 +47,12 @@ so it cannot disagree with the index about what a `@Builder` class contains.
 | `var_target_errors` | `error` | a `var` local whose initializer has no type of its own — a lambda, a method/constructor reference, an array initializer (`var xs = {1,2};`), or the `null` literal. Only the direct value (a cast supplies a target, so `var r = (Runnable) () -> {}` is fine); non-`var` declarations untouched. |
 | `capture_errors` | `error` | a local captured by a lambda **or** an anonymous/inner class and then reassigned in its declaring method (`int c = 0; Runnable r = () -> use(c); c = 5;`) — not effectively final. Complements `lambda_capture_errors` (mutation *inside* a lambda). Conservative like the `final` check: only a local WITH an initializer, declared once, reassigned outside any closure, and actually captured — so a definite-assignment-safe local is never flagged. |
 
+The blank-final half of the definite-assignment check (code `definite-assignment`: a `final` field with
+no initializer assigned nowhere in its class, silent under a Lombok constructor annotation) is also
+exposed as `uninitialized_final_fields(root, source)` — the name spans it reports — so the quick-fixes
+that initialise the field (`bennu-refactor`'s `final_field_fixes`) act on exactly the fields the check
+flags.
+
 `check_file` takes a `FileContext { file_stem, expected_package, java_major, classpath_complete }` —
 each `None` field just skips its check, so a scratch buffer still gets every source-only diagnostic.
 `classpath_complete` (default `false`) tells the unresolved-import check whether the dependency jars

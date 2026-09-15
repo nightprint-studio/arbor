@@ -2,17 +2,17 @@
  * What a kind of template looks like in the interface — its icon, and the colour a language wears.
  *
  * Here rather than in each consumer because the settings tree, the overview and the list of a kind
- * all draw the same six things: an icon that means a different kind in two places is a worse
- * mistake than no icon at all.
+ * all draw the same kinds: an icon that means a different kind in two places is a worse mistake
+ * than no icon at all.
  */
 
-import { Braces, FileCog, FilePlus2, FlaskConical, Type } from 'lucide-svelte';
+import { Braces, CornerDownRight, FileCog, FilePlus2, FlaskConical, Type } from 'lucide-svelte';
 import { JINJA_INNER_BY_EXTENSION, JINJA_LANGUAGE_LABELS } from '$lib/utils/jinja-words';
 import type { TemplateKindId } from '$lib/ipc/bennu/templates';
 import type { IconComponent } from '$lib/types/icon';
 
 /** One icon per kind, in the vocabulary the rest of Bennu uses: a file, a class, a configuration, a
- *  test, a word you type. */
+ *  test, a word you type, a value turned into something else. */
 export const TEMPLATE_KIND_ICONS: Record<TemplateKindId, IconComponent> = {
   'new-file': FilePlus2,
   class: Braces,
@@ -20,6 +20,7 @@ export const TEMPLATE_KIND_ICONS: Record<TemplateKindId, IconComponent> = {
   'config-class': FileCog,
   'validation-tests': FlaskConical,
   live: Type,
+  postfix: CornerDownRight,
 };
 
 /**

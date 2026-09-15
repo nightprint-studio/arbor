@@ -114,6 +114,10 @@ pub use crate::accessor_completion::{
     reference_call, AccessorHint, ReferencedMethod,
 };
 
+// Where a postfix template goes — the expression before the dot, typed — and the item one makes: what the
+// backend's user postfix templates are offered through, the same path the built-in catalogue takes.
+pub use crate::postfix::{postfix_item, postfix_site, PostfixItem, PostfixSite, POSTFIX_LEGACY_LEVEL};
+
 // Writing a method into the class of the object it was called on — the half that is a function
 // of two strings, so it can be tested without a project.
 pub use crate::create_in::{declares_method, foreign_member_edits, TargetEdit};

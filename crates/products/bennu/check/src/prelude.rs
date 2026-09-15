@@ -73,6 +73,10 @@ pub use crate::enum_switch::enum_constants;
 // needs the same slice they take.
 pub use crate::check::collect_nodes;
 
+// The blank `final` fields the definite-assignment check reports, as name spans — the input to the
+// fixes that initialise them, offered from the caret before validation has run.
+pub use crate::init_checks::uninitialized_final_fields;
+
 // The project's inspection policy — which checks report, and how loudly. Severity per kind from the
 // config, suppression from the source itself.
 pub use crate::inspections::{Inspections, Level as InspectionLevel};

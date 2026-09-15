@@ -1,0 +1,17 @@
+{# bennu.description: Log the value at debug level, labelled with the expression that computed it -#}
+{# bennu.applies: any -#}
+{#-
+  A postfix template: typed after a value's dot — orders.logv — it replaces the value with what follows.
+  The template's name is what you type after the dot.
+
+  bennu.applies says which values it is offered on, comma-separated (any of them will do):
+    any, reference, primitive, boolean, number, string, array, iterable, collection, map,
+    optional, closeable, throwable — or a class name, com.acme.Order, for that class and its subtypes.
+  bennu.level: 9 offers it only on a module at that Java level or later.
+
+  The text is a snippet — $1, $2 and so on are the stops Tab walks through, ${1:name} is one with a
+  default, and $0 is where the caret ends. Jinja runs first, with
+    expr, type, type_simple, name, element_type, element_name, level, var, indent,
+    file_name, class_name, package, date, year
+-#}
+log.debug("{{ expr }} = {}", {{ expr }});$0

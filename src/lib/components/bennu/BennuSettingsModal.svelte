@@ -107,13 +107,14 @@
     { id: 'tpl:config-class', kind: 'config-class', label: 'Configuration class' },
     { id: 'tpl:validation-tests', kind: 'validation-tests', label: 'Validation tests' },
     { id: 'tpl:live', kind: 'live', label: 'Abbreviations' },
+    { id: 'tpl:postfix', kind: 'postfix', label: 'Postfix' },
   ];
   const templateKind = $derived(TEMPLATE_PAGES.find((p) => p.id === active)?.kind ?? null);
 
   /**
    * The kinds this project can generate with.
    *
-   * Four of the six read a Java class, the Spring model or Bean Validation, so on a Cargo workspace
+   * Five of the seven read a Java class, the Spring model, Bean Validation or a Java value's type, so on a Cargo workspace
    * they have nothing to run on. Which four is the backend's answer rather than a list repeated
    * here — and until it has answered the branch stays empty, so no page appears and then vanishes.
    */

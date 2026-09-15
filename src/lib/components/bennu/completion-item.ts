@@ -117,7 +117,8 @@ export function kindToType(kind: string): string {
     case 'type-parameter': return 'type';
     case 'variable':       return 'variable';
     case 'parameter':      return 'variable';
-    case 'keyword':        return 'keyword';
+    case 'keyword':
+    case 'postfix':        return 'keyword';
     case 'constant':
     case 'enum-member':    return 'constant';
     case 'annotation':     return 'annotation';
@@ -192,13 +193,18 @@ export function toCompletion(item: CompletionItem, boost: number, hooks: ItemHoo
   if (needsCustomApply) {
     completion.apply = (view, _c, from, to) => {
       const pre = view.state.doc.toString();
+      // A range that starts BEFORE the word being completed — a postfix template replaces the whole
+      // expression it was typed on, not just the name after the dot. Only ever widened to the left:
+      // the offset is in the buffer the request was made with, and everything before the word is
+      // unchanged since, while what follows it may not be.
+      const start = item.replace_start != null ? Math.min(from, makeByteToU16(pre)(item.replace_start)) : from;
       // `insert_text` is plain text either way — the placeholder syntax is parsed away in the
       // backend and what is left of it is the stops, as byte ranges into it. So a snippet differs
       // from a plain completion only in what happens *after* the text lands.
       if (stops.length > 0 || reindents) {
-        insertWithStops(view, from, to, insert, stops, makeByteToU16(insert));
+        insertWithStops(view, start, to, insert, stops, makeByteToU16(insert));
       } else {
-        view.dispatch(insertCompletionText(view.state, insert, from, to));
+        view.dispatch(insertCompletionText(view.state, insert, start, to));
       }
       applyAdditionalEdits(view, extras, pre);
       hooks.after?.(view, item);

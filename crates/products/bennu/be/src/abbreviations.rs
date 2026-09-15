@@ -29,33 +29,26 @@
 //! own prefix has been typed, and `psf` is not a word anyone types by accident.
 
 use bennu_java::prelude::matching_templates;
-use bennu_templates::prelude::{render_code, unmet, LiveContext, TemplateFacts};
+use bennu_templates::prelude::{render_code, unmet, LiveContext, TemplateFacts, TemplateKind};
 use bennu_lsp::prelude::parse_snippet;
 use bennu_proto::prelude::{CompletionItem, SnippetStop};
 use bennu_proto::prelude::SourceEdit;
 
-use crate::templates_live::LiveTemplate;
+use crate::templates_live::UserTemplate;
 
 /// The abbreviation completions for a caret in a Java buffer, in the order they should be read: the
 /// user's own abbreviations first, then the built-in ones — minus any the user redefined.
 ///
 /// Empty for every other language, for a caret that is not on a word, and for a word that begins
-/// no abbreviation — which is nearly every keystroke, and costs a table scan of thirteen rows.
+/// no abbreviation — which is nearly every keystroke, and costs a table scan of fifteen rows.
 pub(crate) fn completions(file: &str, source: &str, offset: usize) -> Vec<CompletionItem> {
-    completions_with(&crate::templates_live::live_templates(), &|| facts_of(file), file, source, offset)
-}
-
-/// `project` and `style` for the project `file` belongs to — the defaults outside any project.
-fn facts_of(file: &str) -> TemplateFacts {
-    crate::index_service::IndexService::global()
-        .root_for_file(file)
-        .map(|root| crate::templates_facts::facts_at(&root, file))
-        .unwrap_or_default()
+    let mine = crate::templates_live::user_templates(TemplateKind::Live);
+    completions_with(&mine, &|| crate::templates_facts::facts_of_file(file), file, source, offset)
 }
 
 /// `facts` is asked only when one of the user's abbreviations starts with the word — which is rarely.
 fn completions_with(
-    mine: &[LiveTemplate],
+    mine: &[UserTemplate],
     facts: &dyn Fn() -> TemplateFacts,
     file: &str,
     source: &str,
@@ -63,7 +56,7 @@ fn completions_with(
 ) -> Vec<CompletionItem> {
     let Some((start, prefix)) = word_before(source, offset) else { return Vec::new() };
     let mut items: Vec<CompletionItem> = Vec::new();
-    let mut matching: Vec<&LiveTemplate> = mine
+    let mut matching: Vec<&UserTemplate> = mine
         .iter()
         .filter(|t| writes_for(&t.extension, file) && starts_with_ignoring_case(&t.name, prefix))
         .collect();
@@ -203,12 +196,12 @@ fn is_word_byte(b: u8) -> bool {
 mod tests {
     use super::*;
 
-    fn mine(name: &str, text: &str) -> LiveTemplate {
+    fn mine(name: &str, text: &str) -> UserTemplate {
         for_language(name, "java", text)
     }
 
-    fn for_language(name: &str, extension: &str, text: &str) -> LiveTemplate {
-        LiveTemplate {
+    fn for_language(name: &str, extension: &str, text: &str) -> UserTemplate {
+        UserTemplate {
             name: name.to_string(),
             description: None,
             requires: Vec::new(),
@@ -250,6 +243,16 @@ mod tests {
         // And the one typed exactly is the one Enter takes.
         assert!(items[0].preselect);
         assert!(!items[1].preselect);
+    }
+
+    /// `private final` is its own family: typing it offers it alone, and it never joins `psf`'s.
+    #[test]
+    fn private_final_is_offered_on_its_own_abbreviation() {
+        let src = "class A { prf";
+        let items = completions_with(&[], &TemplateFacts::default, "/p/A.java", src, src.len());
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].label, "prf");
+        assert_eq!(items[0].insert_text.as_deref(), Some("private final "));
     }
 
     #[test]
@@ -328,8 +331,8 @@ mod tests {
     #[test]
     fn a_users_abbreviation_comes_first_renders_with_the_file_and_replaces_a_built_in_of_its_name() {
         let mine = vec![
-            LiveTemplate { requires: Vec::new(), name: "psf".into(), description: Some("Mine".into()), text: "public static final ${1:String} ${2:NAME} = ${3:null};$0".into() },
-            LiveTemplate { requires: Vec::new(), name: "logx".into(), description: None, text: "LOG.info(\"{{ class_name }}: $1\");$0\n".into() },
+            UserTemplate { description: Some("Mine".into()), ..mine("psf", "public static final ${1:String} ${2:NAME} = ${3:null};$0") },
+            mine("logx", "LOG.info(\"{{ class_name }}: $1\");$0\n"),
         ];
         let src = "class OrderService { psf";
         let items = completions_with(&mine, &TemplateFacts::default, "/p/OrderService.java", src, src.len());

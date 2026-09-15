@@ -50,6 +50,15 @@ export interface IntentionOffer {
    * Absent for a single-range offer, which `start`/`end`/`replacement` describe on their own.
    */
   edits?: { start: number; end: number; text: string }[];
+  /**
+   * What to select once the edits are applied — a placeholder the offer wrote, to be typed over.
+   *
+   * `start`/`end` are UTF-8 **bytes into the inserted text of one edit**: `edits[edit]`, or for a
+   * single-range offer (no `edits`) `replacement` as edit `0`. Relative to the edit rather than the
+   * document so it means the same thing wherever that text lands; `selectionAfterEdits` in
+   * `components/bennu/offer-selection.ts` resolves it. Absent for an offer that selects nothing.
+   */
+  select?: { edit: number; start: number; end: number };
 }
 
 /** A diagnostic as a quick-fix needs it: what kind, and where. */

@@ -349,6 +349,26 @@ impl Project {
         )
     }
 
+    /// The classes the function slot at `file`:`offset` receives — what leads the bare-word answer
+    /// in `opt.map(Re|)`.
+    pub fn functional_types(&self, file: &str, offset: usize) -> Vec<String> {
+        bennu_query::prelude::functional_argument_types(
+            self.source(file),
+            offset,
+            &self.completion_resolver,
+            Default::default(),
+        )
+        .into_iter()
+        .map(|c| c.label)
+        .collect()
+    }
+
+    /// The static type of the expression spanning `[start, end)` in `file`, against the FULL
+    /// resolver — the question a local's hover asks of its name.
+    pub fn type_of(&self, file: &str, start: usize, end: usize) -> Option<bennu_java::prelude::TypeRef> {
+        bennu_java::prelude::infer_expression_type(self.source(file), start, end, &self.completion_resolver)
+    }
+
     /// `true` if a completion candidate named `name` is offered at `file`:`offset`.
     pub fn completes_with(&self, file: &str, offset: usize, name: &str) -> bool {
         self.complete_labels(file, offset).iter().any(|l| l == name)
@@ -565,6 +585,26 @@ impl CpMemberIndex for StreamJdk {
                     CpTypeRef::plain("R"),
                 ))],
             ),
+            // `final class Optional<T> { <U> Optional<U> map(Function<? super T, ? extends U>);
+            // T orElse(T); boolean isPresent(); }` — the wildcards spelled as the bounds the bytecode
+            // decoder collapses them onto. What a project method returning `Optional<Foo>` chains
+            // into, and what `opt.map(Foo::|)` reads its function slot off.
+            "java/util/Optional" => CpClassMembers {
+                superclass: Some(bennu_classpath::prelude::TypeRef::plain("java/lang/Object")),
+                interfaces: Vec::new(),
+                methods: vec![
+                    method(
+                        "map",
+                        vec![applied("java/util/function/Function", &["T", "U"])],
+                        applied("java/util/Optional", &["U"]),
+                    ),
+                    method("orElse", vec![CpTypeRef::plain("T")], CpTypeRef::plain("T")),
+                    method("isPresent", vec![], CpTypeRef::plain("boolean")),
+                ],
+                fields: Vec::new(),
+                flags: CpClassFlags::default(),
+                type_params: vec!["T".to_string()],
+            },
             // Every enum implicitly extends this, and `name()` / `ordinal()` are declared nowhere in
             // the project — so a project enum's `e.name()` resolves only if the walk can see it.
             "java/lang/Enum" => CpClassMembers {

@@ -83,7 +83,9 @@
   const parts = $derived(templateFileParts(path));
   const root = $derived(projectStore.project?.root ?? null);
   const needsConfig = $derived(kind === 'config-class');
-  const needsClass = $derived(kind !== 'new-file' && !needsConfig);
+  /** A postfix template renders on a sample value; an open Java file only lends it a class and a package. */
+  const isPostfix = $derived(kind === 'postfix');
+  const needsClass = $derived(kind !== 'new-file' && !needsConfig && !isPostfix);
   const configTabs = $derived(projectStore.openFilePaths.filter((p) => isSpringConfigFile(p)));
   /** The configuration file to render from: the one chosen, else the last one opened. */
   const configFile = $derived(chosenConfig ?? configTabs[configTabs.length - 1] ?? null);
@@ -126,16 +128,16 @@
       template: parts.name,
       text,
       extension: parts.extension,
-      file: needsClass ? file : needsConfig ? configFile : null,
+      file: needsClass || isPostfix ? file : needsConfig ? configFile : null,
       // By name, so a nested class — or any but the file's first — is the one rendered.
       class: needsClass ? chosenClass?.simple ?? null : null,
       // A class open in a tab renders from its buffer, like the template does. An empty one is a tab
       // not loaded yet, and sending it would render a file with no class in it: the disk answers then.
-      source: needsClass && file
+      source: (needsClass || isPostfix) && file
         ? projectStore.sourceOf(file) || null
         : needsConfig && configFile ? projectStore.sourceOf(configFile) || null : null,
-      directory: needsClass || needsConfig ? null : file ? file.replace(/[\\/][^\\/]*$/, '') : root,
-      name: needsClass || needsConfig ? null : name.trim() || 'Example',
+      directory: needsClass || needsConfig || isPostfix ? null : file ? file.replace(/[\\/][^\\/]*$/, '') : root,
+      name: needsClass || needsConfig || isPostfix ? null : name.trim() || 'Example',
       prefix: needsConfig ? prefix.trim() || null : null,
       parameters: parameters.value,
       traceLines: true,
@@ -215,6 +217,12 @@
       </Button>
       <span class="tp-label">Keys under</span>
       <div class="tp-name"><Input bind:value={prefix} size="sm" placeholder="app.mail" ariaLabel="The prefix the class binds" /></div>
+    {:else if isPostfix}
+      <span class="tp-label">Value</span>
+      <span
+        class="tp-file"
+        use:tooltip={'A sample value, typed in the last Java file opened — change it with Parameters: { "expr": "ids", "type": "int[]" }'}
+      >{'orders · List<Order>'}</span>
     {:else}
       <span class="tp-label">Name</span>
       <div class="tp-name"><Input bind:value={name} size="sm" ariaLabel="The name typed in New file" /></div>

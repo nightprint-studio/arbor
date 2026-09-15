@@ -54,7 +54,7 @@ pub trait TypeNameCatalog {
 /// The identifier spliced in at the caret to make a `receiver.` buffer parse while the enclosing
 /// type is read off it. Its name never reaches an answer — only the type declaration around it
 /// does — so anything that lexes as a Java identifier would do.
-const SITE_PLACEHOLDER: &str = "x";
+pub(crate) const SITE_PLACEHOLDER: &str = "x";
 
 /// Compute member-access completions at `byte_offset` in `source`.
 ///
@@ -91,6 +91,18 @@ pub fn completion_in<M: CpMemberIndex>(
     while byte_offset > 0 && !source.is_char_boundary(byte_offset) {
         byte_offset -= 1;
     }
+    // `Type::|` is a member access too, and it used to reach none of this: the scan below stops at
+    // the `:`, finds no receiver, and the popup fell through to answering a bare word — every local
+    // and every class on the classpath, after a `::` where only a method of `Type` can be written.
+    if let Some(items) = crate::method_reference::method_reference_completion(
+        source,
+        byte_offset,
+        resolver,
+        catalog,
+        case,
+    ) {
+        return items;
+    }
     let (dot_offset, prefix) = split_prefix(source, byte_offset);
     let typed = Typed::new(&prefix, case);
 
@@ -116,32 +128,10 @@ pub fn completion_in<M: CpMemberIndex>(
         s
     };
 
-    // Whether the receiver names a TYPE rather than a value — the ranking's strongest term, since
-    // after `Color.` an instance member is not merely unlikely, it does not compile.
-    let mut receiver_is_type = false;
-    // Set when the receiver was found ONLY through the catalog — i.e. it is not in scope yet. Every
-    // item then carries it, so accepting any member adds the receiver's import in the same gesture.
-    let mut needs_import: Option<String> = None;
-    let recv = match infer_receiver_type(&repaired, dot_offset, resolver) {
-        Some(r) => r,
-        // A **type** receiver — `Color.RED`, `Files.copy(…)`, `Config.MAX`. Inference types
-        // expressions, and a type name is not one, so it answered nothing and every static access
-        // completed to an empty list. Resolving the written name AS a type is the other half of
-        // the same question, and the one `refs` already asks on the go-to path.
-        None => match type_receiver(&repaired, dot_offset, resolver) {
-            Some(r) => {
-                receiver_is_type = true;
-                r
-            }
-            None => match unimported_type_receiver(&repaired, dot_offset, resolver, catalog) {
-                Some((r, fqn)) => {
-                    receiver_is_type = true;
-                    needs_import = Some(fqn);
-                    r
-                }
-                None => return Vec::new(),
-            },
-        },
+    let Some(Receiver { ty: recv, is_type: receiver_is_type, import: needs_import }) =
+        resolve_receiver(&repaired, dot_offset, resolver, catalog)
+    else {
+        return Vec::new();
     };
 
     // The class the caret sits inside. A `private` member is offered only when its declaring type
@@ -180,15 +170,8 @@ pub fn completion_in<M: CpMemberIndex>(
         collect_nested_types(resolver, catalog, &recv.binary_name, typed, &ctx, &mut out, &mut seen);
     }
     collapse_overloads(&mut out);
-    // Most relevant first (see `rank`), and — because relevance ties are common and a popup that
-    // reshuffles between keystrokes is unusable — the old deterministic order underneath it:
-    // fields then methods, alphabetical within.
-    out.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then(a.item.kind.cmp(&b.item.kind))
-            .then(a.item.label.cmp(&b.item.label))
-    });
+    sort_ranked(&mut out);
+    preselect_the_only_exact_fit(&mut out);
     let mut items: Vec<CompletionItem> = out
         .into_iter()
         .map(|r| match &needs_import {
@@ -198,6 +181,42 @@ pub fn completion_in<M: CpMemberIndex>(
         .collect();
     drop_call_syntax_if_written(&mut items, source, byte_offset);
     items
+}
+
+/// What stands left of a member access, read three ways in Java's own order.
+pub(crate) struct Receiver {
+    /// The type whose members are offered.
+    pub(crate) ty: TypeRef,
+    /// Whether the receiver names a TYPE rather than a value — the ranking's strongest term, since
+    /// after `Color.` an instance member is not merely unlikely, it does not compile.
+    pub(crate) is_type: bool,
+    /// Set when the receiver was found ONLY through the catalog — i.e. it is not in scope yet. Every
+    /// item then carries it, so accepting any member adds the receiver's import in the same gesture.
+    pub(crate) import: Option<String>,
+}
+
+/// Read the receiver whose member access ends at `dot_offset` in `repaired` — the one question the
+/// `.` and the `::` completions share, answered once.
+///
+/// A value first; then a **type** receiver — `Color.RED`, `Files.copy(…)`, `Config.MAX`. Inference
+/// types expressions, and a type name is not one, so it answered nothing and every static access
+/// completed to an empty list. Resolving the written name AS a type is the other half of the same
+/// question, and the one `refs` already asks on the go-to path. Last, a type the file has not
+/// imported yet.
+pub(crate) fn resolve_receiver<M: CpMemberIndex>(
+    repaired: &str,
+    dot_offset: usize,
+    resolver: &IndexResolver<M>,
+    catalog: Option<&dyn TypeNameCatalog>,
+) -> Option<Receiver> {
+    if let Some(ty) = infer_receiver_type(repaired, dot_offset, resolver) {
+        return Some(Receiver { ty, is_type: false, import: None });
+    }
+    if let Some(ty) = type_receiver(repaired, dot_offset, resolver) {
+        return Some(Receiver { ty, is_type: true, import: None });
+    }
+    let (ty, fqn) = unimported_type_receiver(repaired, dot_offset, resolver, catalog)?;
+    Some(Receiver { ty, is_type: true, import: Some(fqn) })
 }
 
 /// The receiver read as a type name the file has NOT imported: `Arrays.` with no
@@ -253,7 +272,8 @@ fn collect_nested_types<M: CpMemberIndex>(
             ..Default::default()
         };
         let score = ctx.score_nested_type(simple);
-        out.push(Ranked { score, item });
+        // A type name is not a value, so it produces nothing a position could want.
+        out.push(Ranked { score, fit: rank::Fit::None, item });
     }
 }
 
@@ -284,6 +304,9 @@ pub(crate) fn collapse_overloads(out: &mut Vec<Ranked>) {
         match at.get_mut(&key) {
             Some((idx, extra)) => {
                 *extra += 1;
+                // The row fits if any overload does: accepting it writes the name, and the
+                // parameter hints then offer the overload that returns what is wanted.
+                kept[*idx].fit = kept[*idx].fit.max(r.fit);
                 // The most relevant of the set is the one whose signature is shown — a deprecated
                 // overload should not become the face of a method that also has a current one.
                 if r.score > kept[*idx].score {
@@ -313,7 +336,38 @@ pub(crate) fn collapse_overloads(out: &mut Vec<Ranked>) {
 /// A candidate and how relevant it is here, before the sort turns the pair back into a list.
 pub(crate) struct Ranked {
     pub(crate) score: i32,
+    /// Whether it produces what the position wants — the key ordered BEFORE `score`. See
+    /// [`rank::Fit`] for why it is not one more term in it.
+    pub(crate) fit: rank::Fit,
     pub(crate) item: CompletionItem,
+}
+
+/// Order a candidate list: what fits the position first, the most relevant first within that, and
+/// — because relevance ties are common and a popup that reshuffles between keystrokes is unusable —
+/// fields then methods, alphabetical, underneath it all.
+///
+/// One sort for every list built out of [`Ranked`], so a member after a dot, a bare name and a
+/// method reference cannot disagree about what "first" means.
+pub(crate) fn sort_ranked(out: &mut [Ranked]) {
+    out.sort_by(|a, b| {
+        b.fit
+            .cmp(&a.fit)
+            .then(b.score.cmp(&a.score))
+            .then(a.item.kind.cmp(&b.item.kind))
+            .then(a.item.label.cmp(&b.item.label))
+    });
+}
+
+/// Mark the row `preselect` when it is the ONLY one producing exactly the expected type.
+///
+/// Only then: `return builder.|` has one member returning `Order`, and that is an answer. Two
+/// locals of the right type are a choice, and preselecting either would make it for the user —
+/// the fit ordering already puts both on top.
+pub(crate) fn preselect_the_only_exact_fit(out: &mut [Ranked]) {
+    let mut exact = out.iter_mut().filter(|r| r.fit == rank::Fit::Exact);
+    if let (Some(only), None) = (exact.next(), exact.next()) {
+        only.item.preselect = true;
+    }
 }
 
 /// The receiver read as a TYPE name — the other half of "what is before this dot".
@@ -413,7 +467,8 @@ pub(crate) fn collect_members<M: CpMemberIndex>(
         // never shown).
         let allow_private = same_top_level(bn, site);
         add_matching(
-            &a.members, bn, typed, allow_private, statics_only, site, a.depth, ctx, out, seen,
+            resolver, &a.members, bn, typed, allow_private, statics_only, site, a.depth, ctx, out,
+            seen,
         );
         None
     });
@@ -421,6 +476,7 @@ pub(crate) fn collect_members<M: CpMemberIndex>(
 
 #[allow(clippy::too_many_arguments)]
 fn add_matching(
+    resolver: &dyn TypeResolver,
     cm: &ClassMembers,
     declaring: &str,
     typed: Typed<'_>,
@@ -465,8 +521,15 @@ fn add_matching(
             continue;
         }
         let (insert, stops) = call_syntax(m);
+        // A `void` method produces nothing, and `Fit::None` is what the walk answers for it.
+        let fit = if m.return_type.binary_name == "void" && m.return_type.dims == 0 {
+            rank::Fit::None
+        } else {
+            ctx.fit(&m.return_type, resolver)
+        };
         out.push(Ranked {
             score: rank::score(m, declaring, depth, ctx) - rank::tier_penalty(tier),
+            fit,
             item: CompletionItem {
                 label: m.name.clone(),
                 kind: kind_tag(m.kind).to_string(),
@@ -595,6 +658,7 @@ mod overload_collapse_tests {
     fn item(kind: &str, label: &str, detail: &str, score: i32) -> Ranked {
         Ranked {
             score,
+            fit: rank::Fit::None,
             item: CompletionItem {
                 label: label.to_string(),
                 kind: kind.to_string(),
@@ -664,6 +728,63 @@ mod overload_collapse_tests {
         collapse_overloads(&mut v);
         assert_eq!(v[0].item.detail.as_deref(), Some("run() : void  +1 overload"));
         assert_eq!(v[0].score, 9, "and its score, so it ranks as the best of the set");
+    }
+
+    fn fitting(label: &str, score: i32, fit: rank::Fit) -> Ranked {
+        Ranked { fit, ..item("method", label, "", score) }
+    }
+
+    fn sorted(mut v: Vec<Ranked>) -> Vec<Ranked> {
+        sort_ranked(&mut v);
+        v
+    }
+
+    /// The reported case: `builder.customer(..)` written three times and picked twice this session
+    /// outscores `build()` on habit, and `build()` is the only member a `return` in a method
+    /// returning `Order` can take. The fit leads, whatever the score says.
+    #[test]
+    fn what_fits_the_position_comes_before_what_scores_higher() {
+        let v = sorted(vec![
+            fitting("customer", 64, rank::Fit::None),
+            fitting("id", 40, rank::Fit::None),
+            fitting("build", 0, rank::Fit::Exact),
+        ]);
+        assert_eq!(labels(&v), ["build", "customer", "id"]);
+    }
+
+    /// The exact type first, then a subtype, then everything else — nothing dropped.
+    #[test]
+    fn an_exact_fit_leads_a_subtype_which_leads_a_miss() {
+        let v = sorted(vec![
+            fitting("label", 50, rank::Fit::None),
+            fitting("listed", 10, rank::Fit::Subtype),
+            fitting("orders", 5, rank::Fit::Exact),
+        ]);
+        assert_eq!(labels(&v), ["orders", "listed", "label"]);
+    }
+
+    #[test]
+    fn the_only_exact_fit_is_preselected() {
+        let mut v = vec![fitting("build", 0, rank::Fit::Exact), fitting("id", 9, rank::Fit::Subtype)];
+        preselect_the_only_exact_fit(&mut v);
+        assert!(v[0].item.preselect);
+        assert!(!v[1].item.preselect);
+    }
+
+    /// Two locals of the right type are a choice, not an answer.
+    #[test]
+    fn two_exact_fits_preselect_neither() {
+        let mut v = vec![fitting("order", 0, rank::Fit::Exact), fitting("other", 0, rank::Fit::Exact)];
+        preselect_the_only_exact_fit(&mut v);
+        assert!(v.iter().all(|r| !r.item.preselect));
+    }
+
+    /// A folded row fits when any of its overloads does.
+    #[test]
+    fn a_folded_row_keeps_the_best_fit_of_its_overloads() {
+        let mut v = vec![fitting("of", 9, rank::Fit::None), fitting("of", 1, rank::Fit::Exact)];
+        collapse_overloads(&mut v);
+        assert_eq!(v[0].fit, rank::Fit::Exact);
     }
 
     /// Different methods are not overloads of each other.

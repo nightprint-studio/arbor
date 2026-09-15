@@ -25,7 +25,7 @@
 
 import type { LanguageDescriptor, CompletionSource } from '$lib/components/shared/ui/code-editor';
 import {
-  hoverCardDom, makeU16ToByte,
+  hoverCardDom, makeU16ToByte, createCompletionRequests,
 } from '$lib/components/shared/ui/code-editor';
 import { boostForRank, RESOLVED } from '$lib/components/shared/ui/code-editor/completion-rank';
 import { toCompletion } from './completion-item';
@@ -45,13 +45,14 @@ import {
 import type { CompletionItem } from '$lib/types/bennu';
 
 /**
- * Only the latest keystroke's answer is allowed to open a popup.
+ * Server completion requests, paced to the typing — see `completion-requests`.
  *
- * CodeMirror coalesces its own requests, but the IPC round-trip can still race: two keystrokes
- * in flight can resolve out of order, and the older answer would replace the newer list with a
- * stale one.
+ * Only the latest keystroke's answer may open a popup: the IPC round-trip can race, and an older
+ * answer would replace the newer list with a stale one. Beyond that, a burst of keys asks once it
+ * pauses (sampled while it lasts), and an identical question shares the answer in flight — a
+ * language server is the slowest thing a keystroke can wait on.
  */
-let completionSeq = 0;
+const completionRequests = createCompletionRequests<CompletionItem[]>();
 
 /**
  * Turn one server item into a CodeMirror completion.
@@ -153,17 +154,21 @@ function makeBackendCompletionSource(opts: BackendCompletionOptions = {}): Compl
     const src = ctx.state.doc.toString();
     const byteOffset = makeU16ToByte(src)(ctx.pos);
 
-    const seq = ++completionSeq;
-    let items: CompletionItem[];
+    let answered: CompletionItem[] | null;
     try {
-      items = await ipcCompletion(path, byteOffset, src);
+      answered = await completionRequests.request(
+        `${path} ${byteOffset} ${src}`,
+        () => ipcCompletion(path, byteOffset, src),
+        ctx.explicit,
+      );
     } catch {
       // The backend is absent. Silent while typing — but an explicit press is a question, and a
       // question deserves an answer even when the answer is "nobody is listening".
       if (ctx.explicit) completionNoteStore.say('No engine answered for this file');
       return null;
     }
-    if (seq !== completionSeq) return null; // superseded by a newer keystroke
+    if (answered === null || ctx.aborted) return null; // superseded by a newer keystroke
+    const items = answered;
     if (!items.length) {
       if (ctx.explicit) sayNoSuggestions(ctx);
       return null;

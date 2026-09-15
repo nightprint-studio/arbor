@@ -13,6 +13,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **"Not indexed" in Bennu's footer.** A Java file outside every indexed project says so, with one click to open the project it belongs to.
 - **Bennu tells you when the project's shape changes.** Folders added, removed or renamed at the top of a project, or a module renamed in another IDE, show one notice — with *Rebuild index* when a module or `pom.xml` is involved.
 - **Reload project tree** in Bennu's command palette re-reads the project from disk on demand.
+- **Java postfix templates follow the expression's type and the module's Java level.** `ids.stream` on an array writes `Arrays.stream(ids)`, `orders.for` declares an `Order order`, `.fori` counts to `size()` or `length`; new `Optional` templates (`.ifp`, `.ifpe`, `.ifget`, `.orThrow`, `.orGet`, `.optof`) and IntelliJ's `.soutv`, `.souf`, `.twr`, `.castvar`, `.arg`, `.lambda`, `.reqnonnull`, `.format`, `.new`. Where a level lacks a method the older equivalent is written, and imports are added.
+- **New postfix template…** in Bennu's command palette opens the new-template dialog directly on the Postfix kind.
+- **Postfix templates of your own.** A new *Postfix* kind of code template, offered after a value's dot beside the built-in ones, on the values it declares (`iterable`, `optional`, a class…), replacing a built-in of the same name.
+- **Method references complete.** After `Type::` or `value::` Bennu lists the methods and `new`, the ones fitting the expected function first, inserted without parentheses.
+- **The type a function argument receives is suggested first.** In `optional.map(|)` the value's type is preselected, also on Ctrl+Space with nothing typed.
+- **`prf` and `pf`** expand to `private final` and `public final`.
+- **The name of a declaration as ghost text.** After `private final OrderRepository ` Bennu draws `orderRepository` (`List<Order>` → `orders`), written with Tab — for fields, locals and parameters.
+- **Alt+Enter on a `final` field nothing initialises** offers Add constructor parameter (or all final fields at once), Initialize in constructor, Initialize variable and Make not final — and, on Lombok projects, Add `@RequiredArgsConstructor`, first when the project already uses it. Initialize variable and Initialize in constructor select the value they write, so typing replaces it.
 - **Bennu's project tree repairs itself on focus.** Coming back to the window re-checks the root and the open folders, and reloads the tree if a change was missed.
 
 - **Typing around a selection in Java wraps it.** `<`, `"`, `'` and the brackets surround the selected text instead of replacing it, and `"""` opens a text block with the caret inside.
@@ -142,6 +150,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 
 ### Changed
+- **Bennu's completion no longer asks the backend — or a language server — on every key while you type fast.** A burst is asked once it pauses — and sampled while it lasts — and an identical question shares the answer already on its way.
+- **Alt+Enter fixes that write a placeholder select it.** Create method (from a call or a method reference), Surround with try/catch and Add the missing cases select the stub statement they write, so typing replaces it.
+- **A clearer completion popup** in every code editor: larger rows, colour-coded kind badges, highlighted matched letters, and signature and origin in right-aligned columns.
+
 - **Bennu's Alt+Enter list is read in sections.** Quick fixes, intentions, refactorings and generators each have their own heading and colour, fixes first. The generators appear only where a member is written and never beside a fix, and imports are ordered the way completion ranks them — `java.util.List` before `java.awt.List`, the JDK's internals last — with the clear favourite marked *suggested*.
 
 - **Project Configuration is four sections with a sidebar.** The same layout as Settings — Project, Frameworks, Naming, Spelling — instead of one column scrolling through six unrelated subjects. It is reached from the title bar's gear, `Ctrl+Shift+,` or the palette; the duplicate entry in the Project menu is gone.
@@ -157,6 +169,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **A missing Maven module counted as a complete classpath.** The dependencies of a renamed module were silently left out; now the resolve is incomplete and says which module is missing.
 - **Bennu's project tree missed folder changes.** Folders added directly under the project root, module folders renamed from another IDE, and anything that happened during a build or while a log file grew could leave the tree out of date.
 - **Class and annotation completion put loose matches above exact ones.** A name found only by its humps or in another case could outrank the exact prefix the project imports everywhere; how well the name matches now decides first, and what the project uses orders what is left.
+- **An annotation or class the project imports everywhere was missing from completion until most of its name was typed.** The candidates were cut to the shortest names before popularity was consulted, and the list from the first letter kept being filtered as you typed; `@R` now offers `@RequiredArgsConstructor` near the top in a project that uses it.
+- **Java completion did not open on what a `return` needs.** `return Ra|` now puts the class the method returns first and preselected, `return builder.|` its `build()`, and a bare word the local or field of that type — also inside lambdas and for generic and primitive return types.
+- **After a dot with a name started, Java completion offered keywords, words from the file and local names.** Only the value's members and postfix templates are listed now.
+- **Completion and hover lost the type along a chain on an unfinished line.** `resolver.resolve_identity().map(…)` without its `;` completes `Optional`'s members, and a `val` bound to `….map(Type::method)` hovers as `Optional<…>`.
 - **A `@RequiredArgsConstructor` class hid its undeclared names.** Any Lombok annotation silenced the undeclared-variable and undeclared-method errors for the whole class; now only the ones that really generate such a name do.
 - **A `map(this::method)` or `map(x -> …)` lost its result type.** `opt.map(this::toIdentity)` was an `Optional` of nothing, so the lambda chained after it had no completion, no hover and no checks; the type is now read off the referenced method or the lambda's expression.
 - **Quotes in the Java editor pair only where they belong.** Not inside a string or a comment, not after a word; typing the closing quote steps over it, and the caret stays visible between matched brackets.

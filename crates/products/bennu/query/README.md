@@ -47,6 +47,20 @@ struct RecordedDeps                          // project deps captured during a v
 fn record(f) -> (R, RecordedDeps)            // run `f` capturing the project types it reads
 fn convert_members(&CpClassMembers) -> JClassMembers
 fn completion(source: &str, byte_offset: usize, resolver: &IndexResolver<M>) -> Vec<CompletionItem>
+fn completion_in(source, byte_offset, resolver, catalog: Option<&dyn TypeNameCatalog>, case) -> Vec<CompletionItem>
+// After `::` (`Type::|`, `value::na|`) `completion_in` answers the method reference instead: methods
+// and `new` only, inserting the bare name, the ones fitting the slot's functional interface first.
+fn method_reference_site(source: &str, caret: usize) -> Option<MethodReferenceSite>   // { qualifier_end, name_start }
+fn method_reference_completion(source, caret, resolver, catalog, case) -> Option<Vec<CompletionItem>>
+struct ReferenceShape { params, returns, qualifier, through_type }
+fn fits_reference(m: &Member, shape: &ReferenceShape) -> bool
+fn params_fit(declared: &[TypeRef], wanted: &[TypeRef]) -> bool
+// How a candidate answers the type the position wants (`return builder.|`, `String s = o.|`):
+// None < Subtype < Exact. Every completion list is ordered by it FIRST, then by relevance; the
+// only exact fit is marked `preselect`.
+enum Fit { None, Subtype, Exact }
+// The classes a function slot receives (`opt.map(Re|)` → the Optional's element), as type items.
+fn functional_argument_types(source, caret, resolver, case) -> Vec<CompletionItem>
 fn inherited_members(resolver, java_files: &[PlanFile], file, type_name, line) -> Vec<InheritedMember>
 ```
 
