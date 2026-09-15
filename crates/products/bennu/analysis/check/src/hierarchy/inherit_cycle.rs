@@ -118,9 +118,14 @@ fn check_cycle(
 
 // ── check 2: @Override overrides nothing ─────────────────────────────────────
 
-/// Flag each `@Override` method in `n`'s body that overrides/implements nothing — but ONLY when `n`'s
-/// entire supertype hierarchy is fully known, and only for a method whose name exists nowhere in that
-/// hierarchy (the unambiguous typo case).
+/// Flag each `@Override` method in `n`'s body that overrides/implements nothing:
+///
+/// * a `static` one, always — a static method overrides nothing by definition;
+/// * in a class with no written supertype, one not named like a method of `Object`, the only
+///   type it can override from;
+/// * otherwise, only when `n`'s entire supertype hierarchy is fully known, and then for a name that
+///   exists nowhere in it — or exists only with other parameter counts, which makes the method an
+///   overload.
 fn check_overrides(
     n: Node,
     bytes: &[u8],
@@ -129,7 +134,57 @@ fn check_overrides(
     out: &mut Vec<Diagnostic>,
 ) {
     let Some(body) = n.child_by_field_name("body") else { return };
+    // `(method, its @Override annotation, name)` — reported on the annotation, as javac does: it is
+    // the claim that is wrong, and removing it is one of the two fixes.
+    let mut annotated: Vec<(Node, Node, String)> = Vec::new();
+    let mut mc = body.walk();
+    for m in body.named_children(&mut mc) {
+        if m.kind() != "method_declaration" {
+            continue;
+        }
+        let Some(annotation) = override_annotation(m, bytes) else { continue };
+        let Some(name_node) = m.child_by_field_name("name") else { continue };
+        let Ok(name) = name_node.utf8_text(bytes) else { continue };
+        if crate::support::nodes::has_keyword(m, bytes, "static") {
+            out.push(CheckId::OverrideOverridesNothing.at(annotation, "Static methods cannot be annotated with `@Override`"));
+            continue;
+        }
+        annotated.push((m, annotation, name.to_string()));
+    }
+    if annotated.is_empty() {
+        return;
+    }
+    let object_methods = crate::hierarchy::inheritance::object_method_names(resolver);
+    let written_supers = crate::support::supertypes::all(n, bytes);
+    if written_supers.is_empty() {
+        // Records override their implicit accessors and enums inherit `Enum`: only a plain class
+        // with nothing written after its name has `Object` as its whole hierarchy.
+        if n.kind() == "class_declaration" {
+            for (_, name_node, name) in &annotated {
+                if !object_methods.contains(name) {
+                    out.push(CheckId::OverrideOverridesNothing.at(
+                        *name_node,
+                        "Method does not override or implement a method from a supertype",
+                    ));
+                }
+            }
+        }
+        return;
+    }
+    check_overrides_in_hierarchy(n, &annotated, &object_methods, bytes, symbols, resolver, out);
+}
 
+/// The `@Override` methods of a type that names supertypes, judged against the whole hierarchy.
+#[allow(clippy::too_many_arguments)]
+fn check_overrides_in_hierarchy(
+    n: Node,
+    annotated: &[(Node, Node, String)],
+    object_methods: &HashSet<String>,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    out: &mut Vec<Diagnostic>,
+) {
     // Direct supertypes (extends + implements) as binary names, read in the scope a HEADER is read
     // in — the shared reading, not a sixth copy of it.
     //
@@ -155,43 +210,56 @@ fn check_overrides(
         return;
     }
 
-    // The set of ALL method names declared anywhere in the (fully-known) supertype hierarchy. Because
-    // the hierarchy is fully known, a name absent here is DEFINITELY not overridable → a real typo.
-    let mut super_method_names: HashSet<String> = HashSet::new();
+    // Every method name declared anywhere in the (fully-known) supertype hierarchy, with the parameter
+    // counts it is declared with. Because the hierarchy is fully known, a name absent here is
+    // DEFINITELY not overridable → a real typo.
+    let mut super_methods: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
     for s in &supers {
         crate::support::walk::for_each_supertype(resolver, s, &mut |_bn, cm| {
             for m in &cm.methods {
-                super_method_names.insert(m.name.clone());
+                super_methods.entry(m.name.clone()).or_default().push(m.params.len());
             }
         });
     }
 
-    // Each method declared directly in this type's body: if it's `@Override` and its name appears in
-    // NO supertype, flag it.
-    let mut bc = body.walk();
-    for m in body.named_children(&mut bc) {
-        if m.kind() != "method_declaration" {
-            continue;
+    for (method, name_node, name) in annotated {
+        let overrides = match super_methods.get(name) {
+            None => false,
+            // Same name: an override unless no declaration takes as many parameters. Covariant
+            // returns and erased generic signatures are legal overrides, so arity is all that is
+            // compared — and a varargs method, or one of `Object`'s, is not compared at all.
+            Some(arities) => {
+                let own = parameter_count(*method);
+                own.is_none() || object_methods.contains(name) || arities.contains(&own.unwrap_or(0))
+            }
+        };
+        if !overrides {
+            out.push(CheckId::OverrideOverridesNothing.at(
+                *name_node,
+                "Method does not override or implement a method from a supertype",
+            ));
         }
-        if !has_override_annotation(m, bytes) {
-            continue;
-        }
-        let Some(name_node) = m.child_by_field_name("name") else { continue };
-        let Some(name) = name_node.utf8_text(bytes).ok() else { continue };
-        // Name matches SOME supertype method (any arity) → might override → SKIP (conservative:
-        // covariant returns / generic-erasure signature differences are legal overrides).
-        if super_method_names.contains(name) {
-            continue;
-        }
-        out.push(CheckId::OverrideOverridesNothing.at(
-            name_node,
-            "Method does not override or implement a method from a supertype",
-        ));
     }
 }
 
-/// Whether a method declaration carries `@Override` / `@java.lang.Override` in its `modifiers`.
-fn has_override_annotation(md: Node, bytes: &[u8]) -> bool {
+/// The number of parameters a method declares; `None` for a varargs method, whose arity a caller
+/// cannot compare.
+fn parameter_count(method: Node) -> Option<usize> {
+    let params = method.child_by_field_name("parameters")?;
+    let mut c = params.walk();
+    let mut count = 0;
+    for p in params.named_children(&mut c) {
+        match p.kind() {
+            "formal_parameter" => count += 1,
+            "spread_parameter" => return None,
+            _ => {}
+        }
+    }
+    Some(count)
+}
+
+/// The `@Override` / `@java.lang.Override` annotation in a method declaration's `modifiers`.
+fn override_annotation<'t>(md: Node<'t>, bytes: &[u8]) -> Option<Node<'t>> {
     let mut c = md.walk();
     for ch in md.children(&mut c) {
         if ch.kind() != "modifiers" {
@@ -204,14 +272,14 @@ fn has_override_annotation(md: Node, bytes: &[u8]) -> bool {
                     if let Ok(t) = name.utf8_text(bytes) {
                         // Simple name (last segment of a possibly-qualified annotation).
                         if t.rsplit('.').next().unwrap_or(t) == "Override" {
-                            return true;
+                            return Some(a);
                         }
                     }
                 }
             }
         }
     }
-    false
+    None
 }
 
 // ── CST helpers ──────────────────────────────────────────────────────────────

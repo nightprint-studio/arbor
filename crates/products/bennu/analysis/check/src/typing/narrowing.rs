@@ -38,6 +38,8 @@ use bennu_java::prelude::{infer_node_type_cached, FileSymbols, InferCache, TypeR
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::support::constant::{certainly_not_constant, constant_names, fold, Folded};
+
 /// Parse-and-walk entry mirroring `casts::type_compat_errors_in`: iterate the shared `nodes` and flag
 /// every lossy narrowing at a declarator, an assignment, or a return.
 pub fn narrowing_errors_in(
@@ -182,7 +184,7 @@ fn narrowing_check(
     // Constant-fit exception: a compile-time integer literal that FITS in the narrower integral target
     // is LEGAL (`byte b = 100;`, `short s = 300;`, `char c = 65;`). Only flag a NON-constant source, or
     // a literal that DEFINITELY does not fit. If we can't decide, we SKIP (treat as fits) to stay sound.
-    if literal_fits_or_uncertain(&val, bytes, target) {
+    if constant_fits_or_uncertain(val, bytes, src, target) {
         return;
     }
 
@@ -242,104 +244,29 @@ fn lossy(src: Rank, target: Rank) -> bool {
     }
 }
 
-/// The constant-fit guard. Returns `true` (→ SKIP, don't flag) when the source is a compile-time
-/// constant that FITS the narrower integral target, OR when we simply can't decide (sound bias toward
-/// "fits"). Returns `false` (→ safe to flag) ONLY for a NON-constant source, or a literal that
-/// DEFINITELY overflows the target.
+/// The constant exception of JLS §5.2: a constant expression of type `byte`, `short`, `char` or
+/// `int` narrows to `byte`, `short` or `char` without a cast when its value fits.
 ///
-/// We only reason about a bare integer literal (optionally behind a unary minus), the sole constant
-/// form Java folds for the narrowing exception here. Anything else (a variable, a method call, an
-/// arithmetic expression, a float/char/long literal) is treated as NON-constant for the exception →
-/// `false`, so the earlier `lossy` verdict stands. This is sound: those genuinely ARE lossy narrowings
-/// (e.g. `byte b = anInt;`), and the rare foldable constant-expression case (`byte b = 1 + 2;`) we
-/// deliberately under-report by flagging — WAIT: to stay sound we must NEVER flag a legal program, so
-/// we instead widen the "uncertain → skip" net: see the explicit branches below, where any shape we
-/// can't fold returns `true` UNLESS it's a bare literal we CAN range-check.
-fn literal_fits_or_uncertain(val: &Node, bytes: &[u8], target: Rank) -> bool {
-    // Only integral targets have a "fits" notion here (byte/short/int/char). A float/double/long target
-    // is never the narrower side of a flagged case that reaches here (we only got here because a WIDER
-    // source narrows into it), and float/double have no exact integer-literal fit rule → be safe: if the
-    // target isn't an integral we can range-check, DON'T treat the literal as definitely-overflowing →
-    // return `true` (skip) unless it's a plain integral target below.
-    // Peel a single leading unary minus (`byte b = -1;`). A `unary_expression` with `-` over an integer
-    // literal is still a compile-time constant.
-    let (node, negate) = match unwrap_unary_minus(val, bytes) {
-        Some(inner) => (inner, true),
-        None => (*val, false),
-    };
-
-    // Is there a constant to reason about AT ALL? This test has to come before the target's range is
-    // looked up, and used not to: a `float`/`long`/`double` target fell straight out of that lookup
-    // as "uncertain → skip", which silently swallowed every narrowing INTO one — `float f = aDouble;`
-    // and `long l = aDouble;` were never reported, whatever the source was. The constant exception
-    // (JLS §5.2) is about a literal; with no literal there is no exception, and the `lossy` verdict
-    // above already stands.
-    let is_int_literal = matches!(
-        node.kind(),
-        "decimal_integer_literal" | "hex_integer_literal" | "octal_integer_literal" | "binary_integer_literal"
-    );
-    if !is_int_literal {
+/// `true` (→ skip) when the value folds and fits, or when the source may be a constant this file
+/// cannot evaluate (`OtherType.LIMIT`, an inherited field). `false` (→ report) for a value that
+/// folds and does not fit, a source that is certainly not constant (a parameter, a call, a
+/// non-`final` variable), or a `long`/`float`/`double` source, which the exception never covers.
+fn constant_fits_or_uncertain(val: Node, bytes: &[u8], src: Rank, target: Rank) -> bool {
+    if !matches!(src, Rank::Num(0..=2) | Rank::Char) {
         return false;
     }
-
     let (min, max): (i64, i64) = match target {
-        Rank::Num(0) => (i8::MIN as i64, i8::MAX as i64),       // byte
-        Rank::Num(1) => (i16::MIN as i64, i16::MAX as i64),     // short
-        Rank::Num(2) => (i32::MIN as i64, i32::MAX as i64),     // int
-        Rank::Char => (0, u16::MAX as i64),                     // char: 0..=65535
-        // An int literal never NARROWS into long/float/double (that is a widening), so this arm is
-        // unreachable from `narrowing_check` — skip rather than invent a range.
-        _ => return true,
+        Rank::Num(0) => (i8::MIN.into(), i8::MAX.into()),
+        Rank::Num(1) => (i16::MIN.into(), i16::MAX.into()),
+        Rank::Char => (0, u16::MAX.into()),
+        _ => return false,
     };
-
-    let Ok(text) = node.utf8_text(bytes) else {
-        // Can't read the text → can't prove overflow → SKIP (sound).
-        return true;
-    };
-    // A trailing L/l makes it a `long` literal → not an int constant for the exception → safe to flag.
-    if text.ends_with('l') || text.ends_with('L') {
-        return false;
+    let names = constant_names(val, bytes);
+    match fold(val, bytes, &names, 0) {
+        Some(Folded::Int(v)) => v >= min && v <= max,
+        Some(Folded::Str(_)) => false,
+        None => !certainly_not_constant(val, bytes, &names, 0),
     }
-    let Some(v) = parse_int_literal(text) else {
-        // Unparseable (too big for i64, odd format) → can't prove it fits, but also mustn't wrongly
-        // flag a legal narrowing → SKIP (sound: we under-report).
-        return true;
-    };
-    let v = if negate { v.wrapping_neg() } else { v };
-    // Fits the target range → legal constant assignment → SKIP. Does NOT fit → safe to flag (`byte b =
-    // 300;`).
-    v >= min && v <= max
-}
-
-/// A `unary_expression` that is exactly `- <operand>`; returns the operand node. Any other unary (`+`,
-/// `~`, `!`) or shape → `None`.
-fn unwrap_unary_minus<'a>(node: &Node<'a>, bytes: &[u8]) -> Option<Node<'a>> {
-    if node.kind() != "unary_expression" {
-        return None;
-    }
-    let op = node.child_by_field_name("operator")?;
-    if op.utf8_text(bytes).ok()? != "-" {
-        return None;
-    }
-    node.child_by_field_name("operand")
-}
-
-/// Parse a Java integer literal (decimal/hex/octal/binary, underscores allowed) to an `i64`. `None`
-/// when it doesn't fit an `i64` or the format is unexpected — callers treat `None` as "uncertain".
-fn parse_int_literal(text: &str) -> Option<i64> {
-    let t = text.replace('_', "");
-    let t = t.as_str();
-    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
-        return i64::from_str_radix(hex, 16).ok();
-    }
-    if let Some(bin) = t.strip_prefix("0b").or_else(|| t.strip_prefix("0B")) {
-        return i64::from_str_radix(bin, 2).ok();
-    }
-    // Octal: a leading `0` followed by more digits (`0755`). Plain `0` is decimal zero.
-    if t.len() > 1 && t.starts_with('0') && t.bytes().all(|b| b.is_ascii_digit()) {
-        return i64::from_str_radix(&t[1..], 8).ok();
-    }
-    t.parse::<i64>().ok()
 }
 
 /// The first non-comment named child of a `return_statement` (the returned value), or `None` for a
@@ -606,6 +533,21 @@ mod tests {
     #[test]
     fn negative_in_range_byte_constant_is_ok() {
         assert!(diags("byte b = -1;").is_empty());
+    }
+
+    #[test]
+    fn constant_expressions_that_fit_are_ok() {
+        assert!(run("class C { void m() { char next = 'a' + 1; } }").is_empty());
+        assert!(run("class C { static final int K = 10; void m() { byte b = K; } }").is_empty());
+        assert!(run("class C { void m() { final int local = 20; byte b = local; } }").is_empty());
+        assert!(run("class C { void m() { byte b = 'a'; } }").is_empty());
+    }
+
+    #[test]
+    fn variables_are_not_constants() {
+        assert_eq!(run("class C { void m(int p) { byte b = p; } }").len(), 1);
+        assert_eq!(run("class C { static int K = 10; void m() { byte b = K; } }").len(), 1);
+        assert_eq!(run("class C { static final int K = 1000; void m() { byte b = K; } }").len(), 1);
     }
 
     #[test]

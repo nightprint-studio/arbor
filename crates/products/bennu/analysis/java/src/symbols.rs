@@ -1320,10 +1320,34 @@ fn synthesize_record_members(
         }
     }
 
+    // A compact canonical constructor (`Money { … }`) writes no parameter list, but it takes the
+    // components all the same. Recorded with none, it read as a no-arg constructor that does not
+    // exist, and the real canonical one as missing.
+    if let Some(body) = node.child_by_field_name("body") {
+        let mut cursor = body.walk();
+        for member in body.named_children(&mut cursor) {
+            if member.kind() != "compact_constructor_declaration" {
+                continue;
+            }
+            let span = Some(Span::of(&member));
+            if let Some(ctor) = methods.iter_mut().find(|m| m.name == "<init>" && m.span == span) {
+                ctor.params = components.clone();
+            }
+        }
+    }
+
     // The canonical constructor. Same `<init>` convention `parse_constructor` uses, so arity and
-    // argument-type checks see it like any other. Suppressed when the body declares a constructor
-    // of the same arity — the canonical or compact form the user wrote themselves.
-    if !is_declared(methods, "<init>", components.len()) {
+    // argument-type checks see it like any other. Suppressed when the body declares one taking the
+    // component TYPES in order — the canonical or compact form the user wrote themselves. Arity alone
+    // is not that: `Money(long cents, String code)` beside `record Money(BigDecimal, Currency)` is an
+    // extra constructor, and reading it as the canonical one hid the constructor every
+    // `new Money(amount, currency)` calls.
+    let declares_canonical = methods.iter().any(|m| {
+        m.name == "<init>"
+            && m.params.len() == components.len()
+            && m.params.iter().zip(&components).all(|(p, c)| same_type_text(&p.type_text, &c.type_text))
+    });
+    if !declares_canonical {
         methods.push(MethodDecl {
             span: None,
             name: "<init>".to_string(),
@@ -1430,6 +1454,13 @@ fn synthesize_enum_members(name: &str, methods: &mut Vec<MethodDecl>) {
             annotations: Vec::new(),
         });
     }
+}
+
+/// Two written types, ignoring whitespace (`Map<K, V>` against `Map<K,V>`). Different spellings of one
+/// type (`String` against `java.lang.String`) compare unequal, which keeps the synthetic member — the
+/// harmless side, since a duplicate `<init>` of identical types resolves the same either way.
+fn same_type_text(a: &str, b: &str) -> bool {
+    a.split_whitespace().eq(b.split_whitespace()) || a.replace(char::is_whitespace, "") == b.replace(char::is_whitespace, "")
 }
 
 /// Whether `methods` already holds one of that name and arity — the "a declared member wins" test.

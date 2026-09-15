@@ -1,6 +1,7 @@
 //! Shared readings of the tree and the resolver the checks build on. No diagnostics of their own.
 
 pub mod bare_call;
+pub mod constant;
 /// The tree-sitter adaptation of `bennu-lombok` - internal, because what it exposes is a CST detail.
 /// The knowledge itself is the dependency-free crate every consumer shares.
 pub(crate) mod lombok;

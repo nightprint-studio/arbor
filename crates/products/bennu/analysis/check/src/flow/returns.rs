@@ -5,10 +5,10 @@
 //! the body end in a `return` or `throw`? The *type* half (the returned value matches the declared
 //! type) needs the resolver and is a later phase.
 //!
-//! **Conservative by construction**: `definitely_returns` answers "does this statement guarantee a
-//! return/throw?" and errs toward **true** for anything it doesn't fully model (loops, `switch`,
-//! `try`, labeled/synchronized) — so we never false-flag valid code. We only flag when the last
-//! statement clearly *cannot* guarantee a return (a plain statement, or an `if` with no `else`).
+//! The reachability rules are JLS §14.22's "can complete normally", followed statement by statement
+//! (loops with their `break`s and constant conditions, `switch` blocks, `try`/`catch`/`finally`,
+//! labels). **Conservative by construction**: a shape the analysis does not model answers "cannot
+//! complete normally", which can only silence a report, never invent one.
 
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
@@ -40,15 +40,15 @@ pub fn missing_return_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
         if body.has_error() {
             continue;
         }
-        if !block_definitely_returns(body) {
+        if block_can_complete_normally(body, bytes) {
             let ty = ret.utf8_text(bytes).unwrap_or("").trim();
-            out.push(Diagnostic {
-                message: format!("Missing return statement (method must return `{ty}`)"),
-                severity: crate::engine::check_id::CheckId::MissingReturn.severity().to_string(),
-                code: crate::engine::check_id::CheckId::MissingReturn.code().to_string(),
-                start: ret.start_byte(),
-                end: ret.end_byte(),
-            });
+            // On the closing brace, where javac and IntelliJ put it: that is where control falls out.
+            let end = body.end_byte();
+            out.push(crate::engine::check_id::CheckId::MissingReturn.span(
+                end.saturating_sub(1),
+                end,
+                format!("Missing return statement (method must return `{ty}`)"),
+            ));
         }
     }
     out
@@ -160,49 +160,341 @@ fn has_return_value(ret: Node) -> bool {
     false
 }
 
-/// Does executing `stmt` guarantee a `return` / `throw` on every path? Conservative: constructs we
-/// don't fully model answer **true** (assume they return) so we never flag valid code.
-fn definitely_returns(stmt: Node) -> bool {
+/// JLS §14.22: can `stmt` complete normally? A method body that can is missing its return.
+///
+/// The rules are javac's, not an approximation of them — which is what lets this report the loops,
+/// switches and `try`s the old last-statement heuristic had to wave through. The one place the
+/// language itself needs more than the tree is a loop condition that is a *constant expression*
+/// (`while (DEBUG)` with a `static final boolean`): that is decided by
+/// [`never_constant_true`], which says "not constant" only when it can prove it.
+///
+/// Anything this does not model answers **false** ("cannot complete normally"). That is the silent
+/// side: a `false` can only ever remove a report, because every rule combines a child's answer with
+/// `||` towards a report only when another child definitely completes.
+pub(crate) fn can_complete_normally(stmt: Node, bytes: &[u8]) -> bool {
     match stmt.kind() {
-        "return_statement" | "throw_statement" => true,
-        "block" => block_definitely_returns(stmt),
-        "if_statement" => {
-            // Guarantees a return only when BOTH branches do (an `else` must exist).
-            match (stmt.child_by_field_name("consequence"), stmt.child_by_field_name("alternative")) {
-                (Some(cons), Some(alt)) => definitely_returns(cons) && definitely_returns(alt),
-                _ => false, // no `else` → can fall through
+        "return_statement" | "throw_statement" | "break_statement" | "continue_statement"
+        | "yield_statement" => false,
+        "block" => block_can_complete_normally(stmt, bytes),
+        "local_variable_declaration" | "expression_statement" | "assert_statement" | "enhanced_for_statement"
+        | "class_declaration" | "record_declaration" | "interface_declaration" | "enum_declaration"
+        | "explicit_constructor_invocation" | ";" => true,
+        "if_statement" => match stmt.child_by_field_name("alternative") {
+            None => true,
+            Some(alt) => {
+                stmt.child_by_field_name("consequence").is_some_and(|c| can_complete_normally(c, bytes))
+                    || can_complete_normally(alt, bytes)
             }
+        },
+        "labeled_statement" => {
+            let Some(inner) = labeled_body(stmt) else { return false };
+            can_complete_normally(inner, bytes) || label_name(stmt, bytes).is_some_and(|l| has_labeled_exit(inner, "break_statement", l, bytes))
         }
-        // Not fully modelled → assume it may guarantee a return (infinite loop, exhaustive switch,
-        // try/finally, …). Conservative: this can MISS a real missing-return, but never false-flags.
-        "for_statement"
-        | "enhanced_for_statement"
-        | "while_statement"
-        | "do_statement"
-        | "switch_expression"
-        | "switch_statement"
-        | "try_statement"
-        | "try_with_resources_statement"
-        | "labeled_statement"
-        | "synchronized_statement"
-        | "yield_statement" => true,
-        // A plain statement (local var, expression statement, break/continue, …) doesn't return.
+        "synchronized_statement" => stmt.child_by_field_name("body").is_some_and(|b| can_complete_normally(b, bytes)),
+        "while_statement" => {
+            let never_true = stmt.child_by_field_name("condition").is_some_and(|c| never_constant_true(c, bytes));
+            never_true || breaks_out_of(stmt)
+        }
+        "for_statement" => {
+            // No condition is `for (;;)`, a constant `true`.
+            let never_true = stmt.child_by_field_name("condition").is_some_and(|c| never_constant_true(c, bytes));
+            never_true || breaks_out_of(stmt)
+        }
+        "do_statement" => {
+            if breaks_out_of(stmt) {
+                return true;
+            }
+            let never_true = stmt.child_by_field_name("condition").is_some_and(|c| never_constant_true(c, bytes));
+            let body_completes = stmt.child_by_field_name("body").is_some_and(|b| can_complete_normally(b, bytes))
+                || continues_in(stmt, bytes);
+            never_true && body_completes
+        }
+        "try_statement" | "try_with_resources_statement" => try_can_complete_normally(stmt, bytes),
+        "switch_expression" => switch_statement_can_complete_normally(stmt, bytes),
         _ => false,
     }
 }
 
-/// A block guarantees a return iff its LAST real statement does (comments ignored). An empty block
-/// falls through.
-fn block_definitely_returns(block: Node) -> bool {
-    let mut last: Option<Node> = None;
+/// A block completes normally iff every statement in it does — an earlier statement that cannot
+/// makes the rest unreachable, which is its own error and not a missing return. Empty completes.
+fn block_can_complete_normally(block: Node, bytes: &[u8]) -> bool {
     let mut c = block.walk();
     for ch in block.named_children(&mut c) {
         if matches!(ch.kind(), "line_comment" | "block_comment") {
             continue;
         }
-        last = Some(ch);
+        if !can_complete_normally(ch, bytes) {
+            return false;
+        }
     }
-    last.map(definitely_returns).unwrap_or(false)
+    true
+}
+
+/// `try` completes normally iff the `try` block or some `catch` block does — and a `finally`, when
+/// present, does too (a `finally` that cannot complete overrides everything before it).
+fn try_can_complete_normally(stmt: Node, bytes: &[u8]) -> bool {
+    let mut body_or_catch = stmt.child_by_field_name("body").is_some_and(|b| can_complete_normally(b, bytes));
+    let mut c = stmt.walk();
+    for ch in stmt.named_children(&mut c) {
+        match ch.kind() {
+            "catch_clause" => {
+                body_or_catch |= ch.child_by_field_name("body").is_some_and(|b| can_complete_normally(b, bytes));
+            }
+            "finally_clause" => {
+                let completes = crate::support::nodes::child_of_kind(ch, "block")
+                    .is_some_and(|b| can_complete_normally(b, bytes));
+                if !completes {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    body_or_catch
+}
+
+/// A `switch` statement (JLS §14.22, both block shapes).
+///
+/// It completes normally when control can leave the block at its end (the last group completes, a
+/// trailing label with no statements, an expression rule, a rule block that completes), when a
+/// `break` leaves it, or when no label matches at all — which, for a switch without `default`, is
+/// possible unless the switch is required to be exhaustive. Pattern and `null` labels make it an
+/// *enhanced* switch that must be, so there the missing `default` proves nothing and the answer is
+/// the silent one.
+fn switch_statement_can_complete_normally(stmt: Node, bytes: &[u8]) -> bool {
+    let Some(block) = stmt.child_by_field_name("body") else { return false };
+    if breaks_out_of(stmt) {
+        return true;
+    }
+    let mut has_default = false;
+    let mut enhanced = false;
+    let mut end_reachable = false;
+    let mut c = block.walk();
+    let children: Vec<Node> = block.named_children(&mut c).filter(|n| !matches!(n.kind(), "line_comment" | "block_comment")).collect();
+    if children.is_empty() {
+        return true;
+    }
+    for (i, item) in children.iter().enumerate() {
+        let mut ic = item.walk();
+        let parts: Vec<Node> = item.named_children(&mut ic).filter(|n| !matches!(n.kind(), "line_comment" | "block_comment")).collect();
+        for label in parts.iter().filter(|p| p.kind() == "switch_label") {
+            let (d, e) = classify_label(*label, bytes);
+            has_default |= d;
+            enhanced |= e;
+        }
+        match item.kind() {
+            "switch_rule" => {
+                if let Some(action) = parts.iter().find(|p| p.kind() != "switch_label") {
+                    end_reachable |= match action.kind() {
+                        "expression_statement" => true,
+                        "block" => can_complete_normally(*action, bytes),
+                        _ => false,
+                    };
+                }
+            }
+            "switch_block_statement_group" if i + 1 == children.len() => {
+                // The last group: its statements run into the end of the block.
+                let statements: Vec<&Node> = parts.iter().filter(|p| p.kind() != "switch_label").collect();
+                end_reachable |= statements.is_empty()
+                    || statements.iter().all(|s| can_complete_normally(**s, bytes));
+            }
+            "switch_block_statement_group" => {}
+            _ => return false,
+        }
+    }
+    end_reachable || (!has_default && !enhanced)
+}
+
+/// `(is default, makes the switch enhanced)` for one `switch_label`.
+fn classify_label(label: Node, bytes: &[u8]) -> (bool, bool) {
+    let mut is_default = false;
+    let mut enhanced = false;
+    let mut c = label.walk();
+    for ch in label.children(&mut c) {
+        match ch.kind() {
+            "default" => is_default = true,
+            "pattern" | "type_pattern" | "record_pattern" | "guard" | "null_literal" => enhanced = true,
+            _ if ch.utf8_text(bytes) == Ok("null") => enhanced = true,
+            _ => {}
+        }
+    }
+    (is_default, enhanced)
+}
+
+/// Kinds that start a new `break`/`continue` target, or a new body altogether.
+fn is_breakable(kind: &str) -> bool {
+    matches!(kind, "while_statement" | "do_statement" | "for_statement" | "enhanced_for_statement" | "switch_expression")
+}
+
+fn is_body_boundary(kind: &str) -> bool {
+    matches!(kind, "lambda_expression" | "class_body" | "method_declaration" | "constructor_declaration")
+}
+
+/// Whether an unlabeled `break` inside `target` leaves `target` itself (its nearest breakable).
+fn breaks_out_of(target: Node) -> bool {
+    has_unlabeled_exit(target, "break_statement", is_breakable)
+}
+
+/// Whether an unlabeled `continue` inside the `do` loop `target` continues `target` itself, or a
+/// labeled one names the label written directly on it.
+fn continues_in(target: Node, bytes: &[u8]) -> bool {
+    let is_loop = |k: &str| matches!(k, "while_statement" | "do_statement" | "for_statement" | "enhanced_for_statement");
+    if has_unlabeled_exit(target, "continue_statement", is_loop) {
+        return true;
+    }
+    let labeled = target.parent().filter(|p| p.kind() == "labeled_statement");
+    labeled
+        .and_then(|l| label_name(l, bytes))
+        .is_some_and(|name| has_labeled_exit(target, "continue_statement", name, bytes))
+}
+
+fn has_unlabeled_exit(target: Node, exit_kind: &str, is_target_kind: impl Fn(&str) -> bool) -> bool {
+    let mut stack: Vec<Node> = Vec::new();
+    let mut c = target.walk();
+    stack.extend(target.named_children(&mut c));
+    while let Some(n) = stack.pop() {
+        if n.kind() == exit_kind {
+            if crate::support::nodes::child_of_kind(n, "identifier").is_none() {
+                return true;
+            }
+            continue;
+        }
+        if is_target_kind(n.kind()) || is_body_boundary(n.kind()) {
+            continue; // an exit in there belongs to the nested statement
+        }
+        let mut cc = n.walk();
+        stack.extend(n.named_children(&mut cc));
+    }
+    false
+}
+
+fn has_labeled_exit(scope: Node, exit_kind: &str, label: &str, bytes: &[u8]) -> bool {
+    let mut stack = vec![scope];
+    while let Some(n) = stack.pop() {
+        if n.kind() == exit_kind {
+            if crate::support::nodes::child_of_kind(n, "identifier").and_then(|i| i.utf8_text(bytes).ok()) == Some(label) {
+                return true;
+            }
+            continue;
+        }
+        if is_body_boundary(n.kind()) {
+            continue;
+        }
+        let mut cc = n.walk();
+        stack.extend(n.named_children(&mut cc));
+    }
+    false
+}
+
+fn label_name<'b>(labeled: Node, bytes: &'b [u8]) -> Option<&'b str> {
+    crate::support::nodes::child_of_kind(labeled, "identifier").and_then(|i| i.utf8_text(bytes).ok())
+}
+
+/// The statement a `labeled_statement` labels — its last named child (the first is the label).
+fn labeled_body(labeled: Node) -> Option<Node> {
+    let mut c = labeled.walk();
+    labeled.named_children(&mut c).filter(|n| !matches!(n.kind(), "line_comment" | "block_comment")).skip(1).last()
+}
+
+/// Whether a loop condition is provably NOT the constant `true` (JLS §15.29).
+///
+/// A constant expression is built from literals and constant variables only, so one operand that is
+/// certainly not constant settles it: a call, an assignment, `instanceof`, an object creation — or a
+/// name bound to a parameter or a non-`final` local of the enclosing body. Any other name may be a
+/// `static final` constant somewhere, so on its own it proves nothing.
+fn never_constant_true(cond: Node, bytes: &[u8]) -> bool {
+    let expr = unwrap_parens(cond);
+    if expr.kind() == "false" {
+        return true;
+    }
+    let mut stack = vec![expr];
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "method_invocation" | "object_creation_expression" | "array_creation_expression" | "array_access"
+            | "assignment_expression" | "update_expression" | "instanceof_expression" | "lambda_expression"
+            | "method_reference" | "this" | "super" => return true,
+            "identifier" if names_a_variable(n, bytes) => return true,
+            // `a.b` may be a qualified constant: its parts are not variable reads of their own.
+            "field_access" => continue,
+            _ => {}
+        }
+        let mut c = n.walk();
+        stack.extend(n.named_children(&mut c));
+    }
+    false
+}
+
+fn unwrap_parens(mut n: Node) -> Node {
+    while n.kind() == "parenthesized_expression" {
+        match n.named_child(0) {
+            Some(inner) => n = inner,
+            None => break,
+        }
+    }
+    n
+}
+
+/// Whether the identifier `id` reads a parameter, or a non-`final` local declared before it in an
+/// enclosing block — neither of which can ever be a constant variable.
+fn names_a_variable(id: Node, bytes: &[u8]) -> bool {
+    let Ok(name) = id.utf8_text(bytes) else { return false };
+    let mut cur = id.parent();
+    while let Some(n) = cur {
+        match n.kind() {
+            "block" => {
+                let mut c = n.walk();
+                for stmt in n.named_children(&mut c) {
+                    if stmt.start_byte() >= id.start_byte() {
+                        break;
+                    }
+                    if stmt.kind() == "local_variable_declaration" && declares(stmt, name, bytes) {
+                        return !crate::support::nodes::has_keyword(stmt, bytes, "final");
+                    }
+                }
+            }
+            "method_declaration" | "constructor_declaration" | "lambda_expression" => {
+                let params = n.child_by_field_name("parameters");
+                if params.is_some_and(|p| declares_param(p, name, bytes)) {
+                    return true;
+                }
+                if n.kind() != "lambda_expression" {
+                    return false;
+                }
+            }
+            "class_body" => return false,
+            _ => {}
+        }
+        cur = n.parent();
+    }
+    false
+}
+
+fn declares(decl: Node, name: &str, bytes: &[u8]) -> bool {
+    let mut c = decl.walk();
+    let found = decl.named_children(&mut c).any(|d| {
+        d.kind() == "variable_declarator"
+            && d.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok()) == Some(name)
+    });
+    found
+}
+
+fn declares_param(params: Node, name: &str, bytes: &[u8]) -> bool {
+    if params.kind() == "identifier" {
+        return params.utf8_text(bytes) == Ok(name);
+    }
+    let mut c = params.walk();
+    let found = params.named_children(&mut c).any(|p| match p.kind() {
+        "identifier" => p.utf8_text(bytes) == Ok(name),
+        "formal_parameter" | "spread_parameter" => {
+            p.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok()) == Some(name)
+                || crate::support::nodes::child_of_kind(p, "variable_declarator")
+                    .and_then(|d| d.child_by_field_name("name"))
+                    .and_then(|x| x.utf8_text(bytes).ok())
+                    == Some(name)
+        }
+        _ => false,
+    });
+    found
 }
 
 #[cfg(test)]
@@ -273,6 +565,55 @@ mod tests {
     #[test]
     fn abstract_and_interface_methods_are_skipped() {
         assert!(check("abstract int m();").is_empty());
+    }
+
+    #[test]
+    fn loops_that_can_exit_are_flagged() {
+        assert_eq!(check("int m(int[] a) { for (int v : a) { return v; } }").len(), 1);
+        assert_eq!(check("int m(boolean f) { while (f) { return 1; } }").len(), 1);
+        assert_eq!(check("int m() { while (true) { break; } }").len(), 1);
+        assert_eq!(check("int m() { outer: for (;;) { for (;;) { break outer; } } }").len(), 1);
+    }
+
+    #[test]
+    fn a_name_that_may_be_a_constant_is_not_flagged() {
+        // `T` may be a `static final boolean` somewhere: `while (T)` may never exit.
+        assert!(check("int m() { while (T) { } }").is_empty());
+        // A final local with a constant initializer IS a constant variable.
+        assert!(check("int m() { final boolean t = true; while (t) { } }").is_empty());
+    }
+
+    #[test]
+    fn continue_to_an_outer_infinite_loop_is_not_an_exit() {
+        assert!(check("int m() { outer: while (true) { for (int i = 0; i < 3; i++) { continue outer; } } }").is_empty());
+    }
+
+    #[test]
+    fn switch_without_default_is_flagged() {
+        assert_eq!(check("int m(int k) { switch (k) { case 1: return 1; case 2: return 2; } }").len(), 1);
+        assert_eq!(check("int m(int k) { switch (k) { case 1 -> { return 1; } } }").len(), 1);
+        assert!(check("int m(int k) { switch (k) { case 1 -> { return 1; } default -> throw new RuntimeException(); } }").is_empty());
+    }
+
+    #[test]
+    fn pattern_switch_without_default_is_not_flagged() {
+        // Enhanced switches must be exhaustive, so the missing `default` proves nothing.
+        assert!(check("int m(Object o) { switch (o) { case String s -> { return 1; } case Object x -> { return 2; } } }").is_empty());
+    }
+
+    #[test]
+    fn catch_that_falls_through_is_flagged() {
+        assert_eq!(check("int m() { try { return 1; } catch (RuntimeException e) { } }").len(), 1);
+        assert!(check("int m() { try { } finally { throw new RuntimeException(); } }").is_empty());
+    }
+
+    #[test]
+    fn missing_return_sits_on_the_closing_brace() {
+        let src = "class C { int m() { int x = 1; } }";
+        let tree = parse(src);
+        let d = missing_return(tree.root_node(), src);
+        assert_eq!(&src[d[0].start..d[0].end], "}");
+        assert_eq!(d[0].start, src.find("} }").unwrap());
     }
 
     #[test]

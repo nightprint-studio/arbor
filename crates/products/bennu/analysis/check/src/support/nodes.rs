@@ -101,6 +101,15 @@ pub(crate) fn is_class_type_node(kind: &str) -> bool {
     matches!(kind, "type_identifier" | "scoped_type_identifier" | "generic_type")
 }
 
+/// Whether a node is a QUALIFIED class instance creation, `outer.new Inner()`.
+///
+/// Its type name is looked up among the members of `outer`'s type (JLS §15.9.1), not in the scope it
+/// is written in, so a simple-name lookup of `Inner` finds the wrong type or none — and every check
+/// that read it that way reported legal code.
+pub(crate) fn is_qualified_creation(n: Node) -> bool {
+    n.kind() == "object_creation_expression" && n.child(0).is_some_and(|first| first.kind() != "new")
+}
+
 pub(crate) fn simple_name(binary: &str) -> &str {
     binary.rsplit(['/', '$']).next().unwrap_or(binary)
 }

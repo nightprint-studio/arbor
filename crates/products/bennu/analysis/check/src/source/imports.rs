@@ -130,7 +130,8 @@ pub fn unresolved_static_imports(
         }
         let Some(cm) = resolver.members_of(&target.owner_binary) else { continue };
         let declared = cm.methods.iter().any(|m| m.name == member)
-            || cm.fields.iter().any(|f| f.name == member);
+            || cm.fields.iter().any(|f| f.name == member)
+            || declares_member_type(resolver, &target.owner_binary, &member);
         if declared {
             continue;
         }
@@ -145,6 +146,17 @@ pub fn unresolved_static_imports(
         ));
     }
     out
+}
+
+/// Whether `owner` has a member TYPE named `member` — `import static a.Outer.Nested;` imports one as
+/// readily as a field or a method (JLS §7.5.3). A project nested type is indexed as `Outer/Nested`
+/// and a compiled one as `Outer$Nested`, so both are asked, and so is the supertype walk: a static
+/// import reaches inherited member types too.
+fn declares_member_type(resolver: &dyn TypeResolver, owner: &str, member: &str) -> bool {
+    [format!("{owner}/{member}"), format!("{owner}${member}")]
+        .iter()
+        .any(|binary| resolver.is_project_type(binary) || resolver.members_of(binary).is_some())
+        || bennu_java::prelude::inherited_member_type_of(resolver, owner, member).is_some()
 }
 
 /// The byte span of `member` inside the `import static …` declaration that names it — the LAST

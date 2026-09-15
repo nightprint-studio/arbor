@@ -186,7 +186,7 @@ fn check_new(
     // *supertype's* constructor and the body complicates it. A `class_body` child marks those.
     let Some(ty_node) = n.child_by_field_name("type") else { return };
     let Some(args) = n.child_by_field_name("arguments") else { return };
-    if args.has_error() {
+    if args.has_error() || crate::support::nodes::is_qualified_creation(n) {
         return;
     }
     let mut cw = n.walk();

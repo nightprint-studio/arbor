@@ -8,6 +8,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Added
+- **Bennu reports many more Java compile errors.** Missing returns through loops, `switch` and `try`; assignments to `final` parameters, catch variables and fields; illegal modifiers; record constructor and accessor rules; sealed hierarchies; `break`/`continue`/`return` out of a switch expression; duplicate `case` constants written differently; type parameters in static code; `@Override` on overloads and static methods.
 - **Spring bean declarations checked as you type.** A `private`/`final` or `void` `@Bean`, a `final` `@Configuration`, injection into static members, a stereotype on an interface, abstract or inner class, a non-static post-processor `@Bean`, an `@Async` result the caller never gets, a static `@Transactional` method and a `@Scheduled` method with parameters — with Alt+Enter to fix the modifiers where that is the repair.
 - **Breakpoints in library sources.** Bennu sets, verifies and remembers breakpoints in a dependency's downloaded sources or the JDK's, and lists them by class.
 - **A Bennu project whose folder is gone can be located or removed.** Instead of vanishing silently from the workspace, it offers *Locate…* and *Remove from workspace*.

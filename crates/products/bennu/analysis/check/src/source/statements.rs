@@ -18,11 +18,10 @@
 //! is ordinary Java, and reporting "`4` is not a statement" on it is exactly the false
 //! positive this module claims not to have.
 //!
-//! So a `switch_rule` body is skipped. The cost is real and worth naming: in a switch used as
-//! a *statement*, an arm body genuinely must be a statement expression, and `case A -> x.field;`
-//! there is now missed. Telling the two apart needs the switch's surrounding context rather
-//! than the node itself, and while that is knowable, a check that is silent about a rare
-//! mistake beats one that shouts about a common correct construct (docs §7).
+//! So a `switch_rule` body is skipped — when its switch produces a value. In a switch used as a
+//! *statement* the arm body genuinely must be a statement expression (`case 1 -> 1;` there is
+//! `compiler.err.not.stmt`), and which of the two a switch is comes from its parent
+//! ([`crate::switching::switches::is_statement_position`]).
 //!
 //! ## `switch (x) { … };` — a trailing semicolon, not a broken block
 //!
@@ -69,9 +68,13 @@ pub fn invalid_statements_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
         if n.kind() != "expression_statement" {
             continue;
         }
-        // An arrow switch arm's body: the "statement" is the arm's VALUE. See the module doc.
-        if n.parent().map(|p| p.kind()) == Some("switch_rule") {
-            continue;
+        // An arrow switch arm's body: the "statement" is the arm's VALUE — unless its switch is
+        // itself a statement. See the module doc.
+        if let Some(rule) = n.parent().filter(|p| p.kind() == "switch_rule") {
+            let switch = rule.parent().and_then(|block| block.parent());
+            if !switch.is_some_and(crate::switching::switches::is_statement_position) {
+                continue;
+            }
         }
         // The wrapped expression is the statement's first (and only) named child.
         let Some(expr) = n.named_child(0) else { continue };
@@ -205,6 +208,15 @@ mod tests {
         let tree = parse(src);
         let d = invalid_statements(tree.root_node(), src);
         assert!(d.is_empty(), "{d:?}");
+    }
+
+    /// In a switch STATEMENT an arrow arm's body is a statement, and a bare value is not one.
+    #[test]
+    fn value_arms_in_a_switch_statement_are_not_statements() {
+        let src = "class C {\n  void f(int k) {\n    switch (k) { case 1 -> 1; default -> System.gc(); }\n  }\n}";
+        let tree = parse(src);
+        let d = invalid_statements(tree.root_node(), src);
+        assert_eq!(d.len(), 1, "{d:?}");
     }
 
     /// The skip is scoped to the arm body itself — a bad statement inside an arm's BLOCK is

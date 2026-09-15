@@ -161,6 +161,9 @@ fn check_call(
         return;
     }
     let Ok(method) = name.utf8_text(bytes) else { return };
+    if receiver_type_is_unwritten(obj, bytes) {
+        return;
+    }
 
     // The receiver as a VALUE, else as a TYPE — see `receiver_type`.
     let Some(ty) = receiver_type(root, source, bytes, symbols, resolver, cache, &obj) else {
@@ -180,6 +183,86 @@ fn check_call(
             name,
             format!("Cannot resolve method `{method}` in `{}`", simple_name(&ty.binary_name)),
         ));
+    }
+}
+
+/// Whether the receiver's real type is one no name in the source denotes, so inference can only
+/// answer something wider than the truth:
+///
+/// * an instance of an ANONYMOUS class — `new Object() { int extra() … }.extra()`, or a `var` local
+///   holding one. Inference answers the supertype, which does not declare what the body adds;
+/// * a QUALIFIED creation, `outer.new Inner()`, whose `Inner` is a member of `outer`'s type
+///   ([`crate::support::nodes::is_qualified_creation`]).
+fn receiver_type_is_unwritten(obj: Node, bytes: &[u8]) -> bool {
+    let mut obj = obj;
+    while obj.kind() == "parenthesized_expression" {
+        match obj.named_child(0) {
+            Some(inner) => obj = inner,
+            None => return false,
+        }
+    }
+    let anonymous = |creation: Node| {
+        creation.kind() == "object_creation_expression"
+            && crate::support::nodes::child_of_kind(creation, "class_body").is_some()
+    };
+    if obj.kind() == "object_creation_expression" {
+        return anonymous(obj) || crate::support::nodes::is_qualified_creation(obj);
+    }
+    if obj.kind() != "identifier" {
+        return false;
+    }
+    let Ok(name) = obj.utf8_text(bytes) else { return false };
+    let mut cur = obj.parent();
+    while let Some(n) = cur {
+        if n.kind() == "block" {
+            let mut c = n.walk();
+            for stmt in n.named_children(&mut c).take_while(|s| s.start_byte() < obj.start_byte()) {
+                if stmt.kind() != "local_variable_declaration" {
+                    continue;
+                }
+                let is_var = stmt.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok()) == Some("var");
+                let mut dc = stmt.walk();
+                for d in stmt.named_children(&mut dc).filter(|d| d.kind() == "variable_declarator") {
+                    if d.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok()) == Some(name) {
+                        return is_var && d.child_by_field_name("value").is_some_and(anonymous);
+                    }
+                }
+            }
+        }
+        if matches!(n.kind(), "method_declaration" | "constructor_declaration" | "class_body") {
+            break;
+        }
+        cur = n.parent();
+    }
+    false
+}
+
+#[cfg(test)]
+mod anonymous_receiver_tests {
+    use super::receiver_type_is_unwritten;
+
+    fn receiver_of_last_call(src: &str) -> bool {
+        let tree = bennu_java::prelude::parse_java(src).unwrap();
+        let nodes = crate::engine::check::collect_nodes(tree.root_node());
+        let call = nodes
+            .iter()
+            .filter(|n| n.kind() == "method_invocation")
+            .max_by_key(|n| n.start_byte())
+            .unwrap();
+        receiver_type_is_unwritten(call.child_by_field_name("object").unwrap(), src.as_bytes())
+    }
+
+    #[test]
+    fn anonymous_and_qualified_receivers_are_unwritten() {
+        assert!(receiver_of_last_call("class C { void m() { int x = new Object() { int extra() { return 1; } }.extra(); } }"));
+        assert!(receiver_of_last_call("class C { void m() { var a = new Object() { int h() { return 1; } }; a.h(); } }"));
+        assert!(receiver_of_last_call("class C { void m(O outer) { outer.new Inner().work(); } }"));
+    }
+
+    #[test]
+    fn named_receivers_are_written() {
+        assert!(!receiver_of_last_call("class C { void m() { Object a = new Object() { }; a.hashCode(); } }"));
+        assert!(!receiver_of_last_call("class C { void m() { var a = new StringBuilder(); a.append(1); } }"));
     }
 }
 

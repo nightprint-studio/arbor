@@ -28,6 +28,16 @@ pub fn branch_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
         match n.kind() {
             "break_statement" => check_branch(n, bytes, true, &mut out),
             "continue_statement" => check_branch(n, bytes, false, &mut out),
+            "return_statement" => {
+                if crosses_switch_expression(n) {
+                    out.push(CheckId::BranchOutsideLoop.at(n, "`return` cannot jump out of a `switch` expression"));
+                }
+            }
+            "yield_statement" => {
+                if !inside_switch_expression(n) {
+                    out.push(CheckId::BranchOutsideLoop.at(n, "`yield` is not inside a `switch` expression"));
+                }
+            }
             _ => {}
         }
     }
@@ -38,6 +48,7 @@ pub fn branch_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
 /// asks a different question — not "is there an enclosing loop" but "is there a statement carrying
 /// that label" — so the two are answered separately.
 fn check_branch(stmt: Node, bytes: &[u8], is_break: bool, out: &mut Vec<Diagnostic>) {
+    let kw = if is_break { "break" } else { "continue" };
     match label_of(stmt, bytes) {
         Some(label) => {
             if !label_in_scope(stmt, &label, bytes) {
@@ -47,20 +58,51 @@ fn check_branch(stmt: Node, bytes: &[u8], is_break: bool, out: &mut Vec<Diagnost
                 ));
             }
         }
-        None => {
-            if !enclosed_by_target(stmt, is_break) {
-                let (kw, wanted) = if is_break {
-                    ("break", "a loop or a `switch`")
-                } else {
-                    ("continue", "a loop")
-                };
-                out.push(
-                    CheckId::BranchOutsideLoop
-                        .at(stmt, format!("`{kw}` is not inside {wanted}")),
-                );
+        None => match enclosure(stmt, is_break) {
+            Enclosure::Target => {}
+            Enclosure::SwitchExpression => {
+                out.push(CheckId::BranchOutsideLoop.at(stmt, format!("`{kw}` cannot jump out of a `switch` expression")));
             }
-        }
+            Enclosure::Nothing => {
+                let wanted = if is_break { "a loop or a `switch`" } else { "a loop" };
+                out.push(CheckId::BranchOutsideLoop.at(stmt, format!("`{kw}` is not inside {wanted}")));
+            }
+        },
     }
+}
+
+/// What an unlabeled `break` / `continue` would leave.
+enum Enclosure {
+    /// A loop, or for `break` a switch statement — legal.
+    Target,
+    /// A switch EXPRESSION stands between it and any target: control may only leave one by `yield`.
+    SwitchExpression,
+    /// Nothing at all before the body ends.
+    Nothing,
+}
+
+fn is_switch_expression(n: &Node) -> bool {
+    n.kind() == "switch_expression" && !crate::switching::switches::is_statement_position(*n)
+}
+
+/// Whether a `return` sits inside a switch expression of its own body.
+fn crosses_switch_expression(stmt: Node) -> bool {
+    let mut cur = stmt.parent();
+    while let Some(n) = cur {
+        if is_body_boundary(&n) {
+            return false;
+        }
+        if is_switch_expression(&n) {
+            return true;
+        }
+        cur = n.parent();
+    }
+    false
+}
+
+/// Whether a `yield` has a switch expression to give its value to.
+fn inside_switch_expression(stmt: Node) -> bool {
+    crosses_switch_expression(stmt)
 }
 
 /// The label a `break`/`continue` names, when it names one.
@@ -73,23 +115,25 @@ fn label_of(stmt: Node, bytes: &[u8]) -> Option<String> {
     id.utf8_text(bytes).ok().map(str::to_owned)
 }
 
-/// Whether an enclosing loop (or, for `break`, `switch`) contains this statement.
-fn enclosed_by_target(stmt: Node, is_break: bool) -> bool {
+/// Whether an enclosing loop (or, for `break`, a switch statement) contains this statement — before
+/// a switch expression or the end of the body gets in the way.
+fn enclosure(stmt: Node, is_break: bool) -> Enclosure {
     let mut cur = stmt.parent();
     while let Some(n) = cur {
         if is_body_boundary(&n) {
-            return false;
+            return Enclosure::Nothing;
         }
         match n.kind() {
             "for_statement" | "enhanced_for_statement" | "while_statement" | "do_statement" => {
-                return true;
+                return Enclosure::Target;
             }
-            "switch_expression" if is_break => return true,
+            "switch_expression" if is_switch_expression(&n) => return Enclosure::SwitchExpression,
+            "switch_expression" if is_break => return Enclosure::Target,
             _ => {}
         }
         cur = n.parent();
     }
-    false
+    Enclosure::Nothing
 }
 
 /// Whether some enclosing statement carries `label`.
@@ -211,6 +255,29 @@ mod tests {
         let src = "class A { void m() { outer: for (;;) { Runnable r = new Runnable() { \
                    public void run() { break outer; } }; } } }";
         assert_eq!(codes(src), ["unknown-label"]);
+    }
+
+    #[test]
+    fn jumps_out_of_a_switch_expression_are_flagged() {
+        let src = "class A { int m(int k) { return switch (k) { case 1: break; default: yield 0; }; } }";
+        assert_eq!(codes(src), ["branch-outside-loop"]);
+        let src = "class A { void m(int[] ks) { for (int k : ks) { int r = switch (k) { case 1: continue; default: yield 0; }; } } }";
+        assert_eq!(codes(src), ["branch-outside-loop"]);
+        let src = "class A { int m(int k) { return switch (k) { case 1 -> { return 1; } default -> 0; }; } }";
+        assert_eq!(codes(src), ["branch-outside-loop"]);
+    }
+
+    #[test]
+    fn a_loop_inside_a_switch_expression_arm_is_a_target() {
+        let src = "class A { int m(int k) { return switch (k) { case 1 -> { for (;;) { break; } } default -> 0; }; } }";
+        assert!(codes(src).is_empty());
+        let src = "class A { int m(int k) { return switch (k) { case 1 -> { Runnable r = () -> { return; }; yield 1; } default -> 0; }; } }";
+        assert!(codes(src).is_empty());
+    }
+
+    #[test]
+    fn yield_outside_a_switch_expression_is_flagged() {
+        assert_eq!(codes("class A { void m() { yield 1; } }"), ["branch-outside-loop"]);
     }
 
     /// A label on a sibling statement is not in scope where the `break` is written.

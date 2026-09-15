@@ -109,6 +109,7 @@ pub fn check_file_in(
     out.extend(crate::flow::returns::return_statement_errors_nodes(nodes, source));
     out.extend(crate::switching::switches::switch_yield_errors_nodes(nodes, source));
     out.extend(crate::switching::switches::switch_selector_errors_nodes(nodes, source));
+    out.extend(crate::switching::switches::constant_switch_exhaustiveness_nodes(nodes, source));
     out.extend(crate::decls::duplicates::duplicate_signatures_nodes(nodes, source));
     out.extend(crate::decls::redeclaration::redeclaration_errors_nodes(nodes, source));
     out.extend(crate::flow::finals::final_reassignment_errors_nodes(nodes, source));
@@ -133,6 +134,8 @@ pub fn check_file_in(
     out.extend(crate::decls::ctor_recursion::ctor_recursion_errors_nodes(nodes, source));
     out.extend(crate::decls::method_body::method_body_errors_nodes(nodes, source));
     out.extend(crate::decls::record_ctor::record_ctor_errors_nodes(nodes, source));
+    out.extend(crate::hierarchy::sealed::sealed_errors_nodes(nodes, source));
+    out.extend(crate::typing::static_type_var::static_type_var_errors_nodes(nodes, source));
     out.extend(crate::source::var_target::var_target_errors_nodes(nodes, source));
     out.extend(crate::calls::capture::capture_errors_nodes(nodes, source));
     // Data flow — the checks that follow a value through a method rather than reading a

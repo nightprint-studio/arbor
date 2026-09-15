@@ -60,7 +60,9 @@ pub fn duplicate_signatures_nodes(nodes: &[Node], source: &str) -> Vec<Diagnosti
     let bytes = source.as_bytes();
     // Key: (enclosing body node id, member kind + name, parameter types with the member's own type
     // variables erased). First-seen node kept; a second insertion is a duplicate.
-    let mut seen: HashMap<(usize, String, Vec<String>), ()> = HashMap::new();
+    // The value is the declaration kept so far: the EARLIEST in the source. The slice does not visit
+    // siblings in source order, and javac reports the later declaration — the one that redeclares.
+    let mut seen: HashMap<(usize, String, Vec<String>), Node> = HashMap::new();
     let mut out = Vec::new();
     for &n in nodes {
         let (kind_name, name_node) = match n.kind() {
@@ -79,15 +81,20 @@ pub fn duplicate_signatures_nodes(nodes: &[Node], source: &str) -> Vec<Diagnosti
         let Some(body) = n.parent() else { continue };
         let params = param_types(n, bytes, &type_var_erasures(n, bytes));
         let key = (body.id(), kind_name, params);
-        if seen.insert(key, ()).is_some() {
+        if let Some(kept) = seen.get(&key).copied() {
+            let (later, earlier) =
+                if kept.start_byte() > name_node.start_byte() { (kept, name_node) } else { (name_node, kept) };
+            seen.insert(key, earlier);
             let what = if n.kind() == "constructor_declaration" { "constructor" } else { "method" };
             out.push(Diagnostic {
                 message: format!("Duplicate {what}: another with the same signature is already declared"),
                 severity: crate::engine::check_id::CheckId::DuplicateMethod.severity().to_string(),
                 code: crate::engine::check_id::CheckId::DuplicateMethod.code().to_string(),
-                start: name_node.start_byte(),
-                end: name_node.end_byte(),
+                start: later.start_byte(),
+                end: later.end_byte(),
             });
+        } else {
+            seen.insert(key, name_node);
         }
     }
     out.sort_by_key(|d| d.start);

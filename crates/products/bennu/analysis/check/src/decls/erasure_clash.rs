@@ -76,6 +76,11 @@ pub fn erasure_clash_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnosti
         entry.push(MethodSig { raw, erased, name_node });
     }
 
+    // "In source order" is a promise the node slice does not keep for siblings — and the order is
+    // what decides which of two clashing methods is reported: javac names the later one.
+    for members in groups.values_mut() {
+        members.sort_by_key(|m| m.name_node.start_byte());
+    }
     let mut out = Vec::new();
     for key in &order {
         let members = &groups[key];

@@ -22,7 +22,7 @@
 
 use std::collections::HashSet;
 
-use bennu_java::prelude::{extract_symbols, ClassMembers, FileSymbols, Member, MemberKind, TypeResolver};
+use bennu_java::prelude::{extract_symbols, ClassMembers, FileSymbols, Member, MemberKind, TypeResolver, Visibility};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
@@ -119,6 +119,19 @@ fn check_class_supertypes(
     }
 }
 
+/// Whether `n` names an interface in `extends` or a class in `implements` — the shapes
+/// [`check_class_supertypes`] reports.
+fn clause_kind_is_wrong(n: Node, bytes: &[u8], symbols: &FileSymbols, resolver: &dyn TypeResolver) -> bool {
+    let extends_interface = supertypes::superclass(n, bytes)
+        .and_then(|sup| resolve_members(&sup.text, n, bytes, symbols, resolver))
+        .is_some_and(|cm| cm.flags.is_interface);
+    extends_interface
+        || supertypes::interfaces(n, bytes)
+            .iter()
+            .filter_map(|sup| resolve_members(&sup.text, n, bytes, symbols, resolver))
+            .any(|cm| !cm.flags.is_interface)
+}
+
 // ── missing abstract implementations ─────────────────────────────────────────
 
 /// Parse `source` and flag concrete classes that don't implement an inherited abstract method.
@@ -159,7 +172,10 @@ fn check_missing_impls(
     // An unresolvable supertype → can't assert anything: it is exactly where the implementation
     // this is about to call missing might be declared.
     let Some(supers) = supertypes::binaries_complete(n, bytes, symbols, resolver) else { return };
-    if supers.is_empty() {
+    if supers.is_empty() || clause_kind_is_wrong(n, bytes, symbols, resolver) {
+        // A class that `extends` an interface or `implements` a class has one error, and it is
+        // that: reading the wrong clause's methods as obligations reports a second one javac
+        // never gets to.
         return;
     }
     // Every reachable supertype must be known, else the requirement/provision sets are incomplete.
@@ -263,7 +279,11 @@ fn root_of(decl: Node) -> Node {
 /// Whether `m` is an abstract method a concrete subclass must implement: an `abstract` class method,
 /// or an interface method that isn't `default`/`static`. Shared with the functional-interface check.
 pub(crate) fn is_abstract_requirement(cm: &ClassMembers, m: &Member) -> bool {
-    m.is_abstract || (cm.flags.is_interface && !m.is_default && !m.is_static)
+    // A `private` interface method (Java 9) always has a body — it is a helper for the default
+    // methods, never something an implementation owes. Counting it made an interface with one
+    // abstract method and a private helper "not a functional interface".
+    m.is_abstract
+        || (cm.flags.is_interface && !m.is_default && !m.is_static && m.visibility != Visibility::Private)
 }
 
 /// The method names declared on `java/lang/Object` (satisfied by every class). Falls back to the

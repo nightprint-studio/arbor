@@ -46,6 +46,7 @@
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::support::constant::{constant_names, fold, ConstantNames, Folded};
 use crate::support::switch_label::{label_is_default, label_is_pattern};
 
 /// Flag duplicate `case` labels within a single `switch` over a shared pre-collected node slice (one
@@ -71,9 +72,12 @@ pub fn switch_dup_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> 
 fn check_switch<'t>(switch: Node<'t>, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     let Some(body) = switch.child_by_field_name("body") else { return };
 
-    // Every constant label text seen so far in THIS switch. A label constant repeated → the later one
-    // is the duplicate. We keep the trimmed text; comparison is exact-string.
-    let mut seen: Vec<String> = Vec::new();
+    // Every constant label seen so far in THIS switch — by value when it folds, by text otherwise.
+    let mut seen: Vec<LabelKey> = Vec::new();
+    // Folding reads names as constant variables, which is only safe once the switch is known not to
+    // be over an enum: there, `LOW` is the enum's constant even if a `static final int LOW` exists.
+    // A literal label rules the enum out.
+    let names = if has_literal_label(body) { constant_names(switch, bytes) } else { ConstantNames::new() };
     // A `default` has no constant to compare, so it is counted rather than collected.
     let mut default_seen = false;
 
@@ -122,7 +126,8 @@ fn check_switch<'t>(switch: Node<'t>, bytes: &[u8], out: &mut Vec<Diagnostic>) {
                 if text.is_empty() {
                     continue;
                 }
-                if seen.iter().any(|s| s == text) {
+                let key = fold(cst, bytes, &names, 0).map(LabelKey::Value).unwrap_or_else(|| LabelKey::Text(text.to_string()));
+                if seen.contains(&key) {
                     out.push(Diagnostic {
                         // A case label is usually a constant, but it can be a string
                         // literal of any size — quote it as an excerpt.
@@ -133,12 +138,34 @@ fn check_switch<'t>(switch: Node<'t>, bytes: &[u8], out: &mut Vec<Diagnostic>) {
                         end: cst.end_byte(),
                     });
                 } else {
-                    seen.push(text.to_string());
+                    seen.push(key);
                 }
             }
         }
     }
 }
+
+/// A case constant as far as duplication goes: its value when it folds to one (JLS §15.29), its
+/// source text when it does not.
+#[derive(PartialEq)]
+enum LabelKey {
+    Value(Folded),
+    Text(String),
+}
+
+fn has_literal_label(body: Node) -> bool {
+    crate::support::switch_label::labels_of(body).iter().any(|l| {
+        let mut c = l.walk();
+        let found = l.named_children(&mut c).any(|cst| {
+            let inner = if cst.kind() == "unary_expression" { cst.child_by_field_name("operand") } else { Some(cst) };
+            inner.is_some_and(|i| {
+                matches!(i.kind(), "decimal_integer_literal" | "hex_integer_literal" | "character_literal" | "string_literal")
+            })
+        });
+        found
+    })
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -292,6 +319,24 @@ mod tests {
     fn constant_labels_next_to_pattern_labels_still_report() {
         let d = dups("switch (i) { case 1: break; case 1: break; } return \"\";");
         assert_eq!(d.len(), 1, "{d:?}");
+    }
+
+    #[test]
+    fn constant_expressions_are_compared_by_value() {
+        assert_eq!(dups("switch (i) { case 2: break; case 1 + 1: break; } return \"\";").len(), 1);
+        assert_eq!(dups("switch (i) { case 'a': break; case 97: break; } return \"\";").len(), 1);
+        let src = "class C { static final String P = \"a\"; void m(String s) { switch (s) { case \"a\": break; case P: break; } } }";
+        let tree = bennu_java::prelude::parse_java(src).unwrap();
+        let nodes = crate::engine::check::collect_nodes(tree.root_node());
+        assert_eq!(switch_dup_errors_nodes(&nodes, src).len(), 1);
+    }
+
+    #[test]
+    fn a_non_final_name_is_not_folded() {
+        let src = "class C { static String P = \"a\"; void m(String s) { switch (s) { case \"a\": break; case P: break; } } }";
+        let tree = bennu_java::prelude::parse_java(src).unwrap();
+        let nodes = crate::engine::check::collect_nodes(tree.root_node());
+        assert!(switch_dup_errors_nodes(&nodes, src).is_empty());
     }
 
     #[test]

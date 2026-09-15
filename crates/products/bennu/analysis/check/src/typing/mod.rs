@@ -3,6 +3,7 @@
 pub mod casts;
 pub mod condition_type;
 pub mod narrowing;
+pub mod static_type_var;
 pub mod type_arg_arity;
 pub mod type_use;
 pub mod types;

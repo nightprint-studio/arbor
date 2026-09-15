@@ -29,7 +29,7 @@ use bennu_java::prelude::{
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::support::switch_label::label_is_default;
+use crate::support::switch_label::{label_is_default, label_is_pattern, labels_of};
 
 /// Flag enum switch **expressions** that neither cover every constant nor carry a `default`.
 ///
@@ -72,11 +72,24 @@ fn check_switch(
     // checked; a statement `switch` missing enum cases is legal Java. Same predicate as
     // `switches::is_value_context` (kept identical, mirrored here because that fn is module-private and
     // this file must not modify `switches.rs`).
-    if !crate::switching::switches::is_value_context(switch) {
-        return;
-    }
     let Some(cond) = switch.child_by_field_name("condition") else { return };
     let Some(body) = switch.child_by_field_name("body") else { return };
+    // A pattern label may be total (`case Level l`), which no constant list can see; leave those.
+    // A `case null` label, on the other hand, makes even a STATEMENT switch an enhanced one that must
+    // be exhaustive (JLS §14.11.2).
+    let labels = labels_of(body);
+    if labels.iter().any(|l| label_is_pattern(*l)) {
+        return;
+    }
+    let has_null = labels.iter().any(|l| {
+        let mut c = l.walk();
+        let found = l.named_children(&mut c).any(|ch| ch.kind() == "null_literal");
+        found
+    });
+    let expression = crate::switching::switches::is_value_context(switch);
+    if !expression && !has_null {
+        return;
+    }
 
     // GUARD 2 — the selector type must fully resolve. `infer_node_type_cached` returns `None` when it
     // can't type the selector expression → we can't know it's an enum → skip.
@@ -131,10 +144,11 @@ fn check_switch(
         return;
     }
 
+    let what = if expression { "Switch expression" } else { "A switch with a `case null` label" };
     out.push(crate::engine::check_id::CheckId::NonExhaustiveEnumSwitch.at(
         switch,
         format!(
-            "Switch expression does not cover all enum constants (missing: {}) \
+            "{what} does not cover all enum constants (missing: {}) \
              — add the missing cases or a `default`",
             missing.join(", ")
         ),

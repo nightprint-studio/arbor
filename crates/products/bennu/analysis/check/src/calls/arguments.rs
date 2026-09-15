@@ -152,6 +152,9 @@ fn check_bare_call(n: Node, bare: &BareCalls, file: &FileCtx, out: &mut Vec<Diag
 /// `new Foo(a, b)` — the candidates are `Foo`'s own constructors (never inherited). An anonymous
 /// body changes nothing: its implicit constructor forwards to the one of `Foo` the arguments select.
 fn check_new(n: Node, file: &FileCtx, out: &mut Vec<Diagnostic>) {
+    if crate::support::nodes::is_qualified_creation(n) {
+        return; // `outer.new Inner()` — see `is_qualified_creation`
+    }
     let Some(ty_node) = n.child_by_field_name("type") else { return };
     let Ok(type_text) = ty_node.utf8_text(file.bytes()) else { return };
     let Some(binary) = crate::support::resolve::type_binary(type_text, file.symbols, file.resolver) else {

@@ -42,6 +42,7 @@ pub fn declaration_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
         match n.kind() {
             "method_declaration" => check_method(n, bytes, &mut out),
             "class_declaration" => check_class(n, bytes, &mut out),
+            "interface_declaration" => check_interface(n, bytes, &mut out),
             "record_declaration" => check_record(n, bytes, &mut out),
             "enum_declaration" => check_enum(n, bytes, &imports, &mut out),
             "field_declaration" => check_field(n, bytes, &mut out),
@@ -53,15 +54,65 @@ pub fn declaration_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
 }
 
 /// The nearest enclosing type declaration of `node`, if any.
+///
+/// An anonymous class body (`new I() { … }`, an enum constant's body) is a type too, just one with
+/// no declaration node — reaching one answers `None`, because the declaration further out is not the
+/// type the member belongs to: a method of an anonymous class written inside an interface is a class
+/// method, and holding it to the interface's rules reported legal code.
 fn enclosing_type(node: Node) -> Option<Node> {
     let mut cur = node.parent();
     while let Some(n) = cur {
         if TYPE_DECLS.contains(&n.kind()) {
             return Some(n);
         }
+        if n.kind() == "class_body"
+            && n.parent().is_some_and(|p| matches!(p.kind(), "object_creation_expression" | "enum_constant"))
+        {
+            return None;
+        }
         cur = n.parent();
     }
     None
+}
+
+/// Whether a type declaration sits directly in the compilation unit (not nested in another type).
+fn is_top_level(n: Node) -> bool {
+    n.parent().is_some_and(|p| p.kind() == "program")
+}
+
+/// Modifiers JLS §8.1.1 / §9.1.1 do not allow on a TOP-LEVEL type: they only make sense for a member.
+fn check_top_level_modifiers(n: Node, mods: &[&str], out: &mut Vec<Diagnostic>) {
+    if !is_top_level(n) {
+        return;
+    }
+    for bad in ["private", "protected", "static"] {
+        if mods.contains(&bad) {
+            out.push(err(name_span(n), format!("Modifier `{bad}` is not allowed on a top-level type")));
+        }
+    }
+}
+
+/// `sealed`, `non-sealed` and `final` each say something different about who may extend the type,
+/// so any two of them contradict each other (JLS §8.1.1.2).
+fn check_sealing_modifiers(n: Node, mods: &[&str], out: &mut Vec<Diagnostic>) {
+    let present: Vec<&str> =
+        ["sealed", "non-sealed", "final"].into_iter().filter(|m| mods.contains(m)).collect();
+    if present.len() > 1 {
+        out.push(err(
+            name_span(n),
+            format!("Illegal combination of modifiers: {}", present.join(" and ")),
+        ));
+    }
+}
+
+/// The member modifiers a kind of declaration can never carry — `(modifier, what it is)` pairs for
+/// the message. These are `compiler.err.mod.not.allowed.here` in every Java version.
+fn check_disallowed(anchor: Node, mods: &[&str], disallowed: &[&str], what: &str, out: &mut Vec<Diagnostic>) {
+    for bad in disallowed {
+        if mods.contains(bad) {
+            out.push(err(anchor, format!("Modifier `{bad}` is not allowed on {what}")));
+        }
+    }
 }
 
 fn err(node: Node, message: impl Into<String>) -> Diagnostic {
@@ -106,7 +157,11 @@ fn check_method(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
         // left to avoid a false positive on an enum's constant-bodied abstract method).
         if let Some(ty) = enclosing_type(n) {
             if ty.kind() == "class_declaration" && !modifier_keywords(ty, bytes).contains(&"abstract") {
-                out.push(err(anchor, "Abstract method in non-abstract class"));
+                // On the class, where javac puts it: the class is what has to change (declare it
+                // `abstract`), or the method does — and the class header names the obligation.
+                let class_name = name_span(ty);
+                let method = n.child_by_field_name("name").and_then(|m| m.utf8_text(bytes).ok()).unwrap_or("?");
+                out.push(err(class_name, format!("Class is not abstract but declares the abstract method `{method}`")));
             }
         }
     }
@@ -130,6 +185,15 @@ fn check_method(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
         } else if has("private") && !has_body {
             out.push(err(anchor, "A `private` interface method must have a body"));
         }
+        // An interface method is overridable by definition, and has no instance to lock or state
+        // to keep: `final`, `synchronized` and `native` contradict what it is.
+        check_disallowed(anchor, &mods, &["final", "synchronized", "native", "transient", "volatile"], "an interface method", out);
+        // Only `default`, `static` and `private` methods carry a body; any other is abstract.
+        if has_body && !has("default") && !has("static") && !has("private") {
+            out.push(err(anchor, "Interface abstract methods cannot have a body"));
+        }
+    } else {
+        check_disallowed(anchor, &mods, &["transient", "volatile"], "a method", out);
     }
 }
 
@@ -155,6 +219,22 @@ fn check_class(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     if mods.contains(&"abstract") && mods.contains(&"final") {
         out.push(err(name_span(n), "Illegal combination of modifiers: abstract and final"));
     }
+    check_sealing_modifiers(n, &mods, out);
+    check_top_level_modifiers(n, &mods, out);
+    check_disallowed(name_span(n), &mods, &["transient", "volatile", "synchronized", "native", "default"], "a class", out);
+}
+
+fn check_interface(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+    let mods = modifier_keywords(n, bytes);
+    // An interface exists to be implemented; `final` would forbid exactly that.
+    if mods.contains(&"final") {
+        out.push(err(name_span(n), "Illegal combination of modifiers: interface and final"));
+    }
+    if mods.contains(&"sealed") && mods.contains(&"non-sealed") {
+        out.push(err(name_span(n), "Illegal combination of modifiers: sealed and non-sealed"));
+    }
+    check_top_level_modifiers(n, &mods, out);
+    check_disallowed(name_span(n), &mods, &["transient", "volatile", "synchronized", "native", "default"], "an interface", out);
 }
 
 fn check_record(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
@@ -162,6 +242,8 @@ fn check_record(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     if mods.contains(&"abstract") {
         out.push(err(name_span(n), "A record cannot be abstract"));
     }
+    check_top_level_modifiers(n, &mods, out);
+    check_disallowed(name_span(n), &mods, &["sealed", "non-sealed", "transient", "volatile", "synchronized", "native"], "a record", out);
     // Instance fields: a record's state is its components — only static fields are allowed in the body.
     if let Some(body) = n.child_by_field_name("body") {
         let mut c = body.walk();
@@ -171,11 +253,20 @@ fn check_record(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
             {
                 out.push(err(member, "Records cannot declare instance fields"));
             }
+            // A bare `{ … }` in a type body is an instance initializer; `static { … }` is a
+            // `static_initializer` node, and that one a record may have.
+            if member.kind() == "block" {
+                out.push(err(member, "Records cannot declare instance initializers"));
+            }
         }
     }
 }
 
 fn check_enum(n: Node, bytes: &[u8], imports: &[ParsedImport], out: &mut Vec<Diagnostic>) {
+    // Whether an enum is abstract or final is decided by its constants, never written (JLS §8.9).
+    let mods = modifier_keywords(n, bytes);
+    check_top_level_modifiers(n, &mods, out);
+    check_disallowed(name_span(n), &mods, &["abstract", "final", "sealed", "non-sealed", "transient", "volatile", "synchronized", "native"], "an enum", out);
     let Some(body) = n.child_by_field_name("body") else { return };
     // Lombok writes the constructor the constants call, so an annotated enum has one even though
     // the tree shows none. Without this, every `@AllArgsConstructor` enum with valued constants —
@@ -224,6 +315,8 @@ fn check_field(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     if mods.contains(&"final") && mods.contains(&"volatile") {
         out.push(err(n, "Illegal combination of modifiers: final and volatile"));
     }
+    // A field is state, not behaviour: the method-only modifiers never apply to it.
+    check_disallowed(n, &mods, &["abstract", "synchronized", "native", "strictfp", "default", "sealed", "non-sealed"], "a field", out);
 }
 
 #[cfg(test)]
@@ -290,7 +383,7 @@ mod tests {
     #[test]
     fn abstract_method_in_concrete_class_is_flagged() {
         let e = errs("class C { abstract void m(); }");
-        assert!(e.iter().any(|m| m.contains("non-abstract class")), "{e:?}");
+        assert!(e.iter().any(|m| m.contains("not abstract but declares the abstract method `m`")), "{e:?}");
     }
 
     #[test]
@@ -429,6 +522,54 @@ mod tests {
     fn final_volatile_field_flagged() {
         let e = errs("class C { final volatile int x = 0; }");
         assert!(e.iter().any(|m| m.contains("final and volatile")), "{e:?}");
+    }
+
+    #[test]
+    fn final_interface_is_flagged() {
+        let e = errs("final interface I {}");
+        assert!(e.iter().any(|m| m.contains("interface and final")), "{e:?}");
+    }
+
+    #[test]
+    fn abstract_enum_and_abstract_field_are_flagged() {
+        assert!(errs("class C { abstract enum E { A } }").iter().any(|m| m.contains("`abstract`")));
+        assert!(errs("class C { abstract int x; }").iter().any(|m| m.contains("on a field")));
+    }
+
+    #[test]
+    fn transient_method_is_flagged() {
+        let e = errs("class C { transient void m() {} }");
+        assert!(e.iter().any(|m| m.contains("`transient`")), "{e:?}");
+    }
+
+    #[test]
+    fn interface_method_rules() {
+        let e = errs("interface I { final void a(); void b() {} }");
+        assert!(e.iter().any(|m| m.contains("`final`")), "{e:?}");
+        assert!(e.iter().any(|m| m.contains("cannot have a body")), "{e:?}");
+        // default / static / private bodies are the legal ones.
+        let ok = "interface I { default void a() {} static void b() {} private void c() {} void d(); }";
+        assert!(errs(ok).is_empty(), "{:?}", errs(ok));
+    }
+
+    #[test]
+    fn anonymous_class_inside_an_interface_follows_class_rules() {
+        let src = "interface I { default Runnable r() { return new Runnable() { public void run() {} }; } }";
+        assert!(errs(src).is_empty(), "{:?}", errs(src));
+    }
+
+    #[test]
+    fn member_only_modifiers_on_a_top_level_type_are_flagged() {
+        assert!(errs("private class C {}").iter().any(|m| m.contains("top-level")));
+        assert!(errs("static class C {}").iter().any(|m| m.contains("top-level")));
+        // Nested, the same modifiers are legal.
+        assert!(errs("class O { private static class C {} }").is_empty());
+    }
+
+    #[test]
+    fn sealed_and_final_contradict() {
+        let e = errs("class O { sealed final static class C {} }");
+        assert!(e.iter().any(|m| m.contains("sealed and final")), "{e:?}");
     }
 
     #[test]

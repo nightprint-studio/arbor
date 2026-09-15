@@ -67,34 +67,109 @@ pub fn uninitialized_final_fields(root: Node, source: &str) -> Vec<(usize, usize
     let nodes = crate::engine::check::collect_nodes(root);
     let bytes = source.as_bytes();
     let imports = crate::support::lombok::imports_from_nodes(&nodes, bytes);
-    nodes
+    let mut spans: Vec<(usize, usize)> = nodes
         .iter()
         .filter(|n| matches!(n.kind(), "class_declaration" | "enum_declaration"))
-        .flat_map(|n| blank_final_names(*n, bytes, &imports))
-        .map(|(_, name_node)| (name_node.start_byte(), name_node.end_byte()))
-        .collect()
+        .flat_map(|n| unset_blank_finals(*n, bytes, &imports))
+        .map(|u| (u.field.start_byte(), u.field.end_byte()))
+        .collect();
+    spans.dedup();
+    spans
 }
 
-/// Flag every blank final of type `n` — see [`blank_final_names`].
+/// Flag every blank final of type `n` left unset — see [`unset_blank_finals`].
 fn check_uninitialized_final_fields(
     n: Node,
     bytes: &[u8],
     imports: &[ParsedImport],
     out: &mut Vec<Diagnostic>,
 ) {
-    for (name, name_node) in blank_final_names(n, bytes, imports) {
-        out.push(err(format!("Blank final field `{name}` is never initialized"), name_node));
+    for unset in unset_blank_finals(n, bytes, imports) {
+        let name = &unset.name;
+        match unset.constructor_end {
+            Some(end) => out.push(crate::engine::check_id::CheckId::DefiniteAssignment.span(
+                end.saturating_sub(1),
+                end,
+                format!("Blank final field `{name}` is not initialized by this constructor"),
+            )),
+            None => out.push(err(format!("Blank final field `{name}` is never initialized"), unset.field)),
+        }
     }
 }
 
-/// Every `final` field of type `n` that has no declarator initializer AND whose name is assigned
-/// nowhere in the type's own body, as `(name, name node)`. Skips as soon as *any* assignment to that
-/// name appears — no flow analysis, so any assignment means "possibly initialized".
-fn blank_final_names<'t>(
+/// A blank final a type leaves unset.
+struct Unset<'t> {
+    name: String,
+    field: Node<'t>,
+    /// The end of the constructor that completes without assigning it — where javac reports it. `None`
+    /// when the type has no constructor (or the field is static): then the field itself is the place.
+    constructor_end: Option<usize>,
+}
+
+/// Every blank final of type `n` that is left unset:
+///
+/// * an **instance** field of a type that declares constructors — once for each constructor that
+///   neither delegates with `this(…)` nor assigns it, unless an instance initializer does;
+/// * a **static** field, or any field of a type without constructors — when nothing in the type
+///   assigns it at all.
+///
+/// No flow analysis: an assignment anywhere in the constructor (even one branch) counts.
+fn unset_blank_finals<'t>(n: Node<'t>, bytes: &[u8], imports: &[ParsedImport]) -> Vec<Unset<'t>> {
+    let candidates = blank_final_candidates(n, bytes, imports);
+    let Some(body) = n.child_by_field_name("body") else { return Vec::new() };
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+    let assigned_anywhere = collect_assigned_names(body, bytes);
+    let mut constructors = Vec::new();
+    let mut by_initializers: HashSet<String> = HashSet::new();
+    let mut c = body.walk();
+    for member in body.named_children(&mut c) {
+        match member.kind() {
+            "constructor_declaration" => constructors.push(member),
+            "block" => by_initializers.extend(collect_assigned_names(member, bytes)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for (name, field, is_static) in candidates {
+        if is_static || constructors.is_empty() {
+            if !assigned_anywhere.contains(&name) {
+                out.push(Unset { name, field, constructor_end: None });
+            }
+            continue;
+        }
+        if by_initializers.contains(&name) {
+            continue;
+        }
+        for ctor in &constructors {
+            let Some(ctor_body) = ctor.child_by_field_name("body") else { continue };
+            if delegates_to_this(ctor_body) || collect_assigned_names(ctor_body, bytes).contains(&name) {
+                continue;
+            }
+            out.push(Unset { name: name.clone(), field, constructor_end: Some(ctor_body.end_byte()) });
+        }
+    }
+    out
+}
+
+/// Whether a constructor body starts with `this(…)`: the constructor it calls initializes the fields.
+fn delegates_to_this(ctor_body: Node) -> bool {
+    let mut c = ctor_body.walk();
+    let first = ctor_body.named_children(&mut c).find(|s| !matches!(s.kind(), "line_comment" | "block_comment"));
+    first.is_some_and(|s| {
+        s.kind() == "explicit_constructor_invocation"
+            && s.child_by_field_name("constructor").is_some_and(|k| k.kind() == "this")
+    })
+}
+
+/// Every `final` field declared directly in type `n` with no declarator initializer, as `(name, name
+/// node, is static)` — the fields something has to assign.
+fn blank_final_candidates<'t>(
     n: Node<'t>,
     bytes: &[u8],
     imports: &[ParsedImport],
-) -> Vec<(String, Node<'t>)> {
+) -> Vec<(String, Node<'t>, bool)> {
     // Lombok generates a constructor that initializes the `final` (and `@NonNull`) fields at COMPILE
     // time — there's no textual assignment in source, so without this the blank-final check would
     // falsely flag every final field of a `@Data` / `@Value` / `@Builder` / `@AllArgsConstructor`
@@ -111,12 +186,13 @@ fn blank_final_names<'t>(
 
     // (field name → name node) for each blank final candidate declared directly in this body. A field
     // WITH an initializer is never a candidate (it's already assigned).
-    let mut candidates: Vec<(String, Node<'t>)> = Vec::new();
+    let mut candidates: Vec<(String, Node<'t>, bool)> = Vec::new();
     let mut bc = body.walk();
     for m in body.named_children(&mut bc) {
         if m.kind() != "field_declaration" || !has_keyword(m, bytes, "final") {
             continue;
         }
+        let is_static = has_keyword(m, bytes, "static");
         let mut dc = m.walk();
         for d in m.named_children(&mut dc) {
             if d.kind() != "variable_declarator" {
@@ -128,25 +204,11 @@ fn blank_final_names<'t>(
             }
             if let Some(name_node) = d.child_by_field_name("name") {
                 if let Ok(name) = name_node.utf8_text(bytes) {
-                    candidates.push((name.to_string(), name_node));
+                    candidates.push((name.to_string(), name_node, is_static));
                 }
             }
         }
     }
-    if candidates.is_empty() {
-        return candidates;
-    }
-
-    // Every identifier that appears as an assignment / update target ANYWHERE in this type body —
-    // bare `x = …`, `this.x = …`, `X.x = …`, `x++`, `this.x += …`. We collect the *field name* end of
-    // any such target and, being conservative, DON'T cross into nested type bodies for the candidate
-    // set (they were collected from this body only) but DO gather assignment names across the whole
-    // subtree: an assignment to `x` in an inner class through the outer name is unusual, and counting it
-    // only ever *suppresses* a report — never a false positive, which is the invariant that matters.
-    let assigned = collect_assigned_names(body, bytes);
-
-    // Assigned somewhere → possibly initialized → skip.
-    candidates.retain(|(name, _)| !assigned.contains(name));
     candidates
 }
 
@@ -382,6 +444,20 @@ mod tests {
         assert!(errs(src).is_empty(), "{:?}", errs(src));
     }
 
+    /// javac reports the constructor that completes without the field, not the field.
+    #[test]
+    fn a_constructor_that_misses_the_field_is_flagged_on_its_closing_brace() {
+        let src = "class C { final int x; C() { x = 1; } C(String s) { } }";
+        let tree = parse(src);
+        let d = init_check_errors(tree.root_node(), src);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].message.contains("not initialized by this constructor"), "{d:?}");
+        assert_eq!(&src[d[0].start..d[0].end], "}");
+        assert_eq!(d[0].start, src.rfind("} }").unwrap());
+        // Delegating to a constructor that assigns it is fine.
+        assert!(errs("class C { final int x; C() { x = 1; } C(String s) { this(); } }").is_empty());
+    }
+
     #[test]
     fn final_field_assigned_in_an_instance_initializer_is_not_flagged() {
         let src = "class C { private final int x; { x = 1; } }";
@@ -406,7 +482,7 @@ mod tests {
     /// The spans the quick-fixes read are exactly the diagnostics' spans — one verdict, not two.
     #[test]
     fn uninitialized_final_fields_agrees_with_the_diagnostic() {
-        let src = "import lombok.Getter;\n@Getter\nclass C { final int a; final int b = 1; static final int S; final int c; C() { c = 1; } }";
+        let src = "import lombok.Getter;\n@Getter\nclass C { final int a; final int b = 1; static final int S; final int c; { c = 1; } }";
         let tree = parse(src);
         let spans = uninitialized_final_fields(tree.root_node(), src);
         let diag_spans: Vec<(usize, usize)> = init_check_errors(tree.root_node(), src)

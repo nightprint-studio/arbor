@@ -95,6 +95,14 @@ pub fn unresolved_types_in(
                 if n.parent().map(|p| p.kind()) == Some("method_reference") {
                     continue;
                 }
+                // `outer.new Inner()` names a member type of `outer`'s type, not a type in scope.
+                let creation = match n.parent() {
+                    Some(p) if p.kind() == "generic_type" => p.parent(),
+                    other => other,
+                };
+                if creation.is_some_and(crate::support::nodes::is_qualified_creation) {
+                    continue;
+                }
                 n
             }
             // `Outer.Inner` — a nested type written through the class that declares it.
@@ -128,6 +136,11 @@ pub fn unresolved_types_in(
                 else {
                     continue;
                 };
+                // `Greeter.super::greet` — an interface's super-method reference, not a type
+                // named `super` (the grammar reads the qualifier as a scoped type).
+                if matches!(simple, "super" | "this") {
+                    continue;
+                }
                 let Some(owner) =
                     crate::support::resolve::type_binary_at(qtext, qualifier, bytes, symbols, resolver)
                 else {

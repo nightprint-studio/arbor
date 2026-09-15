@@ -55,6 +55,19 @@ pub fn final_reassignment_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diag
                     if body.kind() == "block" {
                         check_final_locals(body, bytes, &mut out);
                     }
+                    check_final_params(n, body, bytes, &mut out);
+                }
+            }
+            "catch_clause" => check_catch_parameter(n, bytes, &mut out),
+            "enhanced_for_statement" => {
+                if has_final(n, bytes) {
+                    if let (Some(name), Some(body)) =
+                        (n.child_by_field_name("name").and_then(|x| text(x, bytes)), n.child_by_field_name("body"))
+                    {
+                        for target in assignments_to(body, &name, bytes) {
+                            out.push(err(format!("Cannot assign a value to final variable `{name}`"), target));
+                        }
+                    }
                 }
             }
             "static_initializer" => {
@@ -65,13 +78,105 @@ pub fn final_reassignment_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diag
                     }
                 }
             }
-            "class_declaration" | "enum_declaration" => {
+            "class_declaration" | "enum_declaration" | "record_declaration" => {
                 check_final_fields(n, bytes, &mut out);
             }
             _ => {}
         }
     }
     out
+}
+
+// ── final parameters ─────────────────────────────────────────────────────────
+
+/// A `final` parameter of a method, constructor or lambda, assigned in its body.
+fn check_final_params(decl: Node, body: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+    let Some(params) = decl.child_by_field_name("parameters") else { return };
+    let mut c = params.walk();
+    for p in params.named_children(&mut c) {
+        if p.kind() != "formal_parameter" || !has_final(p, bytes) {
+            continue;
+        }
+        let Some(name) = p.child_by_field_name("name").and_then(|x| text(x, bytes)) else { continue };
+        for target in assignments_to(body, &name, bytes) {
+            out.push(err(format!("Cannot assign a value to final parameter `{name}`"), target));
+        }
+    }
+}
+
+/// A `catch` parameter that is final — written `final`, or implicitly because the clause catches
+/// more than one type (JLS §14.20) — assigned in the catch block.
+fn check_catch_parameter(clause: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+    let Some(param) = crate::support::nodes::child_of_kind(clause, "catch_formal_parameter") else { return };
+    let Some(body) = clause.child_by_field_name("body") else { return };
+    let Some(name) = param.child_by_field_name("name").and_then(|x| text(x, bytes)) else { return };
+    let multi = crate::support::nodes::child_of_kind(param, "catch_type").is_some_and(|t| t.named_child_count() > 1);
+    let message = if multi {
+        format!("Multi-catch parameter `{name}` is implicitly final and cannot be assigned")
+    } else if has_final(param, bytes) {
+        format!("Cannot assign a value to final parameter `{name}`")
+    } else {
+        return;
+    };
+    for target in assignments_to(body, &name, bytes) {
+        out.push(err(message.clone(), target));
+    }
+}
+
+/// The bare-name assignment / update targets naming `name` inside `scope`, not crossing a nested
+/// type, lambda or anonymous class. Empty when anything inside `scope` declares `name` again — the
+/// assignment might then be to that one.
+fn assignments_to<'t>(scope: Node<'t>, name: &str, bytes: &[u8]) -> Vec<Node<'t>> {
+    if declared_names(scope, bytes).iter().any(|d| d == name) {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    let mut stack = vec![scope];
+    while let Some(n) = stack.pop() {
+        let target = match n.kind() {
+            "assignment_expression" => assign_target_name(n, bytes),
+            "update_expression" => update_target_name(n, bytes),
+            _ => None,
+        };
+        if let Some((target_name, node)) = target {
+            if target_name == name {
+                found.push(node);
+            }
+        }
+        if is_scope_boundary(n.kind()) || n.kind() == "class_body" {
+            continue;
+        }
+        let mut c = n.walk();
+        stack.extend(n.named_children(&mut c));
+    }
+    found
+}
+
+/// Every name something inside `scope` declares — locals, parameters of nested lambdas and
+/// methods, catch and for-each variables, pattern bindings. Over-inclusive on purpose: it only ever
+/// makes a caller stay silent.
+fn declared_names(scope: Node, bytes: &[u8]) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut stack = vec![scope];
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "variable_declarator" | "formal_parameter" | "catch_formal_parameter" | "enhanced_for_statement"
+            | "resource" => names.extend(n.child_by_field_name("name").and_then(|x| text(x, bytes))),
+            "type_pattern" | "record_pattern_component" | "inferred_parameters" => {
+                let mut c = n.walk();
+                names.extend(n.named_children(&mut c).filter(|x| x.kind() == "identifier").filter_map(|x| text(x, bytes)));
+            }
+            "lambda_expression" => {
+                if let Some(p) = n.child_by_field_name("parameters").filter(|p| p.kind() == "identifier") {
+                    names.extend(text(p, bytes));
+                }
+            }
+            _ => {}
+        }
+        let mut c = n.walk();
+        stack.extend(n.named_children(&mut c));
+    }
+    names
 }
 
 // ── final locals ─────────────────────────────────────────────────────────────
@@ -205,66 +310,143 @@ fn collect_final_inited_locals(scope: Node, bytes: &[u8], out: &mut HashMap<Stri
 
 // ── final fields ─────────────────────────────────────────────────────────────
 
-/// Flag `this.field = …` reassignments of a `final` field that already has an initializer, in the
-/// type `n`'s own body (not descending into nested types — their `this` is a different object).
+/// A `final` field of the type being checked, as far as assigning it is concerned.
+struct FinalField {
+    is_static: bool,
+    initialized: bool,
+    /// A record component's implicit `private final` field.
+    component: bool,
+}
+
+/// The member of a type body an assignment sits in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Site {
+    Method,
+    Constructor,
+    CompactConstructor,
+    InstanceInitializer,
+    StaticInitializer,
+}
+
+/// The members of a type body — an enum's sit one wrapper deeper, after its constants.
+fn type_members(body: Node) -> Vec<Node> {
+    let mut members = Vec::new();
+    let mut c = body.walk();
+    for m in body.named_children(&mut c) {
+        if m.kind() == "enum_body_declarations" {
+            let mut dc = m.walk();
+            members.extend(m.named_children(&mut dc));
+        } else {
+            members.push(m);
+        }
+    }
+    members
+}
+
+/// The `final` fields `n` declares itself, by name — including a record's components.
+fn final_fields_of(n: Node, body: Node, bytes: &[u8]) -> HashMap<String, FinalField> {
+    let mut fields = HashMap::new();
+    if n.kind() == "record_declaration" {
+        if let Some(params) = n.child_by_field_name("parameters") {
+            let mut c = params.walk();
+            for p in params.named_children(&mut c).filter(|p| p.kind() == "formal_parameter") {
+                if let Some(name) = p.child_by_field_name("name").and_then(|x| text(x, bytes)) {
+                    fields.insert(name, FinalField { is_static: false, initialized: false, component: true });
+                }
+            }
+        }
+    }
+    for m in type_members(body) {
+        if m.kind() != "field_declaration" || !has_final(m, bytes) {
+            continue;
+        }
+        let is_static = has_static(m, bytes);
+        let mut dc = m.walk();
+        for d in m.named_children(&mut dc).filter(|d| d.kind() == "variable_declarator") {
+            if let Some(name) = decl_name(d, bytes) {
+                let initialized = d.child_by_field_name("value").is_some();
+                fields.insert(name, FinalField { is_static, initialized, component: false });
+            }
+        }
+    }
+    fields
+}
+
+/// Whether assigning `field` at `site` is illegal whatever the flow (JLS §16): an initialized final
+/// anywhere, a blank one in a method, a static blank one in an instance constructor or initializer,
+/// a record component anywhere but its canonical constructor (a compact constructor assigns the
+/// parameter when it writes the bare name, the field only through `this.`).
+///
+/// A blank final assigned in its own constructor is a definite-assignment question, left alone here.
+fn assignment_is_illegal(field: &FinalField, site: Site, via_this: bool) -> bool {
+    if field.initialized {
+        return true;
+    }
+    if field.component {
+        return match site {
+            Site::Method => true,
+            Site::CompactConstructor => via_this,
+            _ => false,
+        };
+    }
+    match site {
+        Site::Method => true,
+        Site::Constructor | Site::InstanceInitializer => field.is_static,
+        Site::CompactConstructor | Site::StaticInitializer => false,
+    }
+}
+
+/// Flag assignments to the `final` fields the type `n` declares, in its own members — through
+/// `this.field` or a bare name nothing in the member shadows. Nested and anonymous types are not
+/// entered: their `this` and their names are their own.
 fn check_final_fields(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     let Some(body) = n.child_by_field_name("body") else { return };
-
-    // Final fields (declared directly in this body) that carry an initializer.
-    let mut final_fields: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut bc = body.walk();
-    for m in body.named_children(&mut bc) {
-        if m.kind() == "field_declaration" && has_final(m, bytes) {
-            let mut dc = m.walk();
-            for d in m.named_children(&mut dc) {
-                if d.kind() == "variable_declarator" && d.child_by_field_name("value").is_some() {
-                    if let Some(name) = decl_name(d, bytes) {
-                        final_fields.insert(name);
+    let fields = final_fields_of(n, body, bytes);
+    if fields.is_empty() {
+        return;
+    }
+    for member in type_members(body) {
+        let site = match member.kind() {
+            "method_declaration" => Site::Method,
+            "constructor_declaration" => Site::Constructor,
+            "compact_constructor_declaration" => Site::CompactConstructor,
+            "block" => Site::InstanceInitializer,
+            "static_initializer" => Site::StaticInitializer,
+            _ => continue,
+        };
+        let shadowed = declared_names(member, bytes);
+        let mut stack = vec![member];
+        while let Some(node) = stack.pop() {
+            let target = match node.kind() {
+                "assignment_expression" => node.child_by_field_name("left"),
+                "update_expression" => update_operand(node),
+                _ => None,
+            };
+            if let Some(t) = target {
+                let named = match this_field_name(t, bytes) {
+                    Some(field) => Some((field, true)),
+                    None if t.kind() == "identifier" => text(t, bytes).filter(|x| !shadowed.contains(x)).map(|x| (x, false)),
+                    None => None,
+                };
+                if let Some((name, via_this)) = named {
+                    if fields.get(&name).is_some_and(|f| assignment_is_illegal(f, site, via_this)) {
+                        out.push(err(format!("Cannot assign a value to final field `{name}`"), t));
                     }
                 }
             }
-        }
-    }
-    if final_fields.is_empty() {
-        return;
-    }
-
-    // Walk the type body for `this.field` assignment / update targets, not crossing into nested
-    // type declarations.
-    let mut stack: Vec<Node> = Vec::new();
-    let mut c = body.walk();
-    for ch in body.named_children(&mut c) {
-        stack.push(ch);
-    }
-    while let Some(node) = stack.pop() {
-        let target = match node.kind() {
-            "assignment_expression" => node.child_by_field_name("left"),
-            "update_expression" => update_operand(node),
-            _ => None,
-        };
-        if let Some(t) = target {
-            if let Some(field) = this_field_name(t, bytes) {
-                if final_fields.contains(&field) {
-                    out.push(err(
-                        format!("Cannot assign a value to final field `{field}`"),
-                        t,
-                    ));
-                }
+            let nested_type = matches!(
+                node.kind(),
+                "class_declaration" | "interface_declaration" | "enum_declaration" | "record_declaration"
+                    | "annotation_type_declaration" | "class_body"
+            );
+            // A blank final assigned inside a lambda of its constructor is still illegal, but that is
+            // javac's flow analysis talking; the constructor rules above do not know about the lambda.
+            let lambda_in_ctor = node.kind() == "lambda_expression" && site != Site::Method;
+            if nested_type || lambda_in_ctor {
+                continue;
             }
-        }
-        if matches!(
-            node.kind(),
-            "class_declaration"
-                | "interface_declaration"
-                | "enum_declaration"
-                | "record_declaration"
-                | "annotation_type_declaration"
-        ) {
-            continue; // nested type: its `this` is a different object
-        }
-        let mut cc = node.walk();
-        for ch in node.named_children(&mut cc) {
-            stack.push(ch);
+            let mut cc = node.walk();
+            stack.extend(node.named_children(&mut cc));
         }
     }
 }
@@ -482,6 +664,47 @@ mod tests {
     #[test]
     fn non_final_field_this_reassignment_is_ok() {
         assert!(errs("class C { int x = 1; void m() { this.x = 2; } }").is_empty());
+    }
+
+    #[test]
+    fn final_parameters_and_catch_parameters_are_flagged() {
+        assert!(errs("class C { void m(final int v) { v = 2; } }").iter().any(|m| m.contains("final parameter `v`")));
+        assert!(errs("class C { void m() { try { } catch (final RuntimeException e) { e = null; } } }").len() == 1);
+        let multi = errs("class C { void m() { try { } catch (IllegalStateException | IllegalArgumentException e) { e = null; } } }");
+        assert!(multi.iter().any(|m| m.contains("Multi-catch")), "{multi:?}");
+        // Neither final nor multi: assignable.
+        assert!(errs("class C { void m(int v) { v = 2; try { } catch (RuntimeException e) { e = null; } } }").is_empty());
+    }
+
+    #[test]
+    fn final_for_each_variable_is_flagged() {
+        assert_eq!(errs("class C { void m(int[] a) { for (final int v : a) { v = 0; } } }").len(), 1);
+        assert!(errs("class C { void m(int[] a) { for (int v : a) { v = 0; } } }").is_empty());
+    }
+
+    #[test]
+    fn bare_final_field_assignments_are_flagged() {
+        assert_eq!(errs("class C { final int x = 1; void m() { x = 2; } }").len(), 1);
+        assert_eq!(errs("class C { static final int K = 1; void m() { K = 2; } }").len(), 1);
+        // A blank final assigned in a method is illegal; in its constructor it is not.
+        assert_eq!(errs("class C { final int x; C() { x = 1; } void m() { x = 2; } }").len(), 1);
+        // A static blank final belongs to the static initializer.
+        assert!(errs("class C { static final int K; static { K = 1; } }").is_empty());
+    }
+
+    #[test]
+    fn a_shadowed_field_name_is_not_flagged() {
+        assert!(errs("class C { final int x = 1; void m(int x) { x = 2; } }").is_empty());
+        assert!(errs("class C { final int x = 1; void m() { Runnable r = new Runnable() { int x; public void run() { x = 2; } }; } }").is_empty());
+    }
+
+    #[test]
+    fn record_component_fields_are_final() {
+        assert_eq!(errs("record R(int x) { void reset() { x = 0; } }").len(), 1);
+        assert_eq!(errs("record R(int x) { R { this.x = 1; } }").len(), 1);
+        // The compact constructor's bare name is its parameter; the canonical one assigns the field.
+        assert!(errs("record R(int x) { R { x = Math.abs(x); } }").is_empty());
+        assert!(errs("record R(int x) { R(int x) { this.x = x; } }").is_empty());
     }
 
     #[test]
