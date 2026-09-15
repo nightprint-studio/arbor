@@ -1,7 +1,7 @@
 /**
  * Library-bean IPC — the Spring beans an **allowlisted** dependency declares.
  *
- * Mirrors `crates/products/bennu/be/src/library_beans.rs` in snake_case; the Rust side is
+ * Mirrors `crates/products/bennu/runtime/be/src/library_beans.rs` in snake_case; the Rust side is
  * authoritative. In its own file rather than `index.ts` for the same reason as `ext.ts` and
  * `deps.ts`: concurrent edits to the main bennu IPC surface shouldn't race.
  *

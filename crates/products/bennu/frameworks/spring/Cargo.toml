@@ -1,0 +1,44 @@
+[package]
+name         = "bennu-spring"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Spring support for Bennu as a framework extension — bean registry (annotations, @Bean, XML), injection points, request-mapping endpoints, application*.yml/properties, and the editor answers over them (highlight / diagnostics / go-to / hover / completion / gutter)."
+
+[dependencies]
+# The extension seam this crate implements. Everything it contributes crosses this
+# boundary, and nothing Spring-shaped goes the other way.
+bennu-ext  = { path = "../ext" }
+# `${…}` and `#{…}` — the two little languages inside annotation strings.
+bennu-spel = { path = "../spel" }
+# The wire types a contribution is made of (Diagnostic / CompletionItem / CapabilitySet).
+bennu-proto = { path = "../../runtime/proto" }
+
+# The annotation-shaped Java scan + the annotation-origin rule. Both started here and moved
+# out the day JPA needed them identically: parsing Java for framework facts is not a Spring
+# idea, and the alternative to extracting was a second copy that would drift. What stayed in
+# this crate is the policy — the relevance markers (`scan.rs`) and the package table
+# (`known.rs`).
+bennu-facts = { path = "../../analysis/facts" }
+# The Java parser. What Spring's proxy semantics turn on — whether a call goes through the proxy —
+# is a question about a *call site*, which the flattened fact model deliberately does not carry.
+bennu-java  = { path = "../../analysis/java" }
+# The tree-sitter runtime, pinned to the workspace-shared 0.25. Native `links` library: exactly one
+# version can be linked, so a crate picking its own is not a different choice, it is a build failure.
+tree-sitter = "0.25"
+# Runtime-visible annotations off a `.class`. A bean declared inside a dependency has no
+# source on disk, so the only place its `@Service` / `@Bean` is written is the bytecode —
+# same framework facts this crate already reads from Java text and bean XML, third container.
+bennu-classpath = { path = "../../analysis/classpath" }
+# The completion mechanics — the caret's token, the prefix rule, the de-duplicated capped
+# candidate list, and the discipline that separates ghost text from a guess. Extracted here
+# too, and for the same reason: the second provider needed all of it unchanged.
+bennu-complete = { path = "../../editing/complete" }
+# Bean XML, with attribute value ranges (`range_value`) — the spans every positional
+# feature is built on. Same version `bennu-web` already uses.
+roxmltree  = "0.20"
+
+serde      = { workspace = true }
+serde_json = { workspace = true }

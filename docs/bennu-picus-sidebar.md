@@ -151,7 +151,7 @@ flowchart LR
 > the database backend is simply not up. It would also give `bennu-be` a dependency on a database
 > product, which the codebase has already explicitly refused — see below.
 
-The refusal is written down, in `crates/products/bennu/jpa/src/model.rs:1`:
+The refusal is written down, in `crates/products/bennu/frameworks/jpa/src/model.rs:1`:
 
 > Facts with spans, and nothing that needs a database connection: everything here is read out of
 > Java source. Whether the column actually exists in the schema is Picus's question, not this

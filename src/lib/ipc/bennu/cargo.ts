@@ -2,7 +2,7 @@
  * Cargo IPC — the crate graph, the command catalogue, and launching one.
  *
  * Mirrors `bennu-cargo`'s own types in **snake_case**; the Rust side
- * (`crates/products/bennu/cargo/src/{workspace,commands}.rs`) is authoritative.
+ * (`crates/products/bennu/build/cargo/src/{workspace,commands}.rs`) is authoritative.
  *
  * ## Why the command catalogue is fetched rather than declared here
  *

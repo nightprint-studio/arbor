@@ -1,0 +1,28 @@
+[package]
+name         = "bennu-jsp"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The JSP tag-library model: a TLD parser covering both the 1.2 and 2.1 generations, the page's own `<%@ taglib %>` declarations, the rule that decides which library a `uri` names, and the editor answers over them — tag/attribute completion, checks that stay silent without a library, hover carrying the TLD's own prose, and go-to onto the declaration."
+
+[dependencies]
+# The extension seam this crate implements.
+bennu-ext      = { path = "../ext" }
+# The wire types a contribution is made of (Diagnostic / CompletionItem / CapabilitySet).
+bennu-proto    = { path = "../../runtime/proto" }
+# The completion mechanics — the caret's prefix rule and the de-duplicated capped list.
+bennu-complete = { path = "../../editing/complete" }
+# The tolerant tag scan + the caret classification. A taglib tag IS an XML tag; writing a
+# third scanner for it would be writing the same bugs again.
+bennu-xml      = { path = "../../formats/xml" }
+# A TLD is well-formed XML on disk (never a buffer mid-edit), so it is read with the same
+# parser the rest of the workspace reads its descriptors with.
+roxmltree      = "0.20"
+# The page grammar — the SAME generate the editor loads as wasm — for `model.rs` alone. Every
+# other answer in this crate goes through the tolerant tag scan, which wants no parse; a model
+# of what Bennu understood has to start from what Bennu actually read.
+bennu-jsp-grammar = { path = "../jsp-grammar" }
+# Pinned to the workspace's single `links = "tree-sitter"` version, like every other consumer.
+tree-sitter    = "0.25"

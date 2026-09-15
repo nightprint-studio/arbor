@@ -9,7 +9,7 @@
  * their fields under `{ args: … }` (the proven convention — the seam keys params by
  * the handler's single `args` parameter, and the inner fields are the handler
  * struct's fields in snake_case). Wire shapes below match the BE handlers verbatim
- * (`crates/products/bennu/be/src/intel.rs`).
+ * (`crates/products/bennu/runtime/be/src/intel.rs`).
  */
 
 import { bennu } from '../rpc';

@@ -1,7 +1,7 @@
 /**
  * Bennu code templates IPC — the templates the user owns, by kind, and what one renders to.
  *
- * Wire shapes mirror `crates/products/bennu/be/src/templates.rs`. Rendering writes nothing; the one
+ * Wire shapes mirror `crates/products/bennu/runtime/be/src/templates.rs`. Rendering writes nothing; the one
  * call that does is `createFileFromTemplate`, and it refuses a file that is already there.
  */
 

@@ -5,7 +5,7 @@
  *
  * All calls route through the generic `bennu(...)` rpc bridge, wrapping fields under
  * `{ args: … }` (the proven convention). Wire shapes mirror the BE handlers
- * (`crates/products/bennu/be/src/spell.rs`) verbatim.
+ * (`crates/products/bennu/runtime/be/src/spell.rs`) verbatim.
  */
 
 import { bennu } from '../rpc';

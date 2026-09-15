@@ -4,7 +4,7 @@
  * mis-tagged namespaced taglib CLOSING tags (`</s:iterator>`, `</c:if>`) as invalid /
  * untagged (the dark-red / white bug).
  *
- * A small custom tree-sitter grammar (`crates/products/bennu/jsp-grammar`, compiled to
+ * A small custom tree-sitter grammar (`crates/products/bennu/frameworks/jsp-grammar`, compiled to
  * `static/bennu/tree-sitter-jsp.wasm`) parses JSP natively: namespaced tags, scriptlets
  * `<% … %>` / directives `<%@ … %>` / declarations / expressions, JSP comments, EL
  * `${…}` / `#{…}` and Struts OGNL `%{…}` — including inside attribute values. Highlighting

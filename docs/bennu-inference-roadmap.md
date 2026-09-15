@@ -14,7 +14,7 @@ un verdetto sbagliato.
 
 ## 1. Cosa sa fare l'inference OGGI
 
-Motore: `crates/products/bennu/java/src/infer.rs`, seam in `java/src/seam.rs`.
+Motore: `crates/products/bennu/analysis/java/src/infer.rs`, seam in `java/src/seam.rs`.
 
 - **Tipo nominale di un'espressione/receiver** (`infer_receiver_type`, `infer_expression_type`,
   `infer_node_type_cached`): literal, string-concat (`"x"+n → String`), accesso a campo/metodo sul

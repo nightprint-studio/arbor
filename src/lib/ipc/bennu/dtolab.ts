@@ -2,7 +2,7 @@
  * Bennu DTO Lab IPC — a class tried out as JSON, validated on the project's own JVM, and turned into
  * tests from a template the user owns.
  *
- * Wire shapes mirror `crates/products/bennu/be/src/dtolab.rs`; the JVM replies (`read`, `validate`,
+ * Wire shapes mirror `crates/products/bennu/runtime/be/src/dtolab.rs`; the JVM replies (`read`, `validate`,
  * `default`) pass through from the harness as they are, so their fields are snake_case too.
  */
 

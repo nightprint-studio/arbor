@@ -2,7 +2,7 @@
  * Bennu Tomcat hot-swap IPC — link a project to a local Tomcat and copy changed JSPs into the
  * deployed (exploded) webapp so Jasper recompiles them on next request. Routes through the generic
  * `bennu(...)` rpc bridge; wire shapes mirror the BE handlers in
- * `crates/products/bennu/be/src/tomcat.rs` verbatim (snake_case fields under `{ args: … }`).
+ * `crates/products/bennu/runtime/be/src/tomcat.rs` verbatim (snake_case fields under `{ args: … }`).
  */
 
 import { bennu } from '../rpc';

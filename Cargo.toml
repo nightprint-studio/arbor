@@ -24,9 +24,9 @@ members = [
     "crates/foundation/sql-abbrev",
     "crates/foundation/syntax",
     "crates/foundation/logscan",
-    "crates/products/bennu/plugin",
-    "crates/products/bennu/sheet",
-    "crates/products/bennu/wgsl",
+    "crates/products/bennu/runtime/plugin",
+    "crates/products/bennu/formats/sheet",
+    "crates/products/bennu/formats/wgsl",
     "crates/products/corvus/core",
     "crates/products/corvus/plugin",
     "crates/products/corvus/plugin-ns",
@@ -83,97 +83,97 @@ members = [
     "crates/products/sitta/be",
     "crates/products/tyto/core",
     "crates/products/tyto/be",
-    "crates/products/bennu/proto",
-    "crates/products/bennu/core",
-    "crates/products/bennu/project",
-    "crates/products/bennu/classpath",
-    "crates/products/bennu/index",
-    "crates/products/bennu/java",
+    "crates/products/bennu/runtime/proto",
+    "crates/products/bennu/runtime/core",
+    "crates/products/bennu/build/project",
+    "crates/products/bennu/analysis/classpath",
+    "crates/products/bennu/analysis/index",
+    "crates/products/bennu/analysis/java",
     # What Lombok generates, as data: one annotation catalogue and one import gate, so the checks
     # and the index answer "does this member exist in the compiled class" the same way. Zero deps.
-    "crates/products/bennu/lombok",
-    "crates/products/bennu/intentions",
-    "crates/products/bennu/jsp-grammar",
-    "crates/products/bennu/jsp",
-    "crates/products/bennu/i18n",
+    "crates/products/bennu/analysis/lombok",
+    "crates/products/bennu/editing/intentions",
+    "crates/products/bennu/frameworks/jsp-grammar",
+    "crates/products/bennu/frameworks/jsp",
+    "crates/products/bennu/frameworks/i18n",
     # The fulcrum engine's conventions, one crate per subsystem. Each registers itself with the
     # framework-extension seam under a namespaced id, so a sibling is a new crate plus one line.
     "crates/products/bennu/fulcrum/i18n",
-    "crates/products/bennu/web",
-    "crates/products/bennu/spel",
-    "crates/products/bennu/facts",
-    "crates/products/bennu/complete",
-    "crates/products/bennu/npm",
-    "crates/products/bennu/ext",
-    "crates/products/bennu/spring",
-    "crates/products/bennu/jpa",
+    "crates/products/bennu/frameworks/web",
+    "crates/products/bennu/frameworks/spel",
+    "crates/products/bennu/analysis/facts",
+    "crates/products/bennu/editing/complete",
+    "crates/products/bennu/build/npm",
+    "crates/products/bennu/frameworks/ext",
+    "crates/products/bennu/frameworks/spring",
+    "crates/products/bennu/frameworks/jpa",
     # Bean Validation: which bundle a constraint message is really resolved against (the spec's
     # `ValidationMessages`, or one named in a `@Bean`), and which `{…}` in a message is a bundle
     # key rather than the constraint's own attribute.
-    "crates/products/bennu/jakarta",
+    "crates/products/bennu/frameworks/jakarta",
     # Scheduled work: every `@Scheduled` method and Quartz trigger, what its cron says in words,
     # and the two ways a job silently never runs.
-    "crates/products/bennu/scheduling",
+    "crates/products/bennu/frameworks/scheduling",
     # Jackson: what a DTO will and will not put in its JSON, read from the annotations and the
     # accessors rather than discovered from a payload that came out wrong.
-    "crates/products/bennu/jackson",
+    "crates/products/bennu/frameworks/jackson",
     # MapStruct: the property paths a mapper writes as strings, checked against the types they
     # name — and the target properties nobody maps, before the annotation processor says so.
-    "crates/products/bennu/mapstruct",
+    "crates/products/bennu/frameworks/mapstruct",
     # Mockito: the misuses its runtime throws for — an unfinished stubbing, matchers mixed with raw
     # values, `@Mock` fields nothing initialises.
-    "crates/products/bennu/mockito",
+    "crates/products/bennu/frameworks/mockito",
     # AssertJ: the assertion that asserts nothing, and JUnit assertions rewritten as AssertJ ones.
-    "crates/products/bennu/assertj",
+    "crates/products/bennu/frameworks/assertj",
     # Jakarta EE: CDI and EJB beans, the injection points they satisfy, and servlets.
-    "crates/products/bennu/jakartaee",
+    "crates/products/bennu/frameworks/jakartaee",
     # JAX-RS: resources as routes, in the same Endpoints list as Spring's and Struts'.
-    "crates/products/bennu/jaxrs",
+    "crates/products/bennu/frameworks/jaxrs",
     # The DTO Lab's pure half: a class read as its constraints, the cases they imply, and tests
     # rendered from a user-owned template — plus the Java harness that checks them on the JVM.
     # Code generated from templates the user owns: engine, store, the class model, and each kind's context.
-    "crates/products/bennu/templates",
-    "crates/products/bennu/dtolab",
+    "crates/products/bennu/editing/templates",
+    "crates/products/bennu/frameworks/dtolab",
     # Bevy ECS, read from the source shape: the fourth framework extension, and the second that
     # is not Java's.
-    "crates/products/bennu/bevy",
-    "crates/products/bennu/dtd",
-    "crates/products/bennu/xsd",
-    "crates/products/bennu/xml",
-    "crates/products/bennu/deps",
+    "crates/products/bennu/frameworks/bevy",
+    "crates/products/bennu/formats/dtd",
+    "crates/products/bennu/formats/xsd",
+    "crates/products/bennu/formats/xml",
+    "crates/products/bennu/build/deps",
     # Writing back into a pom.xml — the half `bennu-deps` deliberately does not do. A leaf over
     # the XML element tree: no filesystem policy, no Maven invocation, just "here is the text and
     # here is what it should say".
-    "crates/products/bennu/pomedit",
-    "crates/products/bennu/maven",
-    "crates/products/bennu/toolconf",
-    "crates/products/bennu/refactor",
+    "crates/products/bennu/build/pomedit",
+    "crates/products/bennu/build/maven",
+    "crates/products/bennu/build/toolconf",
+    "crates/products/bennu/editing/refactor",
     # What a Cargo workspace IS, read off its manifests: the crate graph, the manifest
     # schema behind Cargo.toml validation + completion, and the cargo command catalogue.
-    "crates/products/bennu/cargo",
+    "crates/products/bennu/build/cargo",
     # TOML read with positions — every table and key with the byte offsets of its value. Its own
     # crate because it owns no schema: `bennu-cargo` reads a manifest with it, the fulcrum i18n
     # extension reads a message bundle.
-    "crates/products/bennu/toml",
-    "crates/products/bennu/query",
+    "crates/products/bennu/formats/toml",
+    "crates/products/bennu/analysis/query",
     # The `Content-Length` base protocol, shared by the LSP and DAP clients below. Dependency-free
     # by construction: it is `std::io` and a header parser.
-    "crates/products/bennu/framed",
+    "crates/products/bennu/protocols/framed",
     # The LSP client — the impl of bennu-intel's predisposed slot. A leaf: serde plus
     # two workspace-internal crates, so it can be split out unchanged.
-    "crates/products/bennu/lsp",
+    "crates/products/bennu/protocols/lsp",
     # The DAP client — the debugger's transport, and the Rust half of what JDWP is for Java. Same
     # shape as `lsp`: hand-rolled protocol, serde, and the shared frame reader.
-    "crates/products/bennu/dap",
-    "crates/products/bennu/check",
+    "crates/products/bennu/protocols/dap",
+    "crates/products/bennu/analysis/check",
     # Naming conventions as an opt-in feature pack: a leaf that turns a grammar into "this
     # declaration breaks the convention the project declared, and here is the name that would not".
-    "crates/products/bennu/naming",
-    "crates/products/bennu/test",
-    "crates/products/bennu/jdwp",
-    "crates/products/bennu/ssr",
-    "crates/products/bennu/intel",
-    "crates/products/bennu/be",
+    "crates/products/bennu/analysis/naming",
+    "crates/products/bennu/frameworks/test",
+    "crates/products/bennu/protocols/jdwp",
+    "crates/products/bennu/editing/ssr",
+    "crates/products/bennu/analysis/intel",
+    "crates/products/bennu/runtime/be",
     "crates/products/picus/types",
     "crates/products/picus/ast",
     "crates/products/picus/emit",

@@ -212,10 +212,10 @@ to ship the first framework.
 
 ### Key file references
 
-- Native seam to extend: `crates/products/bennu/intel/src/config.rs` (`ingest_config_graph` /
+- Native seam to extend: `crates/products/bennu/analysis/intel/src/config.rs` (`ingest_config_graph` /
   `ConfigResolver`).
-- Lombok / type injection point: `crates/products/bennu/intel/src/java_index.rs`
+- Lombok / type injection point: `crates/products/bennu/analysis/intel/src/java_index.rs`
   (`build_class_members`).
-- Annotation-extraction gap: `crates/products/bennu/java/src/symbols.rs`.
+- Annotation-extraction gap: `crates/products/bennu/analysis/java/src/symbols.rs`.
 - Plugin-host prerequisite mirrors: `crates/corvus/be/src/plugin_rpc.rs`.
 - Absent hook catalog: `crates/platform/plugin/types/src/hook_catalog.rs`.

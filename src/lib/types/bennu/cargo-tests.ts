@@ -1,7 +1,7 @@
 /**
  * Cargo test types — the wire shapes of the `cargo_tests` domain, in **snake_case** because that is
- * what crosses the seam. Authoritative source: `crates/products/bennu/test/src/cargo_*.rs` (the
- * pure half) and `crates/products/bennu/be/src/cargo_tests.rs` (the runner).
+ * what crosses the seam. Authoritative source: `crates/products/bennu/frameworks/test/src/cargo_*.rs` (the
+ * pure half) and `crates/products/bennu/runtime/be/src/cargo_tests.rs` (the runner).
  *
  * The same "declared is not executed" split as the Maven side, for the same reason and with one
  * extra twist of its own: an `#[rstest]` is **one** declared function that produces **many** libtest

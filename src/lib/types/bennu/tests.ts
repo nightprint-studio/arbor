@@ -1,7 +1,7 @@
 /**
  * Bennu unit-test types — the wire shapes of the `tests` domain, in **snake_case** because
- * that is what crosses the seam. Authoritative source: `crates/products/bennu/test` (the
- * pure half) and `crates/products/bennu/be/src/tests.rs` (the runner).
+ * that is what crosses the seam. Authoritative source: `crates/products/bennu/frameworks/test` (the
+ * pure half) and `crates/products/bennu/runtime/be/src/tests.rs` (the runner).
  *
  * Two shapes, and they are deliberately NOT the same one:
  *

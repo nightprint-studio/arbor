@@ -1,0 +1,21 @@
+[package]
+name         = "bennu-assertj"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "AssertJ, read for the assertions that cannot fail: a chain with no check at the end of it, soft assertions nobody ever reports, and a boolean assertion that throws away the value it was computed from — plus the Alt+Enter rewrites from JUnit's assertEquals family to assertThat."
+
+[dependencies]
+bennu-ext        = { path = "../ext" }
+bennu-proto      = { path = "../../runtime/proto" }
+# The parse and the declaration helpers. A call chain, the statement it sits in and the declaration
+# of the variable it reads are all questions for a parser.
+bennu-java       = { path = "../../analysis/java" }
+# Imports, and the rule that tells AssertJ's `assertThat` from Hamcrest's and from a project helper.
+bennu-facts      = { path = "../../analysis/facts" }
+# Where a static import goes — the rewrite from JUnit adds one, and a second copy of that placement
+# logic is exactly the kind of thing that drifts.
+bennu-intentions = { path = "../../editing/intentions" }
+tree-sitter      = "0.25"

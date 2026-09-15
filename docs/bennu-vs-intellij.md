@@ -6,7 +6,7 @@ clone sparse di `JetBrains/intellij-community` (daemon di highlighting + catalog
 `JavaErrorKinds` + `JavaCompilationErrorBundle.properties`).
 
 Complementare a `docs/bennu-indexing-validation-analysis.md`, `docs/bennu-inference-roadmap.md` e a
-`crates/products/bennu/check/README.md`.
+`crates/products/bennu/analysis/check/README.md`.
 
 ---
 

@@ -2,7 +2,7 @@
  * Bennu dependencies IPC — what the project depends on, and who decided each answer.
  *
  * Mirrors `bennu-deps`'s model field-for-field in **snake_case**; the Rust side
- * (`crates/products/bennu/deps/src/model.rs`) is authoritative, and its module doc has the table
+ * (`crates/products/bennu/build/deps/src/model.rs`) is authoritative, and its module doc has the table
  * mapping each field onto Maven's vocabulary and Cargo's.
  *
  * **One shape, two ecosystems.** The same report describes a Maven reactor and a Cargo workspace,

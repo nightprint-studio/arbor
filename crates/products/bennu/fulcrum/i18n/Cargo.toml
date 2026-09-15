@@ -9,11 +9,11 @@ description  = "The fulcrum engine's i18n convention, as Bennu tooling: the labe
 
 [dependencies]
 # The extension seam this crate implements.
-bennu-ext   = { path = "../../ext" }
+bennu-ext   = { path = "../../frameworks/ext" }
 # The wire types a contribution is made of (Diagnostic / CapabilitySet / CompletionItem).
-bennu-proto = { path = "../../proto" }
+bennu-proto = { path = "../../runtime/proto" }
 # TOML read WITH positions — a label has to be navigable to, so the value's byte range is the
 # whole point. See that crate's header.
-bennu-toml  = { path = "../../toml" }
+bennu-toml  = { path = "../../formats/toml" }
 
 serde = { workspace = true }
