@@ -5,6 +5,7 @@ pub mod arity;
 pub mod capture;
 pub mod fields;
 pub mod functional;
+pub mod lambda_body;
 pub mod lambdas;
 pub mod members;
 pub mod undefined_var;

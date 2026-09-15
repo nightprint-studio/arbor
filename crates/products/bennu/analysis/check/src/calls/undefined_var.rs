@@ -59,7 +59,7 @@ use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
 use crate::support::scopes::{
-    is_value_position, resolves_as_local, scope_is_top_across_lambdas, single_top_level_type,
+    is_value_position, resolves_as_local_lexically, scope_is_top_across_lambdas, single_top_level_type,
 };
 
 use crate::support::nodes::{child_field_name, generated_names};
@@ -86,7 +86,7 @@ pub fn undefined_var(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnosti
     let symbols = extract_symbols(source);
     let root = tree.root_node();
     let nodes = crate::engine::check::collect_nodes(root);
-    undefined_var_errors_in(root, &nodes, source, &symbols, resolver)
+    undefined_var_errors_in(root, &nodes, source, &symbols, resolver, false)
 }
 
 /// The tree-driven core: mirrors [`crate::typing::types::unresolved_types_in`] / [`crate::calls::members::unknown_members_in`].
@@ -97,12 +97,16 @@ pub fn undefined_var(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnosti
 /// `source` — the byte text for names; `symbols` — the file's `imports` (static-import guard) and
 /// declared `types` (resolve the enclosing type's binary + its enum constants); `resolver` — resolve
 /// the enclosing type's field hierarchy and simple type names.
+///
+/// `classpath_complete` decides whether an UPPERCASE receiver head may be judged: conventionally a
+/// type, it is one the resolver can deny only when it has seen every type there is.
 pub fn undefined_var_errors_in(
     root: Node,
     nodes: &[Node],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    classpath_complete: bool,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
 
@@ -193,6 +197,7 @@ pub fn undefined_var_errors_in(
         }
     }
 
+    let bare_types_known = classpath_complete;
     let mut out = Vec::new();
     for &n in nodes {
         if n.kind() != "identifier" {
@@ -204,17 +209,18 @@ pub fn undefined_var_errors_in(
         // it is judged here under the extra type / package gates below.
         let receiver = is_whole_receiver(n);
         // A lambda may be crossed: it declares no fields and does not rebind `this`, and the names it
-        // DOES bind — its parameters, its block's locals — are read by `resolves_as_local` exactly as
+        // DOES bind — its parameters, its block's locals — are read by `resolves_as_local_lexically` exactly as
         // a method's are. Refusing it left every renamed parameter still used in a callback unjudged.
         if !((receiver || is_value_position(n)) && scope_is_top_across_lambdas(n, top.node)) {
             continue;
         }
         let Ok(name) = n.utf8_text(bytes) else { continue };
-        // RECEIVER gate: an uppercase head is conventionally a type (left to the type checks), and a
-        // head named like a type declared in this file IS one.
+        // RECEIVER gate: a head named like a type declared in this file IS one. An uppercase head is
+        // conventionally a type, so it is judged only on a complete classpath — without one, a
+        // `Widget.X` whose `Widget` resolved to nothing may be a library type nobody indexed.
         if receiver
-            && (!name.chars().next().is_some_and(char::is_lowercase)
-                || declared_types.contains(name))
+            && (declared_types.contains(name)
+                || (!name.chars().next().is_some_and(char::is_lowercase) && !bare_types_known))
         {
             continue;
         }
@@ -229,9 +235,10 @@ pub fn undefined_var_errors_in(
         if JAVA_LANG_TYPES.contains(&name) {
             continue;
         }
-        // RESOLUTION 1: a local / param / for-var / catch-param / resource / pattern var in ANY
-        // enclosing scope. Collected per-identifier by walking its ancestor scopes.
-        if resolves_as_local(n, top.node, bytes) {
+        // RESOLUTION 1: a local / param / for-var / catch-param / resource / pattern var in a scope
+        // that encloses it — lexically: a block's locals end with the block, which is what makes a
+        // loop variable used after its loop a name that binds to nothing.
+        if resolves_as_local_lexically(n, top.node, bytes) {
             continue;
         }
         // RESOLUTION 2: a field of the enclosing type or a known supertype.
@@ -516,6 +523,55 @@ mod tests {
         let d = diags("String name = \"x\"; System.out.println(nam);");
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(d[0].contains("`nam`"), "{d:?}");
+    }
+
+    // ── lexical scope: a local ends with the block that declares it ─────────────────────────────
+
+    #[track_caller]
+    fn flags_only(body: &str, name: &str) {
+        let d = diags(body);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains(&format!("`{name}`")), "{d:?}");
+    }
+
+    #[test]
+    fn a_block_local_used_after_its_block_is_flagged() {
+        flags_only("{ int inner = 1; } int r = inner;", "inner");
+    }
+
+    #[test]
+    fn a_loop_variable_used_after_its_loop_is_flagged() {
+        flags_only("for (int i = 0; i < 3; i++) { count++; } int r = i;", "i");
+    }
+
+    #[test]
+    fn a_catch_parameter_used_after_its_catch_is_flagged() {
+        flags_only("try { count++; } catch (RuntimeException ex) { count--; } Object r = ex;", "ex");
+    }
+
+    #[test]
+    fn a_lambda_local_used_outside_the_lambda_is_flagged() {
+        flags_only("Runnable t = () -> { int inside = 1; }; int r = inside;", "inside");
+    }
+
+    #[test]
+    fn locals_inside_their_own_scope_are_ok() {
+        assert!(diags("for (int i = 0; i < 3; i++) { count += i; }").is_empty());
+        assert!(diags("try { count++; } catch (RuntimeException ex) { Object r = ex; }").is_empty());
+        assert!(diags("{ int inner = 1; count = inner; }").is_empty());
+    }
+
+    /// A pattern variable's scope follows flow, not blocks: after an `if` that returns when the
+    /// pattern does NOT match, the binding is in scope (JLS §6.3.1).
+    #[test]
+    fn a_pattern_binding_introduced_by_a_negated_test_stays_in_scope() {
+        assert!(diags("Object o = null; if (!(o instanceof String s)) { return; } count = s.length();").is_empty());
+    }
+
+    /// Every case group of one `switch` shares the switch block's scope.
+    #[test]
+    fn a_local_of_an_earlier_case_group_is_in_scope_in_a_later_one() {
+        assert!(diags("switch (count) { case 1: int shared = 1; break; case 2: shared = 2; break; }").is_empty());
     }
 
     #[test]
@@ -927,6 +983,23 @@ mod tests {
         let src = "package com.acme;\nimport static com.acme.Helper.cfg;\n\
                    class C extends Base { int count; void m() { cfg.run(); } }";
         assert!(diags_with(src, &resolver()).is_empty(), "{:?}", diags_with(src, &resolver()));
+    }
+
+    /// On a complete classpath an uppercase head that names no type and no variable is reported —
+    /// `Nowhere.VALUE` is javac's `cannot find symbol: variable Nowhere`.
+    #[test]
+    fn an_uppercase_head_naming_nothing_is_flagged_on_a_complete_classpath() {
+        let src = in_method("int y = Nowhere.VALUE;");
+        let tree = bennu_java::prelude::parse_java(&src).unwrap();
+        let symbols = extract_symbols(&src);
+        let nodes = crate::engine::check::collect_nodes(tree.root_node());
+        let r = resolver();
+        let d: Vec<String> = undefined_var_errors_in(tree.root_node(), &nodes, &src, &symbols, &r, true)
+            .into_iter()
+            .map(|d| d.message)
+            .collect();
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`Nowhere`"), "{d:?}");
     }
 
     #[test]

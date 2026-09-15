@@ -37,8 +37,12 @@ pub fn override_access_errors_in(
     let bytes = source.as_bytes();
     let mut out = Vec::new();
     for &n in nodes {
-        if matches!(n.kind(), "class_declaration" | "enum_declaration" | "record_declaration") {
-            check_type(n, bytes, symbols, resolver, &mut out);
+        match n.kind() {
+            "class_declaration" | "enum_declaration" | "record_declaration" => {
+                check_type(n, bytes, symbols, resolver, &mut out)
+            }
+            "object_creation_expression" => check_anonymous(n, bytes, symbols, resolver, &mut out),
+            _ => {}
         }
     }
     out
@@ -52,8 +56,43 @@ fn check_type(
     out: &mut Vec<Diagnostic>,
 ) {
     let Some(body) = n.child_by_field_name("body") else { return };
+    let mut supers = crate::support::supertypes::binaries(n, bytes, symbols, resolver);
+    // A class that extends nothing extends `Object`, whose `public toString()` a `protected` one
+    // narrows exactly as it would narrow any other supertype's.
+    if n.kind() == "class_declaration" && crate::support::supertypes::superclass(n, bytes).is_none() {
+        supers.push("java/lang/Object".to_string());
+    }
+    check_body(body, &supers, bytes, symbols, resolver, out);
+}
 
-    let supers = crate::support::supertypes::binaries(n, bytes, symbols, resolver);
+/// `new T() { … }` — the anonymous body overrides `T`'s methods, under the same rule.
+fn check_anonymous(
+    n: Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    out: &mut Vec<Diagnostic>,
+) {
+    if crate::support::nodes::is_qualified_creation(n) {
+        return;
+    }
+    let Some(body) = crate::support::nodes::child_of_kind(n, "class_body") else { return };
+    let Some(ty) = n.child_by_field_name("type") else { return };
+    let Ok(written) = ty.utf8_text(bytes) else { return };
+    let Some(binary) = crate::support::resolve::type_binary_at(written, n, bytes, symbols, resolver) else {
+        return;
+    };
+    check_body(body, &[binary], bytes, symbols, resolver, out);
+}
+
+fn check_body(
+    body: Node,
+    supers: &[String],
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    out: &mut Vec<Diagnostic>,
+) {
     if supers.is_empty() {
         return;
     }
@@ -61,7 +100,7 @@ fn check_type(
     // name → (erased parameter types, the visibility the supertype promised). Only `public` and
     // `protected` are collected; see the module doc for why package-private is not judged.
     let mut promised: HashMap<String, Vec<(Vec<String>, Visibility)>> = HashMap::new();
-    for sup in &supers {
+    for sup in supers {
         for_each_supertype(resolver, sup, &mut |_bn, cm| {
             for m in &cm.methods {
                 let inherited = m.kind == MemberKind::Method

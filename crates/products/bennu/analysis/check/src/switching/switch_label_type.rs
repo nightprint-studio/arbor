@@ -23,9 +23,14 @@
 //!
 //!   * the selector's type must **fully resolve** through the shared inference to a type the
 //!     resolver knows — an un-inferable selector is skipped entirely;
-//!   * **pattern labels are skipped whole** ([`crate::support::switch_label::label_is_pattern`]). A `when`
-//!     guard is a *sibling* of its pattern in the grammar, so a bare identifier guard sits exactly
-//!     where a case constant sits; reading one as a constant would flag legal Java 21;
+//!   * **a pattern label is never read as a constant** ([`crate::support::switch_label::label_is_pattern`]).
+//!     A `when` guard is a *sibling* of its pattern in the grammar, so a bare identifier guard sits
+//!     exactly where a case constant sits; reading one as a constant would flag legal Java 21. A type
+//!     pattern is judged only as a type: one the selector cannot be cast to, by the rule a cast obeys
+//!     ([`crate::typing::casts::provably_inconvertible`]);
+//!   * a selector only a pattern switch accepts (`Object`, an interface, …) takes no constant label,
+//!     and before Java 21 is no selector at all; a qualified enum label is likewise judged only below
+//!     Java 21 — never when the level is unknown;
 //!   * `default` and `case null` are skipped — `null` is a legal label for any reference selector;
 //!   * only the shapes we can decide are judged. A literal is decidable from the AST alone; a bare
 //!     name against an enum's constant set is decidable *when the set is complete*. Everything else
@@ -44,7 +49,10 @@ use tree_sitter::Node;
 
 use crate::support::nodes::{simple_name};
 
-use crate::support::switch_label::{label_is_default, label_is_pattern, labels_of};
+use crate::engine::check_id::CheckId;
+use crate::support::resolve::written_type_binary;
+use crate::typing::casts::provably_inconvertible;
+use crate::support::switch_label::{is_pattern_selector, label_is_default, label_is_pattern, labels_of};
 
 /// The boxed selector types whose labels must be integral — a `String` label on one of these is an
 /// error. (The *primitive* `int`/`short`/… selectors are not listed: Bennu's inference doesn't model
@@ -87,6 +95,7 @@ pub fn switch_label_type_errors_in(
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
     cache: &InferCache,
+    java_major: Option<u32>,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
@@ -95,7 +104,7 @@ pub fn switch_label_type_errors_in(
         // exhaustiveness (legal to omit in a statement switch), a mistyped label is an error in
         // either position. A broken subtree is skipped — the label reads would be unreliable.
         if n.kind() == "switch_expression" && !n.has_error() {
-            check_switch(n, &root, source, bytes, symbols, resolver, cache, &mut out);
+            check_switch(n, &root, source, bytes, symbols, resolver, cache, java_major, &mut out);
         }
     }
     out
@@ -110,6 +119,7 @@ fn check_switch(
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
     cache: &InferCache,
+    java_major: Option<u32>,
     out: &mut Vec<Diagnostic>,
 ) {
     let Some(cond) = switch.child_by_field_name("condition") else { return };
@@ -124,6 +134,18 @@ fn check_switch(
     }
     let Some(members) = resolver.members_of(&sel.binary_name) else { return };
     let simple = simple_name(&sel.binary_name);
+    let before_21 = java_major.is_some_and(|major| major < 21);
+    let labels = labels_of(body);
+    let pattern_selector = is_pattern_selector(&sel, &members, cond, bytes);
+    // A pattern label below Java 21 is `version`'s finding; a switch without one is still a switch
+    // over a type only a pattern switch accepts.
+    if pattern_selector && before_21 && !labels.iter().any(|l| label_is_pattern(*l)) {
+        let major = java_major.unwrap_or_default();
+        out.push(CheckId::FeatureRequiresNewerJava.at(
+            cond,
+            format!("Pattern matching in `switch` (on `{simple}`) requires Java 21, but the project targets Java {major}"),
+        ));
+    }
 
     // For an enum selector the constant set doubles as the legal label vocabulary — but only when it
     // is complete (see the module doc). Empty ⇒ judge literals only, never names.
@@ -133,17 +155,53 @@ fn check_switch(
         Vec::new()
     };
 
-    for label in labels_of(body) {
-        if label_is_default(label, bytes) || label_is_pattern(label) {
+    for label in labels {
+        if label_is_pattern(label) {
+            if sel.dims == 0 {
+                check_pattern_label(label, bytes, symbols, resolver, &sel.binary_name, out);
+            }
+            continue;
+        }
+        if label_is_default(label, bytes) {
             continue;
         }
         let mut lc = label.walk();
         for cst in label.named_children(&mut lc) {
             if members.flags.is_enum {
-                check_enum_label(cst, bytes, simple, &constants, out);
+                check_enum_label(cst, bytes, simple, &constants, before_21, out);
             } else {
-                check_scalar_label(cst, bytes, &sel.binary_name, simple, out);
+                check_scalar_label(cst, bytes, &sel.binary_name, simple, pattern_selector, out);
             }
+        }
+    }
+}
+
+/// A type pattern no value of the selector's type can match — `case Integer i` on a `String`. The
+/// selector has to be castable to the pattern's type (JLS §14.30.3), by the rule a cast is held to.
+fn check_pattern_label(
+    label: Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    selector: &str,
+    out: &mut Vec<Diagnostic>,
+) {
+    let mut c = label.walk();
+    for part in label.named_children(&mut c) {
+        let pattern = match part.kind() {
+            "pattern" => part.named_child(0),
+            "type_pattern" => Some(part),
+            _ => None,
+        };
+        let Some(pattern) = pattern.filter(|p| p.kind() == "type_pattern") else { continue };
+        let mut pc = pattern.walk();
+        let Some(ty) = pattern.named_children(&mut pc).find(|n| n.kind() != "modifiers") else { continue };
+        let Some(binary) = written_type_binary(ty, bytes, symbols, resolver) else { continue };
+        if provably_inconvertible(selector, &binary, resolver) {
+            out.push(CheckId::IncompatibleCaseLabel.at(
+                ty,
+                format!("`{}` cannot be converted to `{}`", simple_name(selector), simple_name(&binary)),
+            ));
         }
     }
 }
@@ -156,9 +214,22 @@ fn check_enum_label(
     bytes: &[u8],
     enum_simple: &str,
     constants: &[String],
+    before_21: bool,
     out: &mut Vec<Diagnostic>,
 ) {
     let Ok(text) = cst.utf8_text(bytes) else { return };
+
+    // `case Level.LOW` — Java 21 accepts the qualified name; every earlier release wants it bare.
+    if before_21 && cst.kind() == "field_access" {
+        out.push(CheckId::IncompatibleCaseLabel.at(
+            cst,
+            format!(
+                "`case {}` — before Java 21 an enum `switch` label must be the unqualified name of a constant of `{enum_simple}`",
+                crate::support::text::short(text.trim()),
+            ),
+        ));
+        return;
+    }
 
     if let Some(lit) = literal_kind(cst) {
         out.push(crate::engine::check_id::CheckId::IncompatibleCaseLabel.at(
@@ -189,7 +260,17 @@ fn check_enum_label(
 
 /// One label of a **non-enum** switch: only the clear-cut literal mismatches against the two selector
 /// families we can resolve — `String`, and the integral boxes.
-fn check_scalar_label(cst: Node, bytes: &[u8], binary: &str, simple: &str, out: &mut Vec<Diagnostic>) {
+///
+/// A selector only a pattern switch accepts (`Object`, an interface, …) takes no constant at all
+/// (JLS §14.11.1): every literal there is wrong.
+fn check_scalar_label(
+    cst: Node,
+    bytes: &[u8],
+    binary: &str,
+    simple: &str,
+    pattern_selector: bool,
+    out: &mut Vec<Diagnostic>,
+) {
     let Some(lit) = literal_kind(cst) else { return };
     let wrong = if binary == "java/lang/String" {
         lit != Lit::Str
@@ -197,7 +278,7 @@ fn check_scalar_label(cst: Node, bytes: &[u8], binary: &str, simple: &str, out: 
         // `case 'a'` on an `Integer` is a legal widening; only a string is certainly wrong.
         lit == Lit::Str
     } else {
-        false
+        pattern_selector
     };
     if !wrong {
         return;
@@ -322,6 +403,11 @@ mod tests {
     /// Run the check over a method body. `f` is an `Fmt` field, `s` a `String` and `i` an `Integer`,
     /// so every selector below is inferable.
     fn diags(body: &str) -> Vec<String> {
+        diags_at(body, None)
+    }
+
+    /// [`diags`] for a project targeting `java_major`.
+    fn diags_at(body: &str, java_major: Option<u32>) -> Vec<String> {
         let src =
             format!("class C {{ Fmt f; String s; Integer i; boolean flag; void m() {{ {body} }} }}");
         let mut parser = Parser::new();
@@ -330,7 +416,7 @@ mod tests {
         let root = tree.root_node();
         let nodes = crate::engine::check::collect_nodes(root);
         let symbols = extract_symbols(&src);
-        switch_label_type_errors_in(root, &nodes, &src, &symbols, &resolver(), &InferCache::new())
+        switch_label_type_errors_in(root, &nodes, &src, &symbols, &resolver(), &InferCache::new(), java_major)
             .into_iter()
             .map(|d| d.message)
             .collect()
@@ -425,6 +511,7 @@ mod tests {
             &symbols,
             &resolver(),
             &InferCache::new(),
+            None,
         );
         assert!(d.is_empty(), "{d:?}");
     }
@@ -435,4 +522,50 @@ mod tests {
         let d = diags("switch (f) { case CSV: switch (s) { case \"a\": break; } break; }");
         assert!(d.is_empty(), "{d:?}");
     }
+
+    // ── Pattern-only selectors and the Java 21 label rules ─────────────────────
+
+    #[test]
+    fn a_constant_label_on_an_object_selector_is_flagged() {
+        let d = diags("Object o = new Object(); switch (o) { case \"a\" -> { } default -> { } }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("string literal") && d[0].contains("`Object`"), "{d:?}");
+    }
+
+    /// An `Object` only inference answers may be an erased type variable: not a pattern selector.
+    #[test]
+    fn an_object_selector_the_code_does_not_spell_is_not_judged() {
+        assert!(diags("switch (s.hashCode() > 0 ? null : null) { case \"a\" -> { } default -> { } }").is_empty());
+    }
+
+    #[test]
+    fn a_qualified_enum_label_is_flagged_only_before_java_21() {
+        let body = "switch (f) { case Fmt.CSV: break; default: break; }";
+        let old = diags_at(body, Some(8));
+        assert_eq!(old.len(), 1, "{old:?}");
+        assert!(old[0].contains("unqualified"), "{old:?}");
+        assert!(diags_at(body, Some(21)).is_empty());
+        assert!(diags_at(body, None).is_empty());
+    }
+
+    #[test]
+    fn a_switch_on_object_before_java_21_needs_a_newer_java() {
+        let body = "Object o = new Object(); switch (o) { default: break; }";
+        let old = diags_at(body, Some(8));
+        assert_eq!(old.len(), 1, "{old:?}");
+        assert!(old[0].contains("Java 21"), "{old:?}");
+        assert!(diags_at(body, Some(21)).is_empty());
+        assert!(diags_at("switch (s) { default: break; }", Some(8)).is_empty(), "a String switch is Java 7");
+    }
+
+    /// `case Integer i` on a `String`: two final classes, neither the other — no value matches.
+    #[test]
+    fn a_pattern_no_selector_value_can_match_is_flagged() {
+        let d = diags("switch (s) { case Integer n -> { } default -> { } }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`String` cannot be converted to `Integer`"), "{d:?}");
+        assert!(diags("Object o = new Object(); switch (o) { case Integer n -> { } default -> { } }").is_empty());
+    }
 }
+
+

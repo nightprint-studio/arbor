@@ -84,7 +84,8 @@ fn check_declaration(
     let Ok(type_text) = ty_node.utf8_text(bytes) else { return };
     // SKIP `var` — the target type is inferred FROM the initializer, so there is no declared narrower
     // type to violate.
-    let Some(target) = primitive_rank(type_text) else { return };
+    let (element, type_dims) = bennu_java::prelude::split_array_dims(type_text.trim());
+    let Some(target) = primitive_rank(element) else { return };
     let mut c = n.walk();
     // GOTCHA (project rule): explicit `for`, never `.find`/`.any` on `named_children`.
     for d in n.named_children(&mut c) {
@@ -92,7 +93,46 @@ fn check_declaration(
             continue;
         }
         let Some(val) = d.child_by_field_name("value") else { continue };
-        narrowing_check(root, source, bytes, symbols, target, type_text, val, resolver, cache, out);
+        // `int values[] = …` puts part of the depth after the name.
+        let dims = type_dims
+            + d.child_by_field_name("dimensions")
+                .and_then(|x| x.utf8_text(bytes).ok())
+                .map_or(0, |t| t.matches('[').count());
+        let site = Site { root, source, bytes, symbols, resolver, cache };
+        if dims == 0 {
+            narrowing_check(root, source, bytes, symbols, target, element, val, resolver, cache, out);
+        } else if val.kind() == "array_initializer" {
+            // `int[] values = { 1, 2L }` — every entry is assigned to an `int`.
+            site.check_initializer(val, dims, target, element, out);
+        }
+    }
+}
+
+/// What the entries of an array initializer are checked with.
+struct Site<'a, 't> {
+    root: &'a Node<'t>,
+    source: &'a str,
+    bytes: &'a [u8],
+    symbols: &'a FileSymbols,
+    resolver: &'a dyn TypeResolver,
+    cache: &'a InferCache,
+}
+
+impl Site<'_, '_> {
+    /// Each entry of `init`, `dims` levels above the primitive `target`.
+    fn check_initializer(&self, init: Node, dims: usize, target: Rank, element: &str, out: &mut Vec<Diagnostic>) {
+        let mut c = init.walk();
+        let entries: Vec<Node> = init.named_children(&mut c).collect();
+        for entry in entries {
+            match (dims, entry.kind()) {
+                (1, "array_initializer") => {}
+                (1, _) => narrowing_check(
+                    self.root, self.source, self.bytes, self.symbols, target, element, entry, self.resolver, self.cache, out,
+                ),
+                (_, "array_initializer") => self.check_initializer(entry, dims - 1, target, element, out),
+                _ => {}
+            }
+        }
     }
 }
 

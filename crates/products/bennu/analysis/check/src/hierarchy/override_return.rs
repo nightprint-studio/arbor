@@ -26,12 +26,10 @@ use bennu_java::prelude::{FileSymbols, MemberKind, TypeResolver, Visibility};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::support::nodes::{is_primitive, is_type_var, simple_name};
-
-use crate::support::method_sig::{member_param_binaries, method_param_binaries, written_binary};
-use crate::support::nodes::{has_keyword, text};
-use crate::support::resolve::type_binary_at;
-use crate::support::walk::{for_each_supertype, hierarchy_fully_known, reaches};
+use crate::hierarchy::obligations::{declared_returns, indexed_returns, returns_incompatible, Returns};
+use crate::support::method_sig::{member_param_binaries, method_param_binaries};
+use crate::support::nodes::{has_keyword, simple_name, text};
+use crate::support::walk::for_each_supertype;
 
 /// Flag every method whose return type is an illegal (non-covariant) override of an inherited method.
 pub fn override_return_errors_in(
@@ -71,7 +69,7 @@ fn check_type(
     }
 
     // name → the set of (erased params, return binary) of overridable supertype methods.
-    let mut inherited: HashMap<String, Vec<(Vec<String>, String)>> = HashMap::new();
+    let mut inherited: HashMap<String, Vec<(Vec<String>, Returns)>> = HashMap::new();
     for sup in &supers {
         for_each_supertype(resolver, sup, &mut |_bn, cm| {
             for m in &cm.methods {
@@ -85,7 +83,7 @@ fn check_type(
                     inherited
                         .entry(m.name.clone())
                         .or_default()
-                        .push((params, written_binary(&m.return_type)));
+                        .push((params, indexed_returns(m, resolver)));
                 }
             }
         });
@@ -107,32 +105,24 @@ fn check_type(
         let Some(candidates) = inherited.get(&name) else { continue };
         let Some(params) = method_param_binaries(m, bytes, symbols, resolver) else { continue };
 
-        // SKIP unless the overriding method's own return type resolves to a concrete reference class.
-        let Some(sub_ret) = method_return_binary(m, bytes, symbols, resolver) else { continue };
-        let Some(sub_ret) = concrete_ref(&sub_ret, resolver) else { continue };
+        // SKIP unless the overriding method's own return type is one we can compare.
+        let sub_ret = declared_returns(m, bytes, symbols, resolver);
+        if sub_ret == Returns::Unknown {
+            continue;
+        }
 
         for (super_params, super_ret) in candidates {
             if *super_params != params {
                 continue; // different signature → an overload, not this override
             }
-            // SKIP unless the overridden return type is ALSO a concrete reference class we can reason
-            // about. A type variable / primitive / array / unresolved super return → skip.
-            let Some(super_ret) = concrete_ref(super_ret, resolver) else { continue };
-            // The SAME type, however each side happens to spell it — one came from this file's
-            // import, the other from the member index, and a nested type has two binary spellings.
-            if bennu_java::prelude::same_binary_type(&super_ret, &sub_ret) {
-                continue; // identical return → a legal (non-covariant) override
-            }
-            // Both fully known, and the sub return is NOT a subtype of the super return → illegal.
-            if hierarchy_fully_known(resolver, &sub_ret)
-                && hierarchy_fully_known(resolver, &super_ret)
-                && !reaches(resolver, &sub_ret, &super_ret)
-            {
+            // `int produce()` over `Object produce()` is as wrong as `String` over `Number`: a
+            // primitive is no subtype of anything, and overriding does not box.
+            if returns_incompatible(&sub_ret, super_ret, resolver) {
                 out.push(err(
                     format!(
                         "Return type `{}` is not compatible with the overridden method's `{}`",
-                        simple_name(&sub_ret),
-                        simple_name(&super_ret)
+                        describe(&sub_ret),
+                        describe(super_ret)
                     ),
                     name_node,
                 ));
@@ -142,27 +132,14 @@ fn check_type(
     }
 }
 
-/// The overriding method's return type as a concrete binary name, or `None` when it's `void`, a
-/// primitive, or doesn't resolve. Read off the `type` field of the `method_declaration`.
-fn method_return_binary(
-    md: Node,
-    bytes: &[u8],
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-) -> Option<String> {
-    let ty = md.child_by_field_name("type")?;
-    let text = ty.utf8_text(bytes).ok()?;
-    type_binary_at(text, ty, bytes, symbols, resolver)
-}
-
-/// Validate a binary name as a concrete reference class the resolver knows: not a primitive, `void`, a
-/// single-letter type variable, or an array. `None` (→ SKIP) for any of those.
-fn concrete_ref(binary: &str, resolver: &dyn TypeResolver) -> Option<String> {
-    if is_primitive(binary) || binary.ends_with("[]") || is_type_var(binary) {
-        return None;
+/// A return type as the message names it.
+fn describe(returns: &Returns) -> &str {
+    match returns {
+        Returns::Void => "void",
+        Returns::Primitive(p) => p,
+        Returns::Reference(b) => simple_name(b),
+        Returns::Unknown => "?",
     }
-    resolver.members_of(binary)?;
-    Some(binary.to_string())
 }
 
 /// The erased binary names of a method's parameter types. `None` (skip the method) if any parameter
@@ -291,11 +268,12 @@ mod tests {
         assert!(diags("class X extends Mystery { public String getValue() { return \"\"; } }").is_empty());
     }
 
+    /// `void` or a primitive where the overridden method returns a reference is as incompatible as an
+    /// unrelated class: nothing converts between them, and an override does not box.
     #[test]
-    fn primitive_return_override_is_not_flagged() {
-        // A `void` / primitive return isn't a reference type we reason about here → skipped (a genuine
-        // primitive-vs-reference mismatch is a different, rarer error we deliberately don't chase).
-        assert!(diags("class X extends NumericBase { public void getValue() {} }").is_empty());
+    fn a_void_or_primitive_over_a_reference_return_is_flagged() {
+        assert_eq!(diags("class X extends NumericBase { public void getValue() {} }").len(), 1);
+        assert_eq!(diags("class X extends NumericBase { public int getValue() { return 0; } }").len(), 1);
     }
 
     #[test]

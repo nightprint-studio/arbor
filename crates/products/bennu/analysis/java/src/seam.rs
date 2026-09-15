@@ -267,6 +267,98 @@ impl Member {
         self.throws = throws;
         self
     }
+
+    /// The method's OWN type parameters, by name — `<T> T[] toArray(T[] a)` → `["T"]`.
+    ///
+    /// Read off [`Self::raw_signature`], which already holds them in both of its spellings: a class
+    /// file's generic signature (`<T:Ljava/lang/Object;>([TT;)[TT;`) and the source rendering the
+    /// index writes (`<T> T[] toArray(T[] a)`). A parameter typed `T` stands for the enclosing
+    /// class's `T` only when the method does not declare its own — substituting the receiver's type
+    /// argument into a shadowed one is how `<T> void put(T t)` on a `Box<String>` would come to
+    /// refuse an `Integer` that compiles.
+    pub fn method_type_params(&self) -> Vec<String> {
+        let raw = self.raw_signature.trim_start();
+        let Some(rest) = raw.strip_prefix('<') else { return Vec::new() };
+        let mut depth = 1usize;
+        let mut end = None;
+        for (i, c) in rest.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(end) = end else { return Vec::new() };
+        let inner = &rest[..end];
+        match rest[end + 1..].starts_with('(') {
+            true => bytecode_type_param_names(inner),
+            false => source_type_param_names(inner),
+        }
+    }
+}
+
+/// `T:Ljava/lang/Object;U::Ljava/lang/Comparable<TU;>;` → `["T", "U"]`.
+fn bytecode_type_param_names(inner: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let bytes = inner.as_bytes();
+    let (mut i, mut depth) = (0usize, 0usize);
+    while i < bytes.len() {
+        // A name runs to its first `:`.
+        let start = i;
+        while i < bytes.len() && bytes[i] != b':' {
+            i += 1;
+        }
+        names.push(inner[start..i].to_string());
+        // Its bounds: each introduced by `:`, each ending at a `;` outside any `<…>`.
+        while i < bytes.len() && bytes[i] == b':' {
+            i += 1;
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'<' => depth += 1,
+                    b'>' => depth = depth.saturating_sub(1),
+                    b';' if depth == 0 => {
+                        i += 1;
+                        break;
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+        }
+    }
+    names.retain(|n| !n.is_empty());
+    names
+}
+
+/// `T, R extends Comparable<R>` → `["T", "R"]`.
+fn source_type_param_names(inner: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    let mut push = |part: &str| {
+        if let Some(name) = part.split_whitespace().next() {
+            names.push(name.to_string());
+        }
+    };
+    for (i, c) in inner.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                push(&inner[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    push(&inner[start..]);
+    names
 }
 
 /// Class-level access flags the checks need (extend-final / extend-record / implement-abstract).
@@ -364,6 +456,20 @@ pub trait TypeResolver {
         Vec::new()
     }
 
+    /// Whether any type lives in `package` (slash form, `java/util`) or in a package below it.
+    ///
+    /// `Some(false)` is a definitive "nothing is there" — `import com.nowhere.*;` and
+    /// `com.nowhere.Thing` are then javac's `package … does not exist`. `None` means the resolver
+    /// cannot enumerate what it holds, and a caller must stay silent. A package that only has
+    /// subpackages answers `Some(true)`: saying it exists is the direction that cannot invent an
+    /// error.
+    ///
+    /// The answer covers what THIS resolver can see. Whether that is the whole classpath is the
+    /// caller's question (`classpath_complete`), exactly as it is for an unresolved import.
+    fn package_exists(&self, _package: &str) -> Option<bool> {
+        None
+    }
+
     /// Resolve a simple type name (`ArrayList`) to a binary name, using the file's
     /// imports for disambiguation. `None` when unresolvable.
     fn resolve_simple_name(&self, name: &str, imports: &[crate::symbols::Import])
@@ -379,5 +485,34 @@ pub trait TypeResolver {
     /// positive. (Dependency indexing newly surfaced these; before it, such types didn't resolve.)
     fn is_project_type(&self, _binary_name: &str) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_signature(raw: &str) -> Member {
+        Member::method("m", TypeRef::simple("void"), Vec::new()).sig(raw)
+    }
+
+    #[test]
+    fn a_class_file_signature_names_the_methods_own_type_parameters() {
+        assert_eq!(with_signature("<T:Ljava/lang/Object;>([TT;)[TT;").method_type_params(), ["T"]);
+        assert_eq!(
+            with_signature("<K::Ljava/lang/Comparable<-TK;>;V:Ljava/lang/Object;>(TK;TV;)V").method_type_params(),
+            ["K", "V"]
+        );
+        assert!(with_signature("(Ljava/lang/Object;)Z").method_type_params().is_empty());
+    }
+
+    #[test]
+    fn a_source_rendering_names_them_too() {
+        assert_eq!(with_signature("<T> T[] toArray(T[] a)").method_type_params(), ["T"]);
+        assert_eq!(
+            with_signature("<R extends Comparable<R>, S> R pick(S s)").method_type_params(),
+            ["R", "S"]
+        );
+        assert!(with_signature("boolean add(E e)").method_type_params().is_empty());
     }
 }

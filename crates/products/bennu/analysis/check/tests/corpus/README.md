@@ -105,6 +105,14 @@ cargo test -p bennu-intel --test check_corpus -- --nocapture
 It indexes each module against the machine's JDK, validates every file, and compares with
 `expected.txt`. It skips (and says why) when no JDK resolves or a golden file is missing.
 
+To see what Bennu says on a file the report names, set `BENNU_CORPUS_DUMP` to part of its path. Every
+diagnostic of the matching files is printed, warnings included, as `dump file:line severity [code]
+message`:
+
+```sh
+BENNU_CORPUS_DUMP=args/ArgsCtorBad cargo test -p bennu-intel --test check_corpus -- --nocapture
+```
+
 - Matching is on **file + line**, never column. A Bennu diagnostic claims the whole line range of its
   enclosing statement, because javac and Bennu can point at different lines of one multi-line call.
 - The javac-key → Bennu-check mapping is `bennu_check::javac` (`coverage(key)`), the same table the

@@ -431,10 +431,19 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
     }
 
     fn class_annotations(&self, binary_name: &str) -> Vec<JAnnotation> {
-        // Only the classpath answers this today. A PROJECT-declared annotation type would have to
-        // carry its own annotations through the persisted index, which `TypeDecl` does not yet do —
-        // so a project `@Repeatable` reads as "not known" and every caller stays silent, which is
-        // the same thing they do for a type that does not resolve at all.
+        // A PROJECT annotation type carries its own annotations beside its members, under their own
+        // key (the index writer's `type_annotations`). Any other project type has none recorded,
+        // which reads as "not known" — the same as a type that does not resolve.
+        let project = self
+            .project_members_json(binary_name)
+            .or_else(|| binary_name.contains('$').then(|| self.project_members_json(&binary_name.replace('$', "/"))).flatten());
+        if let Some(json) = project {
+            return serde_json::from_str::<serde_json::Value>(&json)
+                .ok()
+                .and_then(|mut v| v.get_mut("type_annotations").map(serde_json::Value::take))
+                .and_then(|a| serde_json::from_value::<Vec<JAnnotation>>(a).ok())
+                .unwrap_or_default();
+        }
         let Some(found) = self.jdk.class_annotations(binary_name) else { return Vec::new() };
         found.class.iter().map(convert_annotation).collect()
     }
@@ -465,6 +474,29 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         out.sort();
         out.dedup();
         out
+    }
+
+    fn package_exists(&self, package: &str) -> Option<bool> {
+        let package = package.trim_matches('/');
+        if package.is_empty() {
+            return None;
+        }
+        let prefix = format!("{package}/");
+        {
+            let ov = self.overlay.read().unwrap_or_else(|p| p.into_inner());
+            if ov.members.keys().any(|binary| binary.starts_with(&prefix)) {
+                return Some(true);
+            }
+        }
+        if self.project.prefix(&prefix).iter().any(is_type_symbol) {
+            return Some(true);
+        }
+        // The project index is not the classpath: a project-only resolver never sees the JDK, so
+        // it cannot say that anything is missing.
+        if self.project_only {
+            return None;
+        }
+        self.jdk.package_exists(package)
     }
 
     fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String> {

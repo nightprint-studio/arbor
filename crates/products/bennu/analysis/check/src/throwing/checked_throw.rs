@@ -98,42 +98,24 @@ fn check_throw(
         return;
     }
 
-    // RULE 6: the NEAREST enclosing callable must be a plain method/constructor. If a lambda or an
-    // anonymous/local class sits between the throw and that callable, SKIP: throws-ability there is
-    // governed by the functional interface's SAM / the inner method's own `throws`, which we don't
-    // analyze. `enclosing_callable` returns the nearest boundary and its kind so we can gate on it.
-    let Some(callable) = enclosing_callable(throw) else { return }; // no enclosing callable → SKIP
-    if !matches!(callable.kind(), "method_declaration" | "constructor_declaration") {
-        // A lambda_expression (or, defensively, anything else that boundaries a scope) → SKIP.
+    // RULE 6: something must answer for what escapes — see `handler_of`. A `throw` statement in an
+    // initializer is javac's "initializer must be able to complete normally", a different error, so
+    // only a method, a constructor or a lambda is judged here.
+    let Some(handler) = handler_of(throw, bytes, symbols, resolver) else { return };
+    if !matches!(handler, Handler::Callable(_) | Handler::Lambda { .. }) {
         return;
     }
-    // The callable is a real method/ctor, but if it's a member of an ANONYMOUS or LOCAL class its
-    // `throws` contract isn't authoritative (an anonymous `new Runnable(){ run(){…} }` implements a
-    // SAM whose signature — which may itself declare `throws` — we don't resolve; a local class's
-    // method is equally out of our simple model). `enclosing_callable` returns the nearest callable,
-    // which for `new Runnable(){ public void run(){ throw … } }` is `run` (found before its enclosing
-    // anonymous body), so we must check the callable's OWN enclosing type here. → SKIP.
-    if callable_in_synthetic_type(callable) {
-        return;
-    }
-    // Lombok `@SneakyThrows` on the enclosing method/ctor lets its body throw any checked exception
-    // without declaring it → never flag a direct throw inside it.
-    if callable_sneaky_throws(callable, bytes) {
-        return;
-    }
-    // RULE 7 (implied by the above): a static/instance initializer block is NOT a
-    // method_declaration/constructor_declaration, so its throw never reaches here — initializers SKIP.
 
     // RULE 4: handled by an enclosing `try` whose `catch` catches `T` or a supertype of `T`? If so → SKIP.
     // We walk only the `try`s that ENCLOSE the throw via their try BLOCK (not via a catch/finally of
-    // that same try), stopping at the callable boundary. A nested try closer to the throw is checked
+    // that same try), stopping at the handler boundary. A nested try closer to the throw is checked
     // first, but since ALL enclosing trys are consulted, "any catches it" short-circuits correctly.
-    if caught_by_enclosing_try(throw, callable, bytes, symbols, resolver, &thrown) {
+    if caught_by_enclosing_try(throw, handler.boundary(), bytes, symbols, resolver, &thrown) {
         return;
     }
 
-    // RULE 5: declared by the enclosing method/constructor's `throws` clause (`T` or a supertype)? → SKIP.
-    if declared_by_callable(callable, bytes, symbols, resolver, &thrown) {
+    // RULE 5: declared by what answers for the throw (`T` or a supertype)? → SKIP.
+    if handler.declares(bytes, symbols, resolver, &thrown) {
         return;
     }
 
@@ -172,35 +154,140 @@ pub(crate) fn is_checked(resolver: &dyn TypeResolver, thrown: &str) -> bool {
         && !reaches(resolver, thrown, ERROR)
 }
 
-/// The nearest enclosing scope boundary of `throw`. Returns the FIRST ancestor that is a callable
-/// (`method_declaration`/`constructor_declaration`), a `lambda_expression`, or a nested type body —
-/// so the caller can tell "plain method/ctor" (handle) from "lambda / inner class in between" (SKIP).
-/// An `object_creation_expression` with an anonymous `class_body` and a local type declaration both
-/// count as boundaries: a `throw` inside them belongs to an inner method/SAM, not the outer callable.
-/// Whether `callable` (a `method_declaration`/`constructor_declaration`) is declared inside an
-/// ANONYMOUS class (`new T(){ … }`) or a LOCAL class (a type declared inside a method body). In both
-/// the method's effective `throws` contract is governed by machinery we don't model (the SAM it
-/// implements, or an enclosing capture), so a checked throw there is SKIPped to stay sound. Walks up
-/// to the callable's own enclosing type body and inspects who owns it.
-pub(crate) fn callable_in_synthetic_type(callable: Node) -> bool {
-    let mut cur = callable.parent();
-    while let Some(n) = cur {
-        if matches!(n.kind(), "class_body" | "enum_body") {
-            let Some(owner) = n.parent() else { return false };
-            return match owner.kind() {
-                // `new Runnable() { … }` — anonymous class.
-                "object_creation_expression" | "enum_constant" => true,
-                // A named type whose parent is a `block` is a LOCAL class (declared inside a method).
-                "class_declaration" | "enum_declaration" | "record_declaration" => {
-                    owner.parent().map(|p| p.kind() == "block").unwrap_or(false)
-                }
-                // A normal top-level or nested member type → the callable's contract is authoritative.
-                _ => false,
-            };
+/// What answers for a checked exception raised at a site — the thing whose declaration makes it
+/// legal to leave the exception uncaught there (JLS §11.2.3).
+pub(crate) enum Handler<'t> {
+    /// A method or constructor, wherever it is declared — an anonymous or local class's method
+    /// included: its own `throws` clause is the whole contract for its body.
+    Callable(Node<'t>),
+    /// A lambda, whose body may let escape exactly what its target's single abstract method
+    /// declares.
+    Lambda { lambda: Node<'t>, declared: Vec<String> },
+    /// A static initializer, or a static field's initializer: nothing checked may escape it.
+    StaticInitializer(Node<'t>),
+    /// An instance initializer, or an instance field's initializer, of a named class: every
+    /// constructor has to declare what escapes — and a class that writes none has the default
+    /// constructor, which declares nothing.
+    InstanceInitializer { boundary: Node<'t>, constructors: Vec<Node<'t>> },
+}
+
+impl<'t> Handler<'t> {
+    /// The node an enclosing `try` has to be inside of to protect the site.
+    pub(crate) fn boundary(&self) -> Node<'t> {
+        match self {
+            Handler::Callable(n) | Handler::StaticInitializer(n) => *n,
+            Handler::Lambda { lambda, .. } => *lambda,
+            Handler::InstanceInitializer { boundary, .. } => *boundary,
         }
-        cur = n.parent();
     }
-    false
+
+    /// The method or constructor whose `throws` clause could be extended, when there is one.
+    pub(crate) fn callable(&self) -> Option<Node<'t>> {
+        match self {
+            Handler::Callable(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// Whether this handler lets `thrown` escape. `thrown`'s hierarchy must be fully known.
+    pub(crate) fn declares(
+        &self,
+        bytes: &[u8],
+        symbols: &FileSymbols,
+        resolver: &dyn TypeResolver,
+        thrown: &str,
+    ) -> bool {
+        match self {
+            Handler::Callable(c) => declared_by_callable(*c, bytes, symbols, resolver, thrown),
+            Handler::Lambda { declared, .. } => declared.iter().any(|d| reaches(resolver, thrown, d)),
+            Handler::StaticInitializer(_) => false,
+            Handler::InstanceInitializer { constructors, .. } => {
+                !constructors.is_empty()
+                    && constructors.iter().all(|c| {
+                        callable_sneaky_throws(*c, bytes)
+                            || declared_by_callable(*c, bytes, symbols, resolver, thrown)
+                    })
+            }
+        }
+    }
+}
+
+/// What answers for a checked exception raised at `site` — or `None` where the rule is not one this
+/// models, which every caller reads as "say nothing": a lambda whose target is not written or whose
+/// SAM declares something unreadable, an anonymous class's initializer (JLS §11.2.3 lets it throw
+/// anything), a `@SneakyThrows` method, an interface or enum body.
+pub(crate) fn handler_of<'t>(
+    site: Node<'t>,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<Handler<'t>> {
+    let mut cur = site.parent();
+    while let Some(n) = cur {
+        match n.kind() {
+            "method_declaration" | "constructor_declaration" => {
+                return (!callable_sneaky_throws(n, bytes)).then_some(Handler::Callable(n));
+            }
+            "lambda_expression" => return lambda_handler(n, bytes, symbols, resolver),
+            "static_initializer" => return Some(Handler::StaticInitializer(n)),
+            "field_declaration" => {
+                let body = n.parent()?;
+                let constructors = named_class_constructors(body)?;
+                let is_static =
+                    crate::support::nodes::modifier_keywords(n, bytes).contains(&"static");
+                return Some(match is_static {
+                    true => Handler::StaticInitializer(n),
+                    false => Handler::InstanceInitializer { boundary: n, constructors },
+                });
+            }
+            // `{ … }` directly in a class body is an instance initializer.
+            "block" if n.parent().is_some_and(|p| p.kind() == "class_body") => {
+                let constructors = named_class_constructors(n.parent()?)?;
+                return Some(Handler::InstanceInitializer { boundary: n, constructors });
+            }
+            "class_body" | "interface_body" | "enum_body" | "enum_body_declarations"
+            | "annotation_type_body" | "record_declaration" => return None,
+            _ => cur = n.parent(),
+        }
+    }
+    None
+}
+
+/// The constructors a NAMED class's body declares — `None` for any other body (an anonymous class,
+/// whose initializers may throw anything, an enum, a record).
+fn named_class_constructors(body: Node) -> Option<Vec<Node>> {
+    if body.kind() != "class_body" || body.parent()?.kind() != "class_declaration" {
+        return None;
+    }
+    let mut c = body.walk();
+    let constructors = body
+        .named_children(&mut c)
+        .filter(|m| m.kind() == "constructor_declaration")
+        .collect();
+    Some(constructors)
+}
+
+/// A lambda whose target type is written, and whose target's SAM declares only exceptions we can
+/// place in the hierarchy. A `throws E` over a type variable could be anything, so it declines.
+fn lambda_handler<'t>(
+    lambda: Node<'t>,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<Handler<'t>> {
+    let (text, _) = crate::calls::functional::target_type(lambda, bytes)?;
+    let binary = crate::support::resolve::type_binary_at(&text, lambda, bytes, symbols, resolver)?;
+    if !resolver.members_of(&binary)?.flags.is_interface {
+        return None;
+    }
+    let sam = bennu_java::prelude::single_abstract_method(
+        resolver,
+        &bennu_java::prelude::TypeRef::simple(binary),
+    )?;
+    if !sam.throws.iter().all(|t| hierarchy_fully_known(resolver, t)) {
+        return None;
+    }
+    Some(Handler::Lambda { lambda, declared: sam.throws })
 }
 
 /// Whether `callable` (a `method_declaration`/`constructor_declaration`) carries Lombok's
@@ -231,38 +318,6 @@ pub(crate) fn callable_sneaky_throws(callable: Node, bytes: &[u8]) -> bool {
         }
     }
     false
-}
-
-pub(crate) fn enclosing_callable(throw: Node) -> Option<Node> {
-    let mut cur = throw.parent();
-    while let Some(n) = cur {
-        match n.kind() {
-            // The two callables we actually handle.
-            "method_declaration" | "constructor_declaration" => return Some(n),
-            // A boundary we DON'T handle — returning it lets the caller SKIP (its kind isn't a
-            // method/ctor). A lambda's throws-ability depends on the target functional interface.
-            "lambda_expression" => return Some(n),
-            // An anonymous/local class between the throw and the outer callable: the throw is inside
-            // some inner member, whose throws we don't model. Return the boundary node so the caller,
-            // seeing a non-callable kind, SKIPs. (Covers `new Runnable(){ public void run(){ throw…} }`
-            // and any local `class`/`interface`/`enum`/`record`.)
-            "class_body"
-            | "interface_body"
-            | "enum_body"
-            | "annotation_type_body"
-            | "class_declaration"
-            | "interface_declaration"
-            | "enum_declaration"
-            | "record_declaration"
-            | "annotation_type_declaration"
-            // Initializer blocks (RULE 7) — a checked throw here is technically an error, but we stay
-            // safe and only handle method/ctor bodies, so treat the initializer as a non-callable
-            // boundary → SKIP.
-            | "static_initializer" => return Some(n),
-            _ => cur = n.parent(),
-        }
-    }
-    None
 }
 
 /// RULE 4: whether some `try` enclosing `throw` (up to, but not past, `callable`) catches `thrown`
@@ -359,7 +414,7 @@ fn try_catches(
 
 /// The resolved binary names of one `catch_clause`'s alternatives (mirrors `exceptions::clause_types`,
 /// but we only need the binary strings here). Unresolvable alternatives are dropped.
-fn clause_catch_types(
+pub(crate) fn clause_catch_types(
     clause: Node,
     bytes: &[u8],
     symbols: &FileSymbols,
@@ -607,10 +662,15 @@ mod tests {
     }
 
     #[test]
-    fn checked_throw_inside_anonymous_class_is_not_flagged() {
-        // The throw sits inside an anonymous class body's method → inner boundary → SKIP (RULE 6).
+    fn checked_throw_inside_an_anonymous_class_answers_to_that_method() {
+        // A method of an anonymous class is a method: its own `throws` clause is its whole contract,
+        // and javac rejects `run() { throw new IOException(); }` exactly as it would in a named class.
+        let d = diags(
+            "class C { void m() { Runnable r = new Runnable() { public void run() { throw new IOException(); } }; } }",
+        );
+        assert_eq!(d.len(), 1, "{d:?}");
         assert!(diags(
-            "class C { void m() { Runnable r = new Runnable() { public void run() { throw new IOException(); } }; } }"
+            "class C { void m() { Object r = new Object() { void run() throws IOException { throw new IOException(); } }; } }"
         )
         .is_empty());
     }

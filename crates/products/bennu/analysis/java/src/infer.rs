@@ -29,7 +29,10 @@ use crate::symbols::{node_text, FileSymbols};
 use crate::typeparse::{parse_type_text, SimpleTypeRef};
 
 mod overload;
-pub use overload::{bound_overload, call_overload_at, overload_fit, subtype_verdict, OverloadFit};
+pub use overload::{
+    bound_overload, call_overload_at, lambda_refused, overload_fit, primitive_widens, subtype_verdict,
+    OverloadFit,
+};
 use overload::distinct_signatures;
 
 /// How a local variable is typed, captured once when its scope is scanned.
@@ -650,6 +653,25 @@ fn primitive_type_text(text: &str) -> Option<&'static str> {
 /// [`infer_receiver_type_cached`] do (that search is O(siblings) per site — the remaining quadratic
 /// on a huge flat method). Memoized by the node's byte range in the shared [`InferCache`]. The
 /// validation checks, which already hold the receiver / value node, use this.
+/// A type as WRITTEN in the file — `Function<String, Integer>`, `long[]`, `Map.Entry<K, V>` — read
+/// the way inference reads a local's declared type: through the file's imports, with its type
+/// arguments and array depth kept.
+///
+/// For a check that holds a type node and needs more than its erased binary name: the arguments a
+/// declaration writes are what say which `T` a functional interface's method returns. `None` when
+/// the name does not resolve to anything the resolver can confirm.
+pub fn written_type_ref(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    text: &str,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> Option<TypeRef> {
+    let ctx = Ctx { root: *root, bytes: source.as_bytes(), resolver, symbols, cache, depth: Cell::new(0) };
+    ctx.resolve_type_text(text.trim()).filter(|t| is_resolved(t, resolver))
+}
+
 pub fn infer_node_type_cached(
     root: &Node,
     source: &str,
@@ -906,12 +928,8 @@ impl Ctx<'_> {
             // and completion after `Foo.class.` resolve. (The `<Foo>` argument isn't tracked; Class's
             // common methods don't need it.)
             "class_literal" => Some(TypeRef::simple("java/lang/Class")),
-            // `new Foo(...)` / `new List<Foo>()`
-            "object_creation_expression" => {
-                let ty = node.child_by_field_name("type")?;
-                let text = node_text(&ty, self.bytes)?;
-                self.resolve_type_text(&text)
-            }
+            // `new Foo(...)` / `new List<Foo>()` / `outer.new Inner()`
+            "object_creation_expression" => self.creation_type(node, enclosing),
             // `a[i]` — one dimension off `a`.
             "array_access" => self.infer_array_access(node, enclosing),
             // `new int[n]` / `new String[]{…}`
@@ -1054,8 +1072,11 @@ impl Ctx<'_> {
     /// Java's own rule is one of the least pleasant paragraphs in the specification: numeric
     /// promotion across the arms, boxing and unboxing, and for two unrelated reference types the
     /// *least upper bound* of their supertypes — a type that is often unwriteable and, for the
-    /// questions asked here, never the one anybody wanted. Deliberately not implemented: an arm of
-    /// `int` and an arm of `long` yields nothing, and so does `String` against `Integer`.
+    /// questions asked here, never the one anybody wanted. Deliberately not implemented: `String`
+    /// against `Integer` yields nothing. Two numeric arms are the exception, and only when both are
+    /// `int`, `long`, `float` or `double`, boxed or not: their type is binary numeric promotion
+    /// (`flag ? 1 : 2L` is a `long`). A `byte`, `short` or `char` arm stays untyped, because beside
+    /// an `int` constant that fits, the conditional takes the narrower type instead (JLS §15.25).
     ///
     /// What is left is the shape that is actually written — `next < 0 ? "/" : path.substring(next)`,
     /// both arms `String` — which until now typed as nothing at all, so the local it initialised
@@ -1073,7 +1094,16 @@ impl Ctx<'_> {
         }
         let a = self.infer_expr(&then, enclosing)?;
         let b = self.infer_expr(&alt, enclosing)?;
-        (a == b).then_some(a)
+        if a == b {
+            return Some(a);
+        }
+        let promotable = |t: &TypeRef| {
+            t.dims == 0 && matches!(unbox(&t.binary_name), Some("int" | "long" | "float" | "double"))
+        };
+        (promotable(&a) && promotable(&b))
+            .then(|| binary_promote(&a.binary_name, &b.binary_name))
+            .flatten()
+            .map(TypeRef::simple)
     }
 
     /// A bare identifier: resolve as local var / parameter first (walking up scopes), then as an
@@ -1305,13 +1335,30 @@ impl Ctx<'_> {
                 self.param_at(&recv, &name, idx, chosen.as_deref())
             }
             "object_creation_expression" => {
-                let ty = call.child_by_field_name("type")?;
-                let text = node_text(&ty, self.bytes)?;
-                let recv = self.resolve_type_text(&text)?;
+                let recv = self.creation_type(&call, enclosing)?;
                 self.param_at(&recv, "<init>", idx, None)
             }
             _ => None,
         }
+    }
+
+    /// The type a `new` creates.
+    ///
+    /// A QUALIFIED creation, `outer.new Inner()`, names a member type of `outer`'s type (JLS §15.9.1),
+    /// which is not in scope where the expression is written: reading `Inner` as a simple name there
+    /// finds nothing, or a different `Inner`. So the qualifier is typed first and the name is looked
+    /// up among its member types, inherited ones included.
+    fn creation_type(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
+        let ty = node.child_by_field_name("type")?;
+        let text = node_text(&ty, self.bytes)?;
+        if node.child(0).is_some_and(|first| first.kind() != "new") {
+            let qualifier = node.named_child(0)?;
+            let outer = self.infer_expr(&qualifier, enclosing)?;
+            let simple = text.split('<').next()?.trim();
+            let member = crate::typename::inherited_member_type_of(self.resolver, &outer.binary_name, simple)?;
+            return Some(TypeRef::simple(member));
+        }
+        self.resolve_type_text(&text)
     }
 
     /// The target type of a lambda that is NOT an argument: the declared type of the variable it
@@ -1441,23 +1488,7 @@ impl Ctx<'_> {
     /// inherits them from `Object`. That is what keeps `Comparator` — which redeclares `equals` — a
     /// functional interface.
     fn abstract_methods(&self, fi: &TypeRef) -> Option<Vec<Member>> {
-        let mut abstracts: Vec<Member> = Vec::new();
-        let walked = crate::hierarchy::walk::<()>(self.resolver, fi, |a| {
-            for m in &a.members.methods {
-                if m.kind == MemberKind::Method
-                    && m.is_abstract
-                    && !m.is_default
-                    && !m.is_static
-                    && m.name != "<init>"
-                    && !is_public_object_method(m)
-                    && !abstracts.iter().any(|u| u.name == m.name && u.params == m.params)
-                {
-                    abstracts.push(m.clone());
-                }
-            }
-            None
-        });
-        walked.complete.then_some(abstracts)
+        abstract_methods_of(self.resolver, fi)
     }
 
     /// `a.b`: infer `a`, then look up field `b` on it. Handles `this.b`.
@@ -2949,6 +2980,40 @@ fn is_public_object_method(m: &Member) -> bool {
     }
 }
 
+/// Every abstract instance method `fi`'s hierarchy leaves to implement, overrides deduplicated — or
+/// `None` when the hierarchy is not fully known, since an unseen supertype could add one. The public
+/// `Object` methods an interface redeclares do not count (JLS §9.8).
+fn abstract_methods_of(resolver: &dyn TypeResolver, fi: &TypeRef) -> Option<Vec<Member>> {
+    let mut abstracts: Vec<Member> = Vec::new();
+    let walked = crate::hierarchy::walk::<()>(resolver, fi, |a| {
+        for m in &a.members.methods {
+            if m.kind == MemberKind::Method
+                && m.is_abstract
+                && !m.is_default
+                && !m.is_static
+                && m.name != "<init>"
+                && !is_public_object_method(m)
+                && !abstracts.iter().any(|u| u.name == m.name && u.params == m.params)
+            {
+                abstracts.push(m.clone());
+            }
+        }
+        None
+    });
+    walked.complete.then_some(abstracts)
+}
+
+/// A functional interface's single abstract method, as declared — generics not substituted. `None`
+/// when `fi`'s hierarchy is not fully known or it does not have exactly one abstract method.
+///
+/// The same reading lambda typing uses, for a caller that needs more of the SAM than its arity: its
+/// `throws` clause, which is what a lambda body may let escape.
+pub fn single_abstract_method(resolver: &dyn TypeResolver, fi: &TypeRef) -> Option<Member> {
+    let abstracts = abstract_methods_of(resolver, fi)?;
+    let [sam] = abstracts.as_slice() else { return None };
+    Some(sam.clone())
+}
+
 /// A JVM primitive binary name.
 /// A primitive as the wrapper a type argument has to be — `int` → `Integer`. Anything else, arrays
 /// included (`int[]` is already a reference type), is returned as it is.
@@ -4053,15 +4118,29 @@ mod ternary_tests {
         );
     }
 
-    /// Arms that disagree yield nothing rather than a guess. Java's answer here is numeric
-    /// promotion or a least upper bound; asserting one of those wrongly is worse than abstaining,
-    /// because every check downstream would believe it.
+    /// Reference arms that disagree yield nothing rather than a guess. Java's answer there is a
+    /// least upper bound; asserting one wrongly is worse than abstaining, because every check
+    /// downstream would believe it.
     #[test]
     fn arms_that_disagree_are_left_untyped() {
         let src = wrap("n < 0 ? \"/\" : 1");
         assert_eq!(infer_call(&src, "n < 0 ? \"/\" : 1", &no_resolver()), None);
+    }
+
+    /// Two numeric arms from `int` up are binary numeric promotion — the one mixed shape whose
+    /// answer has no exception to get wrong.
+    #[test]
+    fn int_and_long_arms_promote_to_long() {
         let src = wrap("n < 0 ? 1 : 2L");
-        assert_eq!(infer_call(&src, "n < 0 ? 1 : 2L", &no_resolver()), None);
+        assert_eq!(infer_call(&src, "n < 0 ? 1 : 2L", &no_resolver()).as_deref(), Some("long"));
+    }
+
+    /// Beside an `int` constant that fits, a `char` arm makes the conditional a `char` (JLS §15.25),
+    /// so a narrow arm is left untyped rather than promoted.
+    #[test]
+    fn a_char_arm_beside_an_int_is_left_untyped() {
+        let src = wrap("n < 0 ? 'a' : 1");
+        assert_eq!(infer_call(&src, "n < 0 ? 'a' : 1", &no_resolver()), None);
     }
 
     /// An arm this engine cannot type makes the whole conditional untyped — an unknown half is not

@@ -123,6 +123,30 @@ impl MemberIndex for ClasspathIndex {
             .members_of(binary_name)
             .or_else(|| self.deps.as_ref().and_then(|d| d.members_of(binary_name)))
     }
+
+    fn class_annotations(
+        &self,
+        binary_name: &str,
+    ) -> Option<bennu_classpath::prelude::ClassAnnotations> {
+        self.jdk
+            .class_annotations(binary_name)
+            .or_else(|| self.deps.as_ref().and_then(|d| d.class_annotations(binary_name)))
+    }
+
+    /// Present in either tier is present. Absent needs every tier to have enumerated and found
+    /// nothing — one tier that cannot list its classes leaves the question open.
+    fn package_exists(&self, package: &str) -> Option<bool> {
+        let jdk = self.jdk.package_exists(package);
+        let deps = match &self.deps {
+            Some(d) => d.package_exists(package),
+            None => Some(false),
+        };
+        match (jdk, deps) {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (Some(false), Some(false)) => Some(false),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

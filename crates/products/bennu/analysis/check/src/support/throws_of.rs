@@ -81,9 +81,45 @@ pub(crate) fn thrown_by<'t>(
         "method_invocation" => {
             thrown_by_invocation(n, root, source, bytes, symbols, resolver, cache, bare)
         }
-        "object_creation_expression" => thrown_by_creation(n, bytes, symbols, resolver),
+        "object_creation_expression" => {
+            thrown_by_creation(n, root, source, bytes, symbols, resolver, cache)
+        }
         _ => Thrown::Known(n, Throws::none()),
     }
+}
+
+/// Both bounds over `candidates`, with the lower bound taken over the overloads the arguments are
+/// APPLICABLE to rather than over every overload of the name.
+///
+/// `new FileReader("f")` binds `FileReader(String)`, which declares `FileNotFoundException`; the
+/// same name also has `FileReader(FileDescriptor)`, which declares nothing, so the plain
+/// intersection came back empty and the unhandled exception went unreported. Applicability is
+/// `bennu_java`'s `overload_fit`, which keeps every candidate an untyped argument could reach and
+/// never picks a most-specific one on a guess — so the narrowed intersection is still a lower bound.
+/// The upper bound stays the union over the whole set.
+fn applicable_bounds(
+    call: Node,
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    candidates: &[bennu_java::prelude::Member],
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> Throws {
+    let all: Vec<&bennu_java::prelude::Member> = candidates.iter().collect();
+    let everything = bounds(&all);
+    let fit = bennu_java::prelude::overload_fit(root, source, symbols, &call, candidates, resolver, cache);
+    let definitely = match fit {
+        // `overload_fit` judges one member per signature; every candidate SHARING a kept signature
+        // is still one the call may reach, so it stays in the intersection.
+        bennu_java::prelude::OverloadFit::Applicable(kept) if !kept.is_empty() => {
+            let reached: Vec<&bennu_java::prelude::Member> =
+                all.iter().copied().filter(|m| kept.iter().any(|k| k.params == m.params)).collect();
+            bounds(&reached).definitely
+        }
+        _ => everything.definitely,
+    };
+    Throws { definitely, possibly: everything.possibly }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -115,19 +151,25 @@ fn thrown_by_invocation<'t>(
     // letter without the arguments cannot tell them apart.
     let receiver_type = match n.child_by_field_name("object") {
         Some(obj) => {
-            // SKIP: receiver type not inferable, or the empty/unknown type → we can't gather a
+            // A value's type — else the TYPE a static call names (`Thread.sleep(1)`), read with the
+            // obscuring guards every other check reads a static receiver with. Neither → SKIP: no
             // trustworthy candidate set (an un-indexed type might overload the method differently).
             let ty = infer_node_type_cached(root, source, symbols, &obj, resolver, cache);
             match ty {
                 Some(ty) if !ty.binary_name.is_empty() => ty,
-                _ => return Thrown::Unknown,
+                _ => match crate::support::resolve::call_receiver_binary(n, root, source, symbols, resolver, cache) {
+                    Some(binary) => bennu_java::prelude::TypeRef::simple(binary),
+                    None => return Thrown::Unknown,
+                },
             }
         }
-        None => match bare.filter(|b| b.judgeable_across_lambdas(n, bytes).is_some()) {
-            // No arguments: inside its own body a type's parameters stand for themselves.
-            Some(b) => bennu_java::prelude::TypeRef::simple(b.top_binary.clone()),
-            // Not judgeable — a nested type, a static import, a name the guards decline — so the
-            // honest answer is still "unknown", exactly as before.
+        // No arguments: inside its own body a type's parameters stand for themselves. A call inside
+        // an anonymous class binds to the innermost class that has a member of that name — the
+        // anonymous type's supertype, or, when that has none, the class around it.
+        None => match bare.and_then(|b| b.owner_through_nested(n, bytes, symbols, resolver)) {
+            Some(owner) => bennu_java::prelude::TypeRef::simple(owner),
+            // Not judgeable — a named nested type, a static import, a name the guards decline — so
+            // the honest answer is still "unknown", exactly as before.
             None => return Thrown::Unknown,
         },
     };
@@ -148,7 +190,7 @@ fn thrown_by_invocation<'t>(
     }
 
     let thrown = through_receiver(
-        bounds(&res.candidates.iter().collect::<Vec<_>>()),
+        applicable_bounds(n, root, source, symbols, &res.candidates, resolver, cache),
         &receiver_type,
         method,
         resolver,
@@ -181,9 +223,12 @@ fn thrown_by_invocation<'t>(
 /// exceptions anchored on the `new`'s type node.
 fn thrown_by_creation<'t>(
     n: Node<'t>,
+    root: &Node,
+    source: &str,
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
 ) -> Thrown<'t> {
     let Some(ty_node) = n.child_by_field_name("type") else { return Thrown::Unknown };
 
@@ -203,21 +248,18 @@ fn thrown_by_creation<'t>(
 
     // Constructors are NOT inherited — look only at this class's own `<init>` methods (mirror arity).
     let Some(cm) = resolver.members_of(&binary) else { return Thrown::Unknown };
-    let ctors: Vec<&bennu_java::prelude::Member> = {
-        let mut v = Vec::new();
-        for m in &cm.methods {
-            if m.name == "<init>" && m.kind == MemberKind::Method {
-                v.push(m);
-            }
-        }
-        v
-    };
+    let ctors: Vec<bennu_java::prelude::Member> = cm
+        .methods
+        .iter()
+        .filter(|m| m.name == "<init>" && m.kind == MemberKind::Method)
+        .cloned()
+        .collect();
     // SKIP: no constructors indexed (the index may omit them) → nothing definite → SKIP.
     if ctors.is_empty() {
         return Thrown::Unknown;
     }
 
-    let thrown = bounds(&ctors);
+    let thrown = applicable_bounds(n, root, source, symbols, &ctors, resolver, cache);
     // Anchor the diagnostic on the `new`'s type node (there's no `name` field on a construction).
     Thrown::Known(ty_node, thrown)
 }

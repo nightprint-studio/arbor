@@ -10,7 +10,11 @@ pub use crate::infer::is_inferred_type;
 // Overload applicability (JLS §15.12.2 in miniature, one copy): the overload a call binds to — at a
 // caret, or for a call node and candidate set in hand — and the full verdict for a check that must
 // tell "ambiguous" from "nothing applies". `arity_admits` is the count rule alone.
-pub use crate::infer::{arity_admits, bound_overload, overload_fit, subtype_verdict, OverloadFit};
+pub use crate::infer::{
+    arity_admits, bound_overload, lambda_refused, overload_fit, primitive_widens, subtype_verdict,
+    OverloadFit,
+};
+pub use crate::infer::{single_abstract_method, written_type_ref};
 pub use crate::infer::{
     call_overload_at, enclosing_type_fqn, functional_descriptor, infer_expression_type, infer_expression_type_at,
     infer_expression_type_cached, infer_node_type_cached, infer_receiver_type, FunctionalDescriptor,

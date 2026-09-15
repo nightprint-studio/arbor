@@ -15,10 +15,12 @@
 
 use std::collections::HashSet;
 
-use bennu_java::prelude::{FileSymbols, MemberKind, TypeRef, TypeResolver};
+use bennu_java::prelude::{FileSymbols, MemberKind, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::annotation::annotation_constants::check_constant_names;
+use crate::annotation::annotation_values::check_value_type;
 use crate::engine::check_id::CheckId;
 use crate::support::resolve::type_binary;
 
@@ -71,8 +73,9 @@ fn check_annotation(
         .filter(|m| m.kind == MemberKind::Method)
         .collect();
     // An annotation type with no elements at all is more likely one we decoded poorly than one
-    // someone is passing arguments to.
-    if elements.is_empty() {
+    // someone is passing arguments to — unless the project declares it, and the list was read from
+    // its source, where a marker with no elements is exactly what it looks like.
+    if elements.is_empty() && !resolver.is_project_type(&binary) {
         return;
     }
     let declares = |name: &str| elements.iter().any(|m| m.name == name);
@@ -88,14 +91,20 @@ fn check_annotation(
                 // when the type declares `value()`; javac otherwise reports it as a `value()` it
                 // cannot find, which is the same sentence as any other unknown element.
                 supplied.insert("value");
-                if !declares("value") {
-                    out.push(CheckId::UnknownAnnotationElement.at(
+                match elements.iter().find(|m| m.name == "value") {
+                    // The shorthand is a value like any other, and asks the same two questions.
+                    Some(element) => {
+                        let declared = &element.return_type;
+                        check_value_type(pair, declared, "value", bytes, resolver, out);
+                        check_constant_names(pair, declared, bytes, symbols, resolver, out);
+                    }
+                    None => out.push(CheckId::UnknownAnnotationElement.at(
                         pair,
                         format!(
                             "`{}` declares no element `value`, so this value needs a name",
                             simple(&binary)
                         ),
-                    ));
+                    )),
                 }
                 continue;
             }
@@ -124,7 +133,7 @@ fn check_annotation(
             let Some(element) = elements.iter().find(|m| m.name == key) else { continue };
             if let Some(value) = pair.child_by_field_name("value") {
                 let declared = &element.return_type;
-                check_value_type(value, declared, key, bytes, out);
+                check_value_type(value, declared, key, bytes, resolver, out);
                 check_constant_names(value, declared, bytes, symbols, resolver, out);
             }
         }
@@ -151,7 +160,6 @@ fn check_annotation(
     }
 }
 
-/// `["a"]` → ``` `a` ```; `["a", "b"]` → ``` `a` and `b` ```; more → a comma list ending in "and".
 /// Whether `binary` is one of Lombok's own annotation types.
 fn is_lombok(binary: &str) -> bool {
     binary
@@ -159,6 +167,7 @@ fn is_lombok(binary: &str) -> bool {
         .is_some_and(|rest| rest.starts_with('/') || rest.starts_with('.'))
 }
 
+/// `["a"]` → ``` `a` ```; `["a", "b"]` → ``` `a` and `b` ```; more → a comma list ending in "and".
 fn list(names: &[&str]) -> String {
     match names {
         [one] => format!("`{one}`"),
@@ -178,6 +187,7 @@ fn simple(binary: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::annotation::annotation_values::pretty;
     use bennu_java::prelude::{ClassFlags, ClassMembers, Import, Member, TypeRef, Visibility};
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -198,6 +208,10 @@ mod tests {
         }
         fn resolve_simple_name(&self, name: &str, _imports: &[Import]) -> Option<String> {
             self.simple.get(name).cloned()
+        }
+        /// Only `ProjectMarker` is declared in the project's own sources.
+        fn is_project_type(&self, binary: &str) -> bool {
+            binary == "com/acme/ProjectMarker"
         }
     }
 
@@ -282,6 +296,7 @@ mod tests {
             ]),
         );
         members.insert("com/acme/Marker".into(), ann(Vec::new()));
+        members.insert("com/acme/ProjectMarker".into(), ann(Vec::new()));
         members.insert("com/acme/Tag".into(), ann(vec![element("v")]));
         members.insert("com/acme/Quiet".into(), ann(vec![element("v")]));
         // An annotation with a REQUIRED element (no `default`) beside an optional one — the shape
@@ -347,6 +362,7 @@ mod tests {
             ("Column", "javax/persistence/Column"),
             ("Setter", "lombok/Setter"),
             ("Marker", "com/acme/Marker"),
+            ("ProjectMarker", "com/acme/ProjectMarker"),
             ("Tag", "com/acme/Tag"),
             ("Quiet", "com/acme/Quiet"),
             ("NotAnAnnotation", "com/acme/NotAnAnnotation"),
@@ -737,6 +753,72 @@ mod tests {
     fn a_marker_annotation_with_no_arguments_is_left_alone() {
         assert!(codes("class A { @Column String f; }").is_empty());
     }
+
+    /// A project's own annotation type was read from its source, so an empty element list is the
+    /// whole list — a value given to it names nothing.
+    #[test]
+    fn a_value_given_to_a_project_marker_is_flagged() {
+        assert_eq!(codes(r#"class A { @ProjectMarker("x") String f; }"#), ["unknown-annotation-element"]);
+        assert_eq!(codes(r#"class A { @ProjectMarker(value = "x") String f; }"#), ["unknown-annotation-element"]);
+    }
+
+    #[test]
+    fn the_shorthand_value_is_checked_like_a_named_one() {
+        assert_eq!(codes(r#"class A { @Only(1) String f; }"#), ["annotation-value-type"]);
+        assert_eq!(codes(r#"class A { @Only(Holder.MUTABLE) String f; }"#), ["non-constant-annotation-value"]);
+    }
+
+    #[test]
+    fn a_non_constant_operand_is_flagged() {
+        assert_eq!(
+            codes(r#"class A { @Named(id = "a" + Holder.MUTABLE) String f; }"#),
+            ["non-constant-annotation-value"]
+        );
+    }
+
+    #[test]
+    fn a_literal_for_a_class_or_enum_element_is_flagged() {
+        assert_eq!(codes(r#"class A { @Column(one_kind = "java.lang.String") String f; }"#), ["annotation-value-type"]);
+        assert_eq!(codes(r#"class A { @Level(at = "HIGH") String f; }"#), ["annotation-value-type"]);
+    }
+
+    #[test]
+    fn a_numeric_literal_that_does_not_convert_is_flagged() {
+        assert_eq!(codes(r#"class A { @Column(length = 1L) String f; }"#), ["annotation-value-type"]);
+        assert_eq!(codes(r#"class A { @Column(length = 1.5) String f; }"#), ["annotation-value-type"]);
+    }
+
+    #[test]
+    fn every_entry_of_a_list_is_checked() {
+        assert_eq!(
+            codes(r#"class A { @Column(tags = {1, 2}) String f; }"#),
+            ["annotation-value-type", "annotation-value-type"]
+        );
+    }
+
+    #[test]
+    fn a_final_field_computed_at_run_time_is_not_a_constant() {
+        let src = r#"class A { static final String COMPUTED = String.valueOf(1); @Named(id = COMPUTED) String f; }"#;
+        let mut r = resolver();
+        r.members.insert(
+            "A".into(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: None,
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: vec![Member::field("COMPUTED", TypeRef::simple("java/lang/String")).stat().final_()],
+                flags: ClassFlags::default(),
+            },
+        );
+        let tree = bennu_java::prelude::parse_java(src).expect("parse");
+        let root = tree.root_node();
+        let nodes = crate::engine::check::collect_nodes(root);
+        let symbols = bennu_java::prelude::extract_symbols_from_root(&root, src);
+        let got: Vec<String> =
+            annotation_element_errors_in(&nodes, src, &symbols, &r).into_iter().map(|d| d.code).collect();
+        assert_eq!(got, ["non-constant-annotation-value"]);
+    }
 }
 
 
@@ -861,255 +943,4 @@ fn scan_value(value: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
         value,
         format!("an annotation value must be a constant, and {what} is not one"),
     ));
-}
-
-/// A name written for an element whose declared type demands a **constant expression**, checked
-/// against what that name actually is.
-///
-/// Only elements of a primitive or `String` type get here. The other legal element types take
-/// something a constant expression never is — an enum element takes an enum constant, a `Class`
-/// element a class literal, an annotation element an annotation — so a name written for one of
-/// those is not this check's business, and judging it by these rules would report the correct
-/// spelling.
-///
-/// Descends an array initialiser, because `{A, B}` given to a `String[]` element asks the question
-/// once per entry.
-fn check_constant_names(
-    value: Node,
-    declared: &TypeRef,
-    bytes: &[u8],
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-    out: &mut Vec<Diagnostic>,
-) {
-    // The ELEMENT family is what decides: `String[]` takes strings, one per entry.
-    let (base, _) = bennu_java::prelude::split_array_dims(&declared.binary_name);
-    if !(crate::support::nodes::is_primitive(base) || base == "java/lang/String") {
-        return;
-    }
-    if value.kind() == "element_value_array_initializer" {
-        let mut c = value.walk();
-        for el in value.named_children(&mut c) {
-            check_constant_names(el, declared, bytes, symbols, resolver, out);
-        }
-        return;
-    }
-    if let Some(why) = not_a_constant_variable(value, bytes, symbols, resolver) {
-        out.push(CheckId::NonConstantAnnotationValue.at(
-            value,
-            format!("an annotation value must be a constant, and {why}"),
-        ));
-    }
-}
-
-/// Why the name `value` reads is **provably** not a constant variable — or `None` when it may be
-/// one, or is not a name we can resolve at all.
-///
-/// Java's rule (JLS §4.12.4): a constant variable is `final`, of a primitive or `String` type, and
-/// initialised with a constant expression. Two of the three clauses are decided here, and both are
-/// decided from the index rather than guessed:
-///
-///   * **not `final`** — never a constant, whatever it holds;
-///   * **`final`, but not of a primitive or `String` type** — `static final MyObj[] OBJ = …` is as
-///     `final` as anything and still not a constant variable, so `final` alone proves nothing.
-///
-/// The third clause is deliberately not attempted. `static final String N = f();` and
-/// `static final int LEN = "abc".length();` are both rejected by javac, but telling them from
-/// `static final String N = "n"` needs the initializer and constant folding — and guessing there
-/// would flag the legal spelling, which is the overwhelmingly common one.
-///
-/// Two things narrow it further, both to avoid saying something wrong:
-///   * a bare name written anywhere inside a `block`, a lambda or a parameter list is skipped — a
-///     local or a parameter can shadow the field, and then the field's own modifiers say nothing
-///     about what the name means;
-///   * a name that resolves to nothing (a static import, a field of an ENCLOSING class rather than
-///     a supertype, an unindexed type) yields `None` and no diagnostic.
-fn not_a_constant_variable(
-    value: Node,
-    bytes: &[u8],
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-) -> Option<String> {
-    let (owner, name) = match value.kind() {
-        "identifier" => {
-            if shadowable_position(value) {
-                return None;
-            }
-            let name = value.utf8_text(bytes).ok()?;
-            let crate::support::type_scope::TypeScope::Inside(owner) =
-                crate::support::resolve::enclosing_scope(value, bytes, symbols)
-            else {
-                return None;
-            };
-            (owner, name)
-        }
-        // `Other.K` — a qualified read, so no local can shadow it. The receiver has to name a TYPE:
-        // an instance receiver could not be constant in the first place, and whatever produced it
-        // would already have been reported by the shape scan.
-        "field_access" => {
-            let object = value.child_by_field_name("object")?;
-            let field = value.child_by_field_name("field")?;
-            let owner = crate::support::resolve::type_binary_at(
-                object.utf8_text(bytes).ok()?,
-                value,
-                bytes,
-                symbols,
-                resolver,
-            )?;
-            (owner, field.utf8_text(bytes).ok()?)
-        }
-        _ => return None,
-    };
-    let field = find_field(resolver, &owner, name)?;
-    if !field.is_final {
-        return Some(format!("`{name}` is not `final`"));
-    }
-    // An ARRAY is never a constant variable, however constant its elements would be — so the family
-    // test has to be asked of the whole type, not of the element left in the name once the depth
-    // moved to `dims`. `static final String[] NAMES` is the shape that slipped through.
-    let ty = &field.return_type;
-    if !ty.is_array()
-        && (crate::support::nodes::is_primitive(&ty.binary_name) || ty.binary_name == "java/lang/String")
-    {
-        return None; // final and of the right family — the initializer is the part we do not judge
-    }
-    Some(format!(
-        "`{name}` is declared `{}`, and only a `final` primitive or `String` is one",
-        pretty(ty)
-    ))
-}
-
-/// Whether `node` sits somewhere a local or a parameter could shadow a field of the same name.
-fn shadowable_position(node: Node) -> bool {
-    let mut cur = node.parent();
-    while let Some(n) = cur {
-        if matches!(n.kind(), "block" | "formal_parameters" | "lambda_expression") {
-            return true;
-        }
-        cur = n.parent();
-    }
-    false
-}
-
-/// The field named `name` on `owner` or any KNOWN supertype — `None` when nothing declares it (the
-/// hierarchy may simply be incomplete, which is why the caller treats `None` as "say nothing").
-fn find_field(
-    resolver: &dyn TypeResolver,
-    owner: &str,
-    name: &str,
-) -> Option<bennu_java::prelude::Member> {
-    let mut found = None;
-    crate::support::walk::for_each_supertype(resolver, owner, &mut |_, cm| {
-        if found.is_none() {
-            found = cm
-                .fields
-                .iter()
-                .find(|f| f.name == name && f.kind == MemberKind::Field)
-                .cloned();
-        }
-    });
-    found
-}
-
-
-// ── a value the declared type cannot hold ────────────────────────────────────
-
-/// An annotation element given a value whose type its declaration cannot accept.
-///
-/// Two shapes, both decided from the value's SYNTAX against the element's declared type — no
-/// inference, so nothing here needs the type checker:
-///
-///   * **an array where the element is not one** — `@Ann(i = {1, 2})` with `int i()`. This is
-///     javac's `annotation.value.not.allowable.type` proper. The reverse is legal and is NOT
-///     flagged: `@Column(name = "a")` for a `String[]` element is Java's single-element shorthand.
-///   * **a literal of the wrong kind** — a string where a number is declared, a number where a
-///     `String` is, a boolean where either is. javac reports these as plain incompatible types.
-///
-/// Only LITERALS are judged. A bare name may be a `static final` constant of any type, and deciding
-/// that needs the resolver plus constant folding — so it is left alone, along with everything else.
-/// This is the half of the question the tree can answer; the other half is the type checker's.
-fn check_value_type(
-    value: Node,
-    declared: &TypeRef,
-    key: &str,
-    bytes: &[u8],
-    out: &mut Vec<Diagnostic>,
-) {
-    // Array-ness is asked of the TYPE, never read off its spelling — `TypeRef::is_array` is the one
-    // place that knows, and it answers for both shapes an index can hold.
-    //
-    // Reading the name was the bug. The array depth moved out of the binary name into `TypeRef::dims`
-    // (an array has no members of its own, so every `members_of` question wants the element type),
-    // and both producers followed it: a bytecode descriptor decodes to `java/lang/String` + `dims: 1`,
-    // and so does a project element's `String[]`. Nothing spells `elem[]` any more — so `contains('[')`
-    // answered *no* for every array element in every real project, and `@Ann(strings = {"a", "b"})`,
-    // the shape those elements exist for, was reported as a list given to something that holds one
-    // value. Only the fixtures here still wrote the old spelling, which is why the check looked right.
-    let is_array = declared.is_array();
-    if value.kind() == "element_value_array_initializer" {
-        if !is_array {
-            out.push(CheckId::AnnotationValueType.at(
-                value,
-                format!("`{key}` is declared `{}`, which holds one value, not a list", pretty(declared)),
-            ));
-        }
-        return;
-    }
-    if is_array {
-        // The single-element shorthand — `@Ann(arr = "one")` for a `String[]`. Legal, and the
-        // element type would have to be compared against the value, which is the same question one
-        // level down; not worth a second, weaker copy of it here.
-        return;
-    }
-    let Some(got) = literal_kind(value) else { return };
-    let want = declared_kind(&declared.binary_name);
-    let Some(want) = want else { return };
-    if got != want {
-        let _ = bytes;
-        out.push(CheckId::AnnotationValueType.at(
-            value,
-            format!("`{key}` is declared `{}`, and this is {got}", pretty(declared)),
-        ));
-    }
-}
-
-/// What a literal IS, in the only three families an annotation element can declare.
-///
-/// `char` is deliberately read as a number, because it widens to every integral type — `@Ann(i =
-/// 'x')` compiles, and calling it a mismatch would be exactly the false positive this check must
-/// not produce.
-fn literal_kind(value: Node) -> Option<&'static str> {
-    Some(match value.kind() {
-        "string_literal" | "text_block" => "a string",
-        "decimal_integer_literal"
-        | "hex_integer_literal"
-        | "octal_integer_literal"
-        | "binary_integer_literal"
-        | "decimal_floating_point_literal"
-        | "hex_floating_point_literal"
-        | "character_literal" => "a number",
-        "true" | "false" => "a boolean",
-        _ => return None,
-    })
-}
-
-/// What family a declared element type belongs to. `None` for anything else — an enum, an
-/// annotation, a `Class`, a type we could not read — where a literal says nothing conclusive.
-fn declared_kind(binary: &str) -> Option<&'static str> {
-    Some(match binary {
-        "java/lang/String" => "a string",
-        "int" | "long" | "short" | "byte" | "char" | "float" | "double" => "a number",
-        "boolean" => "a boolean",
-        _ => return None,
-    })
-}
-
-/// A declared type as a Java reader would write it — `java/lang/String` + `dims: 1` → `String[]`.
-///
-/// The depth is taken from wherever it is: `dims` for anything the current index built, brackets in
-/// the name for a record persisted before `dims` existed.
-fn pretty(ty: &TypeRef) -> String {
-    let (base, in_name) = bennu_java::prelude::split_array_dims(&ty.binary_name);
-    let name = base.rsplit(['/', '$']).next().unwrap_or(base);
-    format!("{name}{}", "[]".repeat(in_name.max(ty.dims as usize)))
 }

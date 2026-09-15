@@ -51,38 +51,8 @@ pub(crate) fn resolves_as_local(ident: Node, top: Node, bytes: &[u8]) -> bool {
 /// constructor parameters, `catch` params, enhanced-`for` and classic-`for` variables, `try`-with-
 /// resources resources, local variable declarations, and record/instanceof pattern variables.
 pub(crate) fn declares_name_in_scope(scope: Node, name: &str, bytes: &[u8]) -> bool {
-    // For the parameter-bearing scopes, check the parameter list directly.
-    match scope.kind() {
-        "method_declaration" | "constructor_declaration" | "lambda_expression" => {
-            if params_declare(scope, name, bytes) {
-                return true;
-            }
-        }
-        "catch_clause" => {
-            // `catch (E e)` — the `catch_formal_parameter` is a sibling of the catch body block, so
-            // the body-only subtree scan below would miss it; check the clause's children directly.
-            let mut c = scope.walk();
-            for ch in scope.named_children(&mut c) {
-                if ch.kind() == "catch_formal_parameter" {
-                    if let Some(nm) = ch.child_by_field_name("name") {
-                        if nm.utf8_text(bytes) == Ok(name) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        "for_statement" | "enhanced_for_statement" => {
-            // Classic `for (int i = …; …)` uses an `init` local_variable_declaration; the enhanced
-            // `for (T x : xs)` uses a `name` field. Both are captured by the subtree scan below, but
-            // the enhanced form's variable is a direct `name` field we check explicitly.
-            if let Some(nm) = scope.child_by_field_name("name") {
-                if nm.utf8_text(bytes) == Ok(name) {
-                    return true;
-                }
-            }
-        }
-        _ => {}
+    if binds_directly(scope, name, bytes) {
+        return true;
     }
 
     // For a `block` (or any scope), scan its DIRECT and nested statements for declared names WITHOUT
@@ -144,6 +114,126 @@ pub(crate) fn declares_name_in_scope(scope: Node, name: &str, bytes: &[u8]) -> b
         }
     }
     false
+}
+
+/// The names a scope node binds itself rather than through a statement inside it: the parameters of
+/// a method, constructor or lambda, a `catch` parameter, an enhanced-`for` variable.
+fn binds_directly(scope: Node, name: &str, bytes: &[u8]) -> bool {
+    match scope.kind() {
+        "method_declaration" | "constructor_declaration" | "lambda_expression" => {
+            params_declare(scope, name, bytes)
+        }
+        "catch_clause" => {
+            // `catch (E e)` — the `catch_formal_parameter` is a sibling of the catch body block, so
+            // a body-only subtree scan would miss it; check the clause's children directly.
+            let mut c = scope.walk();
+            for ch in scope.named_children(&mut c) {
+                if ch.kind() == "catch_formal_parameter"
+                    && ch.child_by_field_name("name").is_some_and(|nm| nm.utf8_text(bytes) == Ok(name))
+                {
+                    return true;
+                }
+            }
+            false
+        }
+        // Classic `for (int i = …; …)` binds through its `init` declaration, which a subtree scan
+        // finds; the enhanced `for (T x : xs)` through a direct `name` field.
+        "for_statement" | "enhanced_for_statement" => scope
+            .child_by_field_name("name")
+            .is_some_and(|nm| nm.utf8_text(bytes) == Ok(name)),
+        _ => false,
+    }
+}
+
+/// [`resolves_as_local`] with Java's block scoping: a name declared inside a block, a `for`, a
+/// `catch`, a lambda, a `try`'s resources, a `switch` body or a class body is in scope only inside
+/// it, so the scan of an ancestor skips every such nested scope the reference does not sit in.
+///
+/// For the check that concludes a name binds to NOTHING — there the broad reading hides
+/// `int inner` used after its block ends, a loop variable after its loop, a catch parameter after
+/// its `catch`. The checks that use a binding to suppress something else keep the broad reading.
+///
+/// Pattern bindings are still gathered everywhere: their scope follows flow, not blocks
+/// (`if (!(o instanceof String s)) return;` binds `s` after the `if`), and over-collecting them only
+/// suppresses.
+pub(crate) fn resolves_as_local_lexically(ident: Node, top: Node, bytes: &[u8]) -> bool {
+    let Ok(name) = referenced_name(ident, bytes) else { return true }; // unreadable → treat as bound
+    let top_body_id = top.child_by_field_name("body").map(|b| b.id());
+    let mut enclosing: Vec<usize> = Vec::new();
+    let mut cur = ident.parent();
+    while let Some(p) = cur {
+        enclosing.push(p.id());
+        cur = p.parent();
+    }
+    let mut cur = ident.parent();
+    while let Some(p) = cur {
+        if p.id() == top.id() || Some(p.id()) == top_body_id {
+            break;
+        }
+        if binds_directly(p, name, bytes) || declared_lexically_within(p, name, bytes, &enclosing) {
+            return true;
+        }
+        cur = p.parent();
+    }
+    false
+}
+
+/// Whether `scope`'s subtree declares `name` where a reference inside the `enclosing` nodes can see
+/// it: everything outside a nested scope, and pattern bindings anywhere.
+fn declared_lexically_within(scope: Node, name: &str, bytes: &[u8], enclosing: &[usize]) -> bool {
+    // (node, patterns only): below a nested scope the reference is not in, only a pattern binding
+    // can still reach it.
+    let mut stack: Vec<(Node, bool)> = Vec::new();
+    let mut c = scope.walk();
+    for ch in scope.named_children(&mut c) {
+        stack.push((ch, false));
+    }
+    while let Some((n, inherited)) = stack.pop() {
+        let patterns_only = inherited || (opens_a_scope(n) && !enclosing.contains(&n.id()));
+        if binding_names(n, name, bytes, patterns_only) {
+            return true;
+        }
+        let mut cc = n.walk();
+        for ch in n.named_children(&mut cc) {
+            stack.push((ch, patterns_only));
+        }
+    }
+    false
+}
+
+/// The node kinds whose declarations are invisible outside them.
+fn opens_a_scope(n: Node) -> bool {
+    matches!(
+        n.kind(),
+        "block"
+            | "for_statement"
+            | "enhanced_for_statement"
+            | "catch_clause"
+            | "lambda_expression"
+            | "try_with_resources_statement"
+            | "switch_block"
+            | "class_body"
+    )
+}
+
+/// Whether `n` itself declares `name` — as a pattern binding, or, unless `patterns_only`, as a local,
+/// a parameter, a resource or a loop variable.
+fn binding_names(n: Node, name: &str, bytes: &[u8], patterns_only: bool) -> bool {
+    let named = |node: Node| node.child_by_field_name("name").is_some_and(|nm| nm.utf8_text(bytes) == Ok(name));
+    match n.kind() {
+        "pattern" | "type_pattern" | "record_pattern_component" => {
+            if named(n) {
+                return true;
+            }
+            let mut cc = n.walk();
+            let bare = n.named_children(&mut cc).any(|ch| ch.kind() == "identifier" && ch.utf8_text(bytes) == Ok(name));
+            bare
+        }
+        "instanceof_expression" => named(n),
+        "variable_declarator" | "catch_formal_parameter" | "formal_parameter" | "spread_parameter"
+        | "resource" | "enhanced_for_statement" => !patterns_only && named(n),
+        _ => false,
+    }
 }
 
 /// The nearest enclosing method / constructor / lambda of `node` — the scope whose parameters and
@@ -406,3 +496,64 @@ pub(crate) fn scope_is_top_across_lambdas(node: Node, top: Node) -> bool {
     }
     false
 }
+
+/// The declared type text of `name` as visible at `use_node`: a method or lambda parameter, a local
+/// declared before the use, or — with `fields` — a field declared before it in an enclosing type.
+/// A small, syntactic subset of the inference engine's local resolution.
+///
+/// Without `fields` the walk stops at the enclosing class body: a name the class declares or
+/// inherits is then never answered with a local of some outer scope that happens to share it.
+pub(crate) fn declared_type_text(use_node: Node, name: &str, bytes: &[u8], fields: bool) -> Option<String> {
+    let use_start = use_node.start_byte();
+    let mut scope = use_node.parent();
+    while let Some(s) = scope {
+        if !fields && s.kind() == "class_body" {
+            return None;
+        }
+        if let Some(params) = s.child_by_field_name("parameters") {
+            let mut pw = params.walk();
+            for p in params.named_children(&mut pw) {
+                if matches!(p.kind(), "formal_parameter" | "spread_parameter")
+                    && p.child_by_field_name("name").and_then(|n| n.utf8_text(bytes).ok()) == Some(name)
+                {
+                    return p.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok()).map(str::to_string);
+                }
+            }
+        }
+        // Locals (and fields, when asked) declared directly in this scope, before the use.
+        let mut cw = s.walk();
+        for c in s.named_children(&mut cw) {
+            if c.start_byte() >= use_start {
+                break;
+            }
+            let declares = match c.kind() {
+                "local_variable_declaration" => true,
+                "field_declaration" => fields,
+                _ => false,
+            };
+            if declares {
+                if let Some(t) = declarator_type(c, name, bytes) {
+                    return Some(t);
+                }
+            }
+        }
+        scope = s.parent();
+    }
+    None
+}
+
+/// The declared type text of a `local_variable_declaration` / `field_declaration` if it declares
+/// `name`.
+fn declarator_type(decl: Node, name: &str, bytes: &[u8]) -> Option<String> {
+    let ty = decl.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok())?;
+    let mut dw = decl.walk();
+    for d in decl.named_children(&mut dw) {
+        if d.kind() == "variable_declarator"
+            && d.child_by_field_name("name").and_then(|n| n.utf8_text(bytes).ok()) == Some(name)
+        {
+            return Some(ty.to_string());
+        }
+    }
+    None
+}
+

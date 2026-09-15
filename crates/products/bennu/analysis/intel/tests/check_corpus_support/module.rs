@@ -60,6 +60,14 @@ impl MemberIndex for JdkIndex {
     fn members_of(&self, binary_name: &str) -> Option<ClassMembers> {
         self.0.members_of(binary_name)
     }
+    // Forwarded like the editor's `JdkMemberIndex` does: a defaulted method left out here would
+    // score a product whose annotation and package questions are never answered.
+    fn class_annotations(&self, binary_name: &str) -> Option<bennu_classpath::prelude::ClassAnnotations> {
+        self.0.class_annotations(binary_name)
+    }
+    fn package_exists(&self, package: &str) -> Option<bool> {
+        self.0.package_exists(package)
+    }
 }
 
 /// Run and score one error module; `Err` carries the reason it was skipped.
@@ -116,6 +124,9 @@ fn validate_all(
         resolver.add_simple_hint(simple, binary);
     }
 
+    // `BENNU_CORPUS_DUMP=ArgsCtorBad` prints every diagnostic, warnings included, of the files whose
+    // path contains the value: what to reach for once the report names a miss.
+    let dump = std::env::var("BENNU_CORPUS_DUMP").ok().filter(|d| !d.is_empty());
     let mut errors = Vec::new();
     for source in sources {
         let ctx = FileContext {
@@ -126,11 +137,18 @@ fn validate_all(
             classpath_complete: true,
         };
         let anchors = Anchors::new(&source.text);
+        let dumped = dump.as_deref().is_some_and(|d| source.rel.contains(d));
         for diagnostic in check_file_resolved(&source.text, &ctx, &resolver, true) {
+            let (first_line, last_line) = anchors.statement_lines(diagnostic.start);
+            if dumped {
+                eprintln!(
+                    "dump {}:{first_line} {} [{}] {}",
+                    source.rel, diagnostic.severity, diagnostic.code, diagnostic.message
+                );
+            }
             if kept == Kept::Errors && diagnostic.severity != "error" {
                 continue;
             }
-            let (first_line, last_line) = anchors.statement_lines(diagnostic.start);
             let code = if diagnostic.code.is_empty() { "<uncoded>".to_string() } else { diagnostic.code };
             errors.push(BennuError {
                 file: source.rel.clone(),

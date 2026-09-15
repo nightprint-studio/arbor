@@ -153,6 +153,37 @@ fn resolver() -> MapResolver {
         ]),
     );
     members.insert("com/acme/Ctor".to_string(), cls(vec![method("<init>", &["int"])]));
+    // A member class of `C` with its own `own(String)` — the innermost class that has the name.
+    members.insert("C/Inner".to_string(), cls(vec![method("own", &["java/lang/String"])]));
+    // `Box<T>` with `set(T)`, and a `put` that declares a `T` of its own; `StringBox extends
+    // Box<String>`.
+    let mut boxed = cls(vec![
+        method("set", &["T"]),
+        method("put", &["T"]).sig("<T> void put(T value)"),
+    ]);
+    boxed.type_params = vec!["T".to_string()];
+    members.insert("com/acme/Box".to_string(), boxed);
+    let mut string_box = cls(vec![]);
+    string_box.superclass = Some(generic("com/acme/Box", &["java/lang/String"]));
+    members.insert("com/acme/StringBox".to_string(), string_box);
+    // `Sorts<E>` declares `sort(Comparator<E>)`; `SortList<T> implements Sorts<T>` overrides it in its
+    // own variable — the same method, met twice by a walk up from a `SortList<String>`.
+    members.insert("java/util/Comparator".to_string(), interface(vec![]));
+    let mut sorts = interface(vec![Member::method(
+        "sort",
+        TypeRef::simple("void"),
+        vec![generic("java/util/Comparator", &["E"])],
+    )]);
+    sorts.type_params = vec!["E".to_string()];
+    members.insert("com/acme/Sorts".to_string(), sorts);
+    let mut sort_list = cls(vec![Member::method(
+        "sort",
+        TypeRef::simple("void"),
+        vec![generic("java/util/Comparator", &["T"])],
+    )]);
+    sort_list.type_params = vec!["T".to_string()];
+    sort_list.interfaces = vec![generic("com/acme/Sorts", &["T"])];
+    members.insert("com/acme/SortList".to_string(), sort_list);
     add_reported_project(&mut members);
     let simple = [
         ("C", "C"),
@@ -171,6 +202,11 @@ fn resolver() -> MapResolver {
         ("ResolvedIdentity", "com/acme/ResolvedIdentity"),
         ("DelegateClient", "com/acme/DelegateClient"),
         ("Token", "com/acme/Token"),
+        ("Box", "com/acme/Box"),
+        ("StringBox", "com/acme/StringBox"),
+        ("SortList", "com/acme/SortList"),
+        ("Comparator", "java/util/Comparator"),
+        ("Integer", "java/lang/Integer"),
     ]
     .into_iter()
     .map(|(s, b)| (s.to_string(), b.to_string()))
@@ -307,10 +343,17 @@ fn varargs_overload_of_other_arity_is_skipped() {
     assert!(diags("s.emit(\"a\", s.widget(), \"c\");").is_empty());
 }
 
+/// A class is no functional interface of any arity, so a lambda cannot be passed where one is
+/// declared — the one lambda verdict that needs no SAM read.
 #[test]
-fn a_lambda_argument_is_never_reported() {
-    assert!(diags("s.take(x -> x);").is_empty());
-    assert!(diags("s.label(\"a\", x -> x);").is_empty());
+fn a_lambda_for_a_class_parameter_is_flagged() {
+    one(&diags("s.take(x -> x);"), &["Argument 1 of `take`", "`lambda` cannot be passed where `Animal`"]);
+}
+
+/// A type variable may be bound to any functional interface: nothing about the lambda is certain.
+#[test]
+fn a_lambda_for_a_type_variable_is_never_reported() {
+    assert!(diags("s.gen(x -> x, y -> y, s.dog());").is_empty());
 }
 
 #[test]
@@ -326,6 +369,68 @@ fn a_fixed_parameter_before_varargs_is_judged() {
     // `emit(String, Object...)` is the only overload `emit(1)` could be, and its first parameter
     // is fixed whether or not the array is varargs.
     one(&diags("s.emit(1);"), &["Argument 1 of `emit`", "String"]);
+}
+
+// ── numeric conversions, `null`, a spelled `Object` ─────────────────────────────────────────────
+
+/// An invocation context widens and never narrows — not even a constant.
+#[test]
+fn a_narrowing_primitive_argument_is_flagged() {
+    one(&diags("s.prim(1L);"), &["`long` cannot be passed where `int`"]);
+}
+
+#[test]
+fn a_widening_primitive_argument_is_ok() {
+    assert!(diags("s.wide(1); s.prim('a');").is_empty());
+}
+
+#[test]
+fn null_for_a_primitive_is_flagged_and_for_a_box_is_ok() {
+    one(&diags("s.prim(null);"), &["`null` cannot be passed where `int`"]);
+    assert!(diags("s.count(null);").is_empty());
+}
+
+/// `Svc` plus `obj() -> Object` and two overload pairs: `pick(String)` / `pick(Widget)` are
+/// incomparable, `gen2(T)` / `gen2(String)` are compared through a type variable.
+fn wider_resolver() -> MapResolver {
+    let mut r = resolver();
+    let svc = r.members.get_mut("com/acme/Svc").expect("Svc");
+    svc.methods.push(returning("obj", &[], TypeRef::simple("java/lang/Object")));
+    svc.methods.push(method("pick", &["java/lang/String"]));
+    svc.methods.push(method("pick", &["com/acme/Widget"]));
+    svc.methods.push(method("gen2", &["T"]));
+    svc.methods.push(method("gen2", &["java/lang/String"]));
+    r
+}
+
+fn wider_diags(body: &str) -> Vec<String> {
+    let src = format!("class C {{ Svc s; void m() {{ {body} }} }}");
+    argument_type_errors(&src, &wider_resolver()).into_iter().map(|d| d.message).collect()
+}
+
+/// A written `new Object()` is an `Object`; an inferred one may be an erased type variable.
+#[test]
+fn a_spelled_object_is_judged_and_an_inferred_one_is_not() {
+    one(&wider_diags("s.label(new Object(), \"b\");"), &["`Object` cannot be passed where `String`"]);
+    assert!(wider_diags("s.label(s.obj(), \"b\");").is_empty());
+}
+
+// ── ambiguity ───────────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn null_between_two_unrelated_reference_overloads_is_ambiguous() {
+    one(&wider_diags("s.pick(null);"), &["Ambiguous call to `pick`", "`pick(String)`", "`pick(Widget)`"]);
+}
+
+#[test]
+fn a_typed_argument_that_picks_one_overload_is_not_ambiguous() {
+    assert!(wider_diags("s.pick(\"a\"); s.pick(s.widget());").is_empty());
+}
+
+/// A type variable fits in every phase, so two survivors through one prove nothing.
+#[test]
+fn survivors_compared_through_a_type_variable_are_not_reported() {
+    assert!(wider_diags("s.gen2(\"a\");").is_empty());
 }
 
 #[test]
@@ -446,10 +551,70 @@ fn a_bare_call_inside_a_lambda_is_judged() {
     one(&diags("Runnable r = () -> s.take(s.widget());"), &["Animal"]);
 }
 
+/// JLS §15.12.1: the name is looked up in the innermost class that HAS a method of it. An anonymous
+/// `Object` has no `own`, so the call is the enclosing class's `own(int)` — judged like any other.
 #[test]
-fn a_bare_call_inside_an_anonymous_class_is_still_skipped() {
-    // The anonymous body could declare its own `own(String)`.
-    assert!(diags("Object o = new Object() { void go() { own(\"x\"); } };").is_empty());
+fn a_bare_call_inside_an_anonymous_class_binds_through_it() {
+    one(&diags("Object o = new Object() { void go() { own(\"x\"); } };"), &["own"]);
+}
+
+/// …but a body that declares the name itself is where it binds, and those methods are not in the
+/// index — so nothing is judged.
+#[test]
+fn a_bare_call_to_a_method_the_anonymous_body_declares_is_skipped() {
+    assert!(diags("Object o = new Object() { void own(String v) {} void go() { own(\"x\"); } };").is_empty());
+}
+
+/// Inside a member class the name binds in THAT class when it has a method of it — the enclosing
+/// class's `own(int)` is shadowed, whatever its arity.
+#[test]
+fn a_bare_call_inside_a_member_class_binds_in_that_class() {
+    let src = "class C { void own(int v) {} class Inner { void own(String v) {} void go() { own(1); } } }";
+    one(&file_diags(src), &["own"]);
+    let fine = "class C { void own(int v) {} class Inner { void own(String v) {} void go() { own(\"x\"); } } }";
+    assert!(file_diags(fine).is_empty(), "{:?}", file_diags(fine));
+}
+
+/// A name no class in scope has is the static imports' — a single one, or every one on demand.
+#[test]
+fn a_bare_call_a_static_import_supplies_is_judged() {
+    let single = "import static com.acme.Util.convert;\nclass C { void m() { convert(\"a\", \"b\", null); } }";
+    one(&file_diags(single), &["convert"]);
+    let on_demand = "import static com.acme.Util.*;\nclass C { void m() { convert(\"a\", \"b\", null); } }";
+    one(&file_diags(on_demand), &["convert"]);
+    let fine = "import static com.acme.Util.*;\nclass C { void m() { convert(\"a\", 1, null); } }";
+    assert!(file_diags(fine).is_empty(), "{:?}", file_diags(fine));
+}
+
+/// A parameter typed by the class's type variable is read through the receiver's argument.
+#[test]
+fn a_type_variable_parameter_is_read_through_the_receivers_argument() {
+    one(&diags("Box<String> b = null; b.set(1);"), &["set"]);
+    assert!(diags("Box<String> b = null; b.set(\"x\");").is_empty());
+    // Through a supertype written with the argument.
+    one(&diags("StringBox b = null; b.set(1);"), &["set"]);
+}
+
+/// An override and the declaration it overrides, each written in its own type variable, are one
+/// method — the call binds, and it is not reported as ambiguous between two copies of itself.
+#[test]
+fn an_override_met_twice_through_the_receiver_is_not_ambiguous() {
+    let d = diags("SortList<String> l = null; Comparator<String> c = null; l.sort(c);");
+    assert!(d.is_empty(), "{d:?}");
+}
+
+/// A method that declares its own `T` is not bound by the receiver's, and neither is a raw receiver.
+#[test]
+fn a_shadowed_or_raw_type_variable_is_never_substituted() {
+    assert!(diags("Box<String> b = null; b.put(1);").is_empty());
+    assert!(diags("Box b = null; b.set(1);").is_empty());
+}
+
+/// A method of the class shadows a static import of the same name, however it is imported.
+#[test]
+fn an_own_method_shadows_a_static_import_of_its_name() {
+    let src = "import static com.acme.Util.convert;\nclass C { void m() { own(\"x\"); } }";
+    one(&file_diags(src), &["own"]);
 }
 
 #[test]

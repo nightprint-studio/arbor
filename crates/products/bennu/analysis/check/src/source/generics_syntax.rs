@@ -10,6 +10,9 @@
 //!   4. **Parameterized `catch` type** — `catch (Foo<X> e)`; exceptions can't be generic.
 //!   5. **`this`/`super` in a static context** — inside a `static` method / initializer, with the
 //!      inner-class carve-out so `this` bound to an inner instance stays legal.
+//!   6. **A type parameter where a reifiable type is needed** — `new T[n]` and `T.class`: neither
+//!      exists at run time for a type variable.
+//!   7. **A primitive type argument** — `List<int>`, `this.<int>m()`: type arguments are reference types.
 //!
 //! Soundness bias: every check flags ONLY the structurally-unambiguous case and SKIPs the moment the
 //! shape is uncertain (see the per-check comments).
@@ -29,6 +32,8 @@ pub fn generics_syntax_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnos
     for &n in nodes {
         match n.kind() {
             "array_creation_expression" => check_generic_array_creation(n, bytes, &mut out),
+            "class_literal" => check_type_param_class_literal(n, bytes, &mut out),
+            "type_arguments" => check_primitive_type_arguments(n, bytes, &mut out),
             "object_creation_expression" => check_type_param_instantiation(n, bytes, &mut out),
             "instanceof_expression" => check_instanceof_generics(n, &mut out),
             "catch_type" => check_catch_generics(n, &mut out),
@@ -65,6 +70,40 @@ fn check_generic_array_creation(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>
     if let Some(ty) = n.child_by_field_name("type") {
         if ty.kind() == "generic_type" && !is_reifiable_generic(ty, bytes) {
             out.push(err(ty, "Generic array creation is not allowed"));
+        } else if names_a_type_param(ty, n, bytes) {
+            // `new T[n]` — a type variable is no more reifiable than `List<String>`.
+            out.push(err(ty, "Generic array creation is not allowed"));
+        }
+    }
+}
+
+/// Whether `ty` is a bare simple name that a type parameter of an enclosing declaration owns.
+fn names_a_type_param(ty: Node, at: Node, bytes: &[u8]) -> bool {
+    ty.kind() == "type_identifier"
+        && ty.utf8_text(bytes).is_ok_and(|name| type_params_in_scope(at, bytes).iter().any(|p| p == name))
+}
+
+// ── 6. `T.class` ─────────────────────────────────────────────────────────────
+
+/// `T.class` where `T` is a type parameter in scope: there is no class object for a type variable.
+fn check_type_param_class_literal(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+    let Some(ty) = n.named_child(0) else { return };
+    if names_a_type_param(ty, n, bytes) {
+        let name = ty.utf8_text(bytes).unwrap_or_default();
+        out.push(err(ty, format!("Cannot select `class` from the type variable `{name}`")));
+    }
+}
+
+// ── 7. primitive type arguments ──────────────────────────────────────────────
+
+/// `List<int>` / `new ArrayList<boolean>()` / `this.<int>m()` — a type argument must be a reference
+/// type. `List<int[]>` is one (an `array_type`), so only a bare primitive is flagged.
+fn check_primitive_type_arguments(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+    let mut c = n.walk();
+    for arg in n.named_children(&mut c) {
+        if matches!(arg.kind(), "integral_type" | "floating_point_type" | "boolean_type") {
+            let written = arg.utf8_text(bytes).unwrap_or_default().trim();
+            out.push(err(arg, format!("A type argument cannot be the primitive `{written}` — use its box")));
         }
     }
 }
@@ -470,5 +509,38 @@ mod reifiable_tests {
         assert_eq!(out.len(), 1, "{out:?}");
         let out = run("class A { Object f() { return new java.util.List<? extends Number>[0]; } }");
         assert_eq!(out.len(), 1, "{out:?}");
+    }
+}
+
+#[cfg(test)]
+mod reify_tests {
+    use super::*;
+
+    fn errs(src: &str) -> Vec<String> {
+        let tree = bennu_java::prelude::parse_java(src).unwrap();
+        generics_syntax_errors(tree.root_node(), src).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn an_array_of_a_type_parameter_is_flagged() {
+        let d = errs("class G<T> { Object m() { return new T[10]; } }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("Generic array creation"), "{d:?}");
+        assert!(errs("class G<T> { Object m() { return new Object[10]; } }").is_empty());
+    }
+
+    #[test]
+    fn a_class_literal_of_a_type_parameter_is_flagged() {
+        let d = errs("class G { <T> Object m() { return T.class; } }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("type variable `T`"), "{d:?}");
+        assert!(errs("class G<T> { Object m() { return String.class; } }").is_empty());
+    }
+
+    #[test]
+    fn a_primitive_type_argument_is_flagged_and_an_array_one_is_not() {
+        let d = errs("class G { void m() { java.util.List<int> a = null; Object b = new java.util.ArrayList<boolean>(); } }");
+        assert_eq!(d.len(), 2, "{d:?}");
+        assert!(errs("class G { void m() { java.util.List<int[]> a = null; java.util.List<Integer> b = null; } }").is_empty());
     }
 }

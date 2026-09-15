@@ -99,6 +99,35 @@ pub fn return_statement_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagno
     out
 }
 
+/// A block lambda body that returns a value on one path and can complete normally on another.
+///
+/// Such a body is neither value-compatible (it can fall off its end) nor void-compatible (it returns
+/// a value) — JLS §15.27.2 — so no functional interface can type it, whatever the target. javac says
+/// so as an incompatible return type; the report sits on the closing brace, where control falls out.
+pub fn lambda_body_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
+    let bytes = source.as_bytes();
+    let mut out = Vec::new();
+    for &n in nodes {
+        if n.kind() != "lambda_expression" {
+            continue;
+        }
+        let Some(body) = n.child_by_field_name("body").filter(|b| b.kind() == "block" && !b.has_error()) else {
+            continue;
+        };
+        let mut returns = Vec::new();
+        collect_returns(body, &mut returns);
+        if returns.iter().any(|r| has_return_value(*r)) && block_can_complete_normally(body, bytes) {
+            let end = body.end_byte();
+            out.push(crate::engine::check_id::CheckId::IncompatibleType.span(
+                end.saturating_sub(1),
+                end,
+                "This lambda returns a value, but its body can also complete without returning one",
+            ));
+        }
+    }
+    out
+}
+
 /// Scan `body` for the returns that belong to this method/constructor (not to a nested lambda /
 /// declaration) and flag the void/value mismatch.
 fn check_returns(body: Node, is_void: bool, is_ctor: bool, ret_ty: &str, out: &mut Vec<Diagnostic>) {
@@ -129,7 +158,7 @@ fn check_returns(body: Node, is_void: bool, is_ctor: bool, ret_ty: &str, out: &m
 
 /// Recursively collect the `return_statement`s directly governed by the current method — descending
 /// through control flow but stopping at any construct that introduces its own return target.
-fn collect_returns<'t>(node: Node<'t>, out: &mut Vec<Node<'t>>) {
+pub(crate) fn collect_returns<'t>(node: Node<'t>, out: &mut Vec<Node<'t>>) {
     let mut c = node.walk();
     for ch in node.named_children(&mut c) {
         match ch.kind() {
@@ -150,7 +179,7 @@ fn collect_returns<'t>(node: Node<'t>, out: &mut Vec<Node<'t>>) {
 
 /// Whether a `return_statement` carries a value (`return x;`) vs. a bare `return;`. A comment is not
 /// a value.
-fn has_return_value(ret: Node) -> bool {
+pub(crate) fn has_return_value(ret: Node) -> bool {
     let mut c = ret.walk();
     for n in ret.named_children(&mut c) {
         if !matches!(n.kind(), "line_comment" | "block_comment") {
@@ -217,7 +246,7 @@ pub(crate) fn can_complete_normally(stmt: Node, bytes: &[u8]) -> bool {
 
 /// A block completes normally iff every statement in it does — an earlier statement that cannot
 /// makes the rest unreachable, which is its own error and not a missing return. Empty completes.
-fn block_can_complete_normally(block: Node, bytes: &[u8]) -> bool {
+pub(crate) fn block_can_complete_normally(block: Node, bytes: &[u8]) -> bool {
     let mut c = block.walk();
     for ch in block.named_children(&mut c) {
         if matches!(ch.kind(), "line_comment" | "block_comment") {
@@ -306,7 +335,7 @@ fn switch_statement_can_complete_normally(stmt: Node, bytes: &[u8]) -> bool {
 }
 
 /// `(is default, makes the switch enhanced)` for one `switch_label`.
-fn classify_label(label: Node, bytes: &[u8]) -> (bool, bool) {
+pub(crate) fn classify_label(label: Node, bytes: &[u8]) -> (bool, bool) {
     let mut is_default = false;
     let mut enhanced = false;
     let mut c = label.walk();
@@ -402,7 +431,7 @@ fn labeled_body(labeled: Node) -> Option<Node> {
 /// certainly not constant settles it: a call, an assignment, `instanceof`, an object creation — or a
 /// name bound to a parameter or a non-`final` local of the enclosing body. Any other name may be a
 /// `static final` constant somewhere, so on its own it proves nothing.
-fn never_constant_true(cond: Node, bytes: &[u8]) -> bool {
+pub(crate) fn never_constant_true(cond: Node, bytes: &[u8]) -> bool {
     let expr = unwrap_parens(cond);
     if expr.kind() == "false" {
         return true;
@@ -424,7 +453,7 @@ fn never_constant_true(cond: Node, bytes: &[u8]) -> bool {
     false
 }
 
-fn unwrap_parens(mut n: Node) -> Node {
+pub(crate) fn unwrap_parens(mut n: Node) -> Node {
     while n.kind() == "parenthesized_expression" {
         match n.named_child(0) {
             Some(inner) => n = inner,

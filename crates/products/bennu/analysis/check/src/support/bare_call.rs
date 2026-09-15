@@ -95,8 +95,23 @@ pub(crate) struct BareCalls<'t> {
     unreadable_static_wildcard: bool,
     /// Names an `import static` binds; each is a candidate whose signature we cannot enumerate.
     static_names: HashSet<String>,
+    /// `import static a.B.m;` — `(a/B, m)`.
+    single_static: Vec<(String, String)>,
+    /// `import static a.B.*;` — the owners whose whole hierarchy could be read.
+    on_demand_static: Vec<String>,
+    /// `java.lang.Object`'s own methods can be read, so their overload sets are exact.
+    object_readable: bool,
     /// Every method the file declares, by name — the buffer's own answer, ahead of the index.
     file_sigs: HashMap<String, Vec<FileSig>>,
+}
+
+/// Where a bare call's name is looked up (JLS §15.12.1).
+pub(crate) enum MemberOwner {
+    /// A nested, inner or anonymous class between the call and the top type has a method of that
+    /// name — this binary (the anonymous class's supertype, for one of those).
+    Nested(String),
+    /// Nothing between them does: the top type, then the static imports.
+    Top,
 }
 
 /// Establish the whole-file preconditions, or `None` when bare calls must not be judged here.
@@ -116,10 +131,13 @@ pub(crate) fn bare_call_scope<'t>(
 
     let mut unreadable_static_wildcard = false;
     let mut static_names: HashSet<String> = HashSet::new();
+    let mut single_static = Vec::new();
+    let mut on_demand_static = Vec::new();
     for t in static_import_targets(&symbols.imports) {
         match t.member {
             Some(m) => {
-                static_names.insert(m);
+                static_names.insert(m.clone());
+                single_static.push((t.owner_binary, m));
             }
             None => {
                 // A wildcard whose owner we cannot read could supply ANY name.
@@ -132,9 +150,13 @@ pub(crate) fn bare_call_scope<'t>(
                         static_names.insert(member.name.clone());
                     }
                 });
+                on_demand_static.push(t.owner_binary);
             }
         }
     }
+    let object_readable = resolver
+        .members_of("java/lang/Object")
+        .is_some_and(|cm| cm.methods.iter().any(|m| m.name == "toString"));
 
     let mut file_sigs: HashMap<String, Vec<FileSig>> = HashMap::new();
     for td in &symbols.types {
@@ -154,35 +176,140 @@ pub(crate) fn bare_call_scope<'t>(
         generates_methods,
         unreadable_static_wildcard,
         static_names,
+        single_static,
+        on_demand_static,
+        object_readable,
         file_sigs,
     })
 }
 
 impl<'t> BareCalls<'t> {
-    /// The method name a bare call names, for a check that asks WHICH names bind or how many
-    /// overloads a name has (arity, `throws_of`): every guard applies, the name-set ones included.
-    pub(crate) fn judgeable_across_lambdas<'a>(
+    /// The type a bare call binds its name in, reading through the nested and anonymous classes
+    /// between it and the top type — see [`Self::member_owner`] — with every name-set guard applied
+    /// when the lookup reaches the top type. For a check that needs the whole set of what the name
+    /// may call (`throws_of`).
+    pub(crate) fn owner_through_nested(
         &self,
         call: Node,
-        bytes: &'a [u8],
-    ) -> Option<&'a str> {
+        bytes: &[u8],
+        symbols: &FileSymbols,
+        resolver: &dyn TypeResolver,
+    ) -> Option<String> {
         if self.generates_methods || self.unreadable_static_wildcard {
             return None;
         }
-        let name = self.judgeable_site(call, bytes)?;
-        (!self.static_names.contains(name)).then_some(name)
+        match self.member_owner(call, bytes, symbols, resolver)? {
+            MemberOwner::Nested(owner) => Some(owner),
+            MemberOwner::Top => {
+                let name = self.judgeable_name(call, bytes)?;
+                (!self.static_names.contains(name)).then(|| self.top_binary.clone())
+            }
+        }
     }
 
-    /// The method name a bare call names, for a check that goes on only with a NON-EMPTY member
-    /// overload set of that name on the top type (argument types). Such a set shadows every static
-    /// import of the name, and Lombok never generates beside it at an arity it already has — see the
-    /// module doc — so the name-set guards do not apply. The caller must not act on an empty set.
-    pub(crate) fn judgeable_member_call<'a>(&self, call: Node, bytes: &'a [u8]) -> Option<&'a str> {
-        self.judgeable_site(call, bytes)
+    /// Where a bare call's name is looked up: the innermost class between the call and the top type
+    /// that has a method of that name (JLS §15.12.1), or the top type when none does.
+    ///
+    /// A member class answers for itself when its hierarchy was read to the end; an anonymous class
+    /// answers through its supertype, unless its body declares the name — those methods are not in
+    /// the index. A local class, or an enum constant's body, answers `None`: nothing is judged.
+    pub(crate) fn member_owner(
+        &self,
+        call: Node,
+        bytes: &[u8],
+        symbols: &FileSymbols,
+        resolver: &dyn TypeResolver,
+    ) -> Option<MemberOwner> {
+        let name = self.judgeable_name(call, bytes)?;
+        if scope_is_top_across_lambdas(call, self.top_node) {
+            return Some(MemberOwner::Top);
+        }
+        let top_body = self.top_node.child_by_field_name("body").map(|b| b.id());
+        let has_method = |binary: &str| {
+            crate::support::walk::hierarchy_has(resolver, binary, &|cm| cm.methods.iter().any(|m| m.name == name))
+        };
+        let mut cur = call.parent();
+        while let Some(p) = cur {
+            if p.id() == self.top_node.id() {
+                return Some(MemberOwner::Top);
+            }
+            match p.kind() {
+                "class_body" | "enum_body" if Some(p.id()) == top_body => {}
+                "enum_body_declarations" if p.parent().map(|b| b.id()) == top_body => {}
+                "class_body" | "interface_body" | "enum_body" => {
+                    let owner = p.parent()?;
+                    let binary = match owner.kind() {
+                        "object_creation_expression" => {
+                            if body_declares_method(p, name, bytes) {
+                                return None;
+                            }
+                            let written = owner.child_by_field_name("type")?.utf8_text(bytes).ok()?;
+                            crate::support::resolve::type_binary_at(written, owner, bytes, symbols, resolver)?
+                        }
+                        "class_declaration" | "interface_declaration" | "enum_declaration" | "record_declaration"
+                            if owner.parent().is_some_and(|q| q.kind() != "block") =>
+                        {
+                            bennu_java::prelude::type_decl_at(&owner, symbols)?.fqn.replace('.', "/")
+                        }
+                        _ => return None,
+                    };
+                    if !hierarchy_fully_known(resolver, &binary) {
+                        return None;
+                    }
+                    if body_declares_method(p, name, bytes) || has_method(&binary) {
+                        return Some(MemberOwner::Nested(binary));
+                    }
+                }
+                "enum_body_declarations" => return None,
+                _ => {}
+            }
+            cur = p.parent();
+        }
+        None
     }
 
-    /// The per-site guards shared by both entry points.
-    fn judgeable_site<'a>(&self, call: Node, bytes: &'a [u8]) -> Option<&'a str> {
+    /// The static methods named `name` the file's static imports bring in — a single static import
+    /// of the name, or else every static import on demand (JLS §6.4.1: the single one shadows the
+    /// others). `None` when some owner cannot be read, when a generated or unreadable member could be
+    /// the one meant, or when nothing of the name is imported.
+    pub(crate) fn static_import_methods(&self, name: &str, resolver: &dyn TypeResolver) -> Option<Vec<Member>> {
+        if self.generates_methods || self.unreadable_static_wildcard {
+            return None;
+        }
+        let singles: Vec<&String> =
+            self.single_static.iter().filter(|(_, member)| member == name).map(|(owner, _)| owner).collect();
+        let owners: Vec<&String> = match singles.is_empty() {
+            true => self.on_demand_static.iter().collect(),
+            false => singles,
+        };
+        let mut found: Vec<Member> = Vec::new();
+        for owner in owners {
+            if !hierarchy_fully_known(resolver, owner) {
+                return None;
+            }
+            for_each_supertype(resolver, owner, &mut |_bn, cm| {
+                for m in cm.methods.iter().filter(|m| m.name == name && m.is_static) {
+                    if !found.contains(m) {
+                        found.push(m.clone());
+                    }
+                }
+            });
+        }
+        (!found.is_empty()).then_some(found)
+    }
+
+    /// Whether a method-generating annotation makes the top type's member list incomplete.
+    pub(crate) fn generates_methods(&self) -> bool {
+        self.generates_methods
+    }
+
+    /// Whether this file declares `binary` — one whose index entry may lag behind the buffer.
+    pub(crate) fn declares(&self, binary: &str, symbols: &FileSymbols) -> bool {
+        symbols.types.iter().any(|t| same_binary_type(&t.fqn.replace('.', "/"), binary))
+    }
+
+    /// The per-site guards that do not depend on where the call sits.
+    fn judgeable_name<'a>(&self, call: Node, bytes: &'a [u8]) -> Option<&'a str> {
         if call.child_by_field_name("object").is_some() {
             return None;
         }
@@ -191,11 +318,10 @@ impl<'t> BareCalls<'t> {
         if name_node.has_error() || args.has_error() {
             return None;
         }
-        if !scope_is_top_across_lambdas(call, self.top_node) {
-            return None;
-        }
         let name = name_node.utf8_text(bytes).ok()?;
-        if OBJECT_METHODS.contains(&name) {
+        // Judged once `Object` itself was read: its overload sets are then exact, and a `toString(x)`
+        // written where the class inherits only `toString()` is javac's to reject.
+        if OBJECT_METHODS.contains(&name) && !self.object_readable {
             return None;
         }
         if self.is_enum && ENUM_IMPLICIT_METHODS.contains(&name) {
@@ -210,6 +336,16 @@ impl<'t> BareCalls<'t> {
     }
 }
 
+/// Whether a class body declares a method named `name` directly.
+fn body_declares_method(body: Node, name: &str, bytes: &[u8]) -> bool {
+    let mut c = body.walk();
+    let found = body.named_children(&mut c).any(|m| {
+        m.kind() == "method_declaration"
+            && m.child_by_field_name("name").and_then(|n| n.utf8_text(bytes).ok()) == Some(name)
+    });
+    found
+}
+
 /// Whether `candidates` (what the index knows) already covers every signature the FILE declares
 /// under `name` — on any of its types, constructors as `<init>` — parameter type for parameter type.
 ///
@@ -218,8 +354,11 @@ impl<'t> BareCalls<'t> {
 /// Matching on arity alone is not enough and was the first thing tried: a buffer that adds
 /// `own(String)` beside an indexed `own(int)` has an arity-1 candidate either way, so the stale
 /// single candidate stood, and a legal `own("x")` came out as a wrong argument type. Anything
-/// that will not resolve is a reason to say no, not to guess. Signatures of every type in the file
-/// are gathered, nested ones included: an extra one can only make the answer "no".
+/// that will not resolve is a reason to say no, not to guess. The signatures gathered are those of
+/// `binary` and of every type of the file it may inherit from — never a constructor of anything but
+/// `binary` itself, since constructors are not inherited. Gathering the whole file refused every
+/// call to a type sharing it with another that declares the same name: `new Pair("a", 1)` went
+/// unjudged because a sibling `Inner(int)` is not one of `Pair`'s constructors.
 ///
 /// Two shapes of parameter text are matched structurally rather than by resolved name, because
 /// neither HAS a resolved name to compare and both used to make every own method carrying one
@@ -228,12 +367,25 @@ impl<'t> BareCalls<'t> {
 /// varargs parameter, whose depth the index keeps beside the name (`dims`) and the text spells
 /// with brackets.
 pub(crate) fn index_covers_file_sigs(
+    binary: &str,
     name: &str,
     candidates: &[Member],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
 ) -> bool {
-    let declared = symbols.types.iter().flat_map(|t| &t.methods).filter(|m| m.name == name);
+    let judged = TypeRef::simple(binary);
+    let declared = symbols
+        .types
+        .iter()
+        .filter(|t| {
+            let decl = t.fqn.replace('.', "/");
+            same_binary_type(&decl, binary)
+                || (name != "<init>"
+                    && bennu_java::prelude::subtype_verdict(resolver, &judged, &TypeRef::simple(decl))
+                        != Some(false))
+        })
+        .flat_map(|t| &t.methods)
+        .filter(|m| m.name == name);
     declared.into_iter().all(|fs| {
         candidates.iter().any(|m| {
             m.params.len() == fs.params.len()

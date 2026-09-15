@@ -623,6 +623,7 @@ mod tests {
             is_default: false,
             is_final: false,
             throws: Vec::new(),
+            type_params: Vec::new(),
             annotations: Vec::new(),
         }
     }

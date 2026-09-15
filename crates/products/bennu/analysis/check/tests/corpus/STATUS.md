@@ -10,7 +10,7 @@ What the corpus expects, and where bennu-check stands against it.
   which writes the per-line report to `src-tauri/target/tmp/bennu-check-corpus.md` (every miss, every
   false positive, coverage per javac key). This page is a snapshot of that report, triaged by hand.
 
-Snapshot: JDK 21.0.6, `release 8` and `release 21`.
+Snapshot: JDK 21.0.11, `release 8` and `release 21`.
 
 ## Summary
 
@@ -18,9 +18,9 @@ Error modules — javac errors Bennu should report:
 
 | module | files | javac errors | mapped to a Bennu check | Bennu hits | not covered (no check yet) | false positives |
 |---|---:|---:|---:|---:|---:|---:|
-| java8 | 123 | 445 | 427 | 235 (55%) | 18 | 2 |
-| java21 | 24 | 70 | 67 | 54 (81%) | 3 | 4 |
-| **total** | **147** | **515** | **494** | **289 (59%)** | **21** | **6** |
+| java8 | 123 | 445 | 428 | 398 (93%) | 17 | 2 |
+| java21 | 24 | 70 | 67 | 62 (93%) | 3 | 4 |
+| **total** | **147** | **515** | **495** | **460 (93%)** | **20** | **6** |
 
 Clean modules — realistic legal code; javac reports nothing, so every Bennu diagnostic is a false positive:
 
@@ -28,6 +28,11 @@ Clean modules — realistic legal code; javac reports nothing, so every Bennu di
 |---|---:|---:|---:|---:|
 | clean8 | 24 | 2511 | 0 | 0 |
 | clean21 | 16 | 1308 | 0 | 0 |
+
+> [!IMPORTANT]
+> **The clean modules are the only false-positive measure of this round**
+> No real project (commons-lang, guava, a Lombok codebase) was re-checked. The rules below were written
+> to stay silent on anything they cannot prove, but a run on real code is what confirms it.
 
 ## Remaining false positives (6) — all parser gaps
 
@@ -43,46 +48,54 @@ Fixing them means a grammar update (a dependency change), not a check.
 
 ## Fixed in this round
 
+java8 went from 278 to 398 hits and java21 from 54 to 62, with no new false positive and the clean
+modules still silent.
+
 | was | now |
 |---|---|
-| C1 `records/Money.java` — the implicit canonical constructor ignored beside an extra constructor | the synthetic canonical constructor is suppressed only by one taking the component types; a compact constructor carries the components as parameters |
-| C2 `modern/ModernIdioms.java` — an interface with `private` methods "not functional" | `private` interface methods are never abstract requirements |
-| C3 `modern/SwitchExpressions.java` — colon groups falling through to a `yield` | only the last group of a switch expression must not complete normally |
-| C4 `overloads/ModernOverloads.java` — `Greeter.super::greet` | `super` / `this` qualifiers are not types |
-| methods of an anonymous class, `outer.new Inner()` | receivers whose type no name denotes are not judged |
-| implicit narrowing of constants (`char c = 'a' + 1`, `byte b = CONSTANT`) | constant expressions are folded (`support::constant`) |
-| `import static pkg.Outer.Nested;` | member types count as statically importable members |
-| duplicate / erasure clash on the first declaration; blank final on the field; abstract method on the method; `@Override` on the method name | reported where javac reports it: the later declaration, the constructor's closing brace, the class header, the annotation |
+| a local read before every path assigned it, or a `final` local assigned twice, unreported | JLS chapter 16 definite (un)assignment, loops, `try`, `switch` and labels included (`flow/definite.rs`) |
+| checked exceptions in lambdas, initializers and anonymous-class methods, rethrows and implicit `close()` unjudged | one handler model per site (`throwing/checked_throw.rs`), precise rethrow and the resource's `close()` (`throwing/checked_call.rs`) |
+| `Math.PI = 3`, `values.length = 3` | assignment to a final field through a qualifier (`flow/qualified_finals.rs`) |
+| two on-demand imports offering one name; a missing package; a static import of nothing | `source/import_ambiguity.rs`, `source/imports.rs` |
+| `@Target`, annotation value types and non-constant values | `annotation/annotation_target.rs`, `annotation_values.rs`, `annotation_constants.rs` |
+| a static method hiding an instance one, an incompatible or `void` override, an abstract method implemented by an overload | signature-based obligations (`hierarchy/obligations.rs`), anonymous bodies included |
+| bare calls in nested and anonymous classes, static-import calls, receiver type arguments | JLS §15.12.1 lookup (`support/bare_call.rs`); `Box<String>.set(1)` judged through the argument (`calls/arguments.rs`) |
+| a primitive dereferenced, `Type.FIELD` on a readable type, an unknown qualifier or package | `calls/fields.rs`, `calls/members.rs`, `typing/types.rs` |
+| lambda bodies and method references against their interface | void/value compatibility, return types, static/bound/unbound forms and their ambiguity, constructor references, a class as target (`calls/lambda_body.rs`) — in declarations, returns, casts and bound calls |
+| `(int) true`, `(long[]) ints`, a final class cast to an interface it does not implement | `typing/casts.rs`, whose reference-cast rule (`provably_inconvertible`) pattern labels share |
+| a qualified enum label below Java 21; a switch on `Object`, its constant labels and its exhaustiveness; a sealed switch missing a permitted subtype; `case Integer i` on a `String`; a switch-expression arm of the wrong type | `switching/switch_label_type.rs`, `switching/enum_switch.rs`, `typing/casts.rs` |
+| `List<Integer>` into a `List<Number>`, `List<?>` into a `List<String>` | invariance and wildcard containment where both sides write their arguments (`typing/parameterized.rs`) |
+| `new T[10]`, `T.class`, `List<int>`, a generic `Throwable`, `String<Integer>` | `source/generics_syntax.rs`, `hierarchy/inheritance.rs`, `typing/type_arg_arity.rs` |
 
 ## Coverage by category (hits / mapped javac errors)
 
 | module | category | hits | biggest gaps |
 |---|---|---:|---|
-| java8 | annotation | 9/35 | project `@Target` applicability (5), annotation member types (4), non-constant values (4), value types (6) |
-| java8 | args | 22/40 | constructor arguments (8), argument types in several shapes (9) |
-| java8 | cast | 22/34 | boxing mismatches (6), inconvertible casts (5) |
-| java8 | condition | 5/7 | non-boolean conditions in less common positions |
-| java8 | flow | 29/45 | unreported checked exceptions (7), definite assignment of locals (4), `Math.PI = 3` / `array.length = 3` |
-| java8 | generic | 20/60 | generic assignment `List<Object> = List<String>` (9), generic method arguments (12), wildcards (5), reifiable-type rules (7), explicit type args (5) |
-| java8 | imports | 17/30 | `ref.ambiguous` between two on-demand imports (7), argument types through static imports (5) |
-| java8 | inherit | 49/61 | anonymous classes missing an abstract method (3), overload instead of override (1), override rules through the resolver (3) |
-| java8 | lambda | 4/16 | lambda arity / return type against the target overload (12) |
-| java8 | mref | 2/11 | incompatible method references (9) |
-| java8 | overload | 1/10 | ambiguous calls `ref.ambiguous` (7), no applicable overload (2) |
-| java8 | resolve | 32/46 | variables in unusual scopes (7), unresolved on-demand/static imports |
-| java8 | scope | 10/15 | arguments across nested/inner scopes (4) |
-| java8 | switches | 11/15 | qualified enum label below Java 21, `Object` selector below Java 21 |
-| java21 | flow | 3/4 | captured non-final locals |
+| java8 | annotation | 26/35 | `AnnotationDeclBad` is quarantined whole by parser recovery (9) |
+| java8 | args | 38/40 | `outer.new Inner(…)` arguments (1), a conditional whose arms need a least upper bound (1) |
+| java8 | cast | 34/34 | — |
+| java8 | condition | 7/7 | — |
+| java8 | flow | 45/45 | — |
+| java8 | generic | 42/60 | calls through wildcards, bounds and raw receivers (11), explicit type arguments (3), a generic method's result assigned (2), `? super` read as its bound (1) |
+| java8 | imports | 30/30 | — |
+| java8 | inherit | 62/62 | — |
+| java8 | lambda | 15/16 | an implicit lambda that fits two overloads (1) |
+| java8 | mref | 11/11 | — |
+| java8 | overload | 10/10 | — |
+| java8 | resolve | 46/46 | — |
+| java8 | scope | 15/15 | — |
+| java8 | switches | 15/15 | — |
+| java21 | flow | 4/4 | — |
 | java21 | inherit | 8/8 | — |
-| java21 | modern | 9/15 | record-pattern arguments, pattern-variable scope |
+| java21 | modern | 10/15 | a pattern variable used where a negated `instanceof` leaves it unbound (1), a qualified record pattern (parser, 1), a switch expression, a `var` element and a `toList()` result as arguments (3) |
 | java21 | records | 14/14 | — |
-| java21 | switches | 19/25 | sealed and pattern exhaustiveness (3), arm types (2) |
+| java21 | switches | 25/25 | — |
 
-Keys with **no** Bennu check yet ("not covered", 21 occurrences): `not.within.bounds` (7),
-`pattern.dominated` (2), `override.static`, `static.imp.only.classes.and.interfaces`,
-`incompatible.thrown.types.in.mref`, `anon.class.impl.intf.no.args`, `array.and.varargs`,
-`const.expr.req`, `string.const.req`, `operator.cant.be.applied`, `operator.cant.be.applied.1`,
-`enum.annotation.must.be.enum.constant`, `flows.through.to.pattern`, `cant.extend.intf.annotation`.
+Keys with **no** Bennu check yet ("not covered", 20 occurrences): `not.within.bounds` (7),
+`pattern.dominated` (2), `static.imp.only.classes.and.interfaces`, `incompatible.thrown.types.in.mref`,
+`anon.class.impl.intf.no.args`, `array.and.varargs`, `const.expr.req`, `string.const.req`,
+`operator.cant.be.applied`, `operator.cant.be.applied.1`, `enum.annotation.must.be.enum.constant`,
+`flows.through.to.pattern`, `cant.extend.intf.annotation`.
 
 ## How to refresh this page
 

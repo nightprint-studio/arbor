@@ -5,22 +5,25 @@
 //!   * the target is a functional interface (exactly one abstract method), and
 //!   * the lambda's parameter count matches the SAM's.
 //!
+//! Past the arity, the lambda's body and a method reference's shape are read against the SAM as the
+//! target's type arguments instantiate it — see [`crate::calls::lambda_body`].
+//!
 //! Conservative (docs: never a false positive):
 //!   * only the target contexts where the type is written out — a `T x = …`, a `return …`, a
-//!     `(T) …` cast. A lambda passed as a method **argument** infers its target through overload
-//!     resolution, which we don't model, so it's skipped;
-//!   * only when the target is a **known interface** (`is_interface` from bytecode is reliable) whose
-//!     hierarchy is fully resolvable. A project interface carries default flags until the symbol
-//!     model grows a type-kind, so it's skipped — a conservative miss, never a false positive;
+//!     `(T) …` cast. A lambda passed as a method **argument** is judged by `arguments`, once overload
+//!     resolution has bound the call;
+//!   * only when the target is a **known interface** whose hierarchy is fully resolvable — or a
+//!     readable class, which no lambda can ever implement;
 //!   * `java.lang.Object` methods never count toward the SAM (`Comparator.equals` doesn't make it
 //!     non-functional).
 
 use std::collections::HashSet;
 
-use bennu_java::prelude::{extract_symbols, FileSymbols, MemberKind, TypeResolver};
+use bennu_java::prelude::{extract_symbols, is_inferred_type, written_type_ref, FileSymbols, InferCache, MemberKind, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::calls::lambda_body::{self, lambda_body_mismatch, method_reference_mismatch, sam_through};
 use crate::hierarchy::inheritance::{is_abstract_requirement, is_ctor, object_method_names};
 use crate::support::nodes::simple_name;
 use crate::support::resolve::type_binary;
@@ -32,62 +35,73 @@ pub fn functional_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagn
         return Vec::new();
     };
     let symbols = extract_symbols(source);
-    let nodes = crate::engine::check::collect_nodes(tree.root_node());
-    functional_errors_in(&nodes, source, &symbols, resolver)
+    let root = tree.root_node();
+    let nodes = crate::engine::check::collect_nodes(root);
+    functional_errors_in(root, &nodes, source, &symbols, resolver, &InferCache::default())
 }
 
 /// Tree-driven core: iterates the shared `nodes` + reuses the caller's `symbols`.
-pub fn functional_errors_in(
-    nodes: &[Node],
+pub fn functional_errors_in<'t>(
+    root: Node<'t>,
+    nodes: &[Node<'t>],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
 ) -> Vec<Diagnostic> {
-    let bytes = source.as_bytes();
     let objects = object_method_names(resolver);
+    let ctx = lambda_body::Ctx { root: &root, source, symbols, resolver, cache };
     let mut out = Vec::new();
     for &n in nodes {
-        if n.kind() == "lambda_expression" {
-            check_lambda(n, bytes, symbols, resolver, &objects, &mut out);
+        if matches!(n.kind(), "lambda_expression" | "method_reference") {
+            check_functional(n, &ctx, &objects, &mut out);
         }
     }
     out
 }
 
-fn check_lambda(
-    lambda: Node,
-    bytes: &[u8],
-    symbols: &FileSymbols,
-    resolver: &dyn TypeResolver,
-    objects: &HashSet<String>,
-    out: &mut Vec<Diagnostic>,
-) {
-    let Some((target_text, anchor)) = target_type(lambda, bytes) else { return };
-    let Some(binary) = type_binary(&target_text, symbols, resolver) else { return };
-    let Some(cm) = resolver.members_of(&binary) else { return };
-    // Only assert against a genuine, fully-known interface (project types carry default flags).
-    if !cm.flags.is_interface || !hierarchy_fully_known(resolver, &binary) {
-        return;
+/// One lambda or method reference in a context that writes its target type.
+fn check_functional(expr: Node, ctx: &lambda_body::Ctx, objects: &HashSet<String>, out: &mut Vec<Diagnostic>) {
+    let (bytes, resolver) = (ctx.source.as_bytes(), ctx.resolver);
+    let Some((target_text, anchor)) = target_type(expr, bytes) else { return };
+    if is_inferred_type(&target_text) {
+        return; // `var` / Lombok's `val`: the type comes from the lambda, there is none to hold it to
     }
-
-    let sam = single_abstract_method(resolver, &binary, objects);
+    let Some(binary) = type_binary(&target_text, ctx.symbols, resolver) else { return };
+    let Some(cm) = resolver.members_of(&binary) else { return };
     let name = simple_name(&binary);
-    match sam {
-        Sam::One { arity } => {
-            let got = lambda_param_count(lambda, bytes);
-            if got != arity {
-                out.push(err(
-                    format!(
-                        "Lambda has {got} parameter{}, but `{name}`'s abstract method takes {arity}",
-                        plural(got)
-                    ),
-                    anchor,
-                ));
-            }
-        }
-        Sam::NotFunctional => {
+    if !cm.flags.is_interface {
+        // A class — `Object` above all — is never a lambda's target. A member list the index says
+        // is partial could be hiding the flags too, so it is not believed.
+        if !cm.flags.has_hidden_members {
             out.push(err(format!("`{name}` is not a functional interface"), anchor));
         }
+        return;
+    }
+    if !hierarchy_fully_known(resolver, &binary) {
+        return;
+    }
+    let Sam::One { arity } = single_abstract_method(resolver, &binary, objects) else {
+        out.push(err(format!("`{name}` is not a functional interface"), anchor));
+        return;
+    };
+    let is_lambda = expr.kind() == "lambda_expression";
+    if is_lambda {
+        let got = lambda_param_count(expr, bytes);
+        if got != arity {
+            let message = format!("Lambda has {got} parameter{}, but `{name}`'s abstract method takes {arity}", plural(got));
+            out.push(err(message, anchor));
+            return;
+        }
+    }
+    let target = written_type_ref(ctx.root, ctx.source, ctx.symbols, &target_text, resolver, ctx.cache);
+    let Some(sam) = target.and_then(|t| sam_through(&t, resolver)) else { return };
+    let problem = match is_lambda {
+        true => lambda_body_mismatch(expr, &sam, ctx),
+        false => method_reference_mismatch(expr, &sam, ctx),
+    };
+    if let Some(problem) = problem {
+        out.push(err(problem, anchor));
     }
 }
 
@@ -140,9 +154,9 @@ fn single_abstract_method(
     }
 }
 
-/// The written target type of a lambda + the node to anchor a diagnostic on, for the contexts where
+/// The written target type of a lambda or method reference + the node to anchor a diagnostic on, for the contexts where
 /// the target type is explicit: `T x = <lambda>`, `return <lambda>`, `(T) <lambda>`.
-fn target_type<'t>(lambda: Node<'t>, bytes: &[u8]) -> Option<(String, Node<'t>)> {
+pub(crate) fn target_type<'t>(lambda: Node<'t>, bytes: &[u8]) -> Option<(String, Node<'t>)> {
     let parent = lambda.parent()?;
     match parent.kind() {
         // `(T) <lambda>`
@@ -239,7 +253,10 @@ mod tests {
 
     fn m(name: &str, params: usize, is_abstract: bool) -> Member {
         let params = (0..params).map(|_| TypeRef::simple("java/lang/Object")).collect();
-        let m = Member::method(name, TypeRef::simple("void"), params);
+        // `run` returns nothing, like `Runnable.run`; every other method returns a type variable, so
+        // the body checks have no concrete type to hold a lambda's value against.
+        let returns = if name == "run" { "void" } else { "R" };
+        let m = Member::method(name, TypeRef::simple(returns), params);
         if is_abstract {
             m.abstract_()
         } else {
@@ -326,6 +343,34 @@ mod tests {
         let d = diags("NotFn f = x -> x;");
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(d[0].contains("not a functional interface"), "{d:?}");
+    }
+
+    /// A SAM that takes nothing leaves the unbound form no receiver to read — `Run r = Util::make;` once
+    /// indexed an empty parameter list.
+    #[test]
+    fn a_static_reference_for_a_parameterless_sam_is_judged_without_a_receiver() {
+        let mut r = resolver();
+        let mut util = iface(vec![Member::method("make", TypeRef::simple("R"), Vec::new()).stat()]);
+        util.flags.is_interface = false;
+        util.superclass = Some(TypeRef::simple("java/lang/Object"));
+        r.members.insert("com/acme/Util".to_string(), util);
+        r.simple.insert("Util".to_string(), "com/acme/Util".to_string());
+        let src = "class C { void m() { Run r = Util::make; } }";
+        let d: Vec<String> = functional_errors(src, &r).into_iter().map(|d| d.message).collect();
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    /// With Lombok on the classpath `val` is a class — which is no reason to call it a lambda's target.
+    #[test]
+    fn an_inferred_local_is_not_a_lambda_target() {
+        let mut r = resolver();
+        let mut val = iface(Vec::new());
+        val.flags.is_interface = false;
+        r.members.insert("lombok/val".to_string(), val);
+        r.simple.insert("val".to_string(), "lombok/val".to_string());
+        let src = "import lombok.val;\nclass C { void m() { val f = (Run) () -> {}; val g = x -> x; } }";
+        let d: Vec<String> = functional_errors(src, &r).into_iter().map(|d| d.message).collect();
+        assert!(d.is_empty(), "{d:?}");
     }
 
     #[test]

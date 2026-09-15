@@ -16,30 +16,33 @@
 //!     the enclosing type for a bare call, or a resolvable type for a `new` — and, for a type this
 //!     file declares, an index that has already seen every signature the buffer declares;
 //!   * only when the shared rules find **no** applicable overload, and **every** overload the count
-//!     admits is refused at some position on evidence of its own ([`mismatch`]) — the shared rules
+//!     admits is refused at some position on evidence of its own ([`crate::support::assignable`]) — the shared rules
 //!     abstain in their own way, and a report must stand on this module's;
 //!   * a position is judged only where the parameter's type is concrete: never a type variable
 //!     (of the method or of its owner — the rest of a generic method is judged), never an array, and
 //!     never at or past a trailing array, which may be varargs;
 //!   * an argument is reported when every admitted overload refuses THAT position, naming each
 //!     expected type; when the overloads are refused at different positions, the call is reported.
-//!     Lambdas, method references, `null` and untyped arguments are never reported.
+//!     Method references and untyped arguments are never reported; `null` only where a primitive is
+//!     expected, a lambda only where the parameter is provably no functional interface of its arity.
 
-mod mismatch;
+mod ambiguity;
 #[cfg(test)]
 mod tests;
 
 use bennu_java::prelude::{
-    infer_node_type_cached, overload_fit, same_binary_type, FileSymbols, InferCache, Member,
-    MemberKind, OverloadFit, TypeRef, TypeResolver,
+    infer_node_type_cached, lambda_refused, overload_fit, same_binary_type, FileSymbols, InferCache,
+    Member, OverloadFit, TypeRef, TypeResolver,
 };
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::support::bare_call::{bare_call_scope, index_covers_file_sigs, BareCalls};
+use crate::calls::lambda_body;
+use crate::support::bare_call::{bare_call_scope, index_covers_file_sigs, BareCalls, MemberOwner};
+use crate::support::constructors::constructor_call;
 use crate::engine::check_id::CheckId;
-use crate::support::nodes::{is_type_var, simple_name};
-use mismatch::{arg_mismatch, Mismatch};
+use crate::support::nodes::{is_primitive, simple_name};
+use crate::support::assignable::{definite_mismatch, null_mismatch, spells_its_type, Mismatch};
 
 /// Parse `source` and flag arguments of the wrong type.
 pub fn argument_type_errors(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagnostic> {
@@ -74,7 +77,9 @@ pub fn argument_type_errors_in(
                     check_bare_call(n, bare, &file, &mut out);
                 }
             }
-            "object_creation_expression" => check_new(n, &file, &mut out),
+            "object_creation_expression" | "explicit_constructor_invocation" => {
+                check_constructor(n, &file, &mut out)
+            }
             _ => {}
         }
     }
@@ -107,7 +112,8 @@ impl FileCtx<'_, '_> {
     /// another file, and for one of this file only once the index has seen every signature the
     /// buffer declares — a method typed a moment ago would otherwise leave a stale set standing.
     fn overloads_current(&self, binary: &str, name: &str, candidates: &[Member]) -> bool {
-        !self.declares(binary) || index_covers_file_sigs(name, candidates, self.symbols, self.resolver)
+        !self.declares(binary)
+            || index_covers_file_sigs(binary, name, candidates, self.symbols, self.resolver)
     }
 }
 
@@ -133,47 +139,46 @@ impl Callee<'_> {
     }
 }
 
-/// A bare `method(a, b)`: the candidate set is the enclosing type's.
+/// A bare `method(a, b)`: the candidate set is the one of the innermost class that has a method of
+/// that name — a nested or anonymous class, the top type — or, when none does, what the static
+/// imports bring in (JLS §15.12.1).
 fn check_bare_call(n: Node, bare: &BareCalls, file: &FileCtx, out: &mut Vec<Diagnostic>) {
-    let Some(method) = bare.judgeable_member_call(n, file.bytes()) else { return };
     let Some(name) = n.child_by_field_name("name") else { return };
-    let res = file.cache.resolve_methods(file.resolver, &bare.top_binary, method);
-    // `judgeable_member_call`'s contract: act only on a non-empty member set, which is what shadows
-    // every static import of the name.
-    if !res.complete || res.candidates.is_empty() {
+    let Ok(method) = name.utf8_text(file.bytes()) else { return };
+    let owner = match bare.member_owner(n, file.bytes(), file.symbols, file.resolver) {
+        Some(MemberOwner::Nested(owner)) => owner,
+        Some(MemberOwner::Top) => bare.top_binary.clone(),
+        None => return,
+    };
+    let res = file.cache.resolve_methods(file.resolver, &owner, method);
+    if !res.complete {
         return;
     }
-    if !file.overloads_current(&bare.top_binary, method, &res.candidates) {
+    // A non-empty member set shadows every static import of the name.
+    if !res.candidates.is_empty() {
+        if file.overloads_current(&owner, method, &res.candidates) {
+            judge_args(&res.candidates, n, name, Callee::Method(method), file, out);
+        }
         return;
     }
-    judge_args(&res.candidates, n, name, Callee::Method(method), file, out);
+    // Nothing of the name in the class — unless the file declares one the index has not seen yet.
+    if owner != bare.top_binary || !bare.file_sigs(method).is_empty() {
+        return;
+    }
+    if let Some(imported) = bare.static_import_methods(method, file.resolver) {
+        judge_args(&imported, n, name, Callee::Method(method), file, out);
+    }
 }
 
-/// `new Foo(a, b)` — the candidates are `Foo`'s own constructors (never inherited). An anonymous
-/// body changes nothing: its implicit constructor forwards to the one of `Foo` the arguments select.
-fn check_new(n: Node, file: &FileCtx, out: &mut Vec<Diagnostic>) {
-    if crate::support::nodes::is_qualified_creation(n) {
-        return; // `outer.new Inner()` — see `is_qualified_creation`
-    }
-    let Some(ty_node) = n.child_by_field_name("type") else { return };
-    let Ok(type_text) = ty_node.utf8_text(file.bytes()) else { return };
-    let Some(binary) = crate::support::resolve::type_binary(type_text, file.symbols, file.resolver) else {
-        return;
-    };
-    let Some(cm) = file.resolver.members_of(&binary) else { return };
-    let ctors: Vec<Member> = cm
-        .methods
-        .iter()
-        .filter(|m| m.name == "<init>" && m.kind == MemberKind::Method)
-        .cloned()
-        .collect();
-    if ctors.is_empty() {
-        return; // an index that omits constructors can assert nothing
-    }
-    if !file.overloads_current(&binary, "<init>", &ctors) {
+/// `new Foo(a, b)`, `super(a, b)` or `this(a, b)` — one type's own constructors, see
+/// [`constructor_call`].
+fn check_constructor(n: Node, file: &FileCtx, out: &mut Vec<Diagnostic>) {
+    let Some(call) = constructor_call(n, file.bytes(), file.symbols, file.resolver) else { return };
+    if !file.overloads_current(&call.binary, "<init>", &call.candidates) {
         return;
     }
-    judge_args(&ctors, n, ty_node, Callee::Constructor(simple_name(&binary)), file, out);
+    let callee = Callee::Constructor(simple_name(&call.binary));
+    judge_args(&call.candidates, n, call.head, callee, file, out);
 }
 
 /// `receiver.method(a, b)` — on a value, `this`, `super` or a type (a static call).
@@ -199,12 +204,108 @@ fn check_call(n: Node, file: &FileCtx, out: &mut Vec<Diagnostic>) {
     if !res.complete || !file.overloads_current(&receiver, method, &res.candidates) {
         return;
     }
-    judge_args(&res.candidates, n, name, Callee::Method(method), file, out);
+    let receiver_type = n
+        .child_by_field_name("object")
+        .and_then(|obj| infer_node_type_cached(&file.root, file.source, file.symbols, &obj, file.resolver, file.cache))
+        .filter(|ty| same_binary_type(&ty.binary_name, &receiver))
+        .unwrap_or_else(|| TypeRef::simple(receiver.clone()));
+    let candidates = through_receiver(&receiver_type, method, &res.candidates, file.resolver);
+    judge_args(&candidates, n, name, Callee::Method(method), file, out);
+}
+
+/// The overloads of `method` with each parameter read through the arguments `receiver` gives the
+/// class that declares it — `List<String>.add(E)` is `add(String)`, and a `StringBox extends
+/// Box<String>` gives `Box.set(T)` a `String` too.
+///
+/// A type variable is left standing — and then fits anything — where substituting would guess: the
+/// method declares a type parameter of that name itself, the receiver is raw, or the argument is a
+/// captured wildcard, whose variance the index does not keep (`add(1)` is fine on a
+/// `List<? super Integer>` and not on a `List<? extends Number>`). `candidates` comes back unchanged
+/// when the hierarchy cannot be walked the same way twice.
+fn through_receiver(receiver: &TypeRef, method: &str, candidates: &[Member], resolver: &dyn TypeResolver) -> Vec<Member> {
+    let mut read: Vec<Member> = Vec::new();
+    // The erased shape of each method kept, so the same method met again further up the hierarchy
+    // — an interface's `sort(Comparator<? super E>)` after `ArrayList`'s override of it, each written
+    // in its own type variables — stays one candidate instead of becoming two that look ambiguous.
+    let mut seen: Vec<Vec<(String, u8)>> = Vec::new();
+    let walked = bennu_java::prelude::walk::<()>(resolver, receiver, |a| {
+        let class_params = &a.members.type_params;
+        let args = &a.ty.type_args;
+        for m in a.members.methods.iter().filter(|m| m.name == method) {
+            let shape = erased_shape(&m.params, class_params, &m.method_type_params());
+            if seen.contains(&shape) {
+                continue;
+            }
+            seen.push(shape);
+            let mut member = m.clone();
+            if !args.is_empty() && args.len() == class_params.len() {
+                let own = m.method_type_params();
+                let visible: Vec<String> =
+                    class_params.iter().map(|p| if own.contains(p) { String::new() } else { p.clone() }).collect();
+                member.params = m
+                    .params
+                    .iter()
+                    .map(|p| {
+                        let substituted = bennu_java::prelude::substitute(p, &visible, args);
+                        if substituted.names_a_wildcard() { p.clone() } else { substituted }
+                    })
+                    .collect();
+            }
+            read.push(member);
+        }
+        None
+    });
+    if !walked.complete || read.is_empty() {
+        return candidates.to_vec();
+    }
+    read
+}
+
+/// A parameter list with every type variable — the class's or the method's — read as one unknown, so
+/// two declarations of the same method written in different variables compare equal.
+fn erased_shape(params: &[TypeRef], class_params: &[String], own: &[String]) -> Vec<(String, u8)> {
+    params
+        .iter()
+        .map(|p| {
+            let variable = class_params.contains(&p.binary_name) || own.contains(&p.binary_name);
+            let name = if variable { "?".to_string() } else { p.binary_name.clone() };
+            (name, p.dims)
+        })
+        .collect()
 }
 
 /// The shared decision: when no overload of `candidates` can take `call`'s arguments, and each one
 /// the count admits is refused at some position on this module's own evidence, report where.
 /// `head` (the method name, or the constructed type) starts the range of a whole-call report.
+/// The lambdas and method references passed to `method`, each judged against the functional
+/// interface of the parameter it binds to — see [`lambda_body`]. A varargs tail is not read.
+fn functional_arguments(method: &Member, args: &[Node], callee: Callee, file: &FileCtx, out: &mut Vec<Diagnostic>) {
+    if args.len() != method.params.len() {
+        return;
+    }
+    let ctx = lambda_body::Ctx {
+        root: &file.root,
+        source: file.source,
+        symbols: file.symbols,
+        resolver: file.resolver,
+        cache: file.cache,
+    };
+    for (i, (arg, param)) in args.iter().zip(&method.params).enumerate() {
+        let is_lambda = match arg.kind() {
+            "lambda_expression" => true,
+            "method_reference" => false,
+            _ => continue,
+        };
+        let Some(sam) = lambda_body::sam_through(param, file.resolver) else { continue };
+        let problem = match is_lambda {
+            true => lambda_body::lambda_body_mismatch(*arg, &sam, &ctx),
+            false => lambda_body::method_reference_mismatch(*arg, &sam, &ctx),
+        };
+        if let Some(problem) = problem {
+            out.push(CheckId::ArgumentType.at(*arg, format!("Argument {} of `{}`: {problem}", i + 1, callee.name())));
+        }
+    }
+}
 fn judge_args(
     candidates: &[Member],
     call: Node,
@@ -222,7 +323,7 @@ fn judge_args(
     // generic ones included: `setRecipients(String, Addresses[])` beside `setRecipients(String,
     // String)`, or SLF4J's `debug(String, Object...)` beside a fixed four-parameter `debug`, bind
     // calls a lone checkable signature would have called wrong.
-    let OverloadFit::Inapplicable(admitted) = overload_fit(
+    let fit = overload_fit(
         &file.root,
         file.source,
         file.symbols,
@@ -230,14 +331,37 @@ fn judge_args(
         candidates,
         file.resolver,
         file.cache,
-    ) else {
-        return;
-    };
+    );
     let args = named_args(arg_list);
-    let arg_types: Vec<Option<TypeRef>> = args.iter().map(|a| judged_arg_type(*a, file)).collect();
+    let admitted = match fit {
+        OverloadFit::Inapplicable(admitted) => admitted,
+        // Several survivors: an error only when they are provably ambiguous — see `ambiguity`. The
+        // arguments are typed here and not before, so a call that binds pays for no second look.
+        OverloadFit::Applicable(kept) if kept.len() > 1 => {
+            let judged: Vec<Judged> = args.iter().map(|a| judged_arg(*a, file)).collect();
+            if ambiguity::provably_ambiguous(&kept, &judged, file.resolver) {
+                out.push(CheckId::ArgumentType.span(
+                    head.start_byte(),
+                    arg_list.end_byte(),
+                    ambiguity::message(callee.name(), &kept),
+                ));
+            }
+            return;
+        }
+        // One binding: the call is settled, so a lambda or method reference among the arguments can
+        // be read against the parameter it binds to.
+        OverloadFit::Applicable(kept) => {
+            if let [bound] = kept.as_slice() {
+                functional_arguments(bound, &args, callee, file, out);
+            }
+            return;
+        }
+        OverloadFit::NoArity => return,
+    };
+    let judged: Vec<Judged> = args.iter().map(|a| judged_arg(*a, file)).collect();
     let refusals: Vec<Vec<Option<Mismatch>>> = admitted
         .iter()
-        .map(|m| position_mismatches(m, &arg_types, file.resolver))
+        .map(|m| position_mismatches(m, &judged, file))
         .collect();
     if refusals.iter().any(|r| r.iter().all(Option::is_none)) {
         return;
@@ -258,39 +382,75 @@ fn judge_args(
     }
 }
 
+/// An argument as one position is judged.
+enum Judged<'t> {
+    /// Typed by inference; `written` when the argument spells that type itself — see
+    /// [`spells_its_type`].
+    Typed { ty: TypeRef, written: bool },
+    /// The `null` literal: it fits any reference and no primitive.
+    Null,
+    /// A lambda: refused only where the parameter is provably no functional interface of its arity.
+    Lambda(Node<'t>),
+    /// A method reference, or an expression inference could not type.
+    Unjudged,
+}
+
 /// Per argument position, the definite mismatch against overload `m` — `None` where the position is
 /// fine, untyped, or not one this module judges.
-fn position_mismatches(
-    m: &Member,
-    arg_types: &[Option<TypeRef>],
-    resolver: &dyn TypeResolver,
-) -> Vec<Option<Mismatch>> {
-    // A trailing array may be varargs (the seam carries no `ACC_VARARGS`): from its index on, an
-    // argument may be an element or the whole array, so nothing there is certain.
-    let varargs_from = m.params.last().filter(|p| p.is_array()).map(|_| m.params.len() - 1);
-    arg_types
-        .iter()
+fn position_mismatches(m: &Member, args: &[Judged], file: &FileCtx) -> Vec<Option<Mismatch>> {
+    // A trailing array may be varargs (the seam carries no `ACC_VARARGS`). When the count spreads
+    // arguments over it, nothing from its index on is certain; with exactly one argument there, that
+    // argument may be the whole array or its single element, and only a refusal of both is.
+    let varargs_at = m.params.last().filter(|p| p.is_array()).map(|_| m.params.len() - 1);
+    let spread = args.len() != m.params.len();
+    args.iter()
         .enumerate()
-        .map(|(i, ty)| {
-            if varargs_from.is_some_and(|v| i >= v) {
+        .map(|(i, arg)| {
+            if spread && varargs_at.is_some_and(|v| i >= v) {
                 return None;
             }
             let param = m.params.get(i)?;
-            if param.is_array() || is_type_var(&param.binary_name) {
-                return None;
+            let refused = judged_mismatch(arg, param, file)?;
+            if varargs_at == Some(i) {
+                let mut element = param.clone();
+                element.dims = element.dims.saturating_sub(1);
+                judged_mismatch(arg, &element, file)?;
             }
-            arg_mismatch(ty.as_ref()?, param, resolver)
+            Some(refused)
         })
         .collect()
 }
 
-/// The type an argument is judged by — never a lambda's, a method reference's or `null`'s, which
-/// have none of their own.
-fn judged_arg_type(arg: Node, file: &FileCtx) -> Option<TypeRef> {
-    if matches!(arg.kind(), "lambda_expression" | "method_reference" | "null_literal") {
-        return None;
+fn judged_mismatch(arg: &Judged, param: &TypeRef, file: &FileCtx) -> Option<Mismatch> {
+    match arg {
+        Judged::Typed { ty, written } => definite_mismatch(ty, param, *written, file.resolver),
+        Judged::Null => null_mismatch(param),
+        Judged::Lambda(lambda) => {
+            lambda_refused(&file.root, file.source, file.symbols, lambda, param, file.resolver, file.cache)
+                .then(|| Mismatch { found: "lambda".to_string(), expected: rendered(param) })
+        }
+        Judged::Unjudged => None,
     }
-    infer_node_type_cached(&file.root, file.source, file.symbols, &arg, file.resolver, file.cache)
+}
+
+/// A parameter type as a message names it: a primitive as written, a class by its simple name.
+fn rendered(param: &TypeRef) -> String {
+    let name = param.binary_name.as_str();
+    param.with_brackets(if is_primitive(name) { name } else { simple_name(name) })
+}
+
+/// What an argument is judged as — never by a method reference's type, which it takes from the
+/// parameter rather than bring to it.
+fn judged_arg<'t>(arg: Node<'t>, file: &FileCtx) -> Judged<'t> {
+    match arg.kind() {
+        "null_literal" => Judged::Null,
+        "lambda_expression" => Judged::Lambda(arg),
+        "method_reference" => Judged::Unjudged,
+        _ => match infer_node_type_cached(&file.root, file.source, file.symbols, &arg, file.resolver, file.cache) {
+            Some(ty) => Judged::Typed { ty, written: spells_its_type(arg) },
+            None => Judged::Unjudged,
+        },
+    }
 }
 
 /// `Argument 3 of `m`: `Widget` cannot be passed where `Animal` is expected` — with every distinct

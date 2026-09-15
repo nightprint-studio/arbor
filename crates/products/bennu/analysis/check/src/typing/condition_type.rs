@@ -58,10 +58,21 @@ pub fn condition_type_errors_in(
         // real expression (mirrors how `switches::selector_primitive` unwraps `(expr)`). Infer on the
         // inner expression so `(5)` types as the `int` literal, not the parenthesized node.
         let cond = unwrap_parens(holder);
+        // `if (null)` — a literal with no type to infer, and never a boolean.
+        if cond.kind() == "null_literal" {
+            out.push(err("Incompatible types: `null` cannot be converted to `boolean`".to_string(), cond));
+            continue;
+        }
+        // `if (value = 1)`: an assignment has the type of the variable it assigns (JLS §15.26), which
+        // is what makes the classic `=` for `==` slip a type error rather than a silent bug.
+        let typed = match cond.kind() {
+            "assignment_expression" => cond.child_by_field_name("left").unwrap_or(cond),
+            _ => cond,
+        };
 
         // Infer the condition expression's static type. SKIP when inference yields nothing — an
         // uninferable / unresolvable condition is "unknown", never an error.
-        let Some(ty) = infer_node_type_cached(&root, source, symbols, &cond, resolver, cache) else {
+        let Some(ty) = infer_node_type_cached(&root, source, symbols, &typed, resolver, cache) else {
             continue;
         };
         // SKIP an empty binary name (inference produced no usable type token).

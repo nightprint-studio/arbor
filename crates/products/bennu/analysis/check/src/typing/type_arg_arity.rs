@@ -5,14 +5,15 @@
 //! generic signature for library / JDK types and from the `<T, …>` clause for project types).
 //!
 //! Soundness (docs: NEVER a false positive). We flag ONLY when the base type resolves and its declared
-//! type-parameter list is **non-empty** — i.e. we KNOW its exact generic arity. A base we can't resolve,
-//! or one whose `type_params` came back empty, is skipped: an empty list can't be told apart from "a
-//! generic type whose parameters we didn't capture", so parameterizing it is never flagged (that would
-//! risk a false "type does not have type parameters"). The diamond `<>` (zero written arguments, always
+//! type-parameter list is **non-empty** — i.e. we KNOW its exact generic arity. A base we can't resolve
+//! is skipped. An EMPTY list is ambiguous in general — it can't be told apart from "a generic type whose
+//! parameters we didn't capture" — so "type does not take parameters" is reported only where empty is
+//! provably the truth: a JDK type (read from bytecode, where every generic class carries its
+//! `Signature`), or a type this very file declares without a `<…>`. The diamond `<>` (zero written arguments, always
 //! inferred) and raw usage (no `<…>` at all → not a `generic_type` node) are never flagged. A scoped /
 //! nested generic base (`Outer<X>.Inner`) is skipped too — its binary isn't reliably recoverable here.
 
-use bennu_java::prelude::{FileSymbols, TypeResolver};
+use bennu_java::prelude::{ClassMembers, FileSymbols, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
@@ -81,7 +82,14 @@ fn check_generic_type(
     let binary = type_binary_at(base_text, n, bytes, symbols, resolver)?;
     let members = resolver.members_of(&binary)?;
     let declared = members.type_params.len();
-    if declared == 0 || written == declared {
+    if declared == 0 {
+        return provably_not_generic(&binary, &members, symbols).then(|| {
+            let simple = binary.rsplit(['/', '$']).next().unwrap_or_default();
+            crate::engine::check_id::CheckId::WrongTypeArgumentCount
+                .at(n, format!("`{simple}` does not take type parameters"))
+        });
+    }
+    if written == declared {
         return None;
     }
 
@@ -89,6 +97,31 @@ fn check_generic_type(
         n,
         format!("Wrong number of type arguments: {written}; required: {declared}"),
     ))
+}
+
+/// Whether an EMPTY `type_params` is the truth rather than a gap in what was read — see the module's
+/// soundness note.
+fn provably_not_generic(binary: &str, members: &ClassMembers, symbols: &FileSymbols) -> bool {
+    if members.flags.has_hidden_members {
+        return false;
+    }
+    if binary.starts_with("java/") {
+        return true;
+    }
+    let package = symbols.package.as_deref();
+    symbols
+        .types
+        .iter()
+        .any(|t| !t.is_anonymous && t.type_params.is_empty() && source_binary(&t.fqn, package) == binary)
+}
+
+/// `com/acme/Outer$Inner` for the dotted `com.acme.Outer.Inner` of a type declared in `package`.
+fn source_binary(fqn: &str, package: Option<&str>) -> String {
+    let nested = package.and_then(|p| fqn.strip_prefix(p)?.strip_prefix('.').map(|rest| (p, rest)));
+    match nested {
+        Some((p, rest)) => format!("{}/{}", p.replace('.', "/"), rest.replace('.', "$")),
+        None => fqn.replace('.', "$"),
+    }
 }
 
 #[cfg(test)]
@@ -207,4 +240,21 @@ mod tests {
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(d[0].message.contains("2; required: 1"), "{}", d[0].message);
     }
+
+    /// Empty type parameters are believed only where they are provably the truth: a JDK type, or a
+    /// type the same file declares without `<…>`. `Plain` is neither, so its empty list stays a gap.
+    #[test]
+    fn a_jdk_or_same_file_type_without_parameters_does_not_take_any() {
+        let mut r = resolver();
+        r.members.insert("java/lang/String".to_string(), cm(&[]));
+        r.simple.insert("String".to_string(), "java/lang/String".to_string());
+        r.members.insert("com/acme/Self".to_string(), cm(&[]));
+        r.simple.insert("Self".to_string(), "com/acme/Self".to_string());
+        let src = "package com.acme; class Self { String<Integer> s; Self<String> me; Plain<String> p; }";
+        let d: Vec<String> = type_arg_arity_errors(src, &r).into_iter().map(|d| d.message).collect();
+        assert_eq!(d.len(), 2, "{d:?}");
+        assert!(d.iter().any(|m| m.contains("`String` does not take type parameters")), "{d:?}");
+        assert!(d.iter().any(|m| m.contains("`Self` does not take type parameters")), "{d:?}");
+    }
 }
+

@@ -381,10 +381,10 @@ impl Ctx<'_> {
         let param_primitive = param.dims == 0 && is_primitive(&param.binary_name);
         let arg_primitive = arg.dims == 0 && is_primitive(&arg.binary_name);
         match (param_primitive, arg_primitive) {
-            (true, true) => widens(&arg.binary_name, &param.binary_name),
+            (true, true) => primitive_widens(&arg.binary_name, &param.binary_name),
             (false, false) => self.subtype(arg, param) != Verdict::No,
             (true, false) => {
-                boxing && unbox(&arg.binary_name).is_some_and(|p| widens(p, &param.binary_name))
+                boxing && unbox(&arg.binary_name).is_some_and(|p| primitive_widens(p, &param.binary_name))
             }
             (false, true) => boxing && self.subtype(&boxed(arg.clone()), param) != Verdict::No,
         }
@@ -441,7 +441,7 @@ impl Ctx<'_> {
         let a_primitive = a.dims == 0 && is_primitive(&a.binary_name);
         let b_primitive = b.dims == 0 && is_primitive(&b.binary_name);
         match (a_primitive, b_primitive) {
-            (true, true) => widens(&a.binary_name, &b.binary_name),
+            (true, true) => primitive_widens(&a.binary_name, &b.binary_name),
             (false, false) => {
                 !self.is_type_variable(&a.binary_name)
                     && !self.is_type_variable(&b.binary_name)
@@ -473,6 +473,30 @@ pub fn subtype_verdict(resolver: &dyn TypeResolver, sub: &TypeRef, sup: &TypeRef
         Verdict::Yes => Some(true),
         Verdict::No => Some(false),
         Verdict::Unknown => None,
+    }
+}
+
+/// Whether `lambda` provably can NOT be passed where `param` is declared: `param` is no functional
+/// interface at all, or one whose single abstract method takes a different number of parameters than
+/// the lambda declares.
+///
+/// The verdict applicability gives a lambda argument, for a caller judging one position at a time
+/// (the argument-type check) — so the two never disagree. `false` whenever the classpath cannot say:
+/// a type variable, an unreadable type, an interface whose hierarchy is not fully known.
+pub fn lambda_refused(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    lambda: &Node,
+    param: &TypeRef,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> bool {
+    let ctx = Ctx { root: *root, bytes: source.as_bytes(), resolver, symbols, cache, depth: Cell::new(0) };
+    match ctx.functional_target(param) {
+        Target::Functional(sam_arity) => lambda_arity(lambda).is_some_and(|n| n != sam_arity),
+        Target::NotFunctional => true,
+        Target::Unknown => false,
     }
 }
 
@@ -565,7 +589,7 @@ fn one_dim_less(ty: &TypeRef) -> TypeRef {
 }
 
 /// Primitive widening (JLS §5.1.2), identity included.
-fn widens(from: &str, to: &str) -> bool {
+pub fn primitive_widens(from: &str, to: &str) -> bool {
     from == to
         || matches!(
             (from, to),
@@ -801,11 +825,11 @@ mod tests {
 
     #[test]
     fn primitive_widening_is_ordered() {
-        assert!(widens("int", "long"));
-        assert!(widens("char", "int"));
-        assert!(widens("int", "int"));
-        assert!(!widens("long", "int"));
-        assert!(!widens("boolean", "int"));
-        assert!(!widens("char", "short"));
+        assert!(primitive_widens("int", "long"));
+        assert!(primitive_widens("char", "int"));
+        assert!(primitive_widens("int", "int"));
+        assert!(!primitive_widens("long", "int"));
+        assert!(!primitive_widens("boolean", "int"));
+        assert!(!primitive_widens("char", "short"));
     }
 }

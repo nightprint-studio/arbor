@@ -160,6 +160,9 @@ pub enum CheckId {
     DuplicateInterface,
     /// Two `import`s binding the same simple name to different types.
     ImportCollision,
+    /// A simple name two on-demand imports both supply, with nothing closer to decide between them
+    /// (javac's `ref.ambiguous`).
+    AmbiguousReference,
 
     // ── pure-AST: constructors & records ─────────────────────────────────────────
     /// A constructor that delegates to itself (directly or via a cycle).
@@ -318,6 +321,7 @@ impl CheckId {
             DuplicateDeclaration => "duplicate-declaration",
             DuplicateInterface => "duplicate-interface",
             ImportCollision => "import-collision",
+            AmbiguousReference => "ambiguous-reference",
             RecursiveConstructor => "recursive-constructor",
             ReferenceBeforeConstructor => "reference-before-constructor",
             RecordConstructor => "record-constructor",
@@ -457,6 +461,7 @@ impl CheckId {
             DuplicateDeclaration,
             DuplicateInterface,
             ImportCollision,
+            AmbiguousReference,
             RecursiveConstructor,
             ReferenceBeforeConstructor,
             RecordConstructor,

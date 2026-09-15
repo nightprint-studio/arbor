@@ -71,7 +71,7 @@ fn integral_selector(cond: Node, bytes: &[u8]) -> Option<&'static str> {
         return None;
     }
     let name = inner.utf8_text(bytes).ok()?;
-    let ty = declared_type_text(inner, name, bytes)?;
+    let ty = crate::support::scopes::declared_type_text(inner, name, bytes, true)?;
     ["int", "short", "byte", "char"].into_iter().find(|p| *p == ty)
 }
 
@@ -145,62 +145,11 @@ fn selector_primitive(cond: Node, bytes: &[u8]) -> Option<&'static str> {
         // A bare name: resolve its declared type via a scope walk.
         "identifier" => {
             let name = inner.utf8_text(bytes).ok()?;
-            let ty = declared_type_text(inner, name, bytes)?;
+            let ty = crate::support::scopes::declared_type_text(inner, name, bytes, true)?;
             FORBIDDEN_SELECTOR.iter().copied().find(|&p| p == ty)
         }
         _ => None,
     }
-}
-
-/// The declared type text of `name` as visible at `use_node`: a method parameter, or a local
-/// variable declared before the use, or a field of the enclosing type. Walks ancestor scopes — a
-/// small, syntactic subset of the inference engine's local resolution (enough for primitive
-/// selectors).
-fn declared_type_text(use_node: Node, name: &str, bytes: &[u8]) -> Option<String> {
-    let use_start = use_node.start_byte();
-    let mut scope = use_node.parent();
-    while let Some(s) = scope {
-        // parameters
-        if let Some(params) = s.child_by_field_name("parameters") {
-            let mut pw = params.walk();
-            for p in params.named_children(&mut pw) {
-                if matches!(p.kind(), "formal_parameter" | "spread_parameter") {
-                    if p.child_by_field_name("name").and_then(|n| n.utf8_text(bytes).ok()) == Some(name) {
-                        return p.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok()).map(str::to_string);
-                    }
-                }
-            }
-        }
-        // locals + fields declared directly in this scope, before the use.
-        let mut cw = s.walk();
-        for c in s.named_children(&mut cw) {
-            if c.start_byte() >= use_start {
-                break;
-            }
-            if matches!(c.kind(), "local_variable_declaration" | "field_declaration") {
-                if let Some(t) = declarator_type(c, name, bytes) {
-                    return Some(t);
-                }
-            }
-        }
-        scope = s.parent();
-    }
-    None
-}
-
-/// The declared type text of a `local_variable_declaration` / `field_declaration` if it declares
-/// `name`.
-fn declarator_type(decl: Node, name: &str, bytes: &[u8]) -> Option<String> {
-    let ty = decl.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok())?;
-    let mut dw = decl.walk();
-    for d in decl.named_children(&mut dw) {
-        if d.kind() == "variable_declarator"
-            && d.child_by_field_name("name").and_then(|n| n.utf8_text(bytes).ok()) == Some(name)
-        {
-            return Some(ty.to_string());
-        }
-    }
-    None
 }
 
 // ── switch-expression value production (pure AST) ─────────────────────────────

@@ -4,6 +4,7 @@
 //!   * **`inheritance_errors`** — an illegal `extends` / `implements`: a class extending a `final`
 //!     type, a record, an enum, or an interface; a class implementing a non-interface; an interface
 //!     extending a non-interface.
+//!     A generic class whose superclass is a `Throwable` is refused here too (JLS §8.1.2).
 //!   * **`missing_abstract_impls`** — a concrete class that leaves an inherited abstract method
 //!     unimplemented (`class X implements Runnable {}` with no `run()`).
 //!
@@ -20,16 +21,19 @@
 //! supertypes carry default flags until the symbol model grows a type-kind, so they're a
 //! conservative miss, never a false positive.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use bennu_java::prelude::{extract_symbols, ClassMembers, FileSymbols, Member, MemberKind, TypeResolver, Visibility};
+use bennu_java::prelude::{extract_symbols, ClassMembers, FileSymbols, Member, TypeResolver, Visibility};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
 use crate::engine::check_id::CheckId;
+use crate::hierarchy::obligations::{declared_provision, indexed_provision, obligations, unmet, Provision};
 use crate::support::nodes::simple_name;
 use crate::support::supertypes;
-use crate::support::walk::{for_each_supertype, hierarchy_fully_known};
+use crate::support::walk::hierarchy_fully_known;
+
+const THROWABLE: &str = "java/lang/Throwable";
 
 // ── extends / implements legality ────────────────────────────────────────────
 
@@ -54,6 +58,21 @@ pub fn inheritance_errors_in(
         match n.kind() {
             "class_declaration" | "enum_declaration" | "record_declaration" => {
                 check_class_supertypes(n, bytes, symbols, resolver, &mut out);
+            }
+            // `new T() { … }` declares a subclass of `T`, and a `final` class has none.
+            "object_creation_expression" if class_body_of(n).is_some() && !crate::support::nodes::is_qualified_creation(n) => {
+                let Some(ty) = n.child_by_field_name("type") else { continue };
+                let Ok(text) = ty.utf8_text(bytes) else { continue };
+                let Some(binary) = crate::support::resolve::type_binary_at(text, n, bytes, symbols, resolver) else {
+                    continue;
+                };
+                let Some(cm) = resolver.members_of(&binary) else { continue };
+                if !cm.flags.is_interface && (cm.flags.is_final || cm.flags.is_record) {
+                    out.push(CheckId::IllegalInheritance.at(
+                        ty,
+                        format!("Cannot inherit from final `{}` — not even anonymously", simple_name(&binary)),
+                    ));
+                }
             }
             "interface_declaration" => {
                 for sup in supertypes::interfaces(n, bytes) {
@@ -101,6 +120,17 @@ fn check_class_supertypes(
             };
             if let Some(m) = msg {
                 out.push(CheckId::IllegalInheritance.at(sup.node, m));
+            }
+            // A generic class may not be a `Throwable` (JLS §8.1.2): a `catch` could not tell its
+            // parameterizations apart at run time.
+            if n.child_by_field_name("type_parameters").is_some() {
+                let binary = binary_of(&sup.text, n, bytes, symbols, resolver);
+                if binary == THROWABLE || crate::support::walk::reaches(resolver, &binary, THROWABLE) {
+                    out.push(CheckId::IllegalGenericUsage.at(
+                        sup.node,
+                        format!("A generic class cannot extend `{}`, a `Throwable`", simple_name(&binary)),
+                    ));
+                }
             }
         }
     }
@@ -153,11 +183,97 @@ pub fn missing_abstract_impls_in(
     let object_methods = object_method_names(resolver);
     let mut out = Vec::new();
     for &n in nodes {
-        if n.kind() == "class_declaration" && !is_abstract(n, bytes) {
-            check_missing_impls(n, bytes, symbols, resolver, &object_methods, &mut out);
+        match n.kind() {
+            "class_declaration" if !is_abstract(n, bytes) => {
+                check_missing_impls(n, bytes, symbols, resolver, &object_methods, &mut out)
+            }
+            "object_creation_expression" => {
+                check_anonymous_impls(n, bytes, symbols, resolver, &object_methods, &mut out)
+            }
+            _ => {}
         }
     }
     out
+}
+
+/// `new T() { … }` — an anonymous class is never abstract, so it owes every abstract method `T`'s
+/// hierarchy leaves, exactly like a named concrete class, and is judged the same way: by signature.
+fn check_anonymous_impls(
+    n: Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    object_methods: &HashSet<String>,
+    out: &mut Vec<Diagnostic>,
+) {
+    if crate::support::nodes::is_qualified_creation(n) {
+        return;
+    }
+    let Some(body) = class_body_of(n) else { return };
+    let Some(ty) = n.child_by_field_name("type") else { return };
+    let Ok(text) = ty.utf8_text(bytes) else { return };
+    let Some(binary) = crate::support::resolve::type_binary(text, symbols, resolver) else { return };
+    // An annotated member may be one that invents methods (Lombok): what the body provides is then
+    // not readable off the tree.
+    if !hierarchy_fully_known(resolver, &binary) || has_annotated_member(body) {
+        return;
+    }
+    let (required, mut provided) = obligations(std::slice::from_ref(&binary), resolver, object_methods);
+    add_declared(body, bytes, symbols, resolver, &mut provided);
+    for m in unmet(&required, &provided, resolver) {
+        out.push(CheckId::MissingAbstractMethod.at(
+            ty,
+            format!(
+                "Anonymous `{}` does not implement abstract method `{}()`",
+                simple_name(&binary),
+                m.name
+            ),
+        ));
+    }
+}
+
+/// Every method a type body declares, as what it provides.
+fn add_declared(
+    body: Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    provided: &mut HashMap<String, Vec<Provision>>,
+) {
+    let mut c = body.walk();
+    let methods: Vec<Node> = body.named_children(&mut c).filter(|m| m.kind() == "method_declaration").collect();
+    for member in methods {
+        if let Some(name) = member.child_by_field_name("name").and_then(|m| m.utf8_text(bytes).ok()) {
+            provided
+                .entry(name.to_string())
+                .or_default()
+                .push(declared_provision(member, bytes, symbols, resolver));
+        }
+    }
+}
+
+fn class_body_of(n: Node) -> Option<Node> {
+    let mut c = n.walk();
+    let body = n.named_children(&mut c).find(|child| child.kind() == "class_body");
+    body
+}
+
+/// Whether any member of an anonymous `body` carries an annotation.
+fn has_annotated_member(body: Node) -> bool {
+    let mut c = body.walk();
+    for member in body.named_children(&mut c) {
+        let mut mc = member.walk();
+        for part in member.named_children(&mut mc) {
+            if part.kind() != "modifiers" {
+                continue;
+            }
+            let mut pc = part.walk();
+            if part.named_children(&mut pc).any(|m| matches!(m.kind(), "annotation" | "marker_annotation")) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn check_missing_impls(
@@ -183,30 +299,16 @@ fn check_missing_impls(
         return;
     }
 
-    // Required abstract method names across all supertypes, and the concrete ones already provided.
-    let mut required: HashSet<String> = HashSet::new();
-    let mut provided: HashSet<String> = object_methods.clone();
-    for s in &supers {
-        for_each_supertype(resolver, s, &mut |_bn, cm| {
-            for m in &cm.methods {
-                if m.kind != MemberKind::Method || is_ctor(&m.name) {
-                    continue;
-                }
-                if is_abstract_requirement(cm, m) {
-                    required.insert(m.name.clone());
-                } else {
-                    provided.insert(m.name.clone());
-                }
-            }
-        });
-    }
-    // The class's own declared methods satisfy requirements too. Found by POSITION: guava's
-    // `Maps.java` declares two classes called `KeySet` and `ConcurrentHashMultiset.java` two called
-    // `EntrySet`, so a search by simple name read one class's methods as the other's — and eight
-    // guava classes were reported for not implementing methods they declare on themselves.
+    // Required abstract methods across all supertypes, and the concrete ones already provided.
+    let (required, mut provided) = obligations(&supers, resolver, object_methods);
+    // The class's own declared methods satisfy requirements too — read off THIS declaration's body.
+    // Found by POSITION: guava's `Maps.java` declares two classes called `KeySet` and
+    // `ConcurrentHashMultiset.java` two called `EntrySet`, so a search by simple name read one class's
+    // methods as the other's — and eight guava classes were reported for not implementing methods
+    // they declare on themselves.
     let Some(td) = bennu_java::prelude::type_decl_at(&n, symbols) else { return };
-    for m in &td.methods {
-        provided.insert(m.name.clone());
+    if let Some(body) = n.child_by_field_name("body") {
+        add_declared(body, bytes, symbols, resolver, &mut provided);
     }
     // And the members nobody wrote. A Lombok accessor exists only in the INDEX — `@Getter` with
     // `@Accessors(fluent = true)` on a field `alias` is the method `alias()`, and the tree above
@@ -217,8 +319,11 @@ fn check_missing_impls(
     // the two `EntrySet`s of one file apart, which is the reason this reads the tree in the first
     // place.
     if let Some(cm) = resolver.members_of(&td.fqn.replace('.', "/")) {
-        for m in &cm.methods {
-            provided.insert(m.name.clone());
+        // Only the names the body does not declare: for those the tree above already answered, with
+        // their return types — the index's copy would count as a match whatever they return.
+        let declared: HashSet<&str> = td.methods.iter().map(|m| m.name.as_str()).collect();
+        for m in cm.methods.iter().filter(|m| !declared.contains(m.name.as_str())) {
+            provided.entry(m.name.clone()).or_default().push(indexed_provision(m, resolver));
         }
     } else if generates_methods(n, bytes) {
         // The index cannot answer for this class — a buffer that has not been indexed yet — and it
@@ -229,12 +334,10 @@ fn check_missing_impls(
 
     let name_node = n.child_by_field_name("name");
     let cls = class_name(n, bytes).unwrap_or("this class");
-    let mut missing: Vec<&String> = required.difference(&provided).collect();
-    missing.sort();
-    for m in missing {
+    for m in unmet(&required, &provided, resolver) {
         out.push(CheckId::MissingAbstractMethod.at(
             name_node.unwrap_or(n),
-            format!("`{cls}` is not abstract and does not implement abstract method `{m}()`"),
+            format!("`{cls}` is not abstract and does not implement abstract method `{}()`", m.name),
         ));
     }
 }
@@ -579,5 +682,59 @@ mod tests {
     #[test]
     fn unknown_hierarchy_is_not_flagged() {
         assert!(abs("class X extends Mystery implements Task {}").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod generic_throwable_tests {
+    use super::*;
+    use bennu_java::prelude::{ClassFlags, Import, TypeRef};
+    use std::sync::Arc;
+
+    struct Resolver(HashMap<String, ClassMembers>);
+
+    impl TypeResolver for Resolver {
+        fn members_of(&self, binary: &str) -> Option<Arc<ClassMembers>> {
+            self.0.get(binary).cloned().map(Arc::new)
+        }
+        fn resolve_simple_name(&self, name: &str, _imports: &[Import]) -> Option<String> {
+            ["Object", "Throwable", "Exception"].contains(&name).then(|| format!("java/lang/{name}"))
+        }
+    }
+
+    fn class(superclass: Option<&str>) -> ClassMembers {
+        ClassMembers {
+            type_params: Vec::new(),
+            superclass: superclass.map(TypeRef::simple),
+            interfaces: Vec::new(),
+            methods: Vec::new(),
+            fields: Vec::new(),
+            flags: ClassFlags::default(),
+        }
+    }
+
+    fn resolver() -> Resolver {
+        let mut members = HashMap::new();
+        members.insert("java/lang/Object".to_string(), class(None));
+        members.insert("java/lang/Throwable".to_string(), class(Some("java/lang/Object")));
+        members.insert("java/lang/Exception".to_string(), class(Some("java/lang/Throwable")));
+        Resolver(members)
+    }
+
+    fn messages(source: &str) -> Vec<String> {
+        inheritance_errors(source, &resolver()).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn a_generic_class_extending_an_exception_is_flagged() {
+        let d = messages("class Failure<X> extends Exception { }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("generic class cannot extend `Exception`"), "{d:?}");
+    }
+
+    #[test]
+    fn a_plain_exception_or_a_generic_non_throwable_is_ok() {
+        assert!(messages("class Failure extends Exception { }").is_empty());
+        assert!(messages("class Box<X> extends Object { }").is_empty());
     }
 }

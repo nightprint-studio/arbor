@@ -2,6 +2,7 @@
 
 pub mod inherit_cycle;
 pub mod inheritance;
+pub mod obligations;
 pub mod override_access;
 pub mod override_return;
 pub mod sealed;

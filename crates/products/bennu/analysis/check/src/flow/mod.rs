@@ -2,7 +2,9 @@
 
 pub mod branches;
 pub mod dataflow;
+pub mod definite;
 pub mod expr_lint;
 pub mod finals;
+pub mod qualified_finals;
 pub mod reachable;
 pub mod returns;

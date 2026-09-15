@@ -144,6 +144,22 @@ impl JdkMemberIndex {
 }
 
 impl MemberIndex for JdkMemberIndex {
+    // ⚠️ Every defaulted method of `MemberIndex` has to be forwarded here: a missing one compiles,
+    // and the wrapped source is then never asked — `class_annotations` was answering `None` for the
+    // whole JDK, so no check could read a `@Target` or a `@Repeatable`.
+    fn class_annotations(
+        &self,
+        binary_name: &str,
+    ) -> Option<bennu_classpath::prelude::ClassAnnotations> {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        guard.source.class_annotations(binary_name)
+    }
+
+    fn package_exists(&self, package: &str) -> Option<bool> {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        guard.source.package_exists(package)
+    }
+
     fn members_of(&self, binary_name: &str) -> Option<ClassMembers> {
         // A flush snapshot is taken under the lock but written after releasing it, so the disk I/O
         // never blocks a concurrent lookup.

@@ -272,6 +272,12 @@ pub trait MemberIndex {
     fn class_annotations(&self, _binary_name: &str) -> Option<crate::annotations::ClassAnnotations> {
         None
     }
+
+    /// Whether any class lives in `package` (slash form) or below it. `None` when this index cannot
+    /// enumerate its classes — which must be read as "not known", never as "no such package".
+    fn package_exists(&self, _package: &str) -> Option<bool> {
+        None
+    }
 }
 
 /// Adapt any [`ClassSource`](crate::source::ClassSource) into a [`MemberIndex`]: the
@@ -281,11 +287,15 @@ pub trait MemberIndex {
 /// `members_of` total.
 pub struct SourceMemberIndex<S: crate::source::ClassSource> {
     source: S,
+    /// Every package the source holds a class in, plus each of their parents — built on the first
+    /// [`MemberIndex::package_exists`] question, because enumerating a JVM image costs a walk of
+    /// every resource in it and most sessions never ask.
+    packages: std::sync::OnceLock<std::collections::HashSet<String>>,
 }
 
 impl<S: crate::source::ClassSource> SourceMemberIndex<S> {
     pub fn new(source: S) -> Self {
-        Self { source }
+        Self { source, packages: std::sync::OnceLock::new() }
     }
 
     /// The wrapped source (e.g. to add more probe modules or chain further).
@@ -310,6 +320,31 @@ impl<S: crate::source::ClassSource> MemberIndex for SourceMemberIndex<S> {
             _ => None,
         }
     }
+
+    fn package_exists(&self, package: &str) -> Option<bool> {
+        let packages = self.packages.get_or_init(|| packages_of(self.source.class_names()));
+        // A source that lists nothing cannot tell an empty package from one it never enumerated.
+        if packages.is_empty() {
+            return None;
+        }
+        Some(packages.contains(package.trim_matches('/')))
+    }
+}
+
+/// Every package a list of binary class names occupies, and every ancestor of those packages —
+/// `java/util/List` puts both `java/util` and `java` in the set.
+fn packages_of(class_names: Vec<String>) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    for name in class_names {
+        let mut package = name.as_str();
+        while let Some((parent, _)) = package.rsplit_once('/') {
+            if !out.insert(parent.to_string()) {
+                break; // its ancestors went in with it the first time
+            }
+            package = parent;
+        }
+    }
+    out
 }
 
 // A boxed `ClassSource` is itself a `ClassSource`, so `SourceMemberIndex<Box<dyn

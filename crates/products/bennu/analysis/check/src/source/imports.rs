@@ -43,9 +43,9 @@ pub fn unresolved_imports(
         if child.kind() != "import_declaration" {
             continue;
         }
-        let Ok(text) = child.utf8_text(bytes) else { continue };
-        // Skip `import static …` and wildcard `import a.b.*;` — not a single resolvable type.
-        if text.contains("static") || text.trim_end_matches(';').trim_end().ends_with('*') {
+        let (is_static, is_star) = import_shape(child);
+        // `import static …` names members, and `unresolved_static_imports` judges those.
+        if is_static {
             continue;
         }
         let Some(name_node) = dotted_name(child) else { continue };
@@ -53,6 +53,22 @@ pub fn unresolved_imports(
         // Only adjudicate non-`java.*` imports when the classpath is known-complete (else a real
         // library type we didn't index would be mis-flagged). `java.*` is always JDK-authoritative.
         if !classpath_complete && !is_java_core_import(dotted) {
+            continue;
+        }
+        if is_star {
+            // `import a.b.*;` brings in a package's types — or a TYPE's member types, which is why
+            // the type reading is tried first. Only a package the resolver enumerated and found
+            // empty is reported: one it cannot list says nothing.
+            if resolves_import(dotted, resolver) {
+                continue;
+            }
+            if resolver.package_exists(&dotted.replace('.', "/")) == Some(false) {
+                out.push(CheckId::UnresolvedImport.span(
+                    name_node.start_byte(),
+                    name_node.end_byte(),
+                    format!("Package `{dotted}` does not exist"),
+                ));
+            }
             continue;
         }
         if !resolves_import(dotted, resolver) {
@@ -85,53 +101,89 @@ fn dotted_name(import: Node) -> Option<Node> {
     None
 }
 
+/// Whether an `import_declaration` is `static`, and whether it ends in `.*` — read off the tree's
+/// own tokens, so a package segment that merely CONTAINS the word (`import com.staticx.Foo;`) is not
+/// taken for the keyword.
+fn import_shape(import: Node) -> (bool, bool) {
+    let mut c = import.walk();
+    let mut shape = (false, false);
+    for part in import.children(&mut c) {
+        match part.kind() {
+            "static" => shape.0 = true,
+            "asterisk" => shape.1 = true,
+            _ => {}
+        }
+    }
+    shape
+}
+
 /// Whether a dotted import path resolves to a known class, trying each package/inner split so a
 /// nested type (`a.b.Outer.Inner` → `a/b/Outer$Inner`) resolves. Unknown at every split → `false`.
 fn resolves_import(dotted: &str, resolver: &dyn TypeResolver) -> bool {
-    let segs: Vec<&str> = dotted.split('.').collect();
-    if segs.len() < 2 {
+    if dotted.split('.').count() < 2 {
         return true; // a bare name import is unusual; don't second-guess it
     }
-    // Split point k: first k segments are the package (`/`-joined), the rest the (possibly nested)
-    // class (`$`-joined). Start from the deepest package (plain `a/b/C`) inward.
-    for k in (1..segs.len()).rev() {
-        let binary = format!("{}/{}", segs[..k].join("/"), segs[k..].join("$"));
-        if resolver.members_of(&binary).is_some() {
-            return true;
-        }
-    }
-    false
+    import_binary(dotted, resolver).is_some()
 }
 
-/// Flag `import static a.b.C.member;` whose OWNER is a project type that declares no such member.
+/// The binary name a dotted import path resolves to, trying each package/inner split: the first `k`
+/// segments are the package (`/`-joined), the rest the (possibly nested) class (`$`-joined),
+/// starting from the deepest package — which is also the project index's own `/` spelling of a
+/// nested type.
+fn import_binary(dotted: &str, resolver: &dyn TypeResolver) -> Option<String> {
+    let segs: Vec<&str> = dotted.split('.').collect();
+    (1..segs.len()).rev().find_map(|k| {
+        let binary = format!("{}/{}", segs[..k].join("/"), segs[k..].join("$"));
+        resolver.members_of(&binary).map(|_| binary)
+    })
+}
+
+/// Flag an `import static …` that names nothing: an OWNER type that does not exist, or a member the
+/// owner does not declare.
 ///
 /// javac reports this as `cannot find symbol: static <member>` at the import line, and it is what a
 /// half-applied rename leaves behind: the declaration moves, the import that named it does not.
 /// It was the single largest class of breakage the validator could not see — on a deliberately
 /// broken project, 792 errors across 143 files that Bennu was silent about.
 ///
-/// Adjudicated ONLY when the owner is a type the PROJECT declares and whose members are therefore
-/// known exactly. A library owner is left alone for the same reason [`unresolved_imports`] gates on
-/// `classpath_complete`: an incomplete member view would report an import that is perfectly valid.
-/// A wildcard static import names no member and is skipped.
+/// Who may be judged follows [`unresolved_imports`]: a project owner always, a `java.*` owner always
+/// (the JDK tier is authoritative), anything else only on a complete classpath. And a member is
+/// reported absent only over a hierarchy read to the end — a static import reaches inherited members
+/// too, so `import static p.Sub.CONST;` for a constant of `p.Base` is legal.
 pub fn unresolved_static_imports(
     root: Node,
     source: &str,
     resolver: &dyn TypeResolver,
+    classpath_complete: bool,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let symbols = bennu_java::prelude::extract_symbols(source);
     let mut out = Vec::new();
     for target in bennu_java::prelude::static_import_targets(&symbols.imports) {
+        let owner_dotted = target.owner_binary.replace('/', ".");
+        let judged = classpath_complete
+            || is_java_core_import(&owner_dotted)
+            || resolver.is_project_type(&target.owner_binary);
+        let Some(owner) = import_binary(&owner_dotted, resolver) else {
+            if judged {
+                if let Some(span) = static_import_owner_span(root, bytes, &owner_dotted) {
+                    out.push(CheckId::UnresolvedImport.span(
+                        span.0,
+                        span.1,
+                        format!("Cannot resolve `{owner_dotted}` — the static import names no type"),
+                    ));
+                }
+            }
+            continue;
+        };
         // `import static a.b.C.*;` names no single member.
         let Some(member) = target.member.clone() else { continue };
-        if !resolver.is_project_type(&target.owner_binary) {
+        if !judged || !crate::support::walk::hierarchy_fully_known(resolver, &owner) {
             continue;
         }
-        let Some(cm) = resolver.members_of(&target.owner_binary) else { continue };
-        let declared = cm.methods.iter().any(|m| m.name == member)
-            || cm.fields.iter().any(|f| f.name == member)
-            || declares_member_type(resolver, &target.owner_binary, &member);
+        let declared = crate::support::walk::hierarchy_has(resolver, &owner, &|cm| {
+            cm.methods.iter().any(|m| m.name == member) || cm.fields.iter().any(|f| f.name == member)
+        }) || declares_member_type(resolver, &owner, &member);
         if declared {
             continue;
         }
@@ -157,6 +209,22 @@ fn declares_member_type(resolver: &dyn TypeResolver, owner: &str, member: &str) 
         .iter()
         .any(|binary| resolver.is_project_type(binary) || resolver.members_of(binary).is_some())
         || bennu_java::prelude::inherited_member_type_of(resolver, owner, member).is_some()
+}
+
+/// The byte span of the owner `a.b.C` inside the `import static a.b.C.…;` that names it.
+fn static_import_owner_span(root: Node, bytes: &[u8], owner_dotted: &str) -> Option<(usize, usize)> {
+    let mut c = root.walk();
+    let found = root.children(&mut c).find_map(|child| {
+        if child.kind() != "import_declaration" || !import_shape(child).0 {
+            return None;
+        }
+        let name = dotted_name(child)?;
+        let text = name.utf8_text(bytes).ok()?;
+        let owns = text == owner_dotted
+            || text.strip_prefix(owner_dotted).is_some_and(|rest| rest.starts_with('.'));
+        owns.then(|| (name.start_byte(), name.start_byte() + owner_dotted.len()))
+    });
+    found
 }
 
 /// The byte span of `member` inside the `import static …` declaration that names it — the LAST
@@ -509,8 +577,44 @@ mod tests {
 
     #[test]
     fn static_and_wildcard_imports_are_not_resolution_checked() {
+        // `Idx` cannot enumerate packages, so a wildcard it does not resolve is still left alone.
         let src = "import static java.lang.Math.max;\nimport com.acme.*;\nclass C {}";
         assert!(unresolved(src, &[]).is_empty());
+    }
+
+    /// A resolver that DOES list packages: `java/util` exists, `com/nowhere` does not.
+    struct Packages;
+    impl TypeResolver for Packages {
+        fn members_of(&self, _b: &str) -> Option<std::sync::Arc<bennu_java::prelude::ClassMembers>> {
+            None
+        }
+        fn resolve_simple_name(&self, _n: &str, _i: &[bennu_java::prelude::Import]) -> Option<String> {
+            None
+        }
+        fn package_exists(&self, package: &str) -> Option<bool> {
+            Some(matches!(package, "java" | "java/util"))
+        }
+    }
+
+    fn wildcard(src: &str, complete: bool) -> Vec<String> {
+        let tree = parse(src);
+        unresolved_imports(tree.root_node(), src, &Packages, complete)
+            .into_iter()
+            .map(|d| d.message)
+            .collect()
+    }
+
+    #[test]
+    fn a_wildcard_of_a_package_nothing_holds_is_reported() {
+        let d = wildcard("import com.nowhere.*;\nclass C {}", true);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("com.nowhere"), "{d:?}");
+        assert!(wildcard("import java.util.*;\nclass C {}", true).is_empty());
+    }
+
+    #[test]
+    fn a_library_wildcard_waits_for_a_complete_classpath() {
+        assert!(wildcard("import com.nowhere.*;\nclass C {}", false).is_empty());
     }
 
     #[test]
@@ -673,10 +777,41 @@ mod static_import_tests {
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(&tree_sitter_java::LANGUAGE.into()).unwrap();
         let tree = parser.parse(src, None).unwrap();
-        unresolved_static_imports(tree.root_node(), src, &resolver())
+        unresolved_static_imports(tree.root_node(), src, &resolver(), false)
             .into_iter()
             .map(|d| d.message)
             .collect()
+    }
+
+    /// A static import reaches inherited members, so a constant declared on the owner's superclass
+    /// is not missing.
+    #[test]
+    fn a_member_inherited_by_the_owner_is_silent() {
+        let mut r = resolver();
+        r.0.insert(
+            "p/Sub".to_string(),
+            ClassMembers {
+                type_params: Vec::new(),
+                superclass: Some(TypeRef::simple("p/Fixture")),
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: Vec::new(),
+                flags: Default::default(),
+            },
+        );
+        let src = "package q;\nimport static p.Sub.DB_ROW;\nclass A {}\n";
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_java::LANGUAGE.into()).unwrap();
+        let tree = parser.parse(src, None).unwrap();
+        assert!(unresolved_static_imports(tree.root_node(), src, &r, false).is_empty());
+    }
+
+    /// A `java.*` owner is judged like a `java.*` import: the JDK is authoritative for it.
+    #[test]
+    fn a_jdk_owner_that_does_not_exist_is_reported() {
+        let out = run("package q;\nimport static java.util.NoSuchType.member;\nclass A {}\n");
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(out[0].contains("java.util.NoSuchType"), "{out:?}");
     }
 
     #[test]

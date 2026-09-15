@@ -73,6 +73,19 @@ pub fn type_binary_at(
     type_binary_in(text, enclosing_scope(node, bytes, symbols), symbols, resolver)
 }
 
+/// The binary type a written type NODE names, its type arguments dropped — `List<String>` reads as
+/// `java/util/List`, through the scope the node sits in.
+pub(crate) fn written_type_binary(
+    ty: tree_sitter::Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<String> {
+    let text = ty.utf8_text(bytes).ok()?;
+    let erased = text.split('<').next().unwrap_or(text).trim();
+    type_binary_at(erased, ty, bytes, symbols, resolver)
+}
+
 /// The binary type a `recv.method(…)` call is made ON: the receiver VALUE's inferred type, else —
 /// for a static call `Util.convert(…)` — the TYPE the receiver names. `None` for a bare call.
 ///
@@ -99,8 +112,9 @@ pub(crate) fn call_receiver_binary(
 }
 
 /// The type a receiver like `Util` / `java.util.Collections` / `Outer.Inner` names, when it cannot
-/// be a value — see [`call_receiver_binary`].
-fn static_receiver_binary(
+/// be a value — see [`call_receiver_binary`]. The same reading serves a static field read,
+/// `Util.LIMIT`.
+pub(crate) fn static_receiver_binary(
     obj: tree_sitter::Node,
     bytes: &[u8],
     symbols: &FileSymbols,

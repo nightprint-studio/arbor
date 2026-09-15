@@ -219,38 +219,46 @@ fn unhandled_exception_fixes(
     // `throws` clause or not — the insertion point is just after the `)`, so an existing clause is
     // extended by writing `, X` in front of it… except that it isn't: the existing clause starts
     // with the word `throws`. Read what follows to tell the two apart.
-    let after = source[call.throws_insert..].trim_start();
-    let already_declares = after.starts_with("throws");
-    if already_declares {
-        // Append to the existing list, just after the word `throws`.
-        if let Some(rel) = source[call.throws_insert..].find("throws") {
-            let at = call.throws_insert + rel + "throws".len();
+    //
+    // Only a method or a constructor has a clause to extend: a lambda answers to its target's
+    // signature and an initializer to none, so neither gets this offer.
+    if let Some(throws_insert) = call.throws_insert {
+        let after = source[throws_insert..].trim_start();
+        let already_declares = after.starts_with("throws");
+        if already_declares {
+            // Append to the existing list, just after the word `throws`.
+            if let Some(rel) = source[throws_insert..].find("throws") {
+                let at = throws_insert + rel + "throws".len();
+                out.push(OfferWire {
+                    id: format!("declare-throws:{}", call.exception),
+                    label: format!("Add `{simple}` to the `throws` clause"),
+                    start: at,
+                    end: at,
+                    replacement: format!(" {simple},"),
+                    action: None,
+                    edits: Vec::new(),
+                    select: None,
+                });
+            }
+        } else {
             out.push(OfferWire {
                 id: format!("declare-throws:{}", call.exception),
-                label: format!("Add `{simple}` to the `throws` clause"),
-                start: at,
-                end: at,
-                replacement: format!(" {simple},"),
+                label: format!("Add `throws {simple}` to the method"),
+                start: throws_insert,
+                end: throws_insert,
+                replacement: format!(" throws {simple}"),
                 action: None,
                 edits: Vec::new(),
                 select: None,
             });
         }
-    } else {
-        out.push(OfferWire {
-            id: format!("declare-throws:{}", call.exception),
-            label: format!("Add `throws {simple}` to the method"),
-            start: call.throws_insert,
-            end: call.throws_insert,
-            replacement: format!(" throws {simple}"),
-            action: None,
-            edits: Vec::new(),
-            select: None,
-        });
     }
 
-    // (b) Catch it. The statement, not the call — `byte[] b = try { … }` is not Java.
-    out.extend(surround_with_try(source, call.statement, &call.exception, &simple));
+    // (b) Catch it. The statement, not the call — `byte[] b = try { … }` is not Java — and only where
+    // there is one: a field initializer has no statement to wrap.
+    if let Some(statement) = call.statement {
+        out.extend(surround_with_try(source, statement, &call.exception, &simple));
+    }
     out
 }
 

@@ -142,7 +142,7 @@ pub fn check_file_resolved_incremental(
             // New / changed body → run the per-expression checks over just its nodes; cache them
             // relative to the body start so a later shift replays them at the right place.
             let body_nodes = nodes_in_range(&nodes, bs, be);
-            let diags = run_body_checks(root, &body_nodes, source, &symbols, resolver, &infer);
+            let diags = run_body_checks(root, &body_nodes, source, &symbols, resolver, &infer, ctx.java_major);
             let rel_diags = diags
                 .iter()
                 .map(|d| Diagnostic {
@@ -161,7 +161,7 @@ pub fn check_file_resolved_incremental(
     // The structural remainder (field initializers, initializer blocks, anything outside a top body)
     // is always recomputed fresh — small, and it keeps those expressions covered.
     let outside = nodes_outside_ranges(&nodes, &top_bodies);
-    out.extend(run_body_checks(root, &outside, source, &symbols, resolver, &infer));
+    out.extend(run_body_checks(root, &outside, source, &symbols, resolver, &infer, ctx.java_major));
 
     *cache = IncrementalCache { structural_hash: structural, resolver_rev, bodies: new_bodies };
 
@@ -178,6 +178,7 @@ fn run_body_checks<'a>(
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
     infer: &InferCache,
+    java_major: Option<u32>,
 ) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     out.extend(crate::calls::members::unknown_members_in(root, nodes, source, symbols, resolver, infer));
@@ -185,13 +186,15 @@ fn run_body_checks<'a>(
     out.extend(crate::calls::arity::arity_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::calls::arguments::argument_type_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::typing::casts::type_compat_errors_in(root, nodes, source, symbols, resolver, infer));
+    out.extend(crate::calls::functional::functional_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::switching::enum_switch::enum_switch_errors_in(root, nodes, source, symbols, resolver, infer));
-    out.extend(crate::switching::switch_label_type::switch_label_type_errors_in(root, nodes, source, symbols, resolver, infer));
+    out.extend(crate::switching::switch_label_type::switch_label_type_errors_in(root, nodes, source, symbols, resolver, infer, java_major));
     out.extend(crate::hierarchy::super_method::super_method_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::typing::condition_type::condition_type_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::typing::type_use::type_use_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::typing::narrowing::narrowing_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::throwing::checked_call::checked_call_errors_in(root, nodes, source, symbols, resolver, infer));
+    out.extend(crate::flow::qualified_finals::qualified_final_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::hierarchy::visibility::visibility_errors_in(root, nodes, source, symbols, resolver, infer));
     out.extend(crate::throwing::checked_throw::checked_throw_errors_in(nodes, source, symbols, resolver));
     out.extend(crate::throwing::exceptions::exception_errors_in(nodes, source, symbols, resolver));
@@ -211,14 +214,13 @@ fn run_wholefile_checks<'a>(
 ) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     out.extend(crate::source::imports::unresolved_imports(root, source, resolver, ctx.classpath_complete));
-    out.extend(crate::source::imports::unresolved_static_imports(root, source, resolver));
-    out.extend(crate::typing::types::unresolved_types_in(nodes, source, symbols, resolver));
+    out.extend(crate::source::imports::unresolved_static_imports(root, source, resolver, ctx.classpath_complete));
+    out.extend(crate::typing::types::unresolved_types_in(nodes, source, symbols, resolver, ctx.classpath_complete));
     out.extend(crate::typing::type_arg_arity::type_arg_arity_errors_in(nodes, source, symbols, resolver));
-    out.extend(crate::calls::undefined_var::undefined_var_errors_in(root, nodes, source, symbols, resolver));
+    out.extend(crate::calls::undefined_var::undefined_var_errors_in(root, nodes, source, symbols, resolver, ctx.classpath_complete));
     out.extend(crate::calls::unresolved_call::unresolved_call_errors_in(root, nodes, source, symbols, resolver));
     out.extend(crate::hierarchy::inheritance::inheritance_errors_in(nodes, source, symbols, resolver));
     out.extend(crate::hierarchy::inheritance::missing_abstract_impls_in(nodes, source, symbols, resolver));
-    out.extend(crate::calls::functional::functional_errors_in(nodes, source, symbols, resolver));
     out.extend(crate::decls::constructors::super_constructor_errors_in(nodes, source, symbols, resolver));
     out.extend(crate::flow::finals::final_override_errors_in(nodes, source, symbols, resolver));
     out.extend(crate::hierarchy::override_return::override_return_errors_in(nodes, source, symbols, resolver));

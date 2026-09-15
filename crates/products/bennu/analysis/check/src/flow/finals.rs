@@ -491,43 +491,61 @@ fn check_type_final_overrides(
         crate::support::supertypes::binary(&sup.text, n, bytes, symbols, resolver)
     }));
 
-    // name → the set of erased parameter-type lists of `final`, overridable supertype methods.
+    // name → the erased parameter-type lists of the inherited methods an override would collide
+    // with: `final` ones, `static` ones (an instance method cannot override those) and instance ones
+    // (a static method cannot hide those). Package-private ones are left out — whether they are
+    // inherited at all depends on the package, which this does not decide.
     let mut final_methods: HashMap<String, Vec<Vec<String>>> = HashMap::new();
+    let mut static_methods: HashMap<String, Vec<Vec<String>>> = HashMap::new();
+    let mut instance_methods: HashMap<String, Vec<Vec<String>>> = HashMap::new();
     for sup in &supers {
         for_each_supertype(resolver, sup, &mut |_bn, cm| {
             for m in &cm.methods {
-                let overridable = m.kind == MemberKind::Method
-                    && m.is_final
-                    && !m.is_static
-                    && m.visibility != Visibility::Private
+                let inherited = m.kind == MemberKind::Method
+                    && !matches!(m.visibility, Visibility::Private | Visibility::Package)
                     && m.name != "<init>"
                     && m.name != "<clinit>";
-                if overridable {
-                    let params = member_param_binaries(m);
-                    final_methods.entry(m.name.clone()).or_default().push(params);
+                if !inherited {
+                    continue;
                 }
+                let params = member_param_binaries(m);
+                let into = match (m.is_static, m.is_final) {
+                    (true, _) => &mut static_methods,
+                    (false, true) => &mut final_methods,
+                    (false, false) => &mut instance_methods,
+                };
+                into.entry(m.name.clone()).or_default().push(params);
             }
         });
     }
-    if final_methods.is_empty() {
+    if final_methods.is_empty() && static_methods.is_empty() && instance_methods.is_empty() {
         return;
     }
 
-    // Each method declared directly in this type: does it override a collected final method?
+    // Each method declared directly in this type: does it collide with a collected one?
     let mut bc = body.walk();
     for m in body.named_children(&mut bc) {
-        if m.kind() != "method_declaration" {
-            continue;
-        }
-        if has_static(m, bytes) || has_visibility(m, bytes, "private") {
-            continue; // static / private methods don't override
+        if m.kind() != "method_declaration" || has_visibility(m, bytes, "private") {
+            continue; // a private method overrides and hides nothing
         }
         let Some(name_node) = m.child_by_field_name("name") else { continue };
         let Some(name) = text(name_node, bytes) else { continue };
-        let Some(candidates) = final_methods.get(&name) else { continue };
+        let collides = |map: &HashMap<String, Vec<Vec<String>>>, params: &[String]| {
+            map.get(&name).is_some_and(|cs| cs.iter().any(|c| c == params))
+        };
         let Some(params) = method_param_binaries(m, bytes, symbols, resolver) else { continue };
-        if candidates.iter().any(|c| *c == params) {
-            out.push(crate::engine::check_id::CheckId::FinalMethodOverride.at(name_node, format!("Cannot override final method `{name}`")));
+        let message = if has_static(m, bytes) {
+            // `static` beside an inherited instance method is not hiding, it is an error (JLS §8.4.8.2).
+            (collides(&instance_methods, &params) || collides(&final_methods, &params))
+                .then(|| format!("Static method `{name}` cannot hide the instance method it would override"))
+        } else if collides(&final_methods, &params) {
+            Some(format!("Cannot override final method `{name}`"))
+        } else {
+            collides(&static_methods, &params)
+                .then(|| format!("`{name}` is static in the supertype, so an instance method cannot override it"))
+        };
+        if let Some(message) = message {
+            out.push(crate::engine::check_id::CheckId::FinalMethodOverride.at(name_node, message));
         }
     }
 }
@@ -803,9 +821,14 @@ mod tests {
         assert!(overrides("class X extends Base { void ok() {} }").is_empty());
     }
 
+    /// A `static` method with an inherited instance method's signature does not hide it: javac
+    /// rejects it (`override.static`), whatever the instance method's modifiers.
     #[test]
-    fn static_method_of_same_name_is_not_an_override() {
-        assert!(overrides("class X extends Base { static void run() {} }").is_empty());
+    fn a_static_method_over_an_inherited_instance_method_is_flagged() {
+        let d = overrides("class X extends Base { static void run() {} }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("Static method `run`"), "{d:?}");
+        assert!(overrides("class X extends Base { static void run(int x) {} }").is_empty());
     }
 
     #[test]

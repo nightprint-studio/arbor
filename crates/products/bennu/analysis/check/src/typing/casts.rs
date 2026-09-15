@@ -14,10 +14,14 @@
 //!   * only value expressions the nominal walk can type (a name, a call, a field, a `new`, a cast) —
 //!     a literal (`1`, `"x"`, `null`) yields no type and is skipped, dodging boxing/widening entirely.
 
-use bennu_java::prelude::{extract_symbols, infer_node_type_cached, FileSymbols, InferCache, TypeResolver};
+use bennu_java::prelude::{
+    extract_symbols, infer_node_type_cached, split_array_dims, FileSymbols, InferCache, TypeRef,
+    TypeResolver,
+};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::support::assignable::{definite_mismatch, spells_its_type, Mismatch};
 use crate::support::nodes::{is_primitive, is_type_var, simple_name};
 
 use crate::support::resolve::type_binary;
@@ -81,34 +85,58 @@ fn check_cast(
         out.push(err(format!("Inconvertible types: cannot cast `{s}` to `{t}`"), ty_node));
         return;
     }
-    let Some(target) = concrete_class(type_text, symbols, resolver) else { return };
-    let Some(source_ty) = concrete_binary(value_ty.binary_name, resolver) else { return };
-    // `java/lang/Object` is the universal supertype: `(Foo) anObject` and `(Object) foo` are always
-    // legal casts (only ever checked at runtime), so skip either direction. This also dodges a project
-    // class whose implicit `extends Object` isn't recorded in the index — the hierarchy walk would
-    // otherwise judge it "unrelated" to Object and wrongly flag `(That) obj`.
-    if source_ty == "java/lang/Object" || target == "java/lang/Object" {
+    if let Some(message) = inconvertible_primitives(type_text, &value_ty) {
+        out.push(err(message, ty_node));
         return;
     }
-    // Both concrete classes, both hierarchies known: a cast is legal only up or down the chain.
-    if !hierarchy_fully_known(resolver, &source_ty) || !hierarchy_fully_known(resolver, &target) {
+    let Some(target) = type_binary(type_text, symbols, resolver) else { return };
+    let to_interface = resolver.members_of(&target).is_some_and(|cm| cm.flags.is_interface);
+    if to_interface && value_ty.dims > 0 {
         return;
     }
-    // Same simple name resolved to two binaries → treat as the same nominal type (resolution
-    // artifact, e.g. an interface-declared return type), never an inconvertible cast.
-    if simple_name(&source_ty) == simple_name(&target) {
-        return;
-    }
-    if !reaches(resolver, &source_ty, &target) && !reaches(resolver, &target, &source_ty) {
+    if provably_inconvertible(&value_ty.binary_name, &target, resolver) {
         out.push(err(
             format!(
                 "Inconvertible types: cannot cast `{}` to `{}`",
-                simple_name(&source_ty),
+                simple_name(&value_ty.binary_name),
                 simple_name(&target)
             ),
             ty_node,
         ));
     }
+}
+
+/// Whether no reference cast converts a value of the class or interface `source` to `target`
+/// (JLS §5.5): a final class to an interface it does not implement — being final, nothing below it
+/// can — or two classes neither of which extends the other. `false` wherever a hierarchy cannot be
+/// read in full. A pattern label is held to the same rule: its type must be castable from the
+/// selector's.
+pub(crate) fn provably_inconvertible(source: &str, target: &str, resolver: &dyn TypeResolver) -> bool {
+    if resolver.members_of(target).is_some_and(|cm| cm.flags.is_interface) {
+        let Some(source_class) = concrete_binary(source.to_string(), resolver) else { return false };
+        return resolver.members_of(&source_class).is_some_and(|cm| cm.flags.is_final)
+            && hierarchy_fully_known(resolver, &source_class)
+            && !reaches(resolver, &source_class, target);
+    }
+    let Some(target) = concrete_binary(target.to_string(), resolver) else { return false };
+    let Some(source) = concrete_binary(source.to_string(), resolver) else { return false };
+    // `java/lang/Object` is the universal supertype: `(Foo) anObject` and `(Object) foo` are always
+    // legal casts (only ever checked at runtime), so skip either direction. This also dodges a project
+    // class whose implicit `extends Object` isn't recorded in the index — the hierarchy walk would
+    // otherwise judge it "unrelated" to Object and wrongly flag `(That) obj`.
+    if source == "java/lang/Object" || target == "java/lang/Object" {
+        return false;
+    }
+    // Both concrete classes, both hierarchies known: a cast is legal only up or down the chain.
+    if !hierarchy_fully_known(resolver, &source) || !hierarchy_fully_known(resolver, &target) {
+        return false;
+    }
+    // Same simple name resolved to two binaries → treat as the same nominal type (resolution
+    // artifact, e.g. an interface-declared return type), never an inconvertible cast.
+    if simple_name(&source) == simple_name(&target) {
+        return false;
+    }
+    !reaches(resolver, &source, &target) && !reaches(resolver, &target, &source)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -124,8 +152,10 @@ fn check_declaration(
 ) {
     let Some(ty_node) = n.child_by_field_name("type") else { return };
     let Ok(type_text) = ty_node.utf8_text(bytes) else { return };
-    if type_text == "var" {
-        return; // inferred — nothing declared to violate
+    // Inferred — nothing declared to violate. `val` too: with Lombok on the classpath it names the
+    // real class `lombok.val`, and read as a type every initializer would be "assigned to `val`".
+    if bennu_java::prelude::is_inferred_type(type_text) {
+        return;
     }
     let mut c = n.walk();
     for d in n.named_children(&mut c) {
@@ -153,6 +183,10 @@ fn check_return(
     let Some(ret) = method.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok()) else {
         return;
     };
+    // `int m()[]` — the old spelling puts the depth after the parameters, not on the type.
+    if method.child_by_field_name("dimensions").is_some() {
+        return;
+    }
     assign_check(root, source, symbols, ret, val, resolver, cache, "returned as", out);
 }
 
@@ -169,6 +203,14 @@ fn assign_check(
     verb: &str,
     out: &mut Vec<Diagnostic>,
 ) {
+    // A switch expression in an assignment context is a poly expression: each of its results is
+    // assigned to the target on its own (JLS §15.28.1), so each is judged as if written there.
+    if val.kind() == "switch_expression" {
+        for result in crate::support::switch_label::switch_results(val) {
+            assign_check(root, source, symbols, target_text, result, resolver, cache, verb, out);
+        }
+        return;
+    }
     // A chain that passes a **function** — a lambda or a method reference — is the one shape whose
     // result type this inference cannot reach: `list.stream().map(X::getId).max(…).orElse(null)` is
     // a `Long` only because `X::getId` says so, and typing a method reference is not something the
@@ -195,13 +237,72 @@ fn assign_check(
         }
         return;
     }
+    // Invariance: the arguments of a parameterized type, where both sides write them.
+    if let Some(refused) =
+        crate::typing::parameterized::parameterized_mismatch(root, source, symbols, target_text, val, resolver, cache)
+    {
+        out.push(err(format!("Incompatible types: `{}` cannot be {verb} `{}`", refused.found, refused.expected), val));
+        return;
+    }
     let Some(value_ty) = infer_node_type_cached(root, source, symbols, &val, resolver, cache)
     else {
         return;
     };
     if let Some((s, t)) = definite_assign_mismatch(&value_ty.binary_name, target_text, symbols, resolver) {
         out.push(err(format!("Incompatible types: `{s}` cannot be {verb} `{t}`"), val));
+        return;
     }
+    if let Some(m) = converted_mismatch(&value_ty, target_text, val, source.as_bytes(), symbols, resolver) {
+        out.push(err(format!("Incompatible types: `{}` cannot be {verb} `{}`", m.found, m.expected), val));
+    }
+}
+
+/// What the class walk leaves alone — boxing, arrays, a primitive meeting a reference — judged by
+/// the rule an argument is judged by ([`crate::support::assignable`]). An assignment allows one
+/// conversion more (JLS §5.2): a constant narrowed to `byte`, `short` or `char`, then boxed. So a
+/// primitive pair stays [`crate::typing::narrowing`]'s, and an integral value into `Byte`, `Short` or
+/// `Character` is not judged.
+fn converted_mismatch(
+    value: &TypeRef,
+    target_text: &str,
+    val: Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<Mismatch> {
+    // `int values[] = …` — the old spelling puts the depth on the name, not on the type.
+    if val.parent().is_some_and(|d| d.child_by_field_name("dimensions").is_some()) {
+        return None;
+    }
+    let target = written_type(target_text, symbols, resolver)?;
+    let primitive = |t: &TypeRef| t.dims == 0 && is_primitive(&t.binary_name);
+    if primitive(value) && primitive(&target) {
+        return None;
+    }
+    let narrowed_constant = primitive(value)
+        && matches!(value.binary_name.as_str(), "byte" | "short" | "char" | "int")
+        && target.dims == 0
+        && matches!(
+            target.binary_name.as_str(),
+            "java/lang/Byte" | "java/lang/Short" | "java/lang/Character"
+        );
+    if narrowed_constant {
+        return None;
+    }
+    // A variable DECLARED `Object` spells its type as surely as `new Object()` does — see
+    // `names_a_declared_object`.
+    let written = spells_its_type(val) || crate::support::assignable::names_a_declared_object(val, bytes);
+    definite_mismatch(value, &target, written, resolver)
+}
+
+/// A declared type as a [`TypeRef`]: the element's binary name (or primitive keyword) and the depth.
+fn written_type(text: &str, symbols: &FileSymbols, resolver: &dyn TypeResolver) -> Option<TypeRef> {
+    let (element, dims) = split_array_dims(text.trim());
+    let binary = match primitive_keyword(element) {
+        Some(p) => p.to_string(),
+        None => type_binary(element, symbols, resolver)?,
+    };
+    Some(TypeRef { dims: u8::try_from(dims).ok()?, ..TypeRef::simple(binary) })
 }
 
 /// A definite assignment/return mismatch: `(value_display, target_display)` when `value_binary` can't
@@ -248,6 +349,25 @@ fn definite_assign_mismatch(
     }
     (!reaches(resolver, &source_ty, &target))
         .then(|| (simple_name(&source_ty).to_string(), simple_name(&target).to_string()))
+}
+
+/// A cast no primitive conversion allows: `boolean` to or from any other primitive, or an array of one
+/// primitive element type to an array of another at the same depth (`(long[]) intArray`).
+fn inconvertible_primitives(type_text: &str, value: &TypeRef) -> Option<String> {
+    let (element, dims) = split_array_dims(type_text.trim());
+    let target = primitive_keyword(element)?;
+    let v = value.binary_name.as_str();
+    if !is_primitive(v) || v == "void" || usize::from(value.dims) != dims {
+        return None;
+    }
+    let incompatible = match dims {
+        0 => (target == "boolean") != (v == "boolean"),
+        _ => target != v,
+    };
+    incompatible.then(|| {
+        let brackets = "[]".repeat(dims);
+        format!("Inconvertible types: cannot cast `{v}{brackets}` to `{target}{brackets}`")
+    })
 }
 
 /// When `target_text` and `value_binary` are a String/primitive pair (either direction) — an
@@ -731,4 +851,86 @@ mod tests {
         let d: Vec<String> = type_compat_errors(src, &resolver()).into_iter().map(|x| x.message).collect();
         assert!(d.iter().any(|m| m.contains("returned as") && m.contains("String")), "{d:?}");
     }
+
+    // ── Boxing, arrays and the constant narrowing only an assignment allows ─────
+
+    /// `Number` ← `Integer`, `Long`, `Byte`: enough of the box hierarchy for boxing to be judged.
+    fn boxing_resolver() -> MapResolver {
+        let mut r = resolver();
+        r.members.insert("java/lang/Number".to_string(), cls(Some("java/lang/Object"), vec![]));
+        for (simple, boxed) in [("Integer", "java/lang/Integer"), ("Long", "java/lang/Long"), ("Byte", "java/lang/Byte")] {
+            r.members.insert(boxed.to_string(), cls(Some("java/lang/Number"), vec![]));
+            r.simple.insert(simple.to_string(), boxed.to_string());
+        }
+        r.simple.insert("Number".to_string(), "java/lang/Number".to_string());
+        r
+    }
+
+    fn boxing_diags(body: &str) -> Vec<String> {
+        let src = format!("class C {{ void m() {{ {body} }} }}");
+        type_compat_errors(&src, &boxing_resolver()).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn an_int_assigned_to_a_boxed_long_is_flagged() {
+        let d = boxing_diags("Long total = 1;");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`int` cannot be assigned to `Long`"), "{d:?}");
+    }
+
+    #[test]
+    fn an_int_boxed_to_a_supertype_of_its_box_is_ok() {
+        assert!(boxing_diags("Number n = 1; Object o = 1; Integer i = 1;").is_empty());
+    }
+
+    /// JLS §5.2: a constant that fits narrows, then boxes — which an argument could not do.
+    #[test]
+    fn a_constant_narrowed_into_a_byte_box_is_not_flagged() {
+        assert!(boxing_diags("Byte b = 1;").is_empty());
+    }
+
+    #[test]
+    fn an_array_of_another_primitive_is_flagged() {
+        let d = boxing_diags("long[] values = new int[1];");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`int[]` cannot be assigned to `long[]`"), "{d:?}");
+    }
+
+    #[test]
+    fn an_array_assigned_to_object_is_ok() {
+        assert!(boxing_diags("Object o = new int[1]; int[] same = new int[1];").is_empty());
+    }
+
+    /// `int values[]` puts the depth on the name: read off the type alone, it would be an `int`.
+    #[test]
+    fn a_c_style_array_declaration_is_not_flagged() {
+        assert!(boxing_diags("int values[] = new int[1];").is_empty());
+    }
+
+    /// Lombok's `val` is a real class on a Lombok classpath — the resolver below knows it — and
+    /// must still read as an inferred type, never as the declared target of the initializer.
+    #[test]
+    fn lombok_val_and_var_locals_are_not_read_as_declared_types() {
+        let mut r = boxing_resolver();
+        for (simple, binary) in [("val", "lombok/val"), ("var", "lombok/var")] {
+            r.members.insert(binary.to_string(), cls(Some("java/lang/Object"), vec![]));
+            r.simple.insert(simple.to_string(), binary.to_string());
+        }
+        let src = "import lombok.val;\nimport lombok.var;\nclass C { void m(Dog dog) { val n = 1; val d = dog; var s = 1L; val a = new int[1]; } }";
+        let d: Vec<String> = type_compat_errors(src, &r).into_iter().map(|x| x.message).collect();
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    /// Every result of a switch expression is assigned on its own: one arm of the wrong type is
+    /// wrong whatever the others are.
+    #[test]
+    fn a_switch_expression_arm_of_the_wrong_type_is_flagged() {
+        let d = boxing_diags("Dog d = switch (1) { case 1 -> new Cat(); default -> new Dog(); };");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`Cat` cannot be assigned to `Dog`"), "{d:?}");
+        let yielded = boxing_diags("Dog d = switch (1) { case 1: yield new Cat(); default: yield new Dog(); };");
+        assert_eq!(yielded.len(), 1, "{yielded:?}");
+        assert!(boxing_diags("Animal a = switch (1) { case 1 -> new Cat(); default -> new Dog(); };").is_empty());
+    }
 }
+

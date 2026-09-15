@@ -192,11 +192,11 @@ fn profile_userdao_shaped_file() {
     resolved!("unknown_fields_in", c, bennu_check::calls::fields::unknown_fields_in(root, &nodes, &src, &symbols, &resolver, &c));
     resolved!("arity_errors_in", c, bennu_check::calls::arity::arity_errors_in(root, &nodes, &src, &symbols, &resolver, &c));
     resolved!("argument_type_errors_in", c, bennu_check::calls::arguments::argument_type_errors_in(root, &nodes, &src, &symbols, &resolver, &c));
-    resolved!("unresolved_types_in", _c, bennu_check::typing::types::unresolved_types_in(&nodes, &src, &symbols, &resolver));
+    resolved!("unresolved_types_in", _c, bennu_check::typing::types::unresolved_types_in(&nodes, &src, &symbols, &resolver, true));
     resolved!("inheritance_errors_in", _c, bennu_check::hierarchy::inheritance::inheritance_errors_in(&nodes, &src, &symbols, &resolver));
     resolved!("missing_abstract_impls_in", _c, bennu_check::hierarchy::inheritance::missing_abstract_impls_in(&nodes, &src, &symbols, &resolver));
     resolved!("type_compat_errors_in", c, bennu_check::typing::casts::type_compat_errors_in(root, &nodes, &src, &symbols, &resolver, &c));
-    resolved!("functional_errors_in", _c, bennu_check::calls::functional::functional_errors_in(&nodes, &src, &symbols, &resolver));
+    resolved!("functional_errors_in", _c, bennu_check::calls::functional::functional_errors_in(root, &nodes, &src, &symbols, &resolver, &bennu_java::prelude::InferCache::default()));
 
     // ── the fix, measured directly: per-call full hierarchy walk (what arity/argument USED to do,
     //    once per call site) vs the memoized `(type, method)` resolution (once per distinct pair). Both

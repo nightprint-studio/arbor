@@ -429,6 +429,29 @@ fn line_declares_type(line: &str, name: &str) -> bool {
     false
 }
 
+/// A type's persisted members — plus, for an **annotation type**, the annotations written on it.
+///
+/// `@Target` and `@Repeatable` decide where an annotation may go and how often, and for a project's
+/// own annotation type nothing else records them: the resolver reads a JDK or library type's
+/// annotations out of its class file, but a type declared in source had no record at all, so every
+/// check asking about one stayed silent. They ride beside the members under their own key rather
+/// than in `ClassMembers`, which every lookup parses and memoizes — only annotation types carry it,
+/// and only the one question that wants it reads it back.
+fn members_json_of(td: &TypeDecl, members: &ClassMembers) -> String {
+    if td.kind != TypeKind::Annotation || td.annotations.is_empty() {
+        return serde_json::to_string(members).unwrap_or_default();
+    }
+    let Ok(mut value) = serde_json::to_value(members) else { return String::new() };
+    if let (Some(object), Ok(annotations)) = (value.as_object_mut(), serde_json::to_value(&td.annotations)) {
+        object.insert(TYPE_ANNOTATIONS_KEY.to_string(), annotations);
+    }
+    value.to_string()
+}
+
+/// The key an annotation type's own annotations are persisted under, beside its members. Read by
+/// `bennu_query`'s `IndexResolver::class_annotations`.
+pub const TYPE_ANNOTATIONS_KEY: &str = "type_annotations";
+
 /// Re-extract a single file's source into fresh [`IndexRecord`]s (for an incremental
 /// [`patch`](IndexBuilder::patch_file)). `project_types` should be the current
 /// project-wide simple→binary map so cross-type references still resolve. `is_project` answers
@@ -478,7 +501,7 @@ fn file_records(
         type_count += 1;
 
         let members = build_class_members(td, &names);
-        let members_json = serde_json::to_string(&members).unwrap_or_default();
+        let members_json = members_json_of(td, &members);
 
         let class_sym = Symbol {
             id: class_id,
@@ -826,7 +849,14 @@ fn render_method(m: &MethodDecl) -> String {
         .iter()
         .map(|p| format!("{} {}", p.type_text, p.name))
         .collect();
-    format!("{} {}({})", m.return_type_text, m.name, params.join(", "))
+    // The method's own type parameters lead, as Java writes them: they are the one record of which
+    // `T` in the parameters is the method's rather than the class's — see
+    // `bennu_java::prelude::Member::method_type_params`.
+    let type_params = match m.type_params.is_empty() {
+        true => String::new(),
+        false => format!("<{}> ", m.type_params.join(", ")),
+    };
+    format!("{type_params}{} {}({})", m.return_type_text, m.name, params.join(", "))
 }
 
 #[allow(clippy::too_many_arguments)]

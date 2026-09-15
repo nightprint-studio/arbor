@@ -41,10 +41,7 @@ use tree_sitter::Node;
 
 use crate::support::throws_of::{thrown_by, Thrown};
 
-use crate::throwing::checked_throw::{
-    callable_in_synthetic_type, callable_sneaky_throws, caught_by_enclosing_try,
-    declared_by_callable, enclosing_callable, is_checked,
-};
+use crate::throwing::checked_throw::{caught_by_enclosing_try, clause_catch_types, handler_of, is_checked};
 use crate::support::nodes::simple_name;
 use crate::support::walk::hierarchy_fully_known;
 
@@ -62,10 +59,12 @@ pub struct UnhandledCall {
     pub exception: String,
     /// Byte span the diagnostic underlines — the call's name, or a constructor's type.
     pub anchor: (usize, usize),
-    /// Byte offset where a `throws` clause would be inserted on the enclosing callable.
-    pub throws_insert: usize,
-    /// Byte span of the statement containing the call — what a `try { … }` would wrap.
-    pub statement: (usize, usize),
+    /// Byte offset where a `throws` clause would be inserted on the enclosing callable — `None` when
+    /// what answers for the exception is not a method or constructor (a lambda, an initializer).
+    pub throws_insert: Option<usize>,
+    /// Byte span of the statement containing the call — what a `try { … }` would wrap. `None` in a
+    /// field initializer, which is inside no statement.
+    pub statement: Option<(usize, usize)>,
 }
 
 /// The checked exceptions the code between `start` and `end` can raise, as JVM binary names.
@@ -394,20 +393,211 @@ pub fn unhandled_calls_in(
                     flag_unhandled(n, anchor, &thrown.definitely, bytes, symbols, resolver, &mut out);
                 }
             }
+            // `catch (IOException ex) { throw ex; }` — a rethrow raises what the try could throw.
+            "throw_statement" => {
+                let rethrown = rethrown_by(n, &root, source, bytes, symbols, resolver, cache, bare.as_ref());
+                flag_unhandled(n, n, &rethrown, bytes, symbols, resolver, &mut out);
+            }
+            // `try (Res r = …)` calls `r.close()` on the way out, and whatever it declares is thrown
+            // by the statement (JLS §14.20.3).
+            "resource" => {
+                if let Some(thrown) = implicit_close(n, &root, source, bytes, symbols, resolver, cache) {
+                    let anchor = n.child_by_field_name("name").unwrap_or(n);
+                    flag_unhandled(n, anchor, &thrown, bytes, symbols, resolver, &mut out);
+                }
+            }
             _ => {}
         }
     }
     out
 }
 
-/// A `receiver.method(args)` (or, when the receiver type can be inferred, a bare/`this` call is
-/// deliberately NOT handled — see below). Collects the name-matching overloads across the receiver
-/// type's fully-known hierarchy, intersects their `throws`, and flags each definitely-thrown checked
-/// exception that is neither caught nor declared.
+/// What `throw ex;` raises when `ex` is the parameter of an enclosing `catch` — JLS §11.2.2.
+///
+/// A catch parameter that is reassigned throws its DECLARED type. One that is not is a *precise*
+/// rethrow: it throws the exceptions the `try` block can throw that this clause catches and no earlier
+/// clause does. Only what the block DEFINITELY throws is gathered — every call's lower bound, every
+/// literal `throw new` — so the set can be too small and never too large.
 #[allow(clippy::too_many_arguments)]
+fn rethrown_by(
+    throw: Node,
+    root: &Node,
+    source: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+    bare: Option<&crate::support::bare_call::BareCalls>,
+) -> Vec<String> {
+    let Some(thrown) = throw.named_child(0).filter(|t| t.kind() == "identifier") else {
+        return Vec::new();
+    };
+    let Ok(name) = thrown.utf8_text(bytes) else { return Vec::new() };
+    let Some(clause) = catch_clause_binding(throw, name, bytes) else { return Vec::new() };
+    let caught = clause_catch_types(clause, bytes, symbols, resolver);
+    if caught.is_empty() || caught_param_is_assigned(clause, name, bytes) {
+        return caught;
+    }
+    let Some(try_node) = clause.parent() else { return Vec::new() };
+    let mut earlier: Vec<String> = Vec::new();
+    let mut c = try_node.walk();
+    for sibling in try_node.named_children(&mut c) {
+        if sibling.id() == clause.id() {
+            break;
+        }
+        if sibling.kind() == "catch_clause" {
+            earlier.extend(clause_catch_types(sibling, bytes, symbols, resolver));
+        }
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut c = try_node.walk();
+    let protected: Vec<Node> = try_node
+        .children(&mut c)
+        .filter(|ch| {
+            ch.kind() == "resource_specification"
+                || try_node.child_by_field_name("body").is_some_and(|b| b.id() == ch.id())
+        })
+        .collect();
+    for region in protected {
+        for (site, raised) in raised_in(region, root, source, bytes, symbols, resolver, cache, bare) {
+            if out.contains(&raised) || !hierarchy_fully_known(resolver, &raised) {
+                continue;
+            }
+            let reaches = |to: &String| crate::support::walk::reaches(resolver, &raised, to);
+            if !caught.iter().any(reaches) || earlier.iter().any(reaches) {
+                continue;
+            }
+            if caught_by_enclosing_try(site, region, bytes, symbols, resolver, &raised) {
+                continue;
+            }
+            out.push(raised);
+        }
+    }
+    out
+}
+
+/// Every `(site, exception)` a region definitely raises by calling or by `throw new`, not looking
+/// inside a lambda or a class body it contains.
+#[allow(clippy::too_many_arguments)]
+fn raised_in<'t>(
+    region: Node<'t>,
+    root: &Node,
+    source: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+    bare: Option<&crate::support::bare_call::BareCalls>,
+) -> Vec<(Node<'t>, String)> {
+    let mut out = Vec::new();
+    let mut stack = vec![region];
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "lambda_expression" | "class_body" => continue,
+            "method_invocation" | "object_creation_expression" => {
+                if let Thrown::Known(_, thrown) = thrown_by(n, root, source, bytes, symbols, resolver, cache, bare) {
+                    out.extend(thrown.definitely.into_iter().map(|t| (n, t)));
+                }
+            }
+            "throw_statement" => {
+                let created = n
+                    .named_child(0)
+                    .filter(|t| t.kind() == "object_creation_expression")
+                    .and_then(|t| t.child_by_field_name("type"))
+                    .and_then(|t| t.utf8_text(bytes).ok())
+                    .and_then(|t| crate::support::resolve::type_binary_at(t, n, bytes, symbols, resolver));
+                out.extend(created.map(|t| (n, t)));
+            }
+            _ => {}
+        }
+        let mut c = n.walk();
+        stack.extend(n.named_children(&mut c));
+    }
+    out
+}
+
+/// The `catch` clause whose parameter `name` is, walking out from `site` — stopping at the first
+/// method, lambda or class body, which a catch parameter cannot be seen through.
+fn catch_clause_binding<'t>(site: Node<'t>, name: &str, bytes: &[u8]) -> Option<Node<'t>> {
+    let mut cur = site.parent();
+    while let Some(n) = cur {
+        match n.kind() {
+            "catch_clause" => {
+                let param = crate::support::nodes::child_of_kind(n, "catch_formal_parameter")?;
+                let declared = param.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok());
+                if declared == Some(name) {
+                    return Some(n);
+                }
+            }
+            "method_declaration" | "constructor_declaration" | "lambda_expression" | "class_body" => {
+                return None
+            }
+            _ => {}
+        }
+        cur = n.parent();
+    }
+    None
+}
+
+/// Whether the catch clause's body assigns its own parameter `name` — which turns a precise rethrow
+/// back into a throw of the declared type.
+fn caught_param_is_assigned(clause: Node, name: &str, bytes: &[u8]) -> bool {
+    let Some(body) = clause.child_by_field_name("body") else { return true };
+    let mut stack = vec![body];
+    while let Some(n) = stack.pop() {
+        let target = match n.kind() {
+            "assignment_expression" => n.child_by_field_name("left"),
+            "update_expression" => n.named_child(0),
+            _ => None,
+        };
+        if target.and_then(|t| t.utf8_text(bytes).ok()) == Some(name) {
+            return true;
+        }
+        let mut c = n.walk();
+        stack.extend(n.named_children(&mut c));
+    }
+    false
+}
+
+/// What the implicit `close()` of a try-with-resources resource declares — the exceptions EVERY
+/// `close()` taking no arguments in the resource type's hierarchy declares. An override may only
+/// narrow what it throws, so the intersection is exactly what the most derived one can throw.
+/// `None` when the resource type or its hierarchy cannot be read.
+#[allow(clippy::too_many_arguments)]
+fn implicit_close(
+    resource: Node,
+    root: &Node,
+    source: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+) -> Option<Vec<String>> {
+    let written = resource.child_by_field_name("type")?.utf8_text(bytes).ok()?;
+    let binary = match written.trim() {
+        inferred if bennu_java::prelude::is_inferred_type(inferred) => {
+            let value = resource.child_by_field_name("value")?;
+            infer_node_type_cached(root, source, symbols, &value, resolver, cache)?.binary_name
+        }
+        text => crate::support::resolve::type_binary_at(text, resource, bytes, symbols, resolver)?,
+    };
+    let res = cache.resolve_methods(resolver, &binary, "close");
+    if !res.complete {
+        return None;
+    }
+    let closes: Vec<&bennu_java::prelude::Member> =
+        res.candidates.iter().filter(|m| m.params.is_empty()).collect();
+    let (first, rest) = closes.split_first()?;
+    let mut thrown = first.throws.clone();
+    for other in rest {
+        thrown.retain(|t| other.throws.contains(t));
+    }
+    Some(thrown)
+}
+
 /// For each definitely-thrown exception in `thrown`, keep only those that are provably CHECKED over a
-/// FULLY-KNOWN hierarchy, then flag the ones neither caught by an enclosing `try` nor declared by the
-/// enclosing callable's `throws`. `anchor` is where the diagnostic points (method name / `new` type).
+/// FULLY-KNOWN hierarchy, then flag the ones neither caught by an enclosing `try` nor let escape by
+/// what answers for the site (`handler_of`). `anchor` is where the diagnostic points.
 #[allow(clippy::too_many_arguments)]
 fn flag_unhandled(
     call: Node,
@@ -422,23 +612,12 @@ fn flag_unhandled(
         return;
     }
 
-    // SKIP the whole call if there's no plain method/constructor enclosing it. The nearest boundary
-    // could be a lambda / anonymous / local class whose throws-ability we don't model. `enclosing_
-    // callable` returns the nearest boundary node; we handle it ONLY if it's a real method/ctor.
-    let Some(callable) = enclosing_callable(call) else { return };
-    if !matches!(callable.kind(), "method_declaration" | "constructor_declaration") {
-        return;
-    }
-    // SKIP: even a real method/ctor, if it belongs to an anonymous/local class, has a non-authoritative
-    // `throws` contract (SAM / capture machinery we don't resolve) → stay sound.
-    if callable_in_synthetic_type(callable) {
-        return;
-    }
-    // Lombok `@SneakyThrows` on the enclosing method/ctor lets it throw any checked exception without
-    // declaring it → never flag a checked-throwing call inside it.
-    if callable_sneaky_throws(callable, bytes) {
-        return;
-    }
+    // What answers for the exception: a method or constructor's `throws` clause (anonymous and local
+    // classes included — a method's own clause is its whole contract), a lambda's target SAM, the
+    // constructors of a class for its field initializers. `None` — `@SneakyThrows`, an unwritten
+    // lambda target, an anonymous class's initializer — says nothing.
+    let Some(handler) = handler_of(call, bytes, symbols, resolver) else { return };
+    let boundary = handler.boundary();
 
     // De-dup: intersection order may repeat across identical overloads; report each type once.
     let mut seen: Vec<&str> = Vec::new();
@@ -460,11 +639,11 @@ fn flag_unhandled(
         seen.push(binary.as_str());
 
         // Handled by an enclosing `try` (catch of this type or a supertype)? → SKIP this exception.
-        if caught_by_enclosing_try(call, callable, bytes, symbols, resolver, binary) {
+        if caught_by_enclosing_try(call, boundary, bytes, symbols, resolver, binary) {
             continue;
         }
-        // Declared by the enclosing method/ctor's `throws` (this type or a supertype)? → SKIP.
-        if declared_by_callable(callable, bytes, symbols, resolver, binary) {
+        // Let escape by what answers for the site (this type or a supertype)? → SKIP.
+        if handler.declares(bytes, symbols, resolver, binary) {
             continue;
         }
 
@@ -472,10 +651,8 @@ fn flag_unhandled(
         out.push(UnhandledCall {
             exception: binary.clone(),
             anchor: (anchor.start_byte(), anchor.end_byte()),
-            throws_insert: throws_insertion_point(callable),
-            statement: enclosing_statement(call)
-                .map(|s| (s.start_byte(), s.end_byte()))
-                .unwrap_or((call.start_byte(), call.end_byte())),
+            throws_insert: handler.callable().map(throws_insertion_point),
+            statement: enclosing_statement(call).map(|s| (s.start_byte(), s.end_byte())),
         });
     }
 }
@@ -719,12 +896,75 @@ mod tests {
     }
 
     #[test]
-    fn call_inside_lambda_is_ok() {
-        // Nearest enclosing callable is a lambda → SKIP (its throws-ability is the SAM's, not modeled).
+    fn call_inside_a_lambda_whose_target_is_unreadable_is_ok() {
+        // `Runnable` is not in this resolver: nothing says what the lambda may throw → SKIP.
         assert!(diags(
             "class C { void m() { Runnable r = () -> { Files f = null; f.readAllBytes(); }; } }"
         )
         .is_empty());
+    }
+
+    /// A resolver that also knows two functional interfaces: `Task.run()` declares nothing and
+    /// `Job.call()` declares `Exception`.
+    fn with_functional_interfaces() -> MapResolver {
+        let mut r = resolver();
+        let iface = |methods| ClassMembers {
+            flags: ClassFlags { is_interface: true, ..ClassFlags::default() },
+            ..cm(None, methods)
+        };
+        r.members.insert("acme/Task".into(), iface(vec![m_throws("run", vec![]).abstract_()]));
+        r.members.insert(
+            "acme/Job".into(),
+            iface(vec![m_throws("call", vec!["java/lang/Exception"]).abstract_()]),
+        );
+        r.simple.insert("Task".into(), "acme/Task".into());
+        r.simple.insert("Job".into(), "acme/Job".into());
+        r
+    }
+
+    fn diags_with(src: &str, r: &MapResolver) -> Vec<String> {
+        checked_call_errors(src, r).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn a_lambda_body_may_throw_only_what_its_target_declares() {
+        let r = with_functional_interfaces();
+        let flagged = diags_with("class C { void m() { Task t = () -> { Files f = null; f.readAllBytes(); }; } }", &r);
+        assert_eq!(flagged.len(), 1, "{flagged:?}");
+        let allowed = diags_with("class C { void m() { Job j = () -> { Files f = null; f.readAllBytes(); }; } }", &r);
+        assert!(allowed.is_empty(), "{allowed:?}");
+    }
+
+    #[test]
+    fn a_method_of_an_anonymous_class_answers_with_its_own_throws_clause() {
+        let r = with_functional_interfaces();
+        let src = "class C { void m() { new Task() { public void run() { Files f = null; f.readAllBytes(); } }; } }";
+        assert_eq!(diags_with(src, &r).len(), 1);
+        let declared = "class C { void m() { new Task() { public void run() throws IOException { Files f = null; f.readAllBytes(); } }; } }";
+        assert!(diags_with(declared, &r).is_empty());
+    }
+
+    #[test]
+    fn a_field_initializer_answers_to_every_constructor() {
+        // No constructor: the default one declares nothing.
+        assert_eq!(diags("class C { App a = new App(); }").len(), 1);
+        // Every constructor declares it.
+        assert!(diags("class C { App a = new App(); C() throws IOException {} }").is_empty());
+        // One does not.
+        assert_eq!(diags("class C { App a = new App(); C() throws IOException {} C(int x) {} }").len(), 1);
+        // A static field has no constructor to lean on.
+        assert_eq!(diags("class C { static App a = new App(); C() throws IOException {} }").len(), 1);
+    }
+
+    #[test]
+    fn a_precise_rethrow_raises_what_the_try_block_throws() {
+        let src = "class C { void m() { Files f = null; try { f.readAllBytes(); } catch (IOException e) { throw e; } } }";
+        let d = diags(src);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("IOException"), "{d:?}");
+        // Nothing checked in the block: the rethrow raises nothing.
+        let quiet = "class C { void m() { try { System.gc(); } catch (Exception e) { throw e; } } }";
+        assert!(diags(quiet).is_empty(), "{:?}", diags(quiet));
     }
 
     #[test]

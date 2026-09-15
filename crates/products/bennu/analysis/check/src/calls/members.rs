@@ -172,6 +172,14 @@ fn check_call(
     if ty.binary_name.is_empty() {
         return;
     }
+    // A primitive has no members at all — javac's `int cannot be dereferenced`.
+    if ty.dims == 0 && crate::support::nodes::is_primitive(&ty.binary_name) {
+        out.push(crate::engine::check_id::CheckId::UnknownMember.at(
+            name,
+            format!("`{}` is a primitive and cannot be dereferenced", ty.binary_name),
+        ));
+        return;
+    }
     // Shared, memoized hierarchy walk (see `InferCache::resolve_methods`): one traversal per
     // `(receiver type, method)` feeds this check + arity + argument-type, across every call site.
     let res = cache.resolve_methods(resolver, &ty.binary_name, method);
@@ -220,7 +228,10 @@ fn receiver_type_is_unwritten(obj: Node, bytes: &[u8]) -> bool {
                 if stmt.kind() != "local_variable_declaration" {
                     continue;
                 }
-                let is_var = stmt.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok()) == Some("var");
+                let is_var = stmt
+                    .child_by_field_name("type")
+                    .and_then(|t| t.utf8_text(bytes).ok())
+                    .is_some_and(bennu_java::prelude::is_inferred_type);
                 let mut dc = stmt.walk();
                 for d in stmt.named_children(&mut dc).filter(|d| d.kind() == "variable_declarator") {
                     if d.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok()) == Some(name) {

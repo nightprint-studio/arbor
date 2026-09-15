@@ -50,15 +50,19 @@ pub fn unresolved_types(source: &str, resolver: &dyn TypeResolver) -> Vec<Diagno
     };
     let symbols = extract_symbols(source);
     let nodes = crate::engine::check::collect_nodes(tree.root_node());
-    unresolved_types_in(&nodes, source, &symbols, resolver)
+    unresolved_types_in(&nodes, source, &symbols, resolver, true)
 }
 
 /// Tree-driven core: iterates the shared `nodes` + reuses the caller's `symbols`.
+///
+/// `classpath_complete` gates the one judgement that needs the whole classpath: a qualified name
+/// whose package holds nothing. A `java.*` package is judged regardless, as imports are.
 pub fn unresolved_types_in(
     nodes: &[Node],
     source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    classpath_complete: bool,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
 
@@ -141,10 +145,24 @@ pub fn unresolved_types_in(
                 if matches!(simple, "super" | "this") {
                     continue;
                 }
-                let Some(owner) =
-                    crate::support::resolve::type_binary_at(qtext, qualifier, bytes, symbols, resolver)
-                else {
-                    continue; // a package, or a type we cannot read: not ours to judge
+                // A lowercase dotted qualifier comes back from the name reading as the package's own
+                // slashed spelling (`java/util`) — the "best reading available" for a name nothing
+                // bound. Only a qualifier that is a type somebody can READ is a type here.
+                let owner = crate::support::resolve::type_binary_at(qtext, qualifier, bytes, symbols, resolver)
+                    .filter(|b| resolver.members_of(b).is_some() || resolver.is_project_type(b));
+                let Some(owner) = owner else {
+                    // Not a type: a package, or a type we cannot read. Only the WHOLE name is
+                    // judged — in `java.util.Absent` the inner `java.util` is a package prefix,
+                    // not a type use of its own.
+                    let outermost = n.parent().map(|p| p.kind()) != Some("scoped_type_identifier");
+                    if outermost {
+                        let head = qtext.split('.').next().unwrap_or(qtext).trim();
+                        let written = QualifiedName { qualifier, last, qtext, simple };
+                        if !known.contains(head) {
+                            out.extend(missing_package_member(&written, resolver, classpath_complete));
+                        }
+                    }
+                    continue;
                 };
                 if !resolver.is_project_type(&owner) {
                     continue;
@@ -235,6 +253,61 @@ pub fn unresolved_types_in(
         out.push(crate::engine::check_id::CheckId::UnresolvedType.at(n, format!("Cannot resolve symbol `{name}`")));
     }
     out
+}
+
+/// A qualified type name `qtext.simple`, its two halves' nodes and texts.
+struct QualifiedName<'t, 's> {
+    qualifier: Node<'t>,
+    last: Node<'t>,
+    qtext: &'s str,
+    simple: &'s str,
+}
+
+/// A qualified type written through a PACKAGE that does not hold it: `java.util.Absent` (javac's
+/// `cannot find symbol`), or `com.nowhere.Thing` whose package holds nothing at all (`package …
+/// does not exist`).
+///
+/// Asked only once the qualifier failed to resolve as a type, and decided only by a resolver that
+/// enumerated what it holds — `package_exists` answering `None` leaves the name alone. A package
+/// outside `java.*` additionally needs the whole classpath, for the reason `unresolved_imports` does.
+fn missing_package_member(
+    name: &QualifiedName,
+    resolver: &dyn TypeResolver,
+    classpath_complete: bool,
+) -> Option<Diagnostic> {
+    // Only a qualifier spelled like a package: an uppercase segment is a type we could not read, and
+    // "its package does not exist" would be the wrong sentence about it.
+    let package_like = name
+        .qtext
+        .split('.')
+        .all(|segment| segment.trim().chars().next().is_some_and(char::is_lowercase));
+    if !package_like || name.qtext.contains(['<', '@']) {
+        return None;
+    }
+    let java_core = name.qtext == "java" || name.qtext.starts_with("java.");
+    if !(classpath_complete || java_core) {
+        return None;
+    }
+    let package = name.qtext.replace('.', "/");
+    let binary = format!("{package}/{}", name.simple);
+    if resolver.members_of(&binary).is_some() || resolver.is_project_type(&binary) {
+        return None;
+    }
+    if resolver.package_exists(&package)? {
+        // The whole name is itself a package (`java.util` written where a type goes is some
+        // other error, not this one).
+        if resolver.package_exists(&binary) == Some(true) {
+            return None;
+        }
+        return Some(
+            crate::engine::check_id::CheckId::UnresolvedType
+                .at(name.last, format!("Cannot resolve symbol `{}`", name.simple)),
+        );
+    }
+    Some(crate::engine::check_id::CheckId::UnresolvedType.at(
+        name.qualifier,
+        format!("Package `{}` does not exist", name.qtext),
+    ))
 }
 
 /// Simple names in scope because a type declared in this file **inherits** them.

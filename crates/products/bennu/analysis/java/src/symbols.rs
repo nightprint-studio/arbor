@@ -253,6 +253,10 @@ pub struct MethodDecl {
     /// `#[serde(default)]` for backward-compatible deserialization of a pre-existing persisted symbol.
     #[serde(default)]
     pub throws: Vec<String>,
+    /// The method's own type parameters, by name (`<T, R> R map(T t)` → `["T", "R"]`). A parameter
+    /// typed `T` means the enclosing class's `T` only when the method does not declare one of its own.
+    #[serde(default)]
+    pub type_params: Vec<String>,
     /// The method's annotations (`@Override`, `@Bean`, `@Transactional`, …). A type and a field
     /// already carried theirs; a method did not, so the one model that knows what a file declares
     /// could not answer the commonest question asked about a method.
@@ -1129,6 +1133,7 @@ fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Opti
         is_final,
         throws,
         annotations: collect_annotations(node, bytes),
+        type_params: type_param_names(node, bytes),
     })
 }
 
@@ -1316,6 +1321,7 @@ fn synthesize_record_members(
                 is_final: false,
                 throws: Vec::new(),
                 annotations: Vec::new(),
+                type_params: Vec::new(),
             });
         }
     }
@@ -1360,6 +1366,7 @@ fn synthesize_record_members(
             is_final: false,
             throws: Vec::new(),
             annotations: Vec::new(),
+            type_params: Vec::new(),
         });
     }
 
@@ -1397,6 +1404,7 @@ fn synthesize_record_members(
             is_final: false,
             throws: Vec::new(),
             annotations: Vec::new(),
+            type_params: Vec::new(),
         });
     }
 }
@@ -1452,6 +1460,7 @@ fn synthesize_enum_members(name: &str, methods: &mut Vec<MethodDecl>) {
             is_final: false,
             throws: Vec::new(),
             annotations: Vec::new(),
+            type_params: Vec::new(),
         });
     }
 }
@@ -1486,6 +1495,7 @@ fn parse_constructor(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
         is_final: false,
         throws: parse_throws(node, bytes),
         annotations: collect_annotations(node, bytes),
+        type_params: type_param_names(node, bytes),
     })
 }
 
@@ -1521,6 +1531,7 @@ fn parse_annotation_element(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
         is_final: false,
         throws: Vec::new(),
         annotations: collect_annotations(node, bytes),
+        type_params: type_param_names(node, bytes),
     })
 }
 

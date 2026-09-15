@@ -18,10 +18,11 @@
 //!   * a trailing array parameter is treated as possibly-varargs (we can't see `ACC_VARARGS` through
 //!     the seam), so a varargs call is never mis-flagged.
 
-use bennu_java::prelude::{extract_symbols, FileSymbols, InferCache, MemberKind, TypeResolver};
+use bennu_java::prelude::{extract_symbols, FileSymbols, InferCache, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
+use crate::support::constructors::constructor_call;
 use crate::support::nodes::simple_name;
 
 /// One overload's arity shape: its parameter count and whether the last parameter is an array
@@ -72,10 +73,12 @@ pub fn arity_errors_in(
             "method_invocation" => {
                 check_call(n, &root, source, bytes, symbols, resolver, cache, &mut out);
                 if let Some(bare) = &bare {
-                    check_bare_call(n, bare, bytes, resolver, cache, &mut out);
+                    check_bare_call(n, bare, bytes, symbols, resolver, cache, &mut out);
                 }
             }
-            "object_creation_expression" => check_new(n, source, bytes, symbols, resolver, &mut out),
+            "object_creation_expression" | "explicit_constructor_invocation" => {
+                check_constructor(n, bytes, symbols, resolver, &mut out)
+            }
             _ => {}
         }
     }
@@ -84,35 +87,65 @@ pub fn arity_errors_in(
 
 /// A bare `method(a, b)` — the receiver is `this`, so the overload set is the top type's, plus every
 /// signature the file itself declares (which the index may not have seen yet).
+#[allow(clippy::too_many_arguments)]
 fn check_bare_call(
     n: Node,
     bare: &crate::support::bare_call::BareCalls,
     bytes: &[u8],
+    symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
     cache: &InferCache,
     out: &mut Vec<Diagnostic>,
 ) {
-    // Across lambdas: a lambda declares no methods and does not rebind `this`, so the overload set
-    // is the same inside one as outside — and counting arguments never needs their types, which is
-    // the only thing the stricter scope protects. Refusing lambdas left every call to an own method
-    // from a callback (`opt.ifPresent(h -> own(h))`, a reactive filter's `map(r -> …)`) unjudged.
-    let Some(method) = bare.judgeable_across_lambdas(n, bytes) else { return };
+    use crate::support::bare_call::MemberOwner;
     let Some(name) = n.child_by_field_name("name") else { return };
     let Some(args) = n.child_by_field_name("arguments") else { return };
+    let Ok(method) = name.utf8_text(bytes) else { return };
 
-    let res = cache.resolve_methods(resolver, &bare.top_binary, method);
-    if !res.complete {
-        return;
-    }
-    let mut sigs: Vec<Sig> = res.candidates.iter().map(sig_of).collect();
-    // The buffer's own declarations, ahead of the index. A `T...` parameter reaches us as written,
-    // so varargs is read off the text rather than from a resolved array binary name.
-    for fs in bare.file_sigs(method) {
-        sigs.push(Sig { params: fs.param_texts.len(), last_is_array: fs.varargs });
-    }
-    if sigs.is_empty() {
-        return; // no such method at all → `unresolved_call`'s finding, not a wrong arity
-    }
+    // Across lambdas: a lambda declares no methods and does not rebind `this`, so the overload set
+    // is the same inside one as outside — and counting arguments never needs their types. A nested
+    // or anonymous class between the call and the top type is looked through too, for the name it
+    // declares or inherits: `helper(1)` inside an inner class that has only `helper()` calls THAT one.
+    let sigs: Vec<Sig> = match bare.member_owner(n, bytes, symbols, resolver) {
+        Some(MemberOwner::Nested(owner)) => {
+            let res = cache.resolve_methods(resolver, &owner, method);
+            if !res.complete || res.candidates.is_empty() {
+                return;
+            }
+            // A type of this file whose index entry lags the buffer is not one to count against.
+            if bare.declares(&owner, symbols)
+                && !crate::support::bare_call::index_covers_file_sigs(&owner, method, &res.candidates, symbols, resolver)
+            {
+                return;
+            }
+            res.candidates.iter().map(sig_of).collect()
+        }
+        Some(MemberOwner::Top) => {
+            // A method-generating annotation may add one at any arity.
+            if bare.generates_methods() {
+                return;
+            }
+            let res = cache.resolve_methods(resolver, &bare.top_binary, method);
+            if !res.complete {
+                return;
+            }
+            let mut sigs: Vec<Sig> = res.candidates.iter().map(sig_of).collect();
+            // The buffer's own declarations, ahead of the index. A `T...` parameter reaches us as
+            // written, so varargs is read off the text rather than from a resolved array binary name.
+            for fs in bare.file_sigs(method) {
+                sigs.push(Sig { params: fs.param_texts.len(), last_is_array: fs.varargs });
+            }
+            // Nothing of the name in the class: a static import supplies it (JLS §15.12.1).
+            if sigs.is_empty() {
+                match bare.static_import_methods(method, resolver) {
+                    Some(imported) => sigs = imported.iter().map(sig_of).collect(),
+                    None => return, // no such method at all → `unresolved_call`'s finding
+                }
+            }
+            sigs
+        }
+        None => return,
+    };
     let argc = arg_count(args);
     if !sigs.iter().any(|s| s.accepts(argc)) {
         out.push(crate::engine::check_id::CheckId::WrongArgumentCount.span(
@@ -174,49 +207,27 @@ fn check_call(
     }
 }
 
-fn check_new(
+/// `new Foo(…)` — an anonymous body included, whose arguments go to `Foo`'s constructor —, `super(…)`
+/// or `this(…)`: see [`constructor_call`] for which constructors those are.
+fn check_constructor(
     n: Node,
-    _source: &str,
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
     out: &mut Vec<Diagnostic>,
 ) {
-    // `new Foo(...)` — skip anonymous-class creations (`new Runnable(){…}`): the args bind to the
-    // *supertype's* constructor and the body complicates it. A `class_body` child marks those.
-    let Some(ty_node) = n.child_by_field_name("type") else { return };
-    let Some(args) = n.child_by_field_name("arguments") else { return };
-    if args.has_error() || crate::support::nodes::is_qualified_creation(n) {
+    let Some(call) = constructor_call(n, bytes, symbols, resolver) else { return };
+    if call.args.has_error() {
         return;
     }
-    let mut cw = n.walk();
-    for c in n.named_children(&mut cw) {
-        if c.kind() == "class_body" {
-            return; // anonymous class → skip
-        }
-    }
-    let Ok(type_text) = ty_node.utf8_text(bytes) else { return };
-    let Some(binary) = crate::support::resolve::type_binary(type_text, symbols, resolver) else { return };
-
-    // Constructors are NOT inherited — look only at this class's own `<init>` methods.
-    let Some(cm) = resolver.members_of(&binary) else { return };
-    let sigs: Vec<Sig> = cm
-        .methods
-        .iter()
-        .filter(|m| m.name == "<init>" && m.kind == MemberKind::Method)
-        .map(sig_of)
-        .collect();
-    if sigs.is_empty() {
-        return; // index may omit constructors → can't assert anything
-    }
-    let argc = arg_count(args);
-    if !sigs.iter().any(|s| s.accepts(argc)) {
+    let argc = arg_count(call.args);
+    if !call.candidates.iter().map(sig_of).any(|s| s.accepts(argc)) {
         out.push(crate::engine::check_id::CheckId::WrongArgumentCount.span(
-            ty_node.start_byte(),
-            args.end_byte(),
+            call.head.start_byte(),
+            call.args.end_byte(),
             format!(
                 "No constructor of `{}` takes {argc} argument{}",
-                simple_name(&binary),
+                simple_name(&call.binary),
                 plural(argc)
             ),
         ));
@@ -329,6 +340,57 @@ mod tests {
     fn diags(body: &str) -> Vec<String> {
         let src = format!("class C {{ void m() {{ {body} }} }}");
         arity_errors(&src, &resolver()).into_iter().map(|d| d.message).collect()
+    }
+
+    /// `D extends Svc`, and `C.Plain`, a nested class declaring no constructor.
+    fn constructor_resolver() -> MapResolver {
+        let mut r = resolver();
+        let plain = |superclass: &str| ClassMembers {
+            type_params: Vec::new(),
+            superclass: Some(TypeRef::simple(superclass)),
+            interfaces: Vec::new(),
+            methods: Vec::new(),
+            fields: Vec::new(),
+            flags: Default::default(),
+        };
+        r.members.insert("D".to_string(), plain("com/acme/Svc"));
+        // Both spellings of a nested binary are in circulation: source resolves `C/Plain`, bytecode
+        // carries `C$Plain`.
+        r.members.insert("C$Plain".to_string(), plain("java/lang/Object"));
+        r.members.insert("C/Plain".to_string(), plain("java/lang/Object"));
+        r.simple.insert("D".to_string(), "D".to_string());
+        r.simple.insert("Plain".to_string(), "C$Plain".to_string());
+        r
+    }
+
+    fn constructor_diags(src: &str) -> Vec<String> {
+        arity_errors(src, &constructor_resolver()).into_iter().map(|d| d.message).collect()
+    }
+
+    /// The arguments of `new Svc(…) { … }` go to `Svc`'s constructor, body or not.
+    #[test]
+    fn an_anonymous_subclass_passes_its_arguments_to_the_superclass_constructor() {
+        let d = diags("Object o = new Svc() { };");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("No constructor of `Svc` takes 0 arguments"), "{d:?}");
+        assert!(diags("Object o = new Svc(1) { };").is_empty());
+    }
+
+    #[test]
+    fn a_super_call_is_judged_against_the_superclass_constructors() {
+        let d = constructor_diags("class D extends Svc { D() { super(); } }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("No constructor of `Svc` takes 0 arguments"), "{d:?}");
+        assert!(constructor_diags("class D extends Svc { D() { super(1); } }").is_empty());
+    }
+
+    /// A class declaring no constructor has the implicit no-argument one (JLS §8.8.9).
+    #[test]
+    fn a_class_without_constructors_takes_no_arguments() {
+        let d = constructor_diags("class C { static class Plain { } void m() { new Plain(1); } }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("No constructor of `Plain` takes 1 argument"), "{d:?}");
+        assert!(constructor_diags("class C { static class Plain { } void m() { new Plain(); } }").is_empty());
     }
 
     #[test]

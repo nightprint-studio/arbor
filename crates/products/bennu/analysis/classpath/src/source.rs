@@ -95,6 +95,28 @@ impl ClassSource for DirSource {
             Err(e) => Err(format!("open {}: {e}", path.display())),
         }
     }
+
+    /// Every `.class` under the root. Listed rather than left to the trait default, because a chain
+    /// that holds a directory and says nothing about it would report that directory's packages as
+    /// missing the moment somebody asks whether a package exists.
+    fn class_names(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut stack = vec![self.root.clone()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| e == "class") {
+                    let Ok(rel) = path.strip_prefix(&self.root) else { continue };
+                    let rel = rel.with_extension("").to_string_lossy().replace('\\', "/");
+                    out.push(rel);
+                }
+            }
+        }
+        out
+    }
 }
 
 // ── JarSource ────────────────────────────────────────────────────────────────

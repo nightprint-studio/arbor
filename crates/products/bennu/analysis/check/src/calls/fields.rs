@@ -59,21 +59,40 @@ fn check_access(
 ) {
     let Some(obj) = n.child_by_field_name("object") else { return };
     let Some(field) = n.child_by_field_name("field") else { return };
-    if field.has_error() {
+    // `Outer.this` and `Outer.super.f` name no field of the qualifier.
+    if field.has_error() || field.kind() != "identifier" || has_super(n) {
         return;
     }
     let Ok(field_name) = field.utf8_text(bytes) else { return };
-    // `arr.length` is a pseudo-field the JVM synthesises — never in the members list. Skip it wholesale
-    // (an array receiver has no `ClassMembers` anyway, but this is belt-and-braces + clearer intent).
-    if field_name == "length" {
-        return;
-    }
 
-    // Infer the receiver (`object`) type from the already-located node (no descendant search).
-    let Some(ty) = infer_node_type_cached(root, source, symbols, &obj, resolver, cache) else {
-        return;
+    // Infer the receiver (`object`) type from the already-located node (no descendant search). A
+    // type name is not a value, so `Box.MISSING` gets no inferred type — it is read as the TYPE it
+    // names, the same reading a static call's receiver gets.
+    let ty = match infer_node_type_cached(root, source, symbols, &obj, resolver, cache) {
+        Some(ty) => ty,
+        None => {
+            let Some(binary) =
+                crate::support::resolve::static_receiver_binary(obj, bytes, symbols, resolver)
+            else {
+                return;
+            };
+            bennu_java::prelude::TypeRef::simple(binary)
+        }
     };
     if ty.binary_name.is_empty() {
+        return;
+    }
+    // A primitive has no members at all — javac's `int cannot be dereferenced`.
+    if ty.dims == 0 && crate::support::nodes::is_primitive(&ty.binary_name) {
+        out.push(crate::engine::check_id::CheckId::UnknownMember.at(
+            field,
+            format!("`{}` is a primitive and cannot be dereferenced", ty.binary_name),
+        ));
+        return;
+    }
+    // `arr.length` is a pseudo-field the JVM synthesises — never in the members list. Skip it wholesale
+    // (an array receiver has no `ClassMembers` anyway, but this is belt-and-braces + clearer intent).
+    if field_name == "length" || ty.is_array() {
         return;
     }
     // Only assert absence when we actually know the receiver type's members.
@@ -87,6 +106,11 @@ fn check_access(
     if resolver.members_of(&format!("{}/{field_name}", ty.binary_name)).is_some() {
         return;
     }
+    if resolver.members_of(&format!("{}${field_name}", ty.binary_name)).is_some()
+        || bennu_java::prelude::inherited_member_type_of(resolver, &ty.binary_name, field_name).is_some()
+    {
+        return;
+    }
     let has = hierarchy_has(resolver, &ty.binary_name, &|cm| {
         cm.fields.iter().any(|m| m.name == field_name && m.kind == MemberKind::Field)
     });
@@ -96,6 +120,13 @@ fn check_access(
             format!("Cannot resolve field `{field_name}` in `{}`", simple_name(&ty.binary_name)),
         ));
     }
+}
+
+/// Whether a `field_access` goes through `super` — `Outer.super.f`.
+fn has_super(n: Node) -> bool {
+    let mut c = n.walk();
+    let found = n.children(&mut c).any(|ch| ch.kind() == "super");
+    found
 }
 
 #[cfg(test)]

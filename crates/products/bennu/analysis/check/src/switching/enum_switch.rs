@@ -22,14 +22,24 @@
 //!
 //! Under-reporting (e.g. a selector we can't infer, an enum whose members we can't see) is fine;
 //! a wrong diagnostic is not.
+//!
+//! ## Pattern switches
+//! A switch over a type only a pattern switch accepts (`Object`, an interface, a sealed hierarchy)
+//! must be exhaustive as a **statement** too — see [`check_pattern_switch`] for what counts as
+//! covering, and for the shapes it leaves alone.
 
 use bennu_java::prelude::{
-    infer_node_type_cached, ClassMembers, FileSymbols, InferCache, TypeResolver,
+    find_type_declaration, infer_node_type_cached, ClassMembers, FileSymbols, InferCache, TypeResolver,
 };
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::support::switch_label::{label_is_default, label_is_pattern, labels_of};
+use crate::support::nodes::simple_name;
+use crate::support::resolve::written_type_binary;
+use crate::support::switch_label::{is_pattern_selector, label_is_default, label_is_pattern, labels_of};
+use crate::support::walk::{hierarchy_fully_known, reaches};
+
+const OBJECT: &str = "java/lang/Object";
 
 /// Flag enum switch **expressions** that neither cover every constant nor carry a `default`.
 ///
@@ -52,6 +62,7 @@ pub fn enum_switch_errors_in(
         // subtree — a parse error there makes the arm/label reads unreliable.
         if n.kind() == "switch_expression" && !n.has_error() {
             check_switch(n, &root, source, bytes, symbols, resolver, cache, &mut out);
+            check_pattern_switch(n, &root, source, bytes, symbols, resolver, cache, &mut out);
         }
     }
     out
@@ -153,6 +164,145 @@ fn check_switch(
             missing.join(", ")
         ),
     ));
+}
+
+/// A switch over a type only a pattern switch accepts — `Object`, an interface, a class that is not
+/// `String`, a box or an enum — must be exhaustive in either position (JLS §14.11.1.1, §15.28.1): a
+/// `default`, a pattern every value matches, or, for a sealed type, a pattern for each permitted
+/// subtype.
+///
+/// Silent wherever the answer needs more than this file shows: a record pattern (exhaustive only in
+/// combination), a pattern type that does not resolve, a sealed type declared elsewhere or without a
+/// `permits` clause, a permitted subtype that could be covered through subtypes of its own.
+#[allow(clippy::too_many_arguments)]
+fn check_pattern_switch(
+    switch: Node,
+    root: &Node,
+    source: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+    out: &mut Vec<Diagnostic>,
+) {
+    let Some(cond) = switch.child_by_field_name("condition") else { return };
+    let Some(body) = switch.child_by_field_name("body") else { return };
+    let labels = labels_of(body);
+    if labels.is_empty() || labels.iter().any(|l| label_is_default(*l, bytes)) {
+        return;
+    }
+    let Some(sel) = infer_node_type_cached(root, source, symbols, &cond, resolver, cache) else { return };
+    let Some(members) = resolver.members_of(&sel.binary_name) else { return };
+    if !is_pattern_selector(&sel, &members, cond, bytes) {
+        return;
+    }
+    let Some(covering) = unguarded_pattern_types(&labels, bytes, symbols, resolver) else { return };
+    let selector = sel.binary_name.as_str();
+    let covers = |sub: &str| covering.iter().any(|t| t == sub || t == OBJECT || reaches(resolver, sub, t));
+    if covers(selector) {
+        return;
+    }
+    if !covering.is_empty() && !hierarchy_fully_known(resolver, selector) {
+        return;
+    }
+    let mut missing = Vec::new();
+    if members.flags.is_sealed {
+        let Some(permitted) = permitted_subtypes(root, bytes, symbols, resolver, selector) else { return };
+        for sub in permitted.iter().filter(|s| !covers(s)) {
+            let leaf = resolver.members_of(sub).is_some_and(|m| {
+                !(m.flags.is_sealed || m.flags.is_abstract || m.flags.is_interface || m.flags.has_hidden_members)
+            });
+            if !leaf || !hierarchy_fully_known(resolver, sub) {
+                return;
+            }
+            missing.push(written_name(sub));
+        }
+        if missing.is_empty() {
+            return;
+        }
+    }
+    let what = match crate::switching::switches::is_value_context(switch) {
+        true => "Switch expression",
+        false => "Switch statement",
+    };
+    let over = written_name(selector);
+    let message = match missing.is_empty() {
+        true => format!("{what} over `{over}` does not cover every value — add a `default` or a pattern matching any `{over}`"),
+        false => format!(
+            "{what} over sealed `{over}` does not cover every permitted subtype (missing: {}) — add the missing cases or a `default`",
+            missing.join(", ")
+        ),
+    };
+    out.push(crate::engine::check_id::CheckId::NonExhaustiveEnumSwitch.at(switch, message));
+}
+
+/// The types of the type patterns among `labels` that match without a guard (`when true` is no
+/// guard). `None` when a pattern cannot be read: a record pattern, or a type that does not resolve.
+fn unguarded_pattern_types(
+    labels: &[Node],
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    for label in labels {
+        let mut c = label.walk();
+        let parts: Vec<Node> = label.named_children(&mut c).collect();
+        let guarded = parts.iter().any(|p| {
+            p.kind() == "guard" && p.named_child(0).and_then(|g| g.utf8_text(bytes).ok()).map(str::trim) != Some("true")
+        });
+        for part in parts {
+            let pattern = match part.kind() {
+                "pattern" => part.named_child(0)?,
+                "type_pattern" | "record_pattern" => part,
+                _ => continue,
+            };
+            if pattern.kind() != "type_pattern" {
+                return None;
+            }
+            if guarded {
+                continue;
+            }
+            let mut pc = pattern.walk();
+            let ty = pattern.named_children(&mut pc).find(|n| n.kind() != "modifiers")?;
+            out.push(written_type_binary(ty, bytes, symbols, resolver)?);
+        }
+    }
+    Some(out)
+}
+
+/// The subtypes the `permits` clause of the sealed type `binary` lists, when this file declares the
+/// type with one. `None` otherwise: without the clause a sealed type permits whatever its compilation
+/// unit declares, and a type declared elsewhere cannot be read here.
+fn permitted_subtypes(
+    root: &Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    binary: &str,
+) -> Option<Vec<String>> {
+    let decl = find_type_declaration(root, bytes, binary)?;
+    let mut out = Vec::new();
+    let mut dc = decl.walk();
+    for permits in decl.children(&mut dc).filter(|n| n.kind() == "permits") {
+        let mut pc = permits.walk();
+        for list in permits.named_children(&mut pc) {
+            let mut lc = list.walk();
+            let types: Vec<Node> = match list.kind() {
+                "type_list" => list.named_children(&mut lc).collect(),
+                _ => vec![list],
+            };
+            for ty in types {
+                out.push(written_type_binary(ty, bytes, symbols, resolver)?);
+            }
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// `Shape` for `corpus/SwitchBad$Shape` — the name as the file writes it.
+fn written_name(binary: &str) -> String {
+    simple_name(binary).rsplit('$').next().unwrap_or_default().to_string()
 }
 
 /// The enum's constant names: the static fields whose declared type is the enum itself. That is how
@@ -475,4 +625,79 @@ mod tests {
         let out = enum_switch_errors_in(root, &nodes, src, &symbols, &r, &InferCache::new());
         assert!(out.is_empty(), "{out:?}");
     }
+
+    // ── Pattern selectors: `Object`, sealed types ──────────────────────────────
+
+    #[test]
+    fn an_object_pattern_switch_without_a_default_is_flagged() {
+        let d = diags("Object o = new Object(); switch (o) { case String s -> { } } return 0;");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("Switch statement over `Object`"), "{d:?}");
+    }
+
+    #[test]
+    fn a_default_or_an_unconditional_pattern_makes_an_object_switch_exhaustive() {
+        assert!(diags("Object o = new Object(); switch (o) { case String s -> { } default -> { } } return 0;").is_empty());
+        assert!(diags("Object o = new Object(); switch (o) { case String s -> { } case Object x -> { } } return 0;").is_empty());
+    }
+
+    #[test]
+    fn a_guarded_pattern_covers_nothing_but_when_true_does() {
+        let guarded = diags("Object o = new Object(); boolean b = true; switch (o) { case Object x when b -> { } } return 0;");
+        assert_eq!(guarded.len(), 1, "{guarded:?}");
+        assert!(diags("Object o = new Object(); switch (o) { case Object x when true -> { } } return 0;").is_empty());
+    }
+
+    /// In a package: a binary name without a `/` is what a type variable looks like, and is never
+    /// read as a pattern selector.
+    fn sealed_resolver() -> MapResolver {
+        let mut r = resolver();
+        let mut shape = plain_cls();
+        shape.flags.is_interface = true;
+        shape.flags.is_abstract = true;
+        shape.flags.is_sealed = true;
+        r.members.insert("p/C$Shape".to_string(), shape);
+        for record in ["p/C$Circle", "p/C$Square"] {
+            let mut cls = plain_cls();
+            cls.interfaces = vec![TypeRef::simple("p/C$Shape")];
+            cls.flags.is_record = true;
+            cls.flags.is_final = true;
+            r.members.insert(record.to_string(), cls);
+        }
+        for (simple, binary) in [("Shape", "p/C$Shape"), ("Circle", "p/C$Circle"), ("Square", "p/C$Square")] {
+            r.simple.insert(simple.to_string(), binary.to_string());
+        }
+        r
+    }
+
+    fn sealed_diags(methods: &str) -> Vec<String> {
+        let src = format!(
+            "package p; class C {{ sealed interface Shape permits Circle, Square {{ }} \
+             record Circle(double r) implements Shape {{ }} record Square(double s) implements Shape {{ }} {methods} }}"
+        );
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_java::LANGUAGE.into()).unwrap();
+        let tree = parser.parse(&src, None).unwrap();
+        let root = tree.root_node();
+        let nodes = crate::engine::check::collect_nodes(root);
+        let symbols = extract_symbols(&src);
+        enum_switch_errors_in(root, &nodes, &src, &symbols, &sealed_resolver(), &InferCache::new())
+            .into_iter()
+            .map(|d| d.message)
+            .collect()
+    }
+
+    #[test]
+    fn a_sealed_switch_missing_a_permitted_subtype_is_flagged() {
+        let d = sealed_diags("int m(Shape shape) { return switch (shape) { case Circle c -> 1; }; }");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("missing: Square"), "{d:?}");
+    }
+
+    #[test]
+    fn a_sealed_switch_covering_every_permitted_subtype_is_ok() {
+        let d = sealed_diags("int m(Shape shape) { return switch (shape) { case Circle c -> 1; case Square s -> 2; }; }");
+        assert!(d.is_empty(), "{d:?}");
+    }
 }
+

@@ -40,7 +40,7 @@ pub fn capture_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
             "method_declaration" | "constructor_declaration" => {
                 if let Some(body) = n.child_by_field_name("body") {
                     if body.kind() == "block" {
-                        check_scope(body, bytes, &mut out);
+                        check_scope(body, n.child_by_field_name("parameters"), bytes, &mut out);
                     }
                 }
             }
@@ -48,7 +48,7 @@ pub fn capture_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
                 let mut c = n.walk();
                 for ch in n.named_children(&mut c) {
                     if ch.kind() == "block" {
-                        check_scope(ch, bytes, &mut out);
+                        check_scope(ch, None, bytes, &mut out);
                     }
                 }
             }
@@ -59,13 +59,25 @@ pub fn capture_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
     out
 }
 
-fn check_scope(scope: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+fn check_scope(scope: Node, params: Option<Node>, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     // Pass 1 — over the scope's OWN region (not descending into closures / nested types / nested
     // callables): the initialized locals (name → declaration-end offset), their declaration counts,
     // and every bare-identifier reassignment site.
     let mut decl_count: HashMap<String, usize> = HashMap::new();
     let mut inited: HashMap<String, usize> = HashMap::new();
     let mut reassigns: Vec<(String, Node)> = Vec::new();
+    // A parameter holds its argument from the first line of the body: it is as initialized as a
+    // local declared with a value, so reassigning one it captures breaks effective finality too.
+    if let Some(params) = params {
+        let mut pc = params.walk();
+        for p in params.named_children(&mut pc).filter(|p| p.kind() == "formal_parameter") {
+            let Some(name) = p.child_by_field_name("name").and_then(|x| text(x, bytes)) else { continue };
+            *decl_count.entry(name.clone()).or_insert(0) += 1;
+            if !has_keyword(p, bytes, "final") {
+                inited.insert(name, scope.start_byte());
+            }
+        }
+    }
     // The closures found at the top level of this scope (not nested inside another closure) — the
     // capture sources.
     let mut closures: Vec<Node> = Vec::new();
@@ -103,6 +115,23 @@ fn check_scope(scope: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
             "formal_parameter" | "spread_parameter" | "catch_formal_parameter" => {
                 if let Some(name) = n.child_by_field_name("name").and_then(|x| text(x, bytes)) {
                     *decl_count.entry(name).or_insert(0) += 1;
+                }
+            }
+            // `o instanceof String text` binds `text` with a value, like an initialized local. The
+            // grammar puts that binding on the `instanceof` itself; a `case String text` has it in
+            // a `type_pattern`.
+            "instanceof_expression" => {
+                if let Some(name) = n.child_by_field_name("name").and_then(|b| text(b, bytes)) {
+                    *decl_count.entry(name.clone()).or_insert(0) += 1;
+                    inited.insert(name, n.end_byte());
+                }
+            }
+            "type_pattern" => {
+                let mut pc = n.walk();
+                let binding = n.named_children(&mut pc).filter(|x| x.kind() == "identifier").last();
+                if let Some(name) = binding.and_then(|b| text(b, bytes)) {
+                    *decl_count.entry(name.clone()).or_insert(0) += 1;
+                    inited.insert(name, n.end_byte());
                 }
             }
             "assignment_expression" => {
@@ -262,13 +291,20 @@ fn collect_free_names<'t>(closure: Node<'t>, bytes: &[u8], into: &mut HashMap<St
 /// `name` field of a `method_invocation`; everything else that is a bare `identifier` counts.
 fn is_value_reference(id: Node) -> bool {
     let Some(parent) = id.parent() else { return true };
-    if parent.kind() == "method_invocation" {
+    let slot = crate::support::nodes::child_field_name(parent, id);
+    match (parent.kind(), slot.as_deref()) {
         // The invoked method's own name is not a captured variable; its receiver / arguments are.
-        if parent.child_by_field_name("name").map(|n| n.id()) == Some(id.id()) {
-            return false;
-        }
+        ("method_invocation", Some("name")) => false,
+        // `obj.count` names a field of `obj`, never the local `count`.
+        ("field_access", Some("field")) => false,
+        // A member a local or anonymous class declares is named, not read.
+        (
+            "method_declaration" | "constructor_declaration" | "class_declaration" | "interface_declaration"
+            | "enum_declaration" | "record_declaration",
+            Some("name"),
+        ) => false,
+        _ => true,
     }
-    true
 }
 
 /// If `n` is a closure, the subtree to scan for captured names: a lambda (whole node — its params are
@@ -278,6 +314,15 @@ fn is_value_reference(id: Node) -> bool {
 fn closure_capture_root(n: Node) -> Option<Node> {
     match n.kind() {
         "lambda_expression" => Some(n),
+        // A LOCAL class captures like an anonymous one. Only one that extends and implements nothing:
+        // a supertype could declare a field of the captured name, which the body would then mean.
+        "class_declaration"
+            if n.parent().is_some_and(|p| p.kind() == "block")
+                && n.child_by_field_name("superclass").is_none()
+                && n.child_by_field_name("interfaces").is_none() =>
+        {
+            n.child_by_field_name("body")
+        }
         "object_creation_expression" => {
             let mut c = n.walk();
             // Explicit loop, never `.find` on `named_children` (cursor-lifetime borrow gotcha).
