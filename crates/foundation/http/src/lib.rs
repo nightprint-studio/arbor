@@ -32,6 +32,8 @@ pub use server::{error_response, Server, ServerConfig};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -102,6 +104,47 @@ mod tests {
         assert!(out.contains("content-type: text/event-stream"), "{out}");
         assert!(out.contains("data: one\n\n"), "{out}");
         assert!(out.contains("event: tick\ndata: two\n\n"), "{out}");
+        handle.abort();
+    }
+
+    /// A stream whose client hangs up has to end by itself.
+    ///
+    /// The sender is held for the whole test and nothing is ever sent on it, so the
+    /// channel cannot be what ends this stream — only the hang-up can. A server that
+    /// waits on the channel alone parks here for the life of the process holding the
+    /// socket, which is how the MCP endpoint lost one descriptor per departed client
+    /// until it ran out and stopped accepting. `tx.closed()` resolving is the proof the
+    /// connection task let go.
+    ///
+    /// It takes a real socket: the receiver can be dropped by hand in-process, but the
+    /// peer going away without anyone dropping anything is the case that leaked, and it
+    /// does not exist above the wire.
+    #[tokio::test]
+    async fn a_stream_ends_when_the_client_hangs_up() {
+        let server = Server::bind("127.0.0.1:0".parse().unwrap()).await.unwrap();
+        let addr = server.local_addr().unwrap();
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<SseEvent>(4);
+        let body = Arc::new(Mutex::new(Some(rx)));
+        let handle = tokio::spawn(server.serve(move |_req: Request| {
+            let rx = body.lock().unwrap().take().expect("one stream per test");
+            async move { Response::sse(rx) }
+        }));
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        client.write_all(b"GET /events HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+        // Read the head first: it puts the server inside the stream arm for certain,
+        // rather than racing the hang-up against the response it has yet to write.
+        let mut head = [0u8; 256];
+        let n = client.read(&mut head).await.unwrap();
+        let head = String::from_utf8_lossy(&head[..n]);
+        assert!(head.contains("content-type: text/event-stream"), "{head}");
+
+        drop(client);
+
+        tokio::time::timeout(Duration::from_secs(5), tx.closed())
+            .await
+            .expect("the stream never noticed the hang-up — its descriptor would leak");
         handle.abort();
     }
 

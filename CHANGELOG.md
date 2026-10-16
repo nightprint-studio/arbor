@@ -172,6 +172,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu's docs read as one manual.** Every page opens with its section and a summary, and lays its facts out as cards, steps, tables and callouts instead of long paragraphs.
 
 ### Fixed
+- **The MCP endpoint keeps answering after many client reconnections.** Every AI client that disconnected used to leave a socket behind, and once enough had, the endpoint went on listening while dropping every connection — only restarting Arbor brought it back.
 - **Bennu catches Java errors it used to let through.** Narrowing or `null` arguments to primitives, wrong `super(…)`/`this(…)` and nested-class constructor arguments, ambiguous overloads, boxing and array assignments, lambdas passed where no functional interface fits, anonymous classes missing an abstract method, `Thread.sleep` without handling, and locals used outside their block, loop or `catch`.
 - **Wrong Java argument types are reported on many more calls.** Static calls, calls inside lambdas, generic and overloaded methods, anonymous-class constructors and own-method calls in Lombok classes now flag an argument no overload can take; static calls also get the wrong-argument-count check.
 - **Go-to and hover on an overloaded Java method pick the overload the call binds to.** `uri(b -> …)` opens `uri(Function)`, not the `uri(URI)` declared above it — lambdas, method references, `null`, literals and argument types are all weighed, even while the lambda is still being written.

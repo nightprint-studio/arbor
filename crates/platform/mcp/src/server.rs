@@ -326,18 +326,26 @@ impl<C: ToolCatalog> McpServer<C> {
         tokio::spawn(async move {
             let _open = open;
             loop {
-                match notifications.recv().await {
-                    Ok(message) => {
-                        // The client hung up: end the task rather than hold a subscriber
-                        // for a stream nobody is reading.
-                        if tx.send(SseEvent::data(message)).await.is_err() {
-                            return;
+                tokio::select! {
+                    // The connection is over — whoever was draining the receiver dropped
+                    // it. Waiting for `send` to fail instead would mean waiting for the
+                    // *next* notification, which may be hours away or never: until then
+                    // this task holds a subscription, and `open_streams` — which answers
+                    // "is anything actually listening" — counts a listener that left.
+                    () = tx.closed() => return,
+                    message = notifications.recv() => match message {
+                        Ok(message) => {
+                            // The client hung up: end the task rather than hold a
+                            // subscriber for a stream nobody is reading.
+                            if tx.send(SseEvent::data(message)).await.is_err() {
+                                return;
+                            }
                         }
-                    }
-                    // Behind by more than the buffer. "Ask again" does not accumulate, so
-                    // one message covers every one that was missed.
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => return,
+                        // Behind by more than the buffer. "Ask again" does not accumulate,
+                        // so one message covers every one that was missed.
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => return,
+                    },
                 }
             }
         });
@@ -1051,10 +1059,10 @@ mod tests {
         let arbor_http::Body::Sse(rx) = resp.body else { panic!("expected a stream") };
         assert_eq!(s.open_streams(), 1);
 
-        // The client hangs up: the count must come back down without another notification
-        // having to arrive to notice.
+        // The client hangs up. The count must come back down on its own: nothing is sent
+        // on this stream afterwards, so a task that only learns of the hang-up from a
+        // failed `send` would hold the count up for as long as the process lives.
         drop(rx);
-        s.notify_tools_changed();
         for _ in 0..50 {
             if s.open_streams() == 0 {
                 return;

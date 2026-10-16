@@ -9,7 +9,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::error::{HttpError, Result};
@@ -124,7 +124,11 @@ where
     let mut writer = BufWriter::new(tx);
 
     loop {
-        let request = match read_request(&mut reader, config.max_head_bytes, config.max_body_bytes).await {
+        // Bound to a `let` before the match: in `match read_request(&mut reader, …).await`
+        // the future is a scrutinee temporary, so its borrow of `reader` would last for
+        // the whole match — and the error arm needs the reader to hand on.
+        let parsed = read_request(&mut reader, config.max_head_bytes, config.max_body_bytes).await;
+        let request = match parsed {
             Ok(Some(r)) => r,
             Ok(None) => return Ok(()), // clean EOF between requests
             Err(e) => {
@@ -132,7 +136,7 @@ where
                 if let Some(status) = e.status() {
                     let mut resp = Response::status(status);
                     resp = resp.with_header("connection", "close");
-                    let _ = write_response(&mut writer, resp, false).await;
+                    let _ = write_response(&mut reader, &mut writer, resp, false).await;
                 }
                 return Err(e);
             }
@@ -145,7 +149,7 @@ where
         let response = handler(request).await;
         let keep_alive = !client_wants_close && !response.forces_close();
 
-        write_response(&mut writer, response, keep_alive).await?;
+        write_response(&mut reader, &mut writer, response, keep_alive).await?;
 
         if !keep_alive {
             let _ = writer.shutdown().await;
@@ -154,10 +158,19 @@ where
     }
 }
 
-/// Write status line, headers and body. Bytes bodies get a `Content-Length`; SSE
-/// bodies get streamed until their sender drops.
-async fn write_response<W>(writer: &mut BufWriter<W>, response: Response, keep_alive: bool) -> Result<()>
+/// Write status line, headers and body. Bytes bodies get a `Content-Length`; SSE bodies
+/// get streamed until their sender drops or the peer hangs up.
+///
+/// It takes the read half as well as the write half for the sake of that second ending:
+/// see the stream arm below for why a writer alone cannot tell that its client is gone.
+async fn write_response<R, W>(
+    reader: &mut BufReader<R>,
+    writer: &mut BufWriter<W>,
+    response: Response,
+    keep_alive: bool,
+) -> Result<()>
 where
+    R: tokio::io::AsyncRead + Unpin,
     W: tokio::io::AsyncWrite + Unpin,
 {
     let Response { status, headers, body } = response;
@@ -189,17 +202,55 @@ where
             head.push_str("connection: close\r\n\r\n");
             writer.write_all(head.as_bytes()).await?;
             writer.flush().await?;
-            while let Some(event) = rx.recv().await {
-                writer.write_all(event.encode().as_bytes()).await?;
-                // Flush per event: an SSE consumer that gets its events in batches
-                // when the buffer happens to fill is an SSE consumer with no reason
-                // to exist.
-                writer.flush().await?;
+            loop {
+                tokio::select! {
+                    // An idle stream writes nothing, so it never takes an `EPIPE`, and
+                    // waiting on the channel alone reads nothing either: a client that
+                    // hangs up between events would leave this task parked here for the
+                    // life of the process, holding its descriptor. One lost descriptor
+                    // per departed client, against the 256 a GUI-launched macOS app
+                    // inherits from launchd — the endpoint stops accepting long before
+                    // anything else notices.
+                    () = peer_gone(reader) => break,
+                    event = rx.recv() => match event {
+                        Some(event) => {
+                            writer.write_all(event.encode().as_bytes()).await?;
+                            // Flush per event: an SSE consumer that gets its events in
+                            // batches when the buffer happens to fill is an SSE consumer
+                            // with no reason to exist.
+                            writer.flush().await?;
+                        }
+                        // The sender is done; nothing more can arrive.
+                        None => break,
+                    },
+                }
             }
             let _ = writer.shutdown().await;
         }
     }
     Ok(())
+}
+
+/// Resolve when the peer is no longer there: end of input, or a read that fails.
+///
+/// Bytes that arrive meanwhile are drained and dropped. That is not neglect: this is only
+/// ever called on a stream response, which has already told the client `connection:
+/// close`, so there is no second request to serve on this socket. The end of the input is
+/// the whole signal.
+///
+/// Safe to lose a race in `select!`: a `read` that is dropped before it completes has
+/// consumed nothing.
+async fn peer_gone<R>(reader: &mut R)
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut scratch = [0u8; 256];
+    loop {
+        match reader.read(&mut scratch).await {
+            Ok(0) | Err(_) => return,
+            Ok(_) => continue,
+        }
+    }
 }
 
 /// Convenience for the common "the peer sent something we won't serve" answer.
