@@ -105,7 +105,12 @@ pub(crate) fn run_streamed(
     use std::process::{Command, Stdio};
 
     let (program, rest) = argv.split_first().ok_or("nothing to run")?;
-    let mut cmd = Command::new(program);
+    // Resolve the program ourselves: `Command::new("npm")` only tries `npm.exe` on Windows, and npm
+    // is a `.cmd` shim — so a package manager that works fine in a terminal reported "not on your
+    // PATH". `locate_executable` also covers the global dirs a GUI-launched process doesn't inherit.
+    let resolved = arbor_process_ext::prelude::locate_executable(program, None, &[], &[])
+        .unwrap_or_else(|| program.clone());
+    let mut cmd = Command::new(&resolved);
     // **`stdin` must be null, not inherited.** A backend's fd 0 is the protocol pipe from the
     // shell, and an inherited one is the SAME open file description — so a child that sets
     // `O_NONBLOCK` on its stdin sets it on ours. Node does exactly that (libuv marks a pipe

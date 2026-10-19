@@ -1767,6 +1767,25 @@ fn static_import_type(imports: &[bennu_java::prelude::Import], name: &str) -> Op
         use bennu_java::prelude::infer_expression_type;
         let resolver = self.resolver.as_deref()?;
         let parent = node.parent()?;
+        // `case Foo f` and a record component (`Num(double value)`): the type written beside the
+        // name. `var` is left alone — it takes the record component's type, which is not written here.
+        if matches!(parent.kind(), "type_pattern" | "record_pattern_component")
+            && bennu_java::prelude::pattern_binding_name(&parent).map(|n| n.id()) == Some(node.id())
+        {
+            let written = parent.named_child(0)?.utf8_text(bytes).ok()?;
+            if written == "var" {
+                return None;
+            }
+            return self
+                .type_of_written(source, written)
+                // A primitive has no import to resolve through; anything else unresolved says nothing.
+                .or_else(|| {
+                    written
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase())
+                        .then(|| bennu_java::prelude::TypeRef::simple(written))
+                });
+        }
         if parent.child_by_field_name("name").map(|n| n.id()) != Some(node.id()) {
             return None;
         }

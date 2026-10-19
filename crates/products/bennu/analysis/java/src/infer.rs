@@ -1759,6 +1759,12 @@ impl Ctx<'_> {
                     if !taken && !from_receiver.contains(&var) {
                         bindings.push((var, bound));
                     }
+                } else if let Some(arg) = args.get(i) {
+                    // `Optional<X> value` passed an `Optional<Foo>`: X is whatever sits in the
+                    // same position of the argument's type.
+                    if let Some(arg_ty) = self.infer_expr(arg, enclosing) {
+                        self.unify_type_args(p, &arg_ty, from_receiver, &mut bindings);
+                    }
                 }
                 continue;
             }
@@ -1792,6 +1798,51 @@ impl Ctx<'_> {
             return ret.clone();
         }
         apply_bindings(ret, &bindings)
+    }
+
+    /// Structural unification of a generic parameter type against the argument's type: every bare
+    /// method-level variable in `param`'s type arguments is bound to the argument's type argument
+    /// at the same position (`Optional<X>` vs `Optional<Foo>` → `X = Foo`; `List<X>` vs
+    /// `ArrayList<Foo>` → `X = Foo`, the argument being viewed as the parameter's raw type first).
+    ///
+    /// Abstains like the identity binding: a raw or unrelated argument, an argument that is itself
+    /// a variable, or a variable already bound (first occurrence wins).
+    fn unify_type_args(
+        &self,
+        param: &TypeRef,
+        arg: &TypeRef,
+        from_receiver: &[String],
+        bindings: &mut Vec<(String, TypeRef)>,
+    ) {
+        if param.type_args.is_empty() || arg.dims != param.dims {
+            return;
+        }
+        let viewed = if arg.binary_name == param.binary_name {
+            arg.clone()
+        } else {
+            match crate::hierarchy::seen_as(self.resolver, arg, &param.binary_name) {
+                Some(v) => v,
+                None => return,
+            }
+        };
+        if viewed.type_args.len() != param.type_args.len() {
+            return; // raw argument: nothing to read the variable off
+        }
+        for (pa, aa) in param.type_args.iter().zip(&viewed.type_args) {
+            if pa.type_args.is_empty() {
+                if pa.dims == 0
+                    && self.is_type_variable(&pa.binary_name)
+                    && !from_receiver.contains(&pa.binary_name)
+                    && !bindings.iter().any(|(v, _)| *v == pa.binary_name)
+                    && !aa.binary_name.is_empty()
+                    && !self.is_type_variable(&aa.binary_name)
+                {
+                    bindings.push((pa.binary_name.clone(), aa.clone()));
+                }
+            } else {
+                self.unify_type_args(pa, aa, from_receiver, bindings);
+            }
+        }
     }
 
     /// The binding a lambda or method reference `arg` makes for the variable its functional
@@ -4020,6 +4071,13 @@ mod method_type_var_tests {
                     vec![TypeRef::simple("T")],
                 )
                 .stat(),
+                // `<X> X unwrap(Opt<X>)`: the variable sits INSIDE the parameter's type arguments.
+                Member::method(
+                    "unwrap",
+                    TypeRef::simple("X"),
+                    vec![TypeRef { binary_name: "acme/Opt".into(), dims: 0, type_args: vec![TypeRef::simple("X")], wildcard: false }],
+                )
+                .stat(),
                 meth("orElse", "T", &["T"]),
             ],
             fields: vec![],
@@ -4066,6 +4124,18 @@ mod method_type_var_tests {
         assert_eq!(
             ty.type_args.first().map(|a| a.binary_name.as_str()),
             Some("acme/Kind"),
+        );
+    }
+
+    /// A variable nested in the parameter's type arguments (`<X> X unwrap(Opt<X>)`) is read off the
+    /// same position of the argument's type — the `or_notify_fe(Optional<X>, …)` shape that left
+    /// every Lombok `val` initialised from it untyped.
+    #[test]
+    fn a_variable_inside_a_generic_parameter_comes_from_the_arguments_type_arguments() {
+        let src = "class C { Repo r; void m() { Opt.unwrap(Opt.ofNullable(r.kind())); } }";
+        assert_eq!(
+            infer_call(src, "Opt.unwrap(Opt.ofNullable(r.kind()))", &resolver()),
+            Some("acme/Kind".to_string()),
         );
     }
 

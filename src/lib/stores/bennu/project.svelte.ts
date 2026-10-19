@@ -832,6 +832,9 @@ function createProjectStore() {
     /** True when the active project is a Cargo one — gate Java-only UI (JDK, Maven,
      *  Dependencies, Generate, validation, index status) on `!isCargo`. */
     get isCargo()        { return project?.kind === 'cargo'; },
+    /** True for a folder with no manifest Bennu models (Node/Angular, SQL-only…): editor only,
+     *  so build-tool, test and dependency tooling has nothing to show. */
+    get isPlain()        { return project?.kind === 'plain'; },
     get activeFilePath() { return activeFilePath; },
     /**
      * `path` written relative to the open project's root, forward slashes — the root itself

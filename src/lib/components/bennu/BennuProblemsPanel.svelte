@@ -1,7 +1,10 @@
 <script lang="ts">
   /**
-   * Problems (bottom dock / right tool window) — a TREE grouped **by severity first**:
-   *   • **Errors** / **Warnings** (/ Info / Hints) are the top-level nodes.
+   * Problems (bottom dock / right tool window) — a TREE grouped **by module first** (only when the
+   * project has modules — a Maven reactor, a Cargo workspace), then **by severity**:
+   *   • one node per **module / crate** (files outside every module sit under the project root's own
+   *     node); a single-module project skips this level.
+   *   • **Errors** / **Warnings** (/ Info / Hints) are the severity nodes of each module.
    *   • Under each, problems are sub-grouped by their source — a **JDK** node (no JDK / fallback
    *     JDK), an **Encoding** node (files not valid in the declared encoding), and one node per
    *     **file** carrying diagnostics.
@@ -14,19 +17,20 @@
    * so Problems was, in practice, a Java panel.
    *   • Each node (severity and file) is collapsible; the leaf rows click to jump.
    *
-   * Because grouping is severity-first, one file can appear under both Errors and Warnings — each
-   * with only its rows of that severity. The header count is every leaf row.
+   * Within a module, grouping is severity-first, so one file can appear under both Errors and
+   * Warnings — each with only its rows of that severity. The header count is every leaf row.
    */
   import { tooltip } from '$lib/actions/tooltip';
   import {
     AlertTriangle, CircleAlert, Info, CircleCheckBig, ChevronRight, ChevronDown,
-    Coffee, FileWarning, FileCode2,
+    Coffee, FileWarning, FileCode2, Package,
   } from 'lucide-svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { moduleIndex } from './modules';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
@@ -55,6 +59,8 @@
     id: string;
     severity: Severity;
     groupKey: string;            // file path, or 'jdk' / 'encoding'
+    /** The file the row is about — what places it in a module. Absent for the JDK pseudo-group. */
+    file?: string;
     groupLabel: string;
     groupIcon: typeof Coffee;
     label: string;
@@ -74,6 +80,13 @@
     label: string;
     count: number;
     files: FileGroup[];
+  }
+  interface ModuleGroup {
+    key: string;
+    label: string;
+    title?: string;
+    count: number;
+    sevs: SevGroup[];
   }
 
   // Severity order is severity order: a style finding sits below every defect and above the
@@ -131,6 +144,7 @@
     for (const e of bennuDiagnosticsStore.encodingIssues) {
       out.push({
         id: `enc:${e.file}`, severity: 'warning',
+        file: e.file,
         groupKey: 'encoding', groupLabel: 'Encoding', groupIcon: FileWarning,
         label: baseName(e.file),
         detail: `not valid ${e.declared_encoding} — recovered as ${e.decoded_as}`,
@@ -146,6 +160,7 @@
       diags.forEach((d, i) => {
         out.push({
           id: `d:${i}`, severity: d.severity,
+          file: activePath,
           groupKey: `file:${norm(activePath)}`, groupLabel: label, groupIcon: FileCode2,
           label: d.message,
           detail: `@${d.start}`,
@@ -164,6 +179,7 @@
       fd.diagnostics.forEach((d, i) => {
         out.push({
           id: `proj:${fd.file}:${i}`, severity: d.severity,
+          file: fd.file,
           groupKey: `file:${norm(fd.file)}`, groupLabel: label, groupIcon: FileCode2,
           label: d.message,
           title: fd.file,
@@ -184,6 +200,7 @@
       fd.diagnostics.forEach((d, i) => {
         out.push({
           id: `lsp:${fd.file}:${i}`, severity: d.severity,
+          file: fd.file,
           groupKey: `file:${norm(fd.file)}`, groupLabel: label, groupIcon: FileCode2,
           label: d.message,
           title: fd.file,
@@ -201,6 +218,7 @@
       fd.diagnostics.forEach((d, i) => {
         out.push({
           id: `moji:${fd.file}:${i}`, severity: d.severity,
+          file: fd.file,
           groupKey: `file:${norm(fd.file)}`, groupLabel: label, groupIcon: FileCode2,
           label: d.message,
           title: fd.file,
@@ -213,11 +231,15 @@
     return out;
   });
 
-  // Severity-first tree: severity → file/source group → rows. Insertion order of files is preserved
-  // (JDK/Encoding first if present, then files as the stores list them).
-  const tree = $derived.by<SevGroup[]>(() => {
+  const modIndex = $derived(moduleIndex(projectStore.project));
+  /** Whether the tree has a module level at all (see {@link tree}). */
+  const grouped = $derived(modIndex.modules.length > 0);
+
+  /** Severity → file/source group → rows, for one module's items. Insertion order of files is
+   *  preserved (JDK/Encoding first if present, then files as the stores list them). */
+  function bySeverity(list: Item[]): SevGroup[] {
     const bySev = new Map<Severity, Map<string, FileGroup>>();
-    for (const it of items) {
+    for (const it of list) {
       let files = bySev.get(it.severity);
       if (!files) { files = new Map(); bySev.set(it.severity, files); }
       let fg = files.get(it.groupKey);
@@ -233,6 +255,30 @@
       out.push({ severity: sev, label: SEV_LABEL[sev] ?? sev, count, files: [...files.values()] });
     }
     return out;
+  }
+
+  /** Module → severity → file → rows. A project with no modules yields ONE unnamed group, which the
+   *  template renders without a node of its own — the tree is then exactly the severity-first one. */
+  const tree = $derived.by<ModuleGroup[]>(() => {
+    if (!grouped) return [{ key: '', label: '', count: items.length, sevs: bySeverity(items) }];
+    const buckets = new Map<string, Item[]>();
+    for (const it of items) {
+      // '' = the project root itself: a file outside every module, or the JDK pseudo-group.
+      const key = (it.file && modIndex.moduleOf(it.file)) || '';
+      let list = buckets.get(key);
+      if (!list) { list = []; buckets.set(key, list); }
+      list.push(it);
+    }
+    const rootName = projectStore.project?.name ?? 'Project';
+    return [...buckets.entries()]
+      .sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)))
+      .map(([key, list]) => ({
+        key: `mod:${key}`,
+        label: key === '' ? rootName : baseName(key),
+        title: key === '' ? undefined : key,
+        count: list.length,
+        sevs: bySeverity(list),
+      }));
   });
 
   const total = $derived(items.length);
@@ -271,14 +317,33 @@
     <div class="pb-clean"><CircleCheckBig size={14} /> No problems detected</div>
   {:else}
     <div class="pb-tree" role="tree" aria-label="Problems">
-      {#each tree as sev (sev.severity)}
+      {#each tree as mod (mod.key)}
+       {@const modCollapsed = grouped && collapsed.has(mod.key)}
+       {#if grouped}
+        <button
+          class="pb-mod"
+          type="button"
+          role="treeitem"
+          aria-expanded={!modCollapsed}
+          onclick={() => toggle(mod.key)}
+          use:tooltip={mod.title}
+        >
+          <span class="pb-chev">{#if modCollapsed}<ChevronRight size={13} />{:else}<ChevronDown size={13} />{/if}</span>
+          <span class="pb-file-icon"><Package size={13} /></span>
+          <span class="pb-sec-label">{mod.label}</span>
+          <span class="pb-sec-count">{mod.count}</span>
+        </button>
+       {/if}
+       {#if !modCollapsed}
+       {#each mod.sevs as sev (sev.severity)}
         {@const SevIc = sevIcon(sev.severity)}
-        {@const sevId = `sev:${sev.severity}`}
+        {@const sevId = `${mod.key}/sev:${sev.severity}`}
         {@const sevCollapsed = collapsed.has(sevId)}
         <button
           class="pb-sec"
           type="button"
           role="treeitem"
+          style:--pb-d={grouped ? 1 : 0}
           aria-expanded={!sevCollapsed}
           onclick={() => toggle(sevId)}
         >
@@ -296,6 +361,7 @@
               class="pb-file"
               type="button"
               role="treeitem"
+              style:--pb-d={grouped ? 1 : 0}
               aria-expanded={!fileCollapsed}
               onclick={() => toggle(fileId)}
             >
@@ -311,6 +377,7 @@
                   class="pb-row"
                   type="button"
                   role="treeitem"
+                  style:--pb-d={grouped ? 1 : 0}
                   onclick={() => row.onClick?.()}
                   oncontextmenu={(e) => onRowContextMenu(row, e)}
                   use:tooltip={row.title}
@@ -323,6 +390,8 @@
             {/if}
           {/each}
         {/if}
+       {/each}
+       {/if}
       {/each}
     </div>
   {/if}
@@ -338,11 +407,19 @@
   .pb-sec {
     display: flex; align-items: center; gap: 6px;
     width: 100%; text-align: left; box-sizing: border-box;
-    padding: 5px 12px 5px 6px; font-size: var(--font-size-sm); cursor: pointer;
+    padding: 5px 12px 5px calc(6px + var(--pb-d, 0) * 16px); font-size: var(--font-size-sm); cursor: pointer;
     background: transparent; border: none; font-family: var(--font-ui-sans);
     color: var(--text-primary); font-weight: 600;
   }
-  .pb-sec:hover { background: var(--bg-hover); }
+  /* Top level when the project has modules: the module / crate a group of problems lives in. */
+  .pb-mod {
+    display: flex; align-items: center; gap: 6px;
+    width: 100%; text-align: left; box-sizing: border-box;
+    padding: 5px 12px 5px 6px; font-size: var(--font-size-sm); cursor: pointer;
+    background: transparent; border: none; font-family: var(--font-ui-sans);
+    color: var(--text-primary); font-weight: 700;
+  }
+  .pb-mod:hover, .pb-sec:hover { background: var(--bg-hover); }
   .pb-chev { display: flex; flex-shrink: 0; color: var(--text-muted); }
   .pb-sec-icon { display: flex; flex-shrink: 0; }
   .pb-sec-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -357,7 +434,7 @@
   .pb-file {
     display: flex; align-items: center; gap: 6px;
     width: 100%; text-align: left; box-sizing: border-box;
-    padding: 4px 12px 4px 24px; font-size: var(--font-size-sm); cursor: pointer;
+    padding: 4px 12px 4px calc(24px + var(--pb-d, 0) * 16px); font-size: var(--font-size-sm); cursor: pointer;
     background: transparent; border: none; font-family: var(--font-ui-sans);
     color: var(--text-primary); font-weight: 500;
   }
@@ -368,7 +445,7 @@
   .pb-row {
     display: flex; align-items: center; gap: 8px;
     width: 100%; text-align: left; box-sizing: border-box;
-    padding: 4px 12px 4px 48px; font-size: var(--font-size-sm); cursor: pointer;
+    padding: 4px 12px 4px calc(48px + var(--pb-d, 0) * 16px); font-size: var(--font-size-sm); cursor: pointer;
     background: transparent; border: none; font-family: var(--font-ui-sans);
     transition: background var(--transition-fast);
   }

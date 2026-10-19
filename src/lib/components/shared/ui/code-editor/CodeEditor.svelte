@@ -345,10 +345,27 @@
   // Scroll-listener teardown (emits `onViewState` so the host can persist scroll too).
   let detachScroll: (() => void) | null = null;
   let scrollRaf = 0;
+  /** A remembered scroll offset not yet applied (layout pending); reported in its place meanwhile. */
+  let pendingScrollTop: number | null = null;
+  let detachRestore: (() => void) | null = null;
   /** The {@link stateKey} this view was created with. Captured, never re-read — see the prop. */
   let heldKey: string | undefined;
 
-  /** Report the current cursor + scroll to the host (for per-tab restore). */
+  /** Last scroll offset read while the scroller was attached and laid out. */
+  let lastLiveScrollTop = 0;
+
+  /**
+   * The scroll offset to remember. On teardown Svelte has already pulled the editor's DOM out of
+   * the document (the `{#key}` that remounts per tab), and a detached scroller reads
+   * `scrollTop === 0` — which overwrote the real offset with the top of the file on every tab
+   * switch. A detached or unlaid-out scroller therefore reports the last offset seen live.
+   */
+  function liveScrollTop(): number {
+    const el = view?.scrollDOM;
+    if (el && el.isConnected && el.clientHeight > 0) lastLiveScrollTop = el.scrollTop;
+    return lastLiveScrollTop;
+  }
+
   /**
    * Report cursor + scroll to the host, which remembers them per tab.
    *
@@ -363,7 +380,7 @@
       {
         anchor: sel.anchor,
         head: sel.head,
-        scrollTop: view.scrollDOM.scrollTop,
+        scrollTop: pendingScrollTop ?? liveScrollTop(),
         history: withHistory
           ? (view.state.toJSON({ history: historyField }) as { history?: unknown }).history
           : undefined,
@@ -774,6 +791,8 @@
       const len = view.state.doc.length;
       const anchor = Math.min(Math.max(0, initialState.anchor), len);
       const head = Math.min(Math.max(0, initialState.head), len);
+      // Before the dispatch: it emits a view state, and that one must not record the fresh view's 0.
+      pendingScrollTop = initialState.scrollTop > 0 ? initialState.scrollTop : null;
       view.dispatch({ selection: { anchor, head } });
       return { anchor, head, top: initialState.scrollTop };
     })();
@@ -788,13 +807,34 @@
       // The caret is the tell. If it is still exactly where this mount put it, nobody has
       // navigated and the remembered scroll is the right answer. If it has moved, somebody
       // named a destination and this must not undo it.
-      requestAnimationFrame(() => {
+      //
+      // The restore is retried across frames until the offset sticks: a view mounted into a
+      // container that has not been laid out yet has `clientHeight === 0`, and a `scrollTop`
+      // written then is clamped to 0 — which the teardown snapshot then recorded as the tab's
+      // scroll, losing it for good ("back on the tab and I'm at the top"). While it is pending,
+      // `emitViewState` reports the wanted offset, never the clamped one.
+      pendingScrollTop = restored && restored.top > 0 ? restored.top : null;
+      const takeOver = () => { pendingScrollTop = null; };
+      const takeOverEvents = ['wheel', 'pointerdown', 'keydown'] as const;
+      for (const ev of takeOverEvents) view.scrollDOM.addEventListener(ev, takeOver, { passive: true });
+      const scroller = view.scrollDOM;
+      detachRestore = () => { for (const ev of takeOverEvents) scroller.removeEventListener(ev, takeOver); };
+      let restoreFrames = 0;
+      const step = () => {
         if (!view) return;
         const sel = view.state.selection.main;
         if (restored && sel.anchor === restored.anchor && sel.head === restored.head) {
-          view.scrollDOM.scrollTop = restored.top;
+          const want = pendingScrollTop;
+          if (want == null) return; // nothing to restore, or the reader took over
+          if (view.scrollDOM.clientHeight > 0) {
+            view.scrollDOM.scrollTop = want;
+            if (Math.abs(view.scrollDOM.scrollTop - want) <= 1) { pendingScrollTop = null; return; }
+          }
+          if (++restoreFrames > 60) { pendingScrollTop = null; return; }
+          requestAnimationFrame(step);
           return;
         }
+        pendingScrollTop = null;
         // Somebody named a destination between the mount and this frame. Their own
         // `scrollIntoView` ran against a view that had not been laid out yet, so it scrolled
         // nothing — which is why the caret could sit on the right line with the viewport still at
@@ -803,11 +843,13 @@
         if (sel.head > 0) {
           view.dispatch({ effects: EditorView.scrollIntoView(sel.head, { y: 'center' }) });
         }
-      });
+      };
+      requestAnimationFrame(step);
     }
 
     // Persist scroll changes too (selection changes come through the update listener).
     const onScroll = () => {
+      liveScrollTop(); // synchronous: the throttled emit below can lose the last frame to a teardown
       if (scrollRaf) return;
       scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; emitViewState(); });
     };
@@ -855,6 +897,7 @@
   onDestroy(() => {
     if (scrollRaf) cancelAnimationFrame(scrollRaf);
     detachScroll?.();
+    detachRestore?.();
     // Last chance to hand the host this tab's undo history — the view is about to go.
     emitViewState(true);
     view?.destroy();

@@ -912,7 +912,10 @@
   // `bennu_open_project`): a rail icon that always opens an empty panel teaches the wrong
   // thing about the tool. Project, Build, Problems, TODO and Terminal all mean something
   // for both and stay.
-  const javaTools = $derived(!projectStore.isCargo);
+  const javaTools = $derived(!projectStore.isCargo && !projectStore.isPlain);
+  // Build tool, Tests and Dependencies exist for Maven and Cargo roots only: a plain folder
+  // (Node/Angular…) has no manifest behind them, so their rail buttons would open empty panels.
+  const hasProjectTooling = $derived(!projectStore.isPlain);
   // Forms reads a JSP's `<form>`s across the include graph, so a project with no pages —
   // a service module, a library, a Cargo root — has nothing it could ever show. Same reasoning
   // as `javaTools`, one notch narrower: the capability set says whether pages exist at all.
@@ -1110,7 +1113,9 @@
     { id: 'structure', tooltip: 'Structure', shortcut: 'Alt+2', icon: ListTree,   active: bennuUiStore.leftPanel === 'structure', onclick: () => bennuUiStore.toggleLeft('structure') },
     // Both ecosystems: the panel answers for a Maven reactor and for a Cargo workspace, from one
     // report shape.
-    { id: 'dependencies', tooltip: 'Dependencies', shortcut: 'Alt+N', icon: Library, active: bennuUiStore.leftPanel === 'dependencies', onclick: () => bennuUiStore.toggleLeft('dependencies') },
+    ...(hasProjectTooling
+      ? [{ id: 'dependencies', tooltip: 'Dependencies', shortcut: 'Alt+N', icon: Library, active: bennuUiStore.leftPanel === 'dependencies', onclick: () => bennuUiStore.toggleLeft('dependencies') }]
+      : []),
     ...pluginRail('left', 'top'),
   ]);
   // Left rail bottom cluster: only the bottom-dock toggles (Terminal, Problems).
@@ -1152,18 +1157,22 @@
       : { id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: MavenIcon, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') },
   );
   const rightTopRaw = $derived<ActivityRailButton[]>([
-    buildToolRail,
-    // The CATALOGUE of tests, not the runs — those are tabs of the Run console. Present on both
-    // ecosystems: a Cargo workspace enumerates its `#[test]`s exactly as a Maven project does, and
-    // the panel behind this button is the per-ecosystem one.
-    {
-      id: 'tests',
-      tooltip: 'Tests',
-      shortcut: 'Alt+5',
-      icon: testIcon(),
-      active: bennuUiStore.rightPanel === 'tests',
-      onclick: () => bennuUiStore.toggleRight('tests'),
-    },
+    ...(hasProjectTooling
+      ? [
+          buildToolRail,
+          // The CATALOGUE of tests, not the runs — those are tabs of the Run console. Present on both
+          // ecosystems: a Cargo workspace enumerates its `#[test]`s exactly as a Maven project does, and
+          // the panel behind this button is the per-ecosystem one.
+          {
+            id: 'tests',
+            tooltip: 'Tests',
+            shortcut: 'Alt+5',
+            icon: testIcon(),
+            active: bennuUiStore.rightPanel === 'tests',
+            onclick: () => bennuUiStore.toggleRight('tests'),
+          },
+        ]
+      : []),
     ...(javaTools
       ? [
           // The parse, and the model Bennu derives from it. Both views are about Bennu's OWN
@@ -1229,6 +1238,7 @@
   // A panel left open from the previous project would then have no toggle anywhere. Close those.
   $effect(() => {
     const java = javaTools;
+    const tooling = hasProjectTooling;
     const jsp = jspTools;
     const dtoLab = dtoLabTools;
     const available = catalogIds;
@@ -1237,11 +1247,11 @@
     // The only dependencies that should re-run this are the three values read above.
     untrack(() =>
       bennuUiStore.dropUnavailablePanels({
-        left: ['project', 'structure', 'dependencies'],
+        left: tooling ? ['project', 'structure', 'dependencies'] : ['project', 'structure'],
         // `i18n` is in both branches and needs no capability gate: it has no rail icon to lose, and
         // whether it applies is a question about the open FILE rather than about the project — a
         // fulcrum content tree can sit in a Maven repo as easily as in a Cargo one.
-        right: java ? ['maven', 'tests', 'ast', 'i18n'] : ['cargo', 'i18n'],
+        right: java ? ['maven', 'tests', 'ast', 'i18n'] : tooling ? ['cargo', 'tests', 'i18n'] : ['i18n'],
         bottom: [
           // `hierarchy` survives every switch: it is opened by an action about the caret rather than
           // by a rail button, so there is no icon that could disappear from under it, and its own
@@ -1588,7 +1598,7 @@
         action: () => run(() => bennuDtoLabStore.openAtCaret('payload')), when: dtoLabTools && !!path?.toLowerCase().endsWith('.java') },
       { id: 'dtolab-tests', title: 'DTO Lab: generate validation tests for the class at the caret', icon: 'Beaker',
         action: () => run(() => bennuDtoLabStore.openAtCaret('tests')), when: dtoLabTools && !!path?.toLowerCase().endsWith('.java') },
-      { id: 'dependencies', title: 'Dependencies',  icon: 'Library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: true },
+      { id: 'dependencies', title: 'Dependencies',  icon: 'Library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: hasProjectTooling },
       // The same subject from the other angle: the list says what each module needs, the graph says
       // who needs *it*, what a change to it rebuilds, and whether the project has a cycle. Named for
       // the ecosystem's own word so a Rust workspace is not offered a "module" graph.
@@ -2185,7 +2195,7 @@
       if (isKey(e, '0')) { e.preventDefault(); bennuUiStore.toggleBottom('build'); return; }
       // Both ecosystems, matching their rail icons: the Dependencies panel answers for a Cargo
       // workspace as well as a Maven reactor, and a cargo command streams into the same console.
-      if (isKey(e, 'n')) { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
+      if (isKey(e, 'n') && hasProjectTooling) { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
       // The Run console. A letter and not a digit because IntelliJ's Alt+4 is already Endpoints
       // here, and moving an existing tool's shortcut to make room would cost more than it buys.
       if (isKey(e, 'r')) { e.preventDefault(); bennuUiStore.toggleBottom('run'); return; }
@@ -2202,7 +2212,7 @@
       }
       // The build tool's window — Maven's goals or Cargo's crates, one slot. Outside the Java gate
       // because a Cargo project has one too.
-      if (isKey(e, '8')) {
+      if (isKey(e, '8') && hasProjectTooling) {
         e.preventDefault();
         bennuUiStore.toggleRight(projectStore.isCargo ? 'cargo' : 'maven');
         return;

@@ -657,6 +657,25 @@ pub fn parameter_name_node<'a>(param: &Node<'a>) -> Option<Node<'a>> {
     Some(declarator.child_by_field_name("name").unwrap_or(declarator))
 }
 
+/// The identifier a **pattern** binds: `s` in `case String s`, `value` in `Num(double value)`.
+///
+/// Same trap as [`parameter_name_node`], one shape over: a `type_pattern` and a
+/// `record_pattern_component` are positional — `<type> <identifier>` with no field names — so a
+/// `name` lookup answers `None` and the variable is invisible to go-to, rename, find-usages and
+/// hover. The binding is the trailing `identifier`.
+pub fn pattern_binding_name<'a>(pattern: &Node<'a>) -> Option<Node<'a>> {
+    if let Some(nm) = pattern.child_by_field_name("name") {
+        return Some(nm);
+    }
+    if !matches!(pattern.kind(), "type_pattern" | "record_pattern_component") {
+        return None;
+    }
+    let count = pattern.named_child_count();
+    // A lone child is the type of an anonymous `_` component, never a binding.
+    let last = pattern.named_child(count.checked_sub(1).filter(|i| *i > 0)?)?;
+    (last.kind() == "identifier").then_some(last)
+}
+
 /// The **type node** of a parameter, with the same trap as [`parameter_name_node`]: a
 /// `spread_parameter` exposes no `type` field either, so its type is the child that is neither the
 /// modifiers nor the declarator.
@@ -1656,6 +1675,35 @@ pub(crate) fn node_text(node: &Node, bytes: &[u8]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every binding name `pattern_binding_name` finds in `src`, in source order.
+    fn pattern_bindings(src: &str) -> Vec<String> {
+        let tree = crate::grammar::parse_java(src).expect("parses");
+        let mut out = Vec::new();
+        let mut stack = vec![tree.root_node()];
+        while let Some(n) = stack.pop() {
+            if let Some(nm) = pattern_binding_name(&n) {
+                if matches!(n.kind(), "type_pattern" | "record_pattern_component") {
+                    out.push(nm.utf8_text(src.as_bytes()).unwrap().to_string());
+                }
+            }
+            let mut c = n.walk();
+            let mut kids: Vec<_> = n.named_children(&mut c).collect();
+            kids.reverse();
+            stack.extend(kids);
+        }
+        out
+    }
+
+    #[test]
+    fn a_record_component_and_a_type_pattern_bind_their_trailing_identifier() {
+        let record = "class C { boolean m(Object e) { return e instanceof Num(double value); } }";
+        assert_eq!(pattern_bindings(record), ["value"]);
+        let nested = "class C { void m(Object o) { switch (o) { case Pair(Num(var a), String b) -> {} default -> {} } } }";
+        assert_eq!(pattern_bindings(nested), ["a", "b"]);
+        let plain = "class C { void m(Object o) { switch (o) { case String s -> {} default -> {} } } }";
+        assert_eq!(pattern_bindings(plain), ["s"]);
+    }
 
     /// The annotations of the single top-level type in `src`.
     fn type_annotations(src: &str) -> Vec<Annotation> {

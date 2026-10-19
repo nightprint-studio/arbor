@@ -132,7 +132,9 @@ pub fn undefined_var_errors_in(
     // Only FIELDS matter here — `@Data`'s accessors or `@RequiredArgsConstructor`'s constructor add
     // no bare value, and going silent on them hid every undeclared name in most Spring classes. See
     // `crate::support::nodes::generated_names`.
-    if generated_names(top.node, bytes).values {
+    // A logger annotation adds exactly one well-known name, so it only exempts that name (below).
+    let generated = generated_names(top.node, bytes);
+    if generated.values {
         return Vec::new();
     }
 
@@ -233,6 +235,10 @@ pub fn undefined_var_errors_in(
         }
         // A `java.lang` type name used bare → a type reference, never an undefined variable.
         if JAVA_LANG_TYPES.contains(&name) {
+            continue;
+        }
+        // Lombok's logger field (`@Slf4j` → `log`) is declared in no source.
+        if generated.is_logger_name(name) {
             continue;
         }
         // RESOLUTION 1: a local / param / for-var / catch-param / resource / pattern var in a scope
@@ -589,6 +595,16 @@ mod tests {
     fn a_member_generating_annotation_skips_the_file() {
         let src = "package com.acme;\n@Slf4j\nclass C extends Base { void m() { Object o = log; } }";
         assert!(diags_with(src, &resolver()).is_empty());
+    }
+
+    /// `@Slf4j` exempts `log` and nothing else: the rest of the class is still judged, or an
+    /// undeclared repository field goes unreported in every logging Spring bean.
+    #[test]
+    fn a_logger_annotation_exempts_only_the_logger_name() {
+        let src = "package com.acme;\n@Slf4j\nclass C extends Base { void m() { log.info(\"x\"); Object o = zzz; } }";
+        let d = diags_with(src, &resolver());
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`zzz`"), "{d:?}");
     }
 
     /// The report, verbatim: a Spring bean with `@RequiredArgsConstructor` passing an argument

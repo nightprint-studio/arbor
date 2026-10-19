@@ -150,6 +150,8 @@ export type NavOutcome =
  */
 export class NavFlow {
   private seq = 0;
+  /** Bumped by {@link releaseHold}; a hold that started under an older value stops. */
+  private holdEpoch = 0;
   private active: { id: number; dest: NavPlace; record: boolean } | null = null;
   /** The last place the reader was settled at — outside any transit, in the file it belongs to. */
   private settled: NavPlace | null = null;
@@ -307,12 +309,13 @@ export class NavFlow {
     const measure = this.host.lineOffset?.bind(this.host);
     const reveal = this.host.reveal?.bind(this.host);
     if (!measure || !reveal) return;
+    const epoch = this.holdEpoch;
     // `null` = no baseline yet: before there is a viewport, and after every correction.
     let settled: number | null = null;
     let quiet = 0;
     for (let i = 0; i < HOLD_ATTEMPTS; i++) {
       await this.host.settle();
-      if (this.seq !== id) return;
+      if (this.seq !== id || this.holdEpoch !== epoch) return;
       if (this.host.caret()?.line !== dest.line) return;
       const now = measure(dest.line);
       // No viewport yet — the case that must not end the hold; waiting is the only thing that helps.
@@ -337,6 +340,15 @@ export class NavFlow {
       quiet += 1;
       if (quiet >= HOLD_SETTLED) return;
     }
+  }
+
+  /**
+   * The reader scrolled (wheel, touch, scrollbar, key): end any hold in progress. The hold exists
+   * for a viewport nobody has touched yet — once the reader is driving, "putting them back" is the
+   * editor fighting their scroll for the whole hold window.
+   */
+  releaseHold(): void {
+    this.holdEpoch += 1;
   }
 
   /** Both halves of a landing: the caret is on the line, and the line can be seen. */

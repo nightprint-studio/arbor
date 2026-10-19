@@ -158,10 +158,30 @@ const OTHER_MEMBER_GENERATING_ANNOTATIONS: &[&str] = &["AutoValue", "Immutable",
 /// method are separate namespaces (JLS §6.5), so each check asks only about its own.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct GeneratedNames {
-    /// A bare field read — Lombok's logger `log`.
+    /// Bare fields of a name nobody can enumerate (`@AutoValue` & co.) — the variable check must
+    /// stay silent for the whole file.
     pub(crate) values: bool,
+    /// Lombok's logger field, a single well-known name (see [`GeneratedNames::is_logger_name`]).
+    /// Kept apart from `values` so a `@Slf4j` class — most Spring classes — still gets its undeclared
+    /// names reported instead of the whole file going quiet for the sake of one `log`.
+    pub(crate) logger: bool,
     /// A bare call — accessors, `builder()`, a `staticName` factory, `@Delegate`'s forwards.
     pub(crate) calls: bool,
+}
+
+impl GeneratedNames {
+    /// Whether any bare field may be generated at all — the answer for a check that cannot tell
+    /// which name it is looking at.
+    pub(crate) fn any_field(&self) -> bool {
+        self.values || self.logger
+    }
+
+    /// Whether `name` is what a logger annotation could have named the field: `log` by default, and
+    /// the usual spellings a `lombok.config` `lombok.log.fieldName` rename lands on. Matched
+    /// case-insensitively because only ever used to suppress.
+    pub(crate) fn is_logger_name(&self, name: &str) -> bool {
+        self.logger && (name.eq_ignore_ascii_case("log") || name.eq_ignore_ascii_case("logger"))
+    }
 }
 
 /// What the type declaration `decl` gets generated — from its own annotations and from those on its
@@ -199,6 +219,6 @@ fn note_generator(out: &mut GeneratedNames, a: &crate::support::lombok::Annotati
         out.values = true;
         out.calls = true;
     }
-    out.values |= bennu_lombok::prelude::generates_fields(a.simple);
+    out.logger |= bennu_lombok::prelude::generates_fields(a.simple);
     out.calls |= bennu_lombok::prelude::generates_methods(a.simple, a.args);
 }

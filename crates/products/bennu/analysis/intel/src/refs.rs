@@ -2375,9 +2375,10 @@ fn collect_bound_names(root: &Node, bytes: &[u8]) -> std::collections::HashSet<S
             "formal_parameter" | "spread_parameter" | "catch_formal_parameter" => {
                 bennu_java::prelude::parameter_name_node(&n)
             }
-            "resource" | "enhanced_for_statement" | "type_pattern" | "instanceof_expression" => {
+            "resource" | "enhanced_for_statement" | "instanceof_expression" => {
                 n.child_by_field_name("name")
             }
+            "type_pattern" | "record_pattern_component" => bennu_java::prelude::pattern_binding_name(&n),
             // `(x, y) -> …` and `x -> …`: inferred lambda parameters are bare identifiers with
             // no `name` field to ask for.
             "inferred_parameters" => {
@@ -2656,8 +2657,11 @@ fn find_local_decl(
             // A pattern variable is a `type_pattern` in some grammar versions and a `name`
             // field on the `instanceof_expression` in others — accept both. (No `name` field
             // when there's no binding, e.g. a plain `o instanceof String`, so this is inert.)
-            "type_pattern" | "instanceof_expression" if level.patterns() => {
-                n.child_by_field_name("name")
+            "instanceof_expression" if level.patterns() => n.child_by_field_name("name"),
+            // Positional (`<type> <identifier>`), so the binding is not under a `name` field —
+            // and a record deconstruction's components (`Num(double value)`) are all of this kind.
+            "type_pattern" | "record_pattern_component" if level.patterns() => {
+                bennu_java::prelude::pattern_binding_name(&n)
             }
             _ => None,
         };

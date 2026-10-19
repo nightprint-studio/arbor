@@ -24,7 +24,7 @@ pub fn simple_type_needing_import(source: &str, offset: usize) -> Option<String>
     // name in the `name` field of a `marker_annotation`, never in a type position, so the caret on
     // it used to find nothing to import. That is the place a missing import is easiest to leave
     // behind — the code around an annotation still reads correctly without it.
-    if node.kind() != "type_identifier" && !is_annotation_name(&node) {
+    if node.kind() != "type_identifier" && !is_annotation_name(&node) && !is_static_receiver(&node, source) {
         return None;
     }
     // A qualified name (`Outer.Inner`, `pkg.Type`) has the inner part as a `type_identifier` under a
@@ -72,6 +72,35 @@ fn is_annotation_name(node: &tree_sitter::Node) -> bool {
         && parent.child_by_field_name("name").map(|n| n.id()) == Some(node.id())
 }
 
+/// Whether `node` is a **class name used as an expression receiver** — `Foo` in `Foo.builder()`,
+/// `Foo.CONSTANT` or `Foo::create`. The grammar cannot tell it from a variable, so it parses as a
+/// plain `identifier` and not a `type_identifier`: the caret on it found nothing to import, which
+/// is exactly where a missing import on a static call is felt.
+///
+/// Decided by shape: the leftmost receiver, written in type case (an uppercase initial and at
+/// least one lowercase letter, so `MAX_SIZE.length()` is left alone). A local or field that happens
+/// to be named like a class costs nothing — the candidate lookup behind this finds no class by
+/// that name and the menu stays as it was.
+fn is_static_receiver(node: &tree_sitter::Node, source: &str) -> bool {
+    if node.kind() != "identifier" {
+        return false;
+    }
+    let Some(parent) = node.parent() else { return false };
+    let is_receiver = match parent.kind() {
+        "method_invocation" | "field_access" => {
+            parent.child_by_field_name("object").map(|n| n.id()) == Some(node.id())
+        }
+        // `Foo::create` has no field names: the receiver is the first named child.
+        "method_reference" => parent.named_child(0).map(|n| n.id()) == Some(node.id()),
+        _ => false,
+    };
+    if !is_receiver {
+        return false;
+    }
+    let Some(text) = node_text(node, source.as_bytes()) else { return false };
+    text.chars().next().is_some_and(|c| c.is_ascii_uppercase()) && text.chars().any(|c| c.is_ascii_lowercase())
+}
+
 /// A conventional type-variable name: a single uppercase letter, or one uppercase letter followed by
 /// digits (`T`, `E`, `K`, `T1`, `T2`) — never a real, importable class name.
 fn looks_like_type_variable(name: &str) -> bool {
@@ -104,6 +133,30 @@ mod tests {
             simple_type_needing_import(with_args, caret(with_args, "RequestMapping")).as_deref(),
             Some("RequestMapping"),
         );
+    }
+
+    #[test]
+    fn a_class_used_as_a_static_receiver_is_importable() {
+        let src = "package a;\nclass C { void m() { var f = Filter.builder().build(); } }";
+        assert_eq!(simple_type_needing_import(src, caret(src, "Filter.")).as_deref(), Some("Filter"));
+        let field = "package a;\nclass C { int m() { return Limits.MAX; } }";
+        assert_eq!(simple_type_needing_import(field, caret(field, "Limits")).as_deref(), Some("Limits"));
+        let reference = "package a;\nclass C { Object m() { return Factory::create; } }";
+        assert_eq!(simple_type_needing_import(reference, caret(reference, "Factory")).as_deref(), Some("Factory"));
+    }
+
+    #[test]
+    fn a_variable_or_a_member_name_is_not_a_receiver_type() {
+        let var = "package a;\nclass C { void m(String s) { s.length(); } }";
+        assert_eq!(simple_type_needing_import(var, caret(var, "s.length")), None);
+        // The method name and a constant-style receiver are not classes either.
+        let method = "package a;\nclass C { void m() { Filter.builder(); } }";
+        assert_eq!(simple_type_needing_import(method, caret(method, "builder")), None);
+        let constant = "package a;\nclass C { void m() { MAX_SIZE.length(); } }";
+        assert_eq!(simple_type_needing_import(constant, caret(constant, "MAX_SIZE")), None);
+        // Already imported.
+        let imported = "package a;\nimport x.Filter;\nclass C { void m() { Filter.builder(); } }";
+        assert_eq!(simple_type_needing_import(imported, caret(imported, "Filter.")), None);
     }
 
     #[test]

@@ -81,17 +81,28 @@ pub fn locate_executable(
 /// tried — a tool installed by npm is a `.cmd` shim and nothing else, and looking only for the
 /// bare name finds nothing.
 pub fn executable_in(dir: &Path, cmd: &str) -> Option<String> {
+    // Windows: a runnable extension beats the bare name. npm ships `npm` (a sh script that cannot be
+    // spawned) next to `npm.cmd`, and returning the bare file made the tool look found but fail.
+    #[cfg(target_os = "windows")]
+    {
+        if Path::new(cmd).extension().is_none() {
+            for ext in ["exe", "cmd", "bat", "com"] {
+                let candidate = dir.join(format!("{cmd}.{ext}"));
+                if candidate.is_file() {
+                    return Some(candidate.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
     let direct = dir.join(cmd);
     if direct.is_file() {
         return Some(direct.to_string_lossy().to_string());
     }
     #[cfg(target_os = "windows")]
     {
-        for ext in ["exe", "cmd", "bat", "com", "ps1"] {
-            let candidate = dir.join(format!("{cmd}.{ext}"));
-            if candidate.is_file() {
-                return Some(candidate.to_string_lossy().to_string());
-            }
+        let candidate = dir.join(format!("{cmd}.ps1"));
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().to_string());
         }
     }
     None

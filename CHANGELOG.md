@@ -176,10 +176,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Every backend executable carries its product's icon.** `corvus-be`, `sitta-be`, `merula-be`, `picus-be`, `tyto-be`, `garrulus-be` and `bennu-be` are no longer blank generic binaries in Explorer, the taskbar and Task Manager, and their Properties → Details now names what they are and which version they came from.
 
 ### Changed
+- **Problems are grouped by module / crate.** On a multi-module project each module is a node, with Errors / Warnings / … and then the files under it; a single-module project looks as before.
 - **A `pom.xml` is coloured by section.** The tags of `dependencies`, `dependencyManagement`, `build`, `properties`, `profiles`, the repositories and `parent`/`modules` each take their own hue.
 - **The hover card reads like code.** Signatures are syntax-coloured and long ones list one parameter per line, the package is muted next to the type name, and a variable is no longer labelled as a class.
 
 ### Fixed
+- **A record-pattern variable (`o instanceof Num(double value)`) is a first-class variable.** Go to declaration, rename, find usages and the hover on its name now work, like for `instanceof Foo f`.
+- **"Import class" is offered on a class used as a static receiver.** `Foo.builder()`, `Foo.CONSTANT` and `Foo::create` with `Foo` not imported now get the import fix, not just the refactorings.
+- **Tornando su un tab dell'editor non si finisce più in cima al file.** Lo scroll di ogni tab viene ricordato e ripristinato al ritorno.
 - **"Show as environment variable" no longer keeps the quotes of a map key.** `service."name".uri` is `SERVICE_NAME_URI`, not a name with `"` in it.
 - **A `var`/`val` initialised from a method returning `Optional<…>` (or any JDK type) gets its type.** A method declared in a file that star-imports its JDK types (`import java.util.*;`) lost its return type; the project index is rebuilt once on next open.
 - **Fetch and push renew an expired token and retry.** A git remote that refused an expired OAuth token used to fail the operation; it now refreshes the token and tries once more.

@@ -107,7 +107,7 @@ impl<'a, 't> FileImports<'a, 't> {
         let mut declared_names: HashSet<String> = symbols.types.iter().map(|t| t.name.clone()).collect();
         collect_type_parameters(root, bytes, &mut declared_names);
         let top = crate::support::scopes::single_top_level_type(root, bytes)
-            .filter(|t| !crate::support::nodes::generated_names(t.node, bytes).values)
+            .filter(|t| !crate::support::nodes::generated_names(t.node, bytes).any_field())
             .and_then(|t| {
                 let binary = crate::support::resolve::type_binary(&t.decl_name, symbols, resolver)?;
                 crate::support::walk::hierarchy_fully_known(resolver, &binary).then_some((t.node, binary))

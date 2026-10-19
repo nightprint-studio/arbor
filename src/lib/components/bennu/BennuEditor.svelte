@@ -456,6 +456,17 @@
     },
   });
 
+  // The reader taking the wheel ends the post-landing hold. Capture-phase on the document: wheel,
+  // touch and scrollbar drags all begin as one of these, and a programmatic scroll is none of them.
+  $effect(() => {
+    const release = () => navFlow.releaseHold();
+    const events = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+    for (const ev of events) document.addEventListener(ev, release, { capture: true, passive: true });
+    return () => {
+      for (const ev of events) document.removeEventListener(ev, release, { capture: true });
+    };
+  });
+
   // A new project: where the flow thinks the reader was belongs to the old one, and the first
   // arrival would record it as a stop. (The store itself is reset by the window.)
   let navRoot: string | null | undefined;
