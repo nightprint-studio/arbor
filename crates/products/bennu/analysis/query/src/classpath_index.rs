@@ -72,6 +72,14 @@ impl ClasspathIndex {
         Arc::clone(&self.jdk)
     }
 
+    /// [`members_of`](MemberIndex::members_of) for a sweep: the same JDK-then-dependencies order,
+    /// but nothing decoded is remembered — see [`JdkMemberIndex::members_unmemoized`].
+    pub fn members_unmemoized(&self, binary_name: &str) -> Option<ClassMembers> {
+        self.jdk
+            .members_unmemoized(binary_name)
+            .or_else(|| self.deps.as_ref().and_then(|d| d.members_unmemoized(binary_name)))
+    }
+
     /// Whether this view carries a dependency tier at all — "can this resolver see the project's
     /// libraries, or only the JDK". The honest source for anything that would otherwise infer it
     /// from a jar list that is written at a different moment.

@@ -22,6 +22,10 @@ pub struct CorpusModule {
     /// What `resolve_jdk_classpath` is asked for (it falls back to the newest JDK installed).
     pub release: &'static str,
     pub major: u32,
+    /// Dependency jars the module compiles against, as paths under `~/.m2/repository`. Empty for a
+    /// JDK-only module; otherwise the module is skipped, saying which jar is missing, until
+    /// `mvn compile` (the refresh script) has downloaded them.
+    pub libs: &'static [&'static str],
 }
 
 /// Everything scored for one module.
@@ -97,11 +101,34 @@ pub fn validate_module(root: &Path, module: &CorpusModule, kept: Kept) -> Result
     }
     let jdk = resolve_jdk_classpath(module.release)
         .map_err(|why| format!("no JDK resolvable for Java {} ({why})", module.release))?;
+    let jdk = with_libs(jdk, module.libs)?;
 
     // Declared before the resolver `validate_all` builds, so the index files outlive their mmap.
     let temp = TempDir::new(module.name)?;
     let diagnostics = validate_all(&src_root, &sources, jdk, temp.path(), module.major, kept)?;
     Ok(Validated { sources, golden, diagnostics })
+}
+
+/// The JDK with the module's dependency jars layered behind it — the JDK first, as in the editor, so
+/// the real core wins over a shaded copy. `Err` names the first jar that is not in the local Maven
+/// repository, which is what makes a missing download a skip with a reason and not a wrong score.
+fn with_libs(jdk: Box<dyn ClassSource>, libs: &[&str]) -> Result<Box<dyn ClassSource>, String> {
+    if libs.is_empty() {
+        return Ok(jdk);
+    }
+    let repo = bennu_classpath::prelude::user_home()
+        .ok_or_else(|| "no home directory to find ~/.m2 in".to_string())?
+        .join(".m2")
+        .join("repository");
+    let mut sources: Vec<Box<dyn ClassSource>> = vec![jdk];
+    for lib in libs {
+        let path = repo.join(lib);
+        if !path.is_file() {
+            return Err(format!("{} is missing (run refresh-expected so Maven downloads it)", path.display()));
+        }
+        sources.push(Box::new(bennu_classpath::prelude::JarSource::open(&path)?));
+    }
+    Ok(Box::new(bennu_classpath::prelude::MultiSource::new(sources)))
 }
 
 /// Every Bennu diagnostic `kept` asks for, in every file of the module.

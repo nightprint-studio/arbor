@@ -13,6 +13,9 @@ pub use crate::provider::{
 // The class-name index behind the "Import class" intention (simple name → importable FQNs).
 pub use crate::class_names::{ClassNameIndex, Segment};
 
+// The static-member index behind the "Import static" intention (bare name → declaring classes).
+pub use crate::static_members::{StaticKind, StaticMemberIndex};
+
 // A line of a backend's memory breakdown — see `crate::memory`.
 pub use crate::memory::MemoryEstimate;
 

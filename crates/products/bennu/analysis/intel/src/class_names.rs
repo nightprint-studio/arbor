@@ -142,6 +142,12 @@ impl ClassNameIndex {
         self.by_simple.get(simple).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    /// Every importable FQN (dotted, sorted) — empty until [`finalize`](Self::finalize). The census
+    /// the static-member index walks to learn which classes to read.
+    pub fn all_fqns(&self) -> &[String] {
+        &self.sorted_fqns
+    }
+
     /// The types nested directly inside `binary`, as binary names. Accepts either spelling of the
     /// outer — source writes `p/Outer/Inner`, bytecode writes `p/Outer$Inner`, and a caller holds
     /// whichever its own path produced.

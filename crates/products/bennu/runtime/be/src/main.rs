@@ -124,6 +124,9 @@ mod hierarchy;
 // text-only ones live in the pure `bennu-intentions` crate; both reach the editor through
 // `intentions`, which is where Alt+Enter asks.
 mod quick_fix;
+// "Import static" for a static member written without its class — gated on the unresolved-name
+// diagnostic, owners from the provider's static-member index — offered through `intentions`.
+mod static_import;
 // The repairs for a blank `final` field — constructor parameter, placeholder, not-final, Lombok's
 // `@RequiredArgsConstructor` — offered on the whole declaration through `intentions`.
 mod final_field_fixes;

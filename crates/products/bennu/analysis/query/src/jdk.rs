@@ -99,6 +99,23 @@ impl JdkMemberIndex {
         guard.source.origin(binary_name)
     }
 
+    /// Decode `binary_name` and **hand it back without remembering it** — a read-through for a
+    /// sweep over many classes, which must not grow the memo or drive its persistence.
+    ///
+    /// [`members_of`](MemberIndex::members_of) memoizes every class it decodes and flushes the whole
+    /// memo to disk every [`FLUSH_EVERY`] fresh ones, which is right for the classes a user touches
+    /// and ruinous for a walk over every class on the classpath: thousands of flushes of a growing
+    /// file, and all of it held in memory afterwards. A class already memoized is still served from
+    /// the memo. The lock is taken per class, so a lookup from the editor waits for one decode and
+    /// not for the sweep.
+    pub fn members_unmemoized(&self, binary_name: &str) -> Option<ClassMembers> {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(hit) = guard.memo.get(binary_name) {
+            return hit.clone();
+        }
+        guard.source.members_of(binary_name)
+    }
+
     /// An **in-memory-only** index over a boxed classpath source (no persistence). Used by the
     /// empty and `project_only` resolvers, which never resolve the JDK.
     pub fn new(source: Box<dyn ClassSource>) -> Self {

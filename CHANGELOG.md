@@ -7,7 +7,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+- **A problem in Bennu's Problems panel opens at the right line.** In a file with accents or other non-ASCII characters, clicking a problem of the open file landed further down than the error.
+- **Bennu no longer reports Lombok-managed fields as unused.** Private fields of a `@Data`, `@Getter`, `@Value`, `@Builder`… class are read by generated code, and a `@SuperBuilder` subclass no longer reports a missing super constructor.
+
 ### Added
+- **Import static in Bennu.** A static field or method written without its class (`MAX_RETRIES`, `assertThat(…)`) gets *Import static '…'* on Alt+Enter, one entry per class that declares it — project, JDK and libraries — ranked like class imports.
 - **An AI client can record the screen as a video.** The new `tyto_record_video` records a monitor, a window (by part of its title) or a rectangle of a monitor for a set number of seconds, and the screenshot and frame-sequence tools now accept a rectangle too. System audio is recorded only when asked for, and the microphone never.
 - **Bennu understands `.env` files.** `.env`, `.env.*` and `*.env` are coloured, complete the variable names Spring Boot binds (with the property each overrides) and their closed values, and show the property, type and default on hover.
 - **Bennu reports many more Java compile errors.** Missing returns through loops, `switch` and `try`; assignments to `final` parameters, catch variables and fields; illegal modifiers; record constructor and accessor rules; sealed hierarchies; `break`/`continue`/`return` out of a switch expression; duplicate `case` constants written differently; type parameters in static code; `@Override` on overloads and static methods.

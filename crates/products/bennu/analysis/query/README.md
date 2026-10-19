@@ -13,6 +13,9 @@ of `bennu-intel` so it depends only on the base crates.
    memo to a JSON file **keyed by the resolved JDK** — so a JDK class is parsed from bytecode at
    most once ever, shared across projects and sessions (the be layer keys the path under
    `bennu_data_dir()/jdk-index/`). `new(source)` is the in-memory-only variant.
+   `members_unmemoized` is the read-through for a **sweep over many classes** (the static-member
+   index in `bennu-intel`): it decodes without remembering or flushing, so a walk of the whole
+   classpath neither grows the memo nor drives its persistence.
 
 `completion(source, byte_offset, &resolver)` is the member-access query: infer the receiver type at
 the `.`, walk its members (super + interfaces), filter by the typed prefix and by what can be written

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Clean corpus module at language level 8 WITH Lombok on the classpath and annotation processing on.
+  Legal Java that MUST compile with zero javac diagnostics, so every Bennu diagnostic on it is a false
+  positive: it measures whether the validator models what Lombok generates (accessors, builders,
+  constructors, `val`, delegates, loggers) instead of reporting the generated members as missing.
+  The one module with a dependency: the aggregator is JDK-only, and this module's golden file
+  depends on the Lombok version below. The test finds the jar in ~/.m2 (`mvn compile` downloads it).
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>dev.arbor.bennu.corpus</groupId>
+    <artifactId>bennu-check-corpus</artifactId>
+    <version>0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>corpus-lombok8</artifactId>
+
+  <properties>
+    <maven.compiler.release>8</maven.compiler.release>
+    <!-- Keep in step with LOMBOK_JAR in intel/tests/check_corpus.rs. -->
+    <lombok.version>1.18.34</lombok.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <version>${lombok.version}</version>
+      <scope>provided</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <!-- The aggregator turns processing off; Lombok IS the annotation processor here. -->
+          <proc>full</proc>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

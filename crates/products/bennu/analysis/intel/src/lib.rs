@@ -53,6 +53,8 @@ pub mod rename;
 pub mod safe_delete;
 pub mod usage_marks;
 pub mod spell;
+// Bare static member name → the classes declaring it: what the "Import static" intention offers.
+pub mod static_members;
 // Spring stereotype-bean policy: reads bennu-java's generic annotations and derives the
 // annotation-declared beans (`@Service`/`@Component`/…) the config resolver consults as a
 // fallback in the C1 chain. Mirrors `lombok` (annotation policy on the java model), but public

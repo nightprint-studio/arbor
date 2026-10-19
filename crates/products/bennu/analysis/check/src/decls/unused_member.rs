@@ -32,6 +32,7 @@ use std::collections::HashSet;
 
 use tree_sitter::Node;
 
+use bennu_lombok::prelude::{generates_members, ParsedImport};
 use bennu_proto::prelude::Diagnostic;
 use crate::engine::check_id::CheckId;
 
@@ -53,8 +54,9 @@ pub const RUNTIME_NAMES: &[&str] = &[
 /// Report every private member and local this file declares and never reads.
 pub fn unused_member_errors(root: Node, source: &str) -> Vec<Diagnostic> {
     let mut out = Vec::new();
+    let imports = crate::support::lombok::imports_from_root(root, source.as_bytes());
     for type_decl in types_in(root) {
-        out.extend(unused_privates(&type_decl, source));
+        out.extend(unused_privates(&type_decl, source, &imports));
     }
     for body in callable_bodies(root) {
         out.extend(unused_locals(&body, source));
@@ -65,8 +67,18 @@ pub fn unused_member_errors(root: Node, source: &str) -> Vec<Diagnostic> {
 
 // ── private members ──────────────────────────────────────────────────────────
 
-fn unused_privates(type_decl: &Node<'_>, source: &str) -> Vec<Diagnostic> {
+fn unused_privates(type_decl: &Node<'_>, source: &str, imports: &[ParsedImport]) -> Vec<Diagnostic> {
     let Some(body) = type_decl.child_by_field_name("body") else { return Vec::new() };
+    // A type Lombok writes members for reads its own fields where no source line shows it: `@Data`'s
+    // accessors, `@AllArgsConstructor`'s assignments, `@ToString`'s concatenation. The fields look
+    // untouched in the tree and are not — so none of this type's fields can be called unused. A
+    // private METHOD is still all in view and is judged as before.
+    let lombok_reads_fields = crate::support::lombok::has_lombok_annotation(
+        *type_decl,
+        source.as_bytes(),
+        imports,
+        |a| generates_members(a.simple),
+    );
     // Every identifier ANYWHERE in the type, including its nested types — a private is visible to
     // the whole top-level class, so a use from an inner class is a use.
     let mentions = mention_counts(type_decl, source);
@@ -78,6 +90,7 @@ fn unused_privates(type_decl: &Node<'_>, source: &str) -> Vec<Diagnostic> {
             continue;
         }
         match member.kind() {
+            "field_declaration" if lombok_reads_fields => {}
             "field_declaration" => {
                 for (name_node, name) in declared_names(&member, source) {
                     if RUNTIME_NAMES.contains(&name.as_str()) {
@@ -283,6 +296,22 @@ mod tests {
     fn an_annotated_member_is_left_alone() {
         let msgs = messages("class A {\n    @Autowired\n    private Service svc;\n}");
         assert!(msgs.is_empty(), "{msgs:?}");
+    }
+
+    /// `@Data` reads every field through accessors no source line shows; the fields are not unused.
+    #[test]
+    fn a_lombok_type_reads_its_own_fields() {
+        let src = "import lombok.Data;\n@Data\nclass A {\n    private int n;\n    private void helper() {}\n}";
+        let msgs = messages(src);
+        assert_eq!(msgs.len(), 1, "{msgs:?}");
+        assert!(msgs[0].contains("`helper`"), "a private method is still judged: {msgs:?}");
+    }
+
+    /// A project's own `@Data` in another package generates nothing, so it excuses nothing.
+    #[test]
+    fn a_look_alike_annotation_without_lombok_excuses_nothing() {
+        let msgs = messages("@Data\nclass A {\n    private int n;\n}");
+        assert_eq!(msgs.len(), 1, "{msgs:?}");
     }
 
     #[test]

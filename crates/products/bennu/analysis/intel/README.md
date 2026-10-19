@@ -40,6 +40,11 @@ Two impl slots:
   JDK classpath source (the JDK-8 `JarSource` is `!Sync`; the mutex restores `Sync` so the
   provider can live in the multi-threaded backend state).
 - **`completion`** — the caret → candidates query.
+- **`static_members`** — `StaticMemberIndex`, a bare static member name → the classes declaring it
+  (`StaticKind::{Field, Method}`), behind the "Import static" intention. Filled by a **background sweep**
+  started on the first question (project types, then the JDK, then libraries, read through
+  `ClasspathIndex::members_unmemoized`), visible as it grows; the provider exposes it as
+  `static_import_choices`, ranked like `import_choices`. Replaced with the provider on every index build.
 - **`postfix`** — postfix templates beside the members after a dot: the receiver typed with the same
   inference, `bennu-java`'s catalogue asked at the module's language level (`CompletionOptions::level`),
   and each expansion made an item that replaces the whole expression and carries its import edits.

@@ -9,7 +9,8 @@
   what `refresh-expected.ps1` / `refresh-expected.sh` run: it makes javac report everything, in
   machine-readable form, into `<module>/target/javac-raw.txt`. See README.md.
 
-  JDK-only on purpose: no dependencies, so the golden files depend on nothing but the JDK.
+  JDK-only on purpose: no dependencies, so the golden files depend on nothing but the JDK. The one
+  exception is `lombok8`, which needs Lombok as an annotation processor and says so in its own pom.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -26,6 +27,7 @@
     <module>java21</module>
     <module>clean8</module>
     <module>clean21</module>
+    <module>lombok8</module>
   </modules>
 
   <properties>

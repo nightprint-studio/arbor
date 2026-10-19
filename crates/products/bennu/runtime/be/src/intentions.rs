@@ -140,6 +140,8 @@ fn bennu_intentions_at(_ctx: &BennuState, args: IntentionsArgs) -> Result<Vec<Ra
         );
         offers.extend(java_file_offers(&args));
         offers.extend(quick_fix_offers(&args).into_iter().map(|o| o.in_section(OfferCategory::Fix)));
+        // A static member written without its class — `import static` for the unresolved name.
+        offers.extend(crate::static_import::static_import_offers(&args));
         // A blank `final` field: offered on its whole declaration, squiggle or not — see the module.
         offers.extend(crate::final_field_fixes::final_field_offers(&args));
     }

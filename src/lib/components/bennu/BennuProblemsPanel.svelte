@@ -105,14 +105,6 @@
     return path.replace(/\\/g, '/');
   }
 
-  // Map a UTF-8 byte offset to a 1-based line for the jump (cheap; the editor re-centres).
-  function lineOfOffset(offset: number): number {
-    const src = projectStore.activeSource;
-    let line = 1;
-    for (let i = 0; i < offset && i < src.length; i++) if (src[i] === '\n') line++;
-    return line;
-  }
-
   const jdk = $derived(bennuDiagnosticsStore.jdk);
 
   // Flat list of every leaf problem, each tagged with its source group. Grouping into the
@@ -165,7 +157,7 @@
           label: d.message,
           detail: `@${d.start}`,
           copy: d.message,
-          onClick: () => bennuUiStore.requestGoto(lineOfOffset(d.start)),
+          onClick: () => bennuUiStore.requestGotoOffset(d.start),
         });
       });
     }

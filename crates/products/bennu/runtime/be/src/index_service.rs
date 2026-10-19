@@ -3557,6 +3557,26 @@ impl IndexService {
         provider.import_choices(source, name)
     }
 
+    /// The "Import static" picker's candidates for the bare member `name` used in `source` — the
+    /// classes declaring a public static field or method of that name, nearest first. Same slot and
+    /// provider lookup as [`import_choices`](Self::import_choices); empty when no project owns `file`.
+    pub fn static_import_choices(
+        &self,
+        file: &str,
+        source: &str,
+        name: &str,
+        kind: bennu_intel::prelude::StaticKind,
+    ) -> bennu_intel::prelude::ImportChoices {
+        let Some(slot) = self.slot_for_file(file) else {
+            return Default::default();
+        };
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        provider.static_import_choices(source, name, kind)
+    }
+
     /// How many files of the project owning `file` import `fqn` outright, from its import census.
     /// `0` when no project owns the file or the census has not been built — "not used here" is the
     /// safe reading of "not known yet" for a caller that only ranks with it.

@@ -13,6 +13,7 @@
 //! bytecode). Project supertypes need their constructors indexed first.
 
 use bennu_java::prelude::{extract_symbols, FileSymbols, MemberKind, TypeRef, TypeResolver};
+use bennu_lombok::prelude::{generates_constructor, ParsedImport};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
@@ -37,10 +38,11 @@ pub fn super_constructor_errors_in(
     resolver: &dyn TypeResolver,
 ) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
+    let imports = crate::support::lombok::imports_from_nodes(nodes, bytes);
     let mut out = Vec::new();
     for &n in nodes {
         if n.kind() == "class_declaration" {
-            check_class(n, bytes, symbols, resolver, &mut out);
+            check_class(n, bytes, symbols, resolver, &imports, &mut out);
         }
     }
     out
@@ -51,8 +53,15 @@ fn check_class(
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    imports: &[ParsedImport],
     out: &mut Vec<Diagnostic>,
 ) {
+    // Lombok writes the constructor (`@SuperBuilder`, `@AllArgsConstructor`, …) and it chains to the
+    // superclass itself, so the tree showing none is not the class lacking one. Which annotations
+    // carry a constructor is `bennu-lombok`'s to say, gated on Lombok really being imported.
+    if crate::support::lombok::has_lombok_annotation(n, bytes, imports, |a| generates_constructor(a.simple)) {
+        return;
+    }
     let Some(sup_text) = superclass_text(n, bytes) else { return };
     let Some(binary) = type_binary(&sup_text, symbols, resolver) else { return };
     let Some(cm) = resolver.members_of(&binary) else { return };

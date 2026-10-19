@@ -29,6 +29,7 @@ tests/corpus/
            src/main/java/corpus/<category>/**/*.java
            expected.txt    header only (anything below it is a corpus bug)
   clean21/ pom.xml         release 21, legal code only
+  lombok8/ pom.xml         release 8, legal code only, Lombok on the classpath + annotation processing
            src/main/java/corpus/<category>/**/*.java
            expected.txt
   refresh-expected.ps1     regenerate the golden files (Windows PowerShell 5.1+)
@@ -40,6 +41,7 @@ The package segment after `corpus` is the **category** the report groups by (`co
 need a newer language feature go in `java21`.
 
 The Rust side lives in `crates/products/bennu/analysis/intel/tests/check_corpus.rs` (+ `check_corpus_support/`).
+`lombok8` also needs Lombok's jar in `~/.m2` (`mvn compile`, i.e. the refresh script, downloads it); without it that module is skipped with a reason.
 It needs the real-JDK resolver (classpath reader, persisted index, `IndexResolver`, project indexer).
 Those are `bennu-intel` dependencies, not `bennu-check` ones.
 
@@ -171,6 +173,8 @@ Rules for adding code:
 | clean8 | `exceptions` | 1 | 150 | declared, caught, wrapped, narrowed by overrides, functional interfaces with `throws`, `throws X` inferred from lambdas |
 | clean8 | `legacy` | 8 | 448 | `Vector`, `Hashtable`, `Enumeration`, raw collections with casts, anonymous raw `Comparator`s, `StringBuffer`, JDBC interfaces, DAO/service layering, snake_case, static single and on-demand imports, `java.util.*` + `java.awt.*` disambiguated by a single-type import |
 | clean8 | `service` | 2 | 156 | the reported `Optional<Delegate>` service: presence guard, `get()` chains, the leading-comma three-argument call |
+| clean8 | `statics` | 7 | 239 | single and on-demand static imports of fields and methods, enum constants (imported and as `switch` labels), interface constants, a nested class's statics by their full path, statics inherited across packages, an own method hiding an on-demand import, a local with the name of an imported method, JDK statics (`Collectors`, `Comparator.comparing`, `emptyList`, `TimeUnit`, `StandardCharsets`) whose type arguments come from the target |
+| lombok8 | `lombok` | 10 | 203 | `@Data`, `@Value` + `@Builder(toBuilder)` + `@Singular` + `@With`, `@Builder.Default`, fluent `@Accessors`, `@RequiredArgsConstructor`/`@NonNull`, `@Log`'s `log`, `val`, `@SneakyThrows`/`@Cleanup`, `@Delegate`, a `@SuperBuilder` hierarchy — all read through the members they generate |
 | clean21 | `records` | 2 | 212 | compact canonical and delegating constructors, static factories, generic records, records implementing interfaces, a record nested in a record, local records/enums/interfaces |
 | clean21 | `sealed` | 6 | 248 | sealed interface and abstract sealed class, final/sealed/non-sealed subclasses across files, exhaustive pattern switches without `default`, nested record patterns, guards |
 | clean21 | `modern` | 3 | 401 | switch expressions (arrows, `yield`, colon groups), qualified enum labels, `case null`, pattern scope out of negated `if`/`while`, `var` and `var` lambda parameters, text blocks, private interface methods, effectively-final resources, anonymous diamond, `Stream.toList()` |
@@ -227,4 +231,5 @@ Marked error lines per category (each `*Bad.java` has a clean `*Ok.java` twin):
 - [ ] **Cross-file hierarchy**: overrides, erasure clashes and abstract methods inherited across files
       and generic supertypes; interface/abstract-class diamonds
 - [ ] **Enums**: constructors, constant bodies, `switch` on enums from another package
-- [ ] **Lombok and dependencies**: needs a corpus module with Maven dependencies
+- [x] **Lombok**: the `lombok8` clean module (Lombok as annotation processor, jar from `~/.m2`)
+- [ ] **Other dependencies**: Spring, JUnit, Mockito — the same `libs` mechanism, one module per library set

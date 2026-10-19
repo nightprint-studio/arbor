@@ -40,7 +40,16 @@
   <code>java.lang</code>, or covered by a wildcard is not offered, needing none. The entries are ordered the way completion ranks the same
   names — what the file already imports, its package, what the project imports everywhere — so <code>java.util.List</code> comes before
   <code>java.awt.List</code>; the JDK's internal packages go last. When one candidate is ahead by those rules rather than by the alphabet, it is
-  marked <em>suggested</em>.
+  marked <em>suggested</em>. A class written as a receiver — <code>Limits.MAX</code>, <code>Filter.builder()</code>, <code>Factory::create</code> — is
+  imported the same way.
+</p>
+<p>
+  A <strong>static member written without its class</strong> — <code>MAX_RETRIES</code>, <code>assertThat(…)</code>, an enum constant outside a
+  <code>switch</code> — is reported as unresolved until it is imported, and there <strong>Import static '…'</strong> adds
+  <code>import static pkg.Owner.NAME;</code> after the other static imports. Every class declaring a <code>public static</code> field (for a name) or method
+  (for a call) of that name is an entry, ordered like the class imports; a member the file already imports by name or by
+  <code>import static Owner.*;</code> needs nothing. The classes are read in the background the first time it is asked — your own types first, then
+  the JDK, then the libraries — so on a large classpath the first Alt+Enter may list fewer owners than the next.
 </p>
 <table>
   <thead><tr><th>Offered on</th><th>Becomes</th></tr></thead>

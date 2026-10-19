@@ -21,6 +21,7 @@ use bennu_query::prelude::{ClasspathIndex, IndexResolver, JdkMemberIndex};
 
 use crate::class_names::ClassNameIndex;
 use crate::expected_types::{Closeness, WantedTypes};
+use crate::static_members::{StaticKind, StaticMemberIndex};
 
 /// One project member (method / field) enumerated from the built symbol index, for the
 /// index inspector's "members" list. A be-agnostic view: the be layer maps this onto its
@@ -576,6 +577,10 @@ pub struct NativeJavaProvider {
     ///
     /// Emptied whenever the class-name axis is replaced, since a name's candidates changed with it.
     annotation_memo: RwLock<HashMap<String, Arc<Vec<String>>>>,
+    /// Bare static member name → the classes declaring it, for the "Import static" intention.
+    /// Filled by a background sweep started on the first question — see [`StaticMemberIndex`]. Not
+    /// carried across a provider rebuild: a rebuild is exactly when the classes it describes changed.
+    static_members: Arc<StaticMemberIndex>,
 }
 
 impl NativeJavaProvider {
@@ -656,10 +661,36 @@ impl NativeJavaProvider {
     /// JDK's internals, AWT's `List`) sink below everything, and a first place that only won
     /// alphabetically is not called a recommendation.
     pub fn import_choices(&self, text: &str, simple: &str) -> ImportChoices {
+        self.rank_import_fqns(text, self.class_names.candidates(simple))
+    }
+
+    /// The "Import static" picker's candidates for the bare member `name`: the classes that declare a
+    /// public static field (or method) of that name, **nearest first** by the same proximity the
+    /// class picker uses, with the same "first place is a clear choice" rule.
+    ///
+    /// The first call starts the background sweep that fills the table (see [`StaticMemberIndex`]),
+    /// so a question asked early answers from what has been read so far — the project's own types are
+    /// read first — and the next Alt+Enter sees more. Empty for the pre-index provider.
+    pub fn static_import_choices(&self, text: &str, name: &str, kind: StaticKind) -> ImportChoices {
+        if let Some(resolver) = &self.resolver {
+            if !self.static_members.is_started() {
+                self.static_members.start(Arc::clone(resolver), self.class_names.all_fqns().to_vec());
+            }
+        }
+        self.rank_import_fqns(text, &self.static_members.owners(kind, name))
+    }
+
+    /// Whether the static-member sweep has covered the whole classpath, so an empty
+    /// [`static_import_choices`](Self::static_import_choices) can be told from "not there yet".
+    pub fn static_members_complete(&self) -> bool {
+        self.static_members.is_complete()
+    }
+
+    /// `fqns` ordered nearest first as seen from the buffer `text`, and whether the first is a clear
+    /// choice. Shared by the class picker and the static-member picker — both rank classes.
+    fn rank_import_fqns(&self, text: &str, fqns: &[String]) -> ImportChoices {
         let here = Proximity::of(text, Some(&*self.imports));
-        let mut ranked: Vec<((bool, Rank), &String)> = self
-            .class_names
-            .candidates(simple)
+        let mut ranked: Vec<((bool, Rank), &String)> = fqns
             .iter()
             .map(|fqn| ((demoted_import(fqn), here.rank_one(fqn)), fqn))
             .collect();
@@ -1179,6 +1210,7 @@ impl NativeJavaProvider {
             // which ranks exactly as the census being switched off does.
             imports: Arc::default(),
             annotation_memo: RwLock::default(),
+            static_members: Arc::default(),
         })
     }
 
@@ -1252,6 +1284,9 @@ impl NativeJavaProvider {
                 // among its candidates may have one now. A memo built against the narrower
                 // classpath would answer for a question that is no longer the same one.
                 annotation_memo: RwLock::default(),
+                // NOT carried either: the table describes the classpath it was swept from, and this
+                // provider's has a dependency tier the old one never read.
+                static_members: Arc::default(),
             })
         })())
     }

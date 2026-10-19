@@ -2875,7 +2875,7 @@
    *  section's (see `BennuIntentionsOverlay`), so the icon only has to say what the row does. */
   function intentionIcon(o: IntentionOffer) {
     const id = o.id;
-    if (id.startsWith('import-class:')) return PackagePlus;
+    if (id.startsWith('import-class:') || id.startsWith('import-static:')) return PackagePlus;
     if (id === 'create-method' || id === 'create-method-in') return SquarePlus;
     if (id === 'create-class') return FilePlus2;
     if (id.startsWith('declare-throws:') || id.startsWith('surround-try:')) return ShieldCheck;
