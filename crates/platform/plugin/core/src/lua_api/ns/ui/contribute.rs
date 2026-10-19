@@ -14,6 +14,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use crate::error::{PluginCoreError, Result};
 use crate::lua_api::ctx::ApiCtx;
 use crate::lua_api::helpers::contrib_write::contribute_patch_payload;
+use crate::lua_api::helpers::convert::json_to_lua;
 use crate::report::PluginReporter;
 use crate::contribution::{
     ContributionPoint, PluginContribution, WhenClause, validate_built_in,
@@ -240,7 +241,7 @@ fn install_list_contributions(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()>
     let fn_ = lua.create_function(move |lua_ctx, point: String| {
         let items = reg.list_for_point(&point);
         let json = serde_json::to_value(&items).unwrap_or(serde_json::Value::Array(Vec::new()));
-        Ok(lua_ctx.to_value(&json).unwrap_or(mlua::Value::Nil))
+        Ok(json_to_lua(lua_ctx, &json).unwrap_or(mlua::Value::Nil))
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     ui.set("list_contributions", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     Ok(())

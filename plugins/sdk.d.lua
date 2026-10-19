@@ -925,6 +925,16 @@ function CredentialsApi.list() end
 -- but not their names, so there is nothing to key a table on. The shapes inside
 -- are still named: a record argument is an ordinary table keyed by its fields.
 --
+-- An optional argument you do not have is `nil` — but Lua cannot hold a
+-- positional nil: `{ a, nil, c }` has a length of 1. A nil at the END is free
+-- (the host pads a missing trailing optional with `none`); a nil in the MIDDLE
+-- needs `table.pack`, whose `n` is the count you wrote:
+--
+--   args = table.pack(prefix, delimiter, cursor, limit)  -- cursor may be nil
+--
+-- Without it the call arrives with two arguments instead of four, and fails on
+-- the arity — or, worse, would slide `limit` into `cursor`'s place.
+--
 -- Field names cross in BOTH spellings, in BOTH directions. A WIT identifier is
 -- kebab-case, so a record field is `params-schema`; a table you pass IN may use
 -- either that or `params_schema`, and a record you get BACK carries both keys.

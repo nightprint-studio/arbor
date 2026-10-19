@@ -196,6 +196,14 @@ end`, '.lua')}</pre>
   are still named: a record argument is an ordinary table keyed by its fields.
 </p>
 <p>
+  An optional argument you do not have is <code>nil</code>, and Lua cannot hold a positional
+  one — <code>&#123; a, nil, c &#125;</code> has a length of 1. A <em>trailing</em> nil is free:
+  a missing optional at the end arrives as <code>none</code>. A nil <em>in the middle</em> needs
+  <code>table.pack</code>, whose <code>n</code> carries the count you wrote.
+</p>
+<pre class="language-lua">{@html highlight(`-- cursor is nil on the first page, and limit still has to land in limit
+args = table.pack(prefix, delimiter, cursor, limit)`, '.lua')}</pre>
+<p>
   Requires <code>service_call = true</code> in <code>[permissions]</code>. Calling an extension
   is invoking another package's code, and an installed extension carries <em>its own</em>
   credentials and network allowlist — a plugin that could call one unasked could use them.
@@ -205,6 +213,13 @@ end`, '.lua')}</pre>
   <strong>resource handle</strong>, which means nothing outside the component that owns it, and
   an <strong>option inside an option</strong>, because <code>nil</code> would have to mean both
   <code>none</code> and <code>some(none)</code>.
+</p>
+<p>
+  Every <code>none</code> — and every <code>null</code> in any JSON the host hands a plugin —
+  arrives as <code>nil</code>. Lua has one absence, so
+  <code>if entry.etag then</code>, <code>entry.size or 0</code> and
+  <code>until cursor == nil</code> all read the way they look. A record's absent field is an
+  absent key: test it, do not compare it to a sentinel.
 </p>
 
 <h3>Payloads: call_to_file and call_from_file</h3>

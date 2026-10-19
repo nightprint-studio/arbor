@@ -70,5 +70,7 @@ pub use crate::lua_api::{
 };
 
 // ── Lua API helpers (consumed by the shell-side `ns_shell/*` installers) ─────
-pub use crate::lua_api::helpers::convert::json_to_lua;
+pub use crate::lua_api::helpers::convert::{
+    json_str_to_lua, json_to_lua, serde_to_lua, LUA_JSON,
+};
 pub use crate::lua_api::helpers::tuple::{boolerr2, err2, ok2, LuaTuple};

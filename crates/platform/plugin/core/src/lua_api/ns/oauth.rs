@@ -60,6 +60,7 @@ use arbor_plugin_types::prelude::credential_account_for;
 
 use crate::error::{PluginCoreError, Result};
 use crate::lua_api::ctx::ApiCtx;
+use crate::lua_api::helpers::convert::json_to_lua;
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let t = lua.create_table().map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -95,7 +96,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
                     app.oauth_refresh(&plugin, &json).map_err(mlua::Error::RuntimeError)?;
                 let v: serde_json::Value = serde_json::from_str(&out)
                     .map_err(|e| mlua::Error::RuntimeError(format!("arbor.oauth.refresh: {e}")))?;
-                lua.to_value(&v)
+                json_to_lua(lua, &v)
             })
             .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
         t.set("refresh", f).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;

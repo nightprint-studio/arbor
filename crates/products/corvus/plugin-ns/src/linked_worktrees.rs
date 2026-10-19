@@ -28,10 +28,10 @@
 //!     `(nil, err)` on a host failure.
 //!   · `set_sync_enabled(id, enabled)` → the `(ok, err)` bool tuple.
 
-use mlua::{Lua, LuaSerdeExt, Table};
+use mlua::{Lua, Table};
 
 use arbor_plugin_core::prelude::{
-    boolerr2, err2, ok2, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError,
+    boolerr2, err2, json_to_lua, ok2, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError,
     PluginCoreResult,
 };
 
@@ -80,7 +80,7 @@ fn install_list(
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match lua_ctx.to_value(&json) {
+            match json_to_lua(lua_ctx, &json) {
                 Ok(v) => ok2(lua_ctx, v),
                 Err(e) => err2(lua_ctx, format!("linked_worktrees.list to_value: {e}")),
             }
@@ -101,7 +101,7 @@ fn install_get(
     let fn_ = lua
         .create_function(move |lua_ctx, id: String| -> LuaTuple {
             match host.linked_worktrees_get(&id) {
-                Ok(Some(json)) => match lua_ctx.to_value(&json) {
+                Ok(Some(json)) => match json_to_lua(lua_ctx, &json) {
                     Ok(v) => ok2(lua_ctx, v),
                     Err(e) => err2(lua_ctx, format!("linked_worktrees.get to_value: {e}")),
                 },

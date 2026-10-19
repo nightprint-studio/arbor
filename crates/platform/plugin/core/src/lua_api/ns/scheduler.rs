@@ -16,11 +16,11 @@
 //!
 //!   arbor.scheduler.list() → { { action, trigger = { kind, … }, … }, … }
 
-use mlua::{Lua, LuaSerdeExt, Table};
+use mlua::{Lua, Table};
 
 use crate::error::{PluginCoreError, Result};
 use crate::lua_api::ctx::ApiCtx;
-use crate::lua_api::helpers::convert::lua_value_to_duration_secs;
+use crate::lua_api::helpers::convert::{json_to_lua, lua_value_to_duration_secs};
 use arbor_plugin_types::prelude::{Schedule, ScheduleTrigger};
 use arbor_scheduler::prelude::validate_cron;
 
@@ -79,7 +79,7 @@ fn install_list(ctx: &ApiCtx, lua: &Lua, sched_table: &Table) -> Result<()> {
     let fn_ = lua.create_function(move |lua_ctx, _: ()| {
         let list = registry.lock().map(|g| g.clone()).unwrap_or_default();
         let json = serde_json::to_value(&list).unwrap_or(serde_json::Value::Array(Vec::new()));
-        Ok(lua_ctx.to_value(&json).unwrap_or(mlua::Value::Nil))
+        Ok(json_to_lua(lua_ctx, &json).unwrap_or(mlua::Value::Nil))
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     sched_table.set("list", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     Ok(())

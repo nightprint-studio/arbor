@@ -229,3 +229,9 @@ reqwest    = { workspace = true }
 # session. Not a new external crate: `libc` is already pinned by `arbor-feedback` and `src-tauri`.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[build-dependencies]
+# The icon and the Windows file properties of this backend's executable, from the
+# `icon.ico` beside this manifest. Build-time only: nothing here is linked into the
+# binary, and on a non-Windows target it does nothing at all.
+arbor-exe-icon = { path = "../../../../foundation/exe-icon" }

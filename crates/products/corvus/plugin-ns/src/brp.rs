@@ -40,7 +40,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use mlua::{Lua, LuaSerdeExt, Table};
 
 use arbor_plugin_core::prelude::{
-    ApiCtx, LuaNamespaceInstaller, PluginCoreError, PluginCoreResult,
+    json_to_lua, ApiCtx, LuaNamespaceInstaller, PluginCoreError, PluginCoreResult,
 };
 
 use crate::nshost::NsHostHandle;
@@ -145,7 +145,7 @@ fn install_disconnect(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreRes
             let status = host
                 .brp_disconnect()
                 .unwrap_or_else(|_| serde_json::json!({ "connected": false }));
-            Ok(lua_ctx.to_value(&status).unwrap_or(mlua::Value::Nil))
+            Ok(json_to_lua(lua_ctx, &status).unwrap_or(mlua::Value::Nil))
         })
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     t.set("disconnect", fn_)
@@ -161,7 +161,7 @@ fn install_status(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<
             let status = host
                 .brp_status()
                 .unwrap_or_else(|_| serde_json::json!({ "connected": false }));
-            Ok(lua_ctx.to_value(&status).unwrap_or(mlua::Value::Nil))
+            Ok(json_to_lua(lua_ctx, &status).unwrap_or(mlua::Value::Nil))
         })
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     t.set("status", fn_)
@@ -277,7 +277,7 @@ fn deliver_inline(
     callback: &mlua::Function,
     payload: serde_json::Value,
 ) -> mlua::Result<()> {
-    let lua_value = lua_ctx.to_value(&payload)?;
+    let lua_value = json_to_lua(lua_ctx, &payload)?;
     callback.call::<()>(lua_value)
 }
 

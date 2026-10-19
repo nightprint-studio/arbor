@@ -33,10 +33,10 @@
 //! Requires git ≥ Read for the introspection ops, git ≥ Write for
 //! `fetch_active_tab` / `clone`.
 
-use mlua::{Lua, LuaSerdeExt, Table};
+use mlua::{Lua, Table};
 
 use arbor_plugin_core::prelude::{
-    boolerr2, err2, ok2, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError,
+    boolerr2, err2, json_to_lua, ok2, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError,
     PluginCoreResult,
 };
 
@@ -273,7 +273,7 @@ fn install_branches(
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match lua_ctx.to_value(&json) {
+            match json_to_lua(lua_ctx, &json) {
                 Ok(v) => ok2(lua_ctx, v),
                 Err(e) => err2(lua_ctx, format!("repo.branches to_value: {e}")),
             }
@@ -307,7 +307,7 @@ fn install_tags(
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match lua_ctx.to_value(&json) {
+            match json_to_lua(lua_ctx, &json) {
                 Ok(v) => ok2(lua_ctx, v),
                 Err(e) => err2(lua_ctx, format!("repo.tags to_value: {e}")),
             }
@@ -372,7 +372,7 @@ fn install_commits(
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match lua_ctx.to_value(&json) {
+            match json_to_lua(lua_ctx, &json) {
                 Ok(v) => ok2(lua_ctx, v),
                 Err(e) => err2(lua_ctx, format!("repo.commits to_value: {e}")),
             }
@@ -408,7 +408,7 @@ fn install_untracked(
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match lua_ctx.to_value(&json) {
+            match json_to_lua(lua_ctx, &json) {
                 Ok(v) => ok2(lua_ctx, v),
                 Err(e) => err2(lua_ctx, format!("repo.untracked to_value: {e}")),
             }
@@ -445,7 +445,7 @@ fn install_staged_files(
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match lua_ctx.to_value(&json) {
+            match json_to_lua(lua_ctx, &json) {
                 Ok(v) => ok2(lua_ctx, v),
                 Err(e) => err2(lua_ctx, format!("repo.staged_files to_value: {e}")),
             }

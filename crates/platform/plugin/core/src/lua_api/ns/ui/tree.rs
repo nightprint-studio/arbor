@@ -12,6 +12,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use crate::error::{PluginCoreError, Result};
 use crate::lua_api::ctx::ApiCtx;
 use crate::lua_api::helpers::contrib_write::dual_write_contribution;
+use crate::lua_api::helpers::convert::json_to_lua;
 use crate::contribution::points;
 use crate::tree::{BreadcrumbSegment, TreeNode, TreeUpdate};
 
@@ -164,7 +165,7 @@ fn install_get(ctx: &ApiCtx, lua: &Lua, tree_table: &Table) -> Result<()> {
         match store.get(&pname, &sidebar_id) {
             Some(snap) => {
                 let json = serde_json::to_value(&snap).unwrap_or(serde_json::Value::Null);
-                Ok(lua_ctx.to_value(&json).unwrap_or(mlua::Value::Nil))
+                Ok(json_to_lua(lua_ctx, &json).unwrap_or(mlua::Value::Nil))
             }
             None => Ok(mlua::Value::Nil),
         }

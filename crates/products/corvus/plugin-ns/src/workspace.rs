@@ -42,10 +42,10 @@
 //! No permission gate: the shell's `workspace` namespace had none (workspace
 //! identity is host-level, not repo git-scope), so neither does this port.
 
-use mlua::{Lua, LuaSerdeExt, Table};
+use mlua::{Lua, Table};
 
 use arbor_plugin_core::prelude::{
-    boolerr2, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError, PluginCoreResult,
+    boolerr2, json_to_lua, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError, PluginCoreResult,
 };
 
 use crate::nshost::NsHostHandle;
@@ -96,7 +96,7 @@ fn install_list(
                 Ok(v) => v,
                 Err(_) => return Ok(mlua::Value::Table(lua_ctx.create_table()?)),
             };
-            lua_ctx.to_value(&json)
+            json_to_lua(lua_ctx, &json)
         })
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     ws_table
@@ -113,7 +113,7 @@ fn install_active(
 ) -> PluginCoreResult<()> {
     let fn_ = lua
         .create_function(move |lua_ctx, ()| match host.workspace_active() {
-            Ok(Some(v)) => lua_ctx.to_value(&v),
+            Ok(Some(v)) => json_to_lua(lua_ctx, &v),
             _ => Ok(mlua::Value::Nil),
         })
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -131,7 +131,7 @@ fn install_get(
 ) -> PluginCoreResult<()> {
     let fn_ = lua
         .create_function(move |lua_ctx, ws_id: String| match host.workspace_get(&ws_id) {
-            Ok(Some(v)) => lua_ctx.to_value(&v),
+            Ok(Some(v)) => json_to_lua(lua_ctx, &v),
             _ => Ok(mlua::Value::Nil),
         })
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -154,7 +154,7 @@ fn install_list_repos(
                 Ok(v) => v,
                 Err(_) => return Ok(mlua::Value::Table(lua_ctx.create_table()?)),
             };
-            lua_ctx.to_value(&json)
+            json_to_lua(lua_ctx, &json)
         })
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     ws_table
@@ -171,7 +171,7 @@ fn install_repo(
 ) -> PluginCoreResult<()> {
     let fn_ = lua
         .create_function(move |lua_ctx, repo_id: String| match host.workspace_repo(&repo_id) {
-            Ok(Some(v)) => lua_ctx.to_value(&v),
+            Ok(Some(v)) => json_to_lua(lua_ctx, &v),
             _ => Ok(mlua::Value::Nil),
         })
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;

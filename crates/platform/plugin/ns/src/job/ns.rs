@@ -37,10 +37,11 @@
 //! name is forwarded as the effective `on_done_action`, so the plugin's closure is what runs
 //! when the job finishes — and it runs in the host that spawned it.
 
-use mlua::{Lua, LuaSerdeExt, Table};
+use mlua::{Lua, Table};
 
 use arbor_plugin_core::prelude::{
-    err2, ok2, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError, PluginCoreResult,
+    err2, json_to_lua, ok2, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError,
+    PluginCoreResult,
 };
 
 use crate::job::host::JobHostOps;
@@ -217,7 +218,7 @@ fn install_list(
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match lua_ctx.to_value(&json) {
+            match json_to_lua(lua_ctx, &json) {
                 Ok(v) => ok2(lua_ctx, v),
                 Err(e) => err2(lua_ctx, format!("job.list to_value: {e}")),
             }

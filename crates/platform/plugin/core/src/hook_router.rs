@@ -14,12 +14,13 @@
 use std::sync::{Mutex, Weak};
 
 use async_trait::async_trait;
-use mlua::{Lua, LuaSerdeExt, Table};
+use mlua::{Lua, Table};
 
 use arbor_plugin_api::prelude::{HookListener, PluginValue};
 use arbor_plugin_types::prelude::hook_names;
 
 use crate::error::{PluginCoreError, Result};
+use crate::lua_api::helpers::convert::json_to_lua;
 use crate::runtime::host::PluginHost;
 
 /// Glob match between a subscription pattern and a concrete event name.
@@ -65,7 +66,7 @@ pub fn matches_pattern(pattern: &str, event: &str) -> bool {
 /// parse / conversion error.
 fn ctx_to_lua(lua: &Lua, context_json: &str) -> Result<mlua::Value> {
     let v = match serde_json::from_str::<serde_json::Value>(context_json) {
-        Ok(v) => lua.to_value(&v).unwrap_or_else(|_| {
+        Ok(v) => json_to_lua(lua, &v).unwrap_or_else(|_| {
             mlua::Value::Table(
                 lua.create_table().expect("failed to create fallback table"),
             )

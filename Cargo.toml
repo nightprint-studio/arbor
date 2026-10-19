@@ -24,6 +24,9 @@ members = [
     "crates/foundation/sql-abbrev",
     "crates/foundation/syntax",
     "crates/foundation/logscan",
+    # Build-time only: what every backend's build.rs calls to give its executable an icon and
+    # its Windows file properties. Nothing links it — it writes a resource, not code.
+    "crates/foundation/exe-icon",
     "crates/products/bennu/runtime/plugin",
     "crates/products/bennu/formats/sheet",
     "crates/products/bennu/formats/wgsl",

@@ -171,8 +171,11 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **Bennu's docs read as one manual.** Every page opens with its section and a summary, and lays its facts out as cards, steps, tables and callouts instead of long paragraphs.
 
+- **Every backend executable carries its product's icon.** `corvus-be`, `sitta-be`, `merula-be`, `picus-be`, `tyto-be`, `garrulus-be` and `bennu-be` are no longer blank generic binaries in Explorer, the taskbar and Task Manager, and their Properties → Details now names what they are and which version they came from.
+
 ### Fixed
-- **The MCP endpoint keeps answering after many client reconnections.** Every AI client that disconnected used to leave a socket behind, and once enough had, the endpoint went on listening while dropping every connection — only restarting Arbor brought it back.
+- **An optional argument a plugin leaves out no longer shortens the call.** A `nil` in a positional argument list truncated it, so an extension was called with fewer arguments than it takes and answered with an arity error.
+- **A missing value reaches a plugin as `nil`.** A `null` in any JSON the host hands Lua — an extension's `none`, an absent field — used to arrive as a value that tested as present, so a plugin reading it took the wrong branch. Cloud listings were the visible case: the bucket browser paged the same first results forever and never showed the files.
 - **Bennu catches Java errors it used to let through.** Narrowing or `null` arguments to primitives, wrong `super(…)`/`this(…)` and nested-class constructor arguments, ambiguous overloads, boxing and array assignments, lambdas passed where no functional interface fits, anonymous classes missing an abstract method, `Thread.sleep` without handling, and locals used outside their block, loop or `catch`.
 - **Wrong Java argument types are reported on many more calls.** Static calls, calls inside lambdas, generic and overloaded methods, anonymous-class constructors and own-method calls in Lombok classes now flag an argument no overload can take; static calls also get the wrong-argument-count check.
 - **Go-to and hover on an overloaded Java method pick the overload the call binds to.** `uri(b -> …)` opens `uri(Function)`, not the `uri(URI)` declared above it — lambdas, method references, `null`, literals and argument types are all weighed, even while the lambda is still being written.
@@ -2708,4 +2711,4 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [0.1.0] — 2026-05-21
 
-Initial public release.
+Initial public release.

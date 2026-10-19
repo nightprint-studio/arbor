@@ -79,6 +79,10 @@ use mlua::{Lua, LuaSerdeExt, Table, Value};
 
 use crate::error::{PluginCoreError, Result};
 use crate::lua_api::ctx::ApiCtx;
+// An extension's records are full of `option<T>`, and every `none` crosses as JSON `null`:
+// the shared converter is what makes those arrive as `nil` rather than as mlua's truthy null
+// sentinel. See `helpers::convert::LUA_JSON`.
+use crate::lua_api::helpers::convert::json_str_to_lua;
 use crate::lua_api::helpers::fs_perm::{check_fs_read, check_fs_write, FsPerm};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
@@ -107,7 +111,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
                 }
                 let app = app.as_ref().ok_or_else(no_host)?;
                 let json = app.ext_surface(&plugin).map_err(mlua::Error::RuntimeError)?;
-                json_to_lua(lua, &json)
+                json_str_to_lua(lua, &json)
             })
             .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
         t.set("list", f).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -132,7 +136,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
                 let out = app
                     .ext_call(&plugin, &spec_json)
                     .map_err(mlua::Error::RuntimeError)?;
-                json_to_lua(lua, &out)
+                json_str_to_lua(lua, &out)
             })
             .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
         t.set("call", f).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -176,7 +180,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
                 let out = app
                     .ext_call_from_file(&plugin, &call_json, &file_json)
                     .map_err(mlua::Error::RuntimeError)?;
-                json_to_lua(lua, &out)
+                json_str_to_lua(lua, &out)
             })
             .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
         t.set("call_from_file", f).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -237,19 +241,62 @@ fn split_file_spec(
     ))
 }
 
-/// Parse a JSON document the host produced and hand it back as Lua.
-fn json_to_lua(lua: &Lua, s: &str) -> mlua::Result<Value> {
-    let v: serde_json::Value =
-        serde_json::from_str(s).map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
-    lua.to_value(&v)
-}
-
 /// Convert one Lua table to JSON.
 ///
 /// Through `serde_json` rather than by hand, so an empty Lua table takes the same road as
 /// everywhere else — the `{}`-is-an-object trap is the plugin surface's oldest, and a second
 /// conversion written here would be a second place for it to bite.
+///
+/// `args` is the one field this does look at, because it is the one field where Lua cannot
+/// say what the author meant. See [`dense_args`].
 fn lua_table_to_json(lua: &Lua, t: &Table) -> mlua::Result<serde_json::Value> {
-    lua.from_value(Value::Table(t.clone()))
+    let spec = match t.get::<Option<Table>>("args")? {
+        Some(args) => {
+            // A shallow copy rather than writing into the caller's table: the plugin still
+            // owns it, and a `nil` quietly turning into a null sentinel in their own variable
+            // is the kind of action at a distance this module exists to avoid.
+            let copy = lua.create_table()?;
+            for pair in t.pairs::<Value, Value>() {
+                let (k, v) = pair?;
+                copy.set(k, v)?;
+            }
+            copy.set("args", dense_args(lua, &args)?)?;
+            copy
+        }
+        None => t.clone(),
+    };
+    lua.from_value(Value::Table(spec))
         .map_err(|e| mlua::Error::RuntimeError(format!("arbor.ext: {e}")))
+}
+
+/// An argument list with its holes filled in, so a `nil` in the middle stays an argument.
+///
+/// A component's parameters are positional, and Lua cannot hold a positional `nil`: `{ a, nil,
+/// c }` has a length of 1, and `ipairs` stops at the gap. An author who writes
+///
+/// ```lua
+/// args = { target, prefix, delimiter, cursor, limit }
+/// ```
+///
+/// with no cursor yet has therefore passed **three** arguments, not five, and the call fails
+/// with an arity error naming a shape they did not write. Worse would be for it to succeed
+/// with `limit` silently landing in `cursor`'s place.
+///
+/// So the length comes from `n` when the caller used `table.pack`, which is exactly what `n`
+/// is for, and every missing index becomes JSON `null` — `none` for an `option<T>`, and a
+/// type error naming the argument for anything else. Without `n` the sequence length is all
+/// Lua can offer, and a trailing optional simply goes unpassed; the guest side pads those.
+fn dense_args(lua: &Lua, args: &Table) -> mlua::Result<Table> {
+    let n = match args.get::<Option<usize>>("n")? {
+        Some(n) => n,
+        None => args.raw_len(),
+    };
+    let dense = lua.create_table()?;
+    for i in 1..=n {
+        let v: Value = args.get(i)?;
+        // `lua.null()` rather than leaving the hole: a nil would truncate this table the same
+        // way it truncated the caller's, and the whole point is to carry the gap across.
+        dense.set(i, if v.is_nil() { lua.null() } else { v })?;
+    }
+    Ok(dense)
 }

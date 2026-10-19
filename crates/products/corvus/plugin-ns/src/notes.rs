@@ -25,10 +25,10 @@
 //!   · `delete(oid, namespace)` is positional, returning the bool tuple.
 //! Requires git ≥ Read for list/get, git ≥ Write for set/delete.
 
-use mlua::{Lua, LuaSerdeExt, Table};
+use mlua::{Lua, Table};
 
 use arbor_plugin_core::prelude::{
-    boolerr2, err2, ok2, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError,
+    boolerr2, err2, json_to_lua, ok2, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError,
     PluginCoreResult,
 };
 
@@ -93,7 +93,7 @@ fn install_list(
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match lua_ctx.to_value(&json) {
+            match json_to_lua(lua_ctx, &json) {
                 Ok(v) => ok2(lua_ctx, v),
                 Err(e) => err2(lua_ctx, format!("notes.list to_value: {e}")),
             }

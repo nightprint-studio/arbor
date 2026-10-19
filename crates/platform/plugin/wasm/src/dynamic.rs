@@ -220,6 +220,19 @@ impl DynGuest {
             .ok_or_else(|| format!("'{func}' is not a function"))?;
 
         let param_types = f.params(&self.store);
+        // Trailing optionals may be left off. The caller is a Lua author writing a positional
+        // list, and Lua cannot hold a trailing `nil`: `{ a, b }` and `{ a, b, nil }` are the
+        // same table, so refusing the short call would make an `option<T>` parameter something
+        // the last caller can never omit. A missing argument in front of one that was passed
+        // is a different thing and still an error — `arbor.ext` fills those holes with `null`
+        // before they get here, from the `n` that `table.pack` records.
+        let mut args: Vec<Json> = args.to_vec();
+        while args.len() < param_types.len() {
+            match &param_types[args.len()] {
+                Type::Option(_) => args.push(Json::Null),
+                _ => break,
+            }
+        }
         if param_types.len() != args.len() {
             return Err(format!(
                 "'{func}' takes {} argument(s), got {}",
@@ -229,7 +242,7 @@ impl DynGuest {
         }
         let params: Vec<Val> = param_types
             .iter()
-            .zip(args)
+            .zip(&args)
             .enumerate()
             .map(|(i, (ty, arg))| match bytes_at {
                 // The byte argument never becomes JSON: it is lowered straight into the

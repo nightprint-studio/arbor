@@ -93,6 +93,10 @@ prelude.
   - `helpers/*` — pure helpers shared by every namespace installer
     (`convert`, `tuple`, `fs_perm`, `glob`, `http_worker`, `json_patch`,
     `settings_scope`, `timer`, `contrib_write`, `xml_patch`).
+    `convert::json_to_lua` / `serde_to_lua` are **the** way an answer reaches
+    Lua: `lua.to_value` lowers JSON `null` onto mlua's truthy null sentinel, so
+    a namespace that used it would make its nullable fields behave unlike
+    every other namespace's.
   - `ns/*` — the host-pure namespaces (`log`, `events`, `json`, `text`,
     `meta`, `notify`, `hooks`, `command`, `keybinding`, `service`,
     `timer`, `scheduler`, `contribution`, `fs`, `http`, `settings`,

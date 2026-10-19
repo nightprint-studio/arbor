@@ -16,10 +16,11 @@
 //! the `arbor://contributions-changed` Tauri event and plugins that need
 //! to react can listen via their normal event hooks.
 
-use mlua::{Lua, LuaSerdeExt, Table};
+use mlua::{Lua, Table};
 
 use crate::error::{PluginCoreError, Result};
 use crate::lua_api::ctx::ApiCtx;
+use crate::lua_api::helpers::convert::json_to_lua;
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let contrib_table = lua.create_table().map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -29,7 +30,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
         let fn_ = lua.create_function(move |lua_ctx, point: String| {
             let items = reg.list_for_point(&point);
             let json = serde_json::to_value(&items).unwrap_or(serde_json::Value::Array(Vec::new()));
-            Ok(lua_ctx.to_value(&json).unwrap_or(mlua::Value::Nil))
+            Ok(json_to_lua(lua_ctx, &json).unwrap_or(mlua::Value::Nil))
         }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
         contrib_table.set("list", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     }
@@ -39,7 +40,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
         let fn_ = lua.create_function(move |lua_ctx, _: ()| {
             let points = reg.list_points();
             let json = serde_json::to_value(&points).unwrap_or(serde_json::Value::Array(Vec::new()));
-            Ok(lua_ctx.to_value(&json).unwrap_or(mlua::Value::Nil))
+            Ok(json_to_lua(lua_ctx, &json).unwrap_or(mlua::Value::Nil))
         }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
         contrib_table.set("list_points", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     }

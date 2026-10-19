@@ -1,0 +1,19 @@
+[package]
+name         = "arbor-exe-icon"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "What a build script calls to give an Arbor executable its icon and its Windows file properties. One line per binary; a no-op everywhere that is not Windows."
+
+[dependencies]
+# The resource compiler, and the only dependency. A BUILD dependency of its consumers, so
+# nothing here is linked into the binaries it decorates — the icon is a section in the
+# executable, not code that runs.
+#
+# `tauri-winres` rather than `embed-resource` underneath it: it is already in the lockfile
+# (`tauri-build` uses it), it writes the VERSIONINFO block we want for the Details tab, and it
+# reports "not building for Windows" as success — which is exactly the behaviour a macOS or
+# Linux build needs from a Windows resource. Nothing of Tauri's comes with it.
+tauri-winres = "0.3"

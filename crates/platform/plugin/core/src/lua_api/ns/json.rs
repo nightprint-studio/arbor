@@ -4,6 +4,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 
 use crate::error::{PluginCoreError, Result};
 use crate::lua_api::ctx::ApiCtx;
+use crate::lua_api::helpers::convert::json_to_lua;
 
 pub(crate) fn install(_ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let json_table = lua.create_table().map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -34,7 +35,7 @@ pub(crate) fn install(_ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
         .create_function(|lua_ctx, s: String| {
             match serde_json::from_str::<serde_json::Value>(&s) {
                 Ok(v) => {
-                    let lv = lua_ctx.to_value(&v)
+                    let lv = json_to_lua(lua_ctx, &v)
                         .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
                     Ok((lv, mlua::Value::Nil))
                 }

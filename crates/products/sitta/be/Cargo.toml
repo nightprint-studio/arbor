@@ -42,3 +42,9 @@ serde_json = { workspace = true }
 # Drives the async domain handlers: each backend request runs on its own
 # serve-loop worker thread, so a multi-thread runtime is required.
 tokio      = { workspace = true }
+
+[build-dependencies]
+# The icon and the Windows file properties of this backend's executable, from the
+# `icon.ico` beside this manifest. Build-time only: nothing here is linked into the
+# binary, and on a non-Windows target it does nothing at all.
+arbor-exe-icon = { path = "../../../foundation/exe-icon" }

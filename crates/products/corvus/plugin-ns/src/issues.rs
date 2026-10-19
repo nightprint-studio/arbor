@@ -27,7 +27,7 @@
 use mlua::{Lua, LuaSerdeExt, Table};
 
 use arbor_plugin_core::prelude::{
-    err2, ok2, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError, PluginCoreResult,
+    err2, json_to_lua, ok2, ApiCtx, LuaNamespaceInstaller, LuaTuple, PluginCoreError, PluginCoreResult,
 };
 
 use crate::nshost::NsHostHandle;
@@ -99,7 +99,7 @@ fn install_search(
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match lua_ctx.to_value(&json) {
+            match json_to_lua(lua_ctx, &json) {
                 Ok(v) => ok2(lua_ctx, v),
                 Err(e) => err2(lua_ctx, format!("issues.search to_value: {e}")),
             }
@@ -123,7 +123,7 @@ fn install_get(host: NsHostHandle, ctx: &ApiCtx, lua: &Lua, t: &Table) -> Plugin
                 Ok(v) => v,
                 Err(e) => return err2(lua_ctx, e),
             };
-            match lua_ctx.to_value(&json) {
+            match json_to_lua(lua_ctx, &json) {
                 Ok(v) => ok2(lua_ctx, v),
                 Err(e) => err2(lua_ctx, format!("issues.get to_value: {e}")),
             }
@@ -166,7 +166,7 @@ fn install_lookup(host: NsHostHandle, ctx: &ApiCtx, lua: &Lua, t: &Table) -> Plu
             let Some(json) = issue_opt else {
                 return ok2(lua_ctx, mlua::Value::Nil);
             };
-            match lua_ctx.to_value(&json) {
+            match json_to_lua(lua_ctx, &json) {
                 Ok(v) => ok2(lua_ctx, v),
                 Err(e) => err2(lua_ctx, format!("issues.lookup to_value: {e}")),
             }
@@ -196,7 +196,7 @@ fn install_transition(
                     Ok(v) => v,
                     Err(e) => return err2(lua_ctx, e),
                 };
-                match lua_ctx.to_value(&json) {
+                match json_to_lua(lua_ctx, &json) {
                     Ok(v) => ok2(lua_ctx, v),
                     Err(e) => err2(lua_ctx, format!("issues.transition to_value: {e}")),
                 }
@@ -227,7 +227,7 @@ fn install_comment(
                     Ok(v) => v,
                     Err(e) => return err2(lua_ctx, e),
                 };
-                match lua_ctx.to_value(&json) {
+                match json_to_lua(lua_ctx, &json) {
                     Ok(v) => ok2(lua_ctx, v),
                     Err(e) => err2(lua_ctx, format!("issues.comment to_value: {e}")),
                 }

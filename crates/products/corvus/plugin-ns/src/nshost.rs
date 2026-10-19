@@ -28,7 +28,8 @@
 //!   shell produced (e.g. `"notes.list: …"`).
 //! - **JSON**: collection results come back as `serde_json::Value` (already the
 //!   serde-serialized domain type, e.g. `Vec<CommitNote>`), which the installer
-//!   hands to `lua.to_value(...)`. Scalars use plain Rust types.
+//!   hands to `json_to_lua(...)` — never `lua.to_value`, which would deliver a
+//!   `null` field as a value that tests as present. Scalars use plain Rust types.
 //!
 //! ## Extending this trait (phase 2+)
 //!

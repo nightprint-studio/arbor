@@ -4,9 +4,8 @@
 //! alternative to `StepKind::Shell` — a Lua function plays the role of a
 //! shell command and returns a normalised `PipelineOpResult`.
 
-use mlua::LuaSerdeExt;
-
 use super::PluginHost;
+use crate::lua_api::helpers::convert::json_to_lua;
 
 /// Result shape returned by a Lua pipeline op handler, normalised so the
 /// orchestrator treats it uniformly with shell runs.
@@ -53,7 +52,7 @@ impl PluginHost {
         // Build (params, ctx) args. ctx carries the step cwd + plugin name so
         // handlers can keep relative paths semantically consistent with shell
         // steps (default cwd is the pipeline's run cwd).
-        let params_lua = plugin.lua.to_value(params)
+        let params_lua = json_to_lua(&plugin.lua, params)
             .map_err(|e| format!("params → lua error: {e}"))?;
         let ctx_tab = plugin.lua.create_table()
             .map_err(|e| format!("ctx table error: {e}"))?;

@@ -4,6 +4,7 @@
 use mlua::LuaSerdeExt;
 
 use super::PluginHost;
+use crate::lua_api::helpers::convert::json_to_lua;
 
 /// Error raised when a cross-plugin service call fails.
 #[derive(Debug)]
@@ -63,7 +64,7 @@ impl PluginHost {
                 "service '{target}.{method}' is not registered"
             ))),
         };
-        let args_lua = plugin.lua.to_value(args_json)
+        let args_lua = json_to_lua(&plugin.lua, args_json)
             .unwrap_or(mlua::Value::Nil);
         let ret: mlua::Value = handler.call(args_lua)
             .map_err(|e| ServiceError::HandlerError(e.to_string()))?;
@@ -96,7 +97,7 @@ impl PluginHost {
             _ => return,
         };
         let _ = cbs.set(call_id, mlua::Value::Nil);
-        let payload_lua = plugin.lua.to_value(payload).unwrap_or(mlua::Value::Nil);
+        let payload_lua = json_to_lua(&plugin.lua, payload).unwrap_or(mlua::Value::Nil);
         if let Err(e) = cb.call::<mlua::Value>((ok, payload_lua)) {
             crate::lua_ctx::report(&plugin.lua, "error", format!("service callback error: {e}"));
         }

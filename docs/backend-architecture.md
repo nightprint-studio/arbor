@@ -63,6 +63,7 @@ un-activated stubs). Grouped:
 | `arbor-ipc` | `foundation/ipc` | the transport seam — `BrokerClient`, `LoopbackBroker`, `ChildClient`, `serve_stdio`, framing, `EventSink`, `HostCaller` |
 | `arbor-rpc` (+ `-macros`) | `foundation/rpc` | the `#[handler]` macro + `inventory` registry |
 | `arbor-shell-common` | `foundation/shell-common` | shell-side `Router` + credential `broker` |
+| `arbor-exe-icon` | `foundation/exe-icon` | build-script only: the icon and Windows file properties every BE binary embeds |
 | `arbor-fs`, `arbor-auth`, `arbor-process-ext`, `arbor-feedback`, `arbor-scheduler`, `arbor-plugin-*` | `foundation/`, `platform/` | shared services |
 
 **Products** (`crates/products/<product>/…`). Each product has a `core` crate (holds the
@@ -335,6 +336,11 @@ handler) and 3–6 (workspace + router + ensure + window); everything else grows
    - Domain modules: one file per domain, each a set of
      `#[arbor_rpc::handler] fn(&FooState, …) -> Result<T, String>`.
    - `src/plugin.rs` if it needs plugins — host-pure copy of `sitta/be/src/plugin.rs`.
+   - `build.rs`: `fn main() { arbor_exe_icon::prelude::embed(); }`, plus
+     `arbor-exe-icon = { path = "…/foundation/exe-icon" }` under `[build-dependencies]`. Drop
+     the product's `icon.ico` beside `Cargo.toml` — add the artwork to
+     `src-tauri/icons/products/foo.png`, add the crate to `scripts/gen-exe-icons.ps1` and run
+     it. Without this the binary is a blank executable in Explorer and Task Manager.
 
 3. **Register in the workspace**: add `"crates/products/foo/core"` and
    `"crates/products/foo/be"` to `Cargo.toml` members.
