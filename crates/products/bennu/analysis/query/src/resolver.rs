@@ -11,10 +11,12 @@
 //!      mutable, patched per file;
 //!   2. the JDK member index (rt.jar / jimage) — immutable, resolved live.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::dep_record;
+use crate::module_scope;
 use bennu_classpath::prelude::MemberIndex as CpMemberIndex;
 use bennu_index::prelude::{PersistedIndex, Symbol, SymbolKind};
 use bennu_java::prelude::{
@@ -52,9 +54,33 @@ pub struct IndexResolver<M: CpMemberIndex> {
     /// pure waste that made the whole reference walk crawl. The provider (completion) keeps
     /// full JDK resolution (a separate resolver instance).
     project_only: bool,
+    /// Whether the project declares any type in more than one module, so that some records are
+    /// filed under per-module alias keys. Read once at construction: when it is `false` (nearly
+    /// always) [`scoped_key`](Self::scoped_key) is a branch and nothing more.
+    module_aliases: bool,
 }
 
 impl<M: CpMemberIndex> IndexResolver<M> {
+    /// The key `binary`'s project record is filed under **for the module being resolved in** — its
+    /// own copy's alias when two modules both declare `binary` and a module is in scope
+    /// ([`module_scope`]), else `binary` itself.
+    ///
+    /// Only the project's own record lookups go through this. The simple-name map, the JDK and the
+    /// overlay keep their plain keys: a simple name resolves to the same binary in either module,
+    /// and it is the *members* behind that binary that differ.
+    fn scoped_key<'a>(&self, binary: &'a str) -> Cow<'a, str> {
+        if !self.module_aliases {
+            return Cow::Borrowed(binary);
+        }
+        module_scope::with_current(|module| match module {
+            Some(module) => {
+                let alias = bennu_index::prelude::module_alias_key(module, binary);
+                if self.project.contains(&alias) { Cow::Owned(alias) } else { Cow::Borrowed(binary) }
+            }
+            None => Cow::Borrowed(binary),
+        })
+    }
+
     /// How many types the `members_of` memo holds, for the process monitor.
     ///
     /// **Counted, not sized.** The entries are the Java model's `ClassMembers`, a nested structure
@@ -87,6 +113,7 @@ impl<M: CpMemberIndex> IndexResolver<M> {
         for (s, b) in COMMON_SIMPLE {
             simple_hints.insert((*s).to_string(), (*b).to_string());
         }
+        let module_aliases = project.has_module_aliases();
         Self {
             project,
             jdk,
@@ -94,6 +121,7 @@ impl<M: CpMemberIndex> IndexResolver<M> {
             overlay: RwLock::new(Overlay::default()),
             members_cache: RwLock::new(HashMap::new()),
             project_only: false,
+            module_aliases,
         }
     }
 
@@ -149,7 +177,7 @@ impl<M: CpMemberIndex> IndexResolver<M> {
                 return Some(json.clone());
             }
         }
-        let sym = self.project.get(binary)?;
+        let sym = self.project.get(&self.scoped_key(binary))?;
         (!sym.members_json.is_empty()).then_some(sym.members_json)
     }
 
@@ -269,6 +297,15 @@ impl<M: CpMemberIndex> IndexResolver<M> {
             for binary in &touched {
                 cache.remove(binary);
             }
+            // An edit's overlay entry is filed under the plain binary and wins over every module's
+            // copy, so each module's memoized answer for a touched type is stale too.
+            if self.module_aliases {
+                cache.retain(|key, _| {
+                    !touched.iter().any(|binary| {
+                        key.starts_with(bennu_index::prelude::ALIAS_MARK) && key.ends_with(binary.as_str())
+                    })
+                });
+            }
         }
     }
 }
@@ -290,7 +327,7 @@ impl<M: CpMemberIndex> IndexResolver<M> {
             }
         }
         // 1) project source type — its resolved members are baked into the record.
-        if let Some(sym) = self.project.get(binary_name) {
+        if let Some(sym) = self.project.get(&self.scoped_key(binary_name)) {
             if !sym.members_json.is_empty() {
                 if let Ok(mut cm) = serde_json::from_str::<JClassMembers>(&sym.members_json) {
                     // Every reference type ultimately extends `java.lang.Object`. A project class
@@ -409,9 +446,12 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         // Memo hit (incl. a cached negative) — skips the JSON parse / bytecode read AND the
         // deep clone: on a hit we hand back a clone of the shared `Arc` (a refcount bump),
         // not a copy of every method/field. This is what makes the reference walk tractable.
+        // Memoized under the SCOPED key: the same binary read from two modules is two different
+        // answers, and one memo slot would hand the first module's members to the second.
+        let key = self.scoped_key(binary_name);
         {
             let cache = self.members_cache.read().unwrap_or_else(|p| p.into_inner());
-            if let Some(hit) = cache.get(binary_name) {
+            if let Some(hit) = cache.get(&*key) {
                 return hit.clone();
             }
         }
@@ -420,7 +460,7 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         self.members_cache
             .write()
             .unwrap_or_else(|p| p.into_inner())
-            .insert(binary_name.to_string(), computed.clone());
+            .insert(key.into_owned(), computed.clone());
         computed
     }
 
@@ -517,6 +557,24 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         // `SingleImport` binds unconfirmed; the static form has to prove itself further down.
         if let Some(c) = candidates.iter().find(|c| c.kind == ScopeKind::SingleImport) {
             return Some(c.binary.clone());
+        }
+        // An import-on-demand that the JDK / classpath proves holds `name` binds it — BEFORE the
+        // project-wide simple-name map below. That map is keyed by simple name alone and knows
+        // nothing of packages, so a project type called `Point` in some unrelated package (a record
+        // in another module, say) beat `import java.awt.*;` and `point.x` was then judged against the
+        // record's private fields: "`x` has private access in `Point`", on a public `java.awt.Point`.
+        // The file's own package and its single-type imports have already been tried by now (by the
+        // caller and above), and a project package it star-imports is probed further down, so what
+        // is left for this tier to shadow is exactly a type from a package the file never mentions.
+        // Classpath-only knowledge: nothing project-side is read, so nothing is recorded.
+        if !self.project_only {
+            let exists = |binary: &str| self.jdk.members_of(binary).is_some();
+            if let Some(c) = candidates
+                .iter()
+                .find(|c| c.kind == ScopeKind::OnDemand && self.project.get(&c.binary).is_none() && c.confirmed_by(&exists))
+            {
+                return Some(c.binary.clone());
+            }
         }
         // From here on we probe the PROJECT for `name`: record the outcome (hit / miss) for the
         // diagnostic cache when recording. An import-bound name (above) is project-independent, so

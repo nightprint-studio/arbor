@@ -1,0 +1,6 @@
+{
+  "name": "tree-sitter-java",
+  "private": true,
+  "type": "commonjs",
+  "description": "Only here so `tree-sitter generate` loads grammar.js as CommonJS, not as the ES module the workspace root package.json would make it."
+}

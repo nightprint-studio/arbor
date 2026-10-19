@@ -15,9 +15,10 @@
 //! couple ms), so re-flattening the whole record set on each patch is the simplest
 //! correct strategy and stays well under the UI budget.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use crate::module::{module_alias_key, ModuleCache};
 use crate::query::serialize_symbol;
 use crate::schema::{ArchivedSymbol, Symbol};
 use crate::store::{open_fst_map, BlobReader, BlobWriter, StoreError};
@@ -55,6 +56,9 @@ pub struct IndexBuilder {
     files: BTreeMap<PathBuf, Vec<IndexRecord>>,
     blob_path: PathBuf,
     fst_path: PathBuf,
+    /// Which module each source directory belongs to — kept across persists, because a patch
+    /// persists again and the pom layout does not change under it.
+    modules: ModuleCache,
 }
 
 impl IndexBuilder {
@@ -64,6 +68,7 @@ impl IndexBuilder {
             files: BTreeMap::new(),
             blob_path: index_dir.join("symbols.blob"),
             fst_path: index_dir.join("names.fst"),
+            modules: ModuleCache::default(),
         }
     }
 
@@ -106,9 +111,15 @@ impl IndexBuilder {
     /// Flatten every file's records to the fst+blob store on disk. Each record is
     /// appended once and aliased under its extra keys, so a class is reachable by both
     /// its simple and binary name against one payload.
+    ///
+    /// A type declared in more than one module is also filed under one key per declaring module
+    /// (see [`crate::module`]), so each module can read its own copy; the plain keys are untouched.
     pub fn persist(&self) -> Result<(), StoreError> {
+        let duplicated = self.types_declared_in_several_modules();
         let mut writer = BlobWriter::new();
-        for recs in self.files.values() {
+        for (file, recs) in &self.files {
+            // Looked up only when something is duplicated: a project without duplicates pays nothing.
+            let module = (!duplicated.is_empty()).then(|| self.modules.module_of(file)).flatten();
             for rec in recs {
                 let bytes = serialize_symbol(&rec.symbol).map_err(StoreError::Io)?;
                 let primary = rec.keys.first().map(String::as_str).unwrap_or("");
@@ -116,9 +127,41 @@ impl IndexBuilder {
                 for extra in rec.keys.iter().skip(1) {
                     writer.append_alias(extra, off);
                 }
+                if let Some(module) = &module {
+                    if duplicated.contains(rec.symbol.fqn.as_str()) && is_type_record(&rec.symbol) {
+                        writer.append_alias(&module_alias_key(module, &rec.symbol.fqn), off);
+                    }
+                }
             }
         }
         writer.finish(&self.blob_path, &self.fst_path)
+    }
+
+    /// The binary names of types declared by files of **two or more different modules**.
+    ///
+    /// A file under no pom has no module, so it never makes a name ambiguous: two copies of a type,
+    /// one in a module and one outside every module, keep today's first-wins behaviour.
+    fn types_declared_in_several_modules(&self) -> HashSet<String> {
+        let mut first_module: HashMap<&str, String> = HashMap::new();
+        let mut duplicated = HashSet::new();
+        for (file, recs) in &self.files {
+            if !recs.iter().any(|r| is_type_record(&r.symbol)) {
+                continue;
+            }
+            let Some(module) = self.modules.module_of(file) else { continue };
+            for rec in recs.iter().filter(|r| is_type_record(&r.symbol)) {
+                match first_module.get(rec.symbol.fqn.as_str()) {
+                    None => {
+                        first_module.insert(rec.symbol.fqn.as_str(), module.clone());
+                    }
+                    Some(first) if *first != module => {
+                        duplicated.insert(rec.symbol.fqn.clone());
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        duplicated
     }
 
     /// The blob path this builder writes.
@@ -129,6 +172,12 @@ impl IndexBuilder {
     pub fn fst_path(&self) -> &Path {
         &self.fst_path
     }
+}
+
+/// Whether `symbol` is a type record — the only kind that carries members and is looked up by its
+/// binary name.
+fn is_type_record(symbol: &Symbol) -> bool {
+    !symbol.members_json.is_empty() && !symbol.fqn.is_empty()
 }
 
 // ── read side ──────────────────────────────────────────────────────────────────
@@ -155,6 +204,21 @@ impl PersistedIndex {
     pub fn get(&self, key: &str) -> Option<Symbol> {
         let off = self.map.get(key.as_bytes())?;
         self.symbol_at(off)
+    }
+
+    /// Whether `key` is filed in the index at all — an exact lookup that does not decode the record.
+    pub fn contains(&self, key: &str) -> bool {
+        self.map.contains_key(key.as_bytes())
+    }
+
+    /// Whether any type is filed under a per-module alias key — that is, whether the project
+    /// declares a type in more than one module. One key read; the resolver asks it once.
+    pub fn has_module_aliases(&self) -> bool {
+        use fst::automaton::{Automaton, Str};
+        use fst::{IntoStreamer, Streamer};
+        let marker = crate::module::ALIAS_MARK.to_string();
+        let matcher = Str::new(&marker).starts_with();
+        self.map.search(&matcher).into_stream().next().is_some()
     }
 
     /// Every record whose key starts with `prefix`. Powers the "search everywhere"
@@ -245,6 +309,49 @@ mod tests {
         assert_eq!(by_binary.id, 0);
         assert_eq!(by_binary.members_json, "{\"m\":1}");
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_type_declared_in_two_modules_is_filed_per_module_and_a_unique_one_is_not() {
+        use crate::module::module_alias_key;
+        let dir = tmp();
+        let root = dir.join("reactor");
+        let (a, b) = (root.join("a"), root.join("b"));
+        for m in [&a, &b] {
+            std::fs::create_dir_all(m.join("src")).unwrap();
+            std::fs::write(m.join("pom.xml"), "<project/>").unwrap();
+        }
+        let key = |m: &Path| crate::module::module_of(&m.join("src/X.java")).unwrap();
+        let rec = |id, simple: &str, binary: &str, members: &str| {
+            IndexRecord::new(class_sym(id, simple, binary, members, "f"), binary)
+        };
+        let mut idx = IndexBuilder::new(&dir.join("idx"));
+        idx.set_file(a.join("src/Tok.java"), vec![rec(0, "Tok", "p/Tok", "{\"m\":\"a\"}"), rec(1, "Only", "p/Only", "{}")]);
+        idx.set_file(b.join("src/Tok.java"), vec![rec(2, "Tok", "p/Tok", "{\"m\":\"b\"}")]);
+        idx.persist().unwrap();
+
+        let read = PersistedIndex::open(idx.blob_path(), idx.fst_path()).unwrap();
+        assert!(read.has_module_aliases());
+        // Each module reads its own copy; the plain key is still the first one, as it always was.
+        assert_eq!(read.get(&module_alias_key(&key(&a), "p/Tok")).unwrap().members_json, "{\"m\":\"a\"}");
+        assert_eq!(read.get(&module_alias_key(&key(&b), "p/Tok")).unwrap().members_json, "{\"m\":\"b\"}");
+        assert_eq!(read.get("p/Tok").unwrap().members_json, "{\"m\":\"a\"}");
+        // A type only one module declares needs no alias.
+        assert!(!read.contains(&module_alias_key(&key(&a), "p/Only")));
+        drop(read);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_project_without_duplicates_has_no_aliases() {
+        let dir = tmp();
+        let mut idx = IndexBuilder::new(&dir);
+        idx.set_file(PathBuf::from("A.java"), vec![IndexRecord::new(class_sym(0, "A", "p/A", "{}", "A.java"), "p/A")]);
+        idx.persist().unwrap();
+        let read = PersistedIndex::open(idx.blob_path(), idx.fst_path()).unwrap();
+        assert!(!read.has_module_aliases());
+        drop(read);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -25,6 +25,8 @@ pub mod hints;
 pub mod inherited;
 pub mod jdk;
 pub mod member_text;
+// The module the file being resolved lives in — which copy of a type two modules both declare.
+pub mod module_scope;
 // Completion after `::` — the member half of a method reference.
 pub mod method_reference;
 pub mod overridable;

@@ -541,7 +541,7 @@ impl LspRegistry {
         let mut args = server.args.clone();
         if !server.custom {
             if let Some(spec) = spec_by_id(&server.id) {
-                args.extend(spec.root_args(&root));
+                args.extend(spec.root_args(&root, &command));
             }
         }
         let cfg = SessionConfig {

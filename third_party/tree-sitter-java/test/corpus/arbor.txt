@@ -1,0 +1,200 @@
+================================================================================
+arbor: qualified record pattern
+================================================================================
+
+class C { void m(Object o) { if (o instanceof Outer.Point(int x, int y)) {} switch (o) { case Outer.Box<String>(var s) -> {} case final String q -> {} case Point(final int u, _) -> {} default -> {} } } }
+
+--------------------------------------------------------------------------------
+
+(program
+  (class_declaration
+    (identifier)
+    (class_body
+      (method_declaration
+        (void_type)
+        (identifier)
+        (formal_parameters
+          (formal_parameter
+            (type_identifier)
+            (identifier)))
+        (block
+          (if_statement
+            (parenthesized_expression
+              (instanceof_expression
+                (identifier)
+                (record_pattern
+                  (scoped_type_identifier
+                    (type_identifier)
+                    (type_identifier))
+                  (record_pattern_body
+                    (record_pattern_component
+                      (integral_type)
+                      (identifier))
+                    (record_pattern_component
+                      (integral_type)
+                      (identifier))))))
+            (block))
+          (switch_expression
+            (parenthesized_expression
+              (identifier))
+            (switch_block
+              (switch_rule
+                (switch_label
+                  (pattern
+                    (record_pattern
+                      (generic_type
+                        (scoped_type_identifier
+                          (type_identifier)
+                          (type_identifier))
+                        (type_arguments
+                          (type_identifier)))
+                      (record_pattern_body
+                        (record_pattern_component
+                          (type_identifier)
+                          (identifier))))))
+                (block))
+              (switch_rule
+                (switch_label
+                  (pattern
+                    (type_pattern
+                      (type_identifier)
+                      (identifier))))
+                (block))
+              (switch_rule
+                (switch_label
+                  (pattern
+                    (record_pattern
+                      (identifier)
+                      (record_pattern_body
+                        (record_pattern_component
+                          (integral_type)
+                          (identifier))
+                        (record_pattern_component
+                          (underscore_pattern))))))
+                (block))
+              (switch_rule
+                (switch_label)
+                (block)))))))))
+
+================================================================================
+arbor: flexible constructor body
+================================================================================
+
+class C extends B { C(int x) { if (x < 0) throw new X(); int y = x; super(y); this.f = y; } C() { this(1); } C(long l) { this.g = 1; } }
+
+--------------------------------------------------------------------------------
+
+(program
+  (class_declaration
+    (identifier)
+    (superclass
+      (type_identifier))
+    (class_body
+      (constructor_declaration
+        (identifier)
+        (formal_parameters
+          (formal_parameter
+            (integral_type)
+            (identifier)))
+        (constructor_body
+          (if_statement
+            (parenthesized_expression
+              (binary_expression
+                (identifier)
+                (decimal_integer_literal)))
+            (throw_statement
+              (object_creation_expression
+                (type_identifier)
+                (argument_list))))
+          (local_variable_declaration
+            (integral_type)
+            (variable_declarator
+              (identifier)
+              (identifier)))
+          (explicit_constructor_invocation
+            (super)
+            (argument_list
+              (identifier)))
+          (expression_statement
+            (assignment_expression
+              (field_access
+                (this)
+                (identifier))
+              (identifier)))))
+      (constructor_declaration
+        (identifier)
+        (formal_parameters)
+        (constructor_body
+          (explicit_constructor_invocation
+            (this)
+            (argument_list
+              (decimal_integer_literal)))))
+      (constructor_declaration
+        (identifier)
+        (formal_parameters
+          (formal_parameter
+            (integral_type)
+            (identifier)))
+        (constructor_body
+          (expression_statement
+            (assignment_expression
+              (field_access
+                (this)
+                (identifier))
+              (decimal_integer_literal))))))))
+
+================================================================================
+arbor: module import
+================================================================================
+
+import module java.base;
+import module.Foo;
+
+--------------------------------------------------------------------------------
+
+(program
+  (module_import_declaration
+    (scoped_identifier
+      (identifier)
+      (identifier)))
+  (import_declaration
+    (scoped_identifier
+      (identifier)
+      (identifier))))
+
+================================================================================
+arbor: annotation type members javac rejects semantically
+================================================================================
+
+@interface A { <T> String v(); int x(int p); String y() throws Exception; }
+@interface B extends C {}
+
+--------------------------------------------------------------------------------
+
+(program
+  (annotation_type_declaration
+    (identifier)
+    (annotation_type_body
+      (annotation_type_element_declaration
+        (type_parameters
+          (type_parameter
+            (type_identifier)))
+        (type_identifier)
+        (identifier))
+      (annotation_type_element_declaration
+        (integral_type)
+        (identifier)
+        (formal_parameter
+          (integral_type)
+          (identifier)))
+      (annotation_type_element_declaration
+        (type_identifier)
+        (identifier)
+        (throws
+          (type_identifier)))))
+  (annotation_type_declaration
+    (identifier)
+    (extends_interfaces
+      (type_list
+        (type_identifier)))
+    (annotation_type_body)))

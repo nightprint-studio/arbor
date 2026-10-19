@@ -84,8 +84,23 @@ fn feature_at(n: Node, bytes: &[u8]) -> Option<(&'static str, u32)> {
         "catch_type" if type_alternatives(n) > 1 => Some(("Multi-catch", 7)),
         // Interface methods: a body needs 8 (`default`/`static`), a `private` one needs 9.
         "method_declaration" => interface_method_feature(n, bytes),
+        // Java 22 (JEP 456): `_` as a pattern, a local, a catch or a lambda parameter. Below it `_`
+        // is a reserved word (9+) and the file does not compile.
+        "underscore_pattern" => Some(("Unnamed variables and patterns", 22)),
+        // Java 25 (JEP 511).
+        "module_import_declaration" => Some(("`import module`", 25)),
+        // Java 25 (JEP 513): a statement ahead of `this(…)` / `super(…)`. javac's own wording below
+        // it is "call to super must be first statement in constructor".
+        "explicit_constructor_invocation" if follows_a_statement(n) => {
+            Some(("Statements before `this(…)` / `super(…)`", 25))
+        }
         _ => None,
     }
+}
+
+/// Whether anything precedes the explicit constructor invocation `n` in its constructor body.
+fn follows_a_statement(n: Node) -> bool {
+    n.prev_named_sibling().is_some()
 }
 
 /// The dated feature a `case` label uses, if any.
@@ -247,6 +262,22 @@ mod tests {
     fn at(src: &str, major: u32) -> Vec<String> {
         let tree = parse(src);
         version_errors(tree.root_node(), src, major).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn the_java_22_to_25_syntax_is_gated() {
+        let flexible = "class C extends B { C(int x) { int y = x; super(y); } }";
+        assert_eq!(at(flexible, 21).len(), 1);
+        assert!(at(flexible, 25).is_empty());
+        // The first statement is the ordinary form.
+        assert!(at("class C extends B { C(int x) { super(x); int y = x; } }", 8).is_empty());
+
+        assert_eq!(at("import module java.base;\nclass C {}", 21).len(), 1);
+        assert!(at("import module java.base;\nclass C {}", 25).is_empty());
+
+        let unnamed = "class C { void m(Object o) { if (o instanceof P(int x, _)) {} } }";
+        assert_eq!(at(unnamed, 21).len(), 1);
+        assert!(at(unnamed, 22).is_empty());
     }
 
     #[test]

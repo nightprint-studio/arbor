@@ -63,7 +63,7 @@
   function displayName(row: WatchedRow): string {
     if (row.kind === 'shell') return 'Arbor';
     if (row.kind === 'backend' && row.product) return productIdentity(row.product)?.name ?? row.name;
-    return row.name;
+    return row.label ?? row.name;
   }
 
   /** The line under the name: what the process is to Arbor, and whose it is. */
@@ -73,7 +73,10 @@
       case 'shell': return 'Frontend';
       case 'backend': return `Backend · ${row.name}`;
       case 'helper': return 'Frontend · WebView';
-      case 'language-server': return owner ? `Started by ${owner}` : 'Language server';
+      case 'language-server': {
+        const by = owner ? `Started by ${owner}` : 'Language server';
+        return row.label ? `${by} · ${row.name} · pid ${row.pid}` : by;
+      }
       default: return owner ? `Started by ${owner}` : 'Started by Arbor';
     }
   }
@@ -210,7 +213,13 @@
       // under `args`, and the first version of this built the payload flat — a Restart that could
       // only ever fail to deserialize.
       const servers = await lspStatus();
-      const match = servers.find((s) => s.pid === row.pid);
+      // The server Bennu spawned is often not the process on this row: an npm server is a `cmd`
+      // shim whose `node` child does the work, so the row's own ancestors count as the same server.
+      const chain = new Set<number>([row.pid]);
+      for (let p = rows.find((r) => r.pid === row.pid)?.parent; p != null; p = rows.find((r) => r.pid === p)?.parent) {
+        chain.add(p);
+      }
+      const match = servers.find((s) => s.pid != null && chain.has(s.pid));
       if (!match) {
         toastStore.show(`${row.name} is no longer running`, 'warning');
         return;

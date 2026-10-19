@@ -74,6 +74,13 @@ flattens them to the mmap'd store:
 `prefix(prefix)`, returning full `Symbol` records off the mmap. Leaf-clean: the builder
 knows only records + keys; the analyzer above turns Java sources into them.
 
+**Modules.** The store is one index per reactor, keyed by binary name, so a type two modules both
+declare would collapse to the first record. `persist()` therefore also files a type declared in
+**more than one module** under `module_alias_key(module, binary)` (`ALIAS_MARK` leads the key, so
+package prefix scans never see it); `module_of(file)` / `ModuleCache` name the module as the nearest
+ancestor directory with a `pom.xml`. The plain keys are unchanged and a project without duplicates
+has no alias. `PersistedIndex::contains` / `has_module_aliases` are the read side.
+
 ## Usage
 
 ```rust

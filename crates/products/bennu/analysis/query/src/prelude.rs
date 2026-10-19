@@ -41,6 +41,10 @@ pub use crate::resolver::{convert_members, IndexResolver, ProjectView};
 // tell when a cached diagnostic list is still valid. `fnv1a` is the shared members-JSON hash.
 pub use crate::dep_record::{fnv1a, record, RecordedDeps};
 
+// The module a file is resolved in: a type two modules both declare reads the asking module's own
+// copy. Entered around one file's validation; a no-op for a project with no such type.
+pub use crate::module_scope::{enter as enter_module, ModuleScope};
+
 // The project source file (path + text) whole-project queries take.
 pub use crate::source::PlanFile;
 

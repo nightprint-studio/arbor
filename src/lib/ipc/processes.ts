@@ -17,6 +17,8 @@ export interface ProcessRow {
   parent: number | null;
   /** The executable's file stem — `bennu-be`, `rust-analyzer`, `java`. */
   name: string;
+  /** What it is when the executable does not say — `Angular language server` for a `node`. */
+  label: string | null;
   kind: ProcessKind;
   /** The product it belongs to, inherited from the nearest backend ancestor — so a language
    *  server carries the icon of the product that started it. */

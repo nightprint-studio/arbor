@@ -422,13 +422,17 @@ mod tests {
 
     #[test]
     fn misplaced_super_call_is_reported() {
-        // A `super()` that isn't the first statement is a grammar error (the parser only accepts an
-        // explicit constructor call at the head of the body), so the syntax pass flags it — the case
-        // is never silently missed even without a dedicated check.
+        // A `super()` that isn't the first statement is legal from Java 25 (JEP 513) and the grammar
+        // parses it at every level, so it is the version pass that flags it below 25.
         let src = "class X { X() { int a = 1; super(); } }";
+        let at = |major| FileContext { java_major: Some(major), ..FileContext::default() };
         assert!(
-            check_file(src, &FileContext::default()).iter().any(|d| d.severity == "error"),
-            "misplaced super() must surface as an error",
+            check_file(src, &at(21)).iter().any(|d| d.severity == "error"),
+            "misplaced super() must surface as an error below Java 25",
+        );
+        assert!(
+            !check_file(src, &at(25)).iter().any(|d| d.severity == "error"),
+            "flexible constructor bodies are legal on Java 25",
         );
     }
 

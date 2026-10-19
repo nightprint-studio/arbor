@@ -376,6 +376,18 @@ pub fn extract_symbols_from_root(root: &Node, source: &str) -> FileSymbols {
                     imports.push(imp);
                 }
             }
+            // `import module java.base;` (Java 25) is every exported package imported on demand.
+            "module_import_declaration" => {
+                let module = child.child_by_field_name("module").and_then(|n| node_text(&n, bytes));
+                for package in module.as_deref().map(module_packages).unwrap_or_default() {
+                    imports.push(Import {
+                        span: Some(Span::of(&child)),
+                        path: (*package).to_string(),
+                        star: true,
+                        static_: false,
+                    });
+                }
+            }
             "class_declaration"
             | "interface_declaration"
             | "enum_declaration"
@@ -392,6 +404,30 @@ pub fn extract_symbols_from_root(root: &Node, source: &str) -> FileSymbols {
         package_span,
         imports,
         types,
+    }
+}
+
+/// The packages a module exports, for `import module M;`. Only `java.base` is known — the one the
+/// JDK itself recommends and the one a module import is overwhelmingly used for; any other module
+/// contributes nothing, which leaves its simple names unresolved rather than wrongly resolved.
+fn module_packages(module: &str) -> &'static [&'static str] {
+    match module {
+        "java.base" => &[
+            "java.io", "java.lang.annotation", "java.lang.constant", "java.lang.foreign", "java.lang.invoke",
+            "java.lang.module", "java.lang.ref", "java.lang.reflect", "java.lang.runtime", "java.math",
+            "java.net", "java.net.spi", "java.nio", "java.nio.channels", "java.nio.channels.spi",
+            "java.nio.charset", "java.nio.charset.spi", "java.nio.file", "java.nio.file.attribute",
+            "java.nio.file.spi", "java.security", "java.security.cert", "java.security.interfaces",
+            "java.security.spec", "java.text", "java.text.spi", "java.time", "java.time.chrono",
+            "java.time.format", "java.time.temporal", "java.time.zone", "java.util",
+            "java.util.concurrent", "java.util.concurrent.atomic", "java.util.concurrent.locks",
+            "java.util.function", "java.util.jar", "java.util.random", "java.util.regex", "java.util.spi",
+            "java.util.stream", "java.util.zip", "javax.crypto", "javax.crypto.interfaces",
+            "javax.crypto.spec", "javax.net", "javax.net.ssl", "javax.security.auth",
+            "javax.security.auth.callback", "javax.security.auth.login", "javax.security.auth.x500",
+            "javax.security.cert",
+        ],
+        _ => &[],
     }
 }
 

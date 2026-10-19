@@ -298,3 +298,11 @@ debug         = 1
 # every run of every suite is paying for it constantly and using it almost never.
 [profile.test]
 debug = "line-tables-only"
+
+# tree-sitter-java 0.23.5 is the last crates.io release and upstream is dormant, so the grammar is
+# vendored with the Java 21–25 syntax it lacks (qualified record patterns, flexible constructor
+# bodies, `import module`, lax `@interface` members). Every consumer keeps depending on
+# `tree-sitter-java = "0.23"`; see third_party/tree-sitter-java/ARBOR.md. Drop this patch if
+# upstream ever publishes the same changes.
+[patch.crates-io]
+tree-sitter-java = { path = "third_party/tree-sitter-java" }

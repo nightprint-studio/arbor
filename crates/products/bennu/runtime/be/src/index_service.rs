@@ -1951,6 +1951,9 @@ impl IndexService {
         // one method re-runs only that method's body. Take the cache out for the run and put it back
         // after — a concurrent validation of the SAME file just finds none and does a full run (still
         // correct). Keyed by the FE `file` string, exactly as `patch_file` counts edits.
+        // Resolve as a file of ITS module: when two modules of the reactor declare the same type, the
+        // one this file's own module declares is the one it sees, not whichever the index met first.
+        let _module = bennu_query::prelude::enter_module(bennu_index::prelude::module_of(path));
         let file_key = PathBuf::from(file);
         let resolver_rev = self.resolver_rev_for(&slot.root, &file_key);
         let mut cache = {
@@ -4113,6 +4116,9 @@ fn validate_files_parallel(
             return BatchResult { file: norm_path(path), diags: Vec::new(), deps: None, hit: false, ms: 0 };
         }
         let file = norm_path(path);
+        // Entered before the cache lookup below: its freshness check reads the same module-scoped
+        // signatures the validation records, so a file depending on a duplicated type can be a hit.
+        let _module = bennu_query::prelude::enter_module(bennu_index::prelude::module_of(path));
         let ctx = bennu_check::prelude::FileContext {
             file_stem: path.file_stem().and_then(|s| s.to_str()).map(str::to_string),
             expected_package: path.parent().and_then(bennu_java::prelude::infer_package),

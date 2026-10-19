@@ -19,5 +19,9 @@ pub use crate::query::{serialize_symbol, SymbolIndex};
 // plus the persisted read view the completion query serves from.
 pub use crate::builder::{IndexBuilder, IndexRecord, PersistedIndex};
 
+// Modules: which module a source file belongs to, and the alias key a type declared in more than one
+// module is additionally filed under — so each module reads its own copy.
+pub use crate::module::{module_alias_key, module_of, ModuleCache, ALIAS_MARK};
+
 // Relations: the config-graph / type-hierarchy edge store (write side + read side).
 pub use crate::relations::{serialize_relation, RelationReader, RelationWriter};

@@ -27,6 +27,7 @@
 //! but the prelude is the canonical call-site path.
 
 pub mod builder;
+pub mod module;
 pub mod prelude;
 pub mod query;
 pub mod relations;

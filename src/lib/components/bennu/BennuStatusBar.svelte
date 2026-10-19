@@ -49,6 +49,7 @@
   const tokens = $derived(bennuLspStore.tokenCount);
 
   const isCargo = $derived(projectStore.isCargo);
+  const isJava = $derived(projectStore.isJava);
   const jdk = $derived(projectStore.project?.jdk ?? null);
   /** The open file's own module, when its pom declares a level of its own. A reactor part-way
    *  through a migration has one module on 21 and another still on 8, and the number that governs
@@ -96,6 +97,10 @@
       <StatusBarItem tooltip="Crates in this workspace (Cargo.toml members)">
         <Boxes size={12} /> {crateCount} crate{crateCount === 1 ? '' : 's'}
       </StatusBarItem>
+    {:else if !isJava}
+      <StatusBarItem tooltip="A plain folder — editor and language-server features only (no symbol index, no JDK)">
+        <Package size={12} /> Folder
+      </StatusBarItem>
     {:else if moduleJdk}
       <StatusBarItem
         tooltip={`JDK ${moduleJdk.version} in module ${moduleJdk.module} · ${
@@ -116,7 +121,7 @@
       </StatusBarItem>
     {/if}
 
-    {#if !isCargo}
+    {#if isJava}
       <StatusBarSeparator />
       <StatusBarItem tooltip={`${capCount} domain capabilit${capCount === 1 ? 'y' : 'ies'} detected`}>
         <Boxes size={12} /> {capCount} capabilit{capCount === 1 ? 'y' : 'ies'}
@@ -141,7 +146,7 @@
   {#if projectStore.project}
     <!-- Indexing status — driven by the real index-progress events / stats poll. A Cargo
          project builds no index, so "Indexed · 0" would be a reading of nothing. -->
-    {#if !isCargo}
+    {#if isJava}
       <!-- The file on screen is outside every indexed project: only syntax checks run on it, and
            without this it reads as a file whose semantics were checked and found clean. -->
       {#if fileOwnerStore.notIndexed}

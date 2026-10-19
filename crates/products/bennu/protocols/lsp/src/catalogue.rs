@@ -235,6 +235,25 @@ pub const BUILTIN_SERVERS: &[ServerSpec] = &[
     },
 ];
 
+/// The `node_modules` an installed `@angular/language-server` carries its own TypeScript and
+/// Angular language service in — `None` when `command` is not such an install.
+///
+/// Two layouts: a symlinked `bin/ngserver` (Unix) whose real path sits inside the package, and
+/// Windows' `<prefix>/ngserver.cmd` shim beside `<prefix>/node_modules/@angular/language-server`.
+fn angular_bundled_modules(command: &str) -> Option<PathBuf> {
+    let exe = Path::new(command);
+    let real = std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
+    let inside = real.ancestors().find(|a| {
+        a.file_name().is_some_and(|n| n == "language-server")
+            && a.parent().and_then(Path::file_name).is_some_and(|n| n == "@angular")
+    });
+    let package = inside.map(Path::to_path_buf).or_else(|| {
+        real.parent().map(|p| p.join("node_modules").join("@angular").join("language-server"))
+    })?;
+    let modules = package.join("node_modules");
+    modules.join("@angular").join("language-service").is_dir().then_some(modules)
+}
+
 impl ServerSpec {
     /// Whether this server serves `file`, by extension.
     pub fn serves(&self, file: &str) -> bool {
@@ -299,12 +318,25 @@ impl ServerSpec {
     /// project's. That is also why this cannot live in [`args`](ServerSpec::args): it is a path
     /// into the user's workspace, and `args` is `&'static`.
     ///
+    /// A project that does not list `@angular/language-service` (a CLI app does not by default)
+    /// has none in its `node_modules`, and `ngserver` then dies with "Failed to resolve
+    /// '@angular/language-service'". The server ships its own copy, so its `node_modules` is
+    /// appended as the second probe location: the project's versions still win when it has them.
+    ///
+    /// `command` is the server's resolved executable, which is how its install directory is found.
+    ///
     /// Not applied to a user-defined server, even one that shadows this id — someone who spells
     /// out an argv gets exactly that argv.
-    pub fn root_args(&self, root: &Path) -> Vec<String> {
+    pub fn root_args(&self, root: &Path, command: &str) -> Vec<String> {
         match self.id {
             "angular" => {
-                let probe = root.join("node_modules").to_string_lossy().into_owned();
+                let mut locations = vec![root.join("node_modules")];
+                locations.extend(angular_bundled_modules(command));
+                let probe = locations
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(",");
                 vec![
                     "--tsProbeLocations".into(),
                     probe.clone(),
@@ -812,9 +844,33 @@ mod tests {
     }
 
     #[test]
+    fn a_project_without_the_language_service_falls_back_to_the_servers_own() {
+        let tmp = std::env::temp_dir().join(format!("bennu-ng-bundle-{}", std::process::id()));
+        let modules = tmp.join("node_modules/@angular/language-server/node_modules");
+        std::fs::create_dir_all(modules.join("@angular/language-service")).unwrap();
+        let shim = tmp.join("ngserver.cmd");
+        std::fs::write(&shim, "").unwrap();
+
+        let args = spec_by_id("angular").unwrap().root_args(Path::new("/w/shop"), &shim.to_string_lossy());
+        let project = PathBuf::from("/w/shop").join("node_modules");
+        // The project's own `node_modules` stays FIRST: its versions win when it has them.
+        let canonical = std::fs::canonicalize(&modules).unwrap_or(modules.clone());
+        let probe = args[1].split(',').map(PathBuf::from).collect::<Vec<_>>();
+        assert_eq!(probe[0], project);
+        assert_eq!(probe.len(), 2, "{args:?}");
+        assert_eq!(
+            std::fs::canonicalize(&probe[1]).unwrap(),
+            canonical,
+            "the bundled copy is the second location"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
     fn angulars_probe_locations_point_at_the_projects_own_node_modules() {
         let angular = spec_by_id("angular").unwrap();
-        let args = angular.root_args(Path::new("/w/shop"));
+        let args = angular.root_args(Path::new("/w/shop"), "/no/such/ngserver");
         let probe = PathBuf::from("/w/shop").join("node_modules").to_string_lossy().into_owned();
         assert_eq!(args, ["--tsProbeLocations", &probe, "--ngProbeLocations", &probe]);
 
@@ -826,7 +882,7 @@ mod tests {
         // Nobody else grows arguments from the root.
         for spec in BUILTIN_SERVERS {
             if spec.id != "angular" {
-                assert!(spec.root_args(Path::new("/w/shop")).is_empty(), "{}", spec.id);
+                assert!(spec.root_args(Path::new("/w/shop"), "x").is_empty(), "{}", spec.id);
             }
         }
     }

@@ -72,6 +72,7 @@ import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 import { html } from '@codemirror/lang-html';
 import { javascript } from '@codemirror/lang-javascript';
 import { javaLanguage } from './java-lang';
+import { angularTemplateHighlight } from './angular-template-highlight';
 import {
   lspLanguage, lspLanguageFrom, backendCompletionSource, backendHoverSource,
 } from './lsp-lang';
@@ -177,7 +178,7 @@ const pomLang = xmlSchemaLang('pom', xml, pomSections);
  * appears once a server has started — a worse fold gutter in the projects that have a server and
  * no fold gutter at all in the ones that do not.
  */
-const htmlLang = lspLanguageFrom('html', html(), { cmFold: true, serverFold: false });
+const htmlLang = lspLanguageFrom('html', [html(), angularTemplateHighlight], { cmFold: true, serverFold: false });
 
 /**
  * Svelte — markup with `<script>` and `<style>` in it, which is exactly what lang-html parses,

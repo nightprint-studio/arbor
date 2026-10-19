@@ -24,6 +24,12 @@ folds them), and with nothing typed the first own member is preselected. Each me
 `signature` (`(String prefix, int limit)`), `detail` = the return type (`getClass()` typed
 `Class<? extends Receiver>`), `member_origin` and `modifiers`.
 
+`module_scope` says which module the file being resolved lives in (`enter_module(Some(m))`, a
+thread-local guard set around one file's validation): when two modules declare the same type,
+`IndexResolver` reads the asking module's own record (its per-module alias key in `bennu-index`)
+for the project lookups and memoizes under that key. Without a scope, or without duplicates, it
+reads the plain keys exactly as before.
+
 `dep_record` powers the **incremental validation cache**: a `record(|| …)` scope captures every
 project type a validation reads through the resolver (`members_of` / `resolve_simple_name` are the
 single choke point) — types whose members were read, bare names that resolved to a project type,

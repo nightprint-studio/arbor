@@ -181,6 +181,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **The hover card reads like code.** Signatures are syntax-coloured and long ones list one parameter per line, the package is muted next to the type name, and a variable is no longer labelled as a class.
 
 ### Fixed
+- **A class that two modules of a project both declare is checked against its own module's copy,** instead of whichever one was indexed first — no more false type errors in the second module.
+- **Opening an Angular/Node folder in Bennu no longer shows "Indexing…"**, a JDK or a capability count: those belong to Java projects, and a plain folder now reads "Folder".
+- **Angular templates are coloured:** `@if`/`@for` blocks, `{{ interpolation }}` and `[prop]`/`(event)`/`*ngIf`/`#ref` bindings no longer come out as plain white text.
+- **The process monitor names language servers by what they are** (`Angular language server`, `TypeScript server`…) instead of five anonymous `node`/`cmd`/`conhost` rows; Restart works from any of them.
+- **The Angular language server starts on a project that does not list `@angular/language-service`.** It falls back to the copy the server ships with, instead of dying with "Failed to resolve '@angular/language-service'".
+- **Java 21–25 syntax the parser rejected now parses:** qualified record patterns (`Outer.Point(int x, int y)`), `final` / `_` in patterns, statements before `this(…)`/`super(…)` and `import module`, each reported against the project's Java level; malformed `@interface` members get javac's own message instead of a syntax error.
 - **A record-pattern variable (`o instanceof Num(double value)`) is a first-class variable.** Go to declaration, rename, find usages and the hover on its name now work, like for `instanceof Foo f`.
 - **"Import class" is offered on a class used as a static receiver.** `Foo.builder()`, `Foo.CONSTANT` and `Foo::create` with `Foo` not imported now get the import fix, not just the refactorings.
 - **Tornando su un tab dell'editor non si finisce più in cima al file.** Lo scroll di ogni tab viene ricordato e ripristinato al ritorno.

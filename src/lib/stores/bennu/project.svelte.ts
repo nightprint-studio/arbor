@@ -835,6 +835,10 @@ function createProjectStore() {
     /** True for a folder with no manifest Bennu models (Node/Angular, SQL-only…): editor only,
      *  so build-tool, test and dependency tooling has nothing to show. */
     get isPlain()        { return project?.kind === 'plain'; },
+    /** True when the Java model applies — the only kind that builds a symbol index, resolves a JDK
+     *  and detects capabilities. Gate that chrome on this rather than on `!isCargo`, which would
+     *  claim it for a plain folder too. `true` with nothing open, like {@link kind}. */
+    get isJava()         { return (project?.kind ?? 'maven') === 'maven'; },
     get activeFilePath() { return activeFilePath; },
     /**
      * `path` written relative to the open project's root, forward slashes — the root itself

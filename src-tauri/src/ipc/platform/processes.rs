@@ -53,6 +53,9 @@ pub struct ProcessRow {
     pub parent: Option<u32>,
     /// The executable's file stem — `bennu-be`, `rust-analyzer`, `java`.
     pub name: String,
+    /// A name that says what the process is when the executable does not — `Angular language
+    /// server` for a `node`, read off its command line. `None` when `name` already says it.
+    pub label: Option<String>,
     /// What this process **is to Arbor**, which is a different question from what it is called:
     /// `"shell"`, `"backend"`, `"helper"` (a WebView process) — those three are Arbor itself —
     /// `"language-server"`, or `"child"`: anything else Arbor started, from a run to a terminal's
@@ -114,6 +117,45 @@ const LANGUAGE_SERVERS: &[&str] = &[
     "nd-dig-lsp",
     "taplo",
 ];
+
+/// What a language server *is*, for the ones whose executable is only the runtime they run on.
+///
+/// `typescript-language-server`, `ngserver` and `svelteserver` are npm packages: on Windows the
+/// process table shows a `cmd` (the `.cmd` shim) and a `node` — five of them for one TypeScript
+/// project — and nothing in the executable name says which is which. The command line does, so this
+/// reads it. Needles are matched in order against the lowercased, forward-slashed command line, so a
+/// more specific one (`typingsinstaller`) goes before the one it contains.
+const RUNTIME_HOSTED_SERVERS: &[(&str, &str)] = &[
+    ("typingsinstaller", "TypeScript typings installer"),
+    ("@angular/language-server", "Angular language server"),
+    ("ngserver", "Angular language server"),
+    ("tsserver", "TypeScript server"),
+    ("typescript-language-server", "TypeScript language server"),
+    ("svelte-language-server", "Svelte language server"),
+    ("svelteserver", "Svelte language server"),
+    ("vscode-html-language-server", "HTML language server"),
+    ("vscode-css-language-server", "CSS language server"),
+    ("vscode-json-language-server", "JSON language server"),
+    ("yaml-language-server", "YAML language server"),
+    ("bash-language-server", "Bash language server"),
+];
+
+/// Executables that merely host a server: the JS runtime and the Windows `.cmd` shim launcher.
+const SERVER_HOSTS: &[&str] = &["node", "cmd"];
+
+/// The language server a `node` / `cmd` process is running, read off its command line.
+fn runtime_hosted_server(name: &str, cmd: &[String]) -> Option<String> {
+    if !SERVER_HOSTS.contains(&name.to_ascii_lowercase().as_str()) {
+        return None;
+    }
+    let line = cmd.join(" ").to_ascii_lowercase().replace('\\', "/");
+    let (_, label) = RUNTIME_HOSTED_SERVERS.iter().find(|(needle, _)| line.contains(needle))?;
+    Some(if name.eq_ignore_ascii_case("cmd") {
+        format!("{label} (launcher)")
+    } else {
+        (*label).to_string()
+    })
+}
 
 /// Executable stems of the WebView's own processes, per platform — Arbor's interface, as much a
 /// part of the application as the shell that hosts it.
@@ -218,9 +260,11 @@ fn process_report(_state: &AppState) -> Result<ProcessReport, AppError> {
     let mut seen: HashSet<Pid> = HashSet::new();
     // Each entry carries the product it inherited, so a language server two levels under `bennu-be`
     // still says `bennu`.
-    let mut queue: Vec<(Pid, Option<String>)> = vec![(own, None)];
+    // and the third slot is the server label of the parent, so the `conhost` Windows attaches to a
+    // server's `cmd` shim is filed under that server instead of as an anonymous child.
+    let mut queue: Vec<(Pid, Option<String>, Option<String>)> = vec![(own, None, None)];
 
-    while let Some((pid, product)) = queue.pop() {
+    while let Some((pid, product, parent_server)) = queue.pop() {
         if !seen.insert(pid) {
             continue; // a cycle cannot happen, but a pid reused mid-walk can
         }
@@ -234,11 +278,17 @@ fn process_report(_state: &AppState) -> Result<ProcessReport, AppError> {
         let product = mine.clone().or(product);
         let is_backend = mine.is_some();
 
+        let hosted_server = runtime_hosted_server(&name, proc.cmd());
+        let label = hosted_server.clone().or_else(|| {
+            let server = parent_server.as_deref()?;
+            name.eq_ignore_ascii_case("conhost").then(|| format!("Console host · {server}"))
+        });
+
         let kind = if pid == own {
             "shell"
         } else if is_backend {
             "backend"
-        } else if LANGUAGE_SERVERS.contains(&name.as_str()) {
+        } else if LANGUAGE_SERVERS.contains(&name.as_str()) || label.is_some() {
             "language-server"
         } else if WEBVIEW_PROCESSES.contains(&name.as_str()) {
             "helper"
@@ -252,6 +302,7 @@ fn process_report(_state: &AppState) -> Result<ProcessReport, AppError> {
             pid: pid.as_u32(),
             parent: (pid != own).then(|| proc.parent().map(|p| p.as_u32())).flatten(),
             name,
+            label,
             kind: kind.to_string(),
             product: product.clone(),
             cpu: proc.cpu_usage(),
@@ -260,7 +311,7 @@ fn process_report(_state: &AppState) -> Result<ProcessReport, AppError> {
         });
 
         for child in children.get(&pid).into_iter().flatten() {
-            queue.push((*child, product.clone()));
+            queue.push((*child, product.clone(), hosted_server.clone().or_else(|| parent_server.clone())));
         }
     }
 
@@ -324,6 +375,32 @@ fn process_memory(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cmd(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_node_process_is_named_after_the_server_it_runs() {
+        let angular = cmd(&["node", r"C:\npm\node_modules\@angular\language-server\bin\ngserver", "--stdio"]);
+        assert_eq!(runtime_hosted_server("node", &angular).as_deref(), Some("Angular language server"));
+        let ts = cmd(&["node", "/x/typescript/lib/tsserver.js"]);
+        assert_eq!(runtime_hosted_server("node", &ts).as_deref(), Some("TypeScript server"));
+        let installer = cmd(&["node", "/x/typescript/lib/typingsInstaller.js"]);
+        assert_eq!(runtime_hosted_server("node", &installer).as_deref(), Some("TypeScript typings installer"));
+    }
+
+    #[test]
+    fn a_cmd_shim_is_a_launcher_and_an_unrelated_node_is_left_alone() {
+        let shim = cmd(&["cmd", "/c", r"C:\npm\typescript-language-server.cmd", "--stdio"]);
+        assert_eq!(
+            runtime_hosted_server("cmd", &shim).as_deref(),
+            Some("TypeScript language server (launcher)")
+        );
+        assert_eq!(runtime_hosted_server("node", &cmd(&["node", "build.js"])), None);
+        // Only the hosts are read: a `java` mentioning the word is not a TypeScript server.
+        assert_eq!(runtime_hosted_server("java", &cmd(&["java", "tsserver"])), None);
+    }
 
     #[test]
     fn a_backend_is_recognised_by_its_suffix_and_names_its_product() {

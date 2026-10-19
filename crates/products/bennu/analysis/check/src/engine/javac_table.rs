@@ -67,7 +67,7 @@ pub const TABLE: &[(&str, Coverage)] = &[
     ("compiler.err.cant.assign.val.to.var", Coverage::Check(&[CheckId::FinalAssignment])),
     ("compiler.err.cant.attach.type.annotations", Coverage::OutOfScope(why::CLASS_FILE)),
     ("compiler.err.cant.deref", Coverage::Check(&[CheckId::UnknownMember])),
-    ("compiler.err.cant.extend.intf.annotation", Coverage::Missing),
+    ("compiler.err.cant.extend.intf.annotation", Coverage::Check(&[CheckId::IllegalDeclaration])),
     ("compiler.err.cant.infer.local.var.type", Coverage::Check(&[CheckId::VarTypeInferenceFailed])),
     ("compiler.err.cant.inherit.diff.arg", Coverage::Missing),
     ("compiler.err.cant.inherit.from.anon", Coverage::Check(&[CheckId::IllegalInheritance])),

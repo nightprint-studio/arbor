@@ -461,8 +461,8 @@
   let lastIndexedRoot: string | null = null;
   $effect(() => {
     const root = projectStore.project?.root ?? null;
-    if (!root || projectStore.isDemo || projectStore.isCargo) {
-      // Switching to a Cargo or demo project — or to none — has to END the previous project's
+    if (!root || projectStore.isDemo || !projectStore.isJava) {
+      // Switching to a Cargo, plain-folder (Angular/Node…) or demo project — or to none — has to END the previous project's
       // indexing card, and this used to just return. Nothing else ever stopped it: the card is
       // finished by a `ready` event or by the poll seeing `index_stats.ready`, and the poll's only
       // give-up is for a backend that emitted NOTHING at all (a live event stream is how it knows a

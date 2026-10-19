@@ -47,6 +47,8 @@ pub fn declaration_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
             "enum_declaration" => check_enum(n, bytes, &imports, &mut out),
             "field_declaration" => check_field(n, bytes, &mut out),
             "constructor_declaration" => check_constructor(n, bytes, &mut out),
+            "annotation_type_declaration" => check_annotation_type(n, &mut out),
+            "annotation_type_element_declaration" => check_annotation_element(n, &mut out),
             _ => {}
         }
     }
@@ -235,6 +237,39 @@ fn check_interface(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     }
     check_top_level_modifiers(n, &mods, out);
     check_disallowed(name_span(n), &mods, &["transient", "volatile", "synchronized", "native", "default"], "an interface", out);
+}
+
+/// `@interface A extends B` — an annotation type has no supertypes (`cant.extend.intf.annotation`).
+fn check_annotation_type(n: Node, out: &mut Vec<Diagnostic>) {
+    let mut c = n.walk();
+    let extends = n.named_children(&mut c).find(|ch| ch.kind() == "extends_interfaces");
+    if let Some(extends) = extends {
+        out.push(err(extends, "Annotation interfaces cannot extend other interfaces"));
+    }
+}
+
+/// What an annotation element may not carry: parameters, type parameters, a `throws` clause. All
+/// three are parsed by javac and refused afterwards, so each is its own message here too.
+fn check_annotation_element(n: Node, out: &mut Vec<Diagnostic>) {
+    let mut c = n.walk();
+    let mut has_params = false;
+    let mut throws = None;
+    for ch in n.named_children(&mut c) {
+        match ch.kind() {
+            "formal_parameter" | "spread_parameter" => has_params = true,
+            "throws" => throws = Some(ch),
+            _ => {}
+        }
+    }
+    if let Some(type_params) = n.child_by_field_name("type_parameters") {
+        out.push(err(type_params, "Annotation interface elements cannot have type parameters"));
+    }
+    if has_params {
+        out.push(err(name_span(n), "Annotation interface elements cannot have parameters"));
+    }
+    if let Some(throws) = throws {
+        out.push(err(throws, "Annotation interface elements cannot declare thrown exceptions"));
+    }
 }
 
 fn check_record(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
@@ -436,6 +471,15 @@ mod tests {
     fn two_visibility_modifiers_flagged() {
         let e = errs("class C { public private void m() {} }");
         assert!(e.iter().any(|m| m.contains("only one of")), "{e:?}");
+    }
+
+    #[test]
+    fn an_annotation_type_cannot_extend_and_an_element_cannot_take_parameters_or_throw() {
+        assert_eq!(errs("@interface B extends C {}").len(), 1);
+        assert_eq!(errs("@interface A { String v(int i); }").len(), 1);
+        assert_eq!(errs("@interface A { <T> String v(); }").len(), 1);
+        assert_eq!(errs("@interface A { String v() throws Exception; }").len(), 1);
+        assert!(errs("@interface A { String v() default \"x\"; int[] n(); }").is_empty());
     }
 
     #[test]
