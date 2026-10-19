@@ -75,6 +75,8 @@ export interface BennuSettingsSnapshot {
   /** Show Local History's diff as two columns rather than as a unified patch. Config-backed;
    *  its control is the toggle in that window, not a settings row. */
   historyDiffSplit: boolean;
+  /** Add the commit message to the Git Blame text drawn after a line. Config-backed. */
+  blameShowMessage: boolean;
   /** Minutes the DTO Lab's JVM may go without a question before it is stopped. Config-backed. */
   dtoLabIdleMinutes: number;
   /** Autosave a modified buffer to disk (after a short idle, on tab switch, on window blur).
@@ -161,6 +163,7 @@ const DEFAULTS: BennuSettingsSnapshot = {
   mavenAutoDownload: true,
   markdownLivePreview: true,
   historyDiffSplit: true,
+  blameShowMessage: false,
   dtoLabIdleMinutes: 10,
   autosave: true,
   localHistory: true,
@@ -251,6 +254,7 @@ function createSettingsStore() {
   let mavenAutoDownload = $state(DEFAULTS.mavenAutoDownload);
   let markdownLivePreview = $state(DEFAULTS.markdownLivePreview);
   let historyDiffSplit = $state(DEFAULTS.historyDiffSplit);
+  let blameShowMessage = $state(DEFAULTS.blameShowMessage);
   let dtoLabIdleMinutes = $state(DEFAULTS.dtoLabIdleMinutes);
 
   /** Keep the font size inside the range the settings stepper offers. A hand-edited
@@ -271,7 +275,7 @@ function createSettingsStore() {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
       highlightCurrentLine, showLineNumbers, minimap, indentGuides, stickyScroll, inlayHints,
       usageCounts, rightMargin,
-      sqlDialect, htmlScriptsAllowed, mavenAutoDownload, markdownLivePreview, historyDiffSplit, dtoLabIdleMinutes, autosave,
+      sqlDialect, htmlScriptsAllowed, mavenAutoDownload, markdownLivePreview, historyDiffSplit, blameShowMessage, dtoLabIdleMinutes, autosave,
       collapseLibraryFrames, searchDependencies,
       localHistory, localHistoryDays, localHistoryMaxMb, localHistoryMaxFileMb,
       autoPopup, popupDelayMs, caseSensitive, importCensus, autoImport,
@@ -320,6 +324,7 @@ function createSettingsStore() {
         maven_auto_download: mavenAutoDownload,
         markdown_live_preview: markdownLivePreview,
         history_diff_split: historyDiffSplit,
+        blame_show_message: blameShowMessage,
         dtolab_idle_minutes: dtoLabIdleMinutes,
         autosave,
         auto_import: autoImport,
@@ -512,6 +517,8 @@ function createSettingsStore() {
     setMarkdownLivePreview(v: boolean) { markdownLivePreview = v; void persistConfigBacked(); },
     get historyDiffSplit() { return historyDiffSplit; },
     setHistoryDiffSplit(v: boolean) { historyDiffSplit = v; void persistConfigBacked(); },
+    get blameShowMessage() { return blameShowMessage; },
+    setBlameShowMessage(v: boolean) { blameShowMessage = v; void persistConfigBacked(); },
     get dtoLabIdleMinutes() { return dtoLabIdleMinutes; },
     setDtoLabIdleMinutes(v: number) { dtoLabIdleMinutes = clampIdleMinutes(v); void persistConfigBacked(); },
 
@@ -547,6 +554,7 @@ function createSettingsStore() {
         mavenAutoDownload = cfg.maven_auto_download ?? DEFAULTS.mavenAutoDownload;
         markdownLivePreview = cfg.markdown_live_preview ?? DEFAULTS.markdownLivePreview;
         historyDiffSplit = cfg.history_diff_split ?? DEFAULTS.historyDiffSplit;
+        blameShowMessage = cfg.blame_show_message ?? DEFAULTS.blameShowMessage;
         dtoLabIdleMinutes = clampIdleMinutes(cfg.dtolab_idle_minutes ?? DEFAULTS.dtoLabIdleMinutes);
         autosave = cfg.autosave;
         localHistory = cfg.local_history ?? DEFAULTS.localHistory;
@@ -610,6 +618,7 @@ function createSettingsStore() {
       htmlScriptsAllowed = [];
       markdownLivePreview = DEFAULTS.markdownLivePreview;
       historyDiffSplit = DEFAULTS.historyDiffSplit;
+      blameShowMessage = DEFAULTS.blameShowMessage;
       dtoLabIdleMinutes = DEFAULTS.dtoLabIdleMinutes;
       autosave = DEFAULTS.autosave;
       localHistory = DEFAULTS.localHistory;

@@ -74,3 +74,25 @@ pub async fn rpc(
     .await
     .map_err(|e| AppError::Other(format!("rpc task panicked: {e}")))?
 }
+
+/// Bring a product backend up for a caller that is not that product's own window.
+///
+/// `rpc` only reaches a backend that is already running; a product's window starts its own on
+/// open. A different product that wants to borrow one (Bennu's blame gutter asking Corvus) has
+/// no window to do that, so it asks here first. Idempotent — an attached backend is a no-op —
+/// and run on the blocking pool because `ensure_*_be` parks on the child's first frame, which
+/// on a runtime worker is the deadlock `docs/backend-architecture.md` warns about.
+///
+/// Only products meant to be borrowed are listed; this is not a way to spawn arbitrary
+/// programs.
+#[tauri::command]
+pub async fn ensure_product_backend(app: AppHandle, program: String) -> Result<(), AppError> {
+    let ensure: fn(&AppHandle) = match program.as_str() {
+        "corvus" => crate::ipc::ensure_corvus_be,
+        "picus" => crate::ipc::ensure_picus_be,
+        other => return Err(AppError::Other(format!("'{other}' is not a borrowable backend"))),
+    };
+    tokio::task::spawn_blocking(move || ensure(&app))
+        .await
+        .map_err(|e| AppError::Other(format!("ensure backend task panicked: {e}")))
+}

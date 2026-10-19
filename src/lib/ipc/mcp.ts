@@ -8,7 +8,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type {
-  McpActivityLog, McpClients, McpConfig, McpProgramTools, McpStatus,
+  McpActivityLog, McpClients, McpConfig, McpGrant, McpGrantSpec, McpProgramTools, McpStatus,
 } from '$lib/types/mcp';
 
 /** Current settings. */
@@ -50,3 +50,19 @@ export const getMcpAudit = () => invoke<McpActivityLog>('get_mcp_audit');
 
 /** Forget the call log. */
 export const clearMcpAudit = () => invoke<void>('clear_mcp_audit');
+
+/**
+ * Hand out a grant: pre-approval for named tools on one project, limited by a number of
+ * uses and/or a deadline. Held in memory only — quitting Arbor drops it. Rejects with a
+ * sentence saying what to fix.
+ */
+export const mintMcpGrant = (spec: McpGrantSpec) => invoke<McpGrant>('mcp_grant_mint', { spec });
+
+/** Every grant still usable, with what is left of each. */
+export const listMcpGrants = () => invoke<McpGrant[]>('mcp_grant_list');
+
+/** Revoke one grant before it runs out. */
+export const revokeMcpGrant = (id: string) => invoke<boolean>('mcp_grant_revoke', { id });
+
+/** Revoke every grant. */
+export const revokeAllMcpGrants = () => invoke<void>('mcp_grant_revoke_all');

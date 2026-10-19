@@ -273,8 +273,35 @@ export const MCP_PRODUCTS: { id: string; name: string; blurb: string }[] = [
     blurb: 'Read and navigate Java and Rust projects: files in their real encoding, declared types, TODOs, index state.',
   },
   {
+    id: 'corvus',
+    name: 'Corvus',
+    blurb: 'Read a repository: status, history and blame. Commit staged changes — never push or rewrite history.',
+  },
+  {
     id: 'tyto',
     name: 'Tyto',
     blurb: 'See the screen: capture a monitor or a window, and read its accessibility layout.',
   },
 ];
+
+/** What the user asks for when handing out a grant. */
+export interface McpGrantSpec {
+  label: string;
+  /** Absolute project root the grant covers. */
+  root: string;
+  tools: string[];
+  /** Calls it covers; `null` = no count limit (then `ttl_secs` is required). */
+  max_uses: number | null;
+  /** Lifetime in seconds; `null` = no time limit (then `max_uses` is required). */
+  ttl_secs: number | null;
+}
+
+/** A grant still usable, with what is left of it. */
+export interface McpGrant {
+  id: string;
+  label: string;
+  root: string;
+  tools: string[];
+  uses_left: number | null;
+  expires_in_secs: number | null;
+}

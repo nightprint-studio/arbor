@@ -179,6 +179,18 @@ fn get_file_blame(state: &CorvusState, tab_id: String, path: String) -> Result<V
     corvus_git::diff::get_file_blame(&repo, &path).map_err(|e| e.to_string())
 }
 
+/// Blame for a file named by **absolute path**, with no tab: the repository is discovered from
+/// the path and kept as a headless repo for its idle TTL ([`crate::ephemeral`]). What an editor
+/// outside Corvus (Bennu's blame gutter) calls — it knows a file, not a `tab_id`.
+#[arbor_rpc::handler]
+fn get_file_blame_by_path(state: &CorvusState, file: String) -> Result<Vec<BlameLine>, String> {
+    let tab = crate::ephemeral::tab_for(state, &file)?;
+    let workdir = repo_path(state, &tab)?;
+    let repo = open(state, &tab)?;
+    let rel = crate::mcp_tools::relative_to(&workdir, &file);
+    corvus_git::diff::get_file_blame(&repo, &rel).map_err(|e| e.to_string())
+}
+
 // ── Streaming blame (returns lines synchronously, ticks via Stream) ───────────
 
 /// Streaming blame: drives a determinate progress bar via `git blame

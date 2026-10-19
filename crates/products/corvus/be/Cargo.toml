@@ -63,6 +63,10 @@ arbor-process-ext = { path = "../../../platform/process-ext" }
 git2          = { version = "0.20", features = ["vendored-libgit2"] }
 serde         = { workspace = true }
 serde_json    = { workspace = true }
+# JSON Schema for the `#[handler(mcp(...))]` args structs in `mcp_tools` — the field `///`s become
+# the per-parameter descriptions an AI client reads. Same workspace pin bennu-be uses; not a new
+# external dependency.
+schemars      = { workspace = true }
 # `~` home-dir expansion for the `commit.template` path in the stage domain's
 # `get_git_commit_template` (already a workspace dependency, used by `src-tauri`).
 dirs          = { workspace = true }

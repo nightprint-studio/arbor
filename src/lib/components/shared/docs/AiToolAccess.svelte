@@ -119,6 +119,22 @@
     guess dressed up as a permission.</li>
 </ul>
 
+<h2>Grants — approving in advance</h2>
+<p>
+  An assistant left to work has nobody at the screen to approve a prompt. <strong>Grants</strong>
+  (the last page of these settings) answer in advance, narrowed on every axis: one project,
+  the tools you tick, and a limit — a number of uses, a duration of at most 24 hours, or both.
+  A grant with no limit cannot be created.
+</p>
+<ul>
+  <li>A grant replaces the <em>prompt</em> and nothing else. A call the rules refuse — a path
+    outside scope, a product off for that project, a class set to never — stays refused.</li>
+  <li>A call is covered only when every path in it lies inside the grant's project.</li>
+  <li>Grants live in memory. Quitting Arbor ends them all, and each can be revoked from the list
+    before it runs out.</li>
+  <li>The activity log marks a covered call with the grant that approved it.</li>
+</ul>
+
 <h2>Approving an action</h2>
 <p>
   When a call needs your approval, Arbor shows the tool, what it says it does, and
@@ -327,6 +343,12 @@
     still loading means "not yet", not "nothing there" — and the tools say which of the two
     they are in, so a client is never told a method is unused when the truth is that nothing
     has finished reading the project.</li>
+  <li><strong>Corvus</strong> — a repository's status (branch, ahead/behind, staged, unstaged,
+    untracked, conflicted), its history newest first — optionally for one file or folder —
+    who last changed each line of a file (folded into runs of the same commit), and
+    <strong>commit staged changes</strong>, staging the paths you name first. It never pushes,
+    amends or rewrites history, and a plugin's pre-commit check can still refuse the commit.
+    Every tool takes a path: the repository need not be open in Corvus.</li>
   <li><strong>Tyto</strong> — list capturable screens and windows, capture one (by window
     title, returned as an image), read the on-screen accessibility layout, check whether a
     recording is running, record the screen for a fixed number of seconds — as an

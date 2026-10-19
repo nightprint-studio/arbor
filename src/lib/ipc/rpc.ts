@@ -82,3 +82,20 @@ export const picus = <R>(method: string, params: Record<string, unknown> = {}): 
  *  live in `ipc/garrulus.ts`; prefer those over calling this directly. */
 export const garrulus = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
   rpc<R>('garrulus', method, params);
+
+/** Backends already confirmed up this session, so a hot path pays the round-trip once. */
+const ensured = new Set<Program>();
+
+/**
+ * Make sure a product backend is running before calling it from a window that is not that
+ * product's own — Bennu's blame gutter borrowing Corvus. A product's window starts its own
+ * backend on open; a borrower has no window to do that, and `rpc` alone fails on a backend
+ * that isn't up. Idempotent, and the shell runs the spawn off the UI thread.
+ *
+ * Only `corvus` and `picus` are borrowable.
+ */
+export async function ensureBackend(program: 'corvus' | 'picus'): Promise<void> {
+  if (ensured.has(program)) return;
+  await invoke<void>('ensure_product_backend', { program });
+  ensured.add(program);
+}

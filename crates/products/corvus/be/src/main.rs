@@ -41,12 +41,15 @@ mod ci;
 mod corvus_config;
 mod deep_link;
 mod diff;
+mod ephemeral;
+mod file_history;
 mod git_cli;
 mod gitflow;
 mod graph;
 mod issues;
 mod jobs;
 mod linked_worktree;
+mod mcp_tools;
 mod memory_report;
 mod merge;
 mod missing;
@@ -76,6 +79,7 @@ mod status;
 mod submodule;
 mod sync;
 mod tickets;
+mod tree_status;
 mod workspace;
 mod workspace_mutation;
 mod workspace_query;
@@ -1530,6 +1534,9 @@ fn main() {
     let sync_state = Arc::clone(&state);
     let sync_rt = app.runtime_handle();
     app.init(move || sync::driver::start(sync_state, sync_rt));
+    // Reclaims headless repos (named by path, no tab) once idle past `cache.headless_repo_ttl_secs`.
+    let sweep_state = Arc::clone(&state);
+    app.init(move || ephemeral::start_sweeper(sweep_state));
 
     if let Err(e) = app.run(dispatcher) {
         eprintln!("corvus-be: serve loop ended with error: {e}");

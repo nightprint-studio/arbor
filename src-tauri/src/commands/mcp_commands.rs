@@ -105,3 +105,28 @@ pub fn get_mcp_audit() -> mcp::audit::ActivityLog {
 pub fn clear_mcp_audit() {
     mcp::audit::clear();
 }
+
+/// Hand out a grant: pre-approval for named tools on one project, limited by a number of
+/// uses and/or a deadline, held in memory only. See [`mcp::grants`].
+#[tauri::command]
+pub fn mcp_grant_mint(spec: mcp::grants::GrantSpec) -> Result<mcp::grants::GrantInfo, AppError> {
+    mcp::grants::mint(spec).map_err(AppError::Other)
+}
+
+/// Every grant still usable, with what is left of each.
+#[tauri::command]
+pub fn mcp_grant_list() -> Vec<mcp::grants::GrantInfo> {
+    mcp::grants::list()
+}
+
+/// Revoke one grant before it runs out.
+#[tauri::command]
+pub fn mcp_grant_revoke(id: String) -> bool {
+    mcp::grants::revoke(&id)
+}
+
+/// Revoke every grant.
+#[tauri::command]
+pub fn mcp_grant_revoke_all() {
+    mcp::grants::clear();
+}

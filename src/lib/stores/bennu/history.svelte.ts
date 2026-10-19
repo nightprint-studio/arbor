@@ -32,9 +32,19 @@ import {
   type Revision,
   type TextDelta,
 } from '$lib/ipc/bennu/history';
+import { hunksTouching, revisionsWhereSelectionChanged, selectionSignature } from '$lib/utils/selection-delta';
 
 /** Which question the dialog is answering. */
 export type HistoryScope = 'file' | 'folder' | 'project' | 'deleted';
+
+/** A range of lines of the file the dialog is narrowed to (1-based, inclusive). */
+export interface LineSelection { start: number; end: number }
+
+/** Revisions examined when narrowing to a selection. Each costs a diff, so the scan is bounded;
+ *  the dialog says so when it cut. */
+const SELECTION_SCAN_LIMIT = 120;
+/** Diffs in flight at once while narrowing. */
+const SELECTION_CONCURRENCY = 6;
 
 /** What the diff pane is comparing — resolved from the current scope + selection, so
  *  every scope feeds the same viewer instead of each growing its own. */
@@ -58,6 +68,11 @@ function createHistoryStore() {
   let timeline = $state<ChangeGroup[]>([]);
   let entries = $state<FolderEntry[]>([]);
   let deleted = $state<DeletedEntry[]>([]);
+
+  /** Set when the dialog is about some lines of the file rather than the whole of it. */
+  let selection = $state<LineSelection | null>(null);
+  /** The scan stopped at its limit, so older revisions were not examined. */
+  let truncated = $state(false);
 
   let selected = $state<DiffTarget | null>(null);
   let delta = $state<TextDelta | null>(null);
@@ -98,7 +113,8 @@ function createHistoryStore() {
       if (scope === 'file') {
         const h = await ipcFileHistory(root, file);
         if (mine !== loadToken) return;
-        revisions = h.revisions;
+        revisions = selection ? await revisionsTouchingSelection(h.revisions, selection) : h.revisions;
+        if (mine !== loadToken) return;
         entries = [];
         timeline = [];
         // The newest revision is what is on disk; the interesting first comparison is
@@ -131,6 +147,36 @@ function createHistoryStore() {
     }
   }
 
+  /**
+   * Narrow `revs` (newest first) to the ones where `sel` changed.
+   *
+   * Each revision is diffed against the disk — the only comparison the backend offers — and the
+   * diff is reduced to what happened inside the selection; see `selection-delta`. Bounded and
+   * run a few at a time: a long history is hundreds of diffs.
+   */
+  async function revisionsTouchingSelection(revs: Revision[], sel: LineSelection): Promise<Revision[]> {
+    const scanned = revs.slice(0, SELECTION_SCAN_LIMIT);
+    truncated = revs.length > scanned.length;
+    const signatures: string[] = new Array(scanned.length).fill('');
+    let next = 0;
+    const worker = async () => {
+      while (next < scanned.length) {
+        const i = next++;
+        const d = await ipcDiff(root, file, scanned[i].id);
+        signatures[i] = selectionSignature(d.hunks, sel.start, sel.end);
+      }
+    };
+    await Promise.all(Array.from({ length: SELECTION_CONCURRENCY }, worker));
+    return revisionsWhereSelectionChanged(scanned, signatures);
+  }
+
+  /** In selection mode the diff shows only the hunks that change the selected lines. */
+  function narrowed(d: TextDelta): TextDelta {
+    if (!selection) return d;
+    const hunks = hunksTouching(d.hunks, selection.start, selection.end);
+    return { ...d, hunks, identical: hunks.length === 0 };
+  }
+
   /** Compare `target` against what is on disk now — the comparison that answers "what
    *  would restoring this change?", which is the question the buttons below it act on. */
   function selectRevision(target: DiffTarget | null): void {
@@ -140,7 +186,7 @@ function createHistoryStore() {
     const mine = ++diffToken;
     diffing = true;
     void ipcDiff(root, target.file, target.revision)
-      .then((d) => { if (mine === diffToken) delta = d; })
+      .then((d) => { if (mine === diffToken) delta = narrowed(d); })
       .catch((e) => { if (mine === diffToken) error = e instanceof Error ? e.message : String(e); })
       .finally(() => { if (mine === diffToken) diffing = false; });
   }
@@ -166,6 +212,8 @@ function createHistoryStore() {
     get entries() { return entries; },
     get deleted() { return deleted; },
     get selected() { return selected; },
+    get selection() { return selection; },
+    get truncated() { return truncated; },
     get delta() { return delta; },
     get loading() { return loading; },
     get diffing() { return diffing; },
@@ -174,14 +222,19 @@ function createHistoryStore() {
 
     /** The label of whatever the dialog is scoped to — the header's subtitle. */
     get subject() {
-      if (scope === 'file') return rel(file);
+      if (scope === 'file') {
+        return selection
+          ? `${rel(file)} · lines ${selection.start}${selection.end > selection.start ? `–${selection.end}` : ''}`
+          : rel(file);
+      }
       if (scope === 'folder') return rel(dir) || '.';
       if (scope === 'project') return root.split(/[\\/]/).pop() ?? root;
       return `${deleted.length} deleted`;
     },
 
     /** Open at a file. */
-    show(projectRoot: string, target: string) {
+    show(projectRoot: string, target: string, lines: LineSelection | null = null) {
+      selection = lines;
       root = projectRoot;
       file = target;
       dir = target.replace(/[\\/][^\\/]*$/, '');
@@ -189,8 +242,13 @@ function createHistoryStore() {
       open = true;
       void load();
     },
+    /** Open at some lines of a file: only the revisions that changed them. */
+    showSelection(projectRoot: string, target: string, start: number, end: number) {
+      this.show(projectRoot, target, { start, end });
+    },
     /** Open at a directory. */
     showFolder(projectRoot: string, target: string) {
+      selection = null;
       root = projectRoot;
       dir = target;
       file = '';
@@ -200,6 +258,7 @@ function createHistoryStore() {
     },
     /** Open at the whole project. */
     showProject(projectRoot: string) {
+      selection = null;
       root = projectRoot;
       dir = projectRoot;
       scope = 'project';
@@ -208,6 +267,7 @@ function createHistoryStore() {
     },
     /** Open at the files that are gone. */
     showDeleted(projectRoot: string) {
+      selection = null;
       root = projectRoot;
       scope = 'deleted';
       open = true;
@@ -219,6 +279,8 @@ function createHistoryStore() {
       // A scope with nothing to be about falls back to the project, rather than opening
       // empty and blaming the user for having right-clicked the wrong thing.
       if (next === 'file' && !file) return;
+      // Leaving the file scope leaves the selection behind: it is about lines of one file.
+      if (next !== 'file') selection = null;
       scope = next;
       void load();
     },
@@ -246,6 +308,8 @@ function createHistoryStore() {
       deleted = [];
       selected = null;
       delta = null;
+      selection = null;
+      truncated = false;
       error = '';
     },
   };

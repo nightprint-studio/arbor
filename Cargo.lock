@@ -2483,6 +2483,7 @@ dependencies = [
  "dirs 6.0.0",
  "git2",
  "regex",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "tokio",

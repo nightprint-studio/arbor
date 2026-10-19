@@ -124,17 +124,22 @@ pub struct CacheConfig {
     #[serde(default = "default_true")] pub close_repo_on_evict: bool,
     #[serde(default = "default_min_cached_tabs")] pub min_cached_tabs: usize,
     #[serde(default = "default_repo_browser_ttl_secs")] pub repo_browser_ttl_secs: u64,
+    /// How long a headless repo (named by path, no tab — see `crate::ephemeral`) stays
+    /// registered after its last use.
+    #[serde(default = "default_headless_repo_ttl_secs")] pub headless_repo_ttl_secs: u64,
 }
 fn default_tab_idle_secs() -> u64 { 300 }
 fn default_evict_check_interval_secs() -> u64 { 60 }
 fn default_min_cached_tabs() -> usize { 1 }
 fn default_repo_browser_ttl_secs() -> u64 { 600 }
+fn default_headless_repo_ttl_secs() -> u64 { 600 }
 impl Default for CacheConfig {
     fn default() -> Self {
         Self { enabled: true, max_tabs: 10, refresh_interval_secs: 60, scheduler_enabled: true,
             auto_evict_enabled: false, tab_idle_secs: default_tab_idle_secs(),
             evict_check_interval_secs: default_evict_check_interval_secs(), close_repo_on_evict: true,
-            min_cached_tabs: default_min_cached_tabs(), repo_browser_ttl_secs: default_repo_browser_ttl_secs() }
+            min_cached_tabs: default_min_cached_tabs(), repo_browser_ttl_secs: default_repo_browser_ttl_secs(),
+            headless_repo_ttl_secs: default_headless_repo_ttl_secs() }
     }
 }
 

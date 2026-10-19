@@ -73,6 +73,7 @@ const DEFAULT_CONFIG: CacheConfig = {
   close_repo_on_evict:       true,
   min_cached_tabs:           1,
   repo_browser_ttl_secs:     600,
+  headless_repo_ttl_secs:    600,
 };
 
 // ── Store ─────────────────────────────────────────────────────────────────────

@@ -44,6 +44,8 @@
   import { treeClipboardStore } from '$lib/stores/bennu/tree-clipboard.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { bennuGitStatusStore } from '$lib/stores/bennu/git-status.svelte';
+  import { GIT_BADGE_COLOR, GIT_BADGE_GLYPH, GIT_BADGE_LABEL } from '$lib/utils/git-badge';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { treeExpansionStore } from '$lib/stores/bennu/tree-expansion.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
@@ -117,6 +119,19 @@
     void javaKindStore.load(root, true);
   });
 
+
+  // ── Git marks on rows ────────────────────────────────────────────────────────
+  // Which files differ from what was committed — the ones a push would carry. Corvus answers for
+  // the whole repository in one call; the store keeps it and rolls it up for folders. Asked again
+  // when the tree reloads, when a save settles (the dirty set shrinks), and when the window comes
+  // back into focus — a `git checkout` or a commit in another tool changes it with none of the
+  // others firing.
+  $effect(() => {
+    void projectStore.tree;
+    void projectStore.dirtyPaths.length;
+    bennuGitStatusStore.refresh(projectStore.project?.root);
+  });
+  function refreshGitMarks() { bennuGitStatusStore.refresh(projectStore.project?.root); }
 
   /** A folder tint: the role's hue, damped toward the muted text colour.
    *
@@ -993,6 +1008,8 @@
   ]);
 </script>
 
+<svelte:window onfocus={refreshGitMarks} />
+
 <PanelShell title="Project">
   {#snippet icon()}<FolderTree size={13} />{/snippet}
   {#snippet actions()}
@@ -1073,10 +1090,23 @@
               <IconifyIconView icon={meta.icon} width={15} height={15} />
             </span>
           {/if}
+          {@const git = ctx.node.ignored ? undefined : bennuGitStatusStore.badgeFor(ctx.node.path, ctx.node.is_dir)}
+          <!-- A file's name takes its git colour (amber modified, green staged, blue untracked…),
+               the same vocabulary as the file explorer. A folder keeps its name and shows a dot
+               in the strongest colour beneath it: colouring every ancestor of a change would turn
+               the tree into a colour field and say nothing about WHERE the change is. -->
           <span
             class="tree-label {faint}"
+            style:color={git && !ctx.node.is_dir ? GIT_BADGE_COLOR[git] : undefined}
             use:tooltip={ctx.node.ignored ? 'Ignored by git' : ''}
           >{ctx.node.name}</span>
+          {#if git}
+            <span
+              class="tree-git"
+              style:color={GIT_BADGE_COLOR[git]}
+              use:tooltip={ctx.node.is_dir ? `Contains changes (${GIT_BADGE_LABEL[git].toLowerCase()})` : GIT_BADGE_LABEL[git]}
+            >{ctx.node.is_dir ? '●' : GIT_BADGE_GLYPH[git]}</span>
+          {/if}
           <!-- The build unit's own line. Right of the name and dimmed: it describes the row, it is
                not part of it, and a module you are not asking about should read as a folder. -->
           {#if unitInfo[ctx.node.path]}
@@ -1220,6 +1250,8 @@
   }
   .tree-icon :global(svg) { width: 1em; height: 1em; }
   .tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The git mark after a name: small, never able to squeeze the name it belongs to. */
+  .tree-git { flex: none; margin-left: 5px; font-size: 10px; font-weight: 700; line-height: 1; }
   /* The build unit's line: pushed to the far end, never able to squeeze the name it describes,
      and the first thing to go when the panel is narrow. */
   .tree-unit {

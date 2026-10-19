@@ -16,7 +16,7 @@
 
 <h2>Checked as you type</h2>
 <p>
-  Java files are checked <strong>as you type</strong>, without compiling: errors are red squiggles, warnings yellow, and everything is listed in the
+  Java files are checked <strong>as you type</strong>, without compiling: errors are red squiggles, warnings yellow — except a name that resolves to nothing (an unknown variable, method, class, field or import), which is painted <strong>red</strong> where it is written instead of underlined — and everything is listed in the
   Problems panel.
 </p>
 <Callout variant="info" title="Which files are checked, and by whom">

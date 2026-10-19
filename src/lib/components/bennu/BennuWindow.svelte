@@ -137,7 +137,10 @@
   import BennuGotoModal from './BennuGotoModal.svelte';
   import BennuIndexInspectorModal from './BennuIndexInspectorModal.svelte';
   import BennuLocalHistoryModal from './BennuLocalHistoryModal.svelte';
+  import BennuGitHistoryModal from './BennuGitHistoryModal.svelte';
+  import { bennuGitHistoryStore } from '$lib/stores/bennu/git-history.svelte';
   import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
+  import { bennuBlameStore } from '$lib/stores/bennu/blame.svelte';
   import BennuModuleGraphModal from './BennuModuleGraphModal.svelte';
   import BennuMojibakeScanModal from './BennuMojibakeScanModal.svelte';
   import BennuTomcatConfigModal from './BennuTomcatConfigModal.svelte';
@@ -1413,6 +1416,20 @@
       { id: 'history', title: 'Local history: this file', icon: 'History', shortcut: 'Alt+Shift+H',
         action: () => run(() => bennuHistoryStore.show(projectStore.project!.root, projectStore.activeFilePath!)),
         when: !!projectStore.project && !!projectStore.activeFilePath },
+      // Git, answered by Corvus: the file's commits, the commits of the highlighted lines, and
+      // blame in the margin. All three need a file to be about.
+      { id: 'githistory', title: 'Git: show history', icon: 'GitCommit',
+        action: () => run(() => bennuGitHistoryStore.showFile(projectStore.activeFilePath!)),
+        when: !!projectStore.activeFilePath },
+      { id: 'githistorysel', title: 'Git: show history for selection', icon: 'GitCommit',
+        action: () => run(() => editor?.showSelectionHistory()),
+        when: !!projectStore.activeFilePath },
+      { id: 'blame', title: 'Git: annotate with blame', icon: 'GitCommit',
+        action: () => run(() => bennuBlameStore.toggle(projectStore.activeFilePath)),
+        when: !!projectStore.activeFilePath },
+      { id: 'historysel', title: 'Local history: selection', icon: 'History',
+        action: () => run(() => editor?.showLocalHistoryForSelection()),
+        when: !!projectStore.project && !!projectStore.activeFilePath },
       { id: 'historyproject', title: 'Local history: project', icon: 'History',
         action: () => run(() => bennuHistoryStore.showProject(projectStore.project!.root)),
         when: !!projectStore.project },
@@ -2509,6 +2526,9 @@
      editor's context menu, the palette) and each of them opens it AT something, so the
      open flag and the subject belong together in the store. -->
 <BennuLocalHistoryModal />
+<!-- Git's own history of a file or a selection, answered by Corvus. Same ownership as above:
+     opened from the editor's menu and the palette, each AT a file, so the store holds both. -->
+<BennuGitHistoryModal />
 
 {#if bennuUiStore.moduleGraphOpen}
   <BennuModuleGraphModal onClose={() => bennuUiStore.closeModuleGraph()} />

@@ -125,6 +125,10 @@ pub struct BennuConfig {
     /// Here rather than on a settings page because its control is the toggle in that window —
     /// a view mode is chosen where it is seen, and remembered so it is chosen once.
     pub history_diff_split: bool,
+    /// Add the commit message to the Git Blame text drawn after a line (`false` by default: the
+    /// author and age are what is read at a glance, and a long subject next to the code is the
+    /// part that turns a margin note into clutter). The full message is always in the hover.
+    pub blame_show_message: bool,
     /// How long the DTO Lab's JVM may go without a question before it is stopped, in minutes. `10`
     /// by default. The JVM takes a second or two to start and holds a project's classes while it
     /// runs, so this trades the wait for the first answer after a pause against memory held idle.
@@ -635,6 +639,7 @@ impl Default for BennuConfig {
             maven_auto_download: true,
             markdown_live_preview: true,
             history_diff_split: true,
+            blame_show_message: false,
             dtolab_idle_minutes: 10,
             // The names the settings page has always shown in this box. `target` and `.idea` are
             // already skipped by the walker's own rules; `build` (a Gradle output tree) is not,

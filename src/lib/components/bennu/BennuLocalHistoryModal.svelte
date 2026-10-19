@@ -23,7 +23,7 @@
    * Either alone is a folder listing that is quietly wrong in one direction, so the column
    * is both — with the ghosts drawn as ghosts.
    */
-  import { History, RotateCcw, Tag, Copy, Check, Columns2, AlignJustify } from 'lucide-svelte';
+  import { History, RotateCcw, Tag, Copy, Check } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
@@ -31,8 +31,9 @@
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
-  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
-  import Alert from '$lib/components/shared/ui/Alert.svelte';
+  import ColumnPanes from '$lib/components/shared/ui/ColumnPanes.svelte';
+  import DiffModeToggle from '$lib/components/shared/ui/DiffModeToggle.svelte';
+  import PaneHeader from '$lib/components/shared/ui/PaneHeader.svelte';
   import TextDiff from '$lib/components/shared/ui/TextDiff.svelte';
   import HistoryTimeline from './history/HistoryTimeline.svelte';
   import HistoryDeletedList from './history/HistoryDeletedList.svelte';
@@ -127,6 +128,9 @@
   const selectedDeleted = $derived(
     s.scope === 'deleted' ? s.deleted.find((d) => `${s.root.replace(/\/+$/, '')}/${d.path}` === s.selected?.file) ?? null : null,
   );
+
+  /** The folder column only exists for the two scopes that are about a directory. */
+  const showMiddle = $derived(s.scope === 'folder' || s.scope === 'project');
 
   /** The filter box.
    *
@@ -225,6 +229,16 @@
 
 <svelte:window onkeydown={onWindowKeydown} />
 
+{#snippet middlePane()}
+  <PaneHeader title="In this folder" count={touched.size ? `${touched.size} touched` : undefined} />
+  <HistoryFolderList
+    rows={folderRows}
+    filter={filterText}
+    onOpen={(r) => s.show(s.root, r.path)}
+    onRestore={(r) => void restoreDeleted(r.path)}
+  />
+{/snippet}
+
 {#if s.open}
   <Modal
     onClose={() => s.close()}
@@ -260,96 +274,71 @@
       </ModalHeader>
     {/snippet}
 
-    <div class="lh">
-      {#if s.error}
-        <div class="lh-error"><Alert variant="error" text={s.error} compact /></div>
-      {/if}
-
-      <div class="lh-cols">
-        <div class="lh-col lh-left">
-          <div class="lh-col-h">
-            {s.scope === 'deleted' ? 'Deleted files' : 'Revisions'}
-            {#if s.loading}<Spinner size={11} />{/if}
-            <span class="lh-count">{s.scope === 'deleted' ? s.deleted.length : rows.length}</span>
-          </div>
-          {#if s.scope === 'deleted'}
-            <HistoryDeletedList
-              entries={s.deleted}
-              filter={filterText}
-              selectedPath={selectedDeleted?.path ?? null}
-              onSelect={(e) => void s.selectDeleted(e)}
-            />
-          {:else}
-            <HistoryTimeline
-              {rows}
-              selectedId={selectedRowId}
-              onSelect={onTimelineSelect}
-              emptyMessage={s.scope === 'file'
-                ? 'This file has no recorded revisions yet.'
-                : 'Nothing has been recorded here yet.'}
-            />
-          {/if}
-        </div>
-
-        {#if s.scope === 'folder' || s.scope === 'project'}
-          <div class="lh-col lh-mid">
-            <div class="lh-col-h">
-              In this folder
-              {#if touched.size}<span class="lh-count">{touched.size} touched</span>{/if}
-            </div>
-            <HistoryFolderList
-              rows={folderRows}
-              filter={filterText}
-              onOpen={(r) => s.show(s.root, r.path)}
-              onRestore={(r) => void restoreDeleted(r.path)}
-            />
-          </div>
+    <ColumnPanes error={s.error} middle={showMiddle ? middlePane : undefined}>
+      {#snippet left()}
+        <PaneHeader
+          title={s.scope === 'deleted' ? 'Deleted files' : 'Revisions'}
+          count={s.scope === 'deleted' ? s.deleted.length : rows.length}
+          loading={s.loading}
+        />
+        {#if s.scope === 'deleted'}
+          <HistoryDeletedList
+            entries={s.deleted}
+            filter={filterText}
+            selectedPath={selectedDeleted?.path ?? null}
+            onSelect={(e) => void s.selectDeleted(e)}
+          />
+        {:else}
+          <HistoryTimeline
+            {rows}
+            selectedId={selectedRowId}
+            onSelect={onTimelineSelect}
+            emptyMessage={s.loading
+              ? 'Reading history…'
+              : s.selection
+                ? 'These lines have not changed since the oldest recorded revision.'
+                : s.scope === 'file'
+                  ? 'This file has no recorded revisions yet.'
+                  : 'Nothing has been recorded here yet.'}
+          />
         {/if}
+      {/snippet}
 
-        <div class="lh-col lh-right">
-          <div class="lh-col-h">
-            {#if s.selected}
-              <span class="lh-diff-of">{s.rel(s.selected.file)}</span>
-              <span class="lh-vs">→ {s.scope === 'deleted' ? 'gone' : 'on disk'}</span>
-            {:else}
-              Diff
+      {#snippet right()}
+        <PaneHeader loading={s.diffing}>
+          {#if s.selected}
+            <span class="lh-diff-of">{s.rel(s.selected.file)}</span>
+            <span class="lh-vs">→ {s.scope === 'deleted' ? 'gone' : 'on disk'}</span>
+          {:else}
+            Diff
+          {/if}
+          {#snippet end()}
+            {#if s.delta && !s.delta.identical}
+              <span class="lh-counts">
+                <span class="add">+{s.delta.added}</span>
+                <span class="del">−{s.delta.removed}</span>
+              </span>
             {/if}
-            <div class="lh-head-end">
-              {#if s.delta && !s.delta.identical}
-                <span class="lh-count">
-                  <span class="add">+{s.delta.added}</span>
-                  <span class="del">−{s.delta.removed}</span>
-                </span>
-              {/if}
-              {#if s.diffing}<Spinner size={11} />{/if}
-              <Button
-                size="xs"
-                variant="icon"
-                ariaLabel={split ? 'Show a unified diff' : 'Show the two versions side by side'}
-                tooltip={{
-                  content: split ? 'Unified diff' : 'Side by side',
-                  shortcut: 'Alt+D',
-                }}
-                onclick={() => bennuSettingsStore.setHistoryDiffSplit(!split)}
-              >
-                {#snippet iconStart()}
-                  {#if split}<AlignJustify size={13} />{:else}<Columns2 size={13} />{/if}
-                {/snippet}
-              </Button>
-            </div>
-          </div>
-          <div class="lh-diff">
-            <TextDiff
-              hunks={s.delta?.hunks ?? []}
-              identical={s.delta?.identical ?? false}
-              mode={split ? 'split' : 'unified'}
-              emptyMessage="Pick a revision to see what it changed."
-              identicalMessage="This revision is identical to what is on disk."
+            <DiffModeToggle
+              {split}
+              shortcut="Alt+D"
+              onToggle={() => bennuSettingsStore.setHistoryDiffSplit(!split)}
             />
-          </div>
+          {/snippet}
+        </PaneHeader>
+        <div class="lh-diff">
+          <TextDiff
+            hunks={s.delta?.hunks ?? []}
+            identical={s.delta?.identical ?? false}
+            mode={split ? 'split' : 'unified'}
+            emptyMessage="Pick a revision to see what it changed."
+            identicalMessage={s.selection
+              ? 'These lines are the same in this revision as on disk.'
+              : 'This revision is identical to what is on disk.'}
+          />
         </div>
-      </div>
-    </div>
+      {/snippet}
+    </ColumnPanes>
 
     {#snippet footer()}
       <ModalFooter>
@@ -373,7 +362,13 @@
           </div>
         {:else}
           <span class="lh-hint">
-            Labelled revisions never expire. Everything else: kept for a while, then dropped.
+            {#if s.truncated}
+              Only the 120 most recent revisions were examined for these lines.
+            {:else if s.selection}
+              Showing the revisions that changed these lines. Restoring puts back the whole file, so it is off here.
+            {:else}
+              Labelled revisions never expire. Everything else: kept for a while, then dropped.
+            {/if}
           </span>
           <Button size="sm" variant="ghost" disabled={!s.selected} onclick={() => (labelling = true)}>
             {#snippet iconStart()}<Tag size={13} />{/snippet}
@@ -385,7 +380,7 @@
             {/snippet}
             {copied ? 'Copied' : 'Copy this version'}
           </Button>
-          <Button size="sm" variant="primary" disabled={!s.selected || busy} onclick={() => void restore()}>
+          <Button size="sm" variant="primary" disabled={!s.selected || busy || !!s.selection} onclick={() => void restore()}>
             {#snippet iconStart()}<RotateCcw size={13} />{/snippet}
             {s.scope === 'deleted' ? 'Restore where it was' : 'Restore this revision'}
           </Button>
@@ -396,9 +391,6 @@
 {/if}
 
 <style>
-  .lh { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-  .lh-error { padding: 8px 10px 0; }
-
   .lh-subject {
     font-family: var(--font-code); font-size: var(--font-size-xs);
     color: var(--text-muted);
@@ -407,26 +399,9 @@
   .lh-scopes { margin-left: auto; }
   .lh-search { width: 180px; flex: none; }
 
-  .lh-cols { display: flex; flex: 1; min-height: 0; }
-  .lh-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .lh-col + .lh-col { border-left: 1px solid var(--border-subtle); }
-  .lh-left { width: 320px; flex: none; }
-  .lh-mid { width: 260px; flex: none; }
-  .lh-right { flex: 1; }
-
-  .lh-col-h {
-    display: flex; align-items: center; gap: 8px; flex: none;
-    height: 26px; padding: 0 10px;
-    font-size: var(--font-size-2xs); letter-spacing: 0.05em; text-transform: uppercase;
-    color: var(--text-faint); border-bottom: 1px solid var(--border-subtle);
-  }
-  .lh-count { margin-left: auto; display: flex; gap: 7px; text-transform: none; letter-spacing: 0; }
-  /* The diff header's trailing group — counts, spinner, layout toggle — as ONE item, so a
-     single auto margin puts the lot at the right edge whatever is currently in it. */
-  .lh-head-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-  .lh-head-end .lh-count { margin-left: 0; }
-  .lh-count .add { color: var(--success); }
-  .lh-count .del { color: var(--error); }
+  .lh-counts { display: flex; gap: 7px; }
+  .lh-counts .add { color: var(--success); }
+  .lh-counts .del { color: var(--error); }
   .lh-diff-of {
     font-family: var(--font-code); text-transform: none; letter-spacing: 0;
     color: var(--text-secondary);

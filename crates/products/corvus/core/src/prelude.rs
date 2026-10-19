@@ -3,7 +3,7 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `corvus_core::prelude::...`. The submodules stay `pub` for rustdoc navigation.
 
-pub use crate::state::CorvusState;
+pub use crate::state::{is_ephemeral_tab, CorvusState, EPHEMERAL_TAB_PREFIX};
 
 // The module, not its contents: a call site reads `hooks::CHECKOUT`, which says
 // what the string is, where a glob would drop bare `CHECKOUT` / `PUSH` / `COMMIT`

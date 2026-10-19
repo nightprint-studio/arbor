@@ -13,7 +13,7 @@
   import {
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
     PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
-    History,
+    History, UserSearch, GitBranch, GitCommitHorizontal, TextSelect,
     Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
     DownloadCloud, FileDown, Variable, Database, Clock, Columns3, ListPlus, SquarePen,
     Languages, CaseSensitive, FileCog, Hammer, PackagePlus, SquarePlus, FilePlus2, Wrench, Puzzle,
@@ -87,6 +87,8 @@
   import { bennuMainClassStore } from '$lib/stores/bennu/main-classes.svelte';
   import { emptyInvocation as emptyCargoInvocation } from '$lib/ipc/bennu/cargo';
   import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
+  import { bennuBlameStore } from '$lib/stores/bennu/blame.svelte';
+  import { bennuGitHistoryStore } from '$lib/stores/bennu/git-history.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuI18nStore } from '$lib/stores/bennu/i18n.svelte';
   import { isI18nBundle } from './i18n/bundle-path';
@@ -1104,9 +1106,19 @@
         )
       : [],
   );
-  const allDiags = $derived([
-    ...diags, ...buildDiags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags,
+  /**
+   * Diagnostics that say a NAME resolves to nothing — an undefined variable, method, class, field
+   * or import. They are painted as red text rather than underlined: the identifier is the whole
+   * problem, and a coloured word reads more directly than a line beneath it.
+   */
+  const UNDEFINED_NAME_CODES = new Set([
+    'unresolved-symbol', 'unresolved-call', 'unresolved-type', 'unresolved-import',
+    'unresolved-super-method', 'unknown-member', 'unknown-field', 'unknown-enum-case-label',
   ]);
+  const allDiags = $derived(
+    [...diags, ...buildDiags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags]
+      .map((d) => (d.code && UNDEFINED_NAME_CODES.has(d.code) ? { ...d, emphasis: 'text' as const } : d)),
+  );
 
   /**
    * The diagnostics a quick-fix could act on, in the shape the backend wants.
@@ -2209,6 +2221,15 @@
    */
   /** The lines the ▶ owns — a script's one line, every `main`, and every test in a Java file. */
   const runLines = $derived([...runGutterMarks, ...testGutterMarks].map((m) => m.line));
+
+  // Git Blame margin (Corvus supplies the data, by path — see the store). The fetch follows the
+  // active file; the column draws nothing until the margin is toggled on.
+  $effect(() => { bennuBlameStore.ensure(activePath); });
+  const blameAnnotations = $derived(bennuBlameStore.annotationsFor(activePath));
+  $effect(() => {
+    const reason = bennuBlameStore.noneReason(activePath);
+    if (reason) toastStore.show('No Git Blame for this file: ' + reason, 'info');
+  });
 
   const allGutterMarks = $derived([
     ...runGutterMarks,
@@ -4340,58 +4361,114 @@
     // right-click doesn't move it on its own, so without this they'd target wherever the
     // caret happened to be instead of the symbol under the pointer.
     editorComp?.setCaretAtCoords(e.clientX, e.clientY);
-    // Navigation actions (go-to / usages / rename) only where they can resolve; Generate
-    // only on Java. On a plain-text/markdown/properties file the menu is just edit + save.
-    const navItems: MenuItem[] = supportsNav
+    // The menu reads as groups — edit · navigate · generate · save · history — each behind a
+    // separator, and each icon carries the colour of what it does, the way Corvus's commit menu
+    // does. A group with nothing in it contributes no separator, so a plain-text file's menu is
+    // just edit + save rather than a column of dividers.
+    const sep = (id: string): MenuItem => ({ id, label: '', separator: true });
+    const edit: MenuItem[] = [
+      { id: 'cut', label: 'Cut', icon: Scissors, iconColor: 'var(--text-muted)', shortcut: 'Ctrl+X' },
+      { id: 'copy', label: 'Copy', icon: Copy, iconColor: 'var(--text-muted)', shortcut: 'Ctrl+C' },
+      { id: 'paste', label: 'Paste', icon: ClipboardPaste, iconColor: 'var(--text-muted)', shortcut: 'Ctrl+V' },
+    ];
+    // Navigation actions (go-to / usages / rename) only where they can resolve.
+    const navigate: MenuItem[] = supportsNav
       ? [
-          { id: 's1', label: '', separator: true },
-          { id: 'gotodef', label: 'Go to declaration', icon: Target, shortcut: 'Ctrl+B' },
-          { id: 'usages', label: 'Find usages', icon: SearchCode, shortcut: 'Alt+F7' },
-          { id: 'rename', label: 'Rename…', icon: PenLine, shortcut: 'Shift+F6' },
+          { id: 'gotodef', label: 'Go to declaration', icon: Target, iconColor: 'var(--accent)', shortcut: 'Ctrl+B' },
+          { id: 'usages', label: 'Find usages', icon: SearchCode, iconColor: 'var(--accent)', shortcut: 'Alt+F7' },
+          { id: 'rename', label: 'Rename…', icon: PenLine, iconColor: 'var(--warning)', shortcut: 'Shift+F6' },
         ]
       : [];
     // On a Spring property file: the one thing you reach for that the file cannot tell you —
     // the environment variable that overrides the line you are pointing at.
-    const envItems: MenuItem[] = isSpringPropertyFile(activePath)
-      ? [
-          { id: 's3', label: '', separator: true },
-          { id: 'envvar', label: 'Show as environment variable…', icon: Variable },
-        ]
+    const env: MenuItem[] = isSpringPropertyFile(activePath)
+      ? [{ id: 'envvar', label: 'Show as environment variable…', icon: Variable, iconColor: 'var(--info)' }]
       : [];
-    const items: MenuItem[] = [
-      { id: 'cut', label: 'Cut', icon: Scissors, shortcut: 'Ctrl+X' },
-      { id: 'copy', label: 'Copy', icon: Copy, shortcut: 'Ctrl+C' },
-      { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V' },
-      ...navItems,
-      ...envItems,
-      { id: 's2', label: '', separator: true },
+    // Generate only on Java.
+    const generate: MenuItem[] = [
       ...(isJavaFile
         ? [
-            { id: 'generate', label: 'Generate…', icon: Wand2, shortcut: 'Alt+Insert' } as MenuItem,
-            { id: 'generate-template', label: 'Generate from a template…', icon: Wand2 } as MenuItem,
+            { id: 'generate', label: 'Generate…', icon: Wand2, iconColor: 'var(--success)', shortcut: 'Alt+Insert' } as MenuItem,
+            { id: 'generate-template', label: 'Generate from a template…', icon: Wand2, iconColor: 'var(--success)' } as MenuItem,
           ]
         : []),
       // Offered on the class that has something to write out: the keys it binds.
       ...(isJavaFile && activePath && projectStore.sourceOf(activePath).includes('@ConfigurationProperties')
-        ? [{ id: 'config-properties', label: 'Generate configuration properties…', icon: Wand2 } as MenuItem]
+        ? [{ id: 'config-properties', label: 'Generate configuration properties…', icon: Wand2, iconColor: 'var(--success)' } as MenuItem]
         : []),
       // And the other way round, on the file the keys are written in.
       ...(isSpringConfigTab
-        ? [{ id: 'config-class', label: 'Generate @ConfigurationProperties class…', icon: Wand2 } as MenuItem]
+        ? [{ id: 'config-class', label: 'Generate @ConfigurationProperties class…', icon: Wand2, iconColor: 'var(--success)' } as MenuItem]
         : []),
       // The class under the pointer, tried out — offered where the lab has something to try it with.
       ...(isJavaFile && (projectStore.capabilities?.bean_validation || projectStore.capabilities?.jackson)
-        ? [{ id: 'dtolab', label: 'Open in DTO Lab', icon: Beaker, shortcut: 'Alt+Shift+J' } as MenuItem]
+        ? [{ id: 'dtolab', label: 'Open in DTO Lab', icon: Beaker, iconColor: 'var(--info)', shortcut: 'Alt+Shift+J' } as MenuItem]
         : []),
-      { id: 'save', label: 'Save', icon: Save, shortcut: 'Ctrl+S' },
-      { id: 's4', label: '', separator: true },
+    ];
+    const save: MenuItem[] = [
+      { id: 'save', label: 'Save', icon: Save, iconColor: 'var(--accent)', shortcut: 'Ctrl+S' },
+    ];
+    const past: MenuItem[] = [
       // Reachable from the buffer as well as from the tree: the moment you want the
       // previous version of a file is while you are looking at the current one, and going
       // to find its row in the tree first is the trip this saves.
-      { id: 'history', label: 'Local History', icon: History, shortcut: 'Alt+Shift+H' },
+      {
+        id: 'local-history', label: 'Local History', icon: History, iconColor: 'var(--warning)',
+        children: [
+          { id: 'history', label: 'Show History', icon: History, iconColor: 'var(--warning)', shortcut: 'Alt+Shift+H' },
+          {
+            id: 'history-selection', label: 'Show History for Selection', icon: TextSelect,
+            iconColor: 'var(--warning)', disabled: editorComp?.selectionLines().empty ?? true,
+          },
+        ],
+      },
+      // The three git questions about this file in one place, the way IntelliJ groups them under
+      // Git. Corvus answers all of them, by path. "Show History for Selection" needs lines
+      // highlighted, so it is greyed out rather than hidden: it is there to be discovered.
+      {
+        id: 'git', label: 'Git', icon: GitBranch, iconColor: 'var(--color-tag)',
+        children: [
+          { id: 'git-history', label: 'Show History', icon: GitCommitHorizontal, iconColor: 'var(--accent)' },
+          {
+            id: 'git-history-selection', label: 'Show History for Selection', icon: TextSelect,
+            iconColor: 'var(--accent)', disabled: editorComp?.selectionLines().empty ?? true,
+          },
+          sep('sep-git'),
+          {
+            id: 'git-blame',
+            label: bennuBlameStore.enabled ? 'Close Annotations' : 'Annotate with Git Blame',
+            icon: UserSearch, iconColor: '#20b2aa',
+          },
+        ],
+      },
     ];
+    const items: MenuItem[] = [edit, navigate, env, generate, save, past]
+      .filter((group) => group.length > 0)
+      .flatMap((group, i) => (i === 0 ? group : [sep('sep' + i), ...group]));
     bennuContextMenuStore.show(e.clientX, e.clientY, items, onEditorMenuSelect);
   }
+  /** Git history of the highlighted lines. The menu greys the entry out without a selection, but
+   *  the palette entry can be run anywhere, so the empty case is answered here too. */
+  export function showSelectionHistory() {
+    const lines = editorComp?.selectionLines();
+    if (!activePath || !lines || lines.empty) {
+      toastStore.show('Select the lines whose history you want first', 'info');
+      return;
+    }
+    bennuGitHistoryStore.showSelection(activePath, lines.start, lines.end);
+  }
+
+  /** Local History of the highlighted lines — the revisions that changed them. */
+  export function showLocalHistoryForSelection() {
+    const lines = editorComp?.selectionLines();
+    const root = projectStore.project?.root;
+    if (!root || !activePath || !lines || lines.empty) {
+      toastStore.show('Select the lines whose history you want first', 'info');
+      return;
+    }
+    bennuHistoryStore.showSelection(root, activePath, lines.start, lines.end);
+  }
+
   function onEditorMenuSelect(id: string) {
     switch (id) {
       case 'cut': editorComp?.cutSelection(); break;
@@ -4401,6 +4478,10 @@
       case 'history':
         if (projectStore.project && activePath) bennuHistoryStore.show(projectStore.project.root, activePath);
         break;
+      case 'git-blame': bennuBlameStore.toggle(activePath); break;
+      case 'git-history': if (activePath) bennuGitHistoryStore.showFile(activePath); break;
+      case 'git-history-selection': showSelectionHistory(); break;
+      case 'history-selection': showLocalHistoryForSelection(); break;
       case 'usages': void findUsages(); break;
       case 'rename': openRename(); break;
       case 'generate':
@@ -4800,6 +4881,7 @@
           marks={springMarks}
           lineHighlights={editorLineHighlights}
           gutterMarks={allGutterMarks}
+          lineAnnotations={blameAnnotations}
           onGutterClick={onGutterClick}
           onGutterContext={onGutterClick}
           flagMarks={canBreak ? breakpointMarks : undefined}

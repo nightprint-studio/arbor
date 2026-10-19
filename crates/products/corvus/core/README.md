@@ -23,6 +23,12 @@ field-by-field as git domains are extracted from the shell.
   call site (`state.emit(...)`) never changes — only the backing.**
 - **`repos`** — the tab→path map the shell pushes, so handlers resolve a tab to
   its repo path without a `RepoManager`.
+- **`ephemeral`** — headless repos: a caller with no tab (an editor, an MCP client)
+  names a repo by path and gets a `path:<workdir>` tab id
+  ([`EPHEMERAL_TAB_PREFIX`]). They resolve through the same `repo_path` as real tabs,
+  but live in their own map with a last-used clock, are dropped by
+  `sweep_ephemeral(ttl, now)` once idle, and never appear in `open_tabs()` — that set
+  stays "what the user has open".
 - **`host: Option<Arc<dyn HostCaller>>`** — reverse channel to the shell (vault /
   plugin-UI round-trips); set only once split into `corvus-be`.
 - **`hooks: Arc<HookDispatcher>`** — the runtime hook broker, so a handler fires

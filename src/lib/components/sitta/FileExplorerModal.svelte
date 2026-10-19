@@ -17,6 +17,7 @@
    * Performance: the dir is read once (incl. hidden) and filtered on the FE;
    * the list is virtualised; the watcher is debounced; sort/filter memoised.
    */
+  import { GIT_BADGE_GLYPH, GIT_BADGE_LABEL } from '$lib/utils/git-badge';
   import { tick, untrack, onMount, onDestroy, getContext } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import { convertFileSrc } from '@tauri-apps/api/core';
@@ -230,15 +231,8 @@
   // fetched per navigation and refreshed off the fs watcher. `null` outside a repo.
   let gitStatus = $state<FsGitStatus | null>(null);
   let gitSeq = 0;
-  // Glyph + colour + tooltip label per badge. Rendered as a tiny corner overlay
-  // on the entry icon (details + grid). 'ignored' dims the row instead.
-  const GIT_BADGE_GLYPH: Record<GitBadge, string> = {
-    modified: '●', added: '+', untracked: '?', deleted: '−', renamed: '»', conflicted: '!', ignored: '',
-  };
-  const GIT_BADGE_LABEL: Record<GitBadge, string> = {
-    modified: 'Modified', added: 'Staged', untracked: 'Untracked', deleted: 'Deleted',
-    renamed: 'Renamed', conflicted: 'Conflicted', ignored: 'Ignored',
-  };
+  // Badges (glyph + label, from `utils/git-badge`) render as a tiny corner overlay on the entry
+  // icon (details + grid). 'ignored' dims the row instead.
 
   type SortKey = 'name' | 'modified' | 'size' | 'type' | 'created' | 'extension';
   let sortKey = $state<SortKey>('name');

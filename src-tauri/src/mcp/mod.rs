@@ -23,6 +23,7 @@
 pub mod audit;
 pub mod catalog;
 pub mod consent;
+pub mod grants;
 pub mod policy;
 pub mod resources;
 

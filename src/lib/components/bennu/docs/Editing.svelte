@@ -411,6 +411,25 @@ import static org.junit.Assert.assertEquals;`, 'java')}</code></pre>
   <dd>Refused, with a note at the caret. That is the most a compiled string constant can hold however it is written — the compiler joins the pieces back into one constant — so no arrangement of that text would build.</dd>
 </dl>
 
+<h2>Git</h2>
+<p>
+  The editor's right-click menu has a <strong>Git</strong> submenu — Corvus answers all three, by file path, so the repository does not have to
+  be open there. They are also in the Command Palette.
+</p>
+<ul>
+  <li><strong>Show History</strong> lists the commits that touched the file, newest first; the diff of the selected one is beside it. <kbd>↑</kbd> /
+    <kbd>↓</kbd> walk the list.</li>
+  <li><strong>Show History for Selection</strong> does the same for the lines you highlighted — git follows those lines through moves and
+    renames, and each commit shows only what it did to them. It is greyed out until something is selected.</li>
+  <li><strong>Annotate with Git Blame</strong> draws a slim colour bar per commit in the left margin, so a run of lines reads as one change. At the start of each run, the author and the age follow the code — and on the line the caret is on, whatever run it belongs
+    to. Hover the bar for the whole commit; <strong>Editor → Commit message in Git Blame</strong> in the settings adds the subject to the text. <strong>Close Annotations</strong>
+    removes it.</li>
+</ul>
+<p>
+  All three read the <em>committed</em> file. Lines typed since the last commit have no author yet, and a selection is read by line number, so save and
+  commit first if you have been editing. After committing, close and reopen the annotations to refresh them.
+</p>
+
 <h2>Saving</h2>
 <p>
   <strong>Autosave is on by default</strong>: a changed file is written a short moment after you stop typing, when you switch tab,

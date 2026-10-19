@@ -25,7 +25,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
-use crate::mcp::{audit, consent, policy};
+use crate::mcp::{audit, consent, grants, policy};
 use crate::AppState;
 
 /// Which programs may be exposed, and how to bring each one up.
@@ -34,6 +34,7 @@ use crate::AppState;
 /// must never be the same act as adding its tools to the AI surface.
 const EXPOSABLE: &[(&str, fn(&AppHandle))] = &[
     ("bennu", crate::ipc::ensure_bennu_be),
+    ("corvus", crate::ipc::ensure_corvus_be),
     ("tyto", crate::ipc::ensure_tyto_be),
 ];
 
@@ -274,6 +275,22 @@ impl ToolCatalog for ShellCatalog {
                 // check that did not finish has not said yes.
                 policy::Verdict::Deny("Arbor could not complete its permission check.".into())
             })
+        };
+        // A grant stands in for the consent prompt and for nothing else: it is only tried when
+        // the policy said "ask", and a session-wide "allow" is checked first so that one
+        // doesn't burn a use. A `Deny` is never overridden here — see `grants`.
+        let verdict = if verdict == policy::Verdict::Ask
+            && !consent::granted_for_session(&routed.descriptor.name)
+        {
+            match grants::consume(&routed.descriptor.name, &policy::candidate_paths(&arguments)) {
+                Some(label) => {
+                    entry.detail = Some(format!("Covered by the grant \"{label}\"."));
+                    policy::Verdict::Allow
+                }
+                None => verdict,
+            }
+        } else {
+            verdict
         };
         match verdict {
             policy::Verdict::Deny(reason) => {

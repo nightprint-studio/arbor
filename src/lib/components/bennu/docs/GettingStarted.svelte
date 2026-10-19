@@ -123,6 +123,7 @@
   <li><strong>Navigation</strong> — the jumps that make a legacy codebase readable.</li>
   <li><strong>Validation &amp; problems</strong> — the squiggles that appear before anything is compiled.</li>
   <li><strong>Language servers</strong> — how every non-Java language is served, and how to install one.</li>
+  <li><strong>Git</strong> — a file's history, the history of a selection, and blame in the margin, from the editor's right-click menu.</li>
   <li><strong>Local history</strong> — the record of a file's own past, including the files that are gone.</li>
 </ul>
 

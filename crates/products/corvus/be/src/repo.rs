@@ -5,7 +5,7 @@
 //! and the git invoker (the program the shell pushed). Centralised so the error
 //! string and the "open by pushed path" shape live in one place.
 
-use corvus_core::prelude::CorvusState;
+use corvus_core::prelude::{is_ephemeral_tab, CorvusState};
 use corvus_git::prelude::{GitCli, SnapshotPolicy};
 use git2::Repository;
 
@@ -46,10 +46,16 @@ pub fn status_detect_renames(state: &CorvusState) -> bool {
 /// Resolve a tab to its repo path, or a clear error if the shell never
 /// registered it (should not happen for an open tab). Used by domains that
 /// shell out to the `git` CLI on a path (e.g. bisect) rather than open a handle.
+///
+/// A `path:<dir>` id (see [`crate::ephemeral`]) that isn't registered — never was, or its idle
+/// TTL ran out — is re-adopted on the spot instead of failing, so a headless caller never has
+/// to track expiry.
 pub fn repo_path(state: &CorvusState, tab_id: &str) -> Result<String, String> {
-    state
-        .repo_path(tab_id)
-        .ok_or_else(|| format!("repo not registered for tab '{tab_id}'"))
+    match state.repo_path(tab_id) {
+        Some(path) => Ok(path),
+        None if is_ephemeral_tab(tab_id) => crate::ephemeral::adopt(state, tab_id),
+        None => Err(format!("repo not registered for tab '{tab_id}'")),
+    }
 }
 
 /// Open the repo registered for `tab_id` as a libgit2 handle, or the same clear

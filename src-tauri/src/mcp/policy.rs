@@ -293,7 +293,7 @@ fn product_project_roots(state: &AppState, product: &str) -> Vec<PathBuf> {
 /// tools are declared by their own crates and a new one may call its path argument
 /// anything. Checking by *shape* means a new tool is in scope by default rather than
 /// unguarded by default — the safe direction to be wrong in.
-fn candidate_paths(value: &serde_json::Value) -> Vec<String> {
+pub(crate) fn candidate_paths(value: &serde_json::Value) -> Vec<String> {
     let mut out = Vec::new();
     collect_paths(value, &mut out);
     out
@@ -331,7 +331,7 @@ fn looks_absolute(s: &str) -> bool {
 /// cannot walk out of an allowed root. A path that does not exist yet (a file about to
 /// be created) falls back to a literal component comparison, which still rejects `..`
 /// because the components are compared in order.
-fn is_within(root: &Path, path: &Path) -> bool {
+pub(crate) fn is_within(root: &Path, path: &Path) -> bool {
     let root_c = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let path_c = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     if path_c.components().any(|c| matches!(c, std::path::Component::ParentDir)) {

@@ -2,10 +2,27 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use arbor_ipc::prelude::{EventSink, HostCaller};
 use arbor_plugin_api::prelude::{HookDispatcher, PluginValue};
 use serde_json::{Map, Value};
+
+/// Prefix of a headless tab id: `path:<normalised workdir>`. A caller with no UI tab names a
+/// repo by path, and the backend treats that id like any other `tab_id` — see
+/// [`CorvusState::register_ephemeral`].
+pub const EPHEMERAL_TAB_PREFIX: &str = "path:";
+
+/// Whether `tab_id` names a headless repo rather than a tab the shell registered.
+pub fn is_ephemeral_tab(tab_id: &str) -> bool {
+    tab_id.starts_with(EPHEMERAL_TAB_PREFIX)
+}
+
+/// One headless repo and when it was last asked about.
+struct Ephemeral {
+    path: String,
+    last_used: Instant,
+}
 
 /// The state the Corvus (git) backend owns — the seed of `corvus-be`.
 ///
@@ -24,6 +41,13 @@ pub struct CorvusState {
     /// shell pushes the open repos here (on repo open/close) and handlers resolve
     /// a tab to its path through [`repo_path`](Self::repo_path).
     repos: Mutex<HashMap<String, String>>,
+    /// Headless repos — resolved from a bare path by a caller with no tab (an editor, an
+    /// MCP client). Same `tab_id → path` shape as [`repos`](Self::repos), plus the last
+    /// time each was used so idle ones can be dropped ([`sweep_ephemeral`](Self::sweep_ephemeral)).
+    /// Kept apart from `repos` on purpose: that map IS the "what the user has open" set
+    /// (graph refresh, orchestrator, memory report), and a repo someone merely asked a
+    /// question about must never appear in it.
+    ephemeral: Mutex<HashMap<String, Ephemeral>>,
     /// Reverse channel back to the shell (`docs/reverse-channel.md`): present
     /// only when split into its own process (`corvus-be` wires a
     /// `FrameHostCaller`). In-process it's `None` — those handlers reach the
@@ -67,6 +91,7 @@ impl CorvusState {
         Self {
             events,
             repos: Mutex::new(HashMap::new()),
+            ephemeral: Mutex::new(HashMap::new()),
             host: None,
             hooks: Arc::new(HookDispatcher::new()),
             config: Mutex::new(Map::new()),
@@ -156,8 +181,58 @@ impl CorvusState {
 
     /// Resolve a tab to its repo path, or `None` if the shell hasn't registered
     /// it (a handler should surface a clear error in that case).
+    ///
+    /// A headless repo answers too, and the lookup counts as a use: it pushes the repo's
+    /// idle deadline back, which is what keeps one that is being queried alive.
     pub fn repo_path(&self, tab_id: &str) -> Option<String> {
-        self.repos.lock().ok().and_then(|r| r.get(tab_id).cloned())
+        if let Some(path) = self.repos.lock().ok().and_then(|r| r.get(tab_id).cloned()) {
+            return Some(path);
+        }
+        let mut eph = self.ephemeral.lock().ok()?;
+        let entry = eph.get_mut(tab_id)?;
+        entry.last_used = Instant::now();
+        Some(entry.path.clone())
+    }
+
+    /// Register (or refresh) a headless repo under `tab_id` (an [`EPHEMERAL_TAB_PREFIX`] id).
+    /// Idempotent: a second call only resets the idle clock.
+    pub fn register_ephemeral(&self, tab_id: String, path: String) {
+        if let Ok(mut eph) = self.ephemeral.lock() {
+            eph.insert(tab_id, Ephemeral { path, last_used: Instant::now() });
+        }
+    }
+
+    /// Drop every headless repo idle for longer than `ttl` as of `now`, together with the
+    /// per-tab caches [`deregister_repo`](Self::deregister_repo) clears. Returns the ids
+    /// dropped. `now` is a parameter so expiry is testable without sleeping.
+    pub fn sweep_ephemeral(&self, ttl: Duration, now: Instant) -> Vec<String> {
+        let expired: Vec<String> = match self.ephemeral.lock() {
+            Ok(mut eph) => {
+                let dead: Vec<String> = eph
+                    .iter()
+                    .filter(|(_, e)| now.saturating_duration_since(e.last_used) >= ttl)
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                for id in &dead {
+                    eph.remove(id);
+                }
+                dead
+            }
+            Err(_) => return Vec::new(),
+        };
+        for id in &expired {
+            self.deregister_repo(id);
+        }
+        expired
+    }
+
+    /// Snapshot of the headless repos as `(tab_id, repo_path)` — diagnostics and the memory
+    /// report only; they are deliberately absent from [`open_tabs`](Self::open_tabs).
+    pub fn ephemeral_tabs(&self) -> Vec<(String, String)> {
+        self.ephemeral
+            .lock()
+            .map(|e| e.iter().map(|(t, v)| (t.clone(), v.path.clone())).collect())
+            .unwrap_or_default()
     }
 
     /// Push (or replace) a config section, keyed by name. The shell sends the
@@ -315,6 +390,53 @@ mod tests {
         assert_eq!(state.config("recovery"), Some(json!({ "retention_days": 30 })));
         // Sections are independent.
         assert_eq!(state.config("diff"), None);
+    }
+
+    fn bare_state() -> CorvusState {
+        CorvusState::new(Arc::new(RecordingSink::default()))
+    }
+
+    #[test]
+    fn ephemeral_repo_resolves_but_is_not_an_open_tab() {
+        let state = bare_state();
+        state.register_ephemeral("path:/w/a".into(), "/w/a".into());
+        assert_eq!(state.repo_path("path:/w/a"), Some("/w/a".to_string()));
+        assert!(state.open_tabs().is_empty());
+        assert_eq!(state.ephemeral_tabs().len(), 1);
+    }
+
+    #[test]
+    fn sweep_drops_only_idle_ephemerals() {
+        let state = bare_state();
+        state.register_ephemeral("path:/w/a".into(), "/w/a".into());
+        state.register_repo("tab1".into(), "/w/open".into());
+        let ttl = Duration::from_secs(60);
+
+        // Within the ttl nothing goes.
+        assert!(state.sweep_ephemeral(ttl, Instant::now()).is_empty());
+        // Past it the headless repo goes; the shell-registered tab never does.
+        let later = Instant::now() + ttl * 2;
+        assert_eq!(state.sweep_ephemeral(ttl, later), vec!["path:/w/a".to_string()]);
+        assert_eq!(state.repo_path("path:/w/a"), None);
+        assert_eq!(state.repo_path("tab1"), Some("/w/open".to_string()));
+    }
+
+    #[test]
+    fn an_entry_inside_its_ttl_survives_a_sweep() {
+        let state = bare_state();
+        state.register_ephemeral("path:/w/a".into(), "/w/a".into());
+        let ttl = Duration::from_secs(60);
+        // A lookup counts as a use, and nothing is idle yet a second short of the ttl.
+        let _ = state.repo_path("path:/w/a");
+        let nearly = Instant::now() + ttl - Duration::from_secs(1);
+        assert!(state.sweep_ephemeral(ttl, nearly).is_empty());
+        assert!(state.repo_path("path:/w/a").is_some());
+    }
+
+    #[test]
+    fn ephemeral_prefix_is_recognised() {
+        assert!(is_ephemeral_tab("path:C:/x"));
+        assert!(!is_ephemeral_tab("tab-1"));
     }
 
     #[test]

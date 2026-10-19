@@ -171,6 +171,25 @@
   {/if}
 </div>
 
+<!-- ── Headless repositories ────────────────────────────────────────────── -->
+<div class="card">
+  <div class="card-section-title"><Database size={12} /> Headless repositories</div>
+
+  <FormRow
+    label="Keep alive for"
+    description="Repositories asked about by path alone — Git Blame in Bennu, AI tools — stay registered this long after their last use, so repeated requests reuse their cached data. They never appear as tabs."
+  >
+    <NumberStepper
+      bind:value={cfg.headless_repo_ttl_secs}
+      min={30}
+      step={60}
+      ariaLabel="Headless repository keep-alive (seconds)"
+      onchange={persist}
+    />
+    <span class="unit-label">s</span>
+  </FormRow>
+</div>
+
 <!-- ── Repository Browser cache ─────────────────────────────────────────── -->
 <div class="card">
   <div class="card-section-title"><Cloud size={12} /> Repository Browser</div>

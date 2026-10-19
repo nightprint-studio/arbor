@@ -12,7 +12,7 @@
   is the fastest way to conclude the feature is broken.
 -->
 <script lang="ts">
-  import { Bot, FolderTree, ShieldCheck } from 'lucide-svelte';
+  import { Bot, FolderTree, KeyRound, ShieldCheck } from 'lucide-svelte';
 
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -21,6 +21,7 @@
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import { mcpStore } from '$lib/stores/mcp.svelte';
   import McpEndpointSection from './McpEndpointSection.svelte';
+  import McpGrantsSection from './McpGrantsSection.svelte';
   import McpPermissionsSection from './McpPermissionsSection.svelte';
   import McpProjectsSection from './McpProjectsSection.svelte';
 
@@ -48,6 +49,7 @@
     { id: 'projects',    label: 'Projects',    icon: FolderTree,
       badge: cfg.projects.length || undefined },
     { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
+    { id: 'grants',      label: 'Grants',      icon: KeyRound },
   ]);
 </script>
 
@@ -89,6 +91,8 @@
         <McpEndpointSection {guard} />
       {:else if page === 'projects'}
         <McpProjectsSection {guard} />
+      {:else if page === 'grants'}
+        <McpGrantsSection {guard} />
       {:else}
         <McpPermissionsSection {guard} />
       {/if}

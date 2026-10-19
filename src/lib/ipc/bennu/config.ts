@@ -56,6 +56,8 @@ export interface BennuConfig {
   markdown_live_preview: boolean;
   /** Show Local History's diff side by side rather than as a unified patch. */
   history_diff_split: boolean;
+  /** Add the commit message to the Git Blame text after a line. */
+  blame_show_message: boolean;
   /** Minutes the DTO Lab's JVM may go without a question before it is stopped. */
   dtolab_idle_minutes: number;
   /** Which SQL dialect `.sql` buffers are highlighted as — `'oracle'` / `'postgres'` /

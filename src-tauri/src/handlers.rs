@@ -19,6 +19,7 @@ macro_rules! invoke_handlers {
             // command here as (program, method, params); the shell router
             // dispatches to the right backend. See `crate::ipc`.
             $crate::commands::rpc_commands::rpc,
+            $crate::commands::rpc_commands::ensure_product_backend,
             // Appearance preferences (window control style, font scale, …)
             $crate::commands::config_commands::set_explorer_config,
             // Tyto (screen recorder) preferences — opt-in OS-global shortcut
@@ -128,6 +129,10 @@ macro_rules! invoke_handlers {
             $crate::commands::mcp_commands::mcp_consent_respond,
             $crate::commands::mcp_commands::mcp_regenerate_token,
             $crate::commands::mcp_commands::mcp_revoke_session_grants,
+            $crate::commands::mcp_commands::mcp_grant_mint,
+            $crate::commands::mcp_commands::mcp_grant_list,
+            $crate::commands::mcp_commands::mcp_grant_revoke,
+            $crate::commands::mcp_commands::mcp_grant_revoke_all,
             $crate::commands::mcp_commands::get_mcp_tools,
             $crate::commands::mcp_commands::get_mcp_clients,
             $crate::commands::mcp_commands::get_mcp_audit,

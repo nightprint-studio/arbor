@@ -7,11 +7,22 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+- **Tyto no longer keeps `ffprobe` and `ffplay`.** After downloading ffmpeg it deletes the two tools it never runs, saving about 200 MB.
+- **Bennu paints undefined names red instead of underlining them.** An unknown variable, method, class, field or import is coloured red where it is written; hover and quick fixes work as before.
+- **Bennu's editor right-click menu is grouped and coloured** — edit, navigate, generate, save, history — like Corvus's commit menu.
+
 ### Fixed
 - **A problem in Bennu's Problems panel opens at the right line.** In a file with accents or other non-ASCII characters, clicking a problem of the open file landed further down than the error.
 - **Bennu no longer reports Lombok-managed fields as unused.** Private fields of a `@Data`, `@Getter`, `@Value`, `@Builder`… class are read by generated code, and a `@SuperBuilder` subclass no longer reports a missing super constructor.
 
 ### Added
+- **Git Blame in Bennu.** *Git → Annotate with Git Blame* draws a slim colour bar per commit in the margin and, at the start of each run of lines, who changed it and when (the commit message is an option). Corvus supplies it — no repository needs to be open there.
+- **Changed files stand out in Bennu's project tree.** Modified files are amber, newly staged ones green, untracked ones blue, each with a small mark after the name; a folder holding changes shows a dot in the strongest colour beneath it.
+- **Local History for a selection in Bennu.** *Local History → Show History for Selection* lists only the revisions that changed the highlighted lines.
+- **Git history from Bennu's editor.** The new *Git* submenu adds *Show History* (the commits that touched the file) and *Show History for Selection* (the commits that touched the highlighted lines, followed through moves), each with the diff of the selected commit.
+- **An AI client can read and commit to a repository.** The new Corvus tools give status, history, blame (folded into runs) and *Commit staged changes* — never push or amend. Per-project permissions work as for Bennu.
+- **Grants: let an AI client commit while you are away.** *AI tool access → Grants* pre-approves named tools on one project for a number of uses and/or a time limit. A grant replaces the confirmation prompt, never a refusal, and lives in memory only — quitting Arbor ends it.
 - **Import static in Bennu.** A static field or method written without its class (`MAX_RETRIES`, `assertThat(…)`) gets *Import static '…'* on Alt+Enter, one entry per class that declares it — project, JDK and libraries — ranked like class imports.
 - **An AI client can record the screen as a video.** The new `tyto_record_video` records a monitor, a window (by part of its title) or a rectangle of a monitor for a set number of seconds, and the screenshot and frame-sequence tools now accept a rectangle too. System audio is recorded only when asked for, and the microphone never.
 - **Bennu understands `.env` files.** `.env`, `.env.*` and `*.env` are coloured, complete the variable names Spring Boot binds (with the property each overrides) and their closed values, and show the property, type and default on hover.

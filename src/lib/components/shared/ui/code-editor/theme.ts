@@ -169,6 +169,12 @@ export const codeEditorTheme = EditorView.theme(
       padding: '2px 6px', maxWidth: '520px', maxHeight: '340px', overflowY: 'auto',
     },
     '.cm-diagnostic': { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+    // `emphasis: 'text'` — the span is recoloured instead of underlined. Three classes beat the
+    // lint plugin's own two-class squiggle rule, so no `!important` is needed.
+    '.cm-lintRange.cm-lint-text': { backgroundImage: 'none', paddingBottom: '0' },
+    '.cm-lintRange.cm-lint-text-error': { color: 'var(--error)' },
+    '.cm-lintRange.cm-lint-text-warning': { color: 'var(--warning)' },
+    '.cm-lintRange.cm-lint-text-info': { color: 'var(--info)' },
     // The lint list (the panel) has the same exposure, one row per diagnostic.
     '.cm-panel.cm-panel-lint ul': { maxHeight: '180px' },
     '.cm-panel.cm-panel-lint li': { overflowWrap: 'anywhere' },

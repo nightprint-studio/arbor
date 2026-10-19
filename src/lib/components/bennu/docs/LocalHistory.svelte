@@ -49,6 +49,14 @@
   </div>
 </div>
 
+<h2>History of a selection</h2>
+<p>
+  Highlight some lines and choose <strong>Local History → Show History for Selection</strong> (editor menu or palette). The list then holds only the
+  revisions that <em>changed those lines</em> — each is the text the lines had before somebody changed them — and the diff shows only the hunks that touch
+  them, against what is on disk. The most recent 120 revisions are examined; the footer says so when there are more. Restoring is off in this mode,
+  because it would put back the whole file, not the lines.
+</p>
+
 <h2>When a revision is recorded</h2>
 <table>
   <thead><tr><th>When</th><th>The row says</th></tr></thead>

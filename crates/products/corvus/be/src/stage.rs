@@ -37,7 +37,7 @@ use crate::repo::{git, open, snapshot_policy};
 // ---------------------------------------------------------------------------
 
 #[arbor_rpc::handler]
-fn commit(state: &CorvusState, tab_id: String, message: String, amend: bool) -> Result<String, String> {
+pub(crate) fn commit(state: &CorvusState, tab_id: String, message: String, amend: bool) -> Result<String, String> {
     // ── Pre-commit veto ────────────────────────────────────────────────
     // Plugins subscribed to `corvus:pre_commit` may reject the commit by
     // returning a non-empty string from their handler. The dispatcher

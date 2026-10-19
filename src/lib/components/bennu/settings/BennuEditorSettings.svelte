@@ -85,6 +85,9 @@
   <FormRow label="Usage counts" description="Draw how many places use each class, method and field above it, and fade the name of one nothing reaches. Java only — it is the whole-project reference index answering, so it says nothing until the index is built. A member carrying an annotation, one that overrides something, and main are never faded: a framework can reach any of them by name, and an index cannot see that.">
     <Toggle checked={s.usageCounts} onchange={(v) => s.setUsageCounts(v)} ariaLabel="Usage counts" />
   </FormRow>
+  <FormRow label="Commit message in Git Blame" description="Add the commit's subject to the author and age drawn after a line when Git Blame is on. Off by default — the message is always in the hover.">
+    <Toggle checked={s.blameShowMessage} onchange={(v) => s.setBlameShowMessage(v)} ariaLabel="Commit message in Git Blame" />
+  </FormRow>
   <FormRow label="Word wrap" description="Wrap long lines to the viewport instead of scrolling horizontally.">
     <Toggle checked={s.wordWrap} onchange={(v) => s.setWordWrap(v)} ariaLabel="Word wrap" />
   </FormRow>

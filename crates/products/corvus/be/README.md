@@ -115,6 +115,16 @@ keyring-derived metadata cross back over the reverse channel
 (`__save_credential` / `__delete_credential` / `__jira_auth_meta`). The
 `SplitBroker` routes per-method, so this is invisible to the caller.
 
+**Headless repos.** A caller with no UI tab (Bennu's blame gutter, the MCP tools) names a repo
+by path: `ephemeral.rs` turns `path:<dir>` into a registered tab id on first use and a sweeper
+thread drops it after `cache.headless_repo_ttl_secs` idle. Every handler works on such an id
+unchanged; they are kept out of `open_tabs()`. `repo_tab_for_path` and `get_file_blame_by_path`
+are the tab-less doors, joined by `file_history_by_path`, `line_history_by_path` (`git log -L`) and
+`file_commit_patch_by_path` in `file_history.rs` — the backend of Bennu's Git submenu.
+
+**MCP tools.** `mcp_tools.rs` publishes `corvus_status`, `corvus_log`, `corvus_blame` and
+`corvus_commit` via `#[handler(mcp(...))]`; the shell lists `corvus` in its exposable programs.
+
 If this binary isn't built, the shell falls back to a pure in-process loopback
 (it keeps in-process copies of these domains too) — the app still works.
 

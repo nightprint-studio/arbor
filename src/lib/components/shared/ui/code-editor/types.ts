@@ -88,6 +88,13 @@ export interface EditorDiagnostic {
    * cannot be reworded. Absent for a diagnostic whose provider has no catalogue.
    */
   code?: string;
+  /**
+   * How the span is drawn: a wavy underline (default) or the **text itself recoloured** by
+   * severity. The recoloured form suits a diagnostic that says "this name is not a thing" —
+   * the word is the problem, and painting it reads more directly than a line under it. Hover,
+   * quick-fixes and the lint list behave the same either way.
+   */
+  emphasis?: 'underline' | 'text';
   /** Optional quick-fixes (e.g. spell-check "Add to dictionary" / "Replace with …"). */
   actions?: EditorDiagnosticAction[];
 }

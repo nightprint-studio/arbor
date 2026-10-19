@@ -41,6 +41,7 @@
     preferencesCompartment, type CodeEditorPreferences, type CompletionPreferences,
   } from './extensions';
   import { minimapExtension } from './minimap';
+  import { lineAnnotationExtension, pushLineAnnotations, type LineAnnotation } from './line-annotations';
   import { makeByteToU16 } from './highlight';
   import { insertWithStops } from './snippet-stops';
   import {
@@ -84,6 +85,7 @@
     marks = [],
     lineHighlights = [],
     gutterMarks = [],
+    lineAnnotations = [],
     onGutterClick,
     onGutterContext,
     flagMarks,
@@ -233,6 +235,12 @@
      * no gutter at all, not an empty column.
      */
     gutterMarks?: readonly { line: number; glyph: string; tooltip: string; className?: string }[];
+    /**
+     * Per-line annotations — `git blame` as a slim coloured bar in the left margin plus the
+     * caret line's author and age after the code. Empty by default, and an empty set takes no
+     * width. See `line-annotations.ts`.
+     */
+    lineAnnotations?: readonly LineAnnotation[];
     /** A gutter icon was clicked: its 1-based line, plus the event — so a host that has more
      *  than one thing to offer can anchor a menu where the pointer is instead of guessing. */
     onGutterClick?: (line: number, event: MouseEvent) => void;
@@ -417,7 +425,12 @@
       from = Math.max(0, Math.min(from, len));
       to = Math.max(from, Math.min(to, len));
       if (to === from) to = Math.min(len, from + 1); // give the marker some width
-      out.push({ from, to, severity: e.severity, message: clampMessage(e.message), actions: e.actions });
+      out.push({
+        from, to, severity: e.severity, message: clampMessage(e.message), actions: e.actions,
+        // The lint plugin draws the squiggle from the severity class; the theme cancels it for
+        // this one and recolours the text instead (see `theme.ts`).
+        markClass: e.emphasis === 'text' ? `cm-lint-text cm-lint-text-${e.severity}` : undefined,
+      });
     }
     return out;
   }
@@ -549,6 +562,7 @@
     view.dispatch({ effects: setGutter.of(RangeSet.of(ranges, true)) });
   }
   $effect(() => { void gutterMarks; pushGutter(); });
+  $effect(() => { const set = lineAnnotations; if (view) pushLineAnnotations(view, set); });
 
   /**
    * The gutter extension. Always installed, never conditional on the current marks: they
@@ -745,6 +759,8 @@
         // and hardest to hit by accident, which is where every IDE puts breakpoints. Gutter
         // order follows extension precedence, and earlier is further left.
         flagGutter,
+        // Right of the toggles and left of the line numbers, where an IDE draws blame.
+        lineAnnotationExtension,
         extensions,
         markField,
         lineMarkField,
@@ -1545,6 +1561,18 @@
     if (!view) return { from: 0, to: 0, head: 0, empty: true };
     const s = view.state.selection.main;
     return { from: s.from, to: s.to, head: s.head, empty: s.empty };
+  }
+
+  /** The 1-based line span the selection covers. A selection that ends at the very start of a line
+   *  does not include that line — the way every editor reports "the lines I highlighted". */
+  export function selectionLines(): { start: number; end: number; empty: boolean } {
+    if (!view) return { start: 1, end: 1, empty: true };
+    const s = view.state.selection.main;
+    const doc = view.state.doc;
+    const start = doc.lineAt(s.from).number;
+    const endLine = doc.lineAt(s.to);
+    const end = !s.empty && s.to === endLine.from && endLine.number > start ? endLine.number - 1 : endLine.number;
+    return { start, end, empty: s.empty };
   }
 
   /** The primary selection as **UTF-8 byte offsets** — the byte-aware sibling of

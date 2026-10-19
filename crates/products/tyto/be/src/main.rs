@@ -51,6 +51,18 @@ mod agent;
 // What this backend holds in memory, for the process monitor's `__memory` breakdown.
 mod memory_report;
 
+/// Delete `ffprobe` and `ffplay` from the folder the ffmpeg archive was just unpacked into.
+///
+/// The archive ships all three, and `ffmpeg-sidecar` unpacks it whole; only `ffmpeg` is ever run
+/// (a recording's duration is read from the MP4 header, not by `ffprobe`), so the other two are
+/// about 200 MB of dead weight. Best-effort: a file that won't go is left alone.
+fn prune_unused_ffmpeg_tools() {
+    let Ok(dir) = ffmpeg_sidecar::paths::sidecar_dir() else { return };
+    for tool in ["ffprobe", "ffplay"] {
+        let _ = std::fs::remove_file(dir.join(format!("{tool}{}", std::env::consts::EXE_SUFFIX)));
+    }
+}
+
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, the plugin dir and
     // any `tyto_config_dir()` / `tyto_data_dir()` would silently resolve the
@@ -62,8 +74,13 @@ fn main() {
     // first run). A failure here isn't fatal — recording just errors until an
     // ffmpeg is on PATH / bundled beside the binary.
     std::thread::spawn(|| {
-        if let Err(e) = ffmpeg_sidecar::download::auto_download() {
-            eprintln!("tyto-be: ffmpeg auto-provision skipped: {e}");
+        let had_ffmpeg = ffmpeg_sidecar::command::ffmpeg_is_installed();
+        match ffmpeg_sidecar::download::auto_download() {
+            // Only after a download that actually happened: a copy the user put there
+            // themselves is theirs to keep.
+            Ok(()) if !had_ffmpeg => prune_unused_ffmpeg_tools(),
+            Ok(()) => {}
+            Err(e) => eprintln!("tyto-be: ffmpeg auto-provision skipped: {e}"),
         }
     });
 

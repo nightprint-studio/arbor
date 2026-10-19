@@ -75,6 +75,9 @@ export interface CacheConfig {
   /** TTL (seconds) for the Repository Browser repo list cache.
    *  Zero disables the cache. */
   repo_browser_ttl_secs: number;
+  /** Seconds a repo that was named by path alone (Bennu's blame, the MCP tools — no tab
+   *  involved) stays registered after its last use. */
+  headless_repo_ttl_secs: number;
 }
 
 export interface ActivityBarItemConfig {

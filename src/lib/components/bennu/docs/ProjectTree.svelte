@@ -39,6 +39,26 @@
   <code>.git</code> are the exception — those are skipped outright, because listing them costs more than the rest of the tree.
 </p>
 
+<h3>Changed files</h3>
+<p>
+  A file that differs from what is committed — what a push would carry — shows it in the tree, in the colours the file explorer uses:
+</p>
+<table>
+  <thead><tr><th>Name</th><th>Mark</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td>Amber</td><td>●</td><td>Modified</td></tr>
+    <tr><td>Green</td><td>+</td><td>New and staged</td></tr>
+    <tr><td>Blue</td><td>?</td><td>New and untracked (everything inside an untracked folder too)</td></tr>
+    <tr><td>Theme accent</td><td>»</td><td>Renamed</td></tr>
+    <tr><td>Red</td><td>!</td><td>In conflict</td></tr>
+  </tbody>
+</table>
+<p>
+  A folder keeps its name and gets a dot in the strongest colour beneath it, so you can see <em>where</em> the changes are without the whole tree turning
+  coloured. The marks refresh when a save settles, when the tree reloads and when the window regains focus. They come from Corvus, by path — the
+  repository does not have to be open there.
+</p>
+
 <h3>Packages</h3>
 <p>
   Inside a <strong>source root</strong> — <code>src/main/java</code>, <code>src/test/java</code> and the matching
