@@ -1059,9 +1059,20 @@ impl Ctx<'_> {
             // exists to find a class — answers nothing for it. The array is still perfectly typed.
             primitive_type_text(&text).map(TypeRef::simple)
         })?;
-        // One dimension per `[` on the `new`, which is where the depth is written: the `type` field
-        // carries only the element.
-        let dims = node_text(node, self.bytes)?.matches('[').count();
+        // One dimension per bracket pair on the `new`, which is where the depth is written: the
+        // `type` field carries only the element. Counted from the `dimensions_expr` (`[n]`) and
+        // `dimensions` (`[]`) children, never from the node's text — an initializer's body can
+        // hold any number of `[` of its own (`new X[]{ new Y() { void f(Z[] a) {} } }` is one
+        // dimension, not three).
+        let mut walk = node.walk();
+        let dims: usize = node
+            .named_children(&mut walk)
+            .map(|c| match c.kind() {
+                "dimensions_expr" => 1,
+                "dimensions" => node_text(&c, self.bytes).map_or(0, |t| t.matches('[').count()),
+                _ => 0,
+            })
+            .sum();
         out.dims = out.dims.saturating_add(dims as u8);
         Some(out)
     }

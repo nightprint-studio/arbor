@@ -25,7 +25,60 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tyto_core::prelude::TytoState;
 
-use crate::capture::{self, session::StartConfig, CaptureTarget, RecordingOutput};
+use crate::capture::{self, session::StartConfig, target::CropRect, CaptureTarget, RecordingOutput};
+
+/// A rectangle of a monitor to capture — what a person would drag out with the region tool.
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+pub struct RegionArgs {
+    /// Left edge, in physical pixels from the monitor's top-left corner.
+    pub x: i32,
+    /// Top edge, in physical pixels from the monitor's top-left corner.
+    pub y: i32,
+    /// Width in physical pixels.
+    pub width: u32,
+    /// Height in physical pixels.
+    pub height: u32,
+}
+
+/// What a tool call's `target_kind` / `source` / `region` resolve to, ready for the engine.
+struct ResolvedTarget {
+    kind: String,
+    source_id: Option<String>,
+    region: Option<CropRect>,
+}
+
+/// Turn the three target arguments every capture verb shares into one answer.
+///
+/// One place for it because the screenshot and both recordings take the same three and the
+/// rules are the same: a window may be named by a fragment of its title, and a `region` is a
+/// rectangle **of a monitor**, so it must come with its rectangle and nothing else may. A
+/// rectangle sent with `monitor` is refused rather than ignored — a caller who thinks it asked for
+/// a crop and got the whole screen has been answered wrongly, not conservatively.
+fn resolve_target(
+    kind: Option<&str>,
+    source: Option<&str>,
+    region: Option<RegionArgs>,
+) -> Result<ResolvedTarget, String> {
+    let kind = kind.unwrap_or("monitor");
+    let source_id = match (kind, source) {
+        ("window", Some(needle)) if !needle.starts_with("win-") => Some(resolve_window(needle)?),
+        (_, s) => s.map(str::to_string),
+    };
+    let region = match (kind, region) {
+        ("region", Some(r)) if r.width > 0 && r.height > 0 => {
+            Some(CropRect { x: r.x, y: r.y, w: r.width, h: r.height })
+        }
+        ("region", Some(_)) => return Err("region needs a width and a height above zero".into()),
+        ("region", None) => {
+            return Err("target_kind \"region\" needs `region`: {x, y, width, height} in physical pixels of the monitor".into())
+        }
+        (_, Some(_)) => {
+            return Err("`region` only goes with target_kind \"region\"; use that to capture part of a monitor".into())
+        }
+        (_, None) => None,
+    };
+    Ok(ResolvedTarget { kind: kind.to_string(), source_id, region })
+}
 
 /// The long edge a screenshot is scaled down to before it is sent.
 ///
@@ -59,14 +112,17 @@ pub struct InlineImage {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ScreenshotArgs {
     /// What to capture: `monitor` for a whole display, `window` for one application
-    /// window. Defaults to `monitor`.
+    /// window, `region` for a rectangle of a monitor. Defaults to `monitor`.
     #[serde(default)]
     pub target_kind: Option<String>,
-    /// Which one. For `monitor`, a `mon-<id>` from `tyto_list_sources` — omit for the
-    /// primary display. For `window`, either a `win-<id>` or a case-insensitive
+    /// Which one. For `monitor` or `region`, a `mon-<id>` from `tyto_list_sources` — omit
+    /// for the primary display. For `window`, either a `win-<id>` or a case-insensitive
     /// fragment of the window title, e.g. "Invoice" or "Visual Studio".
     #[serde(default)]
     pub source: Option<String>,
+    /// The rectangle, required with `target_kind: "region"` and refused with anything else.
+    #[serde(default)]
+    pub region: Option<RegionArgs>,
     /// Scale the image down so its long edge is at most this many pixels. Defaults to
     /// 1568, the point past which detail stops being worth its cost in context.
     #[serde(default)]
@@ -89,21 +145,10 @@ pub struct ScreenshotArgs {
     output = image,
 ))]
 fn tyto_screenshot(_state: &TytoState, args: ScreenshotArgs) -> Result<InlineImage, String> {
-    let kind = args.target_kind.as_deref().unwrap_or("monitor");
-    if kind == "region" {
-        // A region is a rectangle the user dragged; an agent has no such gesture, and
-        // inventing one from coordinates it cannot see would be worse than refusing.
-        return Err("region capture needs an interactive selection; capture a monitor or a window instead".into());
-    }
-
-    // Resolve a title fragment to a real source id, so the caller can say "Invoice"
+    // A title fragment becomes a real source id here, so the caller can say "Invoice"
     // rather than "win-132498".
-    let source_id = match (kind, args.source.as_deref()) {
-        ("window", Some(needle)) if !needle.starts_with("win-") => Some(resolve_window(needle)?),
-        (_, s) => s.map(str::to_string),
-    };
-
-    let target = CaptureTarget::resolve(kind, source_id.as_deref(), None)?;
+    let t = resolve_target(args.target_kind.as_deref(), args.source.as_deref(), args.region)?;
+    let target = CaptureTarget::resolve(&t.kind, t.source_id.as_deref(), t.region)?;
     let (rgba, width, height) = target.grab_rgba()?;
     let image = image::RgbaImage::from_raw(width, height, rgba)
         .ok_or_else(|| "screenshot: buffer/size mismatch".to_string())?;
@@ -186,14 +231,17 @@ pub struct RecordFramesArgs {
     /// has finished, not when it starts.
     pub seconds: u32,
     /// What to capture: `monitor` for a whole display, `window` for one application
-    /// window. Defaults to `monitor`.
+    /// window, `region` for a rectangle of a monitor. Defaults to `monitor`.
     #[serde(default)]
     pub target_kind: Option<String>,
-    /// Which one. For `monitor`, a `mon-<id>` from `tyto_list_sources` — omit for the
-    /// primary display. For `window`, either a `win-<id>` or a case-insensitive
+    /// Which one. For `monitor` or `region`, a `mon-<id>` from `tyto_list_sources` — omit
+    /// for the primary display. For `window`, either a `win-<id>` or a case-insensitive
     /// fragment of the window title.
     #[serde(default)]
     pub source: Option<String>,
+    /// The rectangle, required with `target_kind: "region"` and refused with anything else.
+    #[serde(default)]
+    pub region: Option<RegionArgs>,
     /// Frames sampled per second, at most. Fewer are written whenever the screen
     /// does not change. Defaults to the user's configured value.
     #[serde(default)]
@@ -245,29 +293,22 @@ pub struct FrameSequenceSummary {
     safety = write,
 ))]
 fn tyto_record_frames(state: &TytoState, args: RecordFramesArgs) -> Result<FrameSequenceSummary, String> {
-    let kind = args.target_kind.as_deref().unwrap_or("monitor");
-    if kind == "region" {
-        return Err("region capture needs an interactive selection; record a monitor or a window instead".into());
-    }
     let seconds = args.seconds.clamp(1, MAX_RECORD_SECONDS);
-    let source_id = match (kind, args.source.as_deref()) {
-        ("window", Some(needle)) if !needle.starts_with("win-") => Some(resolve_window(needle)?),
-        (_, s) => s.map(str::to_string),
-    };
+    let t = resolve_target(args.target_kind.as_deref(), args.source.as_deref(), args.region)?;
 
     let cfg = tyto_core::config::load();
     let sample_fps = args.sample_fps.unwrap_or(cfg.frames.sample_fps).clamp(1, 60);
     let start = StartConfig {
-        target_kind: kind.to_string(),
-        source_id: source_id.clone(),
-        region: None,
+        target_label: t.source_id.clone().unwrap_or_else(|| t.kind.clone()),
+        target_kind: t.kind,
+        source_id: t.source_id,
+        region: t.region,
         fps: sample_fps,
         // A still sequence carries no audio, so neither is even brought up.
         mic_id: None,
         system_audio: false,
         out_dir: capture::output_dir(),
         filename_template: cfg.output.filename_template.clone(),
-        target_label: source_id.unwrap_or_else(|| kind.to_string()),
         output: RecordingOutput::Frames {
             format: args.format.unwrap_or(cfg.frames.format),
             sample_fps,
@@ -277,7 +318,7 @@ fn tyto_record_frames(state: &TytoState, args: RecordFramesArgs) -> Result<Frame
 
     let sink = state.event_sink();
     capture::ENGINE.start(start, sink.clone())?;
-    drive_recording(sink.as_ref(), seconds);
+    drive_recording(sink.as_ref(), seconds, "Recording frames");
     let dir = capture::ENGINE.stop()?;
 
     let m = capture::frames::read_manifest(&dir)?;
@@ -298,15 +339,115 @@ fn tyto_record_frames(state: &TytoState, args: RecordFramesArgs) -> Result<Frame
 /// The narration is the point: the caller is blocked for up to two minutes, and a
 /// tool that says nothing for that long is one the client cannot distinguish from a
 /// hang. The Tyto window is filling its own panel from the very same run.
-fn drive_recording(sink: &dyn EventSink, seconds: u32) {
+fn drive_recording(sink: &dyn EventSink, seconds: u32, what: &str) {
     for elapsed in 1..=seconds {
         std::thread::sleep(Duration::from_secs(1));
         sink.progress(
-            &format!("Recording frames — {elapsed}s of {seconds}s"),
+            &format!("{what} — {elapsed}s of {seconds}s"),
             Some(elapsed as u64),
             Some(seconds as u64),
         );
     }
+}
+
+// ── Video recording ──────────────────────────────────────────────────────────
+
+/// Args for [`tyto_record_video`].
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RecordVideoArgs {
+    /// How long to record, in seconds (1-120). The call returns when the recording has
+    /// finished, not when it starts.
+    pub seconds: u32,
+    /// What to capture: `monitor` for a whole display, `window` for one application
+    /// window, `region` for a rectangle of a monitor. Defaults to `monitor`.
+    #[serde(default)]
+    pub target_kind: Option<String>,
+    /// Which one. For `monitor` or `region`, a `mon-<id>` from `tyto_list_sources` — omit
+    /// for the primary display. For `window`, either a `win-<id>` or a case-insensitive
+    /// fragment of the window title.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// The rectangle, required with `target_kind: "region"` and refused with anything else.
+    #[serde(default)]
+    pub region: Option<RegionArgs>,
+    /// Frames per second (1-240). Defaults to the user's configured value.
+    #[serde(default)]
+    pub fps: Option<u32>,
+    /// Encoding quality preset, as the Tyto settings name them. Defaults to the user's.
+    #[serde(default)]
+    pub quality: Option<String>,
+    /// Also record what the computer is playing. **Off unless asked for**: a model that
+    /// records the screen has not been asked to capture a call or a song the user has on.
+    /// The microphone is never recorded by this verb.
+    #[serde(default)]
+    pub system_audio: Option<bool>,
+}
+
+/// What a finished video recording is.
+#[derive(Debug, Serialize)]
+pub struct VideoSummary {
+    /// The capture's name in the library.
+    pub name: String,
+    /// The mp4 on disk.
+    pub path: String,
+    /// How long it ran, in seconds.
+    pub seconds: u32,
+    /// Bytes on disk.
+    pub size_bytes: u64,
+}
+
+/// Record the screen, one window or part of a monitor for a fixed number of seconds as an
+/// **H.264 video**, and return where the file landed.
+///
+/// Use it to document something that moves — a flow through an application, a reproduction of
+/// a bug that a still would not show. For a few seconds that must stay pixel-exact, or that you
+/// want to read frame by frame, `tyto_record_frames` is the better tool: video compression softens
+/// text. A window may be named by part of its title; a part of a monitor is `target_kind:
+/// "region"` with its rectangle.
+///
+/// The call blocks for the requested duration and the file is saved to the user's capture
+/// library, visible in Tyto like any other. It fails rather than interfering if a recording is
+/// already running — check `tyto_recording_state` first when unsure. System audio is recorded only
+/// if `system_audio` is true, and the microphone never.
+#[arbor_rpc::handler(mcp(
+    name = "tyto_record_video",
+    title = "Record the screen as a video",
+    safety = write,
+))]
+fn tyto_record_video(state: &TytoState, args: RecordVideoArgs) -> Result<VideoSummary, String> {
+    let seconds = args.seconds.clamp(1, MAX_RECORD_SECONDS);
+    let t = resolve_target(args.target_kind.as_deref(), args.source.as_deref(), args.region)?;
+
+    let mut cfg = tyto_core::config::load();
+    // The same path a saved setting takes, so the bitrate follows the quality asked for.
+    if let Some(q) = args.quality.clone() {
+        cfg.encoding.quality = q;
+        cfg.normalize();
+    }
+    let start = StartConfig {
+        target_label: t.source_id.clone().unwrap_or_else(|| t.kind.clone()),
+        target_kind: t.kind,
+        source_id: t.source_id,
+        region: t.region,
+        fps: args.fps.unwrap_or(cfg.capture.fps).clamp(1, 240),
+        mic_id: None,
+        system_audio: args.system_audio.unwrap_or(false),
+        out_dir: capture::output_dir(),
+        filename_template: cfg.output.filename_template.clone(),
+        output: RecordingOutput::Video { bitrate_kbps: cfg.encoding.bitrate_kbps },
+    };
+
+    let sink = state.event_sink();
+    capture::ENGINE.start(start, sink.clone())?;
+    drive_recording(sink.as_ref(), seconds, "Recording video");
+    let path = capture::ENGINE.stop()?;
+
+    Ok(VideoSummary {
+        name: path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default(),
+        size_bytes: std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
+        path: path.to_string_lossy().to_string(),
+        seconds,
+    })
 }
 
 /// Args for [`tyto_read_frame`].

@@ -329,10 +329,12 @@
     has finished reading the project.</li>
   <li><strong>Tyto</strong> — list capturable screens and windows, capture one (by window
     title, returned as an image), read the on-screen accessibility layout, check whether a
-    recording is running, record the screen for a fixed number of seconds as a frame
-    sequence, read any one of those frames back — by index or by the moment it was on
-    screen — and fold a whole sequence into a <b>sprite atlas</b>: PNG pages plus a sheet
-    that carries every frame's position and duration, ready for a game engine. Recording
-    and exporting write into your capture library and need your approval; recording
+    recording is running, record the screen for a fixed number of seconds — as an
+    <b>mp4 video</b> or as a frame sequence — read any one of those frames back — by index or
+    by the moment it was on screen — and fold a whole sequence into a <b>sprite atlas</b>: PNG pages plus a sheet
+    that carries every frame's position and duration, ready for a game engine. A capture
+    takes a whole monitor, one window, or a <b>rectangle of a monitor</b> given in pixels.
+    A video records system audio only when the client asks for it, and never the microphone.
+    Recording and exporting write into your capture library and need your approval; recording
     refuses rather than interfering when a recording is already running.</li>
 </ul>

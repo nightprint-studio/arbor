@@ -16,6 +16,14 @@
   its modules or workspace crates, and — for Maven — the JDK language level and the frameworks the code relies on.
 </p>
 
+<p>
+  A folder with <em>neither</em> opens too, as a <strong>plain</strong> project named after the folder: a set of SQL scripts, a Node or
+  Angular tree, anything else you want to edit. It gets the editor and the shared surface — the file tree, go-to file, find in files,
+  TODOs, the terminal, highlighting — and, where a language server serves the files, that server's answers. There is no build model, so no
+  JDK, no capabilities and no module list, and the Java tool windows stay hidden for the same reason they are on a Cargo project. Files are
+  read in the default encoding from the settings.
+</p>
+
 <h2>What opening a folder does</h2>
 <ol class="step-list">
   <li>Bennu reads the root manifest: the display name, and the modules or the workspace crates.</li>

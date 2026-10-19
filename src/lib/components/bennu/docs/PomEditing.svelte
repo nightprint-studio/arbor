@@ -27,8 +27,11 @@
   <li><strong>Properties</strong>one colour where a property is declared and where it is used</li>
 </ul>
 <p>
-  Nothing is ever dimmed. Every tag keeps the colour it has elsewhere; sections and the blocks inside them get
-  <em>weight</em> in that same colour, so the file can be scrolled by its shape without any of it becoming harder to read.
+  Nothing is ever dimmed. The tags of each top-level block take that block's own hue, so the file can be scrolled by its
+  shape: <code>&lt;dependencies&gt;</code>, <code>&lt;dependencyManagement&gt;</code>, <code>&lt;build&gt;</code>,
+  <code>&lt;properties&gt;</code>, <code>&lt;profiles&gt;</code>, the repositories, and the other projects
+  (<code>&lt;parent&gt;</code>, <code>&lt;modules&gt;</code>) are each a different colour, and the closing tag matches its opening
+  one. The project's own coordinates keep the ordinary tag colour.
 </p>
 <pre><code>{@html highlightCode(`<properties>
     <spring.version>5.3.39</spring.version>

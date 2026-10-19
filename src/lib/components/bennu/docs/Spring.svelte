@@ -156,6 +156,18 @@ private int timeout;
 <Callout variant="info" title="Dashes are removed, not replaced">
   The one rule everybody forgets — which is why it is worth computing rather than typing.
 </Callout>
+<p>
+  A key written with quotes in the yaml — <code>service."name".uri</code>, how a map key with a special character is spelled — gives
+  <code>SERVICE_NAME_URI</code>: the quotes belong to the file, not to the name.
+</p>
+
+<h3>Writing a .env</h3>
+<p>
+  <code>.env</code>, <code>.env.local</code>, <code>.env.production</code> and <code>*.env</code> files complete the other way round: type the start of a
+  variable and the names Spring binds are offered — the framework's own and your <code>@ConfigurationProperties</code> — each with the property it overrides.
+  After the <code>=</code>, a closed set of values (a boolean, a documented list) completes too, and hovering a name shows the property, its type, default and
+  description. A name Spring does not know is left alone: a <code>.env</code> carries plenty of variables that are not Spring's.
+</p>
 
 <h2>The Endpoints panel</h2>
 <p>

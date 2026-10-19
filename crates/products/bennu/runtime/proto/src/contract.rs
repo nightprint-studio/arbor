@@ -165,6 +165,9 @@ pub enum ProjectKind {
     /// A Cargo project — the root holds `Cargo.toml`. Editor-only: no symbol index,
     /// no capability detection, no JDK.
     Cargo,
+    /// A folder with no manifest Bennu models — a set of SQL scripts, a Node/Angular tree,
+    /// anything else. Editor-only, like Cargo, and with the default encoding.
+    Plain,
 }
 
 impl ProjectKind {

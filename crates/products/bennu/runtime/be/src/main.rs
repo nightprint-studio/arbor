@@ -40,6 +40,8 @@ mod config_cmds;
 // pom parse + capability detection + JDK/encoding detection + file tree + decoded
 // reads, all driven through the leaf `bennu-project` crate.
 mod project;
+// A Java buffer's declarations from the parse tree, for the Structure panel / File Structure.
+mod java_structure;
 // Giving back what opening a project took — see the module doc for why it is driven by the watched roots.
 mod project_close;
 // What this backend holds in memory, for the process monitor's `__memory` breakdown.

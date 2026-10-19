@@ -255,7 +255,7 @@ fn map_value_type(meta: &PropertyMeta, key: &str) -> String {
 
 /// `java.util.List<java.lang.String>` → `List<String>`. Generic arguments included: for a
 /// property the shape of the collection is exactly what you need to know to write the value.
-fn short_type(fqcn: &str) -> String {
+pub(crate) fn short_type(fqcn: &str) -> String {
     let bare = strip_generics(fqcn);
     let head = simple_name(&bare).replace('$', ".");
     match (fqcn.find('<'), fqcn.rfind('>')) {
@@ -476,7 +476,7 @@ fn value_completions(model: &SpringModel, key: &str, partial: &str, out: &mut Pr
     );
 }
 
-fn detail_of(meta: &PropertyMeta) -> String {
+pub(crate) fn detail_of(meta: &PropertyMeta) -> String {
     let ty = short_type(&meta.type_text);
     match (meta.default_value.is_empty(), meta.deprecation.is_some()) {
         (_, true) => format!("{ty}  · deprecated"),

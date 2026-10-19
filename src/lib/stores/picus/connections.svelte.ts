@@ -276,6 +276,21 @@ function createConnectionsStore() {
     },
 
     /**
+     * The server closed this session (idle timeout, restart) — the backend noticed and dropped
+     * it from its pool.
+     *
+     * The state is re-read rather than assumed: the backend is the one that knows whether the
+     * session is really gone or was already replaced by a reconnect. What is held on the dead
+     * socket goes locally — its cursors died with it, and a transaction that was open was
+     * rolled back by the server, so neither may keep being shown as live.
+     */
+    async connectionLost(id: string) {
+      picusResultsStore.releaseConnection(id);
+      txStore.forget(id);
+      await this.load();
+    },
+
+    /**
      * Create or update a connection.
      *
      * `password` is `undefined` when the form was left untouched — meaning "keep

@@ -69,6 +69,7 @@ pub use crate::env::{env_var, env_var_name, EnvVar};
 
 // The property-file side of the editor's answers, for the handlers that route to it.
 pub use crate::props_intel::{env_var_at, is_property_source};
+pub use crate::dotenv_intel::is_dotenv;
 
 // Beans declared inside an allowlisted dependency, read from bytecode. Their own tier and
 // their own type on purpose — a library bean is a declaration Spring may or may not act on,

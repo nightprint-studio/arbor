@@ -19,6 +19,8 @@
  * are projections of it, so a fix to the regexes fixes both.
  */
 
+import type { JavaStructureEntry } from '$lib/ipc/bennu/java-structure';
+
 /** Member visibility, parsed from the leading modifiers on the declaration line. */
 export type JavaVisibility = 'public' | 'protected' | 'private' | 'package';
 
@@ -341,7 +343,40 @@ const GROUP_ORDER = { field: 'Fields', method: 'Methods' } as const;
  * `javaOutline` still surfaces them for any consumer that wants everything.
  */
 export function javaStructure(source: string): JavaNode[] {
-  const decls = scanDeclarations(source);
+  return structureFromDecls(scanDeclarations(source));
+}
+
+/**
+ * The same hierarchy, built from declarations the backend read off the parse tree — what the
+ * Structure surfaces use for a real file. The line scan above stays as the fallback for the moment
+ * before the backend answers, since it cannot be wrong about a signature it never sees but does
+ * miss wrapped ones, nested generics and braces in text blocks.
+ */
+export function javaStructureFromEntries(entries: JavaStructureEntry[]): JavaNode[] {
+  return structureFromDecls(entries.map(entryToDecl));
+}
+
+/** The flat, ordered view of the same entries — the File Structure popup's list. */
+export function javaOutlineFromEntries(entries: JavaStructureEntry[]): JavaSymbol[] {
+  return entries.map((e) => entryToDecl(e).symbol);
+}
+
+function entryToDecl(e: JavaStructureEntry): RawDecl {
+  return {
+    symbol: {
+      kind: e.kind === 'annotation' ? 'interface' : (e.kind as JavaSymbolKind),
+      name: e.name,
+      detail: e.detail,
+      line: e.line,
+      visibility: e.visibility,
+      overrides: e.overrides || undefined,
+    },
+    depth: e.depth,
+    isType: e.isType,
+  };
+}
+
+function structureFromDecls(decls: RawDecl[]): JavaNode[] {
   const roots: JavaNode[] = [];
   // openTypes[d] = the type node opened at depth d whose members live at depth d+1.
   const openTypes: (JavaNode | undefined)[] = [];

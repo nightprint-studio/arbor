@@ -230,14 +230,22 @@ export const codeEditorTheme = EditorView.theme(
       color: 'var(--accent)', backgroundColor: 'var(--accent-subtle)',
       borderRadius: 'var(--radius-sm)', padding: '1px 5px',
     },
+    // What is NOT a type — a variable, a field, a method — takes the quiet chip: the accent is for
+    // the kinds that name a declaration you could go to, so a local does not shout "class".
+    '.cm-hover-card:not([data-kind="class"]):not([data-kind="interface"]):not([data-kind="enum"]):not([data-kind="record"]):not([data-kind="annotation"]) .cm-hc-kind': {
+      color: 'var(--text-secondary)', backgroundColor: 'var(--bg-hover)',
+    },
     '.cm-hover-card .cm-hc-title': {
       fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-sm)', color: 'var(--text-primary)',
-      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+      whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: '1.5',
     },
     '.cm-hover-card .cm-hc-meta': {
       fontFamily: 'var(--font-code)', fontSize: 'var(--font-size-2xs)', color: 'var(--text-muted)',
-      marginTop: '3px', wordBreak: 'break-all',
+      marginTop: '4px', wordBreak: 'break-all',
     },
+    // The package recedes; the type it qualifies is what the line is for.
+    '.cm-hover-card .cm-hc-pkg': { color: 'var(--text-disabled)' },
+    '.cm-hover-card .cm-hc-typename': { color: 'var(--text-secondary)', fontWeight: '600' },
     // Fainter than the package above it: it answers a rarer question, and a coordinate is long
     // enough that at the package's weight it would be the loudest thing on the card.
     '.cm-hover-card .cm-hc-artifact': {

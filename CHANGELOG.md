@@ -8,6 +8,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Added
+- **An AI client can record the screen as a video.** The new `tyto_record_video` records a monitor, a window (by part of its title) or a rectangle of a monitor for a set number of seconds, and the screenshot and frame-sequence tools now accept a rectangle too. System audio is recorded only when asked for, and the microphone never.
+- **Bennu understands `.env` files.** `.env`, `.env.*` and `*.env` are coloured, complete the variable names Spring Boot binds (with the property each overrides) and their closed values, and show the property, type and default on hover.
 - **Bennu reports many more Java compile errors.** Missing returns through loops, `switch` and `try`; assignments to `final` parameters, catch variables and fields; illegal modifiers; record constructor and accessor rules; sealed hierarchies; `break`/`continue`/`return` out of a switch expression; duplicate `case` constants written differently; type parameters in static code; `@Override` on overloads and static methods.
 - **…and nearly everything javac rejects in everyday Java.** Definite assignment, unhandled checked exceptions (lambdas, initializers, rethrow, implicit `close()`), lambda bodies and method references against their interface, ambiguous imports, `@Target` and annotation values, override and hiding rules, pattern and sealed `switch` exhaustiveness, `List<Integer>` where a `List<Number>` is expected, `new T[]`, `T.class` and `List<int>`.
 - **Spring bean declarations checked as you type.** A `private`/`final` or `void` `@Bean`, a `final` `@Configuration`, injection into static members, a stereotype on an interface, abstract or inner class, a non-static post-processor `@Bean`, an `@Async` result the caller never gets, a static `@Transactional` method and a `@Scheduled` method with parameters — with Alt+Enter to fix the modifiers where that is the repair.
@@ -173,7 +175,19 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **Every backend executable carries its product's icon.** `corvus-be`, `sitta-be`, `merula-be`, `picus-be`, `tyto-be`, `garrulus-be` and `bennu-be` are no longer blank generic binaries in Explorer, the taskbar and Task Manager, and their Properties → Details now names what they are and which version they came from.
 
+### Changed
+- **A `pom.xml` is coloured by section.** The tags of `dependencies`, `dependencyManagement`, `build`, `properties`, `profiles`, the repositories and `parent`/`modules` each take their own hue.
+- **The hover card reads like code.** Signatures are syntax-coloured and long ones list one parameter per line, the package is muted next to the type name, and a variable is no longer labelled as a class.
+
 ### Fixed
+- **"Show as environment variable" no longer keeps the quotes of a map key.** `service."name".uri` is `SERVICE_NAME_URI`, not a name with `"` in it.
+- **A `var`/`val` initialised from a method returning `Optional<…>` (or any JDK type) gets its type.** A method declared in a file that star-imports its JDK types (`import java.util.*;`) lost its return type; the project index is rebuilt once on next open.
+- **Fetch and push renew an expired token and retry.** A git remote that refused an expired OAuth token used to fail the operation; it now refreshes the token and tries once more.
+- **"Test connection" in Cloud Storage always reports a result.** Both the connection form and the connections modal now show success or the exact failure.
+- **Picus notices a connection the server closed.** An idle session dropped by the database is shown as not connected, with a notification, instead of staying green until a statement fails.
+- **Bennu opens folders with no `pom.xml` or `Cargo.toml`.** SQL-only and Node/Angular projects open as editor-only projects.
+- **Bennu's File Structure lists every method.** It reads the parse tree, so wrapped signatures, nested generics and braces in text blocks no longer hide members.
+- **Two Bennu false positives gone.** An annotation with a comment among its arguments no longer reports a phantom `value`, and `new T[]{ new X() { … } }` is no longer typed as a deeper array.
 - **An optional argument a plugin leaves out no longer shortens the call.** A `nil` in a positional argument list truncated it, so an extension was called with fewer arguments than it takes and answered with an arity error.
 - **A missing value reaches a plugin as `nil`.** A `null` in any JSON the host hands Lua — an extension's `none`, an absent field — used to arrive as a value that tested as present, so a plugin reading it took the wrong branch. Cloud listings were the visible case: the bucket browser paged the same first results forever and never showed the files.
 - **Bennu catches Java errors it used to let through.** Narrowing or `null` arguments to primitives, wrong `super(…)`/`this(…)` and nested-class constructor arguments, ambiguous overloads, boxing and array assignments, lambdas passed where no functional interface fits, anonymous classes missing an abstract method, `Thread.sleep` without handling, and locals used outside their block, loop or `catch`.

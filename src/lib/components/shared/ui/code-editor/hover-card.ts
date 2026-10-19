@@ -63,6 +63,67 @@ export interface HoverCard {
    * the honest answer when nobody knows.
    */
   codeLanguage?: string | null;
+  /**
+   * The language the signature itself is written in — a Prism id, like {@link codeLanguage}. Absent
+   * leaves the title as plain text, which is what a column's facts are.
+   */
+  signatureLanguage?: string | null;
+}
+
+/** A signature longer than this gets one parameter per line. */
+const WRAP_SIGNATURE_AT = 88;
+
+/**
+ * Break a long call signature into one parameter per line.
+ *
+ * A six-parameter method on one wrapped line is a sentence you have to parse; stacked, it is a
+ * list you can scan. Only the **top-level** commas split — `Map<String, List<Foo>>` and an
+ * annotation's own arguments keep theirs — and anything without a parameter list, or with fewer
+ * than two parameters, comes back untouched.
+ */
+export function wrapSignature(sig: string): string {
+  if (sig.length <= WRAP_SIGNATURE_AT) return sig;
+  const open = sig.indexOf('(');
+  if (open < 0) return sig;
+
+  const parts: string[] = [];
+  let depth = 0;
+  let start = open + 1;
+  let close = -1;
+  for (let i = open + 1; i < sig.length && close < 0; i++) {
+    const c = sig[i];
+    if (c === '(' || c === '<' || c === '[') depth++;
+    else if (c === '>' || c === ']') depth = Math.max(0, depth - 1);
+    else if (c === ')') {
+      if (depth === 0) close = i;
+      else depth--;
+    } else if (c === ',' && depth === 0) {
+      parts.push(sig.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  if (close < 0) return sig;
+  parts.push(sig.slice(start, close).trim());
+  if (parts.length < 2) return sig;
+  return `${sig.slice(0, open + 1)}\n  ${parts.join(',\n  ')}\n${sig.slice(close)}`;
+}
+
+/** Write a dotted name with its package muted and the type it names in front — `java.util.`
+ *  recedes, `Optional` is the part you were looking for. Anything not shaped like a qualified
+ *  name is written as it came. */
+function appendQualified(parent: HTMLElement, text: string): void {
+  const dot = text.lastIndexOf('.');
+  if (dot <= 0 || !/^[\w$.]+$/.test(text)) {
+    parent.textContent = text;
+    return;
+  }
+  const pkg = document.createElement('span');
+  pkg.className = 'cm-hc-pkg';
+  pkg.textContent = text.slice(0, dot + 1);
+  const name = document.createElement('span');
+  name.className = 'cm-hc-typename';
+  name.textContent = text.slice(dot + 1);
+  parent.append(pkg, name);
 }
 
 /** One `@tag` block of a Javadoc comment. */
@@ -500,6 +561,8 @@ function tagLabel(t: DocTag): string {
 export function hoverCardDom(info: HoverCard): HTMLElement {
   const dom = document.createElement('div');
   dom.className = 'cm-hover-card';
+  // Lets the theme tell a type from a member without the card knowing any product's kinds.
+  if (info.kind) dom.dataset.kind = info.kind.toLowerCase();
 
   const headline = document.createElement('div');
   headline.className = 'cm-hc-headline';
@@ -515,14 +578,19 @@ export function hoverCardDom(info: HoverCard): HTMLElement {
   }
   const sig = document.createElement('span');
   sig.className = 'cm-hc-title';
-  sig.textContent = info.signature;
+  if (info.signatureLanguage) {
+    // Coloured with the editor's own token classes, so the title reads like the code it names.
+    sig.appendChild(highlightToDom(wrapSignature(info.signature), info.signatureLanguage));
+  } else {
+    sig.textContent = info.signature;
+  }
   head.appendChild(sig);
   headline.appendChild(head);
 
   if (info.container) {
     const m = document.createElement('div');
     m.className = 'cm-hc-meta';
-    m.textContent = info.container;
+    appendQualified(m, info.container);
     headline.appendChild(m);
   }
 

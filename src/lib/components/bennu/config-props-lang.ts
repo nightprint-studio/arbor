@@ -51,6 +51,14 @@ export function isSpringPropertyFile(path: string): boolean {
   );
 }
 
+/** Whether a path is a dotenv file — `.env`, `.env.local`, `prod.env` — the same test the backend
+ *  applies. The names in it are the Spring properties it overrides, which is why it shares this
+ *  module's completion and hover rather than having its own. */
+export function isDotEnvFile(path: string): boolean {
+  const name = (path.split(/[\\/]/).pop() ?? '').toLowerCase();
+  return name === '.env' || name.startsWith('.env.') || name.endsWith('.env');
+}
+
 /** Where the token under the caret begins, and whether it is a key or a value.
  *  `null` on a line that is a comment or a sequence item — nothing completes there. */
 function tokenStart(ctx: CompletionContext): number | null {

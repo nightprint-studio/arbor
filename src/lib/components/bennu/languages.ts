@@ -75,11 +75,13 @@ import { javaLanguage } from './java-lang';
 import {
   lspLanguage, lspLanguageFrom, backendCompletionSource, backendHoverSource,
 } from './lsp-lang';
-import { isSpringPropertyFile, configPropsLang } from './config-props-lang';
+import { isSpringPropertyFile, isDotEnvFile, configPropsLang } from './config-props-lang';
 import { isToolConfigFile } from './file-kind';
 import { cargoTomlLang, isCargoManifest } from './cargo-toml-lang';
 import { packageJsonLanguage, isPackageManifest } from './package-json-lang';
 import { xmlSchemaLang } from './xml-schema-lang';
+import { pomSections } from './pom-sections';
+import { isPomFile } from '$lib/ipc/bennu/maven';
 import { jspLanguage } from './jsp-lang';
 import { digLanguage } from './dig/dig-lang';
 import { devLanguage } from './dig/dev-lang';
@@ -157,6 +159,10 @@ function jinjaLang(name: string): LanguageDescriptor {
 // generic one cannot: element/attribute/value completion, ghost text, and a hover carrying the
 // schema's own documentation. Silent when no schema resolves, which is most files.
 const xmlLang = xmlSchemaLang('xml', xml);
+// A pom is XML whose top-level blocks mean different things, so each section gets its own hue.
+// A descriptor of its own: the identity keys the editor, and the pom's extra colouring must not
+// leak onto every other XML file.
+const pomLang = xmlSchemaLang('pom', xml, pomSections);
 /**
  * HTML — the real lang-html tree (embedded JS/CSS highlight + tag folding), **plus** whatever a
  * language server has to say about it.
@@ -230,6 +236,9 @@ const yamlLang = streamLang('yaml', yaml);
 // the identity has to be stable or the editor remounts on every keystroke.
 const springYamlLang = configPropsLang('spring-yaml', yaml);
 const springPropertiesLang = configPropsLang('spring-properties', properties);
+// `KEY=value` with `#` comments is what the properties mode already colours; what a `.env` adds is
+// the vocabulary — the variable names Spring binds — which is the backend's, through the same hooks.
+const dotEnvLang = configPropsLang('dotenv', properties);
 /**
  * `lombok.config`, `junit-platform.properties` and `struts.properties` — properties files with a
  * **closed, documented, version-dependent** vocabulary, which is what separates them from the
@@ -407,6 +416,8 @@ export function languageForPath(path: string | null): LanguageDescriptor {
   // The manifest, by NAME: `rustfmt.toml` and `.cargo/config.toml` are not manifests, and applying
   // the manifest schema to one would flag every key in it.
   if (isCargoManifest(name)) return cargoManifestLang;
+  if (isPomFile(name)) return pomLang;
+  if (isDotEnvFile(name)) return dotEnvLang;
 
   const dot = name.lastIndexOf('.');
   const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';

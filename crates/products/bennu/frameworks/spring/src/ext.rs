@@ -34,7 +34,7 @@ use crate::model::{simple_name, strip_generics, SpringModel};
 use crate::props::{parse_property_file, PropertySources};
 use crate::scan::{looks_spring_relevant, scan_java};
 use crate::xml::parse_bean_xml;
-use crate::{java_intel, props_intel, xml_intel};
+use crate::{dotenv_intel, java_intel, props_intel, xml_intel};
 
 /// The Spring framework extension.
 /// Where type names come from when this crate needs to offer some.
@@ -409,6 +409,9 @@ impl FrameworkExtension for SpringExtension {
             "xml" if xml_intel::is_bean_xml(ctx.source) => {
                 xml_intel::completions(&model, ctx.source, offset)
             }
+            _ if dotenv_intel::is_dotenv(&path) => {
+                dotenv_intel::completions(&model, ctx.source, offset)
+            }
             _ if props_intel::is_property_source(&path) => {
                 props_intel::completions(&model, &path, ctx.source, offset)
             }
@@ -424,6 +427,7 @@ impl FrameworkExtension for SpringExtension {
             "xml" if xml_intel::is_bean_xml(ctx.source) => {
                 xml_intel::hover(&model, ctx.source, offset)
             }
+            _ if dotenv_intel::is_dotenv(&path) => dotenv_intel::hover(&model, ctx.source, offset),
             _ if props_intel::is_property_source(&path) => {
                 props_intel::hover(&model, &path, ctx.source, offset)
             }

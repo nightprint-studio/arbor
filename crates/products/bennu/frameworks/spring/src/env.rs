@@ -54,7 +54,12 @@ pub fn env_var_name(key: &str) -> String {
                     out.push('_');
                 }
             }
-            _ => out.extend(c.to_uppercase()),
+            c if c.is_alphanumeric() || c == '_' => out.extend(c.to_uppercase()),
+            // Whatever else is there — the quotes round a map key (`service."name".uri`, which is
+            // how yaml writes a key with a special character in it) — is the syntax of the
+            // PROPERTY file, not part of the name. A variable name cannot hold it, and Spring
+            // drops it when it binds.
+            _ => {}
         }
     }
     out.trim_end_matches('_').to_string()
@@ -115,6 +120,15 @@ mod tests {
     fn indexed_keys_turn_their_brackets_into_separators() {
         assert_eq!(env_var_name("my.service[0].other"), "MY_SERVICE_0_OTHER");
         assert_eq!(env_var_name("a.b[10]"), "A_B_10", "no trailing separator");
+    }
+
+    #[test]
+    fn the_quotes_round_a_map_key_are_not_part_of_the_name() {
+        assert_eq!(
+            env_var_name(r#"library.gatewaycore.service."name".targeturi"#),
+            "LIBRARY_GATEWAYCORE_SERVICE_NAME_TARGETURI"
+        );
+        assert_eq!(env_var_name("a.'b'.c"), "A_B_C");
     }
 
     #[test]

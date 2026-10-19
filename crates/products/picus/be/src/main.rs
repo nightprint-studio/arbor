@@ -117,6 +117,8 @@ mod lineage;
 mod tx;
 // What this backend holds in memory, for the process monitor's `__memory` breakdown.
 mod memory_report;
+// Spots sessions the server closed (idle timeout, restart) and announces the loss.
+mod watchdog;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, any
@@ -151,6 +153,8 @@ fn main() {
             .with_host_caller(app.host_caller())
             .with_providers(providers),
     );
+
+    watchdog::spawn(Arc::clone(&state), &app.runtime_handle());
 
     // The method routing, declared as the inventory of `#[handler]`s this binary
     // links. `inventory("")` covers them all — picus-be links only its own handlers.

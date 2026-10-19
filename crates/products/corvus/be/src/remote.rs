@@ -89,6 +89,60 @@ fn list_remotes(state: &CorvusState, tab_id: String) -> Result<Vec<RemoteInfo>, 
     corvus_git::remote::list_remotes(&repo).map_err(|e| e.to_string())
 }
 
+/// Whether a git transport error means "the credential was refused" — the cue to renew the
+/// token and try once more. libgit2 words a rejected Basic credential as an authentication
+/// replay loop or a 401, so the match is on the message.
+fn is_auth_failure(error: &str) -> bool {
+    let e = error.to_ascii_lowercase();
+    ["authentication", "401", "unauthorized", "credentials"].iter().any(|m| e.contains(m))
+}
+
+/// Ask the shell to renew the OAuth token for `url`'s host (best-effort, errors swallowed).
+///
+/// The host call blocks until the shell answers, so it runs on the blocking pool: calling it
+/// inline would park a runtime worker the reverse channel needs to deliver that very reply.
+async fn refresh_credentials(state: &CorvusState, url: &str) {
+    let Some(host) = state.host_caller() else { return };
+    let url = url.to_string();
+    let _ = tokio::task::spawn_blocking(move || host.call("__maybe_refresh_url", json!(url))).await;
+}
+
+/// Run a blocking network operation (`op`) under the shell's credentials, renewing the token
+/// first and, when the remote still refuses it, once more before giving up.
+///
+/// The up-front renewal alone is not enough: it is best-effort and silent, so a token that
+/// expired between that call and the transfer (or whose refresh hiccuped) surfaced as a failed
+/// fetch until the user retried by hand.
+async fn with_credential_retry<T, F>(
+    state: &CorvusState,
+    url: &str,
+    what: &str,
+    op: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: Fn(Arc<dyn HostCaller>) -> Result<T, String> + Clone + Send + 'static,
+{
+    refresh_credentials(state, url).await;
+    let mut attempt = 0;
+    loop {
+        let host = state
+            .host_caller()
+            .ok_or_else(|| format!("{what}: no reverse channel"))?;
+        let run = op.clone();
+        let outcome = tokio::task::spawn_blocking(move || run(host))
+            .await
+            .map_err(|e| format!("{what} task panicked: {e}"))?;
+        match outcome {
+            Err(e) if attempt == 0 && is_auth_failure(&e) => {
+                attempt += 1;
+                refresh_credentials(state, url).await;
+            }
+            other => return other,
+        }
+    }
+}
+
 #[arbor_rpc::handler]
 async fn fetch_remote(
     state: &CorvusState,
@@ -98,22 +152,15 @@ async fn fetch_remote(
     let path = repo_path(state, &tab_id)?;
     let url = remote_url(&path, &remote);
 
-    // Proactive token refresh over the reverse channel (best-effort), then run
-    // the blocking fetch on a worker so this process's serve loop stays
-    // responsive — the credential callback calls back to the shell from there.
-    let _ = state.host_call("__maybe_refresh_url", json!(url));
-    let host = state
-        .host_caller()
-        .ok_or_else(|| "fetch_remote: no reverse channel".to_string())?;
-
+    // The blocking fetch runs on a worker so this process's serve loop stays responsive — the
+    // credential callback calls back to the shell from there.
     let remote_for_task = remote.clone();
-    let result = tokio::task::spawn_blocking(move || -> Result<FetchResult, String> {
+    let result = with_credential_retry(state, &url, "fetch_remote", move |host| {
         let repo = git2::Repository::open(&path).map_err(|e| format!("Git error: {e}"))?;
         corvus_git::remote::fetch(&repo, &remote_for_task, &credential_resolver(host))
             .map_err(|e| e.to_string())
     })
-    .await
-    .map_err(|e| format!("fetch task panicked: {e}"))??;
+    .await?;
 
     state.fire_hook(hooks::FETCH, json!({ "tab_id": &tab_id, "remote": &remote }));
     Ok(result)
@@ -130,20 +177,14 @@ async fn push_branch(
     let path = repo_path(state, &tab_id)?;
     let url = remote_url(&path, &remote);
 
-    let _ = state.host_call("__maybe_refresh_url", json!(url));
-    let host = state
-        .host_caller()
-        .ok_or_else(|| "push_branch: no reverse channel".to_string())?;
-
     let remote_task = remote.clone();
     let refspec_task = refspec.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
+    with_credential_retry(state, &url, "push_branch", move |host| {
         let repo = git2::Repository::open(&path).map_err(|e| format!("Git error: {e}"))?;
         corvus_git::remote::push(&repo, &remote_task, &refspec_task, force, &credential_resolver(host))
             .map_err(|e| e.to_string())
     })
-    .await
-    .map_err(|e| format!("push task panicked: {e}"))??;
+    .await?;
 
     state.fire_hook(
         hooks::PUSH,

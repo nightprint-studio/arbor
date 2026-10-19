@@ -82,7 +82,7 @@ export interface CapabilitySet {
  * find-in-files, highlighting, `cargo check`) and nothing that would need a Java index
  * to be true. Gate Java-only UI on this rather than on `jdk === null`.
  */
-export type ProjectKind = 'maven' | 'cargo';
+export type ProjectKind = 'maven' | 'cargo' | 'plain';
 
 /** An opened project (`bennu_open_project`) — Maven or Cargo, see {@link ProjectKind}. */
 export interface ProjectInfo {

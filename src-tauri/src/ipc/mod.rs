@@ -617,6 +617,25 @@ fn host_dispatch(
         return Ok(serde_json::Value::Null);
     }
 
+    // A plugin's credential slots, for a plugin hosted in a product backend. The keychain is
+    // shell-side, so the backend's `arbor.credentials` forwards here; the declared-slot check
+    // already ran in the plugin host, and `credential_account` keeps the name inside the plugin's
+    // own `plugin/<name>/` namespace.
+    if matches!(method, "__credential_get" | "__credential_set" | "__credential_delete") {
+        let field = |k: &str| params.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let (plugin, key) = (field("plugin"), field("key"));
+        return match method {
+            "__credential_get" => crate::app_ctx::plugin_credential_get(&plugin, &key)
+                .map(|v| serde_json::json!(v)),
+            "__credential_set" => {
+                crate::app_ctx::plugin_credential_set(&plugin, &key, &field("value"))
+                    .map(|_| serde_json::Value::Null)
+            }
+            _ => crate::app_ctx::plugin_credential_delete(&plugin, &key)
+                .map(|_| serde_json::Value::Null),
+        };
+    }
+
     // corvus-be self-detects git but cannot write the profile-aware `config.toml`
     // (the shell owns the active profile). On a Settings change it asks the shell
     // to persist the `[git] executable_path` override (or clear it when null); the

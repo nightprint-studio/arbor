@@ -9,6 +9,8 @@
 //!   capabilities and no JDK, because every one of those rules is a claim about a
 //!   Java stack and a false one is worse than an absent one (docs §7).
 //!
+//! * anything else → [`ProjectKind::Plain`]: editor-only, named after the directory.
+//!
 //! Maven is checked first: a polyglot repo that has both is a Java project with a
 //! Rust component far more often than the reverse, and the Java model is the one
 //! that has something to say.
@@ -36,8 +38,8 @@ pub struct OpenOptions<'a> {
 }
 
 /// Open the project rooted at `root`, dispatching on the manifest it holds (see the
-/// module doc). Errors when `root` isn't a directory, or holds neither `pom.xml` nor
-/// `Cargo.toml`.
+/// module doc). Errors only when `root` isn't a directory; one holding neither `pom.xml` nor
+/// `Cargo.toml` opens as a plain, editor-only project.
 pub fn open_project(root: &Path, opts: &OpenOptions) -> Result<ProjectInfo, ProjectError> {
     if !root.is_dir() {
         return Err(ProjectError::NotADirectory(root.display().to_string()));
@@ -48,7 +50,23 @@ pub fn open_project(root: &Path, opts: &OpenOptions) -> Result<ProjectInfo, Proj
     if root.join("Cargo.toml").is_file() {
         return open_cargo(root);
     }
-    Err(ProjectError::NoManifest(root.display().to_string()))
+    Ok(open_plain(root, opts))
+}
+
+/// A folder with no manifest we model: opens as an editor-only project named after its
+/// directory. Refusing it kept SQL-only and Node/Angular trees out of the editor for want of a
+/// file that was never going to exist there.
+fn open_plain(root: &Path, opts: &OpenOptions) -> ProjectInfo {
+    ProjectInfo {
+        root: root.display().to_string(),
+        name: non_empty_or_dir_name("", root),
+        modules: Vec::new(),
+        kind: ProjectKind::Plain,
+        jdk: None,
+        capabilities: CapabilitySet::default(),
+        // The same label `resolve_encoding_label` falls back to for a root with no manifest.
+        source_encoding: opts.default_encoding.to_string(),
+    }
 }
 
 /// The Maven half: pom parse → capability detection + JDK + declared encoding.
@@ -337,11 +355,14 @@ mod tests {
     }
 
     #[test]
-    fn a_root_with_no_manifest_is_refused() {
+    fn a_root_with_no_manifest_opens_as_a_plain_project() {
         let dir = temp_dir("bare");
-        let err = open_project(&dir, &OpenOptions { default_encoding: "UTF-8", jdk_override: None })
-            .unwrap_err();
-        assert!(matches!(err, ProjectError::NoManifest(_)), "got {err:?}");
+        let info = open_project(&dir, &OpenOptions { default_encoding: "UTF-8", jdk_override: None })
+            .unwrap();
+        assert_eq!(info.kind, ProjectKind::Plain);
+        assert!(info.modules.is_empty());
+        assert!(info.jdk.is_none());
+        assert_eq!(info.capabilities, CapabilitySet::default());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

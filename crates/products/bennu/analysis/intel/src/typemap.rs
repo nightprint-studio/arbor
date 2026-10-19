@@ -157,6 +157,13 @@ impl bennu_java::prelude::NameScope for ProjectNameScope<'_> {
         ) {
             return Some(b);
         }
+        // A JDK type the file star-imports (`import java.util.*;`). The build cannot read the JDK to
+        // confirm it, so `bind_simple_name` could not bind it — and before the project-wide guess,
+        // because a project type of that name is not visible here unless the file's own scope
+        // reached it, which it just failed to.
+        if let Some(b) = bennu_java::prelude::jdk_on_demand_binding(simple, self.names.imports) {
+            return Some(b);
+        }
         // Last, the project-wide map — one binary per simple name, so a guess, and taken only when
         // the file's own scope reaches nothing this build can see.
         self.names.project_types.get(simple).cloned()

@@ -138,21 +138,15 @@ impl AppCtx for TauriAppCtx {
     }
 
     fn credential_get(&self, plugin: &str, key: &str) -> Result<Option<String>, String> {
-        let account = arbor_plugin_types::prelude::credential_account(plugin, key)
-            .map_err(|e| e.to_string())?;
-        crate::auth::credential_store::get(&account, "").map_err(|e| e.to_string())
+        plugin_credential_get(plugin, key)
     }
 
     fn credential_set(&self, plugin: &str, key: &str, value: &str) -> Result<(), String> {
-        let account = arbor_plugin_types::prelude::credential_account(plugin, key)
-            .map_err(|e| e.to_string())?;
-        crate::auth::credential_store::save(&account, "", value).map_err(|e| e.to_string())
+        plugin_credential_set(plugin, key, value)
     }
 
     fn credential_delete(&self, plugin: &str, key: &str) -> Result<(), String> {
-        let account = arbor_plugin_types::prelude::credential_account(plugin, key)
-            .map_err(|e| e.to_string())?;
-        crate::auth::credential_store::delete(&account, "").map_err(|e| e.to_string())
+        plugin_credential_delete(plugin, key)
     }
 
     fn active_repo_path(&self) -> Option<PathBuf> {
@@ -186,6 +180,32 @@ impl AppCtx for TauriAppCtx {
             }
         });
     }
+}
+
+// ── A plugin's credential slots ───────────────────────────────────────────────
+//
+// One implementation for the two callers that reach the keychain on a plugin's behalf: this
+// context (a plugin hosted in the shell) and the `__credential_*` reverse-channel handlers (a
+// plugin hosted in a product backend, which has no keychain of its own). Both go through
+// `credential_account`, which can only build `plugin/<name>/<key>` — so the namespace that keeps
+// a plugin out of Arbor's own credentials holds on either route.
+
+pub(crate) fn plugin_credential_get(plugin: &str, key: &str) -> Result<Option<String>, String> {
+    let account =
+        arbor_plugin_types::prelude::credential_account(plugin, key).map_err(|e| e.to_string())?;
+    crate::auth::credential_store::get(&account, "").map_err(|e| e.to_string())
+}
+
+pub(crate) fn plugin_credential_set(plugin: &str, key: &str, value: &str) -> Result<(), String> {
+    let account =
+        arbor_plugin_types::prelude::credential_account(plugin, key).map_err(|e| e.to_string())?;
+    crate::auth::credential_store::save(&account, "", value).map_err(|e| e.to_string())
+}
+
+pub(crate) fn plugin_credential_delete(plugin: &str, key: &str) -> Result<(), String> {
+    let account =
+        arbor_plugin_types::prelude::credential_account(plugin, key).map_err(|e| e.to_string())?;
+    crate::auth::credential_store::delete(&account, "").map_err(|e| e.to_string())
 }
 
 /// Decode the two JSON documents a byte-shaped extension call carries.

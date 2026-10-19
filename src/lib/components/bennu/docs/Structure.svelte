@@ -19,6 +19,12 @@
   The <strong>Structure</strong> tool, on the left rail, lists the open file's symbols — types, methods and fields — grouped by kind,
   filterable, and sorted by position or by name. Click a symbol to jump to its declaration.
 </p>
+<p>
+  For Java the list is read from the parse tree, so every member the file declares is there — a signature wrapped over several lines, a return
+  type with nested generics such as <code>Map&lt;String, List&lt;Foo&gt;&gt;</code>, a brace on its own line, a text block. The same list
+  feeds <strong>File Structure</strong>, which also shows nested types indented under their owner. Members a framework generates, such as
+  Lombok's, have no declaration in the file and are not listed.
+</p>
 <ul>
   <li>A method with <code>@Override</code> carries an <strong>override marker</strong>, an up arrow, so the members that specialise a
     supertype stand out.</li>

@@ -60,6 +60,24 @@ impl BackendAppCtx {
         }
     }
 
+    /// The shared half of the three credential calls: the slot is named, the shell resolves it
+    /// into `plugin/<name>/<key>` and touches the keychain.
+    fn credential_call(
+        &self,
+        method: &str,
+        plugin: &str,
+        key: &str,
+        value: Option<&str>,
+    ) -> Result<serde_json::Value, String> {
+        match &self.host {
+            Some(h) => h.call(
+                method,
+                serde_json::json!({ "plugin": plugin, "key": key, "value": value }),
+            ),
+            None => Err("arbor.credentials: no reverse channel to the shell".to_string()),
+        }
+    }
+
     /// The shared half of the two byte-shaped extension calls: same two documents, same
     /// missing-channel message, different handler.
     fn ext_file_call(
@@ -180,6 +198,24 @@ impl AppCtx for BackendAppCtx {
 
     fn oauth_refresh(&self, plugin: &str, spec_json: &str) -> Result<String, String> {
         Ok(self.oauth_call("__oauth_refresh", plugin, spec_json)?.to_string())
+    }
+
+    // A plugin's credential slots. The keychain is the shell's — a backend holds none and must
+    // not grow one — so `arbor.credentials` forwards. Without these three the trait's default
+    // answered "not supported by this host" to every read and write, which is how a plugin hosted
+    // here could neither find a token it had stored nor store one: `status` said "not connected"
+    // and a sign-in succeeded and kept nothing.
+    fn credential_get(&self, plugin: &str, key: &str) -> Result<Option<String>, String> {
+        let v = self.credential_call("__credential_get", plugin, key, None)?;
+        Ok(v.as_str().map(str::to_string))
+    }
+
+    fn credential_set(&self, plugin: &str, key: &str, value: &str) -> Result<(), String> {
+        self.credential_call("__credential_set", plugin, key, Some(value)).map(|_| ())
+    }
+
+    fn credential_delete(&self, plugin: &str, key: &str) -> Result<(), String> {
+        self.credential_call("__credential_delete", plugin, key, None).map(|_| ())
     }
 
     fn open_path(&self, path: &str) -> Result<(), String> {

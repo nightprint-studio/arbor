@@ -86,6 +86,12 @@ fn check_annotation(
     if let Some(args) = n.child_by_field_name("arguments") {
         let mut cw = args.walk();
         for pair in args.named_children(&mut cw) {
+            // Comments are named children of the argument list, and so is the stray token of a
+            // half-typed pair: neither is a value, and reading one as the `value` shorthand
+            // reported an element nobody wrote on an annotation whose every pair was fine.
+            if matches!(pair.kind(), "line_comment" | "block_comment" | "ERROR") {
+                continue;
+            }
             if pair.kind() != "element_value_pair" {
                 // `@Foo("x")` — the single-element shorthand, which IS `value = "x"`. Legal only
                 // when the type declares `value()`; javac otherwise reports it as a `value()` it

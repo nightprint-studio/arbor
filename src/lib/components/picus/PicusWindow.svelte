@@ -23,6 +23,7 @@
   import { picusScratchStore } from '$lib/stores/picus/scratch.svelte';
   import { picusTabsStore } from '$lib/stores/picus/tabs.svelte';
   import { queryStore } from '$lib/stores/picus/query.svelte';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import PicusShell from './PicusShell.svelte';
 
   onMount(() => {
@@ -40,6 +41,18 @@
     const unlisten = listen('arbor://picus-be-up', () => {
       void picusSettingsStore.loadConfig();
       void connectionsStore.load();
+    });
+
+    // A session the server closed under us (idle timeout, restart). The sidebar's dot, Run and
+    // the transaction buttons all read the connection's state, so refreshing it is what makes
+    // them stop claiming a connection that is gone; the toast is what tells the user why.
+    const unlistenLost = listen<{ id: string; name: string }>('picus://connection-lost', (e) => {
+      void connectionsStore.connectionLost(e.payload.id);
+      toastStore.show(
+        `Connection “${e.payload.name}” was closed by the server. Reconnect to keep working.`,
+        'warning',
+        8000,
+      );
     });
 
     // The unsaved query tabs, re-opened with their text. Before the `picus-be-up`
@@ -62,6 +75,7 @@
       globalThis.removeEventListener('beforeunload', release);
       release();
       void unlisten.then((off) => off());
+      void unlistenLost.then((off) => off());
     };
   });
 

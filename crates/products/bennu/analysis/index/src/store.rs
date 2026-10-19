@@ -45,7 +45,11 @@ pub const MAGIC: &[u8; 8] = b"BNNUIDX0";
 /// subtype actually passes up. An index written before this carries names only, which
 /// deserializes into the new shape as a raw type: silently wrong rather than absent, so
 /// the version has to reject it.
-pub const FORMAT_VERSION: u64 = 6;
+/// v7: a type reached through a JDK star import (`import java.util.*;`) is recorded under its
+/// binary name. Before, `Optional<Foo> find()` in such a file was baked with the bare word
+/// `Optional`, which reads as an unresolved type variable — so a `var` initialised from the call
+/// had no type. An older index still carries the bare names and must be rebuilt.
+pub const FORMAT_VERSION: u64 = 7;
 /// The header is exactly 16 bytes (8 magic + 8 version), so the first record starts
 /// 16-byte-aligned.
 pub const HEADER_LEN: usize = 16;

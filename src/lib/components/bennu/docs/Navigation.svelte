@@ -218,7 +218,7 @@
 
 <h2>Hover</h2>
 <p>
-  Rest the pointer on a class, method or field for a card saying what it is — a tag: class, interface, enum, method, field — its
+  Rest the pointer on a class, method or field for a card saying what it is — a tag: class, interface, enum, method, field, variable — its
   signature, and the type that <em>declares</em> it, which is the supertype for an inherited member. It answers from the index, once warm.
 </p>
 <dl class="meta-grid">
@@ -231,7 +231,9 @@
   <dt>The documentation</dt>
   <dd>From your own source, or from the library's <code>-sources.jar</code> or the JDK's <code>src.zip</code> when on disk. A dependency without downloaded sources shows the signature alone — a <code>.class</code> carries no comments — until <em>Download sources</em> on its decompiled view.</dd>
   <dt>The signature</dt>
-  <dd>Written as Java, generics and <code>throws</code> included: <code>&lt;X extends Throwable&gt; T orElseThrow(Supplier&lt;? extends X&gt;) throws X</code>.</dd>
+  <dd>Written as Java and coloured like it, generics and <code>throws</code> included: <code>&lt;X extends Throwable&gt; T orElseThrow(Supplier&lt;? extends X&gt;) throws X</code>.
+    A long one breaks after each parameter, one per line. In the line of the package, the package itself is muted and the type name is the
+    part that stands out.</dd>
 </dl>
 
 <h3>A Javadoc is rendered, not printed</h3>
@@ -251,8 +253,8 @@
 <h3>Variables, and JSP</h3>
 <p>
   Hovering a <strong>variable</strong> — a local, a parameter, a loop variable, a <code>catch</code> parameter, a pattern variable —
-  names its type, its <strong>fully-qualified</strong> type (which of the four <code>Order</code>s this one is) and <strong>what that
-  type is</strong>: class, interface, enum, record or annotation. A <code>var</code> or a Lombok <code>val</code> never shows as
+  is tagged <strong>variable</strong> and names its type and the <strong>fully-qualified</strong> type under it (which of the four
+  <code>Order</code>s this one is). A <code>var</code> or a Lombok <code>val</code> never shows as
   <code>var</code>: the card shows the type the compiler deduced, including the element type in <code>for (val row : rows)</code>.
 </p>
 <p>

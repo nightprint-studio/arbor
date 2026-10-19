@@ -1736,10 +1736,13 @@ fn static_import_type(imports: &[bennu_java::prelude::Import], name: &str) -> Op
             return unresolved_local_hover(bytes, node, &name);
         };
 
-        let (container, kind) = self.describe_type(&ty);
+        // The card is about the variable, so its kind is `variable` whatever the type is: labelling
+        // a local `class` because its type is one read as the card for the class itself. What the
+        // type is stays in the container line, as the FQCN the variable's type resolves to.
+        let (container, _type_kind) = self.describe_type(&ty);
         Some(crate::rename::HoverInfo {
             signature: format!("{} {name}", render_type_ref(&ty)),
-            kind,
+            kind: "variable".to_string(),
             container,
             // The card is about the variable, not about its type — a library doc pulled in here
             // would answer a question nobody asked. `owner` stays empty for the same reason.

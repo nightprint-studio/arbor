@@ -25,6 +25,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { javaOutline } from './java-outline';
+  import { javaStructureEntries } from '$lib/ipc/bennu/java-structure';
   import { markupOutline, type MarkupNode } from './markup-outline';
   import { lspDocumentSymbols, type LspSymbol } from '$lib/ipc/bennu/lsp';
   import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
@@ -71,13 +72,7 @@
 
   const items = $derived.by<Item[]>(() => {
     const ext = extOf(activePath);
-    if (ext === 'java') {
-      return javaOutline(source).map((s) => ({
-        label: s.name, detail: s.detail, line: s.line, kind: s.kind,
-        visibility: s.visibility, depth: 0, k: s.name.toLowerCase(),
-        container: CONTAINER_KINDS.has(s.kind.toLowerCase()),
-      }));
-    }
+    if (ext === 'java') return javaItems;
     if (MARKUP_EXTS.has(ext)) {
       const out: Item[] = [];
       const walk = (nodes: MarkupNode[], depth: number) => {
@@ -95,6 +90,29 @@
     // A file a language server owns. Its outline is a round-trip, so it is not derivable here —
     // `lspItems` below fetches it and this returns what has landed.
     return lspItems;
+  });
+
+  // ── The Java outline ─────────────────────────────────────────────────────────
+  //
+  // Read off the parse tree by the backend: a line scan misses wrapped signatures, nested generics
+  // and braces in text blocks, so a class listed a fraction of its methods. The scan is kept as the
+  // answer for when the backend cannot give one, so the popup is partial rather than empty.
+  let javaItems = $state<Item[]>([]);
+  let javaSeq = 0;
+  const javaItem = (e: { name: string; detail?: string; line: number; kind: string;
+                         visibility?: string; depth: number }): Item => ({
+    label: e.name, detail: e.detail, line: e.line, kind: e.kind, visibility: e.visibility,
+    depth: e.depth, k: e.name.toLowerCase(), container: CONTAINER_KINDS.has(e.kind.toLowerCase()),
+  });
+  $effect(() => {
+    const src = source;
+    if (extOf(activePath) !== 'java') { javaItems = []; return; }
+    const mine = ++javaSeq;
+    void javaStructureEntries(src)
+      .then((entries) => { if (mine === javaSeq) javaItems = entries.map(javaItem); })
+      .catch(() => {
+        if (mine === javaSeq) javaItems = javaOutline(src).map((s) => javaItem({ ...s, depth: 0 }));
+      });
   });
 
   // ── The server-supplied outline ──────────────────────────────────────────────

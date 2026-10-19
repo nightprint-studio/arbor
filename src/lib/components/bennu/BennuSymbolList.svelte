@@ -39,7 +39,10 @@
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { SvelteSet } from 'svelte/reactivity';
-  import { javaStructure, type JavaNode, type JavaVisibility } from './java-outline';
+  import {
+    javaStructure, javaStructureFromEntries, type JavaNode, type JavaVisibility,
+  } from './java-outline';
+  import { javaStructureEntries } from '$lib/ipc/bennu/java-structure';
   import { markupOutline, type MarkupNode } from './markup-outline';
   import { lspDocumentSymbols, type LspSymbol } from '$lib/ipc/bennu/lsp';
   import { bennuLspStore } from '$lib/stores/bennu/lsp.svelte';
@@ -133,7 +136,11 @@
     const mine = ++seq;
     timer = setTimeout(() => {
       if (java) {
-        roots = tagJava(javaStructure(src));
+        // The parse tree's answer; the line scan only when the backend cannot give one, so the
+        // panel degrades to a partial list instead of an empty one.
+        void javaStructureEntries(src)
+          .then((entries) => { if (mine === seq) roots = tagJava(javaStructureFromEntries(entries)); })
+          .catch(() => { if (mine === seq) roots = tagJava(javaStructure(src)); });
       } else if (markup) {
         roots = tagMarkup(markupOutline(src));
       } else {

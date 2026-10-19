@@ -20,6 +20,7 @@
 
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
 import { StreamLanguage, type StreamParser } from '@codemirror/language';
+import type { Extension } from '@codemirror/state';
 import { makeHoverSource } from './bennu-hover';
 import {
   markupCompletionSource,
@@ -38,12 +39,19 @@ const intel = {
 /** Build the descriptor. Called once at module load — the identity has to be stable, because
  *  `CodeEditor` rebuilds its extensions when the descriptor changes and a fresh object per read
  *  would remount the editor on every keystroke. */
-export function xmlSchemaLang(id: string, parser: StreamParser<unknown>): LanguageDescriptor {
+export function xmlSchemaLang(
+  id: string,
+  parser: StreamParser<unknown>,
+  /** Extra colouring painted from the document, for a file kind whose structure means something
+   *  (a `pom.xml`'s sections). Left out for an ordinary XML file. */
+  extraHighlight?: Extension,
+): LanguageDescriptor {
   return {
     id,
     createParser: () => Promise.reject(new Error(`cm-language:${id} has no tree-sitter parser`)),
     classify: () => null,
     cmExtension: StreamLanguage.define(parser),
+    extraHighlight,
     intel,
   };
 }

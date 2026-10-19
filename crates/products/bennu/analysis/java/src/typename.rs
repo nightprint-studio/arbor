@@ -645,6 +645,86 @@ pub fn java_lang_implicit(name: &str) -> Option<String> {
     NAMES.contains(&name).then(|| format!("java/lang/{name}"))
 }
 
+/// A JDK type a file brings in with an **on-demand import** (`import java.util.*;`), as a binary
+/// name — for a caller that cannot read the JDK.
+///
+/// The index build is that caller: it can confirm only project types, and an on-demand import is
+/// the one scoping route that needs a confirmation (`java/util/Optional` is a class only if the
+/// package has one). Without this a method declared `Optional<Foo> find()` in a file that
+/// star-imports `java.util` was baked with a return type of the bare word `Optional`, which no
+/// later step can tell from a type variable — so `var x = repo.find();` had no type at all.
+///
+/// A curated table of the types people actually reach through a star import, not a copy of the
+/// JDK: a name that is not listed stays unbound, exactly as before. Matched against the file's own
+/// star imports, so `Date` binds to `java.util` only where `java.util.*` is imported (and a
+/// `java.sql.*` file gets `java/sql/Date`).
+pub fn jdk_on_demand_binding(simple: &str, imports: &[crate::symbols::Import]) -> Option<String> {
+    const TABLE: &[(&str, &[&str])] = &[
+        ("java.util", &[
+            "List", "Map", "Set", "Collection", "Optional", "OptionalInt", "OptionalLong",
+            "OptionalDouble", "ArrayList", "LinkedList", "HashMap", "LinkedHashMap", "TreeMap",
+            "HashSet", "LinkedHashSet", "TreeSet", "SortedMap", "SortedSet", "NavigableMap",
+            "NavigableSet", "Queue", "Deque", "ArrayDeque", "PriorityQueue", "Stack", "Vector",
+            "Hashtable", "Iterator", "ListIterator", "Comparator", "Objects", "Arrays",
+            "Collections", "Properties", "Date", "Calendar", "GregorianCalendar", "TimeZone",
+            "Locale", "UUID", "Random", "Scanner", "StringJoiner", "StringTokenizer", "BitSet",
+            "Currency", "Timer", "TimerTask", "Base64", "EnumMap", "EnumSet", "IdentityHashMap",
+            "WeakHashMap", "Formatter", "ResourceBundle", "NoSuchElementException",
+            "ConcurrentModificationException", "Enumeration", "Spliterator", "Iterable",
+        ]),
+        ("java.util.function", &[
+            "Function", "BiFunction", "Supplier", "Consumer", "BiConsumer", "Predicate",
+            "BiPredicate", "UnaryOperator", "BinaryOperator", "IntFunction", "IntPredicate",
+            "IntConsumer", "IntSupplier", "ToIntFunction", "ToLongFunction", "ToDoubleFunction",
+            "BooleanSupplier",
+        ]),
+        ("java.util.stream", &[
+            "Stream", "IntStream", "LongStream", "DoubleStream", "Collectors", "Collector",
+            "StreamSupport",
+        ]),
+        ("java.util.concurrent", &[
+            "ConcurrentHashMap", "ConcurrentMap", "CopyOnWriteArrayList", "ExecutorService",
+            "Executors", "Executor", "Future", "CompletableFuture", "Callable", "TimeUnit",
+            "CountDownLatch", "ScheduledExecutorService", "BlockingQueue", "LinkedBlockingQueue",
+            "ConcurrentLinkedQueue", "ExecutionException", "TimeoutException",
+        ]),
+        ("java.io", &[
+            "File", "IOException", "InputStream", "OutputStream", "Reader", "Writer",
+            "BufferedReader", "BufferedWriter", "InputStreamReader", "OutputStreamWriter",
+            "FileReader", "FileWriter", "FileInputStream", "FileOutputStream", "PrintStream",
+            "PrintWriter", "ByteArrayInputStream", "ByteArrayOutputStream", "Serializable",
+            "Closeable", "UncheckedIOException", "FileNotFoundException", "StringReader",
+            "StringWriter", "ObjectInputStream", "ObjectOutputStream",
+        ]),
+        ("java.nio.file", &["Path", "Paths", "Files", "StandardCopyOption", "StandardOpenOption"]),
+        ("java.time", &[
+            "LocalDate", "LocalDateTime", "LocalTime", "Instant", "Duration", "Period",
+            "ZonedDateTime", "OffsetDateTime", "ZoneId", "ZoneOffset", "Clock", "DayOfWeek",
+            "Month", "Year", "YearMonth",
+        ]),
+        ("java.math", &["BigDecimal", "BigInteger", "RoundingMode", "MathContext"]),
+        ("java.net", &["URL", "URI", "URLEncoder", "URLDecoder", "HttpURLConnection", "Socket"]),
+        ("java.text", &["SimpleDateFormat", "DateFormat", "DecimalFormat", "NumberFormat", "ParseException"]),
+        ("java.sql", &[
+            "Connection", "PreparedStatement", "ResultSet", "Statement", "SQLException",
+            "Timestamp", "Date", "Time", "DriverManager", "CallableStatement", "Types",
+        ]),
+    ];
+    // Java's own precedence between two star imports that both declare the name is an ambiguity
+    // error; the first in import order wins here, which is the harmless reading of a file that
+    // would not compile.
+    imports
+        .iter()
+        .filter(|i| i.star && !i.static_)
+        .find_map(|i| {
+            let path = i.path.trim_end_matches(".*");
+            TABLE
+                .iter()
+                .find(|(pkg, names)| *pkg == path && names.contains(&simple))
+                .map(|(pkg, _)| format!("{}/{simple}", pkg.replace('.', "/")))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -675,6 +755,27 @@ mod tests {
 
     fn bin(text: &str) -> Option<String> {
         resolve_written_type(text, &Scope).resolved()
+    }
+
+    fn star(path: &str) -> crate::symbols::Import {
+        crate::symbols::Import { span: None, path: path.to_string(), star: true, static_: false }
+    }
+
+    #[test]
+    fn a_star_imported_jdk_type_binds_to_its_package() {
+        let imports = [star("java.util"), star("java.io")];
+        assert_eq!(jdk_on_demand_binding("Optional", &imports).as_deref(), Some("java/util/Optional"));
+        assert_eq!(jdk_on_demand_binding("File", &imports).as_deref(), Some("java/io/File"));
+    }
+
+    #[test]
+    fn a_star_import_binds_only_names_its_own_package_has() {
+        // `Date` is in two packages: which one is decided by what the file star-imports.
+        assert_eq!(jdk_on_demand_binding("Date", &[star("java.sql")]).as_deref(), Some("java/sql/Date"));
+        assert_eq!(jdk_on_demand_binding("Date", &[star("java.util")]).as_deref(), Some("java/util/Date"));
+        // A name nobody listed, or a package nobody imported, stays unbound.
+        assert_eq!(jdk_on_demand_binding("Optional", &[star("java.io")]), None);
+        assert_eq!(jdk_on_demand_binding("ResolvedIdentity", &[star("java.util")]), None);
     }
 
     #[test]

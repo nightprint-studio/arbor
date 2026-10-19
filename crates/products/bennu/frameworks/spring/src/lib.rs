@@ -79,6 +79,8 @@ pub mod transaction;
 pub mod props;
 // The editor's answers for a property file — who reads each key.
 pub mod props_intel;
+// The editor's answers for a `.env` — the variable names Spring binds, and their values.
+pub mod dotenv_intel;
 pub mod scan;
 // The reverse index: which Java / XML sites read a configuration key.
 pub mod usages;

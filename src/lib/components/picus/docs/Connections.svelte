@@ -64,6 +64,17 @@
   every tab bound to the connection — so the two are told apart by shape as well.
 </p>
 
+<h2>When the server closes a session</h2>
+<p>
+  A database ends an idle connection without telling anyone — its own idle timeout, a restart, a firewall that forgot the socket. Picus checks
+  the open sessions every few seconds, and when one has been closed from the other side the connection becomes <b>hollow</b> like any
+  disconnected one and a notification names it. Nothing waits for a statement to fail to find out.
+</p>
+<p>
+  What belonged to the dead session goes with it: the held results are released, and a transaction that was open was rolled back by the server,
+  so none of it is shown as live. <b>Connect</b> opens a new session; tabs bound to the connection keep their text and run again once it is open.
+</p>
+
 <h2>Managing a connection</h2>
 <p>
   Right-click a connection in the sidebar — or use the <b>⋯</b> button on its row — for
