@@ -69,6 +69,8 @@
      * completion still offers this file's own headings, which needs nobody's help.
      */
     fileIndex?: () => string[];
+    /** Hand the find widget's query to a project-wide search. Omitted → no "Find in files" button. */
+    onFindInFiles?: (query: string) => void;
   }
 
   let {
@@ -82,6 +84,7 @@
     onCaret,
     onOpenLink,
     fileIndex,
+    onFindInFiles,
   }: Props = $props();
 
   let hostEl = $state<HTMLDivElement | undefined>(undefined);
@@ -114,7 +117,12 @@
         doc,
         extensions: [
           createMarkdownExtensions(
-            { readOnly, docPath, onOpenLink: onOpenLink ?? null, fileIndex: fileIndex ?? null },
+            {
+              readOnly, docPath,
+              onOpenLink: onOpenLink ?? null,
+              fileIndex: fileIndex ?? null,
+              onFindInFiles: onFindInFiles ?? null,
+            },
             compartments,
           ),
           EditorView.updateListener.of((u) => {

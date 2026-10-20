@@ -69,7 +69,9 @@ import {
   indentOnInput,
 } from '@codemirror/language';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { createFindPanel } from '$lib/components/shared/ui/code-editor/find-panel';
+import { findThemeSpec } from '$lib/components/shared/ui/code-editor/find-theme';
 import { tags as t } from '@lezer/highlight';
 
 // ─── Facets ─────────────────────────────────────────────────────────────
@@ -2959,6 +2961,8 @@ export interface MarkdownEditorOptions {
   /** The files `](` may complete to — absolute paths, written into the link relative to the
    *  document. Omitted → only this file's headings are offered. */
   fileIndex?: (() => string[]) | null;
+  /** Hand the find widget's query to a project-wide search. Omitted → no "Find in files" button. */
+  onFindInFiles?: ((query: string) => void) | null;
 }
 
 export interface MarkdownCompartments {
@@ -2976,6 +2980,11 @@ export function createMarkdownExtensions(
   const { readOnly = false, docPath = null } = opts;
   return [
     markdownTheme,
+    EditorView.theme(findThemeSpec),
+    search({
+      top: true,
+      createPanel: createFindPanel({ onFindInFiles: opts.onFindInFiles ?? undefined }),
+    }),
     markdown({ base: markdownLanguage, codeLanguages: [] }),
     syntaxHighlighting(markdownHighlight),
     livePreview,

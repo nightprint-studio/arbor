@@ -13,6 +13,7 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { namespaceThemeSpec } from './namespace-palette';
 import { completionThemeSpec } from './completion-theme';
+import { findThemeSpec } from './find-theme';
 
 /**
  * Lezer highlight style for CodeMirror-built-in / legacy-mode languages (the ones a
@@ -351,14 +352,7 @@ export const codeEditorTheme = EditorView.theme(
     // ── Search panel (Ctrl+F) — themed to match Arbor's inputs/buttons ──
     '.cm-panels': { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)' },
     '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--border-subtle)' },
-    // Arbor's find widget (`FindWidget.svelte`) is not a band across the top: it floats over the
-    // editor's top-right corner so opening it does not shove the code down, and leaves room for the
-    // overview strip on the right. Scoped with `:has` so the stock panel the Merula / Studio
-    // editors still use keeps its band.
-    '.cm-panels.cm-panels-top:has(.arbor-find-host)': {
-      position: 'absolute', top: '6px', right: '20px', left: 'auto', width: 'auto',
-      background: 'transparent', border: 'none', zIndex: '20',
-    },
+    ...findThemeSpec,
     '.cm-panel.cm-search': {
       padding: '6px 8px', fontFamily: 'var(--font-ui-sans)', fontSize: 'var(--font-size-sm)',
       display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px',
@@ -381,25 +375,6 @@ export const codeEditorTheme = EditorView.theme(
     '.cm-panel.cm-search .cm-button:active': { backgroundImage: 'none' },
     '.cm-panel.cm-search [name=close]': { color: 'var(--text-muted)', fontSize: '16px' },
     '.cm-panel.cm-search [name=close]:hover': { color: 'var(--text-primary)' },
-    // Matches must read at a glance in a screenful of code: a fill alone at ~20% disappears into
-    // the selection and the syntax colours, so each carries an outline as well. The occurrences of
-    // a selected word (`selectionMatch`) are the quiet tier; find-panel hits are louder, and the
-    // current one loudest.
-    '.cm-searchMatch': {
-      backgroundColor: 'color-mix(in srgb, var(--warning) 38%, transparent)',
-      outline: '1px solid color-mix(in srgb, var(--warning) 70%, transparent)',
-      borderRadius: '2px',
-    },
-    '.cm-searchMatch.cm-searchMatch-selected': {
-      backgroundColor: 'color-mix(in srgb, var(--accent) 55%, transparent)',
-      outline: '1px solid var(--accent)',
-    },
-    '.cm-selectionMatch': {
-      backgroundColor: 'color-mix(in srgb, var(--accent) 32%, transparent)',
-      outline: '1px solid color-mix(in srgb, var(--accent) 55%, transparent)',
-      borderRadius: '2px',
-    },
-
     // ── Token palette ──
     //
     // Conventional, hierarchical colouring using the standard Arbor `--syntax-*`

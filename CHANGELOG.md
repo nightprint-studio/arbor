@@ -19,6 +19,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu's editor right-click menu is grouped and coloured** — edit, navigate, generate, save, history — like Corvus's commit menu.
 
 ### Fixed
+- **Markdown files use the same Find and Replace as code.** The live-preview editor now opens the floating find widget (with "Find in files") instead of CodeMirror's stock bar.
 - **Bennu shows the "Indexing project" job on every re-index, not just at open.** When dependencies or a pom change on disk (or a build refreshes the index) the job card and footer now follow the re-index through to "Index ready".
 - **Bennu builds a project whose `~/.m2` was filled by IntelliJ.** When offline Maven refuses a jar it already has ("has not been downloaded from it before", typical of a private snapshot registry), the build and the run classpath retry offline ignoring where the jar came from, and only then go online if downloads are allowed.
 - **Bennu flags an enum constant used as a label of an `Integer` or `String` switch.** `switch (code) { case Level.LOW … }` over a numeric selector is reported as an incompatible label, and a switch expression over those types with name labels and no `default` is reported as not exhaustive.

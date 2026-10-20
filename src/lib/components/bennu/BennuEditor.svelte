@@ -4984,6 +4984,7 @@
         onCaret={onMarkdownCaret}
         onOpenLink={openMarkdownLink}
         fileIndex={projectFileIndex}
+        onFindInFiles={(q) => bennuUiStore.openFind(q)}
       />
     </div>
   {:else if activePath}
