@@ -62,7 +62,7 @@ pub use crate::stats::{
 pub use crate::diff::{
     build_workdir_diff, get_branch_diff, get_commit_diff, get_commit_diff_meta,
     get_commit_file_diff, get_commits_range_diff_meta, get_commits_range_file_diff,
-    get_file_at_commit, get_file_blame, get_workdir_diff, parse_diff, parse_diff_meta,
+    get_file_at_commit, get_file_blame, get_workdir_diff, get_workdir_file_diff, parse_diff, parse_diff_meta,
     parse_diff_one, run_incremental_blame, BlameLine, BlameProgress, DiffFile, DiffHunk, DiffLine,
     DiffStats, DiffStatus, EncodingOverrides, LineKind,
 };

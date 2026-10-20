@@ -4,8 +4,8 @@
   import TicketChip from './TicketChip.svelte';
   import NotesModal from './NotesModal.svelte';
   import FileDiffList from '../diff/FileDiffList.svelte';
-  import DiffViewer, { type DiffViewerApi } from '../diff/DiffViewer.svelte';
-  import DiffToolbar from '../diff/DiffToolbar.svelte';
+  import DiffViewer, { type DiffViewerApi } from '$lib/components/shared/internal/diff/DiffViewer.svelte';
+  import DiffToolbar from '$lib/components/shared/internal/diff/DiffToolbar.svelte';
   import ResizablePanel from '../../shared/ui/ResizablePanel.svelte';
   import { Archive, HardDriveDownload, GitCommit, GitCompareArrows, X, StickyNote, ChevronUp, ChevronDown, Play, CornerDownLeft, Trash2, Link2 } from 'lucide-svelte';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
@@ -101,6 +101,7 @@
       {#if diffStore.selectedFile && diffApi}
         <DiffToolbar
           file={diffStore.selectedFile}
+          repoPath={tab?.path ?? null}
           selectedCount={diffApi.selectedCount}
           currentChunkIdx={diffApi.currentChunkIdx}
           copyDone={diffApi.copyDone}

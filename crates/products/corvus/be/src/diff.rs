@@ -142,6 +142,26 @@ fn get_workdir_diff(
     .map_err(|e| e.to_string())
 }
 
+/// One file's working-tree change, parsed — the lazy counterpart of `get_workdir_diff` for a
+/// viewer that shows a single file at a time (Bennu's Changes panel).
+#[arbor_rpc::handler]
+fn get_workdir_file_diff(
+    state: &CorvusState,
+    tab_id: String,
+    staged: bool,
+    path: String,
+    context_lines: Option<u32>,
+    diff_algo: Option<String>,
+    encoding_overrides: Overrides,
+) -> Result<DiffFile, String> {
+    let ctx = context_lines.unwrap_or_else(|| diff_context_lines(state));
+    let repo = open(state, &tab_id)?;
+    corvus_git::diff::get_workdir_file_diff(
+        &repo, staged, &path, ctx, diff_algo.as_deref(), encoding_overrides.as_ref(),
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[arbor_rpc::handler]
 fn get_file_at_commit(
     state: &CorvusState,

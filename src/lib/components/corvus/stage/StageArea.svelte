@@ -8,8 +8,8 @@
   import { AlertTriangle, RefreshCw, GitMerge, CheckCircle2, FileDiff } from 'lucide-svelte';
   import CommitForm from './CommitForm.svelte';
   import ConflictResolver from './ConflictResolver.svelte';
-  import DiffViewer, { type DiffViewerApi } from '../diff/DiffViewer.svelte';
-  import DiffToolbar from '../diff/DiffToolbar.svelte';
+  import DiffViewer, { type DiffViewerApi } from '$lib/components/shared/internal/diff/DiffViewer.svelte';
+  import DiffToolbar from '$lib/components/shared/internal/diff/DiffToolbar.svelte';
   import ResizablePanel from '../../shared/ui/ResizablePanel.svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import StagePanel, { type StageActions } from '$lib/components/shared/internal/stage/StagePanel.svelte';
@@ -192,6 +192,7 @@
       {#if diffStore.selectedFile && diffApi}
         <DiffToolbar
           file={diffStore.selectedFile}
+          repoPath={tab?.path ?? null}
           stageable
           staged={currentDiffStaged}
           selectedCount={diffApi.selectedCount}

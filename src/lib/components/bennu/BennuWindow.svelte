@@ -31,6 +31,7 @@
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { diffStore } from '$lib/stores/corvus/diff.svelte';
   import { signalWindowReady } from '$lib/ipc/window';
   import { syncWindowTitle } from '$lib/utils/window-title.svelte';
   import { isKey, matchesBinding } from '$lib/utils/keybindings';
@@ -234,6 +235,9 @@
       if (bennuOnboardingStore.shouldAutoOpen()) bennuOnboardingStore.show();
     });
     void animStore.loadConfig();
+    // The diff display preferences (unified/split, wrap, context, full file) the Changes panel's
+    // shared diff viewer reads — Corvus's AppShell loads them, and this window never mounts it.
+    void diffStore.loadConfig();
     // Hydrate the config-backed editor toggles (autosave / auto-import) from the persisted config.
     void bennuSettingsStore.loadConfig();
     // The profile list + which one is active, for the titlebar's switcher. Idempotent, so a Bennu

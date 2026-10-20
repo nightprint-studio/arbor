@@ -463,7 +463,8 @@ import static org.junit.Assert.assertEquals;`, 'java')}</code></pre>
   Inside a repository the activity bar has a <strong>Changes</strong> button (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>, or <em>Git: show
   changes</em> in the Command Palette); a dot on it means there is something to commit. The panel is Corvus's staging list: Unstaged and Staged
   sections as a flat list or a folder tree, stage / unstage / discard per file, folder or all, and a commit box with <em>Amend last</em>.
-  Click a file to read its change in a window. Switching branches, pushing and resolving merge conflicts stay in Corvus — the
+  Click a file to see its change in the diff beside the list — Corvus's diff viewer: unified or split, full-file context, change-to-change navigation
+  (<kbd>F3</kbd> / <kbd>Shift</kbd>+<kbd>F3</kbd>), and staging or unstaging single lines or hunks. Switching branches, pushing and resolving merge conflicts stay in Corvus — the
   <strong>Corvus</strong> button opens the project there.
 </p>
 

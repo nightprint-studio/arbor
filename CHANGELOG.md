@@ -8,6 +8,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Changed
+- **Bennu's Changes panel shows the diff beside the file list**, with Corvus's own diff viewer: unified or split, full-file context, chunk navigation and staging single lines or hunks.
 - **One setting decides whether Maven may use the network in Bennu.** *Settings → Java → Allow Maven to use the network* now covers the resolve, the build before a run, the run's classpath and the Maven panel's goals; the panel's *Offline* toggle flips the same, persisted setting instead of a per-session one.
 - **Bennu's run configuration form is easier to scan.** Launch arguments, classpath and debugger, and the environment are folded sections with a summary; script configurations show their shell with icons.
 - **Occurrences of the selected text and find hits are easier to see** in every code editor — stronger fill plus an outline.

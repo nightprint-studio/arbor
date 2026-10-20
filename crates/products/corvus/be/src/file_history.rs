@@ -103,44 +103,6 @@ fn file_commit_patch_by_path(state: &CorvusState, file: String, commit: String) 
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// What a working-tree change to one file looks like, as a unified patch: `staged` = index vs
-/// HEAD, otherwise working tree vs index. An untracked file has no index entry to diff against,
-/// so it is shown as entirely added. The backend of Bennu's Changes panel.
-#[arbor_rpc::handler]
-fn workdir_file_patch_by_path(state: &CorvusState, file: String, staged: bool) -> Result<String, String> {
-    let tab = tab_for(state, &file)?;
-    let workdir = repo_path(state, &tab)?;
-    let rel = relative_to(&workdir, &file);
-
-    let run = |args: &[&str]| -> Result<std::process::Output, String> {
-        git(state)
-            .command()
-            .current_dir(&workdir)
-            .args(args)
-            .output()
-            .map_err(|e| format!("could not run git: {e}"))
-    };
-
-    let mut args = vec!["diff", "--no-color"];
-    if staged {
-        args.push("--cached");
-    }
-    args.extend(["--", rel.as_str()]);
-    let output = run(&args)?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-    let patch = String::from_utf8_lossy(&output.stdout).into_owned();
-    if staged || !patch.is_empty() {
-        return Ok(patch);
-    }
-
-    // Nothing against the index: either the file is clean, or it is untracked. `--no-index`
-    // exits 1 when the files differ, so only a missing patch counts as failure.
-    let untracked = run(&["diff", "--no-color", "--no-index", "--", "/dev/null", rel.as_str()])?;
-    Ok(String::from_utf8_lossy(&untracked.stdout).into_owned())
-}
-
 /// Record separator (U+0001) opens each commit; unit separator (U+001F) splits its fields.
 /// Control characters, because a subject line can contain anything printable.
 const HEADER_FORMAT: &str = "%x01%H%x1f%an%x1f%at%x1f%s";

@@ -4,7 +4,6 @@
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
   import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
   import { diffStore } from '$lib/stores/corvus/diff.svelte';
-  import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { encodingOverrides } from '$lib/stores/corvus/encodingOverrides.svelte';
   import type { DiffFile } from '$lib/types/corvus/git';
   import { computeChunkAnchors } from '$lib/utils/diff-chunks';
@@ -13,6 +12,7 @@
 
   let {
     file,
+    repoPath = null,
     stageable = false,
     staged = false,
     selectedCount = 0,
@@ -27,6 +27,9 @@
     onEncodingChange,
   }: {
     file: DiffFile;
+    /** Workdir of the repository the diff belongs to — keys the per-file encoding override.
+     *  Without it the encoding pill is read-only. */
+    repoPath?: string | null;
     stageable?: boolean;
     staged?: boolean;
     selectedCount?: number;
@@ -51,18 +54,15 @@
       : `${staged ? 'Unstage' : 'Stage'} ${selectedCount} line${selectedCount === 1 ? '' : 's'}`
   );
 
-  const activeRepoPath = $derived(
-    tabsStore.tabs.find(t => t.id === tabsStore.activeTabId)?.path ?? null
-  );
   const encodingOverridden = $derived.by(() => {
-    if (!activeRepoPath || !file) return false;
-    return encodingOverrides.get(activeRepoPath, file.path) !== undefined;
+    if (!repoPath || !file) return false;
+    return encodingOverrides.get(repoPath, file.path) !== undefined;
   });
 
   function pickEncoding(label: string | undefined) {
-    if (!activeRepoPath || !file) return;
-    if (label === undefined) encodingOverrides.clear(activeRepoPath, file.path);
-    else encodingOverrides.set(activeRepoPath, file.path, label);
+    if (!repoPath || !file) return;
+    if (label === undefined) encodingOverrides.clear(repoPath, file.path);
+    else encodingOverrides.set(repoPath, file.path, label);
     onEncodingChange?.();
   }
 </script>

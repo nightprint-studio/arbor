@@ -747,11 +747,23 @@ pub fn get_commit_diff(
 /// synchronous `get_workdir_diff` and the streaming variant so both honor the
 /// same options.
 pub fn build_workdir_diff<'a>(repo: &'a Repository, staged: bool, context_lines: u32, algo: Option<&str>) -> Result<git2::Diff<'a>> {
+    build_workdir_diff_for(repo, staged, context_lines, algo, None)
+}
+
+/// [`build_workdir_diff`] narrowed to `pathspec` (a repo-relative file) when given.
+fn build_workdir_diff_for<'a>(
+    repo: &'a Repository,
+    staged: bool,
+    context_lines: u32,
+    algo: Option<&str>,
+    pathspec: Option<&str>,
+) -> Result<git2::Diff<'a>> {
     let diff = if staged {
         // staged = index vs HEAD
         let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
         let mut opts = DiffOptions::new();
         opts.context_lines(context_lines);
+        if let Some(p) = pathspec { opts.pathspec(p); }
         apply_algo(&mut opts, algo);
         repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?
     } else {
@@ -761,10 +773,29 @@ pub fn build_workdir_diff<'a>(repo: &'a Repository, staged: bool, context_lines:
             .recurse_untracked_dirs(true)
             .show_untracked_content(true)
             .context_lines(context_lines);
+        if let Some(p) = pathspec { opts.pathspec(p); }
         apply_algo(&mut opts, algo);
         repo.diff_index_to_workdir(None, Some(&mut opts))?
     };
     Ok(diff)
+}
+
+/// One file's working-tree change (`staged` = index vs HEAD, otherwise workdir vs index), fully
+/// parsed — what a side-by-side diff view needs without paying for every other changed file.
+/// `path` is repo-relative with forward slashes. Err when the file has no change on that side.
+pub fn get_workdir_file_diff(
+    repo: &Repository,
+    staged: bool,
+    path: &str,
+    context_lines: u32,
+    algo: Option<&str>,
+    overrides: Option<&EncodingOverrides>,
+) -> Result<DiffFile> {
+    let diff = build_workdir_diff_for(repo, staged, context_lines, algo, Some(path))?;
+    match find_delta_index(&diff, path) {
+        Some(i) => parse_diff_one(repo, &diff, i, overrides),
+        None => Err(GitError::Other(format!("file '{path}' has no {} change", if staged { "staged" } else { "unstaged" }))),
+    }
 }
 
 pub fn get_workdir_diff(

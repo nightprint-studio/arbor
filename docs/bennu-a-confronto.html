@@ -221,14 +221,14 @@
 
 <header class="masthead">
   <div class="wrap">
-    <div class="eyebrow">Quinta stesura · solo l'editor · 15 settembre 2026</div>
+    <div class="eyebrow">Sesta stesura · solo l'editor · 20 ottobre 2026</div>
     <h1>Bennu a confronto</h1>
     <p class="standfirst">
       Bennu contro IntelliJ IDEA Ultimate e Community, Eclipse, VS Code con il Java pack e NetBeans:
-      funzione per funzione, area per area, e sugli assi delle stesure precedenti. Rifatta dopo quattro
-      giorni con quasi quarantanovemila righe aggiunte su Bennu, più il lavoro di oggi non ancora
-      committato. La regola resta quella che vale nei due sensi: <b>un voto si muove solo se il repository,
-      o il tuo uso, lo dimostra</b>.
+      funzione per funzione, area per area, e sugli assi delle stesure precedenti. Rifatta dopo cinque
+      settimane, dodici commit e oltre quarantatremila righe aggiunte su Bennu, più il lavoro di oggi non ancora
+      compilato. In coda, due confronti che prima non c'erano: Rust e Bevy, e Spring Tools. La regola resta quella
+      che vale nei due sensi: <b>un voto si muove solo se il repository, o il tuo uso, lo dimostra</b>.
     </p>
   </div>
 </header>
@@ -245,6 +245,8 @@
     <a href="#framework">Framework</a>
     <a href="#build">Build e debug</a>
     <a href="#editor">Editor</a>
+    <a href="#rust">Rust e Bevy</a>
+    <a href="#spring-tools">Spring Tools</a>
     <a href="#salito">Cosa è salito</a>
     <a href="#fermo">Cosa no</a>
     <a href="#prossimi">Prossimi passi</a>
@@ -256,26 +258,26 @@
     <h2>In breve <span class="kicker">tre righe</span></h2>
     <div class="verdict3">
       <div>
-        <b>La completion ha raggiunto il riferimento.</b>
-        Postfix scelti dal tipo e dalla versione Java del modulo, method reference, il tipo del
-        <code>return</code> e dell'argomento funzione messo per primo, il nome della dichiarazione come ghost
-        text, template tuoi in Jinja, e richieste cadenzate sulla digitazione. La riga della scheda sale a 5,
-        alla pari con IntelliJ. Arrivano poi Jakarta EE, JAX-RS, MapStruct, Mockito e AssertJ.
+        <b>Bennu è entrato nel suo repository git.</b>
+        Gutter delle modifiche con ripristino del blocco, blame per commit, cronologia di un file e di una
+        selezione, pannello Changes con il diff accanto alla lista e lo stage per riga, ramo nella status bar,
+        file modificati colorati nell'albero e nei tab. Due delle tre assenze che tenevano la UI/UX a 8.0 cadono; la terza,
+        il multi-caret, resta. Sale a 8.5.
       </div>
       <div>
-        <b>La UI/UX si muove, per tua evidenza.</b>
-        L'11 settembre l'avevi tenuta a 7.5 perché «molte cose sono rimaste grezze». Oggi parli di un
-        miglioramento netto, e il repository lo sostiene: popup della completion rifatto, impostazioni ad
-        albero, Alt+Enter per sezioni, un manuale in-app, un monitor dei processi. Sale a 8.0 — non oltre,
-        perché multi-caret, gutter VCS e diff nell'editor non ci sono ancora.
+        <b>Gli errori di compilazione salgono da 3 a 4.</b>
+        Definite assignment, eccezioni checked in lambda e inizializzatori, lambda e method reference contro
+        la loro interfaccia, switch esaustivi su enum e sealed, <code>List&lt;Integer&gt;</code> dove si aspetta
+        <code>List&lt;Number&gt;</code>, argomenti di tipo sbagliato su molte più chiamate. Non 5: Bennu non compila e nel
+        dubbio tace, e le famiglie nuove non sono ancora state rimisurate su Commons Lang e h2.
       </div>
       <div>
-        <b>L'affidabilità no, e per una ragione precisa.</b>
-        I test salgono (6.097 Rust, 123 frontend), i fix sono tanti. Ma questa settimana i difetti più
-        visibili — il tipo di un <code>val</code> che l'hover non diceva, righe spurie dopo il punto,
-        <code>@RequiredArgsConstructor</code> tagliato fuori — li hai trovati tu, e il lotto di oggi non è ancora
-        compilato. «Funziona davvero» resta 6.5 finché quel lotto non passa. Il distacco da Ultimate sul
-        profilo legacy scende da nove punti a sette.
+        <b>L'affidabilità resta ferma, e la lista dei fix dice perché.</b>
+        Il lotto del 15 settembre è stato compilato e committato, i test salgono (6.523 Rust, 248 frontend). Ma da allora il
+        <code>CHANGELOG</code> registra una dozzina di difetti di base corretti — errori non riportati dentro le lambda,
+        «indietro» che non atterra dove eri, due falsi positivi, un avvio che chiedeva un <code>mvn clean package</code> a mano — e il
+        lavoro di oggi non è compilato. «Funziona davvero» resta 6.5. Il distacco da Ultimate sul profilo legacy scende da
+        sette punti a sei.
       </div>
     </div>
   </div>
@@ -284,13 +286,15 @@
 <section id="metodo">
   <div class="wrap">
     <h2>Metodo <span class="kicker">da cosa nascono i numeri</span></h2>
-    <p>La base di confronto è la quarta stesura dell'11 settembre, con la stessa scala e le stesse righe; le righe
-      nuove sono marcate e contate a parte.</p>
+    <p>La base di confronto è la quinta stesura del 15 settembre, con la stessa scala e le stesse righe; le righe
+      nuove sono marcate e contate a parte. Dove una cella dice «era», è il voto di quella stesura.</p>
     <ul class="plain">
       <li><b>2 settembre — «Arbor a confronto».</b> Assi in decimi per tutta la suite.</li>
       <li><b>9 settembre — «Bennu Against the Field».</b> 21 aree da 0 a 5. Bennu 64 su 105.</li>
       <li><b>11 settembre — quarta stesura.</b> 31 aree, sei editor, due profili pesati. Bennu 109 su 155; legacy 8.5,
         generalista 8.0, UI/UX 7.5, estensibilità 8.0, funziona davvero 6.5, peso 9.5.</li>
+      <li><b>15 settembre — quinta stesura.</b> 35 aree; sulle stesse 31 righe Bennu 112 su 155, in tutto 128 su 175 (73%).
+        Legacy 9.0, generalista 8.5, UI/UX 8.0, estensibilità 8.5, funziona davvero 6.5, peso 9.5.</li>
     </ul>
 
     <h3>Le fonti, e dove si fermano</h3>
@@ -298,47 +302,53 @@
       <table>
         <thead><tr><th>Fonte</th><th>Cosa decide</th><th>Dove non arriva</th></tr></thead>
         <tbody>
-          <tr><td>Il codice al commit <code>bc4bece9</code>, più il lavoro non ancora committato del 15 settembre</td><td>Se una funzione c'è: handler RPC, crate, pagine di documentazione in-app</td><td>Se funziona sul tuo progetto — e per il lotto del 15, se compila</td></tr>
-          <tr><td>Il <code>CHANGELOG</code>, sezione <code>[Unreleased]</code></td><td>Quando una funzione è arrivata rispetto all'11 settembre</td><td>—</td></tr>
-          <tr><td>I conteggi dal repository: crate, test, pagine, tool MCP, <code>git diff --shortstat</code></td><td>Quanto è cresciuto, in numeri</td><td>Quanto regge: un test scritto non è un test passato</td></tr>
-          <tr><td>Le misure registrate sui corpora (Commons Lang, h2)</td><td>Il refactoring, in numeri</td><td>Non rifatte da allora: il codice di quei refactoring non è cambiato</td></tr>
-          <tr><td>Le tue parole del 15 settembre</td><td>UI/UX: «miglioramento netto»</td><td>—</td></tr>
+          <tr><td>Il codice al commit <code>978389e6</code> (20 ottobre), più il lavoro non ancora committato di oggi</td><td>Se una funzione c'è: handler RPC, crate, pagine di documentazione in-app</td><td>Se funziona sul tuo progetto — e per il lavoro di oggi, se compila</td></tr>
+          <tr><td>Il <code>CHANGELOG</code>, sezione <code>[Unreleased]</code>, confrontato voce per voce con quello del 15 settembre</td><td>Quando una funzione è arrivata rispetto alla stesura precedente</td><td>—</td></tr>
+          <tr><td>I conteggi dal repository: crate, test, pagine, tool MCP, <code>git diff --shortstat</code>, tutti con lo stesso metodo di <code>git grep</code> sul commit di allora e su quello di oggi</td><td>Quanto è cresciuto, in numeri</td><td>Quanto regge: un test scritto non è un test passato</td></tr>
+          <tr><td>Le misure registrate sui corpora (Commons Lang, h2)</td><td>Il refactoring, in numeri</td><td>Non rifatte: le famiglie di errori di compilazione arrivate dopo non sono state misurate sugli stessi file</td></tr>
+          <tr><td>Le tue parole del 15 settembre</td><td>UI/UX: «miglioramento netto»</td><td>Da allora nessun nuovo giudizio tuo sull'affidabilità</td></tr>
           <tr><td>Conoscenza generale degli altri IDE</td><td>Le loro colonne</td><td>Non riverificate su un'installazione: approssimate</td></tr>
         </tbody>
       </table>
     </div>
 
     <div class="callout">
-      <b>Il lotto di oggi è nel sorgente, non ancora nel binario.</b>
-      <p>Postfix tipati, method reference, tipo atteso nel <code>return</code>, ghost text del nome, quick fix del
-        campo <code>final</code>, template postfix tuoi, richieste cadenzate e popup nuovo sono stati scritti il 15 settembre
-        e non ancora compilati. La scheda li conta perché il codice c'è; se una di quelle righe non regge alla
-        compilazione o all'uso, torna giù, ed è per questo che l'affidabilità non sale insieme a loro.</p>
+      <b>Il lavoro di oggi è nel sorgente, non ancora nel binario.</b>
+      <p>Il pannello Changes con il diff di Corvus accanto alla lista, il visualizzatore dei diff spostato fra i widget
+        condivisi, il nuovo handler di Corvus che legge un solo file, la ricerca della radice del repository passata
+        da Sitta a Corvus e il job «Indexing project» a ogni re-index sono stati scritti oggi e non compilati. La scheda
+        li conta perché il codice c'è; se non reggono alla compilazione o all'uso, le righe tornano giù. Il lotto del 15 settembre,
+        che nella stesura precedente era nella stessa condizione, è invece compilato e committato.</p>
     </div>
 
-    <h3>Undici settembre → oggi</h3>
+    <h3>Quindici settembre → oggi</h3>
     <div class="facts">
-      <div><b>48 → 54</b><small>crate di Bennu</small></div>
-      <div><b>5.380 → 6.097</b><small>test Rust nei crate di Bennu</small></div>
-      <div><b>85 → 123</b><small>test frontend, in 11 file</small></div>
-      <div><b>48 → 57</b><small>pagine di documentazione in-app</small></div>
-      <div><b>29 → 32</b><small>tool esposti ad agenti via MCP</small></div>
-      <div><b>+48.983 / −12.413</b><small>righe committate su Bennu dall'11 settembre, 420 file</small></div>
+      <div><b>55 → 55</b><small>crate di Bennu, contati con <code>Cargo.toml</code> (nella stesura precedente 54, con un altro metodo)</small></div>
+      <div><b>6.110 → 6.523</b><small>funzioni <code>#[test]</code> nei crate di Bennu</small></div>
+      <div><b>123 → 248</b><small>test frontend (<code>it</code>/<code>test</code>), nei 21 file <code>.test.ts</code></small></div>
+      <div><b>57 → 57</b><small>pagine di documentazione in-app</small></div>
+      <div><b>32 → 32</b><small>tool MCP di Bennu; la suite ne espone 45, con Corvus (5) e Tyto (8)</small></div>
+      <div><b>+43.610 / −7.125</b><small>righe su Bennu dal 15 settembre, 1.343 file, 12 commit</small></div>
     </div>
     <div class="callout green">
-      <b>I sei crate nuovi.</b>
-      <p><code>bennu-jakartaee</code> (CDI, EJB, servlet), <code>bennu-jaxrs</code>, <code>bennu-mapstruct</code>,
-        <code>bennu-mockito</code>, <code>bennu-assertj</code> e <code>bennu-templates</code> (template di codice in Jinja,
-        con anteprima, scelta per progetto, abbreviazioni e postfix tuoi). A questi si aggiungono moduli nuovi dentro crate
-        esistenti: il catalogo postfix e il nome delle dichiarazioni in <code>bennu-java</code>, i method reference e il
-        tipo atteso in <code>bennu-query</code>, la salute del progetto e i cambi dell'albero in <code>bennu-be</code>.</p>
+      <b>Cosa è arrivato, per famiglia.</b>
+      <p><b>Git dentro l'editor</b> (gutter, blame, cronologia di file e selezione, Changes, ramo, albero e tab colorati),
+        con Corvus come motore e nessun repository da aprire là. <b>Errori di compilazione</b>: due voci di
+        <code>CHANGELOG</code> elencano le famiglie nuove, più la correzione di molti falsi negativi dentro le lambda.
+        <b>Ambiente di esecuzione</b>: editor delle variabili per ogni run configuration, scelta della shell per script e terminale,
+        una sola impostazione per la rete di Maven, breakpoint nelle sorgenti delle librerie, file <code>.env</code> compresi.
+        <b>Editor</b>: barra Trova/Sostituisci, import static, cartelle senza <code>pom.xml</code> o <code>Cargo.toml</code> aperte
+        come progetti solo editor, template Angular colorati. <b>Sicurezza</b>: vulnerabilità note delle dipendenze nel pom, opt-in.
+        <b>Agenti</b>: Corvus e Tyto espongono tool MCP, con autorizzazioni a tempo.</p>
     </div>
   </div>
 </section>
 <section id="assi">
   <div class="wrap">
     <h2>Gli assi <span class="kicker">in decimi</span></h2>
-    <p>Stessa scala e stesse colonne dell'11 settembre. Sotto il voto di Bennu c'è quello di allora.</p>
+    <p>Stessa scala e stesse colonne del 15 settembre. Sotto il voto di Bennu c'è quello di allora. Le colonne degli altri
+      IDE non sono state rimesse in discussione: nessuno ha cambiato abbastanza in cinque settimane da spostare un voto
+      senza una prova che qui non c'è.</p>
 
     <div class="tw">
       <table>
@@ -357,10 +367,10 @@
         <tbody>
           <tr>
             <td class="own"><b>Bennu</b></td>
-            <td class="n2 own">9.0<small class="up">era 8.5</small></td>
+            <td class="n2 own">9.0<small>invariato</small></td>
+            <td class="n2 own">8.5<small>invariato</small></td>
             <td class="n2 own">8.5<small class="up">era 8.0</small></td>
-            <td class="n2 own">8.0<small class="up">era 7.5</small></td>
-            <td class="n2 own">8.5<small class="up">era 8.0</small></td>
+            <td class="n2 own">8.5<small>invariato</small></td>
             <td class="n2 own">6.5<small>invariato</small></td>
             <td class="n2 own">9.5<small>invariato</small></td>
             <td class="own">Primo sullo stack legacy; sul generalista davanti a Eclipse, dietro Community solo per le righe a zero</td>
@@ -374,95 +384,84 @@
       </table>
     </div>
 
-    <div class="chart" role="img" aria-label="Bennu, voti in decimi dall'11 settembre a oggi: stack legacy da 8.5 a 9.0, generalista da 8.0 a 8.5, UI/UX da 7.5 a 8.0, estensibilità da 8.0 a 8.5, funziona davvero 6.5 invariato">
-      <div class="chart-title">Bennu, 11 settembre → 15 settembre</div>
-      <div class="crow"><span class="lab">Stack legacy</span><div class="track"><span class="prev" style="width:85%"></span><span class="now" style="width:90%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">8.5 → <b>9.0</b> <span class="up">+0.5</span></span></div>
-      <div class="crow"><span class="lab">Java generalista</span><div class="track"><span class="prev" style="width:80%"></span><span class="now" style="width:85%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">8.0 → <b>8.5</b> <span class="up">+0.5</span></span></div>
-      <div class="crow"><span class="lab">UI/UX</span><div class="track"><span class="prev" style="width:75%"></span><span class="now" style="width:80%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">7.5 → <b>8.0</b> <span class="up">+0.5</span></span></div>
-      <div class="crow"><span class="lab">Estensibilità</span><div class="track"><span class="prev" style="width:80%"></span><span class="now" style="width:85%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">8.0 → <b>8.5</b> <span class="up">+0.5</span></span></div>
+    <div class="chart" role="img" aria-label="Bennu, voti in decimi dal 15 settembre a oggi: stack legacy 9.0 invariato, generalista 8.5 invariato, UI/UX da 8.0 a 8.5, estensibilità 8.5 invariato, funziona davvero 6.5 invariato">
+      <div class="chart-title">Bennu, 15 settembre → 20 ottobre</div>
+      <div class="crow"><span class="lab">Stack legacy</span><div class="track"><span class="prev" style="width:90%"></span><span class="now" style="width:90%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">9.0 → <b>9.0</b></span></div>
+      <div class="crow"><span class="lab">Java generalista</span><div class="track"><span class="prev" style="width:85%"></span><span class="now" style="width:85%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">8.5 → <b>8.5</b></span></div>
+      <div class="crow"><span class="lab">UI/UX</span><div class="track"><span class="prev" style="width:80%"></span><span class="now" style="width:85%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">8.0 → <b>8.5</b> <span class="up">+0.5</span></span></div>
+      <div class="crow"><span class="lab">Estensibilità</span><div class="track"><span class="prev" style="width:85%"></span><span class="now" style="width:85%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">8.5 → <b>8.5</b></span></div>
       <div class="crow"><span class="lab">Funziona davvero</span><div class="track"><span class="prev" style="width:65%"></span><span class="now" style="width:65%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">6.5 → <b>6.5</b></span></div>
       <div class="scale"><span></span><div class="ticks"><span style="left:0">0</span><span style="left:20%">2</span><span style="left:40%">4</span><span style="left:60%">6</span><span style="left:80%">8</span><span style="left:100%">10</span></div><span></span></div>
-      <div class="chart-key"><span><i style="background:var(--line)"></i>11 settembre</span><span><i style="background:var(--accent)"></i>oggi</span></div>
+      <div class="chart-key"><span><i style="background:var(--line)"></i>15 settembre</span><span><i style="background:var(--accent)"></i>oggi</span></div>
     </div>
 
     <h3>Perché ogni asse si è mosso, o no</h3>
     <div class="axes">
       <article class="axis">
-        <header><b>Feature · stack legacy</b><span class="up">8.5 → 9.0</span></header>
-        <p>Struts e JSP erano già al massimo della scheda; il mezzo punto viene da quello che un monolite legacy ha
-          intorno. Jakarta EE — bean CDI ed EJB, iniezioni che niente soddisfa, bean non proxabili, mapping di servlet in
-          conflitto — è il J2EE di quei monoliti, e Community non lo vede. Poi il multi-modulo: un modulo rinominato
-          in un altro IDE segnalato invece di svuotare il classpath in silenzio, il livello Java letto per modulo, lo
-          stamp di compilazione per modulo che toglie il <code>ClassNotFoundException</code> lanciando un modulo non
-          compilato, l'albero che si ripara al focus.</p>
-        <p><b>Non 9.5:</b> nessuna di queste righe è stata usata abbastanza da te per essere stabile, e le prove sui
-          framework Jakarta sono tutte scritte, non misurate su un'applicazione vera.</p>
+        <header><b>Feature · stack legacy</b><span class="flat">9.0 = 9.0</span></header>
+        <p>Nessun movimento. Dal 15 settembre il legacy ha ricevuto poco di suo: i file <code>.env</code> capiti da Spring Boot e il controllo
+          delle dichiarazioni dei bean mentre si scrivono. Sono ritocchi a righe che erano già al massimo della scheda o a 4.</p>
+        <p><b>Non 9.5:</b> le righe su Jakarta EE e sul multi-modulo sono ancora scritte e non misurate su un'applicazione vera, e
+          l'unico confronto che conta qui — il tuo monolite — non è stato rifatto in queste settimane.</p>
       </article>
       <article class="axis">
-        <header><b>Feature · Java generalista</b><span class="up">8.0 → 8.5</span></header>
-        <p>La completion, soprattutto: postfix scelti dal tipo (<code>ids.stream</code> su un array è
-          <code>Arrays.stream(ids)</code>, <code>.ifpe</code> su Java 8 è un <code>if</code> su <code>isPresent()</code>),
-          completion dei method reference con i compatibili prima, il tipo del <code>return</code> e dell'argomento funzione
-          messo per primo e preselezionato, il nome della dichiarazione come ghost text, gli import sempre inclusi. Poi le
-          librerie che un team generalista apre ogni giorno — MapStruct, Mockito, AssertJ, JAX-RS — e i quick fix del
-          campo <code>final</code> che selezionano il valore da sostituire.</p>
-        <p><b>Non 9:</b> le righe a zero dell'11 settembre sono ancora a zero. Change Signature, Introduce Parameter,
-          estrai interfaccia, Gradle, hot-swap delle classi, attach remoto e coverage — cercati nel sorgente, non ci
-          sono.</p>
+        <header><b>Feature · Java generalista</b><span class="flat">8.5 = 8.5</span></header>
+        <p>Dentro l'asse si è mosso molto, ma senza cambiare il voto. Gli errori di compilazione passano da 3 a 4 (più sotto), la local
+          history da 4 a 5 con la cronologia per selezione, e arrivano l'import static, la barra Trova/Sostituisci e il breakpoint
+          nelle sorgenti delle librerie.</p>
+        <p><b>Non 9:</b> le righe a zero sono le stesse del 15 settembre: Change Signature, Introduce Parameter, estrai interfaccia,
+          Gradle, hot-swap delle classi, attach remoto, coverage. Finché sono a zero l'asse non sale, per quanto la parte che c'è
+          migliori.</p>
       </article>
       <article class="axis">
-        <header><b>UI/UX</b><span class="up">7.5 → 8.0</span></header>
-        <p>Tuo voto, e questa volta sale: parli di un «miglioramento netto». Il repository lo sostiene riga per riga —
-          il popup della completion rifatto (righe più alte, badge per tipo colorati, lettere trovate evidenziate,
-          firma e provenienza in colonne), le impostazioni ad albero e la Project Configuration separata, l'elenco di
-          Alt+Enter diviso per sezioni, il manuale in-app a schede, i widget condivisi della status bar e dei toast, il
-          monitor dei processi.</p>
-        <p><b>Non 8.5:</b> multi-caret e selezione a colonna, gutter delle modifiche VCS e diff nell'editor mancano, e
-          sono assenze che si sentono ogni ora. Il popup nuovo, poi, è stato scritto oggi: Merula e Studio hanno ancora
-          la copia vecchia.</p>
+        <header><b>UI/UX</b><span class="up">8.0 → 8.5</span></header>
+        <p>Il 15 settembre due cose tenevano l'8: multi-caret e selezione a colonna, e il gutter delle modifiche con il diff nell'editor.
+          Il gutter c'è — barra colorata per le righe cambiate, clic per vedere il vecchio testo, ripristinare il blocco o copiarlo,
+          <kbd>Alt</kbd>+<kbd>F3</kbd> per scorrerle — insieme al blame, alla cronologia, al ramo nella status bar e a un pannello Changes
+          che mostra il diff di Corvus accanto alla lista. A questo si aggiungono la barra Trova/Sostituisci flottante, il menu del
+          tasto destro raggruppato e colorato, i nomi non dichiarati in rosso e il form delle run configuration a sezioni ripiegabili.</p>
+        <p><b>Non 9:</b> il multi-caret manca, i bookmark mancano, e il diff nell'editor è ancora un pannello e non una vista affiancata
+          sul testo che stai scrivendo. Il pannello Changes con il diff accanto è stato scritto oggi e non è compilato: se non regge, l'asse
+          torna a 8.0.</p>
       </article>
       <article class="axis">
-        <header><b>Estensibilità</b><span class="up">8.0 → 8.5</span></header>
-        <p>L'11 settembre non c'era evidenza nuova. Oggi c'è un punto di estensione vero che non è un plugin: i template
-          di codice in Jinja, di sette tipi — nuovo file, dalla classe, configurazione, validazione, abbreviazioni e
-          postfix tuoi, questi ultimi dichiarando da soli a quali valori si applicano e da quale livello Java — con
-          anteprima dal vivo, scelta per progetto e due tool MCP per un agente che li voglia usare. È estensione alla
-          portata di chi non scrive un plugin.</p>
+        <header><b>Estensibilità</b><span class="flat">8.5 = 8.5</span></header>
+        <p>Nessun punto di estensione nuovo. Cresce la superficie verso gli agenti: i tool MCP della suite sono 45, con Corvus e Tyto,
+          e un'autorizzazione a tempo permette a un client AI di committare mentre non ci sei, senza mai sostituire un rifiuto.</p>
         <p><b>Non 9:</b> l'ecosistema dei plugin resta quello di un maintainer solo.</p>
       </article>
       <article class="axis">
         <header><b>Funziona davvero</b><span class="flat">6.5 = 6.5</span></header>
-        <p>A favore: test Rust da 5.380 a 6.097, frontend da 85 a 123, e una lunga lista di correzioni — progetti chiusi
-          che liberano la memoria, moduli mancanti dichiarati, build fallite che dicono di esserlo, go-to e hover sui
-          wildcard import.</p>
-        <p><b>Contro, e pesa di più:</b> i difetti di questa settimana erano di base e li hai trovati usando — il tipo
-          di un <code>val</code> che l'hover non diceva, parole chiave dopo il punto, un'annotazione usata in centinaia
-          di file che la completion tagliava a quaranta nomi. Sono corretti, ciascuno con il suo test, ma il lotto che li
-          corregge non è ancora compilato. Sale quando quel lotto passa e regge una settimana d'uso.</p>
+        <p>A favore: il lotto del 15 settembre è stato compilato e committato (i commit del 19 ottobre si chiamano «many compilation fix»);
+          i test Rust passano da 6.110 a 6.523 e quelli frontend da 123 a 248; un avvio non richiede più un <code>mvn clean package</code> fatto
+          a mano, e un classpath che non si risolve viene detto invece di partire lo stesso.</p>
+        <p><b>Contro, e pesa di più:</b> le voci nuove del <code>CHANGELOG</code> sono in buona parte difetti di base corretti — tre
+          famiglie di errori che dentro una lambda non venivano segnalati (un nome non dichiarato, un metodo che non esiste, gli argomenti
+          di una chiamata), «indietro» e «avanti» che non atterravano dove eri, due falsi positivi. Ognuno ha il suo test, ma erano visibili
+          solo usando. Sale quando una settimana passa senza che ne emerga uno così, e dopo che il lavoro di oggi è stato compilato.</p>
       </article>
       <article class="axis">
         <header><b>Peso e avvio</b><span class="flat">9.5 = 9.5</span></header>
-        <p>Due fatti nuovi vanno nella direzione giusta: un progetto che nessuno guarda da dieci minuti viene rilasciato
-          insieme ai suoi language server, e il monitor dei processi mostra finalmente la memoria vera, per progetto.</p>
-        <p><b>Da rimisurare:</b> il numero di riferimento risale a 39 crate; oggi sono 54.</p>
+        <p>Nessun fatto nuovo dal 15 settembre sul peso o sull'avvio, tranne cartelle senza <code>pom.xml</code> o <code>Cargo.toml</code> che
+          si aprono come progetti solo editor, senza indicizzare niente.</p>
+        <p><b>Da rimisurare:</b> il numero di riferimento risale a 39 crate; oggi sono 55.</p>
       </article>
     </div>
   </div>
 </section>
 <section id="scheda">
   <div class="wrap">
-    <h2>La scheda <span class="kicker">35 aree · 6 editor · da 0 a 5</span></h2>
-    <p>Le 31 aree dell'11 settembre, più quattro nate da crate che allora non esistevano: Jakarta EE e JAX-RS,
-      MapStruct, le librerie di test, e i template di codice. Sotto il voto di Bennu trovi quello dell'11 settembre
-      quando è cambiato.</p>
+    <h2>La scheda <span class="kicker">36 aree · 6 editor · da 0 a 5</span></h2>
+    <p>Le 35 aree del 15 settembre, più una: la sicurezza delle dipendenze. Sotto il voto di Bennu trovi quello del
+      15 settembre quando è cambiato; «nuova» marca la riga che allora non c'era.</p>
 
     <div class="callout blue">
-      <b>Sulle stesse 31 righe dell'11 settembre: da 109 a 112 su 155, dal 70% al 72%.</b>
-      <p>Tre punti da tre righe. <b>Completion</b> da 4 a 5: ha adesso ogni funzione che IntelliJ ha in quella riga
-        tranne la statement completion, e alcune che lui non ha. <b>Ispezioni sui framework</b> da 4 a 5: agli errori
-        di proxy, rotte e transazioni si aggiungono Mockito, AssertJ, CDI ed EJB. <b>Maven</b> da 4 a 5: la gestione
-        multi-modulo che mancava — moduli rinominati, livello e compilazione per modulo. Con le quattro righe nuove,
-        128 su 175: il 73%.</p>
+      <b>Sulle stesse 35 righe del 15 settembre: da 128 a 131 su 175, dal 73% al 75%.</b>
+      <p>Tre punti da tre righe. <b>Errori di compilazione</b> da 3 a 4: le famiglie elencate nel <code>CHANGELOG</code> coprono ora
+        gran parte di quello che javac rifiuta nel Java di tutti i giorni; manca la misura su Commons Lang e h2, ed è per questo che
+        non è 5. <b>Local history</b> da 4 a 5: oltre a file e cartelle c'è la cronologia per selezione, che IntelliJ ha da sempre.
+        <b>Ergonomia dell'editor</b> da 3 a 4: gutter delle modifiche, barra Trova/Sostituisci, menu del tasto destro raggruppato; restano
+        multi-caret e bookmark. Con la riga nuova, 134 su 180: il 74%.</p>
     </div>
 
     <div class="legend">
@@ -474,11 +473,11 @@
     <div class="tw"><table id="board" class="board"><caption class="fine" style="caption-side:bottom;text-align:left;padding:10px 12px">Totali, subtotali e percentuali sono calcolati dalla pagina sulle righe che vedi, non scritti a mano.</caption></table></div>
 
     <div class="callout">
-      <b>Senza pesi, Bennu supera IntelliJ Community di sei punti — su righe ancora opposte.</b>
-      <p>L'11 settembre erano pari. Community continua a prendere i suoi punti sul Java di tutti i giorni: refactoring,
-        errori di compilazione, debugger, coverage, Gradle. Bennu li prende dove Community ha zero — Struts e JSP, Jakarta
-        EE, i controlli sui framework, gli encoding — e adesso anche sulla completion, dove l'ha raggiunta. La sezione
-        successiva pesa le righe, perché due strumenti con totali vicini e poche righe in comune dicono poco.</p>
+      <b>Senza pesi, Bennu supera IntelliJ Community di undici punti — su righe ancora opposte.</b>
+      <p>Il 15 settembre erano sei. Community continua a prendere i suoi punti sul Java di tutti i giorni: refactoring,
+        debugger, coverage, Gradle. Bennu li prende dove Community ha zero — Struts e JSP, Jakarta EE, i controlli sui
+        framework, gli encoding — e da questa stesura si avvicina anche sugli errori di compilazione. La sezione successiva
+        pesa le righe, perché due strumenti con totali vicini e poche righe in comune dicono poco.</p>
     </div>
   </div>
 </section>
@@ -486,7 +485,7 @@
 <section id="profili">
   <div class="wrap">
     <h2>Due squadre <span class="kicker">la stessa scheda, pesata</span></h2>
-    <p>Stessi pesi dell'11 settembre per le righe che c'erano; per le quattro nuove, il peso è scritto nel sorgente
+    <p>Stessi pesi del 15 settembre per le righe che c'erano; per la riga nuova, il peso è scritto nel sorgente
       della pagina accanto ai voti, come per le altre.</p>
     <div class="profiles">
       <article class="profile">
@@ -504,26 +503,26 @@
     </div>
     <div class="callout blue">
       <b>Cosa dicono.</b>
-      <p>Per il monolite legacy Bennu resta secondo, e il distacco da Ultimate scende da nove punti a sette: 78% contro
-        85%. Per il servizio Spring Boot resta terzo, al 71%, con Community sei punti avanti: su un servizio nuovo
-        refactoring, errori di compilazione e Gradle pesano ancora più di tutto il resto.</p>
-      <p>Il dato utile è lo stesso di allora, e più netto: le funzioni sui framework non spostano più la distanza da
-        Ultimate, perché su quelle Bennu è già davanti. La spostano le righe generaliste a zero o a tre — Change Signature,
-        debugger, coverage — e il tempo.</p>
+      <p>Per il monolite legacy Bennu resta secondo, e il distacco da Ultimate scende da sette punti a sei: 79% contro
+        85%. Per il servizio Spring Boot resta terzo, al 73%, e Community scende da sei punti avanti a tre: gli errori di
+        compilazione pesano ×3 su un servizio nuovo, ed è la riga che si è mossa.</p>
+      <p>Il dato utile è lo stesso di allora: le funzioni sui framework non spostano più la distanza da Ultimate, perché su
+        quelle Bennu è già davanti. La spostano le righe generaliste a zero o a tre — Change Signature, debugger, coverage —
+        e il tempo.</p>
     </div>
   </div>
 </section>
 <section id="codice">
   <div class="wrap">
     <h2>Il dettaglio <span class="kicker">funzione per funzione</span></h2>
-    <p>Le matrici dell'11 settembre, aggiornate. Una riga su sfondo verde è cambiata da allora, e l'etichetta dice
-      com'era; un'etichetta blu segna una riga nuova. Le etichette «nuova» dell'11 settembre sono state tolte: quelle
+    <p>Le matrici del 15 settembre, aggiornate. Una riga su sfondo verde è cambiata da allora, e l'etichetta dice
+      com'era; un'etichetta blu segna una riga nuova. Le etichette della stesura precedente sono state tolte: quelle
       righe oggi sono semplicemente righe.</p>
     <div class="legend">
       <span><b style="color:var(--hi)">✓</b> c'è e regge</span>
       <span><b style="color:var(--mid)">◐</b> a metà, dietro un plugin, o fragile</span>
       <span><b style="color:var(--lo)">✗</b> non c'è</span>
-      <span><span class="tag">era ✗</span> cambiata dall'11 settembre</span>
+      <span><span class="tag">era ✗</span> cambiata dal 15 settembre</span>
       <span><span class="tag new">nuova</span> riga che allora non c'era</span>
     </div>
 
@@ -535,7 +534,7 @@
         <tr><td>Trova utilizzi, con il conteggio sopra ogni dichiarazione</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Gerarchia delle chiamate, dei tipi, membri ereditati</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
         <tr><td>Vai a classe, simbolo, file — anche dentro il JDK</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr class="chg"><td>Hover con il tipo inferito lungo una catena, anche su una riga non finita <span class="tag">fix 15 set</span><small class="why">Un <code>val</code> legato a <code>….map(Tipo::metodo)</code> dice <code>Optional&lt;…&gt;</code>; prima non diceva niente.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Hover con il tipo inferito lungo una catena, anche su una riga non finita<small class="why">Un <code>val</code> legato a <code>….map(Tipo::metodo)</code> dice <code>Optional&lt;…&gt;</code>; prima non diceva niente.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Recent locations, torna all'ultimo punto modificato</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Grafo dei moduli navigabile</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c p">◐</td></tr>
         <tr><td>Sorgenti decompilati e download automatico dei sources</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
@@ -550,21 +549,21 @@
     <div class="tw"><table>
       <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
       <tbody>
-        <tr class="chg"><td>Ordinata dal tipo che la posizione vuole — ora con i sottotipi e il preselezionato <span class="tag">allargata</span><small class="why"><code>return Ra</code> apre sulla classe che il metodo restituisce, <code>return builder.</code> su <code>build()</code>, anche nelle lambda e con i generics. Il tipo esatto prima del sottotipo.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
-        <tr><td>Il tipo che riceve un argomento funzione, per primo <span class="tag new">nuova</span><small class="why">In <code>optional.map(|)</code> l'elemento dell'<code>Optional</code>, anche con Ctrl+Space senza scrivere niente.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
-        <tr><td>Method reference: metodi e <code>new</code> dopo <code>::</code>, i compatibili prima <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
-        <tr><td>Postfix scelti dal tipo e dalla versione Java del modulo <span class="tag new">nuova</span><small class="why">Una quarantina: <code>.for</code>, <code>.fori</code>, <code>.stream</code>, <code>.opt</code>, <code>.ifpe</code>, <code>.twr</code>, <code>.inst</code>… Dove una versione non ha un metodo scrive l'equivalente; un'espressione che fa lavoro non viene scritta due volte.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
-        <tr><td>Il nome di una dichiarazione proposto dopo il tipo <span class="tag new">nuova</span><small class="why">Ghost text: <code>OrderRepository </code> → <code>orderRepository</code>, <code>List&lt;Order&gt; </code> → <code>orders</code>, con la cifra se il nome è preso.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Ordinata dal tipo che la posizione vuole — ora con i sottotipi e il preselezionato<small class="why"><code>return Ra</code> apre sulla classe che il metodo restituisce, <code>return builder.</code> su <code>build()</code>, anche nelle lambda e con i generics. Il tipo esatto prima del sottotipo.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Il tipo che riceve un argomento funzione, per primo<small class="why">In <code>optional.map(|)</code> l'elemento dell'<code>Optional</code>, anche con Ctrl+Space senza scrivere niente.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Method reference: metodi e <code>new</code> dopo <code>::</code>, i compatibili prima</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr><td>Postfix scelti dal tipo e dalla versione Java del modulo<small class="why">Una quarantina: <code>.for</code>, <code>.fori</code>, <code>.stream</code>, <code>.opt</code>, <code>.ifpe</code>, <code>.twr</code>, <code>.inst</code>… Dove una versione non ha un metodo scrive l'equivalente; un'espressione che fa lavoro non viene scritta due volte.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr><td>Il nome di una dichiarazione proposto dopo il tipo<small class="why">Ghost text: <code>OrderRepository </code> → <code>orderRepository</code>, <code>List&lt;Order&gt; </code> → <code>orders</code>, con la cifra se il nome è preso.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
         <tr><td>Ricorda cosa hai scelto, per tipo dichiarante</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
         <tr><td>Accettare un metodo scrive la chiamata, con i tab stop sugli argomenti</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Offre i membri che la classe non ha ancora</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
-        <tr class="chg"><td>Tipi e annotazioni ordinati da quanto il progetto li usa — anche i nomi lunghi <span class="tag">fix 15 set</span><small class="why"><code>@R</code> offre <code>@RequiredArgsConstructor</code> in cima: prima veniva tagliato dietro quaranta annotazioni più corte.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
-        <tr class="chg"><td>Dopo il punto solo i membri del valore <span class="tag">fix 15 set</span><small class="why">Niente più parole chiave, parole del file o nomi locali mescolati ai membri.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr class="chg"><td>Abbreviazioni Java: <code>psf</code>, <code>prf</code>, <code>psvm</code>, <code>sout</code>, <code>fori</code>… <span class="tag">+2</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr class="chg"><td>Live template definiti dall'utente <span class="tag">era ✗</span><small class="why">Abbreviazioni e postfix in Jinja, per qualsiasi linguaggio, con tab stop, import e anteprima dal vivo.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr><td>Richieste cadenzate sulla digitazione <span class="tag new">nuova</span><small class="why">Una raffica di tasti chiede una volta sola quando si ferma, e comunque ogni 350&nbsp;ms; una domanda uguale condivide la risposta in viaggio.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Tipi e annotazioni ordinati da quanto il progetto li usa — anche i nomi lunghi<small class="why"><code>@R</code> offre <code>@RequiredArgsConstructor</code> in cima: prima veniva tagliato dietro quaranta annotazioni più corte.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Dopo il punto solo i membri del valore<small class="why">Niente più parole chiave, parole del file o nomi locali mescolati ai membri.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Abbreviazioni Java: <code>psf</code>, <code>prf</code>, <code>psvm</code>, <code>sout</code>, <code>fori</code>…</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Live template definiti dall'utente<small class="why">Abbreviazioni e postfix in Jinja, per qualsiasi linguaggio, con tab stop, import e anteprima dal vivo.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Richieste cadenzate sulla digitazione<small class="why">Una raffica di tasti chiede una volta sola quando si ferma, e comunque ogni 350&nbsp;ms; una domanda uguale condivide la risposta in viaggio.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Completion dell'istruzione (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>)</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c n">✗</td><td class="c n">✗</td></tr>
-        <tr class="chg"><td>Popup leggibile: badge per tipo, lettere trovate, firma e provenienza in colonne <span class="tag">rifatto</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr><td>Popup leggibile: badge per tipo, lettere trovate, firma e provenienza in colonne</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
       </tbody>
     </table></div>
 
@@ -575,19 +574,20 @@
         <tr><td>Sintassi, statement illegali, modificatori, record, enum</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Control-flow: missing return, irraggiungibile, yield, fall-through</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Membri e arità sul tipo inferito, chiamate statiche e tipi annidati<small class="why">Misurata a zero falsi positivi su 629 file di Commons Lang.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr class="chg"><td>Nomi non dichiarati in una classe Lombok <span class="tag">fix 15 set</span><small class="why">Un <code>@RequiredArgsConstructor</code> zittiva tutta la classe; ora solo le annotazioni che generano davvero quel nome.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Nomi non dichiarati in una classe Lombok<small class="why">Un <code>@RequiredArgsConstructor</code> zittiva tutta la classe; ora solo le annotazioni che generano davvero quel nome.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
         <tr><td>Ereditarietà, override di final, covarianza del return</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr><td>Eccezioni checked, catch morto, multi-catch, try-with-resources</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Eccezioni checked, catch morto, multi-catch, try-with-resources <span class="tag">allargata</span><small class="why">Ora anche dentro lambda e inizializzatori, nel rethrow e nel <code>close()</code> implicito.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Argomenti di tipo sbagliato, boxing, <code>super(…)</code> e <code>this(…)</code>, classi anonime senza il metodo astratto <span class="tag new">nuova</span><small class="why">Su chiamate statiche, dentro le lambda, su metodi generici e in overload, e sui costruttori di classi annidate e anonime.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Generics: arità dei type-argument, erasure clash</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Generics: bound violati, PECS, overload ambiguo</td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Lambda: arità contro la SAM, effectively-final, cattura</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Membro privato o variabile locale che niente legge</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr><td>Switch a pattern: esaustività e dominance (Java 17–21)</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr class="chg"><td>Dataflow: definite assignment, NPE, condizione sempre vera <span class="tag">correzione: era ✗</span><small class="why">I campi <code>final</code> mai assegnati erano già segnalati — la stesura precedente non l'aveva visto. NPE e condizioni sempre vere no.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Switch a pattern: esaustività e dominance (Java 17–21) <span class="tag">era ✗</span><small class="why">Esaustività su enum e su gerarchie sealed, anche quando il tipo del selettore non è sul classpath, e un enum usato come etichetta di uno switch su <code>Integer</code> o <code>String</code>. La dominance dei pattern non risulta dal <code>CHANGELOG</code>.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Dataflow: definite assignment, NPE, condizione sempre vera<small class="why">Il definite assignment ora è nel <code>CHANGELOG</code> per locali e campi, anche in lambda e inizializzatori. NPE e condizioni sempre vere restano assenti, ed è il motivo del ◐.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
         <tr><td>Profilo delle ispezioni per progetto, spellcheck con dizionario</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
         <tr><td>Validazione dell'intero progetto, non solo del file aperto</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
         <tr><td>Scan mojibake di progetto, report di encoding dal pom</td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
-        <tr class="note"><td colspan="5">Un ✓ non vale lo stesso in tutte le colonne. VS Code ed Eclipse girano sul compilatore Eclipse (ECJ): per loro un ✓ dice «non sfugge niente». Per Bennu, che non compila e nel dubbio tace, dice «la famiglia c'è» — ed è per questo che nella scheda la riga degli errori di compilazione resta 3 a Bennu e 5 a loro.</td></tr>
+        <tr class="note"><td colspan="5">Un ✓ non vale lo stesso in tutte le colonne. VS Code ed Eclipse girano sul compilatore Eclipse (ECJ): per loro un ✓ dice «non sfugge niente». Per Bennu, che non compila e nel dubbio tace, dice «la famiglia c'è» — ed è per questo che nella scheda la riga degli errori di compilazione è 4 a Bennu e 5 a loro. Le famiglie arrivate dopo il 15 settembre non sono state misurate su Commons Lang e h2: la misura a zero falsi positivi vale per quelle di allora.</td></tr>
       </tbody>
     </table></div>
   </div>
@@ -596,14 +596,15 @@
 <section id="refactoring">
   <div class="wrap">
     <h2>Refactoring <span class="kicker">fermo sulle righe, cresciuto sulle cure</span></h2>
-    <p>Nessun refactoring nuovo dall'11 settembre, e le misure su Commons Lang e h2 restano quelle. Si è mossa invece la
-      metà che conta ogni giorno: le cure attaccate alle diagnosi.</p>
+    <p>Nessun refactoring nuovo dal 15 settembre, e le misure su Commons Lang e h2 restano quelle. L'unica aggiunta è una cura
+      attaccata a una diagnosi: l'import static.</p>
     <div class="tw"><table>
       <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
       <tbody>
         <tr><td>Rename dall'indice delle referenze dell'intero progetto</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Rename di file e cartelle, sposta in un altro package</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Ottimizza import, genera accessor, override, costruttori</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Import static di un campo o di un metodo scritto senza la classe <span class="tag new">nuova</span><small class="why">Con Alt+Enter, una voce per ogni classe che dichiara il membro — progetto, JDK e librerie — ordinate come gli import di classe.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
         <tr><td>Genera entità JPA da schema</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
         <tr><td>Extract Method<small class="why">15.809 estrazioni su Commons Lang senza rotture; su h2 il 99,5% di 25.094.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Introduce Variable, Constant, Field<small class="why">Parameter no, ed è il motivo del ◐.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
@@ -616,9 +617,9 @@
         <tr><td>Inverti if, unisci if annidati, catena di if → switch, split/join, var ↔ tipo</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
         <tr><td>Copia una classe dal tree, nuovo modulo Maven</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c y">✓</td></tr>
         <tr><td>Rifiuto con il motivo, e gate sulla versione Java del progetto</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
-        <tr><td>Campo <code>final</code> mai inizializzato: parametro del costruttore, inizializza, togli <code>final</code>, <code>@RequiredArgsConstructor</code> <span class="tag new">nuova</span><small class="why">Offerti ovunque sulla dichiarazione, anche prima che la validazione giri; l'annotazione Lombok per prima se il progetto la usa già.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr><td>La cura seleziona il segnaposto che scrive <span class="tag new">nuova</span><small class="why">Create method, try/catch, casi mancanti, inizializza variabile: si digita sopra al valore selezionato. Non ancora quando il metodo va in un altro file.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
-        <tr class="chg"><td>Quick-fix disponibili al caret <span class="tag">allargata</span></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Campo <code>final</code> mai inizializzato: parametro del costruttore, inizializza, togli <code>final</code>, <code>@RequiredArgsConstructor</code><small class="why">Offerti ovunque sulla dichiarazione, anche prima che la validazione giri; l'annotazione Lombok per prima se il progetto la usa già.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>La cura seleziona il segnaposto che scrive<small class="why">Create method, try/catch, casi mancanti, inizializza variabile: si digita sopra al valore selezionato. Non ancora quando il metodo va in un altro file.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Quick-fix disponibili al caret</td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr class="note"><td colspan="5">Il ◐ sui quick-fix resta, ma si restringe: le cure sono di più e migliori, e l'elenco di Alt+Enter è diviso in sezioni con le cure prima. Molte squiggle restano però una diagnosi senza cura. La riga di refactoring della scheda resta a 4: ciò che la separa dal 5 — Change Signature, Introduce Parameter, estrai interfaccia — è ancora assente dal sorgente.</td></tr>
       </tbody>
     </table></div>
@@ -630,7 +631,7 @@
 
     <h3>Bug che il compilatore non vede</h3>
     <p>Il codice compila, i test che mockano il componente passano, e il difetto si vede solo in esecuzione — o in
-      deploy. Le righe blu sono di questi quattro giorni.</p>
+      deploy. Le righe con l'etichetta «nuova» sono di queste cinque settimane.</p>
     <div class="tw"><table>
       <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
       <tbody>
@@ -642,23 +643,24 @@
         <tr><td>Bean Validation: vincolo su un tipo che il motore non valida, messaggio controllato sul bundle</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
         <tr><td><code>@Scheduled</code>: cron letto in parole, espressione che Spring rifiuta, scheduling mai attivato</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
         <tr><td>Classi di test che nessun engine eseguirà</td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
-        <tr><td>Mockito usato male mentre scrivi il test <span class="tag new">nuova</span><small class="why">Stubbing o verify non finiti, matcher mescolati a valori, <code>@Mock</code> che niente inizializza — con Alt+Enter per <code>eq(…)</code> o l'estensione.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
-        <tr><td>AssertJ: <code>assertThat</code> che non controlla niente, soft assertion mai verificate <span class="tag new">nuova</span><small class="why">Più la conversione delle asserzioni JUnit, una per volta o tutto il file.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
-        <tr><td>CDI ed EJB: iniezioni che niente soddisfa, bean non proxabili, EJB non validi <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
-        <tr><td>Servlet in conflitto, JAX-RS: <code>@PathParam</code> che il path non dichiara, due metodi sulla stessa rotta <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c p">◐</td></tr>
-        <tr><td>MapStruct: proprietà di <code>@Mapping</code> che non esistono, target che niente mappa <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Dichiarazioni dei bean Spring controllate mentre scrivi <span class="tag new">nuova</span><small class="why"><code>@Bean</code> <code>private</code>, <code>final</code> o <code>void</code>, <code>@Configuration</code> <code>final</code>, iniezione in un membro statico, stereotipo su un'interfaccia o una classe astratta, <code>@Transactional</code> su un metodo statico, <code>@Scheduled</code> con parametri. Alt+Enter ripara i modificatori dove la cura è quella.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Mockito usato male mentre scrivi il test<small class="why">Stubbing o verify non finiti, matcher mescolati a valori, <code>@Mock</code> che niente inizializza — con Alt+Enter per <code>eq(…)</code> o l'estensione.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>AssertJ: <code>assertThat</code> che non controlla niente, soft assertion mai verificate<small class="why">Più la conversione delle asserzioni JUnit, una per volta o tutto il file.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>CDI ed EJB: iniezioni che niente soddisfa, bean non proxabili, EJB non validi</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr><td>Servlet in conflitto, JAX-RS: <code>@PathParam</code> che il path non dichiara, due metodi sulla stessa rotta</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr><td>MapStruct: proprietà di <code>@Mapping</code> che non esistono, target che niente mappa</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
       </tbody>
     </table></div>
 
     <h3>Jakarta EE, JAX-RS, MapStruct</h3>
-    <p>Sezione nuova. Oltre ai controlli qui sopra, la navigazione e i pannelli.</p>
+    <p>Oltre ai controlli qui sopra, la navigazione e i pannelli.</p>
     <div class="tw"><table>
       <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
       <tbody>
-        <tr><td>Bean CDI ed EJB con i loro punti di iniezione: gutter, go-to, hover, pannello <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
-        <tr><td>Risorse JAX-RS e servlet nel pannello Endpoints, accanto a Spring e Struts <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
-        <tr><td><code>@PathParam</code> completato e collegato al suo template <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c n">✗</td></tr>
-        <tr><td>MapStruct: path di <code>@Mapping</code> completati, con hover e Ctrl+B; pannello Mappers <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr><td>Bean CDI ed EJB con i loro punti di iniezione: gutter, go-to, hover, pannello</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr><td>Risorse JAX-RS e servlet nel pannello Endpoints, accanto a Spring e Struts</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td><code>@PathParam</code> completato e collegato al suo template</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>MapStruct: path di <code>@Mapping</code> completati, con hover e Ctrl+B; pannello Mappers</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
       </tbody>
     </table></div>
 
@@ -722,11 +724,13 @@
         <tr><td>Modello Maven: pom, moduli, classpath, encoding</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Tool window Maven: un modulo per sezione, lifecycle, goal dei plugin, profili, skip test</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr><td>Pom colorato per significato, pom delle dipendenze come pom, versioni più nuove segnalate</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Vulnerabilità note delle dipendenze nel pom, con CVE, gravità e versione corretta <span class="tag new">nuova</span><small class="why">Opt-in; interroga OSV.dev in background e tiene la risposta un giorno. Solo per le dipendenze a versione fissata.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Editor delle variabili d'ambiente di ogni run configuration <span class="tag new">nuova</span><small class="why">Tabella o testo <code>CHIAVE=valore</code>, valori che sembrano credenziali nascosti, file <code>.env</code> letto a ogni avvio invece che importato; scelta della shell per gli script.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
         <tr><td>Livello Java per modulo in un reactor a metà migrazione</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
-        <tr><td>Modulo rinominato o sparito dichiarato, con il nome della cartella probabile <span class="tag new">nuova</span><small class="why">Prima il classpath restava incompleto in silenzio, e anche Rebuild index non diceva niente.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
-        <tr><td>Compilazione e avvio per modulo, senza <code>ClassNotFoundException</code> <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr><td>Stato dell'indice nel footer, build fallita dichiarata, progetto spostato ritrovabile <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
-        <tr><td>Albero del progetto che segue i cambi esterni e si ripara al focus <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr><td>Modulo rinominato o sparito dichiarato, con il nome della cartella probabile<small class="why">Prima il classpath restava incompleto in silenzio, e anche Rebuild index non diceva niente.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Compilazione e avvio per modulo, senza <code>ClassNotFoundException</code></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Stato dell'indice nel footer, build fallita dichiarata, progetto spostato ritrovabile</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Albero del progetto che segue i cambi esterni e si ripara al focus</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr><td>Modello Gradle</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Cargo: workspace, run, test, add, toolchain, outdated</td><td class="c own y">✓</td><td class="c n">✗</td><td class="c p">◐</td><td class="c n">✗</td></tr>
         <tr class="grp"><td colspan="5">Test</td></tr>
@@ -737,6 +741,7 @@
         <tr><td>Coverage<small class="why">Il plugin jacoco è riconosciuto nella tool window Maven; il report non è letto.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
         <tr class="grp"><td colspan="5">Debug</td></tr>
         <tr><td>Debugger Java su JDWP proprio: breakpoint condizionali, più sessioni insieme</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Breakpoint nelle sorgenti scaricate delle librerie e del JDK, elencati per classe <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
         <tr><td>Watch<small class="why">Accettano percorsi — <code>order.customer.name</code>, <code>items[2]</code> — non espressioni Java arbitrarie.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Step che attraversa JDK, AOP di Spring e proxy CGLIB/Hibernate; filtri configurabili</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
         <tr><td>Hot-swap delle classi Java<small class="why">C'è l'hot-swap delle JSP su Tomcat; quello delle classi no.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
@@ -757,26 +762,90 @@
         <tr><td>Minimap, sticky scroll, indent guide, rainbow bracket</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr><td>Inlay hint, code lens, signature help, ghost text</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr><td>La vista resta sulla riga mentre arrivano le code lens</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr><td>Scrivere intorno a una selezione la avvolge: virgolette, parentesi, text block <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr><td>Scrivere intorno a una selezione la avvolge: virgolette, parentesi, text block</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr><td>Multi-caret e selezione a colonna</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
-        <tr><td>Local History con cambi esterni, ripristino di cartelle e file cancellati</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
-        <tr><td>VCS nell'editor: gutter delle modifiche, annotate, revert di riga</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr><td>Diff e merge dentro l'editor</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Local History con cambi esterni, ripristino di cartelle e file cancellati, e cronologia per selezione <span class="tag">allargata</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Gutter delle modifiche, con vecchio testo, ripristino e copia del blocco <span class="tag">era ✗</span><small class="why">Barra colorata per le righe aggiunte, cambiate o tolte dall'ultimo commit; <kbd>Alt</kbd>+<kbd>F3</kbd> e <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F3</kbd> le scorrono. Spegnibile dalle impostazioni, che fermano anche le chiamate.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Annotate con Git Blame: barra per commit, autore e data a inizio blocco <span class="tag new">nuova</span><small class="why">Il messaggio del commit è opzionale. Corvus fornisce il dato: nessun repository da aprire là.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Cronologia git di un file e di una selezione, con il diff del commit scelto <span class="tag new">nuova</span><small class="why">La selezione segue le righe attraverso gli spostamenti. Dal sottomenu <em>Git</em> dell'editor.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Pannello Changes: stage, unstage, discard, commit con <em>Amend last</em>, e il diff accanto alla lista <span class="tag new">nuova</span><small class="why">Il diff è quello di Corvus — unificato o affiancato, contesto di tutto il file, scorrimento per blocchi, stage di una riga o di un hunk. Scritto oggi, non compilato.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Diff e merge dentro l'editor <span class="tag">era ✗</span><small class="why">Il diff di un file si legge nel pannello Changes e nella cronologia; il merge dei conflitti resta in Corvus. Per questo ◐.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Barra Trova/Sostituisci flottante, con contatore e opzioni dentro il campo <span class="tag new">nuova</span><small class="why">Ricerca incrementale, riga di sostituzione su <kbd>Alt</kbd>+<kbd>P</kbd>, scorciatoia verso Trova nei file; occorrenze del testo selezionato e risultati con più contrasto.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>File <code>.env</code>: colori, nomi delle variabili che Spring Boot lega, valori chiusi, proprietà sovrascritta in hover <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Cartelle senza <code>pom.xml</code> o <code>Cargo.toml</code> aperte come progetti solo editor <span class="tag new">nuova</span><small class="why">Progetti SQL e Node/Angular; template Angular colorati.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr><td>Terminale integrato, pannello TODO</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
-        <tr><td>Template di codice in Jinja: nuovo file, dalla classe, configurazione, test, abbreviazioni, postfix <span class="tag new">nuova</span><small class="why">Con anteprima mentre scrivi, righe del template collegate a quelle generate, scelta per progetto, e lo stile Java tuo letto dal template.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Template di codice in Jinja: nuovo file, dalla classe, configurazione, test, abbreviazioni, postfix<small class="why">Con anteprima mentre scrivi, righe del template collegate a quelle generate, scelta per progetto, e lo stile Java tuo letto dal template.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
         <tr><td>Fogli di calcolo come griglia: <code>.xlsx</code>, <code>.xls</code>, <code>.xlsb</code>, <code>.ods</code></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c p">◐</td><td class="c n">✗</td></tr>
         <tr><td>Word, font, immagini, markdown, HTML in anteprima</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
         <tr><td>Colori per <code>.bat</code>/<code>.cmd</code>, Dockerfile, fence nel markdown, Jinja</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr><td>Icone dei file per contenuto: l'elemento radice di un XML, non il nome</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
-        <tr class="chg"><td>Impostazioni ad albero, Project Configuration separata, ispezioni con severità per progetto <span class="tag">era una colonna</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
-        <tr><td>Monitor dei processi con la memoria per progetto; progetti inattivi rilasciati <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
-        <tr class="chg"><td>Command palette: nuove voci per template, albero, progetto; scorciatoie aggiunte <span class="tag">allargata</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
-        <tr class="chg"><td>Superficie MCP nativa: 32 tool, con permessi per prodotto, percorso e azione <span class="tag">era 29</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c y">✓</td><td class="c n">✗</td></tr>
+        <tr><td>Impostazioni ad albero, Project Configuration separata, ispezioni con severità per progetto</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
+        <tr><td>Monitor dei processi con la memoria per progetto; progetti inattivi rilasciati</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Command palette: nuove voci per template, albero, progetto; scorciatoie aggiunte</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Superficie MCP nativa: 32 tool di Bennu, 45 in tutta la suite, con permessi per prodotto, percorso e azione e autorizzazioni a tempo <span class="tag">allargata</span><small class="why">Corvus legge stato, storia e blame e committa ciò che è in stage — mai push né amend; Tyto registra video. Un'autorizzazione sostituisce la conferma, mai un rifiuto, e vive solo in memoria.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c y">✓</td><td class="c n">✗</td></tr>
         <tr><td>Plugin di terze parti, marketplace</td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
       </tbody>
     </table></div>
   </div>
 </section>
+<section id="rust">
+  <div class="wrap">
+    <h2>Rust e Bevy <span class="kicker">un confronto che prima non c'era</span></h2>
+    <p>Bennu apre i progetti Rust come i Java, con rust-analyzer come motore. Il confronto naturale non è con gli IDE Java ma con
+      RustRover e con VS Code più rust-analyzer. Le righe di Bennu vengono dalle pagine Cargo, Bevy, Shaders e Debugging della
+      documentazione in-app; le altre due colonne sono conoscenza generale e non sono state riverificate su un'installazione.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>RustRover</th><th>VS&nbsp;Code + rust-analyzer</th></tr></thead>
+      <tbody>
+        <tr><td>Completion, go-to, hover, rename sul progetto, da rust-analyzer</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Finestra Cargo: workspace, run, test, aggiungi un crate da una modale, toolchain, versioni più nuove</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr><td><code>Cargo.toml</code>: completion e versioni più recenti segnalate</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr><td>Espansione delle macro (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd>)</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Test runner con albero e risultati per caso</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr><td>Debugger: CodeLLDB, lldb-dap o GDB, con la scelta dell'adapter</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Pannello dei componenti Bevy, con i sistemi che li leggono e li scrivono (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>)</td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Supporto agli shader WGSL</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Coverage e profiler</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout">
+      <b>Dove Bennu è davanti, e dove no.</b>
+      <p>Davanti solo sul gioco: il pannello dei componenti di Bevy non ha un equivalente negli altri due. Alla pari sulle
+        funzioni che passano da rust-analyzer. Dietro sulla coverage, che manca come per Java. È un confronto più corto di
+        quelli Java perché l'intelligenza di fondo è la stessa in tutte e tre le colonne: ciò che cambia è il contorno.</p>
+    </div>
+  </div>
+</section>
+
+<section id="spring-tools">
+  <div class="wrap">
+    <h2>Spring Tools <span class="kicker">l'altro riferimento per Spring Boot</span></h2>
+    <p>Per le righe Spring la colonna di VS Code con il Java pack non è il confronto giusto: chi scrive Spring Boot in VS Code o in
+      Eclipse usa Spring Tools 5. È un'estensione, quindi eredita compilatore e refactoring dall'IDE che la ospita; qui si guarda
+      solo quello che aggiunge. Colonna non riverificata su un'installazione.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>Spring Tools 5</th></tr></thead>
+      <tbody>
+        <tr><td>Bean e punti di iniezione: gutter, go-to, hover</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Property e yaml: completion e hover con i metadata di Spring Boot</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td><code>@Value("${…}")</code> → chiave nello yaml, e il ritorno con il numero di utilizzi</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Query derivate di Spring Data, completate e controllate sulle property del tipo</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr><td>Pannello degli endpoint, offline</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr><td>Proxy aggirati, transazioni tenute aperte, dichiarazioni dei bean sbagliate</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr><td>Informazioni dall'applicazione in esecuzione: bean, mapping, ambiente, via actuator</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr><td>Dashboard delle applicazioni Boot: avvia, ferma, riavvia</td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout blue">
+      <b>L'assenza che questo confronto mette in luce.</b>
+      <p>Dove Bennu è forte è tutto ciò che si può sapere leggendo il sorgente. Dove è assente, e dove Spring Tools e
+        Ultimate hanno la loro firma, è ciò che si sa solo interrogando l'applicazione mentre gira. Nel sorgente di Bennu c'è
+        il metadata dell'actuator, non una connessione a un'app viva: è una riga a zero che nessuna delle stesure
+        precedenti aveva, perché mancava la colonna giusta con cui confrontarla.</p>
+    </div>
+  </div>
+</section>
+
 <section id="salito">
   <div class="wrap">
     <h2>Cosa è salito <span class="kicker">riga per riga, con la prova</span></h2>
@@ -785,28 +854,25 @@
     <div class="tw"><table>
       <thead><tr><th>Riga</th><th>Movimento</th><th>La prova</th></tr></thead>
       <tbody>
-        <tr><td><b>Completion</b></td><td class="n2">4 → 5</td><td><code>java/src/postfix/</code> (catalogo tipato, test in <code>tests.rs</code>), <code>query/src/method_reference.rs</code>, <code>intel/src/expected_types.rs</code> e <code>Fit</code> in <code>query/src/rank.rs</code>, <code>java/src/declaration_name/</code>, il limite a 40 annotazioni tolto in <code>provider.rs</code>. Test d'integrazione <code>autocomplete_optional_chain.rs</code> e <code>autocomplete_return_expected.rs</code>. <b>Non ancora compilati.</b></td></tr>
-        <tr><td><b>Ispezioni sui framework</b></td><td class="n2">4 → 5</td><td>I crate <code>bennu-mockito</code>, <code>bennu-assertj</code>, <code>bennu-jakartaee</code>, <code>bennu-jaxrs</code>, <code>bennu-mapstruct</code>, nel commit <code>e4aa7d2e</code>. Ultimate ha più ispezioni in assoluto, ma su questa riga — i difetti di framework che il compilatore non vede — nessun altro ne copre tanti.</td></tr>
-        <tr><td><b>Maven</b></td><td class="n2">4 → 5</td><td><code>be/src/project_health.rs</code>, <code>missing_modules</code> in <code>maven/src/resolve.rs</code>, <code>be/src/tree_changes.rs</code>; lo stamp di compilazione per modulo e il livello Java per modulo nel <code>CHANGELOG</code>.</td></tr>
-        <tr><td><b>Jakarta EE e JAX-RS</b></td><td class="n2">nuova · 4</td><td><code>bennu-jakartaee</code>, <code>bennu-jaxrs</code>. Non 5: NetBeans e Ultimate hanno anni di wizard, deploy e server integrati che Bennu non ha.</td></tr>
-        <tr><td><b>MapStruct</b></td><td class="n2">nuova · 4</td><td><code>bennu-mapstruct</code>: path controllati, completati, navigabili, pannello. Alla pari con il plugin MapStruct di IntelliJ.</td></tr>
-        <tr><td><b>Librerie di test</b></td><td class="n2">nuova · 4</td><td><code>bennu-mockito</code>, <code>bennu-assertj</code>, con le cure Alt+Enter. IntelliJ ha ispezioni analoghe per entrambe.</td></tr>
-        <tr><td><b>Template e generazione</b></td><td class="n2">nuova · 4</td><td><code>bennu-templates</code>: sette tipi, anteprima dal vivo, postfix con applicabilità dichiarata. Non 5: i live template di IntelliJ hanno quindici anni di variabili e contesti.</td></tr>
-        <tr><td><b>Assi</b></td><td class="n2">+0.5 × 4</td><td>Legacy per Jakarta EE e multi-modulo; generalista per completion e librerie; UI/UX per tua evidenza e per il popup, le impostazioni e l'Alt+Enter rifatti; estensibilità per i template.</td></tr>
+        <tr><td><b>Errori di compilazione</b></td><td class="n2">3 → 4</td><td>Il codice in <code>crates/products/bennu/analysis/check/src/</code> (con <code>switching/</code> per gli switch) e le quattro voci del <code>CHANGELOG</code> che elencano le famiglie: <em>many more Java compile errors</em>, <em>nearly everything javac rejects</em>, <em>errors it used to let through</em>, <em>wrong argument types on many more calls</em>. Non 5: le famiglie nuove non sono misurate su Commons Lang e h2, e il dataflow resta ◐.</td></tr>
+        <tr><td><b>Local history</b></td><td class="n2">4 → 5</td><td>La voce <em>Local History for a selection</em> nel <code>CHANGELOG</code> e <code>BennuLocalHistoryModal.svelte</code>. IntelliJ ha la stessa funzione: la riga passa dal quasi al pari.</td></tr>
+        <tr><td><b>Ergonomia dell'editor</b></td><td class="n2">3 → 4</td><td>Il gutter delle modifiche (voce <em>Change markers</em>, con <code>change_markers_by_path</code> sul backend di Corvus), la barra Trova/Sostituisci, il menu del tasto destro raggruppato. Non 5: multi-caret e bookmark mancano.</td></tr>
+        <tr><td><b>Sicurezza delle dipendenze</b></td><td class="n2">nuova · 3</td><td>La voce <em>Known vulnerabilities as warnings in a pom</em>. Non 4: è opt-in e vale solo per le dipendenze a versione fissata.</td></tr>
+        <tr><td><b>Assi</b></td><td class="n2">+0.5 × 1</td><td>Solo la UI/UX: gutter, blame, cronologia, Changes con il diff accanto, barra Trova/Sostituisci. Gli altri cinque assi non si muovono, e le pagine sopra dicono perché.</td></tr>
       </tbody>
     </table></div>
 
     <h3>Correzioni alle stesure precedenti, nei due sensi</h3>
     <div class="callout">
       <ul>
-        <li><b>Definite assignment — a favore di Bennu.</b> L'11 settembre la riga del dataflow era ✗. Il controllo sui
-          campi <code>final</code> mai assegnati, codice <code>definite-assignment</code>, esisteva già in
-          <code>check/src/init_checks.rs</code>. Oggi ◐: NPE e condizioni sempre vere restano assenti.</li>
-        <li><b>Completion — contro Bennu, retroattivamente.</b> La stesura dell'11 settembre dava ✓ a «tipi ordinati da
-          cosa importa il progetto». Era vero solo per i nomi corti: il taglio a quaranta annotazioni prima di consultare i
-          conteggi escludeva proprio quelle usate di più. Sistemato oggi, ma il ✓ di allora era generoso.</li>
-        <li><b>Live template utente — a favore, e con una data.</b> Le abbreviazioni tue in Jinja esistevano già
-          all'11 settembre, e la riga era rimasta ✗. Oggi, con i postfix, il ✓ è pieno.</li>
+        <li><b>Il conteggio dei crate — a sfavore del confronto, non di Bennu.</b> La quinta stesura diceva 54 contro i 48 dell'11 settembre, e
+          non registrava come li aveva contati. Con <code>Cargo.toml</code> sono 55 oggi e 55 al commit del 15 settembre: la crescita
+          di quelle settimane non è confrontabile, e questa stesura smette di vantarla.</li>
+        <li><b>Il lotto «non compilato» — chiuso.</b> La quinta stesura teneva «funziona davvero» a 6.5 anche perché il lotto del 15
+          settembre non era compilato. Lo è, e committato: quella ragione cade. Resta l'altra, i difetti di base che continuano ad
+          emergere usando, e il lavoro di oggi è nella stessa condizione di allora.</li>
+        <li><b>Il ✗ del gutter delle modifiche — vero allora, falso oggi.</b> La quinta stesura lo elencava fra le assenze che tenevano la UI/UX
+          a 8. È arrivato, e ha tolto una delle tre.</li>
       </ul>
     </div>
   </div>
@@ -818,13 +884,14 @@
     <div class="tw"><table>
       <thead><tr><th>Riga o asse</th><th>Oggi</th><th>Cosa servirebbe</th></tr></thead>
       <tbody>
-        <tr><td><b>Funziona davvero</b></td><td class="n2">6.5</td><td>Il lotto del 15 settembre compilato, i suoi test verdi, e una settimana d'uso in cui i difetti li trovino i test prima di te.</td></tr>
-        <tr><td><b>UI/UX</b></td><td class="n2">8.0</td><td>Multi-caret, gutter VCS e diff nell'editor, bookmark. E lo stesso popup in Merula e Studio, che hanno ancora la copia vecchia.</td></tr>
+        <tr><td><b>Funziona davvero</b></td><td class="n2">6.5</td><td>Il lavoro di oggi compilato e i suoi test verdi, e una settimana d'uso in cui i difetti li trovino i test prima di te.</td></tr>
+        <tr><td><b>UI/UX</b></td><td class="n2">8.5</td><td>Multi-caret, bookmark, e il diff come vista affiancata nell'editor invece che in un pannello. E lo stesso popup in Merula e Studio, che hanno ancora la copia vecchia.</td></tr>
         <tr><td><b>Refactoring</b> (scheda)</td><td class="n2">4</td><td>Change Signature, Introduce Parameter, estrai interfaccia e superclasse. Nessuna delle quattro è nel sorgente.</td></tr>
-        <tr><td><b>Errori di compilazione</b></td><td class="n2">3</td><td>Switch a pattern e bound generici. Il dataflow completo resta fuori per principio: senza un motore vero produce falsi positivi.</td></tr>
+        <tr><td><b>Errori di compilazione</b></td><td class="n2">4</td><td>La misura a zero falsi positivi su Commons Lang e h2 delle famiglie nuove, e la dominance dei pattern. Il dataflow completo resta fuori per principio: senza un motore vero produce falsi positivi.</td></tr>
         <tr><td><b>Gradle, Ant, altri server</b></td><td class="n2">0</td><td>Un modello Gradle. Non serve al target legacy; è l'unico zero su una riga che un team generalista apre ogni giorno.</td></tr>
-        <tr><td><b>Coverage e profiling</b></td><td class="n2">0</td><td>La coverage letta da <code>jacoco.xml</code> nel gutter: la tool window Maven riconosce già il plugin, manca leggere il report.</td></tr>
+        <tr><td><b>Coverage e profiling</b></td><td class="n2">0</td><td>La coverage letta da <code>jacoco.xml</code> nel gutter: la tool window Maven riconosce già il plugin, manca leggere il report. Vale anche per Rust.</td></tr>
         <tr><td><b>Debugger</b></td><td class="n2">3</td><td>Hot-swap delle classi (<code>RedefineClasses</code> è nel protocollo JDWP, non nel crate), eval di espressioni Java, attach remoto.</td></tr>
+        <tr><td><b>Spring, informazioni dall'app viva</b></td><td class="n2">4</td><td>Una connessione all'actuator di un'applicazione che gira: bean, mapping, ambiente. Oggi c'è il metadata, non la connessione.</td></tr>
         <tr><td><b>Tastiera e command palette</b></td><td class="n2">4</td><td>Voci e scorciatoie aggiunte, ma alcune modali non rispettano ancora la regola di progetto — focus via attributo, Ctrl+Enter non ovunque.</td></tr>
         <tr><td><b>Ecosistema plugin</b></td><td class="n2">1</td><td>Autori di plugin che non siano il maintainer. I template di codice aprono una porta laterale, non sostituiscono un marketplace.</td></tr>
       </tbody>
@@ -833,18 +900,20 @@
     <h3>Difetti aperti, con il loro numero</h3>
     <div class="callout">
       <ul>
-        <li><b>Il lotto del 15 settembre non è compilato.</b> Una trentina di file Rust nuovi o toccati fra <code>bennu-java</code>,
-          <code>bennu-query</code>, <code>bennu-intel</code>, <code>bennu-refactor</code>, <code>bennu-templates</code> e
-          <code>bennu-be</code>, più il frontend. Rischi segnalati dagli stessi autori: un vincolo generico nel provider, un
-          <code>#[serde(default)]</code> su una struct solo <code>Serialize</code>, lo schema Jinja del campo <code>type</code>.</li>
-        <li><b>Difetti di base trovati a mano questa settimana, tutti corretti con un test:</b> il tipo di un <code>val</code>
-          sull'hover, parole chiave e nomi locali dopo il punto, <code>@RequiredArgsConstructor</code> tagliato fuori, il tipo
-          del <code>return</code> non considerato, un <code>@RequiredArgsConstructor</code> che zittiva i nomi non dichiarati.
-          Nessuno di questi era visibile ai 5.380 test dell'11 settembre.</li>
+        <li><b>Il lavoro di oggi non è compilato.</b> Il pannello Changes riscritto sul visualizzatore dei diff di Corvus, il
+          visualizzatore spostato in <code>shared/internal/diff/</code> (cinque componenti, quattro file che li importano),
+          il nuovo handler <code>get_workdir_file_diff</code> in Corvus, <code>git_repo_root_by_path</code> al posto di
+          <code>fs_repo_root</code> di Sitta, il job «Indexing project» a ogni re-index. Il rischio principale è un import mancato dopo lo spostamento dei file.</li>
+        <li><b>Le famiglie di errori nuove non sono state misurate sui corpora.</b> Le voci del <code>CHANGELOG</code> hanno i loro test, ma
+          la misura a zero falsi positivi su 629 file di Commons Lang risale alle famiglie di allora. Un controllo nuovo che sbaglia su
+          codice corretto costa più di uno che manca.</li>
+        <li><b>Difetti di base corretti nelle ultime settimane:</b> errori non segnalati dentro le lambda (nome non dichiarato, metodo
+          inesistente, argomenti), «indietro» e «avanti» che non atterravano dove eri, due falsi positivi, un avvio che chiedeva un
+          <code>mvn clean package</code> a mano. Ognuno con il suo test; nessuno era visibile ai test di prima.</li>
         <li><b>h2, misura del 9 settembre, invariata.</b> Extract method 99,5%, extract variable 99,6%, declaration-to-var
           99,0%, inline method 97,9%, inline variable con un unico errore di sintassi.</li>
-        <li><b>Il peso non è stato rimisurato</b> da quando i crate sono passati da 39 a 54.</li>
-        <li><b>Create method in un altro file</b> non seleziona il segnaposto: il protocollo di quella cura non lo porta.</li>
+        <li><b>Il peso non è stato rimisurato</b> da quando i crate sono diventati 55.</li>
+        <li><b>Create method in un altro file</b> non seleziona il segnaposto: il protocollo di quella cura non lo porta. Non riverificato in questa stesura.</li>
       </ul>
     </div>
   </div>
@@ -855,12 +924,13 @@
     <h2>Prossimi passi <span class="kicker">in ordine di ritorno</span></h2>
     <p>L'ordine è il punto: ogni voce è messa dove sta per quanto sposta rispetto a quanto costa.</p>
     <ol class="next">
-      <li><div><b>Compilare e far girare il lotto del 15 settembre</b><span>È l'unica voce che sposta un asse senza scrivere una riga: «funziona davvero» è fermo lì sopra, e cinque righe della scheda dipendono da quel lotto.</span></div></li>
+      <li><div><b>Compilare e far girare il lavoro di oggi</b><span>Il pannello Changes con il diff accanto è la voce che ha mosso la UI/UX: se non regge, l'asse torna a 8.0. È anche l'unica che sposta un numero senza scrivere una riga.</span></div></li>
+      <li><div><b>Rimisurare gli errori di compilazione su Commons Lang e h2</b><span>Sono le famiglie che hanno mosso la riga da 3 a 4. Una misura a zero falsi positivi la rende difendibile; un solo falso positivo la riporta giù.</span></div></li>
       <li><div><b>Change Signature, poi Introduce Parameter</b><span>Il refactoring frequente che manca ancora. Con questi due, più estrai interfaccia, la riga del refactoring ha le carte per il 5.</span></div></li>
-      <li><div><b>Test frontend sulla completion, sul progetto vero</b><span>I difetti di questa settimana erano tutti sul percorso fra editor e backend. <code>java-completion-trigger.test.ts</code> e <code>completion-requests.test.ts</code> sono l'inizio; manca un test che apra un file e chieda la lista.</span></div></li>
-      <li><div><b>Multi-caret, bookmark, gutter VCS nell'editor</b><span>Piccoli, frequenti, ed è quello che separa l'8 della UI/UX dall'8.5.</span></div></li>
+      <li><div><b>Multi-caret e bookmark</b><span>Piccoli, frequenti, ed è quello che separa l'8.5 della UI/UX dal 9.</span></div></li>
       <li><div><b>Hot-swap delle classi e attach remoto</b><span>Le due righe del debugger che un team legacy usa ogni giorno su Tomcat.</span></div></li>
-      <li><div><b>Coverage letta da <code>jacoco.xml</code></b><span>Il plugin è già riconosciuto: si legge un report che Maven produce, e una riga lascia lo zero.</span></div></li>
+      <li><div><b>Coverage letta da <code>jacoco.xml</code></b><span>Il plugin è già riconosciuto: si legge un report che Maven produce, e una riga lascia lo zero. Una versione per Rust sposta la stessa riga nella tabella di Rust.</span></div></li>
+      <li><div><b>Informazioni dall'applicazione Spring in esecuzione</b><span>La riga a zero che il confronto con Spring Tools ha messo in luce. Il metadata dell'actuator c'è già: manca parlare con un'app viva.</span></div></li>
       <li><div><b>Il popup nuovo anche in Merula e Studio</b><span>Due copie divergenti dello stesso widget. Poco lavoro, e toglie una ragione di «grezzo».</span></div></li>
       <li><div><b>Le rotture residue su h2</b><span>Prima l'unica con errore di sintassi, in inline variable; poi inline method, il più basso al 97,9%.</span></div></li>
       <li><div><b>Eval di espressioni Java nel debugger</b><span>Oggi i watch seguono percorsi. È il passo che trasforma il pannello delle variabili in un posto dove fare domande.</span></div></li>
@@ -871,14 +941,17 @@
 
 <footer>
   <div class="wrap">
-    <p><b>Fonti e limiti.</b> La colonna di Bennu è letta dal codice al commit <code>bc4bece9</code> e dal lavoro non
-      committato del 15 settembre, dal <code>CHANGELOG</code>, dai conteggi sul repository, dalle misure registrate sui
-      corpora e dalle parole del maintainer sulla UI/UX. Le assenze — Change Signature, Introduce Parameter, estrai
-      interfaccia, Gradle, hot-swap delle classi, coverage, multi-caret — sono state cercate nel sorgente. Le colonne degli
-      altri IDE vengono da conoscenza generale delle versioni rilasciate e non sono state riverificate su un'installazione.
-      Le matrici non sono esaustive: l'assenza di una riga non è un giudizio.</p>
+    <p><b>Fonti e limiti.</b> La colonna di Bennu è letta dal codice al commit <code>978389e6</code> e dal lavoro non
+      committato del 20 ottobre, dal <code>CHANGELOG</code> confrontato voce per voce con quello del 15 settembre, dai conteggi sul
+      repository (stesso metodo sul commit di allora e su quello di oggi), dalle misure registrate sui corpora e dalle parole del
+      maintainer sulla UI/UX. Le assenze — Change Signature, Introduce Parameter, estrai interfaccia, Gradle, hot-swap delle
+      classi, coverage, multi-caret, informazioni dall'app Spring viva — sono state cercate nel sorgente. Le colonne degli altri IDE,
+      RustRover e Spring Tools compresi, vengono da conoscenza generale delle versioni rilasciate e non sono state riverificate su
+      un'installazione. Le matrici non sono esaustive: l'assenza di una riga non è un giudizio.</p>
     <p>Stesure precedenti: <code>docs/arbor-a-confronto.html</code> (2 settembre, tutta la suite), la scheda
-      «Bennu Against the Field» (9 settembre), e la quarta stesura di questa pagina (11 settembre), nella storia git del file.</p>
+      «Bennu Against the Field» (9 settembre), la quarta stesura (11 settembre) e la quinta (15 settembre), nella storia git del file.
+      Il confronto con Corvus non è stato rifatto: secondo il maintainer, dall'ultima valutazione non ha avuto altro che correzioni,
+      oltre ai cinque tool MCP.</p>
   </div>
 </footer>
 
@@ -892,25 +965,25 @@
     { key: 'nb',    name: 'NetBeans', sub: 'Apache' },
   ];
 
-  // [area, nota, Bennu l'11 settembre (null = riga nuova),
+  // [area, nota, Bennu il 15 settembre (null = riga nuova),
   //  Bennu, IntelliJ U, IntelliJ CE, Eclipse, VS Code, NetBeans,
   //  peso «monolite legacy», peso «servizio Spring Boot»]
   const SECTIONS = [
     ['Intelligenza del codice Java', [
       ['Indice simbolico del progetto', 'Sorgenti e jar in un indice proprio; il goto in una dipendenza apre il -sources.jar o uno stub decompilato.', 4, 4, 5, 5, 4, 4, 4, 2, 2],
       ['Trova utilizzi e gerarchie', 'Conteggi sopra ogni dichiarazione; gli entry point dei framework non risultano mai «inutilizzati».', 4, 4, 5, 5, 4, 3, 3, 2, 2],
-      ['Completion', 'Tipo atteso con sottotipi e preselezione, postfix tipati e per versione, method reference, nome della dichiarazione, template tuoi. Manca la statement completion.', 4, 5, 5, 5, 3, 4, 3, 2, 3],
+      ['Completion', 'Tipo atteso con sottotipi e preselezione, postfix tipati e per versione, method reference, nome della dichiarazione, template tuoi. Manca la statement completion.', 5, 5, 5, 5, 3, 4, 3, 2, 3],
       ['Refactoring', 'Sedici al caret più rename e safe delete, ricompilati su Commons Lang e h2; cure che selezionano il segnaposto. Mancano Change Signature ed estrai interfaccia.', 4, 4, 5, 5, 4, 2, 3, 2, 3],
-      ['Errori di compilazione mentre scrivi', 'Bennu non compila e nel dubbio tace; Eclipse e VS Code girano su ECJ, NetBeans su javac.', 3, 3, 5, 5, 5, 5, 5, 2, 3],
+      ['Errori di compilazione mentre scrivi', 'Bennu non compila e nel dubbio tace, ma le famiglie sono ormai quelle di javac per il Java di tutti i giorni: definite assignment, eccezioni checked, lambda, switch esaustivi, generics. Eclipse e VS Code girano su ECJ, NetBeans su javac.', 3, 4, 5, 5, 5, 5, 5, 2, 3],
       ['Ispezioni Java oltre il compilatore', 'Bug probabili sul Java puro. IntelliJ ne ha centinaia; Bennu una manciata, dataflow solo sui campi final.', 2, 2, 5, 5, 3, 2, 3, 1, 2],
     ]],
     ['Stack legacy e framework', [
       ['Struts 2, JSP, taglib, OGNL, Tiles', 'Action → frammento → vista → property OGNL come un grafo solo, più struts.properties e la DTD della versione più vicina.', 5, 5, 3, 0, 2, 1, 2, 3, 0],
-      ['Spring, in XML e Boot', 'Bean, iniezione, property nei due sensi, endpoint, Spring Data, SpEL, classi di configurazione dallo yaml.', 4, 4, 5, 1, 2, 2, 1, 2, 3],
-      ['Ispezioni sui framework', 'Proxy aggirati, rotte in conflitto, transazioni su una chiamata HTTP, job che non partono, Mockito e AssertJ usati male, CDI ed EJB.', 4, 5, 4, 0, 1, 1, 1, 1, 2],
+      ['Spring, in XML e Boot', 'Bean, iniezione, property nei due sensi, endpoint, Spring Data, SpEL, classi di configurazione dallo yaml, dichiarazioni dei bean controllate mentre scrivi, file .env. Niente informazioni dall\'app in esecuzione.', 4, 4, 5, 1, 2, 2, 1, 2, 3],
+      ['Ispezioni sui framework', 'Proxy aggirati, rotte in conflitto, transazioni su una chiamata HTTP, job che non partono, Mockito e AssertJ usati male, CDI ed EJB.', 5, 5, 4, 0, 1, 1, 1, 1, 2],
       ['Bean Validation e Jackson', 'Vincoli che il motore non può validare, messaggi controllati sul bundle, @JsonCreator, forma JSON dei DTO, DTO Lab.', 4, 4, 3, 1, 1, 1, 2, 0.5, 2],
-      ['Jakarta EE e JAX-RS', 'Bean CDI ed EJB con le iniezioni, servlet in conflitto, risorse JAX-RS negli endpoint, @PathParam controllato.', null, 4, 5, 0, 3, 1, 4, 2, 0.5],
-      ['MapStruct', 'Path di @Mapping controllati, completati e navigabili; target non mappati; pannello Mappers.', null, 4, 4, 4, 1, 1, 1, 0.5, 2],
+      ['Jakarta EE e JAX-RS', 'Bean CDI ed EJB con le iniezioni, servlet in conflitto, risorse JAX-RS negli endpoint, @PathParam controllato.', 4, 4, 5, 0, 3, 1, 4, 2, 0.5],
+      ['MapStruct', 'Path di @Mapping controllati, completati e navigabili; target non mappati; pannello Mappers.', 4, 4, 4, 4, 1, 1, 1, 0.5, 2],
       ['MyBatis', 'Statement ↔ metodo dell\'interfaccia, include, result map.', 3, 3, 2, 2, 1, 1, 1, 2, 0.5],
       ['Lombok', 'Annotazioni lette per quello che generano; solo quelle che generano un nome lo coprono. IntelliJ lo include anche in Community.', 4, 4, 5, 5, 4, 4, 3, 1, 2],
       ['File di configurazione degli strumenti', 'lombok.config, junit-platform.properties, struts.properties: completion, hover e gate sulla versione risolta.', 5, 5, 3, 2, 1, 1, 1, 1, 1],
@@ -918,28 +991,29 @@
       ['Encoding legacy', 'Cp1252 letto come Cp1252, file non conformi segnalati, scan mojibake del progetto.', 5, 5, 2, 2, 2, 2, 2, 3, 0],
     ]],
     ['Build, test, debug', [
-      ['Maven', 'Tool window per modulo, pom colorato, nuovi moduli, livello e compilazione per modulo, moduli rinominati dichiarati.', 4, 5, 5, 5, 4, 3, 5, 2, 1],
+      ['Maven', 'Tool window per modulo, pom colorato, nuovi moduli, livello e compilazione per modulo, moduli rinominati dichiarati.', 5, 5, 5, 5, 4, 3, 5, 2, 1],
+      ['Sicurezza delle dipendenze', 'Versioni più nuove nel pom e vulnerabilità note (OSV.dev, opt-in, in cache un giorno) per le dipendenze a versione fissata.', null, 3, 4, 1, 1, 3, 1, 1, 1],
       ['Gradle, Ant, altri application server', 'Assente: Maven e Tomcat soltanto.', 0, 0, 5, 3, 4, 3, 5, 0, 2],
-      ['Debugger', 'Breakpoint condizionali, più sessioni, step oltre i proxy, debug dei test. Mancano hot-swap delle classi, eval Java, attach remoto.', 3, 3, 5, 5, 4, 4, 4, 2, 2],
+      ['Debugger', 'Breakpoint condizionali e nelle sorgenti delle librerie, più sessioni, step oltre i proxy, debug dei test. Mancano hot-swap delle classi, eval Java, attach remoto.', 3, 3, 5, 5, 4, 4, 4, 2, 2],
       ['Test', 'Catalogo, run in streaming, ▶ nell\'editor, classi che nessun engine eseguirà, test generati dai vincoli.', 4, 4, 5, 5, 4, 4, 4, 1, 2],
-      ['Librerie di test', 'Mockito e AssertJ controllati mentre scrivi, con le cure; conversione da JUnit ad AssertJ.', null, 4, 4, 4, 1, 1, 1, 1, 2],
+      ['Librerie di test', 'Mockito e AssertJ controllati mentre scrivi, con le cure; conversione da JUnit ad AssertJ.', 4, 4, 4, 4, 1, 1, 1, 1, 2],
       ['Coverage e profiling', 'Assenti entrambi; il plugin jacoco è solo riconosciuto.', 0, 0, 5, 3, 3, 2, 4, 1, 1],
       ['Database', 'Un prodotto fratello nello stesso workspace, con la sua intelligenza SQL.', 3, 3, 5, 0, 3, 3, 3, 1, 1],
     ]],
     ['Editor e ambiente', [
-      ['Versionamento', 'Un client git completo accanto, non un pannello. Nell\'editor, però, niente gutter delle modifiche.', 5, 5, 4, 4, 3, 4, 3, 1, 1],
-      ['Local history', 'Timeline per file indipendente da git, con cambi esterni e ripristino.', 4, 4, 5, 5, 3, 1, 2, 1, 1],
-      ['Ergonomia dell\'editor', 'Minimap, sticky scroll, inlay, code lens, popup della completion rifatto. Niente multi-caret, niente diff nell\'editor.', 3, 3, 5, 5, 3, 5, 3, 1, 2],
+      ['Versionamento', 'Un client git completo accanto e, nell\'editor, gutter delle modifiche, blame, cronologia di file e di selezione, pannello Changes con il diff accanto alla lista e il commit.', 5, 5, 4, 4, 3, 4, 3, 1, 1],
+      ['Local history', 'Timeline per file, per cartella e per selezione, indipendente da git, con cambi esterni e ripristino.', 4, 5, 5, 5, 3, 1, 2, 1, 1],
+      ['Ergonomia dell\'editor', 'Minimap, sticky scroll, inlay, code lens, barra Trova/Sostituisci, gutter delle modifiche, popup rifatto. Niente multi-caret, niente bookmark.', 3, 4, 5, 5, 3, 5, 3, 1, 2],
       ['File che non sono codice', 'Fogli di calcolo in quattro formati, docx, font, immagini, markdown e HTML in anteprima.', 5, 5, 3, 3, 1, 3, 1, 1, 0.5],
-      ['Template e generazione di codice', 'Jinja in sette tipi con anteprima dal vivo e scelta per progetto; abbreviazioni e postfix tuoi. I live template di IntelliJ restano più ricchi.', null, 4, 5, 5, 4, 3, 3, 1, 1],
+      ['Template e generazione di codice', 'Jinja in sette tipi con anteprima dal vivo e scelta per progetto; abbreviazioni e postfix tuoi. I live template di IntelliJ restano più ricchi.', 4, 4, 5, 5, 4, 3, 3, 1, 1],
       ['Tastiera e command palette', 'Ogni flusso completabile da tastiera per regola di progetto; voci e scorciatoie aggiunte.', 4, 4, 5, 5, 3, 5, 3, 1, 1],
-      ['Peso e avvio', 'Nessuna JVM in-process, indice mmap, progetti inattivi rilasciati. Da rimisurare a 54 crate.', 5, 5, 2, 3, 3, 4, 3, 1, 1],
+      ['Peso e avvio', 'Nessuna JVM in-process, indice mmap, progetti inattivi rilasciati. Da rimisurare a 55 crate.', 5, 5, 2, 3, 3, 4, 3, 1, 1],
     ]],
     ['Piattaforma', [
-      ['Altri linguaggi', 'Rust di prima classe, il resto quanto dà il language server; template e abbreviazioni per ogni linguaggio.', 3, 3, 4, 3, 3, 5, 3, 0.5, 1],
+      ['Altri linguaggi', 'Rust di prima classe, cartelle senza pom o Cargo come progetti solo editor, il resto quanto dà il language server (Angular compreso); template e abbreviazioni per ogni linguaggio.', 3, 3, 4, 3, 3, 5, 3, 0.5, 1],
       ['Ecosistema di plugin', 'Un host Lua documentato e una decina di plugin, contro due marketplace enormi.', 1, 1, 5, 5, 4, 5, 2, 0.5, 1],
-      ['Superficie per agenti AI', '32 tool MCP con permessi per prodotto, percorso e azione, template di codice compresi.', 4, 4, 4, 3, 1, 5, 1, 1, 1],
-      ['Maturità', '6.097 test Rust e 123 frontend, due corpora misurati; un utente solo, e un lotto non ancora compilato.', 2, 2, 5, 5, 4, 4, 3, 2, 2],
+      ['Superficie per agenti AI', '32 tool MCP di Bennu con permessi per prodotto, percorso e azione; la suite ne espone 45, con Corvus (commit di ciò che è in stage, mai push) e Tyto, e autorizzazioni a tempo.', 4, 4, 4, 3, 1, 5, 1, 1, 1],
+      ['Maturità', '6.523 test Rust e 248 frontend, due corpora misurati; un utente solo, e il lavoro di oggi non ancora compilato.', 2, 2, 5, 5, 4, 4, 3, 2, 2],
     ]],
   ];
 

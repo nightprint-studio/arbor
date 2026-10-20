@@ -37,6 +37,7 @@
   let {
     file,
     path,
+    repoPath = null,
     stageable = false,
     staged = false,
     onStageLines,
@@ -46,6 +47,8 @@
   }: {
     file: DiffFile | null;
     path?: string;
+    /** Workdir of the repository — forwarded to the built-in toolbar's encoding picker. */
+    repoPath?: string | null;
     stageable?: boolean;
     staged?: boolean;
     onStageLines?: (patch: string) => void;
@@ -344,6 +347,7 @@
         <div class="diff-header">
           <DiffToolbar
             {file}
+            {repoPath}
             {stageable}
             {staged}
             selectedCount={selectedLines.size}

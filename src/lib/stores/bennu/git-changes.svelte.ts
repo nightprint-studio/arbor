@@ -12,9 +12,10 @@
 import { repoTabForPath } from '$lib/ipc/corvus/changesByPath';
 import {
   getStatus, stageAll, unstageAll, discardAll, stagePaths, unstagePaths, discardPaths,
-  commitChanges, getGitCommitTemplate,
+  stagePatch, commitChanges, getGitCommitTemplate,
 } from '$lib/ipc/corvus/stage';
-import type { RepoStatus } from '$lib/types/corvus/git';
+import { getWorkdirFileDiff } from '$lib/ipc/corvus/diff';
+import type { DiffFile, RepoStatus } from '$lib/types/corvus/git';
 import type { StageTarget } from '$lib/utils/stage/stage-tree';
 import { bennuGitStatusStore } from '$lib/stores/bennu/git-status.svelte';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -72,6 +73,19 @@ function createGitChangesStore() {
     stageAll: () => run(stageAll, null, 'Stage all failed'),
     unstageAll: () => run(unstageAll, null, 'Unstage all failed'),
     discardAll: () => run(discardAll, 'Discarded all unstaged changes', 'Discard all failed'),
+
+    /** One file's change on the staged or unstaged side, parsed for the diff viewer. */
+    async fileDiff(path: string, staged: boolean): Promise<DiffFile> {
+      return getWorkdirFileDiff(await tab(root), staged, path);
+    },
+
+    /** Stage (or, from the staged side, unstage) a hand-picked part of a file — the patch the
+     *  diff viewer builds from the selected lines / hunk. Rejects so the caller can say why. */
+    async applyPatch(patch: string): Promise<void> {
+      await stagePatch(await tab(root), patch);
+      await refresh(root);
+      bennuGitStatusStore.refresh(root);
+    },
 
     /** The commit template git is configured with, or `''`. */
     async template(): Promise<string> {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { GitBranch, ArrowRight, Loader } from 'lucide-svelte';
-  import DiffViewer from '../diff/DiffViewer.svelte';
+  import DiffViewer from '$lib/components/shared/internal/diff/DiffViewer.svelte';
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { getBranchDiff } from '$lib/ipc/corvus/diff';
   import type { DiffFile } from '$lib/types/corvus/git';
@@ -138,6 +138,7 @@
           <DiffViewer
             file={selected}
             path={selected?.path}
+            repoPath={tab?.path ?? null}
             stageable={false}
             onEncodingChange={() => window.dispatchEvent(new CustomEvent('arbor:reload-diff'))}
           />
