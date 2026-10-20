@@ -25,7 +25,7 @@
     TerminalSquare, Hammer, 
     Library, Play, ListTodo, 
     TextCursorInput, Beaker, Bug, Braces, 
-    Cog, 
+    Cog, GitBranch,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -133,11 +133,13 @@
   import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
   import BennuRenameModal from './BennuRenameModal.svelte';
   import BennuMoveTargetPicker from './BennuMoveTargetPicker.svelte';
+  import type { MoveTarget } from '$lib/ipc/bennu/refactor';
   import BennuUsagesPopover from './BennuUsagesPopover.svelte';
   import BennuGotoModal from './BennuGotoModal.svelte';
   import BennuIndexInspectorModal from './BennuIndexInspectorModal.svelte';
   import BennuLocalHistoryModal from './BennuLocalHistoryModal.svelte';
   import BennuGitHistoryModal from './BennuGitHistoryModal.svelte';
+  import { bennuGitStatusStore } from '$lib/stores/bennu/git-status.svelte';
   import { bennuGitHistoryStore } from '$lib/stores/bennu/git-history.svelte';
   import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
   import { bennuBlameStore } from '$lib/stores/bennu/blame.svelte';
@@ -708,6 +710,8 @@
 
   let editor = $state<{
     openGoto: () => void;
+    /** Walk the lines changed since the last commit. */
+    gotoChange: (direction: 1 | -1, fromLine?: number) => void;
     expandSelection: () => Promise<boolean>;
     shrinkSelection: () => Promise<boolean>;
     getCaretLine: () => number;
@@ -734,6 +738,15 @@
     navLastEdit: () => void;
     navToPlace: (place: { file: string; line: number; col: number }) => void;
     caretContext: () => { source: string; offset: number } | null;
+    showSelectionHistory: () => void;
+    showLocalHistoryForSelection: () => void;
+    insertGeneratedSnippet: (
+      offset: number,
+      text: string,
+      stops: readonly { start: number; end: number; group?: number }[],
+    ) => void;
+    selectionBytes: () => { start: number; end: number } | null;
+    applyMoveTarget: (target: MoveTarget) => Promise<void>;
     applyGeneratedEdits: (
       edits: readonly { start: number; end: number; replacement: string }[],
     ) => void;
@@ -1125,6 +1138,11 @@
   // Docs/Settings moved to the titlebar's right cluster (IntelliJ/Corvus layout).
   // These drive the BOTTOM dock (BennuBottomDock), not a side panel — the active
   // state mirrors the dock's open tab.
+  /** Distinct files with a change — what a commit could still carry. */
+  const changedFileCount = $derived.by(() => {
+    const s = bennuGitStatusStore.summary;
+    return s ? s.staged + s.unstaged + s.untracked + s.conflicted : 0;
+  });
   const leftBottomRaw = $derived<ActivityRailButton[]>([
     { id: 'build',    tooltip: 'Build', shortcut: 'Alt+0',      icon: Hammer,         active: bennuUiStore.bottomPanel === 'build',    onclick: () => bennuUiStore.toggleBottom('build') },
     // ONE button for running and debugging, because they are one activity: the same launch with
@@ -1149,6 +1167,19 @@
     },
     { id: 'problems', tooltip: 'Problems', shortcut: 'Alt+6',   icon: AlertTriangle,  active: bennuUiStore.bottomPanel === 'problems', onclick: () => bennuUiStore.toggleBottom('problems') },
     { id: 'todos',    tooltip: 'TODO', shortcut: 'Alt+7',       icon: ListTodo,       active: bennuUiStore.bottomPanel === 'todos',    onclick: () => bennuUiStore.toggleBottom('todos') },
+    // Only inside a git repository: outside one the panel could only say so. The dot is the
+    // "something to commit" cue; the count is in the tooltip, where a number has room to be read.
+    ...(bennuGitStatusStore.inRepo
+      ? [{
+          id: 'changes',
+          tooltip: changedFileCount > 0 ? `Changes — ${changedFileCount} file${changedFileCount === 1 ? '' : 's'}` : 'Changes',
+          shortcut: 'Alt+Shift+C',
+          icon: GitBranch,
+          dot: changedFileCount > 0 ? ('accent' as const) : undefined,
+          active: bennuUiStore.bottomPanel === 'changes',
+          onclick: () => bennuUiStore.toggleBottom('changes'),
+        }]
+      : []),
     { id: 'terminal', tooltip: 'Terminal', shortcut: 'Alt+F12', icon: TerminalSquare, active: bennuUiStore.bottomPanel === 'terminal', onclick: () => bennuUiStore.toggleBottom('terminal') },
     ...pluginRail('left', 'bottom'),
   ]);
@@ -1259,7 +1290,7 @@
           // `hierarchy` survives every switch: it is opened by an action about the caret rather than
           // by a rail button, so there is no icon that could disappear from under it, and its own
           // header closes it.
-          'problems', 'terminal', 'build', 'todos', 'run', 'hierarchy',
+          'problems', 'terminal', 'build', 'todos', 'run', 'hierarchy', 'changes',
           ...(jsp ? ['forms' as const] : []),
           ...(dtoLab ? ['dtolab' as const] : []),
           // Most framework catalogs have no rail button, so one left open after switching to a
@@ -1410,6 +1441,12 @@
     const editorItems = [
       { id: 'goto', title: 'Go to line', icon: 'Hash', shortcut: 'Ctrl+G',
         action: () => run(() => editor?.openGoto()), when: !!projectStore.activeFilePath },
+      // Walk the lines changed since the last commit. Only offered while the gutter has something
+      // to walk: with the setting off there is nothing marked and nothing to jump to.
+      { id: 'nextchange', title: 'Git: next change', icon: 'ArrowDown', shortcut: 'Alt+F3',
+        action: () => run(() => editor?.gotoChange(1)), when: bennuGitStatusStore.inRepo && bennuSettingsStore.showChangeMarkers },
+      { id: 'prevchange', title: 'Git: previous change', icon: 'ArrowUp', shortcut: 'Ctrl+Shift+F3',
+        action: () => run(() => editor?.gotoChange(-1)), when: bennuGitStatusStore.inRepo && bennuSettingsStore.showChangeMarkers },
       // Local history. Three entries and not one, because the three answer different
       // questions and only one of them has a file to be about — an entry that opens on
       // nothing is the same lie as a panel that can only say "not here".
@@ -1629,6 +1666,7 @@
       { id: 'tests',     title: 'Toggle Tests',     icon: 'JUnit',       shortcut: 'Alt+5', action: () => run(() => bennuUiStore.toggleRight('tests')), when: javaTools },
       { id: 'problems',  title: 'Toggle Problems',  icon: 'AlertTriangle',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
       { id: 'todos',     title: 'Toggle TODO',      icon: 'ListTodo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
+      { id: 'changes',   title: 'Git: show changes', icon: 'GitBranch', shortcut: 'Alt+Shift+C', action: () => run(() => bennuUiStore.toggleBottom('changes')), when: bennuGitStatusStore.inRepo },
       { id: 'terminal',  title: 'Toggle Terminal',  icon: 'TerminalSquare',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
       // Why a plugin did nothing. Docked rather than modal, so it belongs beside the other
       // panel toggles — and in the palette, because it is opened exactly when something is
@@ -2062,6 +2100,10 @@
     }
 
     // Find in project (Ctrl+Shift+F) — a modal, replacing the old Search rail.
+    if (mod && e.shiftKey && e.key === 'F3') {
+      if (!bennuSettingsStore.showChangeMarkers) return;
+      e.preventDefault(); editor?.gotoChange(-1); return;
+    }
     if (mod && e.shiftKey && isKey(e, 'f')) { e.preventDefault(); bennuUiStore.openFind(editor?.getSelectedText() ?? ''); return; }
 
     // Structural search (Ctrl+Shift+M) — the shape-aware sibling of the one above. Java-only:
@@ -2177,6 +2219,13 @@
       e.preventDefault(); bennuUiStore.toggleRight('i18n'); return;
     }
 
+    // Changes panel. Alt+Shift+C, in the same safe family as the chords around it; only inside a
+    // repository, like its rail button.
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && isKey(e, 'c')) {
+      if (!bennuGitStatusStore.inRepo) return;
+      e.preventDefault(); bennuUiStore.toggleBottom('changes'); return;
+    }
+
     // Download whatever this project's dependencies need. Alt+Shift+U ("update"), in the same safe
     // family as the chords above — and NOT the mnemonic Alt+Shift+M, which is the macro expansion
     // below. Maven only: on a Cargo project there is nothing for it to do, and a chord that
@@ -2196,6 +2245,10 @@
 
     if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       if (e.key === 'F12') { e.preventDefault(); bennuUiStore.toggleBottom('terminal'); return; }
+      if (e.key === 'F3') {
+        if (!bennuSettingsStore.showChangeMarkers) return;
+        e.preventDefault(); editor?.gotoChange(1); return;
+      }
       if (e.key === 'F7') {
         if (!supportsCodeNav(projectStore.activeFilePath)) return;
         e.preventDefault(); void editor?.findUsages(); return;

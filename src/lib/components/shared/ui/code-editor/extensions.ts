@@ -27,6 +27,7 @@ import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirro
 import { bracketMatching, indentOnInput, foldKeymap, foldGutter, codeFolding } from '@codemirror/language';
 import { lintGutter, lintKeymap } from '@codemirror/lint';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { createFindPanel } from './find-panel';
 import {
   autocompletion, completionKeymap, startCompletion, acceptCompletion,
   closeBrackets, closeBracketsKeymap, type Completion, type CompletionSource,
@@ -189,6 +190,9 @@ export interface CodeEditorExtensionsOptions extends CodeEditorPreferences {
    *  clicked position as a **UTF-8 byte offset** so the host can classify it (a BE
    *  go-to-declaration needs the offset, not just the name). */
   onGoto?: (word: string, view: EditorView, byteOffset: number) => void;
+  /** The find bar's "Find in files" button — receives the current query. The button is absent
+   *  when the host has no project-wide search to hand it to. */
+  onFindInFiles?: (query: string) => void;
   /** Enable Emmet abbreviation expansion on Tab (markup buffers). Off by default — the host
    *  opts in per markup file (HTML / JSP); the binding no-ops (falls through to indent) when the
    *  caret isn't on a valid abbreviation. */
@@ -409,7 +413,8 @@ export function createCodeEditorExtensions(
     // data (`closeBrackets`), so a JSP/XML descriptor won't try to close a `'` inside text.
     closeBrackets(),
     highlightSelectionMatches(),
-    search({ top: true }),
+    // Arbor's own bar instead of CodeMirror's stock panel — see `FindWidget.svelte`.
+    search({ top: true, createPanel: createFindPanel({ onFindInFiles: opts.onFindInFiles }) }),
     useCm ? (lang.cmExtension as Extension) : highlight,
     // Text the grammar never handed to `classify` — see `LanguageDescriptor.extraHighlight`.
     // Absent for every language whose grammar covers its own document.

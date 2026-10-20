@@ -33,7 +33,7 @@
   import { cargoPreview, hasComponent } from '$lib/ipc/bennu/cargo';
   import { bennuCargoStore } from '$lib/stores/bennu/cargo.svelte';
   import { cargoInvocationOf } from '$lib/stores/bennu/run-config.svelte';
-  import type { EnvVar, RunConfig } from '$lib/stores/bennu/run-config.svelte';
+  import type { RunConfig } from '$lib/stores/bennu/run-config.svelte';
 
   let {
     config,
@@ -343,7 +343,7 @@
   />
 </FormField>
 
-<BennuRunEnvField env={config.env} onchange={(next: EnvVar[]) => patch({ env: next })} />
+<BennuRunEnvField {config} {patch} root={workspace?.root ?? ''} />
 
 {#if !workspace}
   <p class="cargo-warn">

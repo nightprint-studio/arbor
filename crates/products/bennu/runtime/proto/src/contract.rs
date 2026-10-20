@@ -1388,6 +1388,14 @@ pub struct RunConfig {
     /// not when it is configured — a configuration written on Windows is still the right
     /// configuration when the repository is opened on a Mac.
     pub script_file: String,
+    /// `script` only — which shell interprets [`RunConfig::script_file`]: `bash`, `zsh`, `sh`,
+    /// `pwsh`, `powershell` or `cmd`. Empty = decided by the file's extension, which is what every
+    /// script did before there was a choice.
+    pub script_shell: String,
+    /// Path of a `.env` file whose variables are added to the environment **when the
+    /// configuration is launched**. Not an import: the file is read at every run, so editing it
+    /// takes effect without touching the configuration. Rows in [`RunConfig::env`] win over it.
+    pub env_file: String,
 }
 
 impl Default for RunConfig {
@@ -1422,6 +1430,8 @@ impl Default for RunConfig {
             cargo_workspace: false,
             cargo_args: String::new(),
             script_file: String::new(),
+            script_shell: String::new(),
+            env_file: String::new(),
         }
     }
 }

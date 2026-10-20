@@ -20,6 +20,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use arbor_ipc::prelude::EventSink;
 use arbor_process_ext::prelude::NoWindowExt;
 use bennu_core::prelude::BennuState;
 use bennu_maven::prelude::{Catalog, LocalRepo, Resolution};
@@ -268,14 +269,17 @@ pub(crate) fn bennu_maven_download(ctx: &BennuState, args: MavenRootArgs) -> Res
                 // and let the index rebuild resolve from scratch.
                 crate::dep_classpath::clear_list_cache(&root);
                 Catalog::scan(&LocalRepo::discover()).save();
-                crate::index_service::finish_bennu_job(&sink, job, true, None);
+                // The job stays open through the reindex: the download is only useful once library
+                // types resolve, and a job that closed here left the longest part of the work —
+                // minutes on a large project — running with nothing on screen to say so.
+                let indexed = reindex_and_wait(&root_str, &sink);
+                crate::index_service::finish_bennu_job(&sink, job, indexed, (!indexed).then(|| "The index could not be rebuilt.".to_string()));
                 crate::index_service::notify(
                     &sink,
                     "Dependencies downloaded",
-                    "Rebuilding the index so library types resolve.",
-                    "success",
+                    if indexed { "The index was rebuilt, so library types resolve." } else { "The index could not be rebuilt." },
+                    if indexed { "success" } else { "warning" },
                 );
-                let _ = crate::index_service::IndexService::global().reindex(&root_str, Arc::clone(&sink));
             }
             Ok((false, log)) => {
                 let reason = go_offline_failure(&log);
@@ -332,18 +336,57 @@ pub(crate) fn bennu_maven_reload(ctx: &BennuState, args: MavenRootArgs) -> Resul
         let catalog = Catalog::scan(&LocalRepo::discover());
         let artifacts = catalog.len();
         catalog.save();
-        crate::index_service::finish_bennu_job(&sink, job, true, None);
+        // The job covers the reindex too. It used to close before it, on the theory that the reindex
+        // "reports as its own job" — but that one is a *system* job, hidden from the Jobs panel, so
+        // the longest part of the work ran with nothing on screen and the press looked finished
+        // after a second.
+        let indexed = reindex_and_wait(&root_str, &sink);
+        crate::index_service::finish_bennu_job(
+            &sink,
+            job,
+            indexed,
+            (!indexed).then(|| "The index could not be rebuilt.".to_string()),
+        );
         crate::index_service::notify(
             &sink,
             "Dependencies re-resolved",
-            &format!("{artifacts} artifact(s) in the local repository. Rebuilding the index."),
-            "success",
+            &format!(
+                "{artifacts} artifact(s) in the local repository.{}",
+                if indexed { " The index was rebuilt." } else { " The index could not be rebuilt." }
+            ),
+            if indexed { "success" } else { "warning" },
         );
-        // Last, and after the job is closed: the reindex reports as its own job, and nesting the
-        // two would leave the outer one open for the length of a whole-project read.
-        let _ = crate::index_service::IndexService::global().reindex(&root_str, Arc::clone(&sink));
     });
     Ok("started".to_string())
+}
+
+/// Start a reindex of `root` and block until its provider is live (or it has failed), so the caller
+/// can keep a job open for the whole of it. Runs on a background thread only — it sleeps.
+///
+/// `reindex` returns as soon as the rebuild is *started*; the readiness is the project's
+/// `provider_stage`. Polled rather than signalled because the index service has no completion hook,
+/// and the poll is bounded: a stage that never leaves `building` ends the wait after
+/// [`REINDEX_WAIT`] with the benefit of the doubt, which is what the job did before it waited at all.
+/// `false` only when the rebuild could not start, or ended in `failed`.
+fn reindex_and_wait(root: &str, sink: &Arc<dyn EventSink>) -> bool {
+    const POLL: std::time::Duration = std::time::Duration::from_millis(400);
+    const REINDEX_WAIT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+    let svc = crate::index_service::IndexService::global();
+    if svc.reindex(root, Arc::clone(sink)).is_err() {
+        return false;
+    }
+    // Let the rebuild reset the stage before it is read: the call returns before the worker has
+    // begun, and reading `dependencies` left over from the previous build would end the wait at once.
+    std::thread::sleep(POLL);
+    let started = std::time::Instant::now();
+    while started.elapsed() < REINDEX_WAIT {
+        match svc.index_stats(root).provider_stage.as_str() {
+            "dependencies" => return true,
+            "failed" => return false,
+            _ => std::thread::sleep(POLL),
+        }
+    }
+    true
 }
 
 /// Download the `-sources.jar` of every dependency, so Ctrl+B into a library lands on real source

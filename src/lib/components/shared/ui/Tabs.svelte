@@ -51,6 +51,9 @@
      *  three without reading eight filenames. Green, the colour the project tree already gives a
      *  test root. */
     tone?:       'default' | 'external' | 'test';
+    /** CSS colour for the label alone — a status carried by the name itself (a file's git
+     *  state), as opposed to `tone`, which restyles the whole tab. */
+    labelColor?: string;
     /** Props handed to {@link icon}, for an icon component that needs more than a size —
      *  a file-type or symbol-kind icon is chosen by what it is *of*, not by which component
      *  it is. Without this a caller with one icon component and N variants has to bypass the
@@ -421,7 +424,7 @@
             <Icon size={item.iconSize ?? (size === 'sm' ? 12 : 14)} {...(item.iconProps ?? {})} />
           {/if}
           {#if item.label}
-            <span class="tab-label">{item.label}</span>
+            <span class="tab-label" style:color={item.labelColor}>{item.label}</span>
           {/if}
           {#if item.badge !== undefined && item.badge !== null && item.badge !== ''}
             <span class="tab-badge">{item.badge}</span>

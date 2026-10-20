@@ -91,6 +91,15 @@ pub struct MavenResolveOpts {
     /// `~/.m2` — which is stale after every edit, and absent until someone runs `mvn install`, in
     /// which case Maven resolves nothing at all for the module. See [`resolve_maven_classpath`].
     pub reactor_module: Option<String>,
+    /// Ignore the repository id each jar in `~/.m2` was recorded under ([`IGNORE_REPO_ORIGIN_ARG`]): accept a jar **whatever
+    /// repository id it was fetched from**.
+    ///
+    /// Maven's default manager records where each file came from (`_remote.repositories`) and, when
+    /// offline, refuses one "not downloaded from it before" — i.e. recorded under another repository
+    /// id. It is the normal state of a `~/.m2` filled by IntelliJ's bundled Maven or a different
+    /// `settings.xml`, and the reason a project that builds there fails here with the jar sitting on
+    /// disk. `false` by default; a caller turns it on after the strict answer fell short.
+    pub ignore_repo_origin: bool,
 }
 
 impl Default for MavenResolveOpts {
@@ -102,6 +111,7 @@ impl Default for MavenResolveOpts {
             scope: None,
             timeout: Duration::from_secs(300),
             reactor_module: None,
+            ignore_repo_origin: false,
         }
     }
 }
@@ -124,6 +134,16 @@ impl MavenResolveOpts {
         self
     }
 }
+
+/// The Maven argument that makes the resolver ignore which repository each jar in `~/.m2` was
+/// recorded as coming from.
+///
+/// It points the "tracking file" the enhanced local repository manager consults (`_remote.repositories`)
+/// at a name no jar has, so nothing counts as fetched from somewhere else. A property rather than the
+/// `-llr` flag (the legacy manager): that flag was removed from current Maven and, unknown, makes the
+/// launcher print its usage text and nothing else. The property is read by the resolver, which every
+/// Maven 3.x and 4 ships, and is ignored where it does not apply.
+pub const IGNORE_REPO_ORIGIN_ARG: &str = "-Daether.enhancedLocalRepository.trackingFilename=bennu-untracked";
 
 /// The outcome of resolving a project's dependency classpath.
 #[derive(Debug, Clone)]
@@ -338,6 +358,9 @@ pub fn resolve_maven_classpath(
     if opts.offline {
         cmd.arg("-o");
     }
+    if opts.ignore_repo_origin {
+        cmd.arg(IGNORE_REPO_ORIGIN_ARG);
+    }
     if let Some(jh) = &opts.java_home {
         cmd.env("JAVA_HOME", jh);
     }
@@ -402,6 +425,9 @@ fn resolve_reactor_module(
     }
     if opts.offline {
         cmd.arg("-o");
+    }
+    if opts.ignore_repo_origin {
+        cmd.arg(IGNORE_REPO_ORIGIN_ARG);
     }
     if let Some(jh) = &opts.java_home {
         cmd.env("JAVA_HOME", jh);

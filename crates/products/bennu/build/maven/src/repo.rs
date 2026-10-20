@@ -256,6 +256,17 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
+/// Whether a version is **calendar-based** (`2024.03`, `2023.1.0`, `20040102`): its first number is
+/// a year or a date, not a major.
+///
+/// Numbers from different schemes are not comparable. A library that moved from `2025.1` to
+/// `1.4.0` has published nothing *older* than `2025.1` since — but compared as numbers, every
+/// semantic release looks like a downgrade, and the old calendar one is "the newest" forever. So
+/// callers that rank versions against a declared one only compare within one scheme.
+pub fn is_calendar_version(version: &str) -> bool {
+    split_version(version).0.first().is_some_and(|first| *first >= 1990)
+}
+
 /// The numeric prefix (`1.2.3`) and whatever qualifies it (`-SNAPSHOT`, `.RELEASE`, `-rc1`).
 fn split_version(v: &str) -> (Vec<u64>, String) {
     let mut nums = Vec::new();
@@ -302,6 +313,16 @@ fn qualifier_rank(q: &str) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_leading_year_marks_a_calendar_version() {
+        assert!(is_calendar_version("2024.03"));
+        assert!(is_calendar_version("2023.1.0-RC1"));
+        assert!(is_calendar_version("20040102"));
+        assert!(!is_calendar_version("6.1.3"));
+        assert!(!is_calendar_version("1.2.3"));
+        assert!(!is_calendar_version("junit"));
+    }
 
     /// The delegation, in one test: a repository is a root plus [`Coord`]'s layout, and the two
     /// packagings that name a different file than they claim go through it unchanged. What the

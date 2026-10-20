@@ -243,7 +243,7 @@ fn resolve_fresh(root: &Path, jdk_version: &str) -> Result<ResolvedList, String>
 ///
 /// Read at each resolve rather than cached: a resolve is rare and slow, and the one thing worse
 /// than asking the config again is a switch that only takes effect after a restart.
-fn auto_download() -> bool {
+pub(crate) fn auto_download() -> bool {
     bennu_core::prelude::load_config().maven_auto_download
 }
 

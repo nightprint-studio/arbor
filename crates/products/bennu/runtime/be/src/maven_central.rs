@@ -143,7 +143,9 @@ async fn hints_for(cfg: &MavenConfig, source: &str, mut budget: usize) -> Vec<Po
 /// `<dependencyManagement>` is excluded on purpose even though its versions are literal — it is
 /// *another* pom's version, and a module told its parent is behind is a module that cannot fix it.
 /// The parent's own hints appear when the parent is open, where the edit belongs.
-fn candidates(pom: &bennu_deps::prelude::Pom) -> Vec<&bennu_deps::prelude::RawDependency> {
+pub(crate) fn candidates(
+    pom: &bennu_deps::prelude::Pom,
+) -> Vec<&bennu_deps::prelude::RawDependency> {
     pom.dependencies
         .iter()
         .filter(|d| {
@@ -230,9 +232,9 @@ mod tests {
 
     #[test]
     fn the_ttl_reads_zero_as_the_default() {
-        let off = MavenConfig { central: true, metadata_ttl_hours: 0 };
+        let off = MavenConfig { central: true, metadata_ttl_hours: 0, ..MavenConfig::default() };
         assert_eq!(ttl(&off), Duration::from_secs(24 * 3600));
-        let two = MavenConfig { central: true, metadata_ttl_hours: 2 };
+        let two = MavenConfig { central: true, metadata_ttl_hours: 2, ..MavenConfig::default() };
         assert_eq!(ttl(&two), Duration::from_secs(2 * 3600));
     }
 }

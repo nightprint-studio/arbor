@@ -30,6 +30,8 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuGitStatusStore } from '$lib/stores/bennu/git-status.svelte';
+  import { GIT_BADGE_COLOR, GIT_BADGE_LABEL } from '$lib/utils/git-badge';
   import { moduleIndex } from './modules';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
@@ -73,6 +75,8 @@
     key: string;
     label: string;
     icon: typeof Coffee;
+    /** The file the group is about; absent for the JDK / Encoding pseudo-groups. */
+    file?: string;
     rows: Item[];
   }
   interface SevGroup {
@@ -235,7 +239,12 @@
       let files = bySev.get(it.severity);
       if (!files) { files = new Map(); bySev.set(it.severity, files); }
       let fg = files.get(it.groupKey);
-      if (!fg) { fg = { key: it.groupKey, label: it.groupLabel, icon: it.groupIcon, rows: [] }; files.set(it.groupKey, fg); }
+      if (!fg) {
+        // Only a real file group names a file: the Encoding group lists many under one key.
+        const file = it.groupKey.startsWith('file:') ? it.file : undefined;
+        fg = { key: it.groupKey, label: it.groupLabel, icon: it.groupIcon, file, rows: [] };
+        files.set(it.groupKey, fg);
+      }
       fg.rows.push(it);
     }
     const out: SevGroup[] = [];
@@ -349,6 +358,7 @@
             {@const FileIc = fg.icon}
             {@const fileId = `${sevId}/${fg.key}`}
             {@const fileCollapsed = collapsed.has(fileId)}
+            {@const gitBadge = fg.file ? bennuGitStatusStore.badgeFor(fg.file, false) : undefined}
             <button
               class="pb-file"
               type="button"
@@ -359,7 +369,11 @@
             >
               <span class="pb-chev">{#if fileCollapsed}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}</span>
               <span class="pb-file-icon"><FileIc size={12} /></span>
-              <span class="pb-file-label">{fg.label}</span>
+              <span
+                class="pb-file-label"
+                style:color={gitBadge ? GIT_BADGE_COLOR[gitBadge] : undefined}
+                use:tooltip={gitBadge ? GIT_BADGE_LABEL[gitBadge] : undefined}
+              >{fg.label}</span>
               <span class="pb-sec-count">{fg.rows.length}</span>
             </button>
             {#if !fileCollapsed}

@@ -1,95 +1,40 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
-  import { Plus, Minus, X, RotateCcw, RefreshCw, Archive, Square, CheckSquare, GitMerge, AlertTriangle, ChevronDown, ChevronRight, List, FolderTree, Folder, CheckCircle2, FileDiff } from 'lucide-svelte';
+  /**
+   * Corvus's Staging Area bottom panel: the shared {@link StagePanel} fed from the active tab,
+   * beside the workdir diff. What lives here is what only Corvus has — the tab, the diff store,
+   * merge / conflict states, stash — while the file lists, context menu and discard
+   * confirmation are the shared panel's.
+   */
+  import { AlertTriangle, RefreshCw, GitMerge, CheckCircle2, FileDiff } from 'lucide-svelte';
   import CommitForm from './CommitForm.svelte';
+  import ConflictResolver from './ConflictResolver.svelte';
   import DiffViewer, { type DiffViewerApi } from '../diff/DiffViewer.svelte';
   import DiffToolbar from '../diff/DiffToolbar.svelte';
   import ResizablePanel from '../../shared/ui/ResizablePanel.svelte';
-  import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
-  import DiscardConfirmModal from './DiscardConfirmModal.svelte';
+  import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
+  import StagePanel, { type StageActions } from '$lib/components/shared/internal/stage/StagePanel.svelte';
+  import StashDialog from '$lib/components/shared/internal/StashDialog.svelte';
   import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { repoStore } from '$lib/stores/corvus/repo.svelte';
   import { diffStore } from '$lib/stores/corvus/diff.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import ConflictResolver from './ConflictResolver.svelte';
-  import Tree from '$lib/components/shared/ui/Tree.svelte';
-  import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
-  import { compactMiddleDirs } from '$lib/utils/file-tree/compact-middle-dirs';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
-  import StashDialog from '$lib/components/shared/internal/StashDialog.svelte';
   import { getStatus, stageAll, unstageAll, discardAll, stagePatch, stagePaths, unstagePaths, discardPaths, pathsOf } from '$lib/ipc/corvus/stage';
-  import type { StatusEntry } from '$lib/types/corvus/git';
   import { stashSave } from '$lib/ipc/corvus/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
   import { getWorkdirDiff } from '$lib/ipc/corvus/diff';
   import { tooltip } from '$lib/actions/tooltip';
+  import type { StageTarget } from '$lib/utils/stage/stage-tree';
 
   const tab    = $derived(tabsStore.activeTab);
   const status = $derived(repoStore.status);
 
-  let viewMode         = $state<'staged' | 'unstaged'>('unstaged');
   let currentDiffStaged = $state(false);
-  let stashOpen           = $state(false);
-  let isStashing          = $state(false);
-  // Imperative handle exposed by the chromeless DiffViewer below — drives
-  // the DiffToolbar we render inside the BottomPanelHeader.
+  let stashOpen         = $state(false);
+  let isStashing        = $state(false);
+  // Imperative handle exposed by the chromeless DiffViewer — drives the DiffToolbar we render
+  // inside the BottomPanelHeader.
   let diffApi = $state<DiffViewerApi | undefined>(undefined);
-
-  // Accordion: unstaged starts open, staged starts closed
-  let unstagedCollapsed = $state(false);
-  let stagedCollapsed   = $state(true);
-
-  // Opening one section always closes the other
-  function toggleSection(which: 'unstaged' | 'staged') {
-    if (which === 'unstaged') {
-      unstagedCollapsed = !unstagedCollapsed;
-      if (!unstagedCollapsed) stagedCollapsed = true;
-    } else {
-      stagedCollapsed = !stagedCollapsed;
-      if (!stagedCollapsed) unstagedCollapsed = true;
-    }
-  }
-
-  // ── List / Tree view mode ────────────────────────────────────────────────
-  let listViewMode = $state<'list' | 'tree'>(
-    (localStorage.getItem('arbor:stage-view-mode') as 'list' | 'tree') ?? 'list'
-  );
-  $effect(() => { localStorage.setItem('arbor:stage-view-mode', listViewMode); });
-
-  interface StageTreeNode {
-    name: string;
-    fullPath: string;
-    children: Map<string, StageTreeNode>;
-    /** Sorted snapshot of `children.values()` — baked in at build time so the
-     *  template never allocates/sorts per render. */
-    sortedChildren: StageTreeNode[];
-    entry?: StatusEntry;
-  }
-
-  function buildStageTree(entries: StatusEntry[]): StageTreeNode {
-    const root: StageTreeNode = { name: '', fullPath: '', children: new Map(), sortedChildren: [] };
-    for (const entry of entries) {
-      const parts = entry.path.split('/');
-      let node = root;
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        if (!node.children.has(part)) {
-          const fp = parts.slice(0, i + 1).join('/');
-          node.children.set(part, { name: part, fullPath: fp, children: new Map(), sortedChildren: [] });
-        }
-        node = node.children.get(part)!;
-      }
-      node.entry = entry;
-    }
-    // Post-pass: populate sortedChildren on every node so the template can iterate
-    // pre-sorted arrays without a filter/sort allocation per render.
-    function bakeSort(n: StageTreeNode) {
-      n.sortedChildren = [...n.children.values()].sort(sortNodes);
-      for (const c of n.sortedChildren) bakeSort(c);
-    }
-    bakeSort(root);
-    return root;
-  }
 
   const unstagedEntries = $derived([...(status?.unstaged ?? []), ...(status?.untracked ?? [])]);
   const stagedEntries   = $derived(status?.staged ?? []);
@@ -101,201 +46,12 @@
     && (status.conflicted?.length ?? 0) === 0
   );
 
-  // After build, optionally collapse single-child directory chains
-  // (IntelliJ "Compact Middle Packages"). Re-sorts each level by the joined
-  // name so the alphabetical order matches what the user sees.
-  const STAGE_ACCESSORS = {
-    isDir:       (n: StageTreeNode) => n.children.size > 0,
-    getName:     (n: StageTreeNode) => n.name,
-    setName:     (n: StageTreeNode, name: string) => { n.name = name; },
-    getChildren: (n: StageTreeNode) => n.sortedChildren,
-    setChildren: (n: StageTreeNode, kids: StageTreeNode[]) => { n.sortedChildren = kids; },
-  };
-  function maybeCompactStageTree(root: StageTreeNode): StageTreeNode {
-    if (!appearanceStore.compactFileTreeDirs) return root;
-    root.sortedChildren = compactMiddleDirs(root.sortedChildren, STAGE_ACCESSORS);
-    const reSort = (n: StageTreeNode) => {
-      n.sortedChildren.sort(sortNodes);
-      for (const c of n.sortedChildren) reSort(c);
-    };
-    reSort(root);
-    return root;
-  }
-  const unstagedTree    = $derived(maybeCompactStageTree(buildStageTree(unstagedEntries)));
-  const stagedTree      = $derived(maybeCompactStageTree(buildStageTree(stagedEntries)));
-
-  let unstagedExpandedPaths = $state(new Set<string>());
-  let stagedExpandedPaths   = $state(new Set<string>());
-  // Track dirs seen on the previous tree pass so we can distinguish brand-new
-  // dirs (auto-expand) from ones the user has explicitly collapsed (preserve).
-  let unstagedKnownDirs = new Set<string>();
-  let stagedKnownDirs   = new Set<string>();
-
-  // Walk the *rendered* tree (sortedChildren reflects compact mode if on)
-  // so the expand-state Set only ever contains paths that actually appear
-  // as collapsible rows in the UI.
-  function collectDirs(node: StageTreeNode, out: Set<string>) {
-    if (node.sortedChildren.length > 0 && node.fullPath) out.add(node.fullPath);
-    for (const c of node.sortedChildren) collectDirs(c, out);
-  }
-
-  function reconcileExpanded(currentDirs: Set<string>, prevExpanded: Set<string>, knownDirs: Set<string>): Set<string> {
-    const next = new Set<string>();
-    for (const d of currentDirs) {
-      if (knownDirs.has(d)) {
-        if (prevExpanded.has(d)) next.add(d);
-      } else {
-        next.add(d);
-      }
-    }
-    return next;
-  }
-
-  $effect(() => {
-    const dirs = new Set<string>();
-    collectDirs(unstagedTree, dirs);
-    untrack(() => {
-      unstagedExpandedPaths = reconcileExpanded(dirs, unstagedExpandedPaths, unstagedKnownDirs);
-      unstagedKnownDirs = dirs;
-    });
-  });
-  $effect(() => {
-    const dirs = new Set<string>();
-    collectDirs(stagedTree, dirs);
-    untrack(() => {
-      stagedExpandedPaths = reconcileExpanded(dirs, stagedExpandedPaths, stagedKnownDirs);
-      stagedKnownDirs = dirs;
-    });
-  });
-
-  function toggleUnstagedDir(path: string) {
-    const s = new Set(unstagedExpandedPaths);
-    s.has(path) ? s.delete(path) : s.add(path);
-    unstagedExpandedPaths = s;
-  }
-  function toggleStagedDir(path: string) {
-    const s = new Set(stagedExpandedPaths);
-    s.has(path) ? s.delete(path) : s.add(path);
-    stagedExpandedPaths = s;
-  }
-
-  function sortNodes(a: StageTreeNode, b: StageTreeNode): number {
-    const aD = a.children.size > 0, bD = b.children.size > 0;
-    if (aD !== bD) return aD ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  }
-
-  // ── Discard confirmation ─────────────────────────────────────────────────
-  type DiscardTarget = ({ kind: 'paths' } & CtxTarget) | { kind: 'all'; count: number };
-  let discardPending = $state<DiscardTarget | null>(null);
-
-  function isConfirmDiscardEnabled() {
-    return diffStore.confirmDiscard;
-  }
-
-  // ── Context menu ────────────────────────────────────────────────
-  /** What an action operates on: the git paths to send, plus how to name the
-   *  target in a toast. A file and a folder differ only in how these two are
-   *  built, which is why there is one handler per verb and not two. */
-  type CtxTarget = { paths: string[]; label: string };
-  type FileCtx = CtxTarget & { x: number; y: number; items: MenuItem[] };
-  let ctxMenu = $state<FileCtx | null>(null);
-
-  const basename = (p: string) => p.split('/').pop() ?? p;
-  /** A moved file is two paths and the tooltip says so — same `old → new` shape
-   *  the diff chrome uses, so the same file reads the same everywhere. */
-  const pathLabel = (e: StatusEntry) => (e.old_path ? `${e.old_path} → ${e.path}` : e.path);
-
-  /** The entries under a folder node, depth-first. Walks `children` — the map the
-   *  tree was built from — because compact mode rewrites `sortedChildren` only. */
-  function collectLeafEntries(node: StageTreeNode): StatusEntry[] {
-    const out: StatusEntry[] = [];
-    function collect(n: StageTreeNode) {
-      if (n.entry) out.push(n.entry);
-      for (const child of n.children.values()) collect(child);
-    }
-    for (const child of node.children.values()) collect(child);
-    return out;
-  }
-
-  const fileTarget = (entry: StatusEntry): CtxTarget =>
-    ({ paths: pathsOf(entry), label: basename(entry.path) });
-
-  /** A rename contributes two paths but is still one file, so the count the user
-   *  sees comes from the entries — never from `paths.length`. */
-  function folderTarget(node: StageTreeNode): CtxTarget & { count: number } {
-    const entries = collectLeafEntries(node);
-    return {
-      paths: entries.flatMap(pathsOf),
-      label: `${entries.length} file${entries.length !== 1 ? 's' : ''} in ${node.name}`,
-      count: entries.length,
-    };
-  }
-
-  function openUnstagedCtx(e: MouseEvent, entry: StatusEntry) {
-    e.preventDefault();
-    ctxMenu = {
-      x: e.clientX, y: e.clientY, ...fileTarget(entry),
-      items: [
-        { id: 'stage',   label: 'Stage File',      icon: Plus, iconColor: 'var(--success)' },
-        { id: 'discard', label: 'Discard Changes',  icon: RotateCcw, danger: true },
-      ],
-    };
-  }
-
-  function openStagedCtx(e: MouseEvent, entry: StatusEntry) {
-    e.preventDefault();
-    ctxMenu = {
-      x: e.clientX, y: e.clientY, ...fileTarget(entry),
-      items: [
-        { id: 'unstage', label: 'Unstage File', icon: Minus, iconColor: 'var(--warning)' },
-      ],
-    };
-  }
-
-  function openUnstagedFolderCtx(e: MouseEvent, node: StageTreeNode) {
-    e.preventDefault();
-    e.stopPropagation();
-    const { count, ...target } = folderTarget(node);
-    ctxMenu = {
-      x: e.clientX, y: e.clientY, ...target,
-      items: [
-        { id: 'stage',   label: `Stage Folder (${count})`,    icon: Plus,     iconColor: 'var(--success)' },
-        { id: 'discard', label: `Discard Folder (${count})`,  icon: RotateCcw, danger: true },
-        { id: 'sep-1', label: '', separator: true },
-        { id: 'stash-all', label: 'Stash All Changes…', icon: Archive, iconColor: 'var(--color-stash)', action: 'stash' },
-      ],
-    };
-  }
-
-  function openStagedFolderCtx(e: MouseEvent, node: StageTreeNode) {
-    e.preventDefault();
-    e.stopPropagation();
-    const { count, ...target } = folderTarget(node);
-    ctxMenu = {
-      x: e.clientX, y: e.clientY, ...target,
-      items: [
-        { id: 'unstage', label: `Unstage Folder (${count})`, icon: Minus, iconColor: 'var(--warning)' },
-      ],
-    };
-  }
-
-  async function handleCtxSelect(id: string) {
-    if (!ctxMenu) return;
-    const target: CtxTarget = { paths: ctxMenu.paths, label: ctxMenu.label };
-    ctxMenu = null;
-    if      (id === 'stage')     await handleStage(target);
-    else if (id === 'unstage')   await handleUnstage(target);
-    else if (id === 'discard')   handleDiscard(target);
-    else if (id === 'stash-all') stashOpen = true;
-  }
-
   $effect(() => {
     if (tab) refreshStatus();
   });
 
-  // Re-fetch the visible diff when the user toggles "Show full file" — the
-  // backend has to emit a different patch (full context vs N-line context).
+  // Re-fetch the visible diff when the user toggles "Show full file" — the backend has to emit
+  // a different patch (full context vs N-line context).
   $effect(() => {
     function onReload() {
       const f = diffStore.selectedFile;
@@ -313,27 +69,23 @@
     if (!diffStore.selectedFile) {
       const firstUnstaged = s.unstaged[0]?.path ?? s.untracked[0]?.path ?? null;
       const firstStaged   = s.staged[0]?.path ?? null;
-      if (firstUnstaged) {
-        await loadDiff(firstUnstaged, false);
-      } else if (firstStaged) {
-        await loadDiff(firstStaged, true);
-      }
+      if (firstUnstaged) await loadDiff(firstUnstaged, false);
+      else if (firstStaged) await loadDiff(firstStaged, true);
     }
   }
 
   async function loadDiff(path: string, staged: boolean) {
     if (!tab) return;
     currentDiffStaged = staged;
-    // Streaming load: the store populates itself via
-    // arbor://diff-stream-* events.  We just tell it which path we want
-    // selected once the metadata list arrives, and show the spinner meanwhile.
+    // Streaming load: the store populates itself via arbor://diff-stream-* events. We just say
+    // which path to select once the metadata list arrives, and show the spinner meanwhile.
     diffStore.setPendingSelection(path);
     diffStore.setLoading(true);
     try {
       await diffStore.loadWorkdirDiffStream(tab.id, staged);
     } catch {
-      // On failure the backend emits arbor://diff-stream-error which clears
-      // loading. Set loading to false defensively in case it never surfaced.
+      // On failure the backend emits arbor://diff-stream-error which clears loading; clear it
+      // defensively in case that never surfaced.
       diffStore.setLoading(false);
     }
   }
@@ -379,96 +131,37 @@
     }
   }
 
-  async function handleStage({ paths, label }: CtxTarget) {
-    if (!tab || paths.length === 0) return;
-    try {
-      await stagePaths(tab.id, paths);
-      await refreshStatus();
-      uiStore.showToast(`Staged ${label}`, 'success');
-    } catch (err) {
-      uiStore.showToast(`Stage failed: ${err}`, 'error');
-    }
-  }
-
-  async function handleUnstage({ paths, label }: CtxTarget) {
-    if (!tab || paths.length === 0) return;
-    try {
-      await unstagePaths(tab.id, paths);
-      await refreshStatus();
-      uiStore.showToast(`Unstaged ${label}`, 'success');
-    } catch (err) {
-      uiStore.showToast(`Unstage failed: ${err}`, 'error');
-    }
-  }
-
-  function handleDiscard(target: CtxTarget) {
-    if (!tab || target.paths.length === 0) return;
-    if (isConfirmDiscardEnabled()) discardPending = { kind: 'paths', ...target };
-    else executeDiscard(target);
-  }
-
-  async function executeDiscard({ paths, label }: CtxTarget) {
+  /** One try / refresh / toast shape for every action the panel can ask for. */
+  async function run(op: () => Promise<void>, ok: string | null, failed: string, okLevel: 'success' | 'warning' = 'success') {
     if (!tab) return;
     try {
-      await discardPaths(tab.id, paths);
-      if (paths.includes(diffStore.selectedFile?.path ?? '')) diffStore.setFiles([]);
+      await op();
       await refreshStatus();
-      uiStore.showToast(`Discarded ${label}`, 'warning');
+      if (ok) uiStore.showToast(ok, okLevel);
     } catch (err) {
-      uiStore.showToast(`Discard failed: ${err}`, 'error');
+      uiStore.showToast(`${failed}: ${err}`, 'error');
     }
   }
 
-  function handleDiscardAll() {
-    if (!tab) return;
-    const count = (status?.unstaged.length ?? 0) + (status?.untracked.length ?? 0);
-    if (count === 0) return;
-    discardPending = { kind: 'all', count };
-  }
-
-  async function executeDiscardAll() {
-    if (!tab) return;
-    try {
-      await discardAll(tab.id);
-      diffStore.setFiles([]);
-      await refreshStatus();
-      uiStore.showToast('Discarded all unstaged changes', 'warning');
-    } catch (err) {
-      uiStore.showToast(`Discard all failed: ${err}`, 'error');
-    }
-  }
-
-  async function onDiscardConfirm() {
-    const pending = discardPending;
-    discardPending = null;
-    if (!pending) return;
-    if (pending.kind === 'paths') await executeDiscard(pending);
-    else await executeDiscardAll();
-  }
-
-  function onDiscardCancel() {
-    discardPending = null;
-  }
-
-  async function handleStageAll() {
-    if (!tab) return;
-    try {
-      await stageAll(tab.id);
-      await refreshStatus();
-    } catch (err) {
-      uiStore.showToast(`Stage all failed: ${err}`, 'error');
-    }
-  }
-
-  async function handleUnstageAll() {
-    if (!tab) return;
-    try {
-      await unstageAll(tab.id);
-      await refreshStatus();
-    } catch (err) {
-      uiStore.showToast(`Unstage all failed: ${err}`, 'error');
-    }
-  }
+  const actions: StageActions = {
+    stage: ({ paths, label }: StageTarget) =>
+      paths.length === 0 ? undefined : run(() => stagePaths(tab!.id, paths), `Staged ${label}`, 'Stage failed'),
+    unstage: ({ paths, label }: StageTarget) =>
+      paths.length === 0 ? undefined : run(() => unstagePaths(tab!.id, paths), `Unstaged ${label}`, 'Unstage failed'),
+    discard: ({ paths, label }: StageTarget) =>
+      run(async () => {
+        await discardPaths(tab!.id, paths);
+        if (paths.includes(diffStore.selectedFile?.path ?? '')) diffStore.setFiles([]);
+      }, `Discarded ${label}`, 'Discard failed', 'warning'),
+    stageAll: () => run(() => stageAll(tab!.id), null, 'Stage all failed'),
+    unstageAll: () => run(() => unstageAll(tab!.id), null, 'Unstage all failed'),
+    discardAll: () =>
+      run(async () => {
+        await discardAll(tab!.id);
+        diffStore.setFiles([]);
+      }, 'Discarded all unstaged changes', 'Discard all failed', 'warning'),
+    stash: () => { stashOpen = true; },
+  };
 
   async function confirmStash(message: string) {
     if (!tab || isStashing) return;
@@ -477,12 +170,10 @@
       await stashSave(tab.id, message || undefined, true);
       uiStore.showToast('Changes stashed', 'success');
       stashOpen = false;
-      // Clear the currently-shown diff: the workdir is now clean so any
-      // previously selected unstaged/staged file no longer exists.
+      // The workdir is now clean, so any selected file no longer exists.
       diffStore.setFiles([]);
-      // Refresh stage file lists (this panel) + repaint stash markers and
-      // sidebar list.  Stash op doesn't change graph topology, so we skip
-      // the full getGraph reload that the old code did.
+      // Refresh the file lists + repaint stash markers and the sidebar list. A stash doesn't
+      // change graph topology, so the full getGraph reload is skipped.
       await Promise.all([refreshStatus(), applyPostStashChange(tab.id)]);
     } catch (err) {
       uiStore.showToast(`Stash failed: ${err}`, 'error');
@@ -519,15 +210,15 @@
       {/if}
     {/snippet}
   </BottomPanelHeader>
+
 {#if status?.is_merging || (status?.conflicted.length ?? 0) > 0}
-  <!-- ── Merge/conflict state: redirect to guided resolution.
-       Triggers on an active merge OR on any unmerged index entries even
-       without an active merge (e.g. after an aborted operation). ── -->
-  <div class="stage-area merge-state">
+  <!-- Merge / conflict state: redirect to guided resolution. Triggers on an active merge OR on
+       any unmerged index entries even without one (e.g. after an aborted operation). -->
+  <div class="stage-area centered">
     <div class="merge-notice">
       {#if (status?.conflicted.length ?? 0) > 0}
         <AlertTriangle size={28} class="merge-notice-icon-conflict" />
-        <p class="merge-notice-title">
+        <p class="notice-title">
           {status?.is_merging ? 'Merge in corso — conflitti da risolvere' : 'Conflitti da risolvere nell\'index'}
         </p>
         <p class="merge-notice-sub">
@@ -543,7 +234,7 @@
         </button>
       {:else}
         <GitMerge size={28} class="merge-notice-icon-ok" />
-        <p class="merge-notice-title">Merge in corso</p>
+        <p class="notice-title">Merge in corso</p>
         <p class="merge-notice-sub">
           Tutti i conflitti sono stati risolti. Completa il merge dalla risoluzione guidata.
         </p>
@@ -555,11 +246,10 @@
     </div>
   </div>
 {:else if isWorkingTreeClean}
-  <!-- ── Clean working tree: compact empty state ── -->
-  <div class="stage-area clean-state">
+  <div class="stage-area centered">
     <div class="clean-notice">
       <CheckCircle2 size={24} class="clean-notice-icon" />
-      <p class="clean-notice-title">Working tree clean</p>
+      <p class="notice-title">Working tree clean</p>
       <p class="clean-notice-sub">
         No changes on <span class="branch-pill">{status?.current_branch ?? 'HEAD'}</span>.
         Edit a file to get started.
@@ -572,211 +262,31 @@
   </div>
 {:else}
 <div class="stage-area">
-  <!-- Left: staged/unstaged file lists -->
   <ResizablePanel direction="horizontal" initialSize={280} minSize={160} maxSize={500}>
-    <div class="files-panel">
-
-      <!-- ── Unstaged ─────────────────────────────────────────────── -->
-      <div class="section" class:collapsed={unstagedCollapsed}>
-        <div class="section-header" role="button" tabindex="0"
-          onclick={() => toggleSection('unstaged')}
-          onkeydown={(e) => e.key === 'Enter' && toggleSection('unstaged')}
-        >
-          <span class="chevron">{#if unstagedCollapsed}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}</span>
-          <span>Unstaged</span>
-          <span class="count" class:nonzero={unstagedEntries.length > 0}>{unstagedEntries.length}</span>
-
-          <div class="header-right">
-            <!-- view mode toggle (single button, icon reflects target state) -->
-            <button
-              class="icon-action"
-              class:active={listViewMode === 'tree'}
-              onclick={(e) => { e.stopPropagation(); listViewMode = listViewMode === 'tree' ? 'list' : 'tree'; }}
-              use:tooltip={listViewMode === 'tree' ? 'Switch to flat list' : 'Group files by folder'}
-            >
-              {#if listViewMode === 'tree'}<List size={11} />{:else}<FolderTree size={11} />{/if}
-            </button>
-            <span class="header-sep"></span>
-            <!-- git actions -->
-            <button class="icon-action" onclick={(e) => { e.stopPropagation(); handleStageAll(); }} use:tooltip={'Stage all'}><CheckSquare size={13} /></button>
-            <button class="icon-action discard-all-btn" onclick={(e) => { e.stopPropagation(); handleDiscardAll(); }} use:tooltip={'Discard all unstaged changes'}><RotateCcw size={12} /></button>
-            <button class="icon-action" onclick={(e) => { e.stopPropagation(); stashOpen = !stashOpen; }} use:tooltip={'Stash all changes'}><Archive size={12} /></button>
-          </div>
-        </div>
-
-        <div class="file-list">
-          {#if listViewMode === 'list'}
-            {#each unstagedEntries as entry}
-              {@const ws = entry.workdir_status}
-              <div
-                class="file-entry"
-                class:selected={diffStore.selectedFile?.path === entry.path}
-                onclick={() => loadDiff(entry.path, false)}
-                oncontextmenu={(e) => openUnstagedCtx(e, entry)}
-                role="row" tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && loadDiff(entry.path, false)}
-              >
-                <span class="status-badge"
-                  class:s-added={ws === 'added' || ws === 'untracked'}
-                  class:s-modified={ws === 'modified'}
-                  class:s-deleted={ws === 'deleted'}
-                  class:s-renamed={ws === 'renamed'}
-                >{ws === 'added' || ws === 'untracked' ? 'A' : ws === 'modified' ? 'M' : ws === 'deleted' ? 'D' : ws === 'renamed' ? 'R' : '?'}</span>
-                <span class="filename truncate" use:tooltip={pathLabel(entry)}>{basename(entry.path)}</span>
-                <div class="file-actions">
-                  <button class="file-btn stage-btn" onclick={(e) => { e.stopPropagation(); handleStage(fileTarget(entry)); }} use:tooltip={'Stage file'}><Plus size={12} /></button>
-                  <button class="file-btn discard-btn" onclick={(e) => { e.stopPropagation(); handleDiscard(fileTarget(entry)); }} use:tooltip={'Discard changes'}><RotateCcw size={11} /></button>
-                </div>
-              </div>
-            {/each}
-          {:else}
-            <!-- Tree view (rendered by shared <Tree>; the row snippet
-                 branches between dir + file content). -->
-            <Tree
-              nodes={unstagedTree.sortedChildren}
-              getId={(n: StageTreeNode) => n.fullPath}
-              getChildren={(n: StageTreeNode) => n.sortedChildren}
-              expandedIds={unstagedExpandedPaths}
-              onExpandToggle={(id) => toggleUnstagedDir(id)}
-              selectedId={diffStore.selectedFile?.path ?? null}
-              selectable={(n: StageTreeNode) => !!n.entry}
-              indentSize={12}
-              basePadding={8}
-              ariaLabel="Unstaged files"
-              onSelect={(n: StageTreeNode) => { if (n.entry) loadDiff(n.entry.path, false); }}
-              onContextMenu={(n: StageTreeNode, e: MouseEvent) =>
-                n.entry ? openUnstagedCtx(e, n.entry) : openUnstagedFolderCtx(e, n)}
-            >
-              {#snippet row({ node }: { node: StageTreeNode })}
-                {#if node.entry}
-                  {@const entry = node.entry}
-                  {@const ws = entry.workdir_status}
-                  <span class="status-badge"
-                    class:s-added={ws === 'added' || ws === 'untracked'}
-                    class:s-modified={ws === 'modified'}
-                    class:s-deleted={ws === 'deleted'}
-                    class:s-renamed={ws === 'renamed'}
-                  >{ws === 'added' || ws === 'untracked' ? 'A' : ws === 'modified' ? 'M' : ws === 'deleted' ? 'D' : ws === 'renamed' ? 'R' : '?'}</span>
-                  <span class="filename truncate" use:tooltip={pathLabel(entry)}>{node.name}</span>
-                  <div class="file-actions">
-                    <button class="file-btn stage-btn" onclick={(e) => { e.stopPropagation(); handleStage(fileTarget(entry)); }} use:tooltip={'Stage file'}><Plus size={12} /></button>
-                    <button class="file-btn discard-btn" onclick={(e) => { e.stopPropagation(); handleDiscard(fileTarget(entry)); }} use:tooltip={'Discard changes'}><RotateCcw size={11} /></button>
-                  </div>
-                {:else}
-                  <Folder size={11} class="folder-icon" />
-                  <span class="dir-name">{node.name}</span>
-                {/if}
-              {/snippet}
-            </Tree>
-          {/if}
-        </div>
-      </div>
-
-      {#if status?.conflicted && status.conflicted.length > 0}
-        <ConflictResolver conflicts={status.conflicted} onResolved={refreshStatus} />
-      {/if}
-
-      <!-- ── Staged ──────────────────────────────────────────────── -->
-      <div class="section" class:collapsed={stagedCollapsed} class:has-staged={stagedEntries.length > 0}>
-        <div class="section-header" role="button" tabindex="0"
-          onclick={() => toggleSection('staged')}
-          onkeydown={(e) => e.key === 'Enter' && toggleSection('staged')}
-        >
-          <span class="chevron">{#if stagedCollapsed}<ChevronRight size={12} />{:else}<ChevronDown size={12} />{/if}</span>
-          <span>Staged</span>
-          <span class="count staged-count" class:nonzero={stagedEntries.length > 0}>{stagedEntries.length}</span>
-
-          <div class="header-right">
-            <!-- view mode toggle (single button, icon reflects target state) -->
-            <button
-              class="icon-action"
-              class:active={listViewMode === 'tree'}
-              onclick={(e) => { e.stopPropagation(); listViewMode = listViewMode === 'tree' ? 'list' : 'tree'; }}
-              use:tooltip={listViewMode === 'tree' ? 'Switch to flat list' : 'Group files by folder'}
-            >
-              {#if listViewMode === 'tree'}<List size={11} />{:else}<FolderTree size={11} />{/if}
-            </button>
-            <span class="header-sep"></span>
-            <!-- git actions -->
-            <button class="icon-action" onclick={(e) => { e.stopPropagation(); handleUnstageAll(); }} use:tooltip={'Unstage all'}><Square size={13} /></button>
-          </div>
-        </div>
-
-        <div class="file-list">
-          {#if listViewMode === 'list'}
-            {#each stagedEntries as entry}
-              {@const is = entry.index_status}
-              <div
-                class="file-entry"
-                class:selected={diffStore.selectedFile?.path === entry.path}
-                onclick={() => loadDiff(entry.path, true)}
-                oncontextmenu={(e) => openStagedCtx(e, entry)}
-                role="row" tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && loadDiff(entry.path, true)}
-              >
-                <span class="status-badge"
-                  class:s-added={is === 'added' || is === 'untracked'}
-                  class:s-modified={is === 'modified'}
-                  class:s-deleted={is === 'deleted'}
-                  class:s-renamed={is === 'renamed'}
-                >{is === 'added' || is === 'untracked' ? 'A' : is === 'modified' ? 'M' : is === 'deleted' ? 'D' : is === 'renamed' ? 'R' : 'M'}</span>
-                <span class="filename truncate" use:tooltip={pathLabel(entry)}>{basename(entry.path)}</span>
-                <div class="file-actions">
-                  <button class="file-btn unstage-btn" onclick={(e) => { e.stopPropagation(); handleUnstage(fileTarget(entry)); }} use:tooltip={'Unstage file'}><X size={11} /></button>
-                </div>
-              </div>
-            {/each}
-          {:else}
-            <!-- Tree view -->
-            <Tree
-              nodes={stagedTree.sortedChildren}
-              getId={(n: StageTreeNode) => n.fullPath}
-              getChildren={(n: StageTreeNode) => n.sortedChildren}
-              expandedIds={stagedExpandedPaths}
-              onExpandToggle={(id) => toggleStagedDir(id)}
-              selectedId={diffStore.selectedFile?.path ?? null}
-              selectable={(n: StageTreeNode) => !!n.entry}
-              indentSize={12}
-              basePadding={8}
-              ariaLabel="Staged files"
-              onSelect={(n: StageTreeNode) => { if (n.entry) loadDiff(n.entry.path, true); }}
-              onContextMenu={(n: StageTreeNode, e: MouseEvent) =>
-                n.entry ? openStagedCtx(e, n.entry) : openStagedFolderCtx(e, n)}
-            >
-              {#snippet row({ node }: { node: StageTreeNode })}
-                {#if node.entry}
-                  {@const entry = node.entry}
-                  {@const is = entry.index_status}
-                  <span class="status-badge"
-                    class:s-added={is === 'added' || is === 'untracked'}
-                    class:s-modified={is === 'modified'}
-                    class:s-deleted={is === 'deleted'}
-                    class:s-renamed={is === 'renamed'}
-                  >{is === 'added' || is === 'untracked' ? 'A' : is === 'modified' ? 'M' : is === 'deleted' ? 'D' : is === 'renamed' ? 'R' : 'M'}</span>
-                  <span class="filename truncate" use:tooltip={pathLabel(entry)}>{node.name}</span>
-                  <div class="file-actions">
-                    <button class="file-btn unstage-btn" onclick={(e) => { e.stopPropagation(); handleUnstage(fileTarget(entry)); }} use:tooltip={'Unstage file'}><X size={11} /></button>
-                  </div>
-                {:else}
-                  <Folder size={11} class="folder-icon" />
-                  <span class="dir-name">{node.name}</span>
-                {/if}
-              {/snippet}
-            </Tree>
-          {/if}
-        </div>
-      </div>
-
-      <!-- Commit form -->
-      <div class="commit-wrap">
+    <StagePanel
+      unstaged={unstagedEntries}
+      staged={stagedEntries}
+      {actions}
+      selectedPath={diffStore.selectedFile?.path ?? null}
+      onOpen={(entry, staged) => loadDiff(entry.path, staged)}
+      viewMode={appearanceStore.stageViewMode}
+      onViewModeChange={(m) => appearanceStore.setStageViewMode(m)}
+      compactDirs={appearanceStore.compactFileTreeDirs}
+      confirmDiscard={diffStore.confirmDiscard}
+    >
+      {#snippet middle()}
+        {#if status?.conflicted && status.conflicted.length > 0}
+          <ConflictResolver conflicts={status.conflicted} onResolved={refreshStatus} />
+        {/if}
+      {/snippet}
+      {#snippet footer()}
         <CommitForm onCommit={() => { diffStore.setFiles([]); refreshStatus(); }} />
-      </div>
-    </div>
+      {/snippet}
+    </StagePanel>
   </ResizablePanel>
 
-  <!-- Right: diff viewer (stageable only when a workdir diff is loaded).
-       chromeless — the toolbar lives in the BottomPanelHeader above; we
-       bind `api` to drive that external toolbar. -->
+  <!-- Right: diff viewer (stageable only when a workdir diff is loaded). Chromeless — the
+       toolbar lives in the BottomPanelHeader above; `api` drives that external toolbar. -->
   <DiffViewer
     file={diffStore.selectedFile}
     path={diffStore.selectedFile?.path}
@@ -794,26 +304,6 @@
 {/if}
 </div>
 
-{#if ctxMenu}
-  <ContextMenu
-    x={ctxMenu.x}
-    y={ctxMenu.y}
-    items={ctxMenu.items}
-    onSelect={handleCtxSelect}
-    onClose={() => ctxMenu = null}
-  />
-{/if}
-
-{#if discardPending}
-  <DiscardConfirmModal
-    target={discardPending.kind === 'paths'
-      ? discardPending.label
-      : `all ${discardPending.count} unstaged file${discardPending.count !== 1 ? 's' : ''}`}
-    onConfirm={onDiscardConfirm}
-    onCancel={onDiscardCancel}
-  />
-{/if}
-
 {#if stashOpen}
   <StashDialog
     branchName={status?.current_branch}
@@ -824,9 +314,7 @@
 {/if}
 
 <style>
-  /* Bottom-panel root: stacks the standardized BottomPanelHeader above
-     the stage layout. Matches the column layout used by other bottom
-     panels so the header sits at 34px and the body fills the rest. */
+  /* Bottom-panel root: stacks the standardized BottomPanelHeader above the stage layout. */
   .stage-root {
     display: flex;
     flex-direction: column;
@@ -843,209 +331,17 @@
     background: var(--bg-base);
     overflow: hidden;
   }
+  .stage-area.centered { align-items: center; justify-content: center; }
 
-  .files-panel {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    background: var(--bg-input);
-    overflow: hidden;
+  .notice-title {
+    font-size: var(--font-size-md, 13px);
+    font-weight: 600;
+    color: var(--text-primary);
+    font-family: var(--font-ui-sans);
+    margin: 0;
   }
 
-  .section {
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 0;
-    min-height: 0;
-    overflow: hidden;
-    transition: flex var(--transition-fast);
-  }
-
-  .section.collapsed {
-    flex: 0 0 auto;
-  }
-
-  .section-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 8px 5px 6px;
-    font-size: var(--font-size-xs);
-    color: var(--text-muted);
-    border-bottom: 1px solid var(--border-subtle);
-    flex-shrink: 0;
-    cursor: pointer;
-    user-select: none;
-  }
-  .section-header:hover { background: var(--bg-hover); }
-
-  .chevron {
-    display: flex;
-    align-items: center;
-    color: var(--text-disabled);
-    flex-shrink: 0;
-  }
-
-  .count {
-    background: var(--bg-overlay);
-    padding: 0 5px;
-    border-radius: 999px;
-    font-size: var(--font-size-2xs);
-    color: var(--text-disabled);
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-
-  /* Active count badges — cyan/blue */
-  .count.nonzero {
-    background: var(--info-subtle);
-    color: var(--info);
-  }
-
-  /* Staged count with items — green tint */
-  .count.staged-count.nonzero {
-    background: var(--success-subtle);
-    color: var(--success);
-  }
-
-  /* Staged section header: subtle green left border when items present */
-  .section.has-staged > .section-header {
-    border-left: 2px solid var(--success);
-    padding-left: 4px;
-  }
-
-  /* Right-aligned button group inside section header */
-  .header-right {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: 2px;
-  }
-
-  .header-sep {
-    width: 1px;
-    height: 12px;
-    background: var(--border-subtle);
-    margin: 0 3px;
-    flex-shrink: 0;
-  }
-
-  .icon-action {
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    color: var(--text-muted);
-    padding: 2px;
-    border-radius: var(--radius-sm);
-    display: flex;
-    align-items: center;
-  }
-  .icon-action:hover { color: var(--text-primary); background: var(--bg-overlay); }
-  .icon-action.active { color: var(--accent); background: var(--accent-subtle); }
-  .icon-action.discard-all-btn:hover { color: var(--warning); background: var(--warning-subtle); }
-
-  .file-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 2px;
-  }
-  .section.collapsed .file-list { display: none; }
-
-  .file-entry {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 6px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    font-size: var(--font-size-xs);
-    transition: background var(--transition-fast);
-  }
-  .file-entry:hover    { background: var(--bg-hover); }
-  .file-entry.selected { background: var(--bg-selected, rgba(77,120,204,0.15)); }
-
-  /* Tree view rendered by shared <Tree>. The strip / chevron / row styling
-     is owned by Tree.svelte; only the in-row file/dir glyphs still live
-     here. */
-  :global(.folder-icon) { color: var(--warning); flex-shrink: 0; }
-
-  .dir-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 500;
-  }
-
-  /* ── Status badge (M / A / D / R / ?) ── */
-  .status-badge {
-    flex-shrink: 0;
-    width: 16px;
-    height: 16px;
-    border-radius: var(--radius-sm);
-    font-size: var(--font-size-2xs);
-    font-weight: 700;
-    line-height: 16px;
-    text-align: center;
-    background: var(--bg-overlay);
-    color: var(--text-muted);
-    letter-spacing: 0;
-  }
-  .status-badge.s-added    { background: color-mix(in srgb, var(--color-file-added) 22%, transparent);    color: var(--color-file-added); }
-  .status-badge.s-modified { background: color-mix(in srgb, var(--color-file-modified) 22%, transparent); color: var(--color-file-modified); }
-  .status-badge.s-deleted  { background: color-mix(in srgb, var(--color-file-deleted) 22%, transparent);  color: var(--color-file-deleted); }
-  .status-badge.s-renamed  { background: color-mix(in srgb, var(--color-file-renamed) 22%, transparent);  color: var(--color-file-renamed); }
-
-  .filename { flex: 1; color: var(--text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  /* ── Per-file action buttons ── */
-  .file-actions {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    flex-shrink: 0;
-  }
-
-  .file-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border: none;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-
-  .stage-btn {
-    background: color-mix(in srgb, var(--success) 14%, transparent);
-    color: var(--success);
-  }
-  .stage-btn:hover { background: color-mix(in srgb, var(--success) 30%, transparent); color: color-mix(in srgb, var(--success) 80%, var(--text-primary)); }
-
-  .unstage-btn {
-    background: color-mix(in srgb, var(--error) 14%, transparent);
-    color: var(--error);
-  }
-  .unstage-btn:hover { background: color-mix(in srgb, var(--error) 30%, transparent); color: color-mix(in srgb, var(--error) 80%, var(--text-primary)); }
-
-  .discard-btn {
-    background: transparent;
-    color: var(--text-disabled);
-  }
-  .discard-btn:hover { background: var(--warning-subtle); color: var(--warning); }
-
-  .commit-wrap {
-    border-top: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-
-  /* ── Clean working tree empty state ── */
-  .stage-area.clean-state {
-    align-items: center;
-    justify-content: center;
-  }
+  /* ── Clean working tree ── */
   .clean-notice {
     display: flex;
     flex-direction: column;
@@ -1056,13 +352,6 @@
     padding: 20px 24px;
   }
   :global(.clean-notice-icon) { color: var(--success); opacity: 0.85; }
-  .clean-notice-title {
-    font-size: var(--font-size-md, 13px);
-    font-weight: 600;
-    color: var(--text-primary);
-    font-family: var(--font-ui-sans);
-    margin: 0;
-  }
   .clean-notice-sub {
     font-size: var(--font-size-sm);
     color: var(--text-muted);
@@ -1091,20 +380,12 @@
     background: transparent;
     border: 1px solid var(--border);
     color: var(--text-secondary);
-    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+    transition: background var(--transition-fast), color var(--transition-fast);
     margin-top: 6px;
   }
-  .clean-notice-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-    border-color: var(--border);
-  }
+  .clean-notice-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
-  /* ── Merge state overlay ── */
-  .stage-area.merge-state {
-    align-items: center;
-    justify-content: center;
-  }
+  /* ── Merge state ── */
   .merge-notice {
     display: flex;
     flex-direction: column;
@@ -1116,14 +397,6 @@
   }
   :global(.merge-notice-icon-conflict) { color: var(--warning); }
   :global(.merge-notice-icon-ok)       { color: var(--success); }
-
-  .merge-notice-title {
-    font-size: var(--font-size-md, 13px);
-    font-weight: 600;
-    color: var(--text-primary);
-    font-family: var(--font-ui-sans);
-    margin: 0;
-  }
   .merge-notice-sub {
     font-size: var(--font-size-sm);
     color: var(--text-secondary);

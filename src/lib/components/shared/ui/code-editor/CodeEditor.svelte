@@ -42,6 +42,8 @@
   } from './extensions';
   import { minimapExtension } from './minimap';
   import { lineAnnotationExtension, pushLineAnnotations, type LineAnnotation } from './line-annotations';
+  import { renderDiagnosticMessage } from './diagnostic-message';
+  import { changeGutterExtension, pushChangeHunks, changeBlocks as readChangeBlocks, type ChangeBlock, type ChangeHunk } from './change-gutter';
   import { makeByteToU16 } from './highlight';
   import { insertWithStops } from './snippet-stops';
   import {
@@ -86,6 +88,8 @@
     lineHighlights = [],
     gutterMarks = [],
     lineAnnotations = [],
+    changeHunks = [],
+    onChangeBlockClick,
     onGutterClick,
     onGutterContext,
     flagMarks,
@@ -99,6 +103,7 @@
     onViewState,
     onfocus,
     onGoto,
+    onFindInFiles,
     onLensPress,
   }: {
     value: string;
@@ -241,6 +246,11 @@
      * width. See `line-annotations.ts`.
      */
     lineAnnotations?: readonly LineAnnotation[];
+    /** Lines that differ from the committed file, drawn as a bar beside the line numbers. Empty by
+     *  default and an empty set takes no width. See `change-gutter.ts`. */
+    changeHunks?: readonly ChangeHunk[];
+    /** A change bar was clicked. */
+    onChangeBlockClick?: (block: ChangeBlock, event: MouseEvent) => void;
     /** A gutter icon was clicked: its 1-based line, plus the event — so a host that has more
      *  than one thing to offer can anchor a menu where the pointer is instead of guessing. */
     onGutterClick?: (line: number, event: MouseEvent) => void;
@@ -312,6 +322,8 @@
     /** Ctrl/Cmd+Click on an identifier the descriptor didn't resolve locally — the word
      *  plus the clicked position as a UTF-8 byte offset (for a BE go-to-declaration). */
     onGoto?: (word: string, view: EditorView, byteOffset: number) => void;
+    /** The find bar's "Find in files" button — receives the current query. Absent = no button. */
+    onFindInFiles?: (query: string) => void;
     /** A code lens was pressed, identified by the `key` the host pushed with it.
      *
      *  Supplying this is what installs the lens layer: a lens is a control, and a host with nothing
@@ -415,6 +427,12 @@
       : message.slice(0, MAX_DIAGNOSTIC_CHARS) + ' […]';
   }
 
+  /** `code` spans in a message become chips; a message without any keeps the plugin's own rendering. */
+  function renderDiagnosticMessageOf(message: string): (() => Node) | undefined {
+    const clamped = clampMessage(message);
+    return clamped.includes('`') ? () => renderDiagnosticMessage(clamped) ?? document.createTextNode(clamped) : undefined;
+  }
+
   function toCmDiagnostics(errors: EditorDiagnostic[], src: string): CmDiagnostic[] {
     const b2u = makeByteToU16(src);
     const len = src.length;
@@ -427,6 +445,7 @@
       if (to === from) to = Math.min(len, from + 1); // give the marker some width
       out.push({
         from, to, severity: e.severity, message: clampMessage(e.message), actions: e.actions,
+        renderMessage: renderDiagnosticMessageOf(e.message),
         // The lint plugin draws the squiggle from the severity class; the theme cancels it for
         // this one and recolours the text instead (see `theme.ts`).
         markClass: e.emphasis === 'text' ? `cm-lint-text cm-lint-text-${e.severity}` : undefined,
@@ -563,6 +582,7 @@
   }
   $effect(() => { void gutterMarks; pushGutter(); });
   $effect(() => { const set = lineAnnotations; if (view) pushLineAnnotations(view, set); });
+  $effect(() => { const set = changeHunks; if (view) pushChangeHunks(view, set); });
 
   /**
    * The gutter extension. Always installed, never conditional on the current marks: they
@@ -715,7 +735,7 @@
 
   function mount(target: HTMLDivElement) {
     const { extensions, preferences } = createCodeEditorExtensions(language, {
-      readOnly, onGoto, onLensPress, rulerColumn, emmet, indentGuides, stickyScroll,
+      readOnly, onGoto, onFindInFiles, onLensPress, rulerColumn, emmet, indentGuides, stickyScroll,
       scrollbarOverview, keyBindings, ...currentPreferences(),
     });
     buildPreferences = preferences;
@@ -761,6 +781,7 @@
         flagGutter,
         // Right of the toggles and left of the line numbers, where an IDE draws blame.
         lineAnnotationExtension,
+        changeGutterExtension((block, event) => onChangeBlockClick?.(block, event)),
         extensions,
         markField,
         lineMarkField,
@@ -1663,6 +1684,24 @@
       selection: { anchor: sel.from + text.length },
     });
     view.focus();
+  }
+
+  /** Replace whole lines `fromLine..toLine` (1-based, inclusive) with `text`. With `toLine`
+   *  below `fromLine` nothing is removed and `text` is inserted before `fromLine` — which is how
+   *  a block that was deleted comes back. `text` is newline-terminated per line, as HEAD has it. */
+  export function replaceLines(fromLine: number, toLine: number, text: string) {
+    if (!view) return;
+    const doc = view.state.doc;
+    const first = Math.min(Math.max(fromLine, 1), doc.lines);
+    const from = doc.line(first).from;
+    const to = toLine >= fromLine ? Math.min(doc.line(Math.min(toLine, doc.lines)).to + 1, doc.length) : from;
+    view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from } });
+    view.focus();
+  }
+
+  /** The change blocks currently marked, in document order. */
+  export function changeBlocks(): ChangeBlock[] {
+    return view ? readChangeBlocks(view.state) : [];
   }
 </script>
 

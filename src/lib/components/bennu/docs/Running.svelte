@@ -85,9 +85,22 @@
   <div class="feature-card">
     <div class="fc-eyebrow">Every project</div>
     <div class="fc-title">Script</div>
-    <div class="fc-desc">A <code>.sh</code>, <code>.bat</code>/<code>.cmd</code> or <code>.ps1</code>, picked not typed, with arguments, a working directory and environment variables. Whether it runs <em>here</em> is answered at launch. No Debug: a shell script's debugger is <code>set -x</code>.</div>
+    <div class="fc-desc">A <code>.sh</code>, <code>.bat</code>/<code>.cmd</code> or <code>.ps1</code>, picked not typed, with arguments, a working directory and environment variables. <strong>Run with</strong> chooses the shell from those that can interpret the file — <em>Git Bash</em>, <em>zsh</em>, <em>sh</em> for a <code>.sh</code>; <em>PowerShell 7</em> or <em>Windows PowerShell</em> for a <code>.ps1</code> — and <em>Auto</em> picks by extension. A shell this machine lacks is listed, greyed, with the reason. Whether the script runs <em>here</em> is answered at launch. No Debug: a shell script's debugger is <code>set -x</code>.</div>
   </div>
 </div>
+<h3>Environment</h3>
+<p>
+  Every category has an <strong>Environment</strong> section, folded while it is empty. Variables are edited as a <strong>table</strong> or as <strong>text</strong> — one <code>KEY=value</code> per line, so a block pasted
+  from a README fills the list. A value whose name suggests a credential (<code>PASSWORD</code>, <code>TOKEN</code>, <code>SECRET</code>…) is hidden until you press the eye.
+</p>
+<p>
+  The <strong>.env file</strong> field points at a file that is <strong>read every time the configuration runs</strong> — nothing is copied into the configuration, so editing the file is enough and a secret kept in an ignored
+  <code>.env</code> never reaches the committed run configuration. The variables typed in the section win over the file's. A relative path is taken from the project root; an unreadable file stops the launch with a message in the Run console.
+</p>
+<p>
+  In the Spring Boot form the less used parts — launch arguments, classpath and debugger — are folded sections too; a folded header shows what is in it.
+</p>
+
 <p>
   Each category is offered only where it applies — JVM ones on a Java project, Cargo on a Cargo one, Spring Boot where there is Spring. On a project with exactly one entry point you need
   none of this: ▷ finds it, makes a configuration — a Spring Boot one for a Boot application, a Cargo one for a workspace's single binary — and runs it. With several, it asks.
@@ -120,7 +133,9 @@
 </Callout>
 <p>
   <strong>Classpath</strong> in the configuration changes it — Compile, Test, or every scope — because a launcher wanting a test-scoped H2 or a provided servlet API is legitimate. The
-  first launch of a configuration resolves its classpath through Maven; later ones are instant until a pom changes. The working directory defaults to the module's, and both the
+  first launch of a configuration resolves its classpath through Maven; later ones are instant until a pom changes. The resolve starts offline, from <code>~/.m2</code>. A jar Maven refuses offline although it is on disk — "has not been downloaded from it before", as after IntelliJ filled the repository — is accepted on a second offline try that ignores where it came from. If a jar is
+  still missing and <strong>Settings → Java → Allow Maven to use the network</strong> (the Maven panel's <em>Offline</em> toggle) is on, the launch goes online once to fetch it — the console says so — instead of starting a JVM that dies
+  on a missing class. With that switch off the launch stays offline and says which entries are absent. The working directory defaults to the module's, and both the
   editor's list and the title-bar selector show a configuration's module.
 </p>
 <p>

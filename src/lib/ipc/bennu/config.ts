@@ -58,6 +58,8 @@ export interface BennuConfig {
   history_diff_split: boolean;
   /** Add the commit message to the Git Blame text after a line. */
   blame_show_message: boolean;
+  /** Mark lines changed since HEAD in the editor gutter. */
+  show_change_markers: boolean;
   /** Minutes the DTO Lab's JVM may go without a question before it is stopped. */
   dtolab_idle_minutes: number;
   /** Which SQL dialect `.sql` buffers are highlighted as — `'oracle'` / `'postgres'` /
@@ -175,6 +177,10 @@ export interface MavenConfigDto {
   /** How long cached artifact metadata stays fresh, in hours. A day by default; `0` reads as the
    *  default rather than as "always refetch". */
   metadata_ttl_hours: number;
+  /** Whether Bennu may ask OSV.dev which of a pom's dependencies have known vulnerabilities.
+   *  `false` by default — unlike {@link central} it sends each dependency's coordinate and version
+   *  to a third party, so it is opt-in. */
+  advisories: boolean;
 }
 
 /** Mirrors the BE `LspConfig`. */

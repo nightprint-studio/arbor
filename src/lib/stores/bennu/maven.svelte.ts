@@ -21,6 +21,7 @@
 import { mavenModel, type MavenModel, type MavenModule } from '$lib/ipc/bennu/maven-build';
 import { mavenLiveKeys } from '$lib/components/bennu/tree-expansion';
 import { treeExpansionStore } from './tree-expansion.svelte';
+import { bennuSettingsStore } from './settings.svelte';
 
 function createMavenStore() {
   let model = $state<MavenModel | null>(null);
@@ -33,9 +34,6 @@ function createMavenStore() {
   let activeProfiles = $state<string[]>([]);
   /** `-DskipTests` on every press from this panel until it is turned back off. */
   let skipTests = $state(false);
-  /** `-o` on every press. Off by default — a deliberate goal may need to fetch its own plugin. */
-  let offline = $state(false);
-
   return {
     get model(): MavenModel | null {
       return model;
@@ -56,8 +54,15 @@ function createMavenStore() {
     get skipTests() {
       return skipTests;
     },
+    /**
+     * `-o` on every press — and the same answer the build before a run and the run's classpath
+     * give. There is ONE setting for "may Maven use the network" (`maven_auto_download`, in the
+     * Java settings): this panel's toggle is a second way to flip it, not a second setting. Two
+     * switches for one question had a goal here going online while the run beside it stayed
+     * offline, so a project could build from this panel and fail to run.
+     */
     get offline() {
-      return offline;
+      return !bennuSettingsStore.mavenAutoDownload;
     },
     /** Whether a Maven launcher was found. `false` is what makes the panel say so once, rather
      *  than letting every press fail to spawn with the reason only in a console tab. */
@@ -77,7 +82,7 @@ function createMavenStore() {
       skipTests = v;
     },
     setOffline(v: boolean) {
-      offline = v;
+      bennuSettingsStore.setMavenAutoDownload(!v);
     },
 
     /** Read the model for `root`. A repeat call for the same project is a no-op unless `force`;

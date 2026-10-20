@@ -170,7 +170,7 @@ fn check_switch(
             if members.flags.is_enum {
                 check_enum_label(cst, bytes, simple, &constants, before_21, out);
             } else {
-                check_scalar_label(cst, bytes, &sel.binary_name, simple, pattern_selector, out);
+                check_scalar_label(cst, bytes, symbols, resolver, &sel.binary_name, simple, pattern_selector, out);
             }
         }
     }
@@ -263,14 +263,21 @@ fn check_enum_label(
 ///
 /// A selector only a pattern switch accepts (`Object`, an interface, …) takes no constant at all
 /// (JLS §14.11.1): every literal there is wrong.
+#[allow(clippy::too_many_arguments)]
 fn check_scalar_label(
     cst: Node,
     bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
     binary: &str,
     simple: &str,
     pattern_selector: bool,
     out: &mut Vec<Diagnostic>,
 ) {
+    if let Some(message) = enum_constant_on_scalar(cst, bytes, symbols, resolver, binary, simple) {
+        out.push(CheckId::IncompatibleCaseLabel.at(cst, message));
+        return;
+    }
     let Some(lit) = literal_kind(cst) else { return };
     let wrong = if binary == "java/lang/String" {
         lit != Lit::Str
@@ -293,6 +300,45 @@ fn check_scalar_label(
             simple
         ),
     ));
+}
+
+/// A **qualified enum constant** (`Level.LOW`) as a label of a `String` or integral-box switch — an
+/// error, because no enum is a `String` or an `Integer`, so the label can never match the selector.
+/// It is the shape a refactor leaves behind when a numeric code (`Integer commodello`) is replaced by
+/// an enum in the labels but not in the selector.
+///
+/// Judged only when the qualifier resolves to a known enum **and** the name is one of its constants,
+/// and only against the selectors an enum can never be assignable to; a qualified label on `Object`
+/// or an interface is legal Java 21 and is not touched.
+fn enum_constant_on_scalar(
+    cst: Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    selector: &str,
+    selector_simple: &str,
+) -> Option<String> {
+    if selector != "java/lang/String" && !INTEGRAL_BOXES.contains(&selector) {
+        return None;
+    }
+    if cst.kind() != "field_access" {
+        return None;
+    }
+    let qualifier = cst.child_by_field_name("object")?;
+    let enum_binary = written_type_binary(qualifier, bytes, symbols, resolver)?;
+    let members = resolver.members_of(&enum_binary)?;
+    if !members.flags.is_enum {
+        return None;
+    }
+    let name = label_name(cst, bytes)?;
+    if !crate::switching::enum_switch::enum_constants(&members, &enum_binary).iter().any(|c| c == name) {
+        return None;
+    }
+    Some(format!(
+        "`case {}` is a constant of enum `{}`, which can't match a `{selector_simple}` selector — the label is unreachable",
+        crate::support::text::short(cst.utf8_text(bytes).ok()?.trim()),
+        simple_name(&enum_binary),
+    ))
 }
 
 /// The literal family of a label expression, or `None` when it isn't a literal.
@@ -420,6 +466,26 @@ mod tests {
             .into_iter()
             .map(|d| d.message)
             .collect()
+    }
+
+    /// An enum constant as a label of an `Integer` switch: what is left when a numeric code becomes an
+    /// enum in the labels and not in the selector. Compiled nowhere.
+    #[test]
+    fn an_enum_constant_on_an_integer_selector_is_an_error() {
+        let d = diags("switch (i) { case Fmt.CSV: break; case Fmt.TSV: break; }");
+        assert_eq!(d.len(), 2, "{d:?}");
+        assert!(d[0].contains("constant of enum `Fmt`"), "{d:?}");
+        assert!(d[0].contains("`Integer` selector"), "{d:?}");
+        let d = diags("switch (s) { case Fmt.CSV: break; }");
+        assert_eq!(d.len(), 1, "{d:?}");
+    }
+
+    /// Only a real constant of a real enum: a name that is not one, or an `Object` selector (which
+    /// Java 21 allows qualified constants on), stays silent.
+    #[test]
+    fn only_a_known_constant_on_a_scalar_selector_is_judged() {
+        assert!(diags("switch (i) { case Fmt.JSON: break; }").is_empty());
+        assert!(diags("Object o = null; switch (o) { case Fmt.CSV -> {} default -> {} }").is_empty());
     }
 
     /// The reported case: an enum selector with integer labels. Compiled nowhere, reported nowhere.

@@ -39,6 +39,7 @@ pub use crate::sources::JavaSourceZip;
 // mtime), layered behind the JDK through the same MultiSource.
 pub use crate::maven::{
     resolve_maven_classpath, source_from_jars, MavenClasspath, MavenClasspathCache, MavenResolveOpts,
+    IGNORE_REPO_ORIGIN_ARG,
 };
 
 // NON-class jar entries — the descriptor files a library ships about itself (Spring Boot's

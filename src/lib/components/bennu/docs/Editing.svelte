@@ -165,6 +165,22 @@
   so where the picture would have been, in mermaid's words, naming the line.
 </p>
 
+<h2>Find and replace</h2>
+<p>
+  <kbd>Ctrl+F</kbd> opens a slim bar in the editor's top-right corner, over the code rather than above it. The word under a selection fills the field, every change
+  re-runs the search and the editor jumps to the first match from the caret, and the counter inside the field says which match you are on (<code>3/8</code>).
+  The three keys at the end of the field switch <strong>match case</strong>, <strong>whole word</strong> and <strong>regular expression</strong>.
+</p>
+<ul>
+  <li><kbd>Enter</kbd> / <kbd>Shift+Enter</kbd> — next / previous match. <kbd>Esc</kbd> closes the bar and returns to the code.</li>
+  <li><kbd>Alt+C</kbd>, <kbd>Alt+W</kbd>, <kbd>Alt+X</kbd> — match case, whole word, regular expression.</li>
+  <li><kbd>Alt+P</kbd> — shows the replace row (<kbd>Ctrl+H</kbd> is the type hierarchy). There, <kbd>Enter</kbd> replaces the current match and <kbd>Ctrl+Enter</kbd> replaces all.</li>
+  <li>The magnifier hands the query to <strong>Find in files</strong> (<kbd>Ctrl+Shift+F</kbd>).</li>
+</ul>
+<p>
+  The other occurrences of a selected word are outlined too, so a variable's uses read at a glance without opening the bar.
+</p>
+
 <h2>Folding</h2>
 <p>
   Braced blocks — classes, methods, blocks — and block comments fold from the gutter chevrons, keeping the head line visible.
@@ -428,6 +444,34 @@ import static org.junit.Assert.assertEquals;`, 'java')}</code></pre>
 <p>
   All three read the <em>committed</em> file. Lines typed since the last commit have no author yet, and a selection is read by line number, so save and
   commit first if you have been editing. After committing, close and reopen the annotations to refresh them.
+</p>
+<h3>Change markers</h3>
+<p>
+  A thin bar beside the line numbers marks what differs from the last commit: green for lines you added, blue for lines you changed, a red
+  wedge where lines were removed. Click one to see the block as it was against what is there now, <strong>Revert block</strong> to put the
+  old text back (an added block is removed) or <strong>Copy old text</strong>. The buffer is only edited — save when you are happy.
+  <kbd>Alt</kbd>+<kbd>F3</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F3</kbd> jump to the next and previous change, also in the Command
+  Palette (<em>Git: next change</em>, <em>Git: previous change</em>).
+</p>
+<p>
+  The diff is asked of Corvus a moment after you stop typing, and not at all outside a repository, for an untracked file or one over 2&nbsp;MB.
+  <strong>Editor → Change markers in the gutter</strong> in the settings turns the markers off; the editor then makes no such calls.
+</p>
+
+<h3>Changes panel</h3>
+<p>
+  Inside a repository the activity bar has a <strong>Changes</strong> button (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>, or <em>Git: show
+  changes</em> in the Command Palette); a dot on it means there is something to commit. The panel is Corvus's staging list: Unstaged and Staged
+  sections as a flat list or a folder tree, stage / unstage / discard per file, folder or all, and a commit box with <em>Amend last</em>.
+  Click a file to read its change in a window. Switching branches, pushing and resolving merge conflicts stay in Corvus — the
+  <strong>Corvus</strong> button opens the project there.
+</p>
+
+<p>
+  Inside a git repository the status bar names the current branch, with <kbd>↑</kbd> the commits you have not pushed and <kbd>↓</kbd> those you
+  have not pulled. It is read-only — hover for the staged, modified and untracked counts, click to open the project in Corvus, where branches
+  are switched. The names of changed files are coloured in the editor tabs and in the Problems panel as in the project tree: amber modified,
+  green staged, blue untracked, red in conflict.
 </p>
 
 <h2>Saving</h2>

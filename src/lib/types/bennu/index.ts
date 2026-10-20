@@ -413,6 +413,11 @@ export interface RunConfigDto {
   cargo_args?: string;
   /** `script` only — absolute path of the `.sh` / `.bat` / `.cmd` / `.ps1` to run. */
   script_file?: string;
+  /** `script` only — `"bash"` | `"zsh"` | `"sh"` | `"pwsh"` | `"powershell"` | `"cmd"`; empty =
+   *  from the file's extension. */
+  script_shell?: string;
+  /** A `.env` file read at launch and merged under `env`. */
+  env_file?: string;
 }
 
 /** The per-repo run-config bundle stored in `<root>/.arbor/config.toml`. */

@@ -16,6 +16,31 @@ export interface TreeGitStatus {
   files: Record<string, GitBadge>;
 }
 
+/** Where the repository stands — what Bennu's status bar shows. */
+export interface GitSummary {
+  in_repo: boolean;
+  branch: string | null;
+  /** HEAD is on a commit, not a branch. */
+  detached: boolean;
+  ahead: number;
+  behind: number;
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  conflicted: number;
+}
+
+export async function getGitSummary(root: string): Promise<GitSummary> {
+  await ensureBackend('corvus');
+  return corvus<GitSummary>('git_summary_by_path', { root });
+}
+
+/** The workdir of the repository containing `path`; `null` when it isn't inside one. */
+export async function getRepoRoot(path: string): Promise<string | null> {
+  await ensureBackend('corvus');
+  return corvus<string | null>('git_repo_root_by_path', { path });
+}
+
 export async function getGitTreeStatus(root: string): Promise<TreeGitStatus> {
   await ensureBackend('corvus');
   return corvus<TreeGitStatus>('git_tree_status_by_path', { root });

@@ -168,7 +168,7 @@
 <p>
   Above a dependency that is behind, a line says which version Maven Central has, and one press writes it.
 </p>
-<Callout variant="warning" title="The one thing here that reaches the network">
+<Callout variant="warning" title="Reaches the network">
   The local repository holds only what somebody here has already asked for, so by its measure a dependency nobody updated is
   permanently current. Turn the check off in <strong>Settings → Java → Check Maven Central for newer versions</strong>.
 </Callout>
@@ -178,6 +178,23 @@
   <li>Answers are cached on disk for a day per artifact, and a failed lookup falls back to whatever is cached, however old — on a
     train, last week's answer is the right one.</li>
   <li>A milestone or a release candidate is never offered as the newer version.</li>
+</ul>
+
+<h2>Known vulnerabilities</h2>
+<p>
+  With <strong>Settings → Java → Check dependencies for known vulnerabilities</strong> on, a version a pom pins that has a published
+  advisory is underlined as a warning. The message names the CVE (or the advisory id), its severity, a one-line summary and the nearest
+  version that fixes it — hover to read it, and use the <em>newer version</em> line above the dependency to move.
+</p>
+<Callout variant="warning" title="Off by default, and different from the version check">
+  The version check reads a public file and says nothing about your project. This one sends each pinned dependency's
+  <code>groupId:artifactId</code> and version to <strong>api.osv.dev</strong> — nothing else — so it waits for your say-so.
+</Callout>
+<ul>
+  <li>It runs in the background: a cold lookup can take a few seconds, and typing never waits for it. The warnings appear when the answer arrives.</li>
+  <li>Same scope as the version check — only what <em>this</em> pom pins. A version inherited from a parent or written as a property is not looked up.</li>
+  <li>Answers are cached on disk for a day per dependency and version, and a request looks up a bounded number of them, so a large pom fills in over a few passes.</li>
+  <li>The warnings are drawn in the editor; the Problems panel lists the synchronous checks only.</li>
 </ul>
 
 <h2>When something is missing</h2>

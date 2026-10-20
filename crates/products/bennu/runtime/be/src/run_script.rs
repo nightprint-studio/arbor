@@ -52,6 +52,61 @@ pub struct RunScriptArgs {
     /// Extra environment variables, merged over the inherited environment.
     #[serde(default)]
     pub env: Option<HashMap<String, String>>,
+    /// The shell to interpret the script with (`bash`, `zsh`, `sh`, `pwsh`, `powershell`, `cmd`).
+    /// Empty / absent = chosen from the file's extension.
+    #[serde(default)]
+    pub shell: Option<String>,
+}
+
+/// Args for [`bennu_script_shells`].
+#[derive(Deserialize)]
+pub struct ScriptShellsArgs {
+    /// The script (or just its name) — only the extension matters.
+    pub file: String,
+}
+
+/// One shell the editor may offer for a script.
+#[derive(serde::Serialize)]
+pub struct ScriptShell {
+    /// What `RunScriptArgs::shell` takes.
+    pub id: &'static str,
+    /// The name as people say it.
+    pub label: &'static str,
+    /// Where it was found, or why it was not.
+    pub detail: String,
+    /// Whether this machine has it. An unavailable shell is still listed: a configuration written
+    /// on another machine names one, and hiding it would make the field read as empty.
+    pub available: bool,
+}
+
+/// The shells that can interpret `file`, with what this machine has.
+///
+/// Filtered by the file's family on purpose: `bash` cannot run a `.ps1` and `cmd` cannot run a
+/// `.sh`, so offering the whole list would be offering choices that can only fail. A `.bat` has one
+/// interpreter and therefore no choice.
+#[arbor_rpc::handler]
+fn bennu_script_shells(_ctx: &BennuState, args: ScriptShellsArgs) -> Result<Vec<ScriptShell>, String> {
+    Ok(shells_for(&extension_of(&args.file)))
+}
+
+fn shells_for(ext: &str) -> Vec<ScriptShell> {
+    let found = |id, label, r: Result<Interpreter, String>| match r {
+        Ok(i) => ScriptShell { id, label, detail: i.program.to_string_lossy().to_string(), available: true },
+        Err(why) => ScriptShell { id, label, detail: why, available: false },
+    };
+    match ext {
+        "sh" | "bash" => vec![
+            found("bash", if cfg!(windows) { "Git Bash" } else { "bash" }, shell_interpreter("bash")),
+            found("zsh", "zsh", shell_interpreter("zsh")),
+            found("sh", "sh", shell_interpreter("sh")),
+        ],
+        "ps1" => vec![
+            found("pwsh", "PowerShell 7", shell_interpreter("pwsh")),
+            found("powershell", "Windows PowerShell", shell_interpreter("powershell")),
+        ],
+        "bat" | "cmd" => vec![found("cmd", "cmd", shell_interpreter("cmd"))],
+        _ => Vec::new(),
+    }
 }
 
 /// How a script kind is launched on this machine.
@@ -74,7 +129,7 @@ fn bennu_run_script(ctx: &BennuState, args: RunScriptArgs) -> Result<RunHandle, 
     if !script.is_file() {
         return Err(format!("{} is not a file", script.display()));
     }
-    let interpreter = resolve_interpreter(&script)?;
+    let interpreter = resolve_interpreter(&script, args.shell.as_deref())?;
 
     // The script's own directory unless told otherwise: a `deploy.sh` that reads `./env` means
     // the one beside it, not the one beside the pom.
@@ -160,10 +215,30 @@ fn extension_of(file: &str) -> String {
         .unwrap_or_default()
 }
 
-fn resolve_interpreter(script: &Path) -> Result<Interpreter, String> {
-    match extension_of(&script.to_string_lossy()).as_str() {
-        "sh" | "bash" => bash_interpreter(),
-        "bat" | "cmd" => {
+/// The interpreter for `script`: the one the user chose, else the one its extension implies.
+///
+/// A chosen shell must belong to the file's family — `bash` for a `.ps1` is refused with a sentence
+/// rather than handed to a shell that would print a syntax error halfway through a deploy.
+fn resolve_interpreter(script: &Path, chosen: Option<&str>) -> Result<Interpreter, String> {
+    let ext = extension_of(&script.to_string_lossy());
+    let default = match ext.as_str() {
+        "sh" | "bash" => "bash",
+        "bat" | "cmd" => "cmd",
+        "ps1" => if cfg!(windows) { "powershell" } else { "pwsh" },
+        other => return Err(format!("Bennu does not know how to run a `.{other}` file")),
+    };
+    let shell = chosen.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(default);
+    if !shells_for(&ext).iter().any(|s| s.id == shell) {
+        return Err(format!("`{shell}` cannot run a `.{ext}` file."));
+    }
+    shell_interpreter(shell)
+}
+
+/// Locate `id` on this machine. Every refusal says what was looked for and where.
+fn shell_interpreter(id: &str) -> Result<Interpreter, String> {
+    match id {
+        "bash" => bash_interpreter(),
+        "cmd" => {
             if !cfg!(windows) {
                 return Err("A batch file is `cmd.exe` syntax, and only Windows has one. \
                             Nothing on this machine can run it."
@@ -175,9 +250,38 @@ fn resolve_interpreter(script: &Path) -> Result<Interpreter, String> {
                 label: "cmd",
             })
         }
-        "ps1" => powershell_interpreter(),
-        other => Err(format!("Bennu does not know how to run a `.{other}` file")),
+        "zsh" => posix_shell("zsh"),
+        "sh" => posix_shell("sh"),
+        "pwsh" | "powershell" => powershell_interpreter(id == "pwsh"),
+        other => Err(format!("Unknown shell `{other}`")),
     }
+}
+
+/// `zsh` / `sh`: on PATH on Unix. On Windows `sh` ships next to Git Bash's `bash`, and `zsh` is not
+/// something Windows has without WSL — which is deliberately not used, for the filesystem reason
+/// the [`bash_interpreter`] docs spell out.
+fn posix_shell(name: &'static str) -> Result<Interpreter, String> {
+    if cfg!(windows) {
+        if name == "sh" {
+            for candidate in git_bash_candidates() {
+                let sh = candidate.with_file_name("sh.exe");
+                if sh.is_file() {
+                    return Ok(Interpreter { program: sh, leading: Vec::new(), label: "bash" });
+                }
+            }
+        }
+        return Err(format!("`{name}` is not available on Windows outside WSL, which a project script should not run through."));
+    }
+    if on_path(name) {
+        return Ok(Interpreter { program: PathBuf::from(name), leading: Vec::new(), label: name });
+    }
+    Err(format!("`{name}` was not found on PATH."))
+}
+
+/// Whether an executable named `name` exists in a `PATH` directory.
+fn on_path(name: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else { return false };
+    std::env::split_paths(&path).any(|dir| dir.join(name).is_file())
 }
 
 /// The bash to run a `.sh` with.
@@ -223,7 +327,7 @@ fn git_bash_candidates() -> Vec<PathBuf> {
 /// `-ExecutionPolicy Bypass` because the script being run is one the user opened in their own
 /// project: the policy exists to stop scripts arriving from elsewhere, and refusing this one
 /// teaches nothing that the file's presence in the tree has not already settled.
-fn powershell_interpreter() -> Result<Interpreter, String> {
+fn powershell_interpreter(want_pwsh: bool) -> Result<Interpreter, String> {
     let leading = vec![
         "-NoLogo".to_string(),
         "-NoProfile".to_string(),
@@ -231,16 +335,20 @@ fn powershell_interpreter() -> Result<Interpreter, String> {
         "Bypass".to_string(),
         "-File".to_string(),
     ];
-    if cfg!(windows) {
-        return Ok(Interpreter { program: PathBuf::from("powershell.exe"), leading, label: "powershell" });
+    if !want_pwsh {
+        if cfg!(windows) {
+            return Ok(Interpreter { program: PathBuf::from("powershell.exe"), leading, label: "powershell" });
+        }
+        return Err("Windows PowerShell (`powershell.exe`) exists only on Windows — use PowerShell 7."
+            .to_string());
     }
-    // Cross-platform PowerShell is `pwsh`, and it is not installed by default anywhere but
-    // Windows — so this is a real question rather than a formality.
+    // Cross-platform PowerShell is `pwsh`, and it is not installed by default anywhere — so this is
+    // a real question rather than a formality.
     if which_pwsh() {
         return Ok(Interpreter { program: PathBuf::from("pwsh"), leading, label: "pwsh" });
     }
-    Err("`.ps1` needs PowerShell, and `pwsh` was not found on this machine. \
-         Install PowerShell 7 (`brew install powershell` on macOS) to run it here."
+    Err("`pwsh` was not found on this machine. Install PowerShell 7 \
+         (`winget install Microsoft.PowerShell`, or `brew install powershell` on macOS)."
         .to_string())
 }
 
@@ -268,6 +376,18 @@ mod tests {
         for no in ["/p/App.java", "/p/main.rs", "/p/notes.md", "/p/Makefile"] {
             assert!(!is_runnable_script(no), "{no} should not be runnable");
         }
+    }
+
+    /// A shell from the wrong family is refused with a sentence, not handed a file it would choke on.
+    #[test]
+    fn a_shell_must_belong_to_the_files_family() {
+        let err = resolve_interpreter(Path::new("/p/provision.ps1"), Some("bash")).err().unwrap();
+        assert!(err.contains("cannot run"), "{err}");
+        let err = resolve_interpreter(Path::new("/p/x.sh"), Some("cmd")).err().unwrap();
+        assert!(err.contains("cannot run"), "{err}");
+        // Nothing but cmd runs a batch file, so the list has no choice to offer.
+        assert_eq!(shells_for("bat").len(), 1);
+        assert!(shells_for("md").is_empty());
     }
 
     /// Git Bash takes the script path in its own shape. A `C:\…` reaching it as an argument is

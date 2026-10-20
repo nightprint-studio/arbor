@@ -15,6 +15,7 @@
    * it, it reads as a boundary, which is what makes the group a group.
    */
   import type { Snippet } from 'svelte';
+  import { ChevronRight } from 'lucide-svelte';
 
   interface Props {
     /**
@@ -40,22 +41,56 @@
      * happen to be adjacent.
      */
     boxed?: boolean;
+    /**
+     * The label becomes a button that folds the body away — for a long form whose rarely used
+     * groups (environment, debugger, classpath) would otherwise push the common ones off screen.
+     */
+    collapsible?: boolean;
+    /** Whether a collapsible section is unfolded. Ignored unless {@link collapsible}. */
+    open?: boolean;
+    /** Leading icon next to the label — what lets a folded section still be recognised at a glance. */
+    icon?: Snippet;
+    /** What the section holds, shown beside the label while it is folded (`dev · -Xmx1g`). */
+    summary?: string;
     children: Snippet;
   }
 
-  let { label, hint, aside, first = false, boxed = false, children }: Props = $props();
+  let {
+    label, hint, aside, first = false, boxed = false,
+    collapsible = false, open = $bindable(true), icon, summary,
+    children,
+  }: Props = $props();
+
+  const shown = $derived(!collapsible || open);
 </script>
 
 <section class="fs" class:first class:headless={!label && !aside}>
   {#if label || aside}
     <div class="fs-head">
-      {#if label}<span class="fs-label">{label}</span>{/if}
+      {#if collapsible}
+        <button
+          type="button"
+          class="fs-toggle"
+          aria-expanded={open}
+          onclick={() => (open = !open)}
+        >
+          <ChevronRight size={12} class="fs-chevron {open ? 'open' : ''}" />
+          {#if icon}<span class="fs-icon">{@render icon()}</span>{/if}
+          {#if label}<span class="fs-label">{label}</span>{/if}
+          {#if !open && summary}<span class="fs-summary">{summary}</span>{/if}
+        </button>
+      {:else}
+        {#if icon}<span class="fs-icon">{@render icon()}</span>{/if}
+        {#if label}<span class="fs-label">{label}</span>{/if}
+      {/if}
       <span class="fs-rule" aria-hidden="true"></span>
       {#if aside}<span class="fs-aside">{@render aside()}</span>{/if}
     </div>
   {/if}
-  {#if hint}<p class="fs-hint">{hint}</p>{/if}
-  <div class="fs-body" class:boxed>{@render children()}</div>
+  {#if shown}
+    {#if hint}<p class="fs-hint">{hint}</p>{/if}
+    <div class="fs-body" class:boxed>{@render children()}</div>
+  {/if}
 </section>
 
 <style>
@@ -70,6 +105,24 @@
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--text-disabled);
+  }
+  .fs-icon { display: inline-flex; color: var(--text-muted); flex-shrink: 0; }
+  .fs-toggle {
+    display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+    padding: 2px 4px 2px 0; margin: 0;
+    background: transparent; border: none; border-radius: var(--radius-sm);
+    color: inherit; cursor: pointer;
+  }
+  .fs-toggle:hover .fs-label { color: var(--text-secondary); }
+  .fs-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .fs-toggle :global(.fs-chevron) {
+    color: var(--text-muted); flex-shrink: 0;
+    transition: transform var(--transition-fast);
+  }
+  .fs-toggle :global(.fs-chevron.open) { transform: rotate(90deg); }
+  .fs-summary {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: var(--font-size-xs); color: var(--text-muted); font-family: var(--font-code);
   }
   /* The rule is what turns the label into a boundary instead of another field name. */
   .fs-rule { flex: 1; height: 1px; background: var(--border-subtle); }

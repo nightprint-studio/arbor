@@ -279,6 +279,9 @@ mod reactor;
 // One handler (`bennu_run_script`) over the same streaming spawner the JVM runner uses, so a
 // script gets the console tab, the stdin and the Stop that a Java run already has.
 mod run_script;
+// A run configuration's `.env` file, parsed at launch — the file is the source of truth, not a copy
+// of it inside the configuration.
+mod env_file;
 // Killing a child and everything it started (`taskkill /T` on Windows) — shared by the two
 // domains that launch long-lived children, `build`'s run and `tests`' `mvn test`.
 mod child;
@@ -358,6 +361,8 @@ mod postfix_templates;
 // release. The Java mirror of `crates_io`, and the only Java-side call that opens a socket — behind
 // its own switch, its own cache and its own TTL, for the same three reasons.
 mod maven_central;
+// Known vulnerabilities of a pom's dependencies (OSV.dev) — opt-in, cached, bounded per request.
+mod maven_advisories;
 // The Java refactorings — extract method / variable / constant, inline variable / method. The
 // transforms are the pure `bennu-refactor` crate; this is the two things it cannot do on its own:
 // name a type with the project's resolver, and refuse when nothing can.

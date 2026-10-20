@@ -36,44 +36,79 @@ pub fn hover(env: &PomEnv<'_>, doc: &Doc<'_>, offset: usize) -> Option<ExtHover>
         return None;
     }
 
-    let signature = match env.reactor_pom(&coord) {
-        Some(_) => "a module of this project — built from source".to_string(),
-        None => match env.repo.resolve(&coord) {
-            Some(path) => path.to_string_lossy().replace('\\', "/"),
-            None if coord.version.is_empty() => "no version — nothing supplies one".to_string(),
-            None => "not in the local repository".to_string(),
-        },
-    };
-
-    let mut lines: Vec<String> = Vec::new();
+    // The headline is the coordinate — the one thing every dependency card is about — and the
+    // chip before it says what kind of declaration this is. Everything else is a paragraph of the
+    // body, rendered as the small HTML subset the shared card understands: a path or a version
+    // list in a chip-sized title is what made this card hard to read.
+    let mut paras: Vec<String> = Vec::new();
     if let Some(doc_line) = known::describe(&coord.group_id, &coord.artifact_id) {
-        lines.push(doc_line.to_string());
+        paras.push(esc(doc_line));
     }
     if block.version.text.is_empty() {
         if let Some(pin) = env.managed(&Coord { version: String::new(), ..coord.clone() }) {
-            lines.push(format!("Version `{}` managed by `{}`.", pin.version, pin.from));
+            paras.push(format!("Version {} managed by {}.", code(&pin.version), code(&pin.from)));
         }
     } else if block.version.text.contains("${") {
-        lines.push(format!("`{}` expands to `{}`.", block.version.text, coord.version));
+        paras.push(format!("{} expands to {}.", code(&block.version.text), code(&coord.version)));
     }
     let scope = block.scope.text.trim();
+    let mut facts: Vec<String> = Vec::new();
     if !scope.is_empty() {
-        lines.push(format!("Scope `{scope}`."));
+        facts.push(format!("<b>Scope</b> {}", code(scope)));
     }
     if !block.profile.is_empty() {
-        lines.push(format!("Only under profile `{}`.", block.profile));
+        facts.push(format!("<b>Profile</b> {}", code(&block.profile)));
     }
+    if !facts.is_empty() {
+        paras.push(facts.join(" · "));
+    }
+
+    paras.push(match env.reactor_pom(&coord) {
+        Some(_) => "A module of this project — built from source.".to_string(),
+        None => match env.repo.resolve(&coord) {
+            Some(path) => format!("<b>Jar</b> {}", code(&in_repo(env, &path))),
+            None if coord.version.is_empty() => "No version — nothing supplies one.".to_string(),
+            None => "Not in the local repository.".to_string(),
+        },
+    });
+
     let installed = env.repo.versions(&coord.group_id, &coord.artifact_id);
     if !installed.is_empty() {
-        lines.push(format!(
-            "Installed locally: {}{}",
-            installed.iter().take(6).cloned().collect::<Vec<_>>().join(", "),
-            if installed.len() > 6 { format!(", +{} more", installed.len() - 6) } else { String::new() }
+        let shown: Vec<String> = installed.iter().take(INSTALLED_SHOWN).map(|v| code(v)).collect();
+        let more = installed.len().saturating_sub(INSTALLED_SHOWN);
+        paras.push(format!(
+            "<b>Installed</b> {}{}",
+            shown.join(" "),
+            if more > 0 { format!(" +{more} more") } else { String::new() }
         ));
     }
-    lines.push(format!("Declared as a {}.", block.kind.label()));
 
-    Some(ExtHover { title: coord.gav(), signature, doc: lines.join("\n") })
+    let doc = paras.iter().map(|p| format!("<p>{p}</p>")).collect::<String>();
+    Some(ExtHover { title: block.kind.label().to_string(), signature: coord.gav(), doc })
+}
+
+/// How many installed versions the card lists before saying "+N more".
+const INSTALLED_SHOWN: usize = 8;
+
+/// Text for the card body, which is parsed as HTML: the three characters that would start markup
+/// are the only ones that need to stop doing so.
+fn esc(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+fn code(text: &str) -> String {
+    format!("<code>{}</code>", esc(text))
+}
+
+/// A repository file as a path relative to the repository — `org/junit/.../x.jar` — which is all
+/// that distinguishes one artifact from another; the `C:/Users/…/.m2/repository` in front of it is
+/// the same on every line of every pom.
+fn in_repo(env: &PomEnv<'_>, path: &std::path::Path) -> String {
+    let full = path.to_string_lossy().replace('\\', "/");
+    let root = env.repo.root().to_string_lossy().replace('\\', "/");
+    full.strip_prefix(root.trim_end_matches('/'))
+        .map(|rest| rest.trim_start_matches('/').to_string())
+        .unwrap_or(full)
 }
 
 /// The card for a `${property}` under the caret: what it expands to, and which pom said so.

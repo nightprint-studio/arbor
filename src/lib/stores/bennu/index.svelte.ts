@@ -37,6 +37,11 @@ const PHASES: { key: string; label: string }[] = [
 function phaseLabel(key: string): string {
   return PHASES.find((p) => p.key === key)?.label ?? key;
 }
+/** Backend roots and the frontend's can differ in separators/trailing slash on Windows. */
+function sameRoot(a: string | null, b: string | null): boolean {
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  return !!a && !!b && norm(a) === norm(b);
+}
 function baseName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
@@ -244,15 +249,16 @@ function createBennuIndexStore() {
       if (attached) return () => {};
       attached = true;
 
-      // A dependency jar was rebuilt on disk while the window was open — the backend has
-      // already started re-indexing against the new classes, so everything keyed on the
-      // index settling refreshes on its own. What it cannot do on its own is explain
-      // itself: an editor that begins re-indexing for no visible reason reads as a glitch,
-      // and the one thing the user knows that we don't is that they just ran a build.
+      // A dependency jar (or a pom) changed on disk while the window was open — the backend
+      // has already started re-indexing. The toast says WHY; the "Indexing project" job
+      // (armed by the `project` start event below, or here if that event was missed) shows
+      // the progress and the "Index ready" outcome.
       unlistenClasspath = await listen<{ root: string }>(
         'arbor://bennu/classpath-changed',
-        () => {
+        (e) => {
           toastStore.show('Dependencies changed on disk — re-indexing', 'info');
+          const { root } = e.payload;
+          if (sameRoot(root, currentRoot) && (done || !indexing)) beginCycle(currentRoot!);
         },
       ).catch(() => null);
       unlisten = await listen<{
@@ -261,6 +267,14 @@ function createBennuIndexStore() {
         'arbor://bennu/index-progress',
         (e) => {
           const { root, phase: ph, state, done: doneN, total } = e.payload;
+          // A build the frontend did not ask for — the dependency/pom watcher, a compile's
+          // refresh — announces itself with the first phase's `start` after the previous cycle
+          // settled. Without arming a cycle here those rebuilds ran invisibly: no job, no
+          // footer state, no way to tell whether it had re-indexed. An event while a cycle is
+          // already open (our own open / rebuild) is part of it and must not re-arm.
+          if (ph === 'project' && state === 'start' && (done || !indexing) && sameRoot(root, currentRoot)) {
+            beginCycle(currentRoot!);
+          }
           // Events are live → disable the poll's no-event stop heuristics (see `sawEvent`),
           // so a long references phase isn't cut short by the type-count plateau / poll cap.
           sawEvent = true;

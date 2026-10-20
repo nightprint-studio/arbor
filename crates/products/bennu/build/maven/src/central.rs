@@ -94,11 +94,24 @@ pub fn parse_metadata(xml: &str) -> Metadata {
 /// Maven resolves `LATEST` to. It is not blindly trusted: a few artifacts publish a milestone as
 /// their release, so the version list is consulted too and the newer of the two wins — by
 /// [`crate::repo::compare_versions`], which already ranks a release above its own pre-releases.
+///
+/// **Only within one numbering scheme.** A library that moved from `2025.1` to `1.4.0` still lists
+/// both, and ranked as numbers the abandoned calendar version beats everything published since —
+/// so the project already on the newest release was told to "update" to a years-old one. The
+/// metadata's own order is the publication order (Central appends as it releases), which is the
+/// release date this crate has no network access to read: the scheme of the **last** published
+/// release is the live one, and only versions of that scheme compete.
 pub fn latest_release(meta: &Metadata) -> Option<String> {
+    let live_scheme = meta
+        .release
+        .as_deref()
+        .or_else(|| meta.versions.iter().rev().find(|v| !is_prerelease(v)).map(String::as_str))
+        .map(crate::repo::is_calendar_version);
     let newest_listed = meta
         .versions
         .iter()
         .filter(|v| !is_prerelease(v))
+        .filter(|v| live_scheme.map_or(true, |calendar| crate::repo::is_calendar_version(v) == calendar))
         .max_by(|a, b| crate::repo::compare_versions(a, b))
         .cloned();
     match (meta.release.clone(), newest_listed) {
@@ -240,6 +253,24 @@ mod tests {
         let xml = "<metadata><versioning><release>1.0</release>\
 <versions><version>1.0</version><version>2.0</version></versions></versioning></metadata>";
         assert_eq!(latest_release(&parse_metadata(xml)).as_deref(), Some("2.0"));
+    }
+
+    #[test]
+    fn an_abandoned_calendar_scheme_does_not_outrank_the_live_one() {
+        // `2025.1` was the last release of the old scheme; `6.1.3` is what the library publishes now.
+        let xml = "<metadata><versioning><release>6.1.3</release>\
+<versions><version>2024.12</version><version>2025.1</version><version>6.0.1</version>\
+<version>6.1.3</version></versions></versioning></metadata>";
+        assert_eq!(latest_release(&parse_metadata(xml)).as_deref(), Some("6.1.3"));
+        assert!(!is_newer("6.1.3", "6.1.3"));
+    }
+
+    #[test]
+    fn without_a_release_tag_the_last_published_scheme_wins() {
+        let xml = "<metadata><versioning>\
+<versions><version>2025.1</version><version>6.0.1</version><version>6.1.3</version></versions>\
+</versioning></metadata>";
+        assert_eq!(latest_release(&parse_metadata(xml)).as_deref(), Some("6.1.3"));
     }
 
     #[test]

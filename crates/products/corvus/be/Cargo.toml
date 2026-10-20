@@ -67,6 +67,9 @@ serde_json    = { workspace = true }
 # the per-parameter descriptions an AI client reads. Same workspace pin bennu-be uses; not a new
 # external dependency.
 schemars      = { workspace = true }
+# Line diff of an editor buffer against HEAD for the change gutter (`change_markers`). Already a
+# workspace dependency (history, studio) — not a new external crate.
+similar       = { workspace = true }
 # `~` home-dir expansion for the `commit.template` path in the stage domain's
 # `get_git_commit_template` (already a workspace dependency, used by `src-tauri`).
 dirs          = { workspace = true }

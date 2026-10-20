@@ -89,6 +89,8 @@ export type BottomPanel =
    *  panel you have to keep closing. */
   | 'plugin-logs'
   | 'todos'
+  /** The project's git working tree — staged and unstaged files and a commit box. Offered only inside a repository. */
+  | 'changes'
   /** The call / type hierarchy — a tree of callers, callees, supertypes or implementors.
    *
    *  Here rather than in a side rail because of the shape of a row: a name, a file and the line of

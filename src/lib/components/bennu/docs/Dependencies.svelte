@@ -108,9 +108,11 @@
   never built has the folders and none of the code.
 </p>
 <p>
-  <strong>Download missing dependencies</strong>, under Settings → Java, is on by default and closes that gap: when a jar
-  is missing, the resolve fetches it. Turning it off resolves from the local repository alone — worth doing on a metered
-  connection or behind a slow corporate repository.
+  <strong>Allow Maven to use the network</strong>, under Settings → Java, is on by default and closes that gap: when a jar
+  is missing, the resolve fetches it. It is the one switch for every place Bennu runs Maven — the resolve, the build before a
+  run, the run's classpath and the goals started from the Maven panel, whose <em>Offline</em> toggle flips the same setting.
+  Turning it off resolves from the local repository alone — worth doing on a metered connection or behind a slow corporate
+  repository.
 </p>
 <Callout variant="warning" title="What a missing jar looks like">
   A declared dependency whose jar is still missing is called out, because that is exactly what "cannot find symbol" looks

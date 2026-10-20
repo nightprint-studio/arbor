@@ -158,6 +158,8 @@ export interface AppearanceConfig {
    *  single-child directories into one row across file panel, stage area,
    *  commit detail file list, and conflict sidebar. */
   compact_file_tree_dirs: boolean;
+  /** Staging panel layout: flat list or grouped by folder. */
+  stage_view_mode: 'list' | 'tree';
 }
 
 /** View mode for the built-in file explorer's listing. */

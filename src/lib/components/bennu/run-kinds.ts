@@ -17,7 +17,7 @@
 
 import {
   AppWindow, BadgeCheck, FileCode2, FlaskConical, Gauge, Hammer, Leaf, Package, Play, Rocket,
-  Server, Sparkles, Wrench, CircleHelp,
+  Server, Sparkles, Wrench, CircleHelp, Terminal, SquareTerminal, Zap,
 } from 'lucide-svelte';
 import type { IconComponent } from '$lib/types/icon';
 import type { RunConfig } from '$lib/stores/bennu/run-config.svelte';
@@ -31,6 +31,17 @@ const KIND_ICONS: Record<string, unknown> = {
   // A crate. Cargo's own mark is a shipping crate, and `Package` is the closest lucide has.
   cargo: Package,
   tomcat: Server,
+  script: SquareTerminal,
+};
+
+/** Per **script extension** — what interprets the file, so a list of deploy scripts separates the
+ *  PowerShell ones from the bash ones at a glance. */
+const SCRIPT_ICONS: Record<string, unknown> = {
+  sh: SquareTerminal,
+  bash: SquareTerminal,
+  ps1: Zap,
+  bat: Terminal,
+  cmd: Terminal,
 };
 
 /**
@@ -65,7 +76,14 @@ export function runKindIcon(kind: string): IconComponent {
  * Falls back to the kind's icon whenever the configuration carries nothing finer, so a shape this
  * table has never heard of degrades to "a Cargo thing" rather than to a question mark.
  */
-export function runConfigIcon(config: Pick<RunConfig, 'kind' | 'cargoCommand'>): IconComponent {
+export function runConfigIcon(
+  config: Pick<RunConfig, 'kind' | 'cargoCommand'> & Partial<Pick<RunConfig, 'scriptFile'>>,
+): IconComponent {
+  if (config.kind === 'script') {
+    const ext = (config.scriptFile ?? '').split('.').pop()?.toLowerCase() ?? '';
+    const hit = SCRIPT_ICONS[ext];
+    if (hit) return hit as IconComponent;
+  }
   if (config.kind === 'cargo') {
     // The subcommand as written, so `cargo +nightly test` and `test --doc` both land on `test`.
     const first = (config.cargoCommand ?? '')

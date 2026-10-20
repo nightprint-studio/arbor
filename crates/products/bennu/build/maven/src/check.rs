@@ -339,7 +339,7 @@ fn check_exists(env: &PomEnv<'_>, block: &Block, out: &mut Vec<Diagnostic>) {
         format!(
             "`{}` is in the local repository as a pom, but its jar was never downloaded. Maven \
              fetches a pom to read the dependency graph and the jar only when something compiles \
-             against it — build once, or turn on Download missing dependencies.",
+             against it — build once, or allow Maven to use the network.",
             coord.gav()
         )
     } else {
@@ -397,13 +397,19 @@ fn note_newer(env: &PomEnv<'_>, block: &Block, coord: &Coord, out: &mut Vec<Diag
     }
     let Some((start, end)) = block.version.span else { return };
     let installed = env.repo.versions(&coord.group_id, &coord.artifact_id);
-    let Some(newest) = installed.first() else { return };
-    if newest == &coord.version {
+    // Only versions of the same numbering scheme as the declared one are candidates: `2025.1` is
+    // not "newer" than `6.1.3` because 2025 > 6, it is the scheme the library left behind. And a
+    // pre-release is never suggested over a release — having a `3.0.0-M2` in the repository is not
+    // a reason to be told your `2.7.18` is out of date — so it is skipped, not allowed to hide the
+    // release that sits just under it.
+    let calendar = crate::repo::is_calendar_version(&coord.version);
+    let declared_pre = is_prerelease(&coord.version);
+    let Some(newest) = installed.iter().find(|v| {
+        crate::repo::is_calendar_version(v) == calendar && (declared_pre || !is_prerelease(v))
+    }) else {
         return;
-    }
-    // A pre-release is never suggested over a release: having a `3.0.0-M2` in the repository is not
-    // a reason to be told your `2.7.18` is out of date.
-    if is_prerelease(newest) && !is_prerelease(&coord.version) {
+    };
+    if newest == &coord.version {
         return;
     }
     if crate::repo::compare_versions(newest, &coord.version) != std::cmp::Ordering::Greater {

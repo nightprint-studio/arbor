@@ -12,6 +12,7 @@
    * flipping it re-runs the search rather than staging a change to be submitted.
    */
   import type { IconComponent } from '$lib/types/icon';
+  import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
     pressed: boolean;
@@ -27,18 +28,24 @@
      *  and the control needs a stable name. */
     ariaLabel?: string;
     onclick: () => void;
+    /** Keybinding shown in the tooltip (`'Alt+C'`), beside {@link title}. */
+    shortcut?: string;
+    /** Borderless 22px key for sitting **inside** a field (the options at the end of a find
+     *  input), where a bordered 26px button would make the field a toolbar. */
+    compact?: boolean;
   }
 
-  let { pressed, label, icon: Icon, title, ariaLabel, onclick }: Props = $props();
+  let { pressed, label, icon: Icon, title, ariaLabel, onclick, shortcut, compact = false }: Props = $props();
 </script>
 
 <button
   type="button"
   class="tgl"
+  class:compact
   class:on={pressed}
   aria-pressed={pressed}
   aria-label={ariaLabel ?? title}
-  {title}
+  use:tooltip={shortcut ? { content: title, shortcut } : title}
   {onclick}
 >
   {#if Icon}<Icon size={13} />{:else}<span class="tgl-label">{label}</span>{/if}
@@ -66,6 +73,9 @@
   }
   .tgl:hover { border-color: var(--border); color: var(--text-secondary); }
   .tgl.on { background: var(--accent-subtle); border-color: var(--accent); color: var(--accent); }
+  .tgl.compact { min-width: 22px; height: 22px; padding: 0 3px; background: transparent; border-color: transparent; }
+  .tgl.compact:hover { background: var(--bg-hover); border-color: transparent; }
+  .tgl.compact.on { background: var(--accent-subtle); border-color: transparent; }
   /* A two-character label has to fit the same square an icon does. */
   .tgl-label { font-size: var(--font-size-2xs); line-height: 1; }
 </style>

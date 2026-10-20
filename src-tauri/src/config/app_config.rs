@@ -607,9 +607,14 @@ pub struct AppearanceConfig {
     /// list, and conflict file sidebar. On by default.
     #[serde(default = "default_true_compact_dirs")]
     pub compact_file_tree_dirs: bool,
+    /// How the staging panel lists changed files: `"list"` (flat) or `"tree"`
+    /// (grouped by folder). Shared by every product that embeds the panel.
+    #[serde(default = "default_stage_view_mode")]
+    pub stage_view_mode: String,
 }
 
 fn default_true_compact_dirs() -> bool { true }
+fn default_stage_view_mode() -> String { "list".into() }
 
 fn default_window_controls_style() -> String { "mac".into() }
 fn default_font_scale() -> f32 { 1.0 }
@@ -634,6 +639,7 @@ impl Default for AppearanceConfig {
             compact_title_bar:     false,
             parked_modals_max:     default_parked_modals_max(),
             compact_file_tree_dirs: true,
+            stage_view_mode:       default_stage_view_mode(),
         }
     }
 }

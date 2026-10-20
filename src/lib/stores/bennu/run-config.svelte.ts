@@ -188,6 +188,13 @@ export interface RunConfig {
   /** Absolute path of the `.sh` / `.bat` / `.cmd` / `.ps1` to run. `programArgs`, `workingDir`
    *  and `env` are shared with the other kinds; everything else is left empty. */
   scriptFile: string;
+  /** Which shell interprets {@link scriptFile}; empty = decided by its extension. */
+  scriptShell: string;
+
+  // ── every kind ────────────────────────────────────────────────────────────
+  /** A `.env` file read **when the configuration is launched** (not imported): its variables sit
+   *  under {@link env}, whose rows win on a clash. */
+  envFile: string;
 }
 
 /** The per-project run-config bundle — the ordered list plus which one is active. */
@@ -233,6 +240,8 @@ function toDto(c: RunConfig): RunConfigDto {
     cargo_workspace: c.cargoWorkspace,
     cargo_args: c.cargoArgs,
     script_file: c.scriptFile,
+    script_shell: c.scriptShell,
+    env_file: c.envFile,
   };
 }
 
@@ -273,6 +282,8 @@ function fromDto(d: RunConfigDto): RunConfig {
     cargoWorkspace: d.cargo_workspace ?? false,
     cargoArgs: d.cargo_args ?? '',
     scriptFile: d.script_file ?? '',
+    scriptShell: d.script_shell ?? '',
+    envFile: d.env_file ?? '',
   };
 }
 
@@ -306,6 +317,8 @@ export function emptyConfig(name = 'Unnamed', kind: RunConfigKind = 'application
     cargoWorkspace: kind === 'cargo',
     cargoArgs: '',
     scriptFile: '',
+    scriptShell: '',
+    envFile: '',
   };
 }
 

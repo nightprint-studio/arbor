@@ -325,7 +325,13 @@ export interface RunOptions {
 export function runScript(
   root: string,
   file: string,
-  opts: { args?: string[]; workingDir?: string; env?: Record<string, string> } = {},
+  opts: {
+    args?: string[];
+    workingDir?: string;
+    env?: Record<string, string>;
+    /** `bash` | `zsh` | `sh` | `pwsh` | `powershell` | `cmd`; omitted = from the extension. */
+    shell?: string;
+  } = {},
 ): Promise<RunHandle> {
   return bennu('bennu_run_script', {
     args: {
@@ -334,8 +340,29 @@ export function runScript(
       args: opts.args ?? [],
       working_dir: opts.workingDir ?? '',
       env: opts.env ?? {},
+      shell: opts.shell ?? '',
     },
   });
+}
+
+/** One shell that can interpret a script, as `bennu_script_shells` reports it. */
+export interface ScriptShell {
+  id: string;
+  label: string;
+  /** Where it was found, or why it was not. */
+  detail: string;
+  available: boolean;
+}
+
+/** The shells that can interpret `file`, with what this machine has. Wire: `bennu_script_shells`. */
+export function scriptShells(file: string): Promise<ScriptShell[]> {
+  return bennu('bennu_script_shells', { args: { file } });
+}
+
+/** The variables of a `.env` file, parsed by the backend. Relative paths resolve against `root`.
+ *  Wire: `bennu_load_env_file`. */
+export function loadEnvFile(root: string, path: string): Promise<Record<string, string>> {
+  return bennu('bennu_load_env_file', { args: { root, path } });
 }
 
 export function run(root: string, mainClass: string, opts: RunOptions = {}): Promise<RunHandle> {

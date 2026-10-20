@@ -10,7 +10,7 @@
  * Rune-store pattern: private `$state`, returned getters + methods (CLAUDE.md).
  */
 
-import { getGitTreeStatus } from '$lib/ipc/corvus/treeStatus';
+import { getGitSummary, getGitTreeStatus, type GitSummary } from '$lib/ipc/corvus/treeStatus';
 import type { GitBadge } from '$lib/ipc/fs';
 import { strongerBadge } from '$lib/utils/git-badge';
 
@@ -33,6 +33,7 @@ function createGitStatusStore() {
   let root = $state('');
   let inRepo = $state(false);
   let branch = $state<string | null>(null);
+  let summary = $state.raw<GitSummary | null>(null);
   // Replaced wholesale, never mutated: a big working tree must not become a deep reactive proxy.
   let files = $state.raw<Record<string, GitBadge>>({});
   /** Folder → the strongest badge beneath it. */
@@ -44,8 +45,13 @@ function createGitStatusStore() {
   async function load(forRoot: string) {
     const mine = ++token;
     try {
-      const status = await getGitTreeStatus(forRoot);
+      // Two cheap walks in parallel; the summary's failure must not blank the tree marks.
+      const [status, sum] = await Promise.all([
+        getGitTreeStatus(forRoot),
+        getGitSummary(forRoot).catch(() => null),
+      ]);
       if (mine !== token) return;
+      summary = sum?.in_repo ? sum : null;
       const direct: Record<string, GitBadge> = {};
       const rolled: Record<string, GitBadge> = {};
       const rootKey = key(forRoot);
@@ -65,6 +71,7 @@ function createGitStatusStore() {
       // No repository, or Corvus is not available: the tree simply shows no git marks.
       if (mine !== token) return;
       inRepo = false;
+      summary = null;
       files = {};
       folders = {};
     }
@@ -73,6 +80,8 @@ function createGitStatusStore() {
   return {
     get inRepo() { return inRepo; },
     get branch() { return branch; },
+    /** Branch, ahead/behind and per-bucket counts; `null` outside a repository. */
+    get summary() { return summary; },
 
     /**
      * The badge for a tree row, or `undefined` when it is clean.
@@ -100,6 +109,7 @@ function createGitStatusStore() {
         token++;
         root = '';
         inRepo = false;
+        summary = null;
         files = {};
         folders = {};
         return;

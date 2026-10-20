@@ -88,6 +88,7 @@ mod tests {
             progress: String::new(),
             features: Vec::new(),
             log_tail: Vec::new(),
+            pid: None,
         }
     }
 

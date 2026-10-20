@@ -8,16 +8,37 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Changed
+- **One setting decides whether Maven may use the network in Bennu.** *Settings → Java → Allow Maven to use the network* now covers the resolve, the build before a run, the run's classpath and the Maven panel's goals; the panel's *Offline* toggle flips the same, persisted setting instead of a per-session one.
+- **Bennu's run configuration form is easier to scan.** Launch arguments, classpath and debugger, and the environment are folded sections with a summary; script configurations show their shell with icons.
+- **Occurrences of the selected text and find hits are easier to see** in every code editor — stronger fill plus an outline.
+- **The pom dependency hover card is readable.** The coordinate is the headline, the jar path is relative to the local repository, and scope, profile and installed versions are short labelled lines; code in diagnostic messages is drawn as chips instead of raw backticks.
+- **The staging panel's list / tree choice is kept in the app config** instead of the browser storage, and is shared by Corvus and Bennu.
 - **Tyto no longer keeps `ffprobe` and `ffplay`.** After downloading ffmpeg it deletes the two tools it never runs, saving about 200 MB.
 - **Bennu paints undefined names red instead of underlining them.** An unknown variable, method, class, field or import is coloured red where it is written; hover and quick fixes work as before.
 - **Bennu's editor right-click menu is grouped and coloured** — edit, navigate, generate, save, history — like Corvus's commit menu.
 
 ### Fixed
+- **Bennu shows the "Indexing project" job on every re-index, not just at open.** When dependencies or a pom change on disk (or a build refreshes the index) the job card and footer now follow the re-index through to "Index ready".
+- **Bennu builds a project whose `~/.m2` was filled by IntelliJ.** When offline Maven refuses a jar it already has ("has not been downloaded from it before", typical of a private snapshot registry), the build and the run classpath retry offline ignoring where the jar came from, and only then go online if downloads are allowed.
+- **Bennu flags an enum constant used as a label of an `Integer` or `String` switch.** `switch (code) { case Level.LOW … }` over a numeric selector is reported as an incompatible label, and a switch expression over those types with name labels and no `default` is reported as not exhaustive.
+- **Bennu reports a non-exhaustive `switch` expression even when the selector's type is unknown.** When the selector comes from a library class that is not on the classpath (a jar not downloaded), a switch whose labels are written `Enum.CONSTANT` and miss a constant is now flagged instead of passing silently.
+- **Running in Bennu no longer fails on a dependency the editor could resolve.** When the offline run classpath is missing a jar and Maven may use the network, the launch fetches it online once instead of starting a JVM that dies on a missing class.
+- **Re-resolving or downloading dependencies in Bennu stays visible as a job until the reindex is done,** instead of closing after a second while the reindex ran unseen.
+- **Bennu no longer suggests an abandoned version scheme as "newer".** A library that moved from calendar versions (`2025.1`) to plain ones (`6.1.3`) is compared within its current scheme only, both for the pom hint and for the Maven Central check.
 - **A problem in Bennu's Problems panel opens at the right line.** In a file with accents or other non-ASCII characters, clicking a problem of the open file landed further down than the error.
 - **Bennu no longer reports Lombok-managed fields as unused.** Private fields of a `@Data`, `@Getter`, `@Value`, `@Builder`… class are read by generated code, and a `@SuperBuilder` subclass no longer reports a missing super constructor.
 
 ### Added
+- **Known vulnerabilities as warnings in a pom (opt-in).** With *Settings → Java → Check dependencies for known vulnerabilities* on, a pinned dependency with a published advisory is underlined with its CVE, severity and fixed version. Asks OSV.dev in the background and caches for a day.
+- **A new find and replace bar in the code editors.** A slim floating bar with the match counter and the case / word / regex keys inside the field, incremental search as you type, a replace row on `Alt+P`, and a shortcut to Find in files.
+- **Choose the shell of a Bennu script configuration.** *Run with* offers the shells that can interpret the file (Git Bash, zsh, sh, PowerShell 7, Windows PowerShell); *Auto* keeps the extension-based choice.
+- **Environment editor for every Bennu run configuration.** Edit variables as a table or as `KEY=value` text, hide credential-looking values, and point to a `.env` file that is read at every run instead of being imported.
+- **Choose the shell of a new terminal in Bennu,** with the same menu as Corvus.
 - **Git Blame in Bennu.** *Git → Annotate with Git Blame* draws a slim colour bar per commit in the margin and, at the start of each run of lines, who changed it and when (the commit message is an option). Corvus supplies it — no repository needs to be open there.
+- **Changes panel in Bennu.** Inside a git repository, a Changes button on the activity bar (`Alt+Shift+C`) opens Corvus's staging list for the project: stage, unstage, discard, view a file's change and commit with *Amend last*.
+- **Change markers in Bennu's editor gutter.** Lines added, changed or removed since the last commit get a coloured bar; click it to see the old text, revert the block or copy it, and `Alt+F3` / `Ctrl+Shift+F3` walk the changes. Can be turned off in the editor settings, which also stops the calls.
+- **Bennu's status bar shows the git branch.** Branch name with commits ahead ↑ and behind ↓ upstream, read-only; a click opens the project in Corvus.
+- **Changed files are coloured in Bennu's editor tabs and Problems panel,** the same way as in the project tree.
 - **Changed files stand out in Bennu's project tree.** Modified files are amber, newly staged ones green, untracked ones blue, each with a small mark after the name; a folder holding changes shows a dot in the strongest colour beneath it.
 - **Local History for a selection in Bennu.** *Local History → Show History for Selection* lists only the revisions that changed the highlighted lines.
 - **Git history from Bennu's editor.** The new *Git* submenu adds *Show History* (the commits that touched the file) and *Show History for Selection* (the commits that touched the highlighted lines, followed through moves), each with the diff of the selected commit.

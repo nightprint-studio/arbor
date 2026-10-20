@@ -157,7 +157,7 @@
   <li><strong>Restart</strong> — offered on a language server, the one kind of process that can be
     restarted without losing anything, since it rebuilds its state from the files.</li>
 </ul>
-<Callout variant="important" title="It reports; it does not cap">
+<Callout variant="warning" title="It reports; it does not cap">
   There is no <code>-Xmx</code> for Arbor, and there cannot be a portable one: holding a native
   process under a memory ceiling is a job object on Windows, a cgroup on Linux, and nothing at all
   on macOS. A “maximum RAM” switch would work on one platform and silently do nothing on the other

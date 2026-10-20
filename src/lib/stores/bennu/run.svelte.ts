@@ -47,7 +47,7 @@ import {
   build as ipcBuild, validateProject as ipcValidateProject, run as ipcRun,
   cancelRun as ipcCancelRun, cancelValidation as ipcCancelValidation,
   runInput as ipcRunInput,
-  runScript as ipcRunScript,
+  runScript as ipcRunScript, loadEnvFile as ipcLoadEnvFile,
 } from '$lib/ipc/bennu';
 import { getBennuConfig, setBennuConfig } from '$lib/ipc/bennu/config';
 import type {
@@ -132,6 +132,8 @@ interface ScriptRunSpec {
   root: string;
   /** Absolute path of the script. The backend picks the interpreter from its extension. */
   file: string;
+  /** The shell the configuration asked for; empty = from the extension. */
+  shell: string;
   args: string[];
   workingDir: string;
   env: Record<string, string>;
@@ -785,6 +787,7 @@ function createBennuRunStore() {
         args: spec.args,
         workingDir: spec.workingDir,
         env: spec.env,
+        shell: spec.shell,
       });
       claimRun(id, handle.run_id, { command: handle.command, workingDir: handle.working_dir });
     } catch (e) {
@@ -872,6 +875,8 @@ function createBennuRunStore() {
       pushRun(`“${cfg.name}” is a ${cfg.kind} configuration, which this version cannot run.`, 'err');
       return;
     }
+    const env = await launchEnv(root, cfg);
+    if (!env) return;
     if (cfg.kind === 'cargo') {
       // Debugging a cargo configuration is the configuration you have, with a debugger. The backend
       // builds the target first and launches the binary under an adapter — `cargo run` cannot be
@@ -881,7 +886,7 @@ function createBennuRunStore() {
         root,
         invocation: cargoInvocationOf(cfg),
         workingDir: cfg.workingDir.trim(),
-        env: envRecord(cfg.env),
+        env,
         label: debug ? `Debug ${cfg.name}` : cfg.name,
         debug,
       });
@@ -905,9 +910,10 @@ function createBennuRunStore() {
         kind: 'script',
         root,
         file,
+        shell: cfg.scriptShell,
         args: splitArgs(cfg.programArgs),
         workingDir: cfg.workingDir.trim(),
-        env: envRecord(cfg.env),
+        env,
         label: cfg.name,
       });
       return;
@@ -944,7 +950,7 @@ function createBennuRunStore() {
       args: splitArgs(cfg.programArgs),
       vmArgs: vmArgsOf(cfg),
       workingDir: cfg.workingDir.trim(),
-      env: envRecord(cfg.env),
+      env,
       label: cfg.name,
       debug,
       // Only meaningful under the debugger, and only when the configuration asked: a launch
@@ -952,6 +958,28 @@ function createBennuRunStore() {
       debugSuspend: debug && cfg.debugSuspend,
       classpathScope: cfg.classpathScope,
     });
+  }
+
+  /**
+   * The environment `cfg` launches with: its `.env` file, read **now**, with the rows typed in the
+   * configuration on top. Read at every launch rather than imported once, so the file stays the
+   * source of truth.
+   *
+   * `null` when the file was named and could not be read — reported in the Run console, and the
+   * launch is abandoned: starting a service without the database password the file was meant to
+   * supply fails later, further from the cause, and sometimes against the wrong database.
+   */
+  async function launchEnv(root: string, cfg: RunConfig): Promise<Record<string, string> | null> {
+    const own = envRecord(cfg.env);
+    const file = cfg.envFile.trim();
+    if (!file) return own;
+    try {
+      return { ...(await ipcLoadEnvFile(root, file)), ...own };
+    } catch (e) {
+      bennuUiStore.showBottom('run');
+      pushRun(e instanceof Error ? e.message : String(e), 'err');
+      return null;
+    }
   }
 
   /** The `@SpringBootApplication` entry point of `cfg`'s module, when there is exactly one.
@@ -1268,6 +1296,7 @@ function createBennuRunStore() {
         kind: 'script',
         root,
         file,
+        shell: '',
         args: opts.args ?? [],
         workingDir: '',
         env: {},

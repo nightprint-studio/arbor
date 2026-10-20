@@ -168,7 +168,7 @@
       kind: 'item',
       id: 'offline',
       label: bennuMavenStore.offline ? 'Offline: on' : 'Offline: off',
-      subtitle: 'Adds -o to every goal run from this panel',
+      subtitle: 'Maven may not use the network — for these goals, the build before a run and the run. Same as Settings → Java',
       icon: WifiOff,
       onclick: () => bennuMavenStore.setOffline(!bennuMavenStore.offline),
     },

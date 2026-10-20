@@ -37,6 +37,7 @@ use serde_json::json;
 mod avatar;
 mod bisect;
 mod branch;
+mod change_markers;
 mod ci;
 mod corvus_config;
 mod deep_link;

@@ -30,7 +30,9 @@
 
   /** The `[maven]` section, with a complete default so a config written before it existed reads as
    *  "on, a day" rather than as a half-populated object. */
-  const mavenCfg = $derived<MavenConfigDto>(cfg?.maven ?? { central: true, metadata_ttl_hours: 24 });
+  const mavenCfg = $derived<MavenConfigDto>(
+    cfg?.maven ?? { central: true, metadata_ttl_hours: 24, advisories: false },
+  );
 
   async function commitThreads(field: 'validation_threads' | 'index_threads', raw: string) {
     const n = Math.max(0, Math.floor(Number(raw) || 0));
@@ -49,10 +51,10 @@
             onchange={(v) => s.setDefaultEncoding(v as SourceEncoding)} />
   </FormRow>
   <FormRow
-    label="Download missing dependencies"
-    description="Let the dependency resolve reach the network when a jar is not in ~/.m2 yet. On by default: types from a jar that was never downloaded read as unresolved, and the only other way out is to leave the editor and run a build. Off resolves from ~/.m2 alone — worth it on a metered connection, or behind a VPN that makes the corporate repository slow."
+    label="Allow Maven to use the network"
+    description="One switch for every place Bennu runs Maven: the dependency resolve, the build before a run, the run's classpath and the goals started from the Maven panel. Everything tries ~/.m2 first and reaches the network only for a jar that is not there (types from a jar never downloaded read as unresolved, and a run would die on a missing class). Off keeps all of it on ~/.m2 alone — worth it on a metered connection, or behind a VPN that makes the corporate repository slow. The Maven panel's Offline toggle flips this same setting."
   >
-    <Toggle checked={s.mavenAutoDownload} onchange={(v) => s.setMavenAutoDownload(v)} ariaLabel="Download missing dependencies" />
+    <Toggle checked={s.mavenAutoDownload} onchange={(v) => s.setMavenAutoDownload(v)} ariaLabel="Allow Maven to use the network" />
   </FormRow>
   <!-- The other thing on this side that reaches the network, and the only one that is about
        versions rather than about jars. Beside the download toggle because both answer "may Bennu
@@ -63,6 +65,16 @@
   >
     <Toggle checked={mavenCfg.central} onchange={(on) => void bennuConfigStore.patch({ maven: { ...mavenCfg, central: on } })}
             ariaLabel="Check Maven Central for newer versions" />
+  </FormRow>
+  <!-- Off by default and separate from the toggle above: that one fetches a public file and tells
+       nobody anything about the project, this one sends each dependency's coordinate and version to
+       a third party. They are different answers to "may Bennu talk to the network". -->
+  <FormRow
+    label="Check dependencies for known vulnerabilities"
+    description="Asks OSV.dev about the dependencies a pom pins and underlines the affected version as a warning, naming the CVE and the version that fixes it. This sends each dependency's group:artifact and version to api.osv.dev — nothing else about the project. Runs in the background and never blocks typing; answers are cached on disk for a day. Off by default."
+  >
+    <Toggle checked={mavenCfg.advisories} onchange={(on) => void bennuConfigStore.patch({ maven: { ...mavenCfg, advisories: on } })}
+            ariaLabel="Check dependencies for known vulnerabilities" />
   </FormRow>
   <FormRow label="Rebuild index on open" description="Re-scan symbols each time a project opens (slower open, fresher completion).">
     <Toggle checked={s.rebuildIndexOnOpen} onchange={(v) => s.setRebuildIndexOnOpen(v)} ariaLabel="Rebuild index on open" />

@@ -52,3 +52,36 @@ export interface PomVersionHint {
 export function pomVersionHints(file: string, source: string): Promise<PomVersionHint[]> {
   return bennu('bennu_maven_version_hints', { args: { file, source } });
 }
+
+/** One known vulnerability — mirrors the BE `Advisory`. */
+export interface Advisory {
+  /** OSV's id (`GHSA-…`). */
+  id: string;
+  /** The CVE alias, when there is one. */
+  cve: string | null;
+  summary: string;
+  /** `critical` | `high` | `moderate` | `low` | `unknown`. */
+  severity: string;
+  /** The nearest version above the current one that fixes it, when the record says. */
+  fixed: string | null;
+}
+
+/** A pinned dependency with at least one known vulnerability — mirrors the BE `PomAdvisory`. */
+export interface PomAdvisory {
+  coord: string;
+  line: number;
+  /** Byte span of the version **value** — where the warning is drawn. */
+  start: number;
+  end: number;
+  current: string;
+  advisories: Advisory[];
+}
+
+/** Which of a pom's pinned dependencies have known vulnerabilities (OSV.dev). Resolves to `[]` —
+ *  never rejects — when the switch is off, nothing is affected, or OSV cannot be reached.
+ *
+ *  Opt-in (`[maven] advisories`), cached for a day, bounded per request. Wire:
+ *  `bennu_maven_advisories` — `{ file, source }`. */
+export function pomAdvisories(file: string, source: string): Promise<PomAdvisory[]> {
+  return bennu('bennu_maven_advisories', { args: { file, source } });
+}

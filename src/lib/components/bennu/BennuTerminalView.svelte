@@ -15,8 +15,9 @@
    * The panel owns its header (title + "New terminal" + close) and renders the
    * session tab strip (when >1) above the terminal bodies.
    */
-  import { Plus, TerminalSquare } from 'lucide-svelte';
+  import { Plus, ChevronDown, TerminalSquare } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
+  import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
@@ -45,6 +46,21 @@
       creating = false;
     }
   }
+
+  /** The shells to choose from — the same list Corvus's terminal offers, because it is one store.
+   *  Before detection has run it is the built-in catalogue; the menu opening is what starts the
+   *  detection (once — `ensureDetected` joins an in-flight one), so the list sharpens without the
+   *  window paying for a probe nobody asked for. */
+  const shellItems = $derived<DropdownItem[]>(
+    terminalStore.pickerOptions().map((s) => ({
+      kind: 'item',
+      id: s.id,
+      label: s.name,
+      icon: TerminalSquare,
+      meta: s.custom ? 'custom' : undefined,
+      onclick: () => void openTerminal(s.id),
+    })),
+  );
 
   /** Close a terminal for good: the tab, the PTY, and the xterm session behind it. Ending the
    *  session is what an unmount must NOT do — see `session.ts`. */
@@ -75,6 +91,23 @@
       >
         <Plus size={13} />
       </button>
+      <Dropdown items={shellItems} position="fixed" direction="down" width="220px">
+        {#snippet trigger({ toggle, open })}
+          <button
+            class="ps-btn"
+            class:open
+            type="button"
+            use:tooltip={'Choose shell'}
+            aria-label="Choose shell"
+            aria-haspopup="menu"
+            aria-expanded={open}
+            disabled={creating}
+            onclick={() => { void terminalStore.ensureDetected(); toggle(); }}
+          >
+            <ChevronDown size={11} />
+          </button>
+        {/snippet}
+      </Dropdown>
     {/snippet}
   </BottomPanelHeader>
 

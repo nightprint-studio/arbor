@@ -129,6 +129,9 @@ pub struct BennuConfig {
     /// author and age are what is read at a glance, and a long subject next to the code is the
     /// part that turns a margin note into clutter). The full message is always in the hover.
     pub blame_show_message: bool,
+    /// Mark lines changed since HEAD in the editor gutter (`true` by default). Off, the editor never
+    /// asks Corvus for the diff — no repository is opened and no HEAD blob is read for it.
+    pub show_change_markers: bool,
     /// How long the DTO Lab's JVM may go without a question before it is stopped, in minutes. `10`
     /// by default. The JVM takes a second or two to start and holds a project's classes while it
     /// runs, so this trades the wait for the first answer after a pause against memory held idle.
@@ -439,11 +442,17 @@ pub struct MavenConfig {
     /// rather than as "always refetch" — that would be one request per dependency per pom open,
     /// which is exactly what the cache exists to prevent.
     pub metadata_ttl_hours: u32,
+    /// Whether Bennu may ask OSV.dev which of a pom's dependencies have known vulnerabilities.
+    ///
+    /// **`false` by default**, unlike [`Self::central`]: the version hints fetch a public file and
+    /// reveal nothing about the project, while this sends each dependency's `group:artifact` and
+    /// version to a third party. Cached for [`Self::metadata_ttl_hours`].
+    pub advisories: bool,
 }
 
 impl Default for MavenConfig {
     fn default() -> Self {
-        Self { central: true, metadata_ttl_hours: 24 }
+        Self { central: true, metadata_ttl_hours: 24, advisories: false }
     }
 }
 
@@ -640,6 +649,7 @@ impl Default for BennuConfig {
             markdown_live_preview: true,
             history_diff_split: true,
             blame_show_message: false,
+            show_change_markers: true,
             dtolab_idle_minutes: 10,
             // The names the settings page has always shown in this box. `target` and `.idea` are
             // already skipped by the walker's own rules; `build` (a Gradle output tree) is not,

@@ -79,6 +79,8 @@
   import SymbolKindIcon from './SymbolKindIcon.svelte';
   import { javaKindStore } from '$lib/stores/bennu/java-kinds.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { bennuGitStatusStore } from '$lib/stores/bennu/git-status.svelte';
+  import { GIT_BADGE_COLOR, GIT_BADGE_LABEL } from '$lib/utils/git-badge';
   import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
   import { discoverTests as ipcDiscoverTests } from '$lib/ipc/bennu/tests';
   import type { DiscoveredTest } from '$lib/types/bennu';
@@ -88,6 +90,10 @@
   import { emptyInvocation as emptyCargoInvocation } from '$lib/ipc/bennu/cargo';
   import { bennuHistoryStore } from '$lib/stores/bennu/history.svelte';
   import { bennuBlameStore } from '$lib/stores/bennu/blame.svelte';
+  import { bennuChangeMarkersStore } from '$lib/stores/bennu/change-markers.svelte';
+  import type { ChangeBlock } from '$lib/components/shared/ui/code-editor/change-gutter';
+  import BennuChangePopup from './BennuChangePopup.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { bennuGitHistoryStore } from '$lib/stores/bennu/git-history.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuI18nStore } from '$lib/stores/bennu/i18n.svelte';
@@ -126,7 +132,9 @@
     type NpmScript, type NpmVersionHint,
   } from '$lib/ipc/bennu/npm';
   import { isPackageManifest } from './package-json-lang';
-  import { isPomFile, pomVersionHints, type PomVersionHint } from '$lib/ipc/bennu/maven';
+  import {
+    isPomFile, pomVersionHints, pomAdvisories, type PomVersionHint, type PomAdvisory,
+  } from '$lib/ipc/bennu/maven';
   import BennuEnvVarModal from './BennuEnvVarModal.svelte';
   import BennuMacroExpandModal from './BennuMacroExpandModal.svelte';
   import { makeByteToU16, makeU16ToByte } from '$lib/components/shared/ui/code-editor';
@@ -194,6 +202,15 @@
     requestCompletion: () => boolean;
     getValue: () => string;
     getSelectionText: () => string;
+    selectionLines: () => { start: number; end: number; empty: boolean };
+    insertSnippetAtByte: (
+      startByte: number,
+      endByte: number,
+      text: string,
+      stops: readonly { start: number; end: number; group?: number }[],
+    ) => void;
+    replaceLines: (fromLine: number, toLine: number, text: string) => void;
+    changeBlocks: () => ChangeBlock[];
     openSearch: () => void;
     scrollToLineCol: (line: number, col?: number) => void;
     /** Which document the mounted view actually holds — see `nav-flow`'s `ready`. */
@@ -365,9 +382,14 @@
       // anything else as its file-type icon. A tab strip where every tab wore the identical
       // generic glyph was spending the space without answering anything with it.
       const java = p.toLowerCase().endsWith('.java');
+      // The same colour the project tree gives this file's name, so a changed file reads as
+      // changed in the strip too.
+      const gitBadge = bennuGitStatusStore.badgeFor(p, false);
+      const gitNote = gitBadge ? `  ·  ${GIT_BADGE_LABEL[gitBadge]}` : '';
       return {
         id: p,
         label: baseName(p),
+        labelColor: gitBadge ? GIT_BADGE_COLOR[gitBadge] : undefined,
         icon: java ? SymbolKindIcon : IconifyIconView,
         iconProps: java
           ? { kind: javaKindStore.kindOf(p) }
@@ -387,7 +409,7 @@
             : undefined,
         title: conflicted
           ? `${p}${from}  ·  changed on disk — autosave paused until you choose a version`
-          : `${p}${from}`,
+          : `${p}${from}${gitNote}`,
         badge: conflicted ? 'disk' : foreign ? (owningName(p) ?? 'ext') : undefined,
       };
     }),
@@ -1085,6 +1107,10 @@
   // "JSP not found" / "not a property of action" on a Struts config XML's `<result>` targets (live
   // buffer, debounced, re-run on index rebuild).
   let strutsDiags = $state<EditorDiagnostic[]>([]);
+  // Known vulnerabilities of a pom's pinned dependencies (OSV.dev) — the opt-in network check, so
+  // they arrive asynchronously, well after the synchronous pom diagnostics, and live apart from
+  // them. See the effect that fills it, below the pom version hints.
+  let advisoryDiags = $state<EditorDiagnostic[]>([]);
   // The last build's compiler errors/warnings for THIS file, placed in the buffer. Derived
   // rather than fetched: the run store already holds them, and re-deriving on every build
   // means a rebuild that fixes an error clears its mark without anyone clearing anything.
@@ -1116,7 +1142,7 @@
     'unresolved-super-method', 'unknown-member', 'unknown-field', 'unknown-enum-case-label',
   ]);
   const allDiags = $derived(
-    [...diags, ...buildDiags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags]
+    [...diags, ...buildDiags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags, ...advisoryDiags]
       .map((d) => (d.code && UNDEFINED_NAME_CODES.has(d.code) ? { ...d, emphasis: 'text' as const } : d)),
   );
 
@@ -1380,6 +1406,51 @@
         })
         .catch(() => {});
     }, 900);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  // ── Known vulnerabilities (pom.xml) ─────────────────────────────────────────────
+  //
+  // A warning on the version a pom pins when OSV.dev knows of a vulnerability in it, naming the CVE
+  // and the version that fixes it. Off by default (`[maven] advisories`): the backend answers `[]`
+  // until the user agrees to send coordinates to a third party, so asking here costs one cheap call.
+  //
+  // Asynchronous by construction — a request can take seconds on a cold cache — and therefore kept
+  // out of the pom's own diagnostics, which are synchronous and must not wait for the network. The
+  // previous answer stays drawn while the next one is fetched, and is dropped on leaving the file:
+  // a warning anchored to byte offsets of a buffer that is no longer there would land on whatever
+  // sits at them now.
+  function advisoryMessage(a: PomAdvisory): string {
+    const n = a.advisories.length;
+    const lines = a.advisories.slice(0, 4).map((v) => {
+      const tag = v.cve ?? v.id;
+      const sev = v.severity !== 'unknown' ? ` (${v.severity})` : '';
+      const fix = v.fixed ? ` — fixed in ${v.fixed}` : '';
+      return `${tag}${sev}${v.summary ? `: ${v.summary}` : ''}${fix}`;
+    });
+    const more = n > lines.length ? [`…and ${n - lines.length} more`] : [];
+    return [`${a.coord} ${a.current} has ${n} known ${n === 1 ? 'vulnerability' : 'vulnerabilities'}`,
+      ...lines, ...more].join('\n');
+  }
+  $effect(() => {
+    const path = activePath;
+    if (!path || !isPomFile(path)) { advisoryDiags = []; return; }
+    const src = projectStore.sourceOf(path);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void pomAdvisories(path, src)
+        .then((found) => {
+          if (cancelled || projectStore.activeFilePath !== path) return;
+          advisoryDiags = found.map((a) => ({
+            from: a.start,
+            to: a.end,
+            severity: 'warning' as const,
+            code: 'maven-vulnerable-dependency',
+            message: advisoryMessage(a),
+          }));
+        })
+        .catch(() => {});
+    }, 1200);
     return () => { cancelled = true; clearTimeout(t); };
   });
 
@@ -2231,6 +2302,50 @@
     if (reason) toastStore.show('No Git Blame for this file: ' + reason, 'info');
   });
 
+  // Change gutter: lines that differ from HEAD. The diff is asked of Corvus a moment after typing
+  // stops, and not at all when the setting is off or the project is not in a repository. The git
+  // status summary is read so a commit or checkout elsewhere re-diffs against the new HEAD.
+  $effect(() => {
+    void bennuGitStatusStore.summary;
+    bennuChangeMarkersStore.request(activePath, activePath ? projectStore.sourceOf(activePath) : '');
+  });
+  const changeHunks = $derived(bennuChangeMarkersStore.hunksFor(activePath));
+
+  let changePopup = $state<{ block: ChangeBlock; x: number; y: number } | null>(null);
+  /** What the block's lines say now — the right-hand side of the popup's diff. */
+  const changePopupNewText = $derived.by(() => {
+    const p = changePopup;
+    if (!p || p.block.hunk.kind === 'removed') return '';
+    return (activePath ? projectStore.sourceOf(activePath) : '').split('\n').slice(p.block.fromLine - 1, p.block.toLine).join('\n');
+  });
+
+  function openChangePopup(block: ChangeBlock, event: MouseEvent) {
+    changePopup = { block, x: event.clientX, y: event.clientY };
+  }
+
+  /** Put the block back as HEAD has it. For an added block that means removing its lines. */
+  function revertChangeBlock() {
+    const p = changePopup;
+    if (!p) return;
+    const { hunk, fromLine, toLine } = p.block;
+    if (hunk.kind === 'removed') editorComp?.replaceLines(fromLine, fromLine - 1, hunk.old_text);
+    else editorComp?.replaceLines(fromLine, toLine, hunk.old_text);
+    changePopup = null;
+  }
+
+  /** Jump to the change after (`+1`) or before (`-1`) the caret line, wrapping round. Also what the
+   *  popup's arrows do, and what the palette's Next / Previous change call. */
+  export function gotoChange(direction: 1 | -1, fromLine?: number) {
+    const blocks = editorComp?.changeBlocks() ?? [];
+    if (blocks.length === 0) return;
+    const here = fromLine ?? caretLine;
+    const ahead = direction === 1
+      ? blocks.find((b) => b.fromLine > here) ?? blocks[0]
+      : [...blocks].reverse().find((b) => b.fromLine < here) ?? blocks[blocks.length - 1];
+    editorComp?.scrollToLineCol(ahead.fromLine, 1);
+    if (changePopup) changePopup = { block: ahead, x: changePopup.x, y: changePopup.y };
+  }
+
   const allGutterMarks = $derived([
     ...runGutterMarks,
     // A test's arrow after an entry point's, on the rare line that is both — pressing ▶ on a
@@ -2359,6 +2474,14 @@
       if (t) openDefinitionFile(t.file, t.offset);
     });
   }
+
+  const decompiledCtx = $derived(decompiledStore.ctx(activePath));
+  // Declared before its first reader below (the breakpoint block); a derived is lazy, but the
+  // declaration order is what the type-checker and a future eager read both go by.
+  const isDecompiledView = $derived(
+    !!decompiledCtx ||
+      ((activePath?.includes('/decompiled/') ?? false) && projectStore.isForeign(activePath ?? '')),
+  );
 
   // ── Breakpoints (the flag gutter) ─────────────────────────────────────────────
 
@@ -3977,15 +4100,10 @@
   /** The current tab's decompiled-view context (present only for a JDK/library source view), and
    *  whether it's a read-only decompiled path (by the data-dir `/decompiled/` segment — robust for
    *  restored tabs too). */
-  const decompiledCtx = $derived(decompiledStore.ctx(activePath));
   /** A built-in code template, written out to be read: compiled into Bennu, so nothing typed here could be kept. */
   const isBuiltinTemplate = $derived(isBuiltinTemplatePath(activePath));
   // A decompiled view lives in the data dir (never under a project root → always "foreign"); the
   // `isForeign` guard means a real project package literally named `decompiled` isn't made read-only.
-  const isDecompiledView = $derived(
-    !!decompiledCtx ||
-      ((activePath?.includes('/decompiled/') ?? false) && projectStore.isForeign(activePath ?? '')),
-  );
 
   /** Fetch the dependency's real sources for the current decompiled tab (a tracked backend job). On
    *  success the backend emits `sources-ready`, which reloads the tab with the real source. */
@@ -4882,6 +5000,8 @@
           lineHighlights={editorLineHighlights}
           gutterMarks={allGutterMarks}
           lineAnnotations={blameAnnotations}
+          changeHunks={changeHunks}
+          onChangeBlockClick={openChangePopup}
           onGutterClick={onGutterClick}
           onGutterContext={onGutterClick}
           flagMarks={canBreak ? breakpointMarks : undefined}
@@ -4916,6 +5036,7 @@
           oncaret={onCaret}
           onViewState={(s, key) => { if (key) viewStates.set(key, s); }}
           onGoto={onEditorGoto}
+          onFindInFiles={(q) => bennuUiStore.openFind(q)}
           onLensPress={(key) => void onLensPress(key)}
         />
       {/key}
@@ -4982,6 +5103,20 @@
       <span class="ed-foot-sep">·</span>
       <span class="ed-enc" use:tooltip={'File encoding'}>{projectStore.activeEncoding}</span>
     </div>
+  {/if}
+
+  {#if changePopup}
+    <BennuChangePopup
+      block={changePopup.block}
+      newText={changePopupNewText}
+      x={changePopup.x}
+      y={changePopup.y}
+      onRevert={revertChangeBlock}
+      onCopyOld={() => void copyToClipboard(changePopup?.block.hunk.old_text ?? '')}
+      onPrev={() => gotoChange(-1, changePopup?.block.fromLine)}
+      onNext={() => gotoChange(1, changePopup?.block.fromLine)}
+      onClose={() => (changePopup = null)}
+    />
   {/if}
 
   {#if gotoOpen}

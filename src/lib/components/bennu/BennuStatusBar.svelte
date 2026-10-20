@@ -19,7 +19,7 @@
    * a real button.
    */
   import {
-    AlertTriangle, Coffee, Boxes, Database, FileType, Package, ServerCog, ServerCrash,
+    AlertTriangle, Coffee, Boxes, Database, FileType, GitBranch, Package, ServerCog, ServerCrash,
   } from 'lucide-svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import StatusBarItem from '$lib/components/shared/ui/StatusBarItem.svelte';
@@ -31,6 +31,9 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { javaLevelStore } from '$lib/stores/bennu/java-level.svelte';
   import { fileOwnerStore } from '$lib/stores/bennu/file-owner.svelte';
+  import { bennuGitStatusStore } from '$lib/stores/bennu/git-status.svelte';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import { fsOpenInArbor } from '$lib/ipc/fs';
   import type { Snippet } from 'svelte';
 
   let { footerExtra }: { footerExtra?: Snippet } = $props();
@@ -85,6 +88,24 @@
   };
 
   const openLanguageSettings = () => bennuUiStore.openSettings('languages');
+
+  const git = $derived(bennuGitStatusStore.summary);
+  const gitTooltip = $derived.by(() => {
+    if (!git) return '';
+    const parts = [
+      git.staged && `${git.staged} staged`,
+      git.unstaged && `${git.unstaged} modified`,
+      git.untracked && `${git.untracked} untracked`,
+      git.conflicted && `${git.conflicted} in conflict`,
+    ].filter(Boolean);
+    const upstream = git.ahead || git.behind ? ` · ${git.ahead} ahead, ${git.behind} behind` : '';
+    return `${parts.length ? parts.join(' · ') : 'Working tree clean'}${upstream} — click to open in Corvus`;
+  });
+
+  function openInCorvus() {
+    const root = projectStore.project?.root;
+    if (root) void fsOpenInArbor(root).catch((e) => toastStore.show(String(e), 'error'));
+  }
 </script>
 
 <div class="bf">
@@ -125,6 +146,21 @@
       <StatusBarSeparator />
       <StatusBarItem tooltip={`${capCount} domain capabilit${capCount === 1 ? 'y' : 'ies'} detected`}>
         <Boxes size={12} /> {capCount} capabilit{capCount === 1 ? 'y' : 'ies'}
+      </StatusBarItem>
+    {/if}
+
+    <!-- Read-only: the branch is switched in Corvus, and a click on the reading goes there. -->
+    {#if git}
+      <StatusBarSeparator />
+      <StatusBarItem
+        tone={git.conflicted > 0 ? 'warning' : undefined}
+        tooltip={gitTooltip}
+        onclick={openInCorvus}
+      >
+        <GitBranch size={12} />
+        {git.branch ?? (git.detached ? 'detached HEAD' : 'no commits')}
+        {#if git.ahead > 0}<span class="bf-sub">↑{git.ahead}</span>{/if}
+        {#if git.behind > 0}<span class="bf-sub">↓{git.behind}</span>{/if}
       </StatusBarItem>
     {/if}
   {:else}

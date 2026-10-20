@@ -36,7 +36,9 @@ use tree_sitter::Node;
 
 use crate::support::nodes::simple_name;
 use crate::support::resolve::written_type_binary;
-use crate::support::switch_label::{is_pattern_selector, label_is_default, label_is_pattern, labels_of};
+use crate::support::switch_label::{
+    is_pattern_selector, label_is_default, label_is_pattern, labels_of, LEGACY_REFERENCE_SELECTORS,
+};
 use crate::support::walk::{hierarchy_fully_known, reaches};
 
 const OBJECT: &str = "java/lang/Object";
@@ -63,9 +65,65 @@ pub fn enum_switch_errors_in(
         if n.kind() == "switch_expression" && !n.has_error() {
             check_switch(n, &root, source, bytes, symbols, resolver, cache, &mut out);
             check_pattern_switch(n, &root, source, bytes, symbols, resolver, cache, &mut out);
+            check_scalar_switch(n, &root, source, bytes, symbols, resolver, cache, &mut out);
         }
     }
     out
+}
+
+/// A switch **expression** over a `String` or an integral box whose labels are *names* and which has
+/// no `default`. Nothing but a `default` can make such a switch exhaustive — a `String` or an
+/// `Integer` has no finite set of values to enumerate — so it is an error whatever the labels are.
+///
+/// Labels that are all literals are `constant_switch_exhaustiveness_nodes`' (it needs no selector
+/// type), so this takes only a switch with at least one name label: that is the shape of a numeric
+/// switch whose labels were turned into enum constants, where the label type check (see
+/// `switch_label_type`) reports the labels and this one reports the missing `default`.
+#[allow(clippy::too_many_arguments)]
+fn check_scalar_switch(
+    switch: Node,
+    root: &Node,
+    source: &str,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &InferCache,
+    out: &mut Vec<Diagnostic>,
+) {
+    let Some(cond) = switch.child_by_field_name("condition") else { return };
+    let Some(body) = switch.child_by_field_name("body") else { return };
+    let labels = labels_of(body);
+    if labels.is_empty()
+        || labels.iter().any(|l| label_is_default(*l, bytes) || label_is_pattern(*l))
+    {
+        return;
+    }
+    let names_something = labels.iter().any(|l| {
+        let mut c = l.walk();
+        let found = l.named_children(&mut c).any(|ch| matches!(ch.kind(), "identifier" | "field_access"));
+        found
+    });
+    let has_null = labels.iter().any(|l| {
+        let mut c = l.walk();
+        let found = l.named_children(&mut c).any(|ch| ch.kind() == "null_literal");
+        found
+    });
+    let expression = crate::switching::switches::is_value_context(switch);
+    if !names_something || (!expression && !has_null) {
+        return;
+    }
+    let Some(sel) = infer_node_type_cached(root, source, symbols, &cond, resolver, cache) else { return };
+    if sel.dims > 0 || !LEGACY_REFERENCE_SELECTORS.contains(&sel.binary_name.as_str()) {
+        return;
+    }
+    let what = if expression { "Switch expression" } else { "A switch with a `case null` label" };
+    out.push(crate::engine::check_id::CheckId::NonExhaustiveEnumSwitch.at(
+        switch,
+        format!(
+            "{what} over `{}` does not cover every value — add a `default`",
+            written_name(&sel.binary_name)
+        ),
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -102,17 +160,24 @@ fn check_switch(
         return;
     }
 
-    // GUARD 2 — the selector type must fully resolve. `infer_node_type_cached` returns `None` when it
-    // can't type the selector expression → we can't know it's an enum → skip.
-    let Some(sel_ty) = infer_node_type_cached(root, source, symbols, &cond, resolver, cache) else {
+    // GUARD 2 — the selector type must resolve. `infer_node_type_cached` returns `None` when it can't
+    // type the selector expression (a call on a library class that is not on the classpath, say).
+    // That used to end the check, and a switch over a method of a jar that had not been downloaded
+    // was the one compile error nothing reported — the very state in which the jar is missing. The
+    // labels can still say which enum it is, when they are written `Type.CONSTANT`: see
+    // [`enum_from_labels`].
+    let inferred = infer_node_type_cached(root, source, symbols, &cond, resolver, cache)
+        .filter(|t| !t.binary_name.is_empty());
+    let from_selector = inferred.and_then(|t| {
+        let members = resolver.members_of(&t.binary_name)?;
+        Some((t.binary_name, members))
+    });
+    let Some((enum_binary, members)) =
+        from_selector.or_else(|| enum_from_labels(&labels, bytes, symbols, resolver))
+    else {
         return;
     };
-    if sel_ty.binary_name.is_empty() {
-        return;
-    }
-    // GUARD 3 — the resolved type must be a KNOWN enum. `members_of` = None (unknown type) or a type
-    // whose `flags.is_enum` is false → skip.
-    let Some(members) = resolver.members_of(&sel_ty.binary_name) else { return };
+    // GUARD 3 — the resolved type must be a KNOWN enum. A type whose `flags.is_enum` is false → skip.
     if !members.flags.is_enum {
         return;
     }
@@ -120,7 +185,7 @@ fn check_switch(
     // GUARD 4 — the constants must be COMPLETELY enumerable. An empty set means our view of the enum's
     // members is incomplete (every enum has ≥1 constant), and a partial list would invent a false
     // "missing case", so we bail.
-    let constants = enum_constants(&members, &sel_ty.binary_name);
+    let constants = enum_constants(&members, &enum_binary);
     if constants.is_empty() {
         return;
     }
@@ -164,6 +229,47 @@ fn check_switch(
             missing.join(", ")
         ),
     ));
+}
+
+/// The enum a switch is over, read from its **labels** when the selector's type is unknown.
+///
+/// Only when every label (other than `case null` and `default`) is qualified — `Type.CONSTANT` — and
+/// all of them name the same type, which resolves to an enum. Bare `CONSTANT` labels say nothing about
+/// which enum they belong to without the selector, so those stay silent.
+///
+/// Sound because of what a switch expression with no `default` and no patterns can be exhaustive
+/// over: its labels are constants of one enum, so it covers that enum only by naming every constant
+/// of it — whatever the selector's type is (the enum itself, or an interface it implements). A
+/// constant left out is therefore an error for every possible selector, which is what lets this
+/// report without knowing it.
+fn enum_from_labels(
+    labels: &[Node],
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<(String, std::sync::Arc<ClassMembers>)> {
+    let mut found: Option<String> = None;
+    for label in labels {
+        let mut c = label.walk();
+        let parts: Vec<Node> = label.named_children(&mut c).collect();
+        // `case null` and `default` name no constant.
+        if label_is_default(*label, bytes) || parts.iter().all(|p| p.kind() == "null_literal") {
+            continue;
+        }
+        let [only] = parts.as_slice() else { return None };
+        if only.kind() != "field_access" {
+            return None;
+        }
+        let qualifier = only.child_by_field_name("object")?;
+        let binary = written_type_binary(qualifier, bytes, symbols, resolver)?;
+        match &found {
+            Some(prev) if *prev != binary => return None,
+            _ => found = Some(binary),
+        }
+    }
+    let binary = found?;
+    let members = resolver.members_of(&binary)?;
+    Some((binary, members))
 }
 
 /// A switch over a type only a pattern switch accepts — `Object`, an interface, a class that is not
@@ -603,6 +709,90 @@ mod tests {
             &InferCache::new(),
         );
         assert!(out.is_empty(), "{out:?}");
+    }
+
+    /// Run the check over `class C { … }` text as written, for a selector inference cannot type.
+    fn diags_in(src: &str) -> Vec<String> {
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_java::LANGUAGE.into()).unwrap();
+        let tree = parser.parse(src, None).unwrap();
+        let root = tree.root_node();
+        let nodes = crate::engine::check::collect_nodes(root);
+        let symbols = extract_symbols(src);
+        enum_switch_errors_in(root, &nodes, src, &symbols, &resolver(), &InferCache::new())
+            .into_iter()
+            .map(|d| d.message)
+            .collect()
+    }
+
+    /// **The selector is a call on a class that is not on the classpath** — a jar that was never
+    /// downloaded — but the labels are qualified, so they say which enum it is. A constant left out
+    /// is an error whatever the selector's type is, so it is reported.
+    #[test]
+    fn an_untypable_selector_is_read_from_qualified_labels() {
+        let d = diags_in(
+            "class C { int m(Missing x) { return switch (x.mode()) { case null -> 0; \
+             case Color.RED -> 1; case Color.GREEN -> 2; }; } }",
+        );
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("missing: BLUE"), "{d:?}");
+    }
+
+    #[test]
+    fn an_untypable_selector_covering_every_constant_is_silent() {
+        let d = diags_in(
+            "class C { int m(Missing x) { return switch (x.mode()) { \
+             case Color.RED -> 1; case Color.GREEN -> 2; case Color.BLUE -> 3; }; } }",
+        );
+        assert!(d.is_empty(), "{d:?}");
+        // A `default` is the other way to be exhaustive.
+        let d = diags_in(
+            "class C { int m(Missing x) { return switch (x.mode()) { case Color.RED -> 1; default -> 0; }; } }",
+        );
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    /// Bare labels name no enum on their own, and labels from two enums name no single one — in both
+    /// cases the reading would be a guess, so there is none.
+    #[test]
+    fn labels_that_do_not_name_one_enum_are_left_alone() {
+        let bare = diags_in("class C { int m(Missing x) { return switch (x.mode()) { case RED -> 1; }; } }");
+        assert!(bare.is_empty(), "{bare:?}");
+        let mixed = diags_in(
+            "class C { int m(Missing x) { return switch (x.mode()) { case Color.RED -> 1; case Widget.W -> 2; }; } }",
+        );
+        assert!(mixed.is_empty(), "{mixed:?}");
+    }
+
+    /// A switch expression over an `Integer` with name labels and no `default` can never be
+    /// exhaustive. `Holder` types the selector as `Integer` so inference can read it.
+    fn scalar_diags(body: &str) -> Vec<String> {
+        let mut r = resolver();
+        r.members.insert("java/lang/Integer".to_string(), plain_cls());
+        r.simple.insert("Integer".to_string(), "java/lang/Integer".to_string());
+        let src = format!("class C {{ Integer i; int m() {{ {body} }} }}");
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_java::LANGUAGE.into()).unwrap();
+        let tree = parser.parse(&src, None).unwrap();
+        let root = tree.root_node();
+        let nodes = crate::engine::check::collect_nodes(root);
+        let symbols = extract_symbols(&src);
+        enum_switch_errors_in(root, &nodes, &src, &symbols, &r, &InferCache::new())
+            .into_iter()
+            .map(|d| d.message)
+            .collect()
+    }
+
+    #[test]
+    fn an_integer_switch_expression_with_name_labels_needs_a_default() {
+        let d = scalar_diags("return switch (i) { case null -> 0; case Color.RED -> 1; };");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("over `Integer`") && d[0].contains("add a `default`"), "{d:?}");
+        // With a default it is exhaustive; with only literals it is `switches.rs`'s, not this.
+        assert!(scalar_diags("return switch (i) { case Color.RED -> 1; default -> 0; };").is_empty());
+        assert!(scalar_diags("return switch (i) { case 1 -> 1; case 2 -> 2; };").is_empty());
+        // A statement switch is legal without one.
+        assert!(scalar_diags("switch (i) { case Color.RED -> {} } return 0;").is_empty());
     }
 
     #[test]

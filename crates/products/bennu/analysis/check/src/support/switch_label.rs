@@ -19,7 +19,7 @@ use crate::support::assignable::{names_a_declared_object, spells_its_type};
 
 /// The reference selectors a `switch` took before patterns (JLS §14.11: `String` and the boxes of
 /// `char`, `byte`, `short`, `int`). An enum is the other one, told by its flags.
-const LEGACY_REFERENCE_SELECTORS: [&str; 5] =
+pub(crate) const LEGACY_REFERENCE_SELECTORS: [&str; 5] =
     ["java/lang/String", "java/lang/Integer", "java/lang/Short", "java/lang/Byte", "java/lang/Character"];
 
 /// The boxes Java 21 still refuses as selectors and a later release reads through primitive patterns

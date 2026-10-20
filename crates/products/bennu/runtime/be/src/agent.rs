@@ -3685,6 +3685,7 @@ mod next_steps_tests {
             progress: String::new(),
             features: Vec::new(),
             log_tail: Vec::new(),
+            pid: None,
         }
     }
 

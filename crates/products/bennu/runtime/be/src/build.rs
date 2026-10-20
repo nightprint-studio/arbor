@@ -71,7 +71,9 @@ use std::time::Duration;
 
 use arbor_ipc::prelude::EventSink;
 use arbor_process_ext::prelude::NoWindowExt;
-use bennu_classpath::prelude::{find_jdk_home, resolve_maven_classpath, MavenResolveOpts};
+use bennu_classpath::prelude::{
+    find_jdk_home, resolve_maven_classpath, MavenClasspath, MavenResolveOpts,
+};
 use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::{BuildDiagnostic, BuildResult, RunHandle};
 use serde::Deserialize;
@@ -711,18 +713,63 @@ fn run_cargo_check(root: &Path, package: Option<&str>) -> Result<(bool, String),
     Ok((out.status.success(), merge_output(&out.stdout, &out.stderr)))
 }
 
+/// What an offline Maven says when the artifact IS on disk but was recorded as fetched from another
+/// repository id — the enhanced local repository manager's `_remote.repositories` check. Typical of
+/// a private snapshot registry, and of a `~/.m2` another tool (IntelliJ's bundled Maven, a different
+/// `settings.xml`) filled.
+fn offline_refused_known_jar(log: &str) -> bool {
+    log.contains("has not been downloaded from it before")
+}
+
+/// Whether the failure is Maven being **offline** and missing something — the cases where going
+/// online can help, as opposed to a compile error or a broken pom.
+fn offline_was_the_problem(log: &str) -> bool {
+    offline_refused_known_jar(log)
+        || log.contains("in offline mode")
+        || (log.contains("Could not resolve dependencies") && log.contains("offline"))
+}
+
+/// `mvn compile`, escalating only as far as the failure demands.
+///
+///   1. **Offline** (`-o`): the fast path, and the one that never touches the network.
+///   2. **Offline, ignoring where each jar was fetched from** (`IGNORE_REPO_ORIGIN_ARG`, which turns off the enhanced local repository
+///      manager) — when Maven refuses a jar it *has*. Still no network; this is what lets a project
+///      whose `~/.m2` was filled by IntelliJ build here, where before it failed with a message about
+///      a download that was never needed.
+///   3. **Online**, when `maven_auto_download` allows it and Maven is still short of something — the
+///      same switch the editor's own resolve obeys.
 fn run_mvn_compile(
     root: &Path,
     module: Option<&str>,
     mvn_path: &str,
     java_home: Option<&Path>,
 ) -> Result<(bool, String), String> {
+    let (ok, log) = mvn_compile_once(root, module, mvn_path, java_home, &["-o"])?;
+    if ok || !offline_was_the_problem(&log) {
+        return Ok((ok, log));
+    }
+    if offline_refused_known_jar(&log) {
+        let (ok, retry) = mvn_compile_once(root, module, mvn_path, java_home, &["-o", bennu_classpath::prelude::IGNORE_REPO_ORIGIN_ARG])?;
+        if ok || !offline_was_the_problem(&retry) {
+            return Ok((ok, retry));
+        }
+    }
+    if crate::dep_classpath::auto_download() {
+        return mvn_compile_once(root, module, mvn_path, java_home, &[]);
+    }
+    Ok((false, log))
+}
+
+fn mvn_compile_once(
+    root: &Path,
+    module: Option<&str>,
+    mvn_path: &str,
+    java_home: Option<&Path>,
+    flags: &[&str],
+) -> Result<(bool, String), String> {
     let mut cmd = Command::new(mvn_path);
-    cmd.current_dir(root)
-        .arg("-q")
-        .arg("compile")
-        .arg("--batch-mode")
-        .arg("-o"); // offline: resolve only from the local ~/.m2 cache
+    cmd.current_dir(root).arg("-q").arg("compile").arg("--batch-mode");
+    cmd.args(flags);
     // Scope the reactor when we know which module is about to run. `mvn compile` at the root
     // of a large reactor costs tens of seconds with NOTHING to do — Maven still scans every
     // pom, resolves every module's plugins and runs each one's up-to-date checks. `-pl` cuts
@@ -1074,23 +1121,69 @@ fn resolve_run_deps(
 
     let in_reactor =
         !rel.is_empty() && root.join("pom.xml").is_file() && modules.iter().any(|m| m.rel == rel);
-    let resolved = if in_reactor {
-        opts.reactor_module = Some(rel.to_string());
-        resolve_maven_classpath(root, &opts).or_else(|reactor_err| {
-            opts.reactor_module = None;
-            resolve_maven_classpath(&dir, &opts).map_err(|_| reactor_err)
-        })
-    } else {
-        resolve_maven_classpath(&dir, &opts)
-    }
-    .map_err(|e| format!("Could not resolve the run classpath of {label}: {e}"))?;
-
-    let deps = RunDeps {
+    let resolve = |opts: &mut MavenResolveOpts| {
+        if in_reactor {
+            opts.reactor_module = Some(rel.to_string());
+            resolve_maven_classpath(root, opts).or_else(|reactor_err| {
+                opts.reactor_module = None;
+                resolve_maven_classpath(&dir, opts).map_err(|_| reactor_err)
+            })
+        } else {
+            resolve_maven_classpath(&dir, opts)
+        }
+    };
+    let to_deps = |resolved: MavenClasspath| RunDeps {
         entries: resolved.entries,
         // A directory is not a missing jar: it is a sibling's classes, already in `entries`.
         missing: resolved.unresolved.into_iter().filter(|p| !p.is_dir()).collect(),
         mvn_ok: resolved.mvn_ok,
     };
+
+    // Offline first: it is the fast path and the common one. A jar it cannot find — or a resolve it
+    // cannot finish — is not the end of the launch when the user has allowed downloads
+    // (`maven_auto_download`, the same switch the editor's own resolve obeys): the launch goes
+    // online once, which fetches what is missing into `~/.m2`, instead of starting a JVM that dies
+    // on a `NoClassDefFoundError` with the remedy in a warning above it. Before this the run was
+    // the one place that ignored the switch, so a project the editor had happily resolved could
+    // still refuse to start.
+    let incomplete_of = |r: &Result<MavenClasspath, String>| match r {
+        Ok(r) => !r.mvn_ok || r.unresolved.iter().any(|p| !p.is_dir()),
+        Err(_) => true,
+    };
+    let mut first = resolve(&mut opts);
+    // Still offline, but no longer strict about which repository id a jar came from: a `~/.m2` that
+    // IntelliJ (or another `settings.xml`) filled holds jars strict Maven refuses to use offline
+    // ("has not been downloaded from it before"). Costs nothing when the strict answer was complete,
+    // and avoids the network when it was not.
+    if incomplete_of(&first) {
+        opts.ignore_repo_origin = true;
+        let lenient = resolve(&mut opts);
+        if !incomplete_of(&lenient) || first.is_err() && lenient.is_ok() {
+            first = lenient;
+        }
+        opts.ignore_repo_origin = false;
+    }
+    let incomplete = incomplete_of(&first);
+    let resolved = if incomplete && crate::dep_classpath::auto_download() {
+        if let Some(sink) = sink {
+            sink.progress(
+                &format!("Downloading the dependencies {label} is missing (mvn dependency:build-classpath)"),
+                None,
+                None,
+            );
+        }
+        opts.offline = false;
+        match resolve(&mut opts) {
+            Ok(online) => Ok(online),
+            // The online attempt failing says less than the offline one if that produced anything.
+            Err(online_err) => first.map_err(|_| online_err),
+        }
+    } else {
+        first
+    }
+    .map_err(|e| format!("Could not resolve the run classpath of {label}: {e}"))?;
+
+    let deps = to_deps(resolved);
     // Only a complete answer is kept. An incomplete one is asked again next launch — the missing jar
     // may be downloaded by then — rather than served until the pom is next edited.
     if deps.mvn_ok && deps.missing.is_empty() {

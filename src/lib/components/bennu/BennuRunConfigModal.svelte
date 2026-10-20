@@ -31,8 +31,9 @@
    */
   import {
     Play, Plus, Copy, Trash2, SlidersHorizontal, CircleDot, Circle, X, Search, ChevronDown,
-    Layers, Leaf,
+    Layers, Leaf, Rocket, Bug,
   } from 'lucide-svelte';
+  import FormSection from '$lib/components/shared/ui/FormSection.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
@@ -726,6 +727,16 @@
             </FormField>
           {/if}
 
+          <!-- Folded away unless something is in it: the form's job on opening is to show the
+               fields every launch needs, and the rest are one click off. The summary on a folded
+               header says what is inside, so "is anything set here?" needs no unfolding. -->
+          <FormSection
+            label="Launch arguments"
+            collapsible
+            open={!!(selected.programArgs.trim() || selected.vmArgs.trim() || selected.workingDir.trim())}
+            summary={[selected.vmArgs.trim(), selected.programArgs.trim()].filter(Boolean).join(' ') || 'none'}
+          >
+            {#snippet icon()}<Rocket size={12} />{/snippet}
           <FormField label="Program arguments" hint="Passed to the program after the main class.">
             <Input
               value={selected.programArgs}
@@ -750,6 +761,15 @@
             />
           </FormField>
 
+          </FormSection>
+
+          <FormSection
+            label="Classpath & debugger"
+            collapsible
+            open={selected.classpathScope !== 'runtime' || selected.debugSuspend}
+            summary={`${selected.classpathScope || 'every scope'}${selected.debugSuspend ? ' · suspend on debug' : ''}`}
+          >
+            {#snippet icon()}<Bug size={12} />{/snippet}
           <!-- `runtime` is what `mvn spring-boot:run` and a packaged application see, and it is
                the default because the alternative is a launch that quietly differs from
                production. The other choices exist because the exceptions are real — a launcher
@@ -786,7 +806,9 @@
             </label>
           </FormField>
 
-          <BennuRunEnvField env={selected.env} onchange={(next) => patch({ env: next })} />
+          </FormSection>
+
+          <BennuRunEnvField config={selected} {patch} root={project?.root ?? ''} />
           {/if}
 
           {#if cmdPreview}

@@ -20,6 +20,7 @@
    */
   import BennuBuildProblemsPanel from './BennuBuildProblemsPanel.svelte';
   import BennuRunPanel from './BennuRunPanel.svelte';
+  import BennuChangesPanel from './BennuChangesPanel.svelte';
   import BennuTerminalView from './BennuTerminalView.svelte';
   import BennuTodoPanel from './BennuTodoPanel.svelte';
   import BennuHierarchyPanel from './BennuHierarchyPanel.svelte';
@@ -68,6 +69,12 @@
   {#if active === 'plugin-logs'}
     <div class="dock-section">
       <PluginLogsPanel onClose={() => bennuUiStore.toggleBottom('plugin-logs')} />
+    </div>
+  {/if}
+  <!-- Mounted only while shown: the status is re-read on open, so nothing is lost. -->
+  {#if active === 'changes'}
+    <div class="dock-section">
+      <BennuChangesPanel />
     </div>
   {/if}
   {#if active === 'forms'}

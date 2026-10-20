@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { platform, sitta } from './rpc';
+import { getRepoRoot } from './corvus/treeStatus';
 
 /**
  * Bytes → base64, in chunks.
@@ -255,15 +256,11 @@ export const fsGitUnstage = (paths: string[]) => sitta<void>('fs_git_unstage', {
 export const fsGitDiscard = (paths: string[]) => sitta<void>('fs_git_discard', { paths });
 /** Append paths to the repo's `.gitignore` (anchored, folders get a trailing slash). */
 export const fsGitIgnore  = (paths: string[]) => sitta<void>('fs_git_ignore',  { paths });
-/** Resolve the repo root enclosing `path` (libgit2, via sitta-be). `null` when
- *  `path` isn't inside a git repository. */
-export const fsRepoRoot = (path: string) => sitta<string | null>('fs_repo_root', { path });
-
-/** Resolve the repo containing `path` (via sitta-be), then bring the main Arbor
+/** Resolve the repo containing `path` (via corvus-be), then bring the main Arbor
  *  window forward to open it (delegating the heavy git operations — diff / log /
  *  blame — to Arbor's UI). Rejects when `path` isn't inside a git repository. */
 export async function fsOpenInArbor(path: string): Promise<void> {
-  const root = await fsRepoRoot(path);
+  const root = await getRepoRoot(path);
   if (!root) throw new Error('not inside a git repository');
   return invoke<void>('fs_open_in_arbor', { repoRoot: root });
 }

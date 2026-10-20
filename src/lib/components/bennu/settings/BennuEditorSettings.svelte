@@ -88,7 +88,10 @@
   <FormRow label="Commit message in Git Blame" description="Add the commit's subject to the author and age drawn after a line when Git Blame is on. Off by default — the message is always in the hover.">
     <Toggle checked={s.blameShowMessage} onchange={(v) => s.setBlameShowMessage(v)} ariaLabel="Commit message in Git Blame" />
   </FormRow>
-  <FormRow label="Word wrap" description="Wrap long lines to the viewport instead of scrolling horizontally.">
+  <FormRow label="Change markers in the gutter" description="Mark the lines you added, changed or removed since the last commit with a coloured bar beside the line numbers; click one to see the old text, copy it or revert the block. The diff is asked of Corvus a moment after you stop typing — turn this off and the editor makes no such calls at all.">
+    <Toggle checked={s.showChangeMarkers} onchange={(v) => s.setShowChangeMarkers(v)} ariaLabel="Change markers in the gutter" />
+  </FormRow>
+  <FormRow label="Word wrap"description="Wrap long lines to the viewport instead of scrolling horizontally.">
     <Toggle checked={s.wordWrap} onchange={(v) => s.setWordWrap(v)} ariaLabel="Word wrap" />
   </FormRow>
   <FormRow label="Show whitespace" description="Render dots and arrows for spaces and tabs.">
