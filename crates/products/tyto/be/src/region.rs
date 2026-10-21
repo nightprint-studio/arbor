@@ -1,5 +1,6 @@
 //! `region` domain — resolve a CSS-pixel drag on a monitor into the physical-pixel
-//! crop rectangle, using the monitor's real DPI scale (Win32). The crop rect is
+//! crop rectangle, using the monitor's real DPI scale (Win32 on Windows, CoreGraphics
+//! on macOS — see `capture::source::monitor_rect`). The crop rect is
 //! **display-local** (0-based within the captured monitor), which is what the scap
 //! region producer crops against.
 
@@ -35,7 +36,7 @@ pub struct RegionSelection {
 /// the captured display at exactly this rect, so no virtual-desktop origin is added.
 #[arbor_rpc::handler]
 fn select_region(_state: &TytoState, args: SelectRegionArgs) -> Result<RegionSelection, String> {
-    let (_ox, _oy, scale) = crate::capture::source::monitor_geometry(&args.monitor_id);
+    let scale = crate::capture::source::monitor_scale(&args.monitor_id);
     let physical = PixelRect {
         x: (args.css.x as f64 * scale) as i32,
         y: (args.css.y as f64 * scale) as i32,
@@ -73,14 +74,15 @@ fn enumerate_ui_elements(_state: &TytoState, monitor_id: String) -> Result<Vec<P
 
 /// Window hover-rects on ONE monitor for the in-window fullscreen selector's **window**
 /// mode, in **monitor-local CSS pixels** (same space as `freeze_screen` /
-/// `enumerate_ui_elements`). Empty off Windows. `id` = `win-<hwnd>`.
+/// `enumerate_ui_elements`). Empty where the OS won't say where windows are.
+/// `id` = `win-<handle>`.
 #[arbor_rpc::handler]
 fn enumerate_window_rects(_state: &TytoState, monitor_id: String) -> Result<Vec<WindowPickRect>, String> {
     Ok(crate::capture::winpick::enumerate_windows_on_monitor(&monitor_id))
 }
 
 /// One window hover-rect for the selector's **window** mode, in monitor-local CSS px.
-/// `id` = `win-<hwnd>` (same formula as the source picker, so the two ids match).
+/// `id` = `win-<handle>` (same formula as the source picker, so the two ids match).
 #[derive(Serialize)]
 pub struct WindowPickRect {
     pub id: String,
@@ -104,25 +106,31 @@ pub struct FrozenFrame {
     pub scale: f64,
 }
 
-/// Grab a frozen screenshot of a monitor (default: primary) to a temp PNG for the
-/// region-selection overlay. Multi-monitor union is a follow-up — this is one
-/// monitor.
+/// Grab a frozen screenshot of a monitor to a temp PNG for the region-selection
+/// overlay. Multi-monitor union is a follow-up — this is one monitor.
+///
+/// With no `monitor_id` the default is **the monitor the pointer is on**, not the
+/// primary one: this is the quick-capture entry point, summoned by a global shortcut
+/// from wherever the user happens to be working, and a selector that opens on another
+/// display than the mouse is a selector that opened in the wrong place. The primary
+/// monitor stays the fallback for a platform that can't locate the pointer.
 #[arbor_rpc::handler]
 fn freeze_screen(_state: &TytoState, monitor_id: Option<String>) -> Result<FrozenFrame, String> {
-    // Default to the primary monitor (else the first) when none is given.
     let monitor_id = match monitor_id {
         Some(id) => id,
-        None => {
-            let mons = crate::capture::source::list_monitors();
-            mons.iter()
-                .find(|m| m.primary)
-                .or_else(|| mons.first())
-                .map(|m| m.id.clone())
-                .ok_or_else(|| "no monitor available".to_string())?
-        }
+        None => crate::capture::source::monitor_at_cursor()
+            .or_else(|| {
+                let mons = crate::capture::source::list_monitors();
+                mons.iter()
+                    .find(|m| m.primary)
+                    .or_else(|| mons.first())
+                    .map(|m| m.id.clone())
+            })
+            .ok_or_else(|| "no monitor available".to_string())?,
     };
-    let (px, py, scale) = crate::capture::source::monitor_geometry(&monitor_id);
-    let scale = scale.max(0.1);
+    let rect = crate::capture::source::monitor_rect(&monitor_id);
+    let (px, py) = rect.map(|r| (r.x, r.y)).unwrap_or((0, 0));
+    let scale = rect.map(|r| r.scale).unwrap_or(1.0).max(0.1);
 
     // Full-monitor still for the selection backdrop. On Windows use GDI (a plain
     // BitBlt) so no WGC "being captured" yellow border flashes; elsewhere fall back to
@@ -140,13 +148,23 @@ fn freeze_screen(_state: &TytoState, monitor_id: Option<String>) -> Result<Froze
     let path = std::env::temp_dir().join(format!("tyto-region-{}.png", uuid::Uuid::new_v4().simple()));
     img.save(&path).map_err(|e| e.to_string())?;
 
+    // The window bounds come from the MONITOR, not from the bitmap we just grabbed.
+    // They are the same number on Windows (a GDI grab is exactly the monitor rect),
+    // but a capture engine is free to hand back a frame of its own choosing — scap on
+    // macOS sizes from the display mode's framebuffer — and sizing the overlay from
+    // the pixels it returned is how the selector ends up covering a fraction of the
+    // screen. The bitmap only has to be sharp; the backdrop is stretched to fit.
+    let (lw, lh) = match rect {
+        Some(r) => ((r.w as f64 / scale).round() as u32, (r.h as f64 / scale).round() as u32),
+        None => ((pw as f64 / scale).round() as u32, (ph as f64 / scale).round() as u32),
+    };
     Ok(FrozenFrame {
         path: path.to_string_lossy().to_string(),
         monitor_id,
         x: (px as f64 / scale).round() as i32,
         y: (py as f64 / scale).round() as i32,
-        width: (pw as f64 / scale).round() as u32,
-        height: (ph as f64 / scale).round() as u32,
+        width: lw,
+        height: lh,
         scale,
     })
 }

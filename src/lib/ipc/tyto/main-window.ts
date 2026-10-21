@@ -29,6 +29,17 @@ export function resetTytoBounds(): Promise<void> {
   return invoke('reset_tyto_bounds');
 }
 
+/** Dismiss Tyto from the selector: the shell HIDES the window (and restores the panel
+ *  geometry behind it) instead of closing it.
+ *
+ *  Not `getCurrentWindow().close()`, which is what this replaced: closing a webview that
+ *  is hosting a monitor-sized surface races WebKit's layer-tree commits and segfaults the
+ *  app, and a real close also tears down `tyto-be`, so the next capture pays for a whole
+ *  window + backend boot. Hidden, the next one is immediate. */
+export function dismissTytoWindow(): Promise<void> {
+  return invoke('dismiss_tyto_window');
+}
+
 /** Take + clear the "opened via global shortcut" intent: true means Tyto should drop
  *  straight into the Snip selector (quick capture) rather than the full panel. Pulled by
  *  the FE on mount (fresh window) and on the `tyto://enter-snip` event (already-open). */

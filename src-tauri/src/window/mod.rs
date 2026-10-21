@@ -58,6 +58,9 @@ pub mod focus;
 pub mod garrulus;
 pub mod hud;
 pub mod launcher;
+/// A full-screen overlay's macOS manners: standing above the menu bar and the Dock,
+/// and giving the user's own app back afterwards. Neither is in Tauri's API.
+pub mod mac_overlay;
 pub mod merula;
 pub mod picus;
 pub mod placement;
@@ -196,6 +199,103 @@ pub fn native_titlebar<'a, R: Runtime, M: Manager<R>>(
     {
         builder.decorations(false)
     }
+}
+
+/// Arbor's chrome for a window that **becomes an overlay**: frameless on every
+/// platform, including macOS, with the same drag-and-drop handling as
+/// [`native_titlebar`].
+///
+/// The exception exists for one window, Tyto's. It has two presentations of the same
+/// webview — the control panel and the monitor-covering Snip selector — and macOS draws
+/// its traffic lights above the webview, where nothing in the page can reach them. Grown
+/// to cover a display, the window kept three buttons floating over the frozen desktop,
+/// offering to close a thing that has no frame.
+///
+/// ⚠️⚠️ **Toggling the decorations on and off instead is not an option**, and it fails in
+/// the worst way: with a custom traffic-light inset set (which every `native_titlebar`
+/// window has), tao re-applies it on every `drawRect:` by `unwrap()`ing
+/// `standardWindowButton`, and a borderless NSWindow answers that with `nil`. The window
+/// doesn't lose its buttons — the process panics inside a draw call.
+///
+/// A window built with this renders its own controls: the frontend's `WindowControls`
+/// takes `forceCustom` so it paints the trio on macOS too, instead of standing aside
+/// for the native one.
+pub fn frameless_window<'a, R: Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'a, R, M>,
+) -> WebviewWindowBuilder<'a, R, M> {
+    builder.disable_drag_drop_handler().decorations(false)
+}
+
+/// Place (and optionally size) a window from a rectangle given in **PHYSICAL desktop
+/// pixels**, in whatever units the platform actually wants.
+///
+/// Physical pixels are the one description of the desktop that doesn't depend on which
+/// display you ask from, so that is what crosses the IPC seam and what every caller
+/// here passes. Turning them into a placement is the part that differs, and getting it
+/// wrong puts the window on another monitor at another size:
+///
+/// * **Windows** has a single physical desktop plane; the numbers go through as they
+///   are. Logical ones would *not*: `set_position(LogicalPosition)` is interpreted
+///   against the window's *current* monitor scale, so a move onto a different-DPI
+///   display mis-places and mis-sizes it.
+/// * **macOS** has no such plane. Its global plane is in **points**, each display
+///   scales on its own, and tao converts a `PhysicalPosition` by dividing by the scale
+///   of the display the window is on *right now* — so a window on a 1× external
+///   display, sent to a 2× built-in one, lands at double the coordinates and twice the
+///   size. The rectangle is therefore converted to points up front, against the scale
+///   of the **target** display, and handed over as logical.
+///
+/// Size first, then position: both platforms anchor a move at the top-left corner, so
+/// the corner has to be set after the frame it belongs to.
+pub fn place_physical(w: &WebviewWindow, x: i32, y: i32, size: Option<(u32, u32)>) {
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri::{PhysicalPosition, PhysicalSize};
+        if let Some((width, height)) = size {
+            let _ = w.set_size(PhysicalSize::new(width, height));
+        }
+        let _ = w.set_position(PhysicalPosition::new(x, y));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::{LogicalPosition, LogicalSize};
+        let scale = scale_at_physical(w, x, y);
+        if let Some((width, height)) = size {
+            let _ = w.set_size(LogicalSize::new(width as f64 / scale, height as f64 / scale));
+        }
+        let _ = w.set_position(LogicalPosition::new(x as f64 / scale, y as f64 / scale));
+    }
+}
+
+/// The monitor containing a **physical desktop point**, as the window runtime sees it.
+///
+/// One search for both platforms: `Monitor::position`/`size` are in the same physical
+/// space the callers' rectangles are (on macOS, points × that display's own scale — see
+/// tauri-runtime-wry's `MonitorExt`), so a plain containment test is right in both.
+/// `None` when no monitor claims the point, which happens for real: a display can be
+/// unplugged between reading a rectangle and acting on it.
+pub fn monitor_at_physical(w: &WebviewWindow, x: i32, y: i32) -> Option<tauri::window::Monitor> {
+    w.available_monitors().ok().and_then(|monitors| {
+        monitors.into_iter().find(|m| {
+            let (p, s) = (m.position(), m.size());
+            x >= p.x && x < p.x + s.width as i32 && y >= p.y && y < p.y + s.height as i32
+        })
+    })
+}
+
+/// macOS: the scale factor of the monitor containing a physical desktop point.
+///
+/// It has to come from the target display rather than from the window, because the
+/// window is still wherever it was — quite possibly on a display of a different
+/// density — and that is the whole bug [`place_physical`] exists to avoid. If no
+/// display claims the point, the window's own scale is the least-wrong fallback.
+#[cfg(target_os = "macos")]
+fn scale_at_physical(w: &WebviewWindow, x: i32, y: i32) -> f64 {
+    monitor_at_physical(w, x, y)
+        .map(|m| m.scale_factor())
+        .or_else(|| w.scale_factor().ok())
+        .unwrap_or(1.0)
+        .max(0.1)
 }
 
 /// Give a product window its OWN icon, so the taskbar and Alt-Tab tell Arbor's windows

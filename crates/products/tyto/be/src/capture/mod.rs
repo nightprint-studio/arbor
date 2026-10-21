@@ -26,6 +26,9 @@ pub mod frames;
 #[cfg(target_os = "windows")]
 pub mod gdi;
 pub mod library;
+/// Display + window geometry from CoreGraphics — macOS-only, no dependency added.
+#[cfg(target_os = "macos")]
+pub mod mac;
 /// Minimal MP4 header reading — the duration of a recorded video, without ffprobe.
 pub mod mp4;
 pub mod screenshot;

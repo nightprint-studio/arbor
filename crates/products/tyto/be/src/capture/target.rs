@@ -44,7 +44,8 @@ impl CaptureTarget {
             }
             other => return Err(format!("unknown target kind '{other}'")),
         }
-        Ok(CaptureTarget { kind: kind.to_string(), source_id: source_id.map(str::to_string), region })
+        let (kind, source_id, region) = normalize(kind, source_id.map(str::to_string), region);
+        Ok(CaptureTarget { kind, source_id, region })
     }
 
     /// Grab one RGBA frame (bytes, width, height). Runs the scap one-shot on a helper
@@ -78,6 +79,35 @@ impl CaptureTarget {
         rx.recv_timeout(Duration::from_secs(3))
             .map_err(|_| "screen capture timed out".to_string())?
     }
+}
+
+/// Rewrite a capture request into one the platform can actually serve, **before**
+/// anything resolves a scap `Target`. Identity everywhere except macOS, where a
+/// `window` becomes a `region` of the display it sits on — see `source::window_crop`
+/// for why scap can't stream another application's window there, and what the rewrite
+/// costs.
+///
+/// It lives between the handlers and scap deliberately: the wire kind the user picked
+/// is still `window` (that is what the library entry says, and what the screenshot
+/// mask logic keys off), and only the capture side is told something different. Both
+/// capture paths — the one-shot in [`CaptureTarget::resolve`] and the streaming
+/// producer — go through here, so a window records the same pixels it previews.
+pub fn normalize(
+    kind: &str,
+    source_id: Option<String>,
+    region: Option<CropRect>,
+) -> (String, Option<String>, Option<CropRect>) {
+    #[cfg(target_os = "macos")]
+    {
+        if kind == "window" {
+            if let Some((monitor, crop)) = source_id.as_deref().and_then(super::source::window_crop) {
+                return ("region".to_string(), Some(monitor), Some(crop));
+            }
+            // The window is gone, or sits on no display we know: fall through and let
+            // the scap path report it ("the selected window is no longer available").
+        }
+    }
+    (kind.to_string(), source_id, region)
 }
 
 /// Resolve a scap `Target` from the wire kind + `source_id`. Shared with the streaming
@@ -134,13 +164,23 @@ fn grab_once_bgra(target: Target) -> Result<(Vec<u8>, u32, u32), String> {
     })?
     .map_err(|e| format!("couldn't start capture: {e:?}"))?;
     cap.start_capture();
-    let frame = cap.get_next_frame();
+    // ⚠️ The FIRST frame is routinely empty, and not as a failure: ScreenCaptureKit
+    // reports an unchanged screen as an `Idle` sample, which scap forwards as a BGRA
+    // frame of 0×0 with no data. Taking frame #1 and calling a 0×0 result "a zero-size
+    // frame" turns a still desktop into a broken screenshot. Keep asking until a frame
+    // has pixels; the caller's 3s timeout bounds the wait.
+    let frame = loop {
+        match cap.get_next_frame() {
+            Ok(Frame::BGRA(f)) if f.width > 0 && f.height > 0 => break Ok(f),
+            // An idle tick — ask again.
+            Ok(Frame::BGRA(_)) => continue,
+            Ok(_) => break Err("capture returned an unexpected frame type".to_string()),
+            Err(e) => break Err(format!("capture failed: {e}")),
+        }
+    };
     cap.stop_capture();
-    match frame {
-        Ok(Frame::BGRA(f)) => Ok((f.data, f.width.max(0) as u32, f.height.max(0) as u32)),
-        Ok(_) => Err("capture returned an unexpected frame type".to_string()),
-        Err(e) => Err(format!("capture failed: {e}")),
-    }
+    let f = frame?;
+    Ok((f.data, f.width.max(0) as u32, f.height.max(0) as u32))
 }
 
 /// Crop a `w`×`h` window at `(x, y)` out of a BGRA buffer (4 bytes/px), clamped to the

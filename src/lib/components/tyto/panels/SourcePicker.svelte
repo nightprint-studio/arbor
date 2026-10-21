@@ -15,7 +15,7 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { openScreenRecordingSettings } from '$lib/ipc/tyto/main-window';
-  import { recorderStore } from '$lib/stores/tyto/recorder.svelte';
+  import { recorderStore, type MonitorTarget } from '$lib/stores/tyto/recorder.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
 
   /** Send the user to the OS pane where the permission lives. After a refusal this is
@@ -26,6 +26,14 @@
     if (!opened) {
       uiStore.showToast('Open your system privacy settings and allow Arbor to record the screen.', 'info');
     }
+  }
+
+  /** A display's resolution as text. The backend sends the rectangle in physical
+   *  pixels (the shell needs it to place windows); the wording belongs here. A
+   *  platform that can't report the size sends zeros — then say so rather than
+   *  printing "0 × 0". */
+  function monResolution(mon: MonitorTarget): string {
+    return mon.width > 0 && mon.height > 0 ? `${mon.width} × ${mon.height}` : 'Unknown size';
   }
 
   /** Stable per-app colour (hashed hue) so each window reads distinctly. */
@@ -97,7 +105,7 @@
           class="tile"
           class:selected={mon.id === recorderStore.selectedMonitorId}
           onclick={() => recorderStore.selectMonitor(mon.id)}
-          use:tooltip={`${mon.name} · ${mon.resolution} · ${mon.scale}× scale`}
+          use:tooltip={`${mon.name} · ${monResolution(mon)} · ${mon.scale}× scale`}
           aria-pressed={mon.id === recorderStore.selectedMonitorId}
         >
           <div class="tile-thumb"><Monitor size={22} /></div>
@@ -106,7 +114,7 @@
               {mon.name}
               {#if mon.primary}<span class="pill">Primary</span>{/if}
             </div>
-            <div class="tile-sub">{mon.resolution} · {mon.scale}× scale</div>
+            <div class="tile-sub">{monResolution(mon)} · {mon.scale}× scale</div>
           </div>
           {#if mon.id === recorderStore.selectedMonitorId}<Check size={15} class="tile-check" />{/if}
         </button>

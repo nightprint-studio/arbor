@@ -34,9 +34,9 @@ import { uiStore } from '$lib/stores/ui.svelte';
 // user opted in, OS file manager otherwise) — an atlas export lands in a folder.
 import { openFolder } from '$lib/utils/reveal';
 import { formatBytes } from '$lib/utils/format';
-import { setTytoSelection, resetTytoBounds, screenRecordingStatus } from '$lib/ipc/tyto/main-window';
+import { setTytoSelection, resetTytoBounds, dismissTytoWindow, screenRecordingStatus } from '$lib/ipc/tyto/main-window';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { openRecordingHud, closeRecordingHud, TYTO_RECORDING_STOPPED } from '$lib/ipc/tyto/hud-window';
+import { openRecordingHud, closeRecordingHud, TYTO_RECORDING_STOPPED, type HudDisplay } from '$lib/ipc/tyto/hud-window';
 
 // ── Domain model ─────────────────────────────────────────────────────────────
 
@@ -79,7 +79,13 @@ export type FrameFormat = 'png' | 'jpg' | 'webp';
 export interface MonitorTarget {
   id: string;
   name: string;
-  resolution: string;
+  /** The display's rectangle on the desktop, in PHYSICAL pixels — what the shell
+   *  needs to put a window (the selection overlay, the recording HUD) on *this*
+   *  display. `width`/`height` are also what the picker shows as the resolution. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   scale: number;
   primary: boolean;
 }
@@ -182,8 +188,8 @@ export const TYTO_FRAME_WIDTH_OPTIONS = [
 // ── Mock fixtures ────────────────────────────────────────────────────────────
 
 const MOCK_MONITORS: MonitorTarget[] = [
-  { id: 'mon-1', name: 'Display 1 · Dell U2723QE', resolution: '3840 × 2160', scale: 1.5, primary: true },
-  { id: 'mon-2', name: 'Display 2 · LG 27GP850',   resolution: '2560 × 1440', scale: 1.0, primary: false },
+  { id: 'mon-1', name: 'Display 1 · Dell U2723QE', x: 0,    y: 0, width: 3840, height: 2160, scale: 1.5, primary: true },
+  { id: 'mon-2', name: 'Display 2 · LG 27GP850',   x: 3840, y: 0, width: 2560, height: 1440, scale: 1.0, primary: false },
 ];
 
 const MOCK_WINDOWS: WindowTarget[] = [
@@ -469,7 +475,11 @@ function createRecorderStore() {
         windows = [];
       } else {
         if (s.monitors.length) {
-          monitors = s.monitors.map(m => ({ id: m.id, name: m.name, resolution: m.resolution, scale: m.scale, primary: m.primary }));
+          monitors = s.monitors.map(m => ({
+            id: m.id, name: m.name,
+            x: m.x, y: m.y, width: m.width, height: m.height,
+            scale: m.scale, primary: m.primary,
+          }));
           if (!monitors.some(m => m.id === selectedMonitorId)) selectedMonitorId = monitors[0].id;
         }
         if (s.windows.length) {
@@ -493,6 +503,20 @@ function createRecorderStore() {
       const caps = await listCaptures();
       if (authoritative || caps.length) captures = caps.map(mapCapture);
     } catch { /* keep current list */ }
+  }
+
+  /** Which display the recording HUD belongs on, as a physical rectangle — or null
+   *  when this target names no display and the shell should leave the HUD where it is.
+   *
+   *  A monitor target is its own display. Everything else goes through the display the
+   *  selector last froze (`selectMonitorId`), which is the region's display and the
+   *  display of a window picked on screen. A window picked from the panel's grid is the
+   *  one case with no answer: the picker knows the window, not where it sits. */
+  function hudDisplay(): HudDisplay | null {
+    const id = targetKind === 'monitor' ? selectedMonitorId : selectMonitorId;
+    const mon = monitors.find((m) => m.id === id);
+    if (!mon || mon.width === 0 || mon.height === 0) return null;
+    return { x: mon.x, y: mon.y, width: mon.width, height: mon.height };
   }
 
   /** The current selection as backend recording/screenshot args. */
@@ -542,7 +566,7 @@ function createRecorderStore() {
       beSession = true;
       recording = true;
       elapsedMs = 0; // driven by the tyto://recording-progress event
-      void openRecordingHud(targetLabel());
+      void openRecordingHud(targetLabel(), hudDisplay());
     } catch (e) {
       lastError = String(e);
       uiStore.showToast(`Couldn't start recording: ${e}`, 'error');
@@ -555,20 +579,15 @@ function createRecorderStore() {
 
   // ── In-window selector internals ─────────────────────────────────────────────
 
-  /** Hide Tyto → freeze `monitorId` (or the primary when null) → enumerate BOTH the
-   *  smart UI-element rects AND the window rects for that monitor → grow the Tyto window
-   *  to cover the frozen monitor → show it. Populates all `select*` state. Returns
-   *  `false` (with the error surfaced + Tyto restored) if the freeze/enumerate fails, so
-   *  the caller leaves selection off. Frozen backdrop = the CURRENT monitor only (never
-   *  the virtual desktop). */
-  /** Hide Tyto → freeze `monitorId` (the primary when null) → grow the window to cover
+  /** Hide Tyto → freeze `monitorId` (the pointer's monitor when null) → grow the window to cover
    *  that monitor's PHYSICAL bounds → show it over the frozen backdrop. Sets
    *  `selectMonitorId`/`selectMonitorName`/`selectFrozenUrl`. Returns the FrozenFrame, or
    *  null (error surfaced + Tyto restored) on failure. Shared by the Snip selector and the
    *  in-window countdown; the frozen backdrop is the CURRENT monitor only.
    *
-   *  PHYSICAL bounds (logical × scale) are unambiguous across monitors, so switching to a
-   *  different-DPI display doesn't mis-place/mis-size the covering window. */
+   *  PHYSICAL bounds (logical × scale) are passed because they describe the desktop
+   *  without depending on which display you ask from; the shell converts them to what
+   *  each OS actually wants (`set_tyto_selection` owns that split). */
   async function coverMonitor(monitorId: string | null): Promise<FrozenFrame | null> {
     const win = getCurrentWindow();
     try {
@@ -715,16 +734,19 @@ function createRecorderStore() {
      *  — the backdrop + enumerated rects are still valid for the same display). */
     setSelectMethod(m: SelectMethod) { selectMethod = m; },
 
-    /** Enter the in-window fullscreen selector: freeze the active monitor (the current
-     *  `selectedMonitorId`, else the primary), enumerate its smart + window rects, grow
-     *  the Tyto window to cover it, and paint the frozen backdrop + toolbar. Needs the
-     *  backend — a no-op (with an error surfaced) when it's down. */
+    /** Enter the in-window fullscreen selector: freeze **the monitor the pointer is
+     *  on**, enumerate its smart + window rects, grow the Tyto window to cover it, and
+     *  paint the frozen backdrop + toolbar. Needs the backend — a no-op (with an error
+     *  surfaced) when it's down.
+     *
+     *  Deliberately NOT `selectedMonitorId`: that is the *capture target* chosen in the
+     *  panel, a different thing from where a quick capture should open. The selector is
+     *  summoned by a global shortcut from wherever the user is working, so it belongs on
+     *  the display their mouse is on — the toolbar's monitor switch moves it from there.
+     *  Passing null lets the backend resolve the pointer's monitor (`freeze_screen`). */
     async enterSelection(method: SelectMethod) {
       if (!backendUp) { lastError = 'Recording backend not available'; return; }
-      const start = selectedMonitorId && monitors.some((m) => m.id === selectedMonitorId)
-        ? selectedMonitorId
-        : null;
-      const ok = await freezeMonitorForSelection(start);
+      const ok = await freezeMonitorForSelection(null);
       if (!ok) return;
       selectMethod = method;
       selecting = true;
@@ -738,6 +760,20 @@ function createRecorderStore() {
       const cur = monitors.findIndex((m) => m.id === selectMonitorId);
       const next = monitors[(cur + 1) % monitors.length];
       await freezeMonitorForSelection(next.id);
+    },
+
+    /** Dismiss the selector AND Tyto with it (Esc, right-click, the selector's Close) —
+     *  the quick-capture equivalent of "never mind".
+     *
+     *  The shell hides the window rather than closing it (see `dismissTytoWindow` for
+     *  why closing it segfaults), and the `select*` state is dropped only AFTER that, so
+     *  the panel never paints over the desktop on its way out. */
+    async dismissSelection() {
+      try { await dismissTytoWindow(); } catch { /* ignore */ }
+      selecting = false;
+      selectFrozenUrl = null;
+      selectElements = [];
+      selectWindows = [];
     },
 
     /** Leave the selector: restore the full Tyto control panel and drop the frozen

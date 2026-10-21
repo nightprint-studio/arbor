@@ -25,7 +25,7 @@
 
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::Shortcut;
 
 use super::{show_and_focus, WEBVIEW_BROWSER_ARGS};
@@ -183,8 +183,15 @@ fn create_or_focus(app: &AppHandle) {
 ///
 /// `WebviewUrl::default()` resolves to the app's index (`index.html`) — the same
 /// entry the main window uses — so the load path is identical in dev (Vite) and
-/// packaged builds. Frameless to match Arbor; TytoShell paints its own titlebar +
-/// WindowControls.
+/// packaged builds.
+///
+/// Frameless on **every** platform, macOS included, which is the one place Arbor
+/// departs from its own rule of keeping native traffic lights there: this window grows
+/// to cover a whole display as the Snip selector, and OS-drawn window buttons would
+/// float over the frozen desktop with nothing to close. See
+/// [`super::frameless_window`] for the full reason (and for why toggling the
+/// decorations per presentation is not an alternative). TytoShell paints its own
+/// titlebar + WindowControls.
 fn build_tyto_window(app: &AppHandle) {
     let builder = WebviewWindowBuilder::new(app, TYTO_WINDOW_LABEL, WebviewUrl::default())
         .title("Tyto — Arbor")
@@ -199,8 +206,8 @@ fn build_tyto_window(app: &AppHandle) {
         // Match the main window's WebView2 env (see WEBVIEW_BROWSER_ARGS) —
         // mismatched args on a second webview → HRESULT 0x8007139F.
         .additional_browser_args(WEBVIEW_BROWSER_ARGS);
-    // Native traffic lights on macOS, frameless elsewhere (see super::native_titlebar).
-    let res = super::native_titlebar(builder).build();
+    // Frameless everywhere — this window doubles as a full-screen overlay.
+    let res = super::frameless_window(builder).build();
 
     match res {
         Ok(w) => {
@@ -219,6 +226,10 @@ fn build_tyto_window(app: &AppHandle) {
 /// control panel.
 pub fn open_or_focus_snip(app: &AppHandle) {
     SNIP_INTENT.store(true, Ordering::Relaxed);
+    // FIRST, before anything shows or focuses a window: showing the overlay activates
+    // Arbor (it has to — see `mac_overlay`), and by then the frontmost application is
+    // us. Remembered now, handed back on dismiss. macOS only; a no-op elsewhere.
+    super::mac_overlay::remember_frontmost_app(app);
     open_or_focus(app);
     // Fresh windows aren't built yet here (creation is dispatched to the main thread),
     // so this emit only reaches an ALREADY-open window; the fresh case uses the pull-flag.
@@ -258,15 +269,15 @@ pub async fn open_tyto_window(app: AppHandle) {
 /// The FE freezes the target monitor and passes its **physical** bounds; the shell owns
 /// the geometry so the cover/restore rules live in one place.
 ///
-/// `x`/`y`/`width`/`height` are **PHYSICAL** pixels. Using physical (not logical) is what
-/// makes the monitor-SWITCH robust: `set_position(LogicalPosition)` is interpreted against
-/// the window's *current* monitor scale, so moving a window onto a display with a
-/// different DPI mis-places/mis-sizes it (the "zoom/resolution goes wrong on switch" bug).
-/// Physical coordinates are absolute across monitors; the webview then re-derives its own
-/// device-pixel-ratio on the new display so the frozen backdrop still fills exactly.
+/// `x`/`y`/`width`/`height` are **PHYSICAL** pixels; [`super::place_physical`] turns
+/// them into the placement each OS actually wants, and its doc has the reason that
+/// matters (physical coordinates are absolute on Windows and meaningless on macOS
+/// without a display to scale them against).
+///
+/// The two calls:
 ///
 /// * `active = true` (enter): drop the minimum size, lock resizing, size+place the
-///   window to the monitor's physical bounds, pin always-on-top, focus.
+///   window to the monitor's physical bounds, pin it above the system chrome, focus.
 /// * `active = false` (exit): un-pin, restore the full-mode minimum + resizability,
 ///   size back to the standard panel, re-center.
 #[tauri::command]
@@ -278,14 +289,17 @@ pub async fn set_tyto_selection(app: AppHandle, active: bool, x: i32, y: i32, wi
         // TYTO_FULL_MIN_* on a low-res monitor) can actually be applied.
         let _ = w.set_min_size(Some(PhysicalSize::new(1u32, 1u32)));
         let _ = w.set_resizable(false);
-        // PHYSICAL bounds — absolute across monitors, so a switch to a different-DPI
-        // display lands and sizes correctly (see the doc note).
-        let _ = w.set_size(PhysicalSize::new(width, height));
-        let _ = w.set_position(PhysicalPosition::new(x, y));
+        super::place_physical(&w, x, y, Some((width, height)));
         let _ = w.set_always_on_top(true);
+        // AFTER always-on-top, which sets the window level itself: on macOS floating
+        // still leaves the menu bar and the Dock drawn over the selector.
+        super::mac_overlay::set_above_system_chrome(&w, true, true);
         let _ = w.set_focus();
     } else {
         reset_to_full_panel(&w);
+        // Expanding the selector into the control panel IS choosing Arbor: there is no
+        // app to hand back any more, and a later dismiss must not reach for a stale one.
+        super::mac_overlay::forget_frontmost_app();
         let _ = w.set_focus();
     }
 }
@@ -298,10 +312,49 @@ pub async fn set_tyto_selection(app: AppHandle, active: bool, x: i32, y: i32, wi
 /// visible-restore paths (`set_tyto_selection(false)`) add it themselves.
 pub(crate) fn reset_to_full_panel(w: &WebviewWindow) {
     let _ = w.set_always_on_top(false);
+    // Back to the ordinary levels, so the panel can't sit over the menu bar.
+    super::mac_overlay::set_above_system_chrome(w, false, false);
     let _ = w.set_min_size(Some(LogicalSize::new(TYTO_FULL_MIN_W, TYTO_FULL_MIN_H)));
     let _ = w.set_resizable(true);
     let _ = w.set_size(LogicalSize::new(TYTO_FULL_W, TYTO_FULL_H));
     let _ = w.center();
+}
+
+/// Dismiss Tyto from the selector: **hide** the window rather than close it.
+///
+/// Esc / right-click / the selector's own Close used to call `window.close()`, and that
+/// is the one gesture where closing is both dangerous and wasteful.
+///
+/// ⚠️ **Dangerous**: tearing down a WKWebView that is hosting a monitor-sized surface
+/// races WebKit's own layer-tree commits, and the commit lands on a drawing-area proxy
+/// whose window is gone — `EXC_BAD_ACCESS` inside
+/// `RemoteLayerTreeDrawingAreaProxy::commitLayerTree`, on the main thread, with not one
+/// frame of Arbor in the stack. It is the close that is unsafe, and nothing in the
+/// backtrace says so (upstream: tauri-apps/tauri#5396).
+///
+/// **Wasteful**: Tyto's window is the one a global shortcut summons all day, and a real
+/// close is the last window of the product, so `events.rs` tears `tyto-be` down with it.
+/// Every Esc then cost the next capture a window build, a webview boot and a backend
+/// spawn — which is what `TytoShell`'s five-second "wait for the backend" retry loop is
+/// there to survive. Hidden, the next snip is immediate.
+///
+/// Hide FIRST, then restore the panel geometry: the other order would flash a
+/// panel-sized window over the desktop. [`reset_to_full_panel`] is safe on a hidden
+/// window by design, and it is also what drops the raised window level and the pin.
+///
+/// The launcher's node goes dark, because from the user's side Tyto is gone — a later
+/// [`open_or_focus`] lights it up again. The window controls and "Close Window" still
+/// close for real: those say close, and mean it.
+#[tauri::command]
+#[allow(clippy::unused_async)]
+pub async fn dismiss_tyto_window(app: AppHandle) {
+    let Some(w) = app.get_webview_window(TYTO_WINDOW_LABEL) else { return };
+    let _ = w.hide();
+    reset_to_full_panel(&w);
+    // The user said "never mind" — give them back the application they were in. Queued
+    // after the hide, so it isn't activating something from under a window still up.
+    super::mac_overlay::restore_frontmost_app(&app);
+    super::emit_product_state(&app, "tyto", false);
 }
 
 /// Reset the Tyto window to the full control-panel geometry WITHOUT showing/focusing it.

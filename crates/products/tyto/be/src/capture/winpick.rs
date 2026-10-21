@@ -4,8 +4,9 @@
 //! top-level windows in **monitor-local CSS pixels** (physical screen coords clipped to
 //! the monitor, minus its origin, divided by its DPI scale) — the SAME space as
 //! `region::freeze_screen` and [`super::uia::enumerate_elements`], so hover hit-tests
-//! line up with the backdrop. Windows-only real impl; the non-Windows stub returns empty.
-//! Ids match the existing `source.rs` formula: `win-<hwnd as u32>`.
+//! line up with the backdrop. Implemented on Windows (Win32) and macOS
+//! ([`super::mac`]); elsewhere the stub returns empty and the selector disables its
+//! Window mode. Ids match the existing `source.rs` formula: `win-<handle as u32>`.
 
 use crate::region::WindowPickRect;
 
@@ -18,16 +19,57 @@ pub fn enumerate_windows_on_monitor(monitor_id: &str) -> Vec<WindowPickRect> {
     {
         win_windows_on_monitor(monitor_id)
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        mac_windows_on_monitor(monitor_id)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = monitor_id;
         Vec::new()
     }
 }
 
+/// macOS: the picker's windows, clipped to one monitor. `CGWindowBounds` is already in
+/// points — the same unit as monitor-local CSS px — so the conversion is a subtraction
+/// of the monitor's origin and no scaling at all.
+#[cfg(target_os = "macos")]
+fn mac_windows_on_monitor(monitor_id: &str) -> Vec<WindowPickRect> {
+    let Some(d) = monitor_id
+        .strip_prefix("mon-")
+        .and_then(|s| s.parse::<u32>().ok())
+        .and_then(super::mac::display)
+    else {
+        return Vec::new();
+    };
+    let (mx, my) = (d.x as f64 / d.scale, d.y as f64 / d.scale);
+    let (mw, mh) = (d.w as f64 / d.scale, d.h as f64 / d.scale);
+    super::mac::windows()
+        .into_iter()
+        .filter(|w| !is_own_window(&w.title))
+        .filter_map(|w| {
+            // Keep only windows intersecting this monitor; clip to it.
+            let l = w.x.max(mx);
+            let t = w.y.max(my);
+            let r = (w.x + w.w).min(mx + mw);
+            let b = (w.y + w.h).min(my + mh);
+            if r - l < 1.0 || b - t < 1.0 {
+                return None;
+            }
+            Some(WindowPickRect {
+                id: format!("win-{}", w.id),
+                x: (l - mx).round() as i32,
+                y: (t - my).round() as i32,
+                w: (r - l).round() as u32,
+                h: (b - t).round() as u32,
+            })
+        })
+        .collect()
+}
+
 /// True for a title that belongs to Tyto itself — never offer our own windows as a
 /// pick target (mirrors `source::is_own_window`).
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn is_own_window(title: &str) -> bool {
     title.starts_with("Tyto —") || title == "Select region"
 }

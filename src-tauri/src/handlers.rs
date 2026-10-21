@@ -98,6 +98,7 @@ macro_rules! invoke_handlers {
             $crate::window::tyto::open_tyto_window,
             $crate::window::tyto::set_tyto_selection,
             $crate::window::tyto::reset_tyto_bounds,
+            $crate::window::tyto::dismiss_tyto_window,
             $crate::window::tyto::take_tyto_snip_intent,
             $crate::window::screen_capture::open_screen_recording_settings,
             $crate::window::screen_capture::screen_recording_status,

@@ -22,7 +22,6 @@
    * straight on `recorderStore` — no window_ready / reveal / getRegionInit plumbing.
    */
   import { Square, PenTool, MousePointer2, AppWindow, Monitor, Video, Camera, X, Maximize2 } from 'lucide-svelte';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { recorderStore, type SelectMethod } from '$lib/stores/tyto/recorder.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
@@ -152,9 +151,14 @@
   }
 
   // The selector IS Tyto's primary (compact) presentation, so dismissing it (Esc /
-  // right-click / Close) closes the whole Tyto window — like Windows' Snip. Going to the
+  // right-click / Close) sends the whole of Tyto away — like Windows' Snip. Going to the
   // full control panel ("expand") is the explicit secondary action.
-  function closeTyto() { void getCurrentWindow().close(); }
+  //
+  // ⚠️ It HIDES the window, it doesn't close it: closing a webview that is hosting a
+  // monitor-sized surface races WebKit's own layer-tree commits and takes the process
+  // down (see `dismissTytoWindow`). Hiding also keeps `tyto-be` alive, so the next
+  // capture doesn't wait for a backend.
+  function closeTyto() { void recorderStore.dismissSelection(); }
   function expand() { void recorderStore.exitSelection(); }
 
   function confirm() {

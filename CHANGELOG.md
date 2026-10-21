@@ -19,6 +19,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu's editor right-click menu is grouped and coloured** — edit, navigate, generate, save, history — like Corvus's commit menu.
 
 ### Fixed
+- **Dismissing a quick capture gives you back the app you were in.** On macOS the capture selection has to bring Arbor forward to take the keyboard; cancelling it now activates the application that was in front before, instead of leaving you in Arbor.
+- **Dismissing Tyto's capture selection no longer crashes the app on macOS.** Esc, right-click and the selector's Close now put Tyto away instead of closing its window — which also means the next capture starts immediately, with no backend to restart.
+- **Tyto's recording controls appear on the display being recorded,** instead of always on the primary monitor, and clear of the menu bar.
+- **Tyto's capture selection covers the macOS menu bar and Dock** instead of being drawn underneath them.
+- **Tyto's capture selection opens on the display the mouse is on,** at that display's size, instead of always covering the primary monitor — and no longer leaves the system's window buttons floating over the frozen desktop.
+- **Tyto's window source works on macOS.** The list is the windows you can see, with the owning application's name, and the live preview and capture of a window produce pixels instead of failing.
+- **Tyto captures the right part of a high-density display on macOS.** Region selections were cropped as if the display had no scaling, and the monitor tiles showed no resolution or scale factor.
+- **A Tyto recording no longer stops when the screen goes still on macOS,** and a screenshot of an unchanged screen no longer fails as an empty frame.
 - **Markdown files use the same Find and Replace as code.** The live-preview editor now opens the floating find widget (with "Find in files") instead of CodeMirror's stock bar.
 - **Bennu shows the "Indexing project" job on every re-index, not just at open.** When dependencies or a pom change on disk (or a build refreshes the index) the job card and footer now follow the re-index through to "Index ready".
 - **Bennu builds a project whose `~/.m2` was filled by IntelliJ.** When offline Maven refuses a jar it already has ("has not been downloaded from it before", typical of a private snapshot registry), the build and the run classpath retry offline ignoring where the jar came from, and only then go online if downloads are allowed.
@@ -2774,4 +2782,4 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [0.1.0] — 2026-05-21
 
-Initial public release.
+Initial public release.

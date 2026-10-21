@@ -8,12 +8,22 @@ use tyto_core::prelude::TytoState;
 use crate::capture::{self, CaptureTarget, CropRect};
 use crate::region::PixelRect;
 
-/// A capturable display.
+/// A capturable display, with its place on the desktop.
+///
+/// The rectangle is in **physical pixels** and is what makes the display addressable
+/// rather than merely nameable: the shell needs it to put the selection overlay — and
+/// the recording HUD — on *this* display rather than on the primary one. The size
+/// doubles as what the picker shows as the resolution, formatted there; two
+/// representations of the same pair of numbers on one wire struct is how they start to
+/// disagree.
 #[derive(Serialize)]
 pub struct MonitorSource {
     pub id: String,
     pub name: String,
-    pub resolution: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
     pub scale: f64,
     pub primary: bool,
 }
@@ -49,8 +59,8 @@ pub struct CaptureSources {
 /// window with its title.
 ///
 /// Call this to learn which windows exist before capturing one, or when a title
-/// fragment matched more than one. Returns ids (`mon-…`, `win-…`), titles and
-/// resolutions — no pixels.
+/// fragment matched more than one. Returns ids (`mon-…`, `win-…`), titles and each
+/// display's rectangle in physical pixels — no image data.
 #[arbor_rpc::handler(mcp(
     name = "tyto_list_sources",
     title = "List capturable screens and windows",

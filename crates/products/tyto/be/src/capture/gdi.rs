@@ -6,7 +6,7 @@
 //! Windows-only; the freeze falls back to scap elsewhere. The exact `windows 0.61`
 //! GDI API here was verified against a standalone probe (BitBlt + GetDIBits +
 //! SelectObject + `BI_RGB.0 as u32`), and the `GetMonitorInfoW` idiom mirrors
-//! [`super::source`]'s `win_monitor_geometry`.
+//! [`super::source`]'s `win_monitor_rect`.
 
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Gdi::{

@@ -75,8 +75,9 @@
 
 <h2>The recording control bar</h2>
 <p>
-  While recording, an always-on-top bar floats at the top of the screen (kept out
-  of the capture). It comes in two layouts you switch between at any time:
+  While recording, an always-on-top bar floats at the top of <b>the display being
+  recorded</b> (kept out of the capture). It comes in two layouts you switch between at
+  any time:
 </p>
 <ul>
   <li><b>Compact</b> — a slim pill with the elapsed time, pause/resume and stop.</li>

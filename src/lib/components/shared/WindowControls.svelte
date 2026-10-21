@@ -7,6 +7,17 @@
   // get clipped by the window edge.
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
 
+  interface Props {
+    /**
+     * Paint our own trio even on macOS. For a window built **frameless on macOS**
+     * (`window/mod.rs::frameless_window` — today only Tyto's, which doubles as a
+     * full-screen overlay): there are no native traffic lights to stand aside for, so
+     * standing aside would leave the window with no controls at all.
+     */
+    forceCustom?: boolean;
+  }
+  let { forceCustom = false }: Props = $props();
+
   const appWindow = getCurrentWindow();
   let isMaximized = $state(false);
 
@@ -87,8 +98,9 @@
      here and let the platform own the min/max/close trio. Off macOS we paint our
      own: the `style` setting picks the faux-mac trio (18×18, leading edge, like
      the real thing) or the Windows/IntelliJ trio (full-height, flush to the
-     corner). The side swap lives in app.css — see `.window-controls-slot`. -->
-{#if !isMac}
+     corner). The side swap lives in app.css — see `.window-controls-slot`.
+     `forceCustom` opts a macOS window that was built frameless back into ours. -->
+{#if !isMac || forceCustom}
 <div class="window-controls no-drag" data-style={style} class:zoom-open={zoomOpen}>
   {#if style === 'windows'}
     <button class="wc-btn wc-win wc-minimize" onclick={() => appWindow.minimize()} use:tooltip={'Minimize'} aria-label="Minimize">

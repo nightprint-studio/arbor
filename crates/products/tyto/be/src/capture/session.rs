@@ -461,6 +461,11 @@ fn scap_producer(
         return;
     }
 
+    // Same rewrite the one-shot path applies, so a window records what it previewed
+    // (on macOS: its display, cropped to its frame). Identity elsewhere.
+    let (kind, source_id, region) = super::target::normalize(kind, source_id, region);
+    let kind = kind.as_str();
+
     let target = match resolve_scap_target(kind, source_id.as_deref()) {
         Ok(t) => t,
         Err(e) => {
@@ -507,12 +512,22 @@ fn scap_producer(
                     continue;
                 }
                 let (fw, fh) = (f.width.max(0) as u32, f.height.max(0) as u32);
+                // ⚠️ An empty frame is an IDLE TICK, not a failure: ScreenCaptureKit
+                // reports an unchanged screen that way and scap forwards it as a 0×0
+                // BGRA frame. Treating it as an error aborted any mac recording the
+                // moment the screen stopped moving. Wait for the next one instead — a
+                // source that never delivers is caught by `start`'s ready timeout.
+                if fw == 0 || fh == 0 {
+                    continue;
+                }
                 let (buf, cw, ch) = match &region {
                     Some(r) => crop_region_bgra(&f.data, fw, fh, r),
                     None => (f.data, fw, fh),
                 };
+                // A real frame that crops to nothing IS an error — the rectangle is
+                // outside the display, and waiting for a better frame won't fix it.
                 if cw == 0 || ch == 0 {
-                    let _ = ready.send(Err("capture returned a zero-size frame".to_string()));
+                    let _ = ready.send(Err("the capture region falls outside the display".to_string()));
                     break;
                 }
                 let (w, h) = match dims {

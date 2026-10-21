@@ -6,8 +6,9 @@
 //!
 //! The FE asks the shell to [`resize_recording_hud`] when the user toggles layout;
 //! the shell owns the size + top-center placement so the positioning logic lives in
-//! one spot. The window pulls its [`get_hud_init`] (the target label) on mount to
-//! avoid an emit/listen race.
+//! one spot — on **the display being recorded**, which the FE names when it knows it
+//! (see [`HudDisplay`]). The window pulls its [`get_hud_init`] (the target label) on
+//! mount to avoid an emit/listen race.
 //!
 //! It is marked **content-protected** (`SetWindowDisplayAffinity` /
 //! `WDA_EXCLUDEFROMCAPTURE` under the hood) so the HUD itself doesn't show up in the
@@ -19,7 +20,7 @@
 
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use super::{show_and_focus, WEBVIEW_BROWSER_ARGS};
 
@@ -40,16 +41,42 @@ pub struct HudInit {
     pub target_label: String,
 }
 
+/// Which display the HUD belongs on, as a rectangle in **physical desktop pixels** —
+/// the one the frontend read from `list_capture_sources` for the capture target.
+///
+/// `None` when the frontend can't tell (a window picked from the panel's grid names no
+/// display), and then the HUD is placed wherever it already is. The primary monitor is
+/// the wrong answer either way: a recording of the second screen put its own controls
+/// on the first one, where the person watching the recording wasn't looking.
+#[derive(Clone, Copy, serde::Deserialize)]
+pub struct HudDisplay {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
 static HUD_INIT: Mutex<Option<HudInit>> = Mutex::new(None);
+/// Set by [`open_recording_hud`], read by every placement until the HUD closes.
+static HUD_DISPLAY: Mutex<Option<HudDisplay>> = Mutex::new(None);
+
+/// How far below the top of the display's work area the HUD sits, in logical pixels.
+/// Measured from the **work area** rather than the display: on macOS the menu bar owns
+/// the strip above it, and a HUD at a flat offset from the display top disappears
+/// behind it (further still on a notched screen).
+const HUD_TOP_GAP: f64 = 24.0;
 
 /// Open the recording HUD and hide the Tyto window: during a recording the HUD is
 /// the on-screen control, and Tyto stays out of the capture. `target_label` is what
 /// the expanded HUD shows as the recording subject.
 #[tauri::command]
 #[allow(clippy::unused_async)] // async moves the handler off the main thread (WebView2 creation).
-pub async fn open_recording_hud(app: AppHandle, target_label: String) {
+pub async fn open_recording_hud(app: AppHandle, target_label: String, display: Option<HudDisplay>) {
     if let Ok(mut g) = HUD_INIT.lock() {
         *g = Some(HudInit { target_label });
+    }
+    if let Ok(mut g) = HUD_DISPLAY.lock() {
+        *g = display;
     }
     if let Some(w) = app.get_webview_window(super::tyto::TYTO_WINDOW_LABEL) {
         let _ = w.hide();
@@ -63,18 +90,30 @@ pub fn get_hud_init() -> HudInit {
     HUD_INIT.lock().ok().and_then(|g| g.clone()).unwrap_or_default()
 }
 
-/// Position the HUD at the top-center of the primary monitor for the given size.
+/// Position the HUD at the top-center of the display being recorded, for the given
+/// logical width.
+///
+/// The display is [`HUD_DISPLAY`] when the frontend named one, else the one the HUD is
+/// already on, else the primary — in that order, so a recording of the second screen
+/// keeps its controls there while a target that names no display doesn't get moved
+/// somewhere arbitrary. The maths is done in physical pixels and handed to
+/// [`super::place_physical`], which knows what each platform wants.
 fn place_top_center(w: &tauri::WebviewWindow, width: f64) {
-    if let Ok(Some(mon)) = w.primary_monitor() {
-        let scale = mon.scale_factor();
-        let logical_w = mon.size().width as f64 / scale;
-        let x = ((logical_w - width) / 2.0).max(0.0);
-        let _ = w.set_position(LogicalPosition::new(x, 24.0));
-    }
+    let named = HUD_DISPLAY.lock().ok().and_then(|g| *g);
+    let mon = named
+        .and_then(|r| super::monitor_at_physical(w, r.x, r.y))
+        .or_else(|| w.current_monitor().ok().flatten())
+        .or_else(|| w.primary_monitor().ok().flatten());
+    let Some(mon) = mon else { return };
+    let scale = mon.scale_factor().max(0.1);
+    let area = mon.work_area();
+    let x = area.position.x + (((area.size.width as f64 - width * scale) / 2.0).max(0.0) as i32);
+    let y = area.position.y + (HUD_TOP_GAP * scale) as i32;
+    super::place_physical(w, x, y, None);
 }
 
 /// Main-thread builder: an opaque, content-protected, always-on-top pill at the top
-/// center of the primary monitor (compact layout by default).
+/// center of the display being recorded (compact layout by default).
 fn build_hud_window(app: &AppHandle) {
     // Recording is now live (the HUD is the on-screen control): let the global-shortcut
     // handler know a press should STOP rather than open a new selector.
@@ -118,7 +157,7 @@ fn build_hud_window(app: &AppHandle) {
 }
 
 /// Resize the HUD between its compact and expanded layouts, keeping it pinned to the
-/// top-center of the primary monitor. Driven by the FE's layout toggle.
+/// top-center of the same display. Driven by the FE's layout toggle.
 #[tauri::command]
 #[allow(clippy::unused_async)]
 pub async fn resize_recording_hud(app: AppHandle, expanded: bool) {
@@ -142,7 +181,13 @@ pub async fn close_recording_hud(app: AppHandle) {
     if let Ok(mut g) = HUD_INIT.lock() {
         *g = None;
     }
+    if let Ok(mut g) = HUD_DISPLAY.lock() {
+        *g = None;
+    }
     super::tyto::set_recording(false);
+    // A finished recording ends with Tyto's panel in front, showing the new capture —
+    // so the application the quick capture interrupted is no longer owed its turn.
+    super::mac_overlay::forget_frontmost_app();
     if let Some(w) = app.get_webview_window(TYTO_HUD_LABEL) {
         let _ = w.close();
     }

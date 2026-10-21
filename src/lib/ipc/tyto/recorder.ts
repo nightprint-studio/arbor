@@ -100,7 +100,12 @@ export const setTytoConfig = (config: TytoRecorderConfig) => tyto<TytoRecorderCo
 export interface MonitorSource {
   id: string;
   name: string;
-  resolution: string;
+  /** Rectangle on the desktop, in PHYSICAL pixels. The shell needs it to place a
+   *  window on this display; the picker formats the size as the resolution. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   scale: number;
   primary: boolean;
 }

@@ -23,6 +23,12 @@
   or process name with the search box. A <b>live preview</b> of the selected window
   sits above the grid, so you can confirm the right one before capturing.
 </p>
+<div class="callout">
+  Where the system only hands over whole displays, a window capture is the window's
+  <b>area of its display</b> rather than the window in isolation: anything stacked in
+  front of it is in the frame, and a window that moves mid-recording leaves the frame
+  behind. Bring it to the front before you capture.
+</div>
 
 <h2>Region</h2>
 <p>

@@ -110,6 +110,18 @@
     settingsContent?: Snippet;
     /** Window controls slot — consumer passes its own min/max/close. */
     windowControls?: Snippet;
+    /**
+     * Does the OS paint this window's close/minimise/zoom buttons? True on macOS
+     * by default, which is where Arbor keeps the native traffic lights: the bar
+     * then reserves their gutter, draws the hairline that separates it from the
+     * app chrome, and suppresses its own controls divider.
+     *
+     * Set it to `false` for a macOS window built **frameless**
+     * (`window/mod.rs::frameless_window` — Tyto's, which doubles as a full-screen
+     * overlay): there is no gutter to reserve and nothing to divide from, and the
+     * bar's own `windowControls` are the only ones the window has.
+     */
+    nativeWindowButtons?: boolean;
     class?: string;
   }
 
@@ -117,7 +129,7 @@
     logo, logoTooltip, menu, menuWidth = '280px', menuTooltip = 'Main menu',
     hamburger, onNativeMenu, nativeMenuEnabled = true, leading, center, trailing, actions,
     docs, commandPalette, settings, settingsContent,
-    windowControls, class: cls = '',
+    windowControls, nativeWindowButtons = isMac, class: cls = '',
   }: Props = $props();
 
   /** macOS with a native-menu host: the bar replaces the hamburger entirely.
@@ -172,10 +184,10 @@
   {/if}
 {/snippet}
 
-<div class="tb {cls}" data-tauri-drag-region role="banner">
+<div class="tb {cls}" class:tb-no-gutter={!nativeWindowButtons} data-tauri-drag-region role="banner">
   <!-- macOS: a hairline that divides the native traffic-light gutter from the
        app chrome. Sits at the start, right after the reserved gutter. -->
-  {#if isMac}<div class="tb-mac-sep" aria-hidden="true"></div>{/if}
+  {#if nativeWindowButtons}<div class="tb-mac-sep" aria-hidden="true"></div>{/if}
 
   {#if logo}
     <div class="tb-nodrag tb-brand" use:tooltip={logoTooltip ?? ''}>
@@ -219,7 +231,7 @@
     <div class="tb-spacer" data-tauri-drag-region></div>
   {/if}
 
-  <div class="tb-right tb-nodrag" class:tb-right-mac={isMac}>
+  <div class="tb-right tb-nodrag" class:tb-right-mac={nativeWindowButtons}>
     {#if trailing}{@render trailing()}{/if}
     {#if actions}{@render actions()}{/if}
     {#if docs}{@render namedButton(docs, BookOpen, 'Documentation')}{/if}
@@ -235,10 +247,10 @@
     <!-- Its own flex child rather than a tail of `.tb-right`: the Mac trio has
          to be able to jump to the LEADING edge (`.window-controls-slot` in
          app.css flips its `order`), which it can't do from inside the right
-         cluster. On macOS the slot renders nothing — the native traffic lights
-         sit top-left instead — so the divider is suppressed with it. -->
+         cluster. Where the OS paints the buttons the slot renders nothing — the
+         native traffic lights sit top-left instead — so the divider goes with it. -->
     <div class="window-controls-slot">
-      {#if !isMac}<div class="tb-sep"></div>{/if}
+      {#if !nativeWindowButtons}<div class="tb-sep"></div>{/if}
       {@render windowControls()}
     </div>
   {/if}
@@ -352,6 +364,9 @@
   .tb-right-mac {
     padding-right: 8px;
   }
+
+  /* A frameless macOS window has no traffic lights, so no gutter to clear. */
+  .tb-no-gutter { padding-left: 0; }
 
   /* macOS-only hairline separating the traffic-light gutter from app chrome. */
   .tb-mac-sep {

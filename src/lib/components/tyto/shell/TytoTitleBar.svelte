@@ -78,6 +78,7 @@
   menuWidth="220px"
   docs={{ active: tytoUiStore.docsOpen, tooltip: { content: 'Documentation', shortcut: 'F1' }, onclick: () => tytoUiStore.toggleDocs() }}
   settings={{ menu: settingsMenu, menuWidth: '260px', tooltip: 'Settings' }}
+  nativeWindowButtons={false}
 >
   {#snippet logo()}
     <ProductIcon id="tyto" size={22} />
@@ -161,7 +162,10 @@
   {/snippet}
 
   {#snippet windowControls()}
-    <WindowControls />
+    <!-- Tyto's window is frameless on EVERY platform, macOS included (it doubles as
+         the full-screen Snip overlay — see window/mod.rs::frameless_window), so the
+         trio is ours to paint there too. -->
+    <WindowControls forceCustom />
   {/snippet}
 </TitleBar>
 
