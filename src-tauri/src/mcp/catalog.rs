@@ -76,19 +76,33 @@ impl ShellCatalog {
     ///
     /// Runs entirely on the blocking pool: `ensure_*_be` waits for the child's `Hello`.
     fn collect_blocking(app: &AppHandle, cache: &Mutex<HashMap<String, Vec<Routed>>>) -> Vec<Routed> {
-        let enabled: Vec<(&'static str, fn(&AppHandle))> = {
+        // A live grant is the other way onto the surface: the products gate may be off —
+        // which is the point of a closed default — and the grant switches one on for its
+        // own stretch. It contributes only the tools it names, so a grant for one tool does
+        // not advertise the rest of that product.
+        let unlocked = grants::unlocked();
+        let exposed: Vec<(&'static str, fn(&AppHandle), bool)> = {
             let state = app.state::<AppState>();
             let Ok(cfg) = state.lock_config() else { return Vec::new() };
             EXPOSABLE
                 .iter()
-                .filter(|(program, _)| cfg.mcp.products.get(*program).copied().unwrap_or(false))
-                .copied()
+                .filter_map(|(program, ensure)| {
+                    let on = cfg.mcp.products.get(*program).copied().unwrap_or(false);
+                    // Only start a backend that something actually exposes: a grant on one
+                    // product must not boot the others to read inventories nobody asked for.
+                    (on || unlocked.exposes(program)).then_some((*program, *ensure, on))
+                })
                 .collect()
         };
 
         let mut out = Vec::new();
-        for (program, ensure) in enabled {
-            out.extend(tools_of(app, Some(cache), program, ensure).unwrap_or_default());
+        for (program, ensure, on) in exposed {
+            let routed = tools_of(app, Some(cache), program, ensure).unwrap_or_default();
+            if on {
+                out.extend(routed);
+            } else {
+                out.extend(routed.into_iter().filter(|r| unlocked.names(&r.descriptor.name)));
+            }
         }
         out.sort_by(|a, b| a.descriptor.name.cmp(&b.descriptor.name));
         out
@@ -138,6 +152,10 @@ pub struct ProgramTools {
     /// "what would this let an assistant do" is the question you have *before* deciding
     /// to switch it on, and a list that appears only once you have is no help with it.
     pub exposed: bool,
+    /// Whether a live grant is exposing it right now although `exposed` is false — the
+    /// closed default being temporarily open, which a reader has no other way to tell from
+    /// a product that is simply off.
+    pub granted: bool,
     pub tools: Vec<ToolSummary>,
     /// Why there is nothing here, when there isn't.
     pub detail: Option<String>,
@@ -170,6 +188,7 @@ pub fn listing(app: &AppHandle) -> Vec<ProgramTools> {
             .map(|cfg| cfg.mcp.products.get(program).copied().unwrap_or(false))
             .unwrap_or(false)
     };
+    let unlocked = grants::unlocked();
 
     EXPOSABLE
         .iter()
@@ -195,13 +214,29 @@ pub fn listing(app: &AppHandle) -> Vec<ProgramTools> {
                 }
                 Err(e) => (Vec::new(), Some(e)),
             };
+            let exposed = enabled(program);
             ProgramTools {
                 program: program.to_string(),
-                exposed: enabled(program),
+                exposed,
+                granted: !exposed && unlocked.exposes(program),
                 tools,
                 detail,
             }
         })
+        .collect()
+}
+
+/// Which programs the named tools belong to, resolved from the real inventories.
+///
+/// Host-side on purpose: a grant is a permission artifact, so what it unlocks is
+/// established here rather than taken from whoever asked for it. Blocks, like [`listing`] —
+/// it is called once when a grant is minted, from the settings window that has just listed
+/// the same tools to offer them.
+pub fn programs_of(app: &AppHandle, tools: &[String]) -> Vec<String> {
+    listing(app)
+        .into_iter()
+        .filter(|p| p.tools.iter().any(|t| tools.iter().any(|wanted| *wanted == t.name)))
+        .map(|p| p.program)
         .collect()
 }
 
@@ -276,21 +311,33 @@ impl ToolCatalog for ShellCatalog {
                 policy::Verdict::Deny("Arbor could not complete its permission check.".into())
             })
         };
-        // A grant stands in for the consent prompt and for nothing else: it is only tried when
-        // the policy said "ask", and a session-wide "allow" is checked first so that one
-        // doesn't burn a use. A `Deny` is never overridden here — see `grants`.
-        let verdict = if verdict == policy::Verdict::Ask
-            && !consent::granted_for_session(&routed.descriptor.name)
-        {
-            match grants::consume(&routed.descriptor.name, &policy::candidate_paths(&arguments)) {
-                Some(label) => {
-                    entry.detail = Some(format!("Covered by the grant \"{label}\"."));
-                    policy::Verdict::Allow
-                }
-                None => verdict,
+        // ── Grants ──────────────────────────────────────────────────────────
+        // A grant is the user's advance consent, and it overrides a `Deny` as well as a
+        // prompt: a product switched off, or a project outside the configured scope, is
+        // exactly what "let it work on this repository for the next hour" has to get past.
+        // What it cannot widen is its own reach — `consume` matches only when every path in
+        // the call lies inside one of the grant's own projects.
+        //
+        // Tried only when the call would not have run anyway, so an already-allowed call
+        // never spends a use. The session-wide "allow" came from a prompt, so it still
+        // stands in for a prompt alone and is checked first for the same reason.
+        let verdict = match verdict {
+            policy::Verdict::Allow => policy::Verdict::Allow,
+            policy::Verdict::Ask if consent::granted_for_session(&routed.descriptor.name) => {
+                policy::Verdict::Allow
             }
-        } else {
-            verdict
+            refused => {
+                match grants::consume(
+                    &routed.descriptor.name,
+                    &policy::candidate_paths(&arguments),
+                ) {
+                    Some(label) => {
+                        entry.detail = Some(format!("Covered by the grant \"{label}\"."));
+                        policy::Verdict::Allow
+                    }
+                    None => refused,
+                }
+            }
         };
         match verdict {
             policy::Verdict::Deny(reason) => {

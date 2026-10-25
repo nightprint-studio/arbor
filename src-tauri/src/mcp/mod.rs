@@ -242,6 +242,23 @@ pub fn backend_attached(program: &str) {
     tracing::debug!("mcp: {program} re-attached — tool list invalidated and clients told");
 }
 
+/// A grant was minted or revoked, so the exposed set moved — tell the clients.
+///
+/// The third of the three places the surface changes, and it has to be here for the same
+/// reason as the other two: a client lists the tools **once**, when it connects, and keeps
+/// what it got. A grant that switches Corvus on for an hour is worth nothing to a client
+/// that is still holding a list without it, and revoking one leaves the client offering
+/// tools that now refuse.
+pub fn grants_changed() {
+    let live = slot().lock().ok().and_then(|s| {
+        s.as_ref().map(|r| (r.catalog.clone(), r.server.clone()))
+    });
+    let Some((catalog, server)) = live else { return };
+    catalog.invalidate();
+    server.notify_tools_changed();
+    tracing::debug!("mcp: grants changed — tool list invalidated and clients told");
+}
+
 /// Take the endpoint down.
 pub fn stop() {
     if let Ok(mut s) = slot().lock() {

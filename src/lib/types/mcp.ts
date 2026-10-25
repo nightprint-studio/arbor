@@ -260,6 +260,8 @@ export interface McpProgramTools {
   program: string;
   /** Whether this program is exposed right now. Its tools are listed either way. */
   exposed: boolean;
+  /** A live grant is exposing it although `exposed` is false. */
+  granted: boolean;
   tools: McpToolSummary[];
   /** Why the list is empty, when it is. */
   detail: string | null;
@@ -275,7 +277,7 @@ export const MCP_PRODUCTS: { id: string; name: string; blurb: string }[] = [
   {
     id: 'corvus',
     name: 'Corvus',
-    blurb: 'Read a repository: status, history and blame. Commit staged changes — never push or rewrite history.',
+    blurb: 'Work in a repository: status, diff, history and blame; stage, unstage, commit and push the current branch — never a force push or a rewrite.',
   },
   {
     id: 'tyto',
@@ -287,8 +289,8 @@ export const MCP_PRODUCTS: { id: string; name: string; blurb: string }[] = [
 /** What the user asks for when handing out a grant. */
 export interface McpGrantSpec {
   label: string;
-  /** Absolute project root the grant covers. */
-  root: string;
+  /** Absolute project roots the grant covers. At least one. */
+  roots: string[];
   tools: string[];
   /** Calls it covers; `null` = no count limit (then `ttl_secs` is required). */
   max_uses: number | null;
@@ -300,8 +302,13 @@ export interface McpGrantSpec {
 export interface McpGrant {
   id: string;
   label: string;
-  root: string;
+  roots: string[];
   tools: string[];
+  /** Products this grant exposes while it lives, whether or not they are switched on. */
+  programs: string[];
   uses_left: number | null;
   expires_in_secs: number | null;
+  /** The budget it started with, so what is left reads as a fraction of it. */
+  max_uses: number | null;
+  ttl_secs: number | null;
 }

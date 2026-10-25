@@ -166,8 +166,10 @@ async fn fetch_remote(
     Ok(result)
 }
 
+/// `pub(crate)` so the MCP facade ([`crate::mcp_tools::corvus_push`]) can reuse the whole
+/// credential-retry path instead of growing a second copy of it.
 #[arbor_rpc::handler]
-async fn push_branch(
+pub(crate) async fn push_branch(
     state: &CorvusState,
     tab_id: String,
     remote: String,

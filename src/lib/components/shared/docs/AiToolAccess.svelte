@@ -48,7 +48,8 @@
 <ul>
   <li><strong>Endpoint</strong> — is anything listening at all.</li>
   <li><strong>Products</strong> — which backends contribute tools. A product that is off
-    is not merely refused: the client is never told it exists.</li>
+    is not merely refused: the client is never told it exists. A grant can hold one open
+    temporarily without changing this setting.</li>
   <li><strong>Projects</strong> — which paths on disk are in play.</li>
   <li><strong>Permissions</strong> — what may happen, per class of action.</li>
 </ul>
@@ -122,16 +123,38 @@
 <h2>Grants — approving in advance</h2>
 <p>
   An assistant left to work has nobody at the screen to approve a prompt. <strong>Grants</strong>
-  (the last page of these settings) answer in advance, narrowed on every axis: one project,
-  the tools you tick, and a limit — a number of uses, a duration of at most 24 hours, or both.
-  A grant with no limit cannot be created.
+  (the last page of these settings) answer in advance, narrowed on every axis: the projects you
+  pick, the tools you tick, and a limit — a number of uses, a duration of at most 24 hours, or
+  both. A grant with no limit cannot be created.
+</p>
+<p>
+  A grant is a <strong>temporary override</strong> of the gates above, and that is what makes
+  the closed default usable rather than merely safe. You can leave a product switched off
+  entirely — nothing of Corvus on the AI surface — and hand out a grant when there is work to
+  do: it switches that product on for its own stretch, exposing only the tools you ticked, and
+  takes it away again when the budget runs out. Permission arrives with the work and leaves
+  with it.
 </p>
 <ul>
-  <li>A grant replaces the <em>prompt</em> and nothing else. A call the rules refuse — a path
-    outside scope, a product off for that project, a class set to never — stays refused.</li>
-  <li>A call is covered only when every path in it lies inside the grant's project.</li>
-  <li>Grants live in memory. Quitting Arbor ends them all, and each can be revoked from the list
-    before it runs out.</li>
+  <li>It overrides the product being off, the project being out of scope, and the permission
+    class for that kind of action. A grant that stopped at the prompt could not do the job it
+    exists for.</li>
+  <li>What it cannot do is widen its own reach. A call is covered only when
+    <em>every</em> path in it lies inside one of the grant's own projects — so a call that
+    strays outside them is still refused with no prompt, and one stray path spoils the whole
+    call. A call that names no path at all is never covered.</li>
+  <li>A grant covers several projects when you pick several, and a single call may touch any
+    of them.</li>
+  <li>Its tools become <em>visible</em> as well as permitted, and only its tools: a grant for
+    one tool does not advertise the rest of that product. Clients are told the moment the set
+    moves, when a grant is handed out and again when it is revoked.</li>
+  <li>Grants live in memory, and that is a property rather than a shortcut: a grant written to
+    disk is a grant that can be written, and what a grant authorises is an assistant holding
+    file tools. Quitting Arbor ends them all, and each can be revoked from the list before it
+    runs out.</li>
+  <li>A grant outlives a change to these settings — it is the more deliberate statement of the
+    two, so tightening a class does not silently cancel one you handed out. The Products page
+    marks anything a grant is holding open, and the list is where you end it early.</li>
   <li>The activity log marks a covered call with the grant that approved it.</li>
 </ul>
 
@@ -194,9 +217,10 @@
 <h2>When the tools change</h2>
 <p>
   A client asks Arbor for its tool list once, when it connects, and keeps it. So switching a
-  product on — or rebuilding a backend, if you develop Arbor — used to leave it offering
-  tools that were gone and unable to see the ones that had arrived, with nothing saying so.
-  Arbor now tells connected clients the set has moved, and they re-read it themselves.
+  product on, handing out or revoking a grant — or rebuilding a backend, if you develop
+  Arbor — used to leave it offering tools that were gone and unable to see the ones that had
+  arrived, with nothing saying so. Arbor now tells connected clients the set has moved, and
+  they re-read it themselves.
 </p>
 <p>
   It is the only thing Arbor sends a client unasked, beyond progress on a call that asked
@@ -344,11 +368,19 @@
     they are in, so a client is never told a method is unused when the truth is that nothing
     has finished reading the project.</li>
   <li><strong>Corvus</strong> — a repository's status (branch, ahead/behind, staged, unstaged,
-    untracked, conflicted), its history newest first — optionally for one file or folder —
-    who last changed each line of a file (folded into runs of the same commit), and
-    <strong>commit staged changes</strong>, staging the paths you name first. It never pushes,
-    amends or rewrites history, and a plugin's pre-commit check can still refuse the commit.
-    Every tool takes a path: the repository need not be open in Corvus.</li>
+    untracked, conflicted), the patch of the uncommitted work itself — staged or not, whole or
+    narrowed to one file or folder — its history newest first, who last changed each line of a
+    file (folded into runs of the same commit), and the writes of one ordinary contribution:
+    <strong>stage</strong> and <strong>unstage</strong> the paths you name,
+    <strong>commit</strong> what is in the index, and <strong>push</strong> the current branch.
+    Every write here is either undoable on this machine or additive to the remote: staging only
+    ever moves the index and never the working tree, so nothing you wrote can be lost by it; a
+    commit is undone with one command; a push is a plain fast-forward of the current branch.
+    What it cannot do is destroy or rewrite — no amend, no force push, no pushing another
+    branch or a tag, no discard, no reset, no branch surgery — and a plugin's pre-commit check
+    can still refuse a commit. A branch that is behind the remote is refused rather than
+    forced: pulling is a decision you take in Arbor. Every tool takes a path: the repository
+    need not be open in Corvus.</li>
   <li><strong>Tyto</strong> — list capturable screens and windows, capture one (by window
     title, returned as an image), read the on-screen accessibility layout, check whether a
     recording is running, record the screen for a fixed number of seconds — as an

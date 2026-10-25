@@ -52,9 +52,10 @@ export const getMcpAudit = () => invoke<McpActivityLog>('get_mcp_audit');
 export const clearMcpAudit = () => invoke<void>('clear_mcp_audit');
 
 /**
- * Hand out a grant: pre-approval for named tools on one project, limited by a number of
- * uses and/or a deadline. Held in memory only — quitting Arbor drops it. Rejects with a
- * sentence saying what to fix.
+ * Hand out a grant: a temporary override of the gates for named tools on named projects,
+ * limited by a number of uses and/or a deadline. It switches a product on for its own
+ * stretch even when the products gate is off. Held in memory only — quitting Arbor drops
+ * it. Rejects with a sentence saying what to fix.
  */
 export const mintMcpGrant = (spec: McpGrantSpec) => invoke<McpGrant>('mcp_grant_mint', { spec });
 

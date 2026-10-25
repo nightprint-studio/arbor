@@ -17,6 +17,13 @@
 //! prompting, so a model cannot turn "read my SSH key" into a consent dialog the user
 //! might click through.
 //!
+//! **A grant can override what this module decides** — see [`crate::mcp::grants`], which
+//! the caller consults when the verdict here is anything but `Allow`. That does not weaken
+//! the paragraph above: a grant covers a call only when every path in it is inside a
+//! project the user named while minting it, so an out-of-scope path still produces no
+//! prompt and no call. The override exists so the *configured* default can stay closed —
+//! no product on the surface at all — without that making unattended work impossible.
+//!
 //! **A call that names no path is decided globally.** `tyto_screenshot` is not about a
 //! project and cannot be attributed to one, so a per-project rule cannot reach it. The
 //! alternative — attributing it to whichever project happens to be open — would be a

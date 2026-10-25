@@ -16,7 +16,7 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
-  import { getMcpClients } from '$lib/ipc/mcp';
+  import { getMcpClients, listMcpGrants } from '$lib/ipc/mcp';
   import { mcpStore } from '$lib/stores/mcp.svelte';
   import { MCP_PRODUCTS } from '$lib/types/mcp';
   import type { McpClients } from '$lib/types/mcp';
@@ -33,8 +33,18 @@
       : '',
   );
 
+  /**
+   * Products a live grant is exposing although the toggle below says off. Without this the
+   * page would state the opposite of what the endpoint is doing: a grant is allowed to
+   * switch a product on for its own stretch, and the toggle is the setting it overrides,
+   * not a report of what is reachable.
+   */
+  let grantedPrograms = $state<string[]>([]);
+
   /** Nothing on → say so once, here, rather than letting three pages look live. */
-  const noProduct = $derived(MCP_PRODUCTS.every((p) => !(cfg.products[p.id] ?? false)));
+  const noProduct = $derived(
+    MCP_PRODUCTS.every((p) => !(cfg.products[p.id] ?? false)) && grantedPrograms.length === 0,
+  );
 
   // ── Who is on the other end ───────────────────────────────────────────────
   //
@@ -44,11 +54,14 @@
   let connected = $state<McpClients | null>(null);
 
   $effect(() => {
-    if (!cfg.enabled) { connected = null; return; }
+    if (!cfg.enabled) { connected = null; grantedPrograms = []; return; }
     let live = true;
     const read = () => {
       void getMcpClients()
         .then((c) => { if (live) connected = c; })
+        .catch(() => {});
+      void listMcpGrants()
+        .then((gs) => { if (live) grantedPrograms = [...new Set(gs.flatMap((g) => g.programs))]; })
         .catch(() => {});
     };
     read();
@@ -177,13 +190,19 @@
 <section>
   <SectionHeader
     title="Products"
-    description="Each product exposes its own tools. A product that is off contributes none — the AI client is not told it exists." />
+    description="Each product exposes its own tools. A product that is off contributes none — the AI client is not told it exists — unless a grant switches it on for a stretch." />
   {#each MCP_PRODUCTS as product (product.id)}
-    <Toggle
-      checked={cfg.products[product.id] ?? false}
-      label={product.name}
-      description={product.blurb}
-      onchange={(v) => guard(() => mcpStore.setProduct(product.id, v))} />
+    {@const on = cfg.products[product.id] ?? false}
+    <div class="product">
+      <Toggle
+        checked={on}
+        label={product.name}
+        description={product.blurb}
+        onchange={(v) => guard(() => mcpStore.setProduct(product.id, v))} />
+      {#if !on && grantedPrograms.includes(product.id)}
+        <Badge variant="tone" tone="warning" size="sm">on until a grant runs out</Badge>
+      {/if}
+    </div>
   {/each}
 
   {#if cfg.enabled && noProduct}
@@ -196,6 +215,10 @@
 
 <style>
   section   { display: flex; flex-direction: column; gap: 10px; }
+  /* The grant badge rides on the product's own row: a note elsewhere would be read as
+     being about the list rather than about this one product. */
+  .product  { display: flex; align-items: center; gap: 10px; }
+  .product :global(> *:first-child) { flex: 1; min-width: 0; }
   .row      { display: flex; align-items: center; gap: 10px; }
   .row label{ font-size: 12px; color: var(--text-secondary); }
   .command  { display: flex; align-items: center; gap: 8px; padding: 8px 10px;

@@ -8,6 +8,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Changed
+- **A grant now overrides the AI gates, not just the confirmation prompt.** You can leave a product switched off entirely and hand out a grant when there is work to do: it exposes the tools you ticked on the projects you picked until its budget runs out, and connected clients are told the moment the tool set moves. Grants still live in memory only, and a call whose paths stray outside the grant's projects is still refused without asking.
 - **Bennu's Changes panel shows the diff beside the file list**, with Corvus's own diff viewer: unified or split, full-file context, chunk navigation and staging single lines or hunks.
 - **One setting decides whether Maven may use the network in Bennu.** *Settings → Java → Allow Maven to use the network* now covers the resolve, the build before a run, the run's classpath and the Maven panel's goals; the panel's *Offline* toggle flips the same, persisted setting instead of a per-session one.
 - **Bennu's run configuration form is easier to scan.** Launch arguments, classpath and debugger, and the environment are folded sections with a summary; script configurations show their shell with icons.
@@ -39,6 +40,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu no longer reports Lombok-managed fields as unused.** Private fields of a `@Data`, `@Getter`, `@Value`, `@Builder`… class are read by generated code, and a `@SuperBuilder` subclass no longer reports a missing super constructor.
 
 ### Added
+- **A grant can cover several projects at once**, picked as chips from your recent projects or browsed to.
+- **An AI client can stage, unstage, diff and push through Corvus.** Alongside status, log, blame and commit, the Corvus MCP tools now read the patch of the uncommitted work (staged or not, whole or one file), move paths in and out of the index, and push the current branch — a plain fast-forward, never a force push, never another ref. Push counts as a Destructive action, so it answers to that permission on its own.
 - **Known vulnerabilities as warnings in a pom (opt-in).** With *Settings → Java → Check dependencies for known vulnerabilities* on, a pinned dependency with a published advisory is underlined with its CVE, severity and fixed version. Asks OSV.dev in the background and caches for a day.
 - **A new find and replace bar in the code editors.** A slim floating bar with the match counter and the case / word / regex keys inside the field, incremental search as you type, a replace row on `Alt+P`, and a shortcut to Find in files.
 - **Choose the shell of a Bennu script configuration.** *Run with* offers the shells that can interpret the file (Git Bash, zsh, sh, PowerShell 7, Windows PowerShell); *Auto* keeps the extension-based choice.

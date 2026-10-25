@@ -106,11 +106,21 @@ pub fn clear_mcp_audit() {
     mcp::audit::clear();
 }
 
-/// Hand out a grant: pre-approval for named tools on one project, limited by a number of
-/// uses and/or a deadline, held in memory only. See [`mcp::grants`].
+/// Hand out a grant: a temporary override of the gates for named tools on named projects,
+/// limited by a number of uses and/or a deadline, held in memory only. See [`mcp::grants`].
+///
+/// Which products the grant exposes is resolved here from the real inventories rather than
+/// taken from the caller, and the clients are told the tool set moved — a grant that nobody
+/// re-lists after is a grant with no effect.
 #[tauri::command]
-pub fn mcp_grant_mint(spec: mcp::grants::GrantSpec) -> Result<mcp::grants::GrantInfo, AppError> {
-    mcp::grants::mint(spec).map_err(AppError::Other)
+pub fn mcp_grant_mint(
+    app: AppHandle,
+    spec: mcp::grants::GrantSpec,
+) -> Result<mcp::grants::GrantInfo, AppError> {
+    let programs = mcp::catalog::programs_of(&app, &spec.tools);
+    let info = mcp::grants::mint(spec, programs).map_err(AppError::Other)?;
+    mcp::grants_changed();
+    Ok(info)
 }
 
 /// Every grant still usable, with what is left of each.
@@ -122,11 +132,16 @@ pub fn mcp_grant_list() -> Vec<mcp::grants::GrantInfo> {
 /// Revoke one grant before it runs out.
 #[tauri::command]
 pub fn mcp_grant_revoke(id: String) -> bool {
-    mcp::grants::revoke(&id)
+    let removed = mcp::grants::revoke(&id);
+    if removed {
+        mcp::grants_changed();
+    }
+    removed
 }
 
 /// Revoke every grant.
 #[tauri::command]
 pub fn mcp_grant_revoke_all() {
     mcp::grants::clear();
+    mcp::grants_changed();
 }
