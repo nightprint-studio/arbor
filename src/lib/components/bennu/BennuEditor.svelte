@@ -4010,7 +4010,7 @@
     if (isSamePath(target.file, path) && offset >= target.start && offset < target.end) {
       // A method of a MyBatis mapper interface has a better answer than its usages: the XML
       // statement that implements it. Anything that is not a mapper method resolves to null here.
-      if (isJavaFile && (await tryGoToMapperStatement(source, offset))) return;
+      if (isJavaFile && (await tryGoToMapperStatement(source, offset))) return true;
       await runFindUsages(source, offset, editorComp.coordsAtByteOffset(offset), word || null);
       return true;
     }
