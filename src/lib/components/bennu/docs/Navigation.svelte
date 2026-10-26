@@ -118,6 +118,13 @@
   only report noise.
 </Callout>
 
+<h2>Go to implementation</h2>
+<p>
+  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd> on an interface or abstract class lists every type built on it, at any depth; on a
+  method it lists the subtypes that declare it themselves. One result jumps straight there, several open a popover. On a MyBatis
+  mapper method the XML statement is listed too.
+</p>
+
 <h2>Find usages</h2>
 <p>
   <kbd>Alt</kbd> + <kbd>F7</kbd> on a class, method or field lists every place it is used across the project, in a popover — pick one to

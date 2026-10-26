@@ -50,6 +50,7 @@
     <tr><td><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td><strong>Back</strong> / <strong>forward</strong> through the places you navigated from. Actions make a stop; moving the caret does not</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Backspace</kbd></td><td>The <strong>last place you edited</strong>; again for the one before</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd></td><td><strong>Recent locations</strong>, filterable, with the line you were on and a toggle for edited places</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></td><td><strong>Go to implementation</strong> — subtypes and overrides; on a mapper method, its XML statement</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>F12</kbd></td><td><strong>File structure</strong> — a searchable outline; from the server on a language-server file</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>H</kbd></td><td>The <strong>type hierarchy</strong> of the type at the caret — anywhere inside it</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd></td><td>The <strong>call hierarchy</strong> of the method at the caret — one level at a time</td></tr>
@@ -140,7 +141,7 @@
   <tbody>
     <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>J</kbd></td><td>The <strong>DTO Lab</strong> on the class at the caret, or toggles its panel elsewhere; inside, <kbd>Ctrl</kbd> + <kbd>Enter</kbd> runs the payload or applies the tests</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>4</kbd></td><td><strong>Endpoints</strong> — request mappings and Struts actions in one list</td></tr>
-    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></td><td><strong>Spring beans</strong></td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F12</kbd></td><td><strong>Spring beans</strong></td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></td><td><strong>Bevy components</strong>, each expanding into the systems reading and writing it</td></tr>
     <tr><td>Command palette</td><td><strong>Message bundles</strong>, <strong>Spring configuration</strong>, <strong>Spring bound properties</strong></td></tr>
   </tbody>

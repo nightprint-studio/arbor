@@ -178,9 +178,13 @@ export const codeEditorTheme = EditorView.theme(
     // `emphasis: 'text'` — the span is recoloured instead of underlined. Three classes beat the
     // lint plugin's own two-class squiggle rule, so no `!important` is needed.
     '.cm-lintRange.cm-lint-text': { backgroundImage: 'none', paddingBottom: '0' },
-    '.cm-lintRange.cm-lint-text-error': { color: 'var(--error)' },
-    '.cm-lintRange.cm-lint-text-warning': { color: 'var(--warning)' },
-    '.cm-lintRange.cm-lint-text-info': { color: 'var(--info)' },
+    // The `span` half is what makes it show on a name the syntax highlighter has already coloured
+    // (a type, a method): those words sit in token spans with a colour of their own, which beat the
+    // one inherited from this wrapper — so the unresolved name stayed its normal colour and only the
+    // gutter marker said anything was wrong.
+    '.cm-lintRange.cm-lint-text-error, .cm-lintRange.cm-lint-text-error span': { color: 'var(--error)' },
+    '.cm-lintRange.cm-lint-text-warning, .cm-lintRange.cm-lint-text-warning span': { color: 'var(--warning)' },
+    '.cm-lintRange.cm-lint-text-info, .cm-lintRange.cm-lint-text-info span': { color: 'var(--info)' },
     // The lint list (the panel) has the same exposure, one row per diagnostic.
     '.cm-panel.cm-panel-lint ul': { maxHeight: '180px' },
     '.cm-panel.cm-panel-lint li': { overflowWrap: 'anywhere' },

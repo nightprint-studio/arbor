@@ -23,6 +23,7 @@ use serde_json::json;
 
 use crate::build::{BuildGuard, BUSY_MSG};
 use crate::index_service::IndexService;
+use crate::progress_gate::ProgressGate;
 
 /// Progress ticks while a project validation runs (`{ root, done, total }`).
 const EVT_VALIDATE_PROGRESS: &str = "arbor://bennu/validate-progress";
@@ -67,8 +68,13 @@ fn bennu_validate_project(
     let svc = IndexService::global();
 
     // Validate the whole project (parallel, cache-backed), streaming progress to the Build window.
+    // Gated like the index walk's: one event per file is thousands of them, which in the background
+    // queue unread in the throttled webview and are delivered all at once on the way back.
+    let gate = ProgressGate::new();
     let on_progress = |done: usize, total: usize| {
-        sink.emit(EVT_VALIDATE_PROGRESS, json!({ "root": &args.root, "done": done, "total": total }));
+        if gate.allow(done, total) {
+            sink.emit(EVT_VALIDATE_PROGRESS, json!({ "root": &args.root, "done": done, "total": total }));
+        }
     };
     let mut out = svc.validate_project_collect(&args.root, &encoding, &on_progress);
     eprintln!(

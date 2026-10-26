@@ -228,7 +228,7 @@ export const FRAMEWORK_CATALOGS: FrameworkCatalogSpec[] = [
       { id: 'owner', label: 'Group by package' },
       { id: 'none', label: 'No grouping' },
     ],
-    shortcut: 'Ctrl+Shift+B',
+    shortcut: 'Ctrl+Shift+F12',
   },
   {
     id: 'librarybeans',

@@ -128,6 +128,8 @@ members = [
     "crates/products/bennu/frameworks/mockito",
     # AssertJ: the assertion that asserts nothing, and JUnit assertions rewritten as AssertJ ones.
     "crates/products/bennu/frameworks/assertj",
+    # MyBatis: a mapper XML coloured as what it is — the SQL, the #{} / ${} bindings, the dynamic tags.
+    "crates/products/bennu/frameworks/mybatis",
     # Jakarta EE: CDI and EJB beans, the injection points they satisfy, and servlets.
     "crates/products/bennu/frameworks/jakartaee",
     # JAX-RS: resources as routes, in the same Endpoints list as Spring's and Struts'.

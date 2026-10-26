@@ -1,0 +1,12 @@
+[package]
+name         = "bennu-mybatis"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "MyBatis mapper XML, coloured for what it is: the SQL inside a statement, the #{} / ${} bindings in it, the dynamic-SQL tags and their OGNL conditions, and the references between statements, fragments and result maps."
+
+[dependencies]
+bennu-ext   = { path = "../ext" }
+bennu-proto = { path = "../../runtime/proto" }

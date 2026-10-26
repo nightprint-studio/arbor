@@ -719,8 +719,10 @@ pub struct ProjectSession {
     pub open_files: Vec<String>,
     /// The active tab (one of `open_files`), or empty.
     pub active_file: String,
-    /// Where the caret was in each open tab, `"line:col"` (both 1-based), **positionally aligned
-    /// with `open_files`**; `""` for a tab the caret never visited.
+    /// Where the caret was in each open tab, `"line:col"` (both 1-based) with an optional
+    /// `":scrollTop"` suffix (pixels) for how far the page was scrolled, **positionally aligned
+    /// with `open_files`**; `""` for a tab the caret never visited. Opaque here: the FE owns the
+    /// format.
     ///
     /// A parallel array rather than a `path → caret` table because this struct is serialized as a
     /// TOML *array-of-tables* (`[[workspaces.projects]]`), where every field must be a scalar or

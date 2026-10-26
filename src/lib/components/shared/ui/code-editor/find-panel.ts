@@ -7,7 +7,7 @@
  * down when it opens, and CodeMirror's scroll margins still keep the caret out from under it.
  */
 
-import { mount, unmount } from 'svelte';
+import { flushSync, mount, unmount } from 'svelte';
 import type { EditorView, Panel } from '@codemirror/view';
 import FindWidget from './FindWidget.svelte';
 
@@ -30,7 +30,13 @@ export function createFindPanel(opts: FindPanelOptions = {}): (view: EditorView)
           target: dom,
           props: { view, onFindInFiles: opts.onFindInFiles },
         });
-        (widget as { focusFind?: () => void }).focusFind?.();
+        // `bind:element` is applied by an effect, so without a flush the field is not bound yet
+        // and the first Ctrl+F opened the widget with the focus still in the code. The panel's
+        // DOM is also attached only after `mount()` returns, so focus once more on the next tick.
+        flushSync();
+        const focus = () => (widget as { focusFind?: () => void } | null)?.focusFind?.();
+        focus();
+        queueMicrotask(focus);
       },
       update() {
         (widget as { refresh?: () => void } | null)?.refresh?.();

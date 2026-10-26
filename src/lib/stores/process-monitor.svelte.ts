@@ -6,7 +6,8 @@
  *
  * A monitor that sampled in the background would be a process doing work to report that processes
  * are doing work. `start()` is called by the screen when it opens and `stop()` when it closes, and
- * between those two it asks once a second. Nothing here runs otherwise.
+ * between those two it asks once a second — while the window is in front: in the background the poll
+ * rests, and samples once on return. Nothing here runs otherwise.
  *
  * ## The watchdog needs two samples, not one
  *
@@ -20,6 +21,7 @@
 
 import { processReport, type ProcessReport, type ProcessRow } from '$lib/ipc/processes';
 import { platform } from '$lib/ipc/rpc';
+import { watchWindowFocus, type WindowFocusWatch } from '$lib/utils/window-focus';
 
 /** How often the screen re-asks, in milliseconds. */
 const INTERVAL_MS = 1000;
@@ -47,6 +49,8 @@ function createProcessMonitorStore() {
   /** How many consecutive samples each pid has been over the CPU line — see the module doc. */
   let overCpu = $state<Record<number, number>>({});
   let timer: ReturnType<typeof setInterval> | null = null;
+  /** The window's focus while sampling — the poll rests in the background. */
+  let focus: WindowFocusWatch | null = null;
   /** How many screens are open on it. Two windows can both be watching. */
   let watchers = 0;
 
@@ -97,7 +101,13 @@ function createProcessMonitorStore() {
         // reason to show nothing.
       }
       await sample();
-      timer = setInterval(() => void sample(), INTERVAL_MS);
+      // Skipped, not queued, while the window is in the background: a second-by-second poll of a
+      // screen nobody can see is the very thing this monitor exists to catch other processes doing.
+      timer = setInterval(() => { if (focus?.focused ?? true) void sample(); }, INTERVAL_MS);
+      void watchWindowFocus((focused) => { if (focused && timer) void sample(); }).then((w) => {
+        // The last screen may have closed while the listener was attaching.
+        if (timer) focus = w; else w.stop();
+      });
     },
 
     /** Stop sampling when the last screen closes. */
@@ -106,6 +116,8 @@ function createProcessMonitorStore() {
       if (watchers > 0 || !timer) return;
       clearInterval(timer);
       timer = null;
+      focus?.stop();
+      focus = null;
     },
 
     /** Ask again now, without waiting for the next tick. */

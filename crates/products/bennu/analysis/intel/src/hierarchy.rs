@@ -36,7 +36,7 @@
 //!   attributed to its **type**, and that node is a leaf. Its real callers are the constructors,
 //!   which the index cannot attribute to it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use bennu_java::prelude::{FileSymbols, MethodDecl, Span, TypeDecl, TypeResolver};
 use bennu_query::prelude::PlanFile;
@@ -166,6 +166,88 @@ pub fn step(
         // hierarchy's chips over a type node — and the honest answer is none.
         _ => Vec::new(),
     }
+}
+
+/// What implements (or overrides) the declaration `key` stands for — "go to implementation".
+///
+/// A **type** answers with every project type built on it, directly or not; a **method** answers
+/// with the subtypes that declare it themselves, which is the list a reader wants on an interface
+/// or abstract method. The same `SubtypeMap` the type hierarchy descends, so the two agree on what
+/// an implementor is (an anonymous class included). A field has no implementations.
+pub fn implementations(ctx: &HierarchyCtx, key: &DeclKey) -> Vec<HierarchyItem> {
+    match key {
+        DeclKey::Type { binary } => descendants(ctx, binary)
+            .iter()
+            .filter_map(|sub| type_item(ctx, sub))
+            .collect(),
+        DeclKey::Method { owner, name } => descendants(ctx, owner)
+            .iter()
+            .filter(|sub| crate::rename::declares_method(ctx.resolver, sub, name))
+            .filter_map(|sub| method_item(ctx, sub, name, Vec::new()))
+            .collect(),
+        DeclKey::Field { .. } => Vec::new(),
+    }
+}
+
+/// Every project type built on `binary` at any depth, nearest first — breadth-first so direct
+/// implementors lead the list a reader scans.
+fn descendants(ctx: &HierarchyCtx, binary: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::from([binary.to_string()]);
+    let mut queue: VecDeque<String> = VecDeque::from([binary.to_string()]);
+    // A library supertype's project subtypes are found by what their source says: the subtype map
+    // is built from the resolver's supertype links, and a class that `extends` a jar's type is
+    // exactly the link it can lose (the walk resolver does not read the dependency tier).
+    if ctx.index.file_declaring(binary).is_none() {
+        for sub in named_subtypes(ctx, binary) {
+            if seen.insert(sub.clone()) {
+                out.push(sub.clone());
+                queue.push_back(sub);
+            }
+        }
+    }
+    while let Some(cur) = queue.pop_front() {
+        for sub in ctx.subtypes.children(&cur) {
+            if seen.insert(sub.clone()) {
+                out.push(sub.clone());
+                queue.push_back(sub.clone());
+            }
+        }
+    }
+    out
+}
+
+/// The project types whose `extends` / `implements` clause names `binary`, read off their source:
+/// the simple name written there must be one the file's own imports and package make mean `binary`.
+fn named_subtypes(ctx: &HierarchyCtx, binary: &str) -> Vec<String> {
+    let simple = binary.rsplit(['/', '$']).next().unwrap_or(binary);
+    let mut out = Vec::new();
+    for (_, symbols) in ctx.index.all_symbols() {
+        for ty in &symbols.types {
+            let names_it = ty
+                .extends
+                .iter()
+                .chain(ty.implements.iter())
+                .any(|text| simple_name_of(text) == simple);
+            if names_it
+                && bennu_java::prelude::simple_name_reaches(
+                    binary,
+                    simple,
+                    symbols.package.as_deref(),
+                    &symbols.imports,
+                )
+            {
+                out.push(ty.fqn.replace('.', "/"));
+            }
+        }
+    }
+    out
+}
+
+/// `Base<T>` → `Base`, `a.b.Base` → `Base`: the simple name a type clause writes.
+fn simple_name_of(type_text: &str) -> &str {
+    let base = type_text.split('<').next().unwrap_or(type_text).trim();
+    base.rsplit('.').next().unwrap_or(base)
 }
 
 // ── calls ─────────────────────────────────────────────────────────────────────────

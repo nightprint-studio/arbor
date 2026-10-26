@@ -663,6 +663,43 @@ impl SemanticEngine {
         crate::hierarchy::prepare(&self.hierarchy_ctx(&live), &key, calls)
     }
 
+    /// What the caret is on or uses, as the declaration key find-usages and rename share. The
+    /// classification half of [`implementations`](Self::implementations), for a caller that needs
+    /// only the name (a framework resolver keyed by owner + method).
+    pub fn key_at(&self, file: &str, source: &str, offset: usize) -> Option<DeclKey> {
+        let live = self.live();
+        self.classify_wide(&live, file, source, offset)
+    }
+
+    /// [`classify_caret`] with the FULL resolver when there is one — the choice `hover` makes, for
+    /// the same reason. The walk resolver is project-only and cannot name a library type, so a caret
+    /// on `OncePerRequestFilter` classified to nothing and "go to implementation" had no key to ask
+    /// about. Find-usages must keep the walk's own keys; a question about what a name *means* can
+    /// afford the wider view.
+    fn classify_wide(&self, live: &Live, file: &str, source: &str, offset: usize) -> Option<DeclKey> {
+        let policy = self.full_policy();
+        let resolver: &dyn TypeResolver = match policy.as_deref() {
+            Some(full) => full,
+            None => &*self.resolver,
+        };
+        classify_caret(&live.index, file, source, offset, resolver, &live.project_types)
+    }
+
+    /// The declaration the caret is on (or uses), with what implements / overrides it — "go to
+    /// implementation". `None` when the caret classifies to nothing; an empty list when the
+    /// declaration is real but nothing builds on it. Same classifier as find-usages and hierarchy.
+    pub fn implementations(
+        &self,
+        file: &str,
+        source: &str,
+        offset: usize,
+    ) -> Option<(DeclKey, Vec<HierarchyItem>)> {
+        let live = self.live();
+        let key = self.classify_wide(&live, file, source, offset)?;
+        let items = crate::hierarchy::implementations(&self.hierarchy_ctx(&live), &key);
+        Some((key, items))
+    }
+
     /// One level of a hierarchy, expanded from a node's own handle.
     pub fn hierarchy_step(
         &self,

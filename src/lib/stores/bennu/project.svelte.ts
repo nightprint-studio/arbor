@@ -151,16 +151,28 @@ function createProjectStore() {
   // Plain Map: nothing renders a caret from here. The editor reads it once, when it mounts a tab
   // it has no live view state for; from then on the live per-tab snapshot in `BennuEditor` is the
   // finer answer (it carries the scroll offset too) and this is only what gets written to disk.
-  const carets = new Map<string, { line: number; col: number }>();
+  //
+  // The scroll offset (pixels) rides with the caret: a caret alone reopens the tab on the right line
+  // but with that line centred, not where the page was scrolled to.
+  interface RememberedView { line: number; col: number; scroll?: number }
+  const carets = new Map<string, RememberedView>();
 
-  /** `"line:col"` ⇄ the pair, for the persisted (TOML-friendly) form. Tolerant on the way in:
-   *  anything that is not two positive integers is "no remembered caret". */
-  function parseCaret(text: string): { line: number; col: number } | null {
-    const m = /^(\d+):(\d+)$/.exec(text.trim());
+  /** `"line:col"` or `"line:col:scroll"` ⇄ the view, for the persisted (TOML-friendly) form.
+   *  Tolerant on the way in: anything that is not two positive integers (and an optional third) is
+   *  "no remembered caret". The scroll is an optional suffix so a session written before it existed
+   *  still reads. */
+  function parseCaret(text: string): RememberedView | null {
+    const m = /^(\d+):(\d+)(?::(\d+))?$/.exec(text.trim());
     if (!m) return null;
     const line = Number(m[1]);
     const col = Number(m[2]);
-    return line > 0 && col > 0 ? { line, col } : null;
+    if (!(line > 0 && col > 0)) return null;
+    const scroll = m[3] ? Number(m[3]) : 0;
+    return scroll > 0 ? { line, col, scroll } : { line, col };
+  }
+
+  function formatCaret(c: RememberedView): string {
+    return c.scroll && c.scroll > 0 ? `${c.line}:${c.col}:${Math.round(c.scroll)}` : `${c.line}:${c.col}`;
   }
 
   // ── Workspace (N projects) ────────────────────────────────────────────────────
@@ -433,7 +445,7 @@ function createProjectStore() {
     const caretsFor = (paths: string[]) =>
       paths.map((p) => {
         const c = carets.get(p);
-        return c ? `${c.line}:${c.col}` : '';
+        return c ? formatCaret(c) : '';
       });
     const projects = roots.map((r) => {
       if (r === activeRoot) {
@@ -871,13 +883,30 @@ function createProjectStore() {
       const key = canonPath(path);
       const before = carets.get(key);
       if (before && before.line === line && before.col === col) return;
-      carets.set(key, { line, col });
+      carets.set(key, { line, col, scroll: before?.scroll });
       persistWorkspace(CARET_PERSIST_MS);
     },
 
-    /** The remembered caret for `path`, or `null`. The editor asks once, when it opens a tab it
-     *  has no live view state for — a restored session being exactly that case. */
-    caretOf(path: string): { line: number; col: number } | null {
+    /**
+     * Remember how far `path` is scrolled (pixels), so a restart reopens the tab where the page
+     * was, not just on the caret's line. Same persistence path and debounce as the caret.
+     *
+     * Scrolling back to the top (`0`) is a position and is recorded. The caller must not report while
+     * a restored tab is still mounting — the editor says 0 then, and that would wipe the offset
+     * waiting to be applied (see the restore effect in `BennuEditor`).
+     */
+    rememberScroll(path: string, scroll: number) {
+      const key = canonPath(path);
+      const before = carets.get(key);
+      const next = Math.max(0, Math.round(scroll));
+      if ((before?.scroll ?? 0) === next) return;
+      carets.set(key, { line: 1, col: 1, ...before, scroll: next });
+      persistWorkspace(CARET_PERSIST_MS);
+    },
+
+    /** The remembered caret (and scroll) for `path`, or `null`. The editor asks once, when it opens
+     *  a tab it has no live view state for — a restored session being exactly that case. */
+    caretOf(path: string): { line: number; col: number; scroll?: number } | null {
       return carets.get(canonPath(path)) ?? null;
     },
 

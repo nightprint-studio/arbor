@@ -103,4 +103,7 @@ pub use crate::mybatis::{parse_mybatis, parse_mybatis_file, MyBatisParse};
 
 // MyBatis mapper-XML navigation: resolve the token under the caret (statement id → Java
 // method, namespace → interface, include/resultMap → their fragment, intra- or cross-file).
-pub use crate::mybatis_nav::{resolve_mybatis_ref, FragmentKind, MybatisRef};
+pub use crate::mybatis_nav::{
+    declaration_offset, fragment_usages, mapper_namespace, resolve_mybatis_ref, FragmentKind,
+    MybatisRef,
+};

@@ -4,7 +4,8 @@
  * The store that polls, and the only one in Picus that does. Two rules shape it,
  * and both are about somebody else's production database:
  *
- * * **It polls only while the panel is on screen.** `start` is called when the
+ * * **It polls only while the panel is on screen — and the window is in front.** The poll pauses
+ *   when the window loses the OS focus and reads once on return. `start` is called when the
  *   panel mounts and `stop` when it unmounts, so a dock closed on the Consistency
  *   tab costs nothing. A timer that keeps running behind a hidden panel is a query
  *   against a live server every three seconds, forever, for a picture nobody is
@@ -27,6 +28,7 @@ import {
   type SessionActivity,
   type StopKind,
 } from '$lib/ipc/picus/activity';
+import { watchWindowFocus, type WindowFocusWatch } from '$lib/utils/window-focus';
 import { connectionsStore } from './connections.svelte';
 import { picusProvidersStore } from './providers.svelte';
 
@@ -99,6 +101,31 @@ function createActivityStore() {
   /** The connection the request in flight is for — a late answer for a connection
    *  the user has left describes the wrong server and is dropped. */
   let asking = '';
+
+  /** The window's focus, while polling. Not `$state`: it gates the timer, nothing renders it. */
+  let focusWatch: WindowFocusWatch | null = null;
+  /** Bumped by every watch, so one that resolves after `stop()` (or a newer `start`) detaches itself. */
+  let watchSeq = 0;
+
+  /**
+   * Follow the window's focus: pause the poll in the background, and read once straight away when
+   * the window comes back so the table is current the moment you look at it.
+   */
+  async function watchFocus(id: string) {
+    stopWatchingFocus();
+    const mine = ++watchSeq;
+    const watch = await watchWindowFocus((focused) => {
+      if (focused && timer !== null) void refresh(id);
+    });
+    if (mine !== watchSeq) watch.stop();
+    else focusWatch = watch;
+  }
+
+  function stopWatchingFocus() {
+    watchSeq += 1;
+    focusWatch?.stop();
+    focusWatch = null;
+  }
 
   const byPid = $derived(new Map(snapshot.sessions.map((s) => [s.pid, s])));
   /** Pids something is waiting behind — what makes a session a root rather than
@@ -189,13 +216,17 @@ function createActivityStore() {
         loading = true;
       }
       void refresh(id);
-      timer = setInterval(() => void refresh(id), REFRESH_MS);
+      // A tick while the window is in the background is skipped, not queued: nobody is looking, and
+      // it would be a query against somebody's server for a picture no one sees.
+      timer = setInterval(() => { if (focusWatch?.focused ?? true) void refresh(id); }, REFRESH_MS);
+      void watchFocus(id);
     },
 
     /** Stop polling. Called when the panel unmounts — see the note at the top. */
     stop() {
       if (timer !== null) clearInterval(timer);
       timer = null;
+      stopWatchingFocus();
     },
 
     /** Read once, now — the refresh button, and whatever a stop leaves behind. */

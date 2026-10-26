@@ -19,7 +19,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu paints undefined names red instead of underlining them.** An unknown variable, method, class, field or import is coloured red where it is written; hover and quick fixes work as before.
 - **Bennu's editor right-click menu is grouped and coloured** — edit, navigate, generate, save, history — like Corvus's commit menu.
 
+### Changed
+- **Bennu reopens each tab scrolled where you left it,** not only on the caret's line, across restarts.
+- **Less to catch up on when you come back to Arbor:** whole-project validation and language-server status updates are throttled while the app is in the background, and the Picus Activity monitor and the process monitor pause their polling until the window is focused again.
+
 ### Fixed
+- **Bennu no longer reports "Statements before `this(…)` / `super(…)` requires Java 25" for a comment** placed before the call in a constructor.
+- **MyBatis mapper XML: Ctrl+B and Ctrl+click** now resolve types, result-map `extends`, association `select` and result `property` (no longer falling through to the DTD); on a `<resultMap>` / `<sql>` declaration they list its usages, as Alt+F7 does. Jumps from a mapper are recorded in the navigation history, so Ctrl+Alt+← returns from them.
+- **Go to implementation finds the project's subtypes of a library class** (e.g. what extends Spring's `OncePerRequestFilter`).
+- **Ctrl+F puts the caret in the Find field** — also on the first press and when the find widget is already open.
+- **Bennu's File structure (Ctrl+F12) reads better:** names lead with the element kind quieter, secondary text is right-aligned, and the selected row has an accent bar.
+- **Bennu: Ctrl+click on a `resultMap="…"` in a MyBatis mapper opens its `<resultMap>`** instead of the DTD.
 - **Dismissing a quick capture gives you back the app you were in.** On macOS the capture selection has to bring Arbor forward to take the keyboard; cancelling it now activates the application that was in front before, instead of leaving you in Arbor.
 - **Dismissing Tyto's capture selection no longer crashes the app on macOS.** Esc, right-click and the selector's Close now put Tyto away instead of closing its window — which also means the next capture starts immediately, with no backend to restart.
 - **Tyto's recording controls appear on the display being recorded,** instead of always on the primary monitor, and clear of the menu bar.
@@ -40,6 +50,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu no longer reports Lombok-managed fields as unused.** Private fields of a `@Data`, `@Getter`, `@Value`, `@Builder`… class are read by generated code, and a `@SuperBuilder` subclass no longer reports a missing super constructor.
 
 ### Added
+- **Bennu colours MyBatis mapper XML:** the SQL of each statement (keywords, functions, strings, comments), `#{}` bindings and — in a warning colour — `${}` splices, the dynamic tags with their `test` conditions, and declarations, references and Java types.
+- **Bennu: Go to implementation** (Ctrl+Shift+B, also in the palette and editor menu; the Spring beans catalog moves to Ctrl+Shift+F12) lists what implements an interface or abstract type, or overrides a method; a MyBatis mapper method also lists its XML statement.
+- **Bennu: Ctrl+B on a MyBatis mapper method opens its XML statement** instead of listing usages.
 - **A grant can cover several projects at once**, picked as chips from your recent projects or browsed to.
 - **An AI client can stage, unstage, diff and push through Corvus.** Alongside status, log, blame and commit, the Corvus MCP tools now read the patch of the uncommitted work (staged or not, whole or one file), move paths in and out of the index, and push the current branch — a plain fast-forward, never a force push, never another ref. Push counts as a Destructive action, so it answers to that permission on its own.
 - **Known vulnerabilities as warnings in a pom (opt-in).** With *Settings → Java → Check dependencies for known vulnerabilities* on, a pinned dependency with a published advisory is underlined with its CVE, severity and fixed version. Asks OSV.dev in the background and caches for a day.

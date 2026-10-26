@@ -358,16 +358,6 @@ export function lspTypeDefinition(
   return bennu('bennu_lsp_type_definition', { args: { file, source, offset } });
 }
 
-/** Go to implementations — for a Rust trait method, every `impl` of it.
- *  Wire: `bennu_lsp_implementations` — `{ file, source, offset }`. */
-export function lspImplementations(
-  file: string,
-  source: string,
-  offset: number,
-): Promise<import('$lib/ipc/bennu/nav').UsagesResult | null> {
-  return bennu('bennu_lsp_implementations', { args: { file, source, offset } });
-}
-
 /** Signature help at the caret. Wire: `bennu_lsp_signature_help` — `{ file, source, offset }`. */
 export function lspSignatureHelp(
   file: string,

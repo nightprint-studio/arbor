@@ -120,6 +120,9 @@ mod optimize_imports;
 // `bennu_hierarchy_prepare` / `bennu_hierarchy_step` — the call and type hierarchy, routed the same
 // way `format` is: a server for the languages that have one, the reference index for Java.
 mod hierarchy;
+// `bennu_implementations` — "go to implementation": the subtypes / overrides of the type or method
+// under the caret, plus the MyBatis XML statement a mapper method is implemented by.
+mod implementations;
 // The repairs that need types — "add `throws IOException`", "fill in the missing enum cases". The
 // text-only ones live in the pure `bennu-intentions` crate; both reach the editor through
 // `intentions`, which is where Alt+Enter asks.
@@ -203,6 +206,8 @@ mod inspect;
 // the native provider, serve completion from it, and patch a single file on edit.
 mod generate_override;
 mod index_service;
+// Focus-aware rate limit for the per-file "done of total" progress events.
+mod progress_gate;
 // Config-graph input discovery: walk the project tree to find struts/spring/tiles files
 // (`WebInputs`) for the config-graph build.
 mod web_discovery;

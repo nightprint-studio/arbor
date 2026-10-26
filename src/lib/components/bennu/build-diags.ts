@@ -38,6 +38,9 @@ function isFile(reported: string, file: string, root: string): boolean {
   return !absolute && `${norm(root)}/${r}` === target;
 }
 
+/** A compiler saying a name resolves to nothing (javac's wording, English or Italian). */
+const NOT_FOUND = /cannot find symbol|cannot resolve|impossibile trovare il simbolo/i;
+
 /** `note` is the compiler's third level and reads as information, not as a problem. */
 function severityOf(s: string): EditorDiagnostic['severity'] {
   if (s === 'error') return 'error';
@@ -95,11 +98,17 @@ export function buildDiagnosticsFor(
     const from = starts[line] + enc.encode(src.slice(0, col - 1)).length;
     // No end column in a compiler line, so the mark runs to the end of the line — which
     // is where the eye goes anyway, and never lands mid-character.
-    const to = starts[line] + enc.encode(src).length;
+    let to = starts[line] + enc.encode(src).length;
+    // A name the compiler could not find is the one case where its column says exactly what is
+    // wrong: the identifier it points at. Marking it alone, as red text like the live analysis does,
+    // beats underlining everything to the end of the line.
+    const name = NOT_FOUND.test(d.message) ? /^[A-Za-z_$][\w$]*/.exec(src.slice(col - 1))?.[0] : undefined;
+    if (name) to = from + enc.encode(name).length;
     out.push({
       from,
       to: Math.max(from, to),
       severity: severityOf(d.severity),
+      ...(name ? { emphasis: 'text' as const } : {}),
       // Named, because in a lint tooltip next to a live analysis warning "who said this"
       // is the first question — and the answer changes what you do about it.
       message: `${d.message}  (build)`,

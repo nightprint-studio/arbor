@@ -59,7 +59,7 @@ pub(crate) fn bennu_references(
 }
 
 /// Map an intel [`ReferencesResult`] onto the wire [`UsagesResult`].
-fn usages_result_of(result: ReferencesResult) -> UsagesResult {
+pub(crate) fn usages_result_of(result: ReferencesResult) -> UsagesResult {
     // The direct hits first, then each generated member's — tagged with what it is called, so the
     // list can say why `order.getName()` is a use of the field `name`. One flat list rather than
     // groups on the wire: they are all uses of the same declaration, the count in the header is the

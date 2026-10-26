@@ -385,6 +385,12 @@ impl ReferenceIndex {
     }
 
     /// The parsed symbols of a file (for the caret classifier). `None` if not indexed.
+    /// Every indexed project file with its extracted symbols — for a question the per-name tables
+    /// cannot answer, such as which types *write* a given supertype in their `extends` clause.
+    pub fn all_symbols(&self) -> impl Iterator<Item = (&String, &FileSymbols)> {
+        self.file_symbols.iter()
+    }
+
     pub fn symbols(&self, file: &str) -> Option<&FileSymbols> {
         self.file_symbols.get(file)
     }

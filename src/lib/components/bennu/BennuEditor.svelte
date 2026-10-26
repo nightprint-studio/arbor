@@ -110,6 +110,9 @@
     jspIncludeTarget as ipcJspIncludeTarget,
     beanClass as ipcBeanClass,
     mybatisNav as ipcMybatisNav,
+    mybatisUsages as ipcMybatisUsages,
+    mapperStatement as ipcMapperStatement,
+    implementations as ipcImplementations,
     actionPropertyTarget as ipcActionPropertyTarget,
     actionPropertyLint as ipcActionPropertyLint,
     strutsResultTarget as ipcStrutsResultTarget,
@@ -213,6 +216,8 @@
     changeBlocks: () => ChangeBlock[];
     openSearch: () => void;
     scrollToLineCol: (line: number, col?: number) => void;
+    /** Scroll to a remembered pixel offset, retried until the layout exists. */
+    restoreScrollTop: (top: number) => void;
     /** Which document the mounted view actually holds — see `nav-flow`'s `ready`. */
     documentKey: () => string | undefined;
     /** Whether a line is visible right now, as opposed to having been asked for. */
@@ -631,19 +636,28 @@
   // answer, and a go-to that asked for a specific line outranks both — hence the relays below
   // claim the tab through this same flag.
   let restoredCaretFor: string | null = null;
+  // Tabs whose remembered scroll has been dealt with, so a later report of theirs is the reader's
+  // own scrolling and worth persisting. Before that the editor reports the 0 of a fresh mount.
+  const scrollArmed = new Set<string>();
   $effect(() => {
     const path = activePath;
     const source = path ? projectStore.sourceOf(path) : '';
     if (!path || !source || isPreviewTab) return;
-    if (restoredCaretFor === path || viewStates.has(path)) return;
+    if (restoredCaretFor === path) return;
+    if (viewStates.has(path)) { scrollArmed.add(path); return; }
     restoredCaretFor = path;
     const caret = projectStore.caretOf(path);
-    if (!caret || (caret.line === 1 && caret.col === 1)) return;
+    const scroll = caret?.scroll ?? 0;
+    const atTop = !caret || (caret.line === 1 && caret.col === 1);
+    if (atTop && scroll <= 0) { scrollArmed.add(path); return; }
     void tick().then(() => {
+      scrollArmed.add(path);
       if (projectStore.activeFilePath !== path) return;
       // No history call here: restoring the caret is not a navigation. It only moves where the
       // reader is settled in this tab, which is what the next jump records as its origin.
-      editorComp?.scrollToLineCol(caret.line, caret.col);
+      if (caret && !atTop) editorComp?.scrollToLineCol(caret.line, caret.col);
+      // After the caret, which centres its line: the remembered offset is where the page really was.
+      if (scroll > 0) editorComp?.restoreScrollTop(scroll);
     });
   });
 
@@ -3765,6 +3779,15 @@
       // (the backend routes it to the server), and the JSP resolvers below would be asked about
       // a page that does not exist.
       if (!isJavaFile && !isLspBuffer) {
+        // A MyBatis mapper has its own idea of a use: the references to a `<resultMap>` / `<sql>`
+        // across the project's mappers, or the Java callers of a statement.
+        if (activePath.toLowerCase().endsWith('.xml') && isMapperSource(source)) {
+          const mapperUsages = await ipcMybatisUsages(activePath, source, offset).catch(() => null);
+          if (mapperUsages) {
+            bennuRefactorStore.setUsages(mapperUsages.target_label, mapperUsages.usages);
+            return;
+          }
+        }
         const nav = await ipcJspNav(activePath, source, offset).catch(() => null);
         if (nav && nav.usages.length) {
           bennuRefactorStore.setUsages(nav.label, nav.usages);
@@ -3895,6 +3918,35 @@
   /** What implements the type at the caret (and, by direction, what it is built on). */
   export function showTypeHierarchy() { void showHierarchy('types'); }
 
+  // ── Go to implementation (Ctrl+Shift+B) ─────────────────────────────────────
+
+  /**
+   * What implements the interface / abstract type at the caret, or overrides the method there —
+   * and, on a MyBatis mapper method, the XML statement implementing it.
+   *
+   * One answer jumps straight there; several open the same results popover find-usages uses, since
+   * silently picking one of several implementors would be picking the one *we* ranked first.
+   */
+  export async function goToImplementation() {
+    if (!activePath || !editorComp) return;
+    const source = editorComp.getValue();
+    const offset = editorComp.caretByteOffset();
+    const anchor = editorComp.coordsAtCaret();
+    const word = editorComp.wordAtCaret() || null;
+    const res = await ipcImplementations(activePath, source, offset).catch(() => null);
+    if (!res || res.usages.length === 0) {
+      toastStore.show('No implementations found', 'info');
+      return;
+    }
+    if (res.usages.length === 1) {
+      const only = res.usages[0];
+      openDefinitionFile(only.file, only.start);
+      return;
+    }
+    bennuRefactorStore.startUsages(anchor, word);
+    bennuRefactorStore.setUsages(res.target_label, res.usages);
+  }
+
   // ── Go to definition (Ctrl+B / Ctrl+Click) ────────────────────────────────────
   //
   // Resolves the JSP form/link **action reference** under the caret/click to its
@@ -3956,10 +4008,27 @@
     if (!target) return false;
     // On the declaration's own name span (same file, offset inside [start,end))? → usages.
     if (isSamePath(target.file, path) && offset >= target.start && offset < target.end) {
+      // A method of a MyBatis mapper interface has a better answer than its usages: the XML
+      // statement that implements it. Anything that is not a mapper method resolves to null here.
+      if (isJavaFile && (await tryGoToMapperStatement(source, offset))) return;
       await runFindUsages(source, offset, editorComp.coordsAtByteOffset(offset), word || null);
       return true;
     }
     await openAt(target.file, target.line, target.col ?? 1);
+    return true;
+  }
+
+  /** Java→XML: jump from the mapper method at `offset` to its `<select|insert|update|delete>`
+   *  statement in the mapper XML. Resolves via `bennu_mapper_statement`; `null` (→ false) when the
+   *  caret isn't on a mapper method, so the caller's usual go-to / find-usages gets its turn. */
+  async function tryGoToMapperStatement(source: string, offset: number): Promise<boolean> {
+    const path = activePath;
+    if (!path) return false;
+    const t = await ipcMapperStatement(path, source, offset).catch(() => null);
+    if (!t) return false;
+    // By line and column, through the history: a bare byte-offset open is not recorded, and a jump
+    // that is not recorded is one Back cannot return from.
+    await openAt(t.file, t.line, t.col);
     return true;
   }
 
@@ -4211,24 +4280,40 @@
    *  Intra-file targets move the caret here; a Java target opens the `.java` and jumps to the
    *  method/type line. Only meaningful in a mapper `.xml` (a non-mapper XML resolves to null →
    *  false, so the struts/spring `class=` resolver gets its turn). Returns true when it jumped. */
-  async function tryGoToMybatis(offset: number): Promise<boolean> {
+  async function tryGoToMybatis(offset: number, silent = false): Promise<boolean> {
     const path = activePath;
     if (!path || !editorComp || !path.toLowerCase().endsWith('.xml')) return false;
-    const t = await ipcMybatisNav(path, editorComp.getValue(), offset).catch(() => null);
-    if (!t) return false;
-    if (!isSamePath(t.file, path)) {
-      // A byte offset takes its own relay, which the history does not watch — so the arrival is
-      // announced the same way and the line is what the ring records.
-      await projectStore.openFile(t.file);
-      if (t.offset > 0) bennuUiStore.requestGotoOffset(t.offset);
-      else bennuUiStore.requestGoto(t.line);
-    } else if (t.offset > 0) {
-      editorComp?.scrollToByteOffset(t.offset);
-    } else if (t.line > 0) {
-      noteNavigation(t.line);
-      editorComp?.scrollToLineCol(t.line, 1);
+    const source = editorComp.getValue();
+    if (!isMapperSource(source)) return false;
+
+    const t = await ipcMybatisNav(path, source, offset).catch(() => null);
+    if (t) {
+      // By line and column, through the history, for every target: a byte-offset open is not
+      // recorded by it, and a jump that is not recorded is one Ctrl+Alt+← cannot return from.
+      await openAt(t.file, t.line, t.col);
+      return true;
     }
-    return true;
+    // A `<resultMap>` / `<sql>` declaration has nothing to jump to — it is the target — so what the
+    // gesture means there is its usages (IntelliJ's behaviour on a declaration).
+    const used = await ipcMybatisUsages(path, source, offset).catch(() => null);
+    if (used) {
+      bennuRefactorStore.startUsages(editorComp.coordsAtByteOffset(offset), editorComp.wordAtCaret() || null);
+      bennuRefactorStore.setUsages(used.target_label, used.usages);
+      return true;
+    }
+    // Anywhere else inside the mapper the framework's XML answer — the DTD's declaration of the tag
+    // or attribute — is never what was asked for, so it is not given. Before `<mapper>` (the
+    // DOCTYPE's own system id) the DTD is still the right place to go.
+    if (offset > source.search(/<mapper\b/)) {
+      if (!silent) toastStore.show('Nothing to go to here', 'info');
+      return true;
+    }
+    return false;
+  }
+
+  /** Whether `source` is a MyBatis mapper (a `<mapper namespace="…">` root). */
+  function isMapperSource(source: string): boolean {
+    return /<mapper\b[^>]*\bnamespace\s*=/.test(source);
   }
 
   /** Resolve + navigate to the declaration of the symbol / `action` under the caret/click.
@@ -4262,6 +4347,12 @@
     // 1. BE go-to-declaration — any Java symbol (class/method/field/local) — when we have
     //    a byte offset to classify at. Authoritative + precise (jumps to the exact line).
     if (offset != null && (await tryGoToDeclarationBE(offset, action))) return;
+    // 1-mybatis. MyBatis mapper XML: a statement `id` → the Java interface method, `namespace` →
+    //     the interface, an `<include refid>` → its `<sql>`, a `resultMap="…"` → its
+    //     `<resultMap>`. Offset-classified (needs no ref token); a non-mapper XML is a no-op.
+    //     BEFORE the framework extensions: the XML extension answers any attribute value with the
+    //     DTD declaration of the attribute, which won over the mapper's own `<resultMap>`.
+    if (offset != null && (await tryGoToMybatis(offset, silent))) return;
     // 1a. Framework extensions, BEFORE the server-backed stop below — because one of them now
     //     has something to say about a Rust file, and about a shader. A `"shaders/x.wgsl"`
     //     inside an `impl Material` is a string literal: rust-analyzer answers nothing about the
@@ -4307,10 +4398,6 @@
     //     `<s:include value>` path under the caret) — a `.jsp`/`.jspf` path is unambiguous, so
     //     resolve it before the Struts-action ref (they're disjoint). Non-`.java` files only.
     if (action && (await tryGoToJspInclude(action))) return;
-    // 1c-bis. MyBatis mapper XML: a statement `id` → the Java interface method, `namespace` →
-    //     the interface, an `<include refid>` → its `<sql>`, a `resultMap="…"` → its
-    //     `<resultMap>`. Offset-classified (needs no ref token); a non-mapper XML is a no-op.
-    if (offset != null && (await tryGoToMybatis(offset))) return;
     // 1c-ter. Struts config XML: a `<result>` body — a JSP path (open it) or an OGNL `${prop}` (jump
     //     to the owning action's property). Offset-classified; a non-result token is a no-op.
     if (offset != null && (await tryGoToStrutsResult(offset))) return;
@@ -4493,6 +4580,7 @@
     const navigate: MenuItem[] = supportsNav
       ? [
           { id: 'gotodef', label: 'Go to declaration', icon: Target, iconColor: 'var(--accent)', shortcut: 'Ctrl+B' },
+          { id: 'gotoimpl', label: 'Go to implementation', icon: Target, iconColor: 'var(--accent)', shortcut: 'Ctrl+Shift+B' },
           { id: 'usages', label: 'Find usages', icon: SearchCode, iconColor: 'var(--accent)', shortcut: 'Alt+F7' },
           { id: 'rename', label: 'Rename…', icon: PenLine, iconColor: 'var(--warning)', shortcut: 'Shift+F6' },
         ]
@@ -4593,6 +4681,7 @@
       case 'copy': editorComp?.copySelection(); break;
       case 'paste': void editorComp?.pasteClipboard(); break;
       case 'gotodef': goToDefinition(); break;
+      case 'gotoimpl': void goToImplementation(); break;
       case 'history':
         if (projectStore.project && activePath) bennuHistoryStore.show(projectStore.project.root, activePath);
         break;
@@ -5035,7 +5124,14 @@
           oninput={onInput}
           ondocchange={onDocChange}
           oncaret={onCaret}
-          onViewState={(s, key) => { if (key) viewStates.set(key, s); }}
+          onViewState={(s, key) => {
+            if (!key) return;
+            viewStates.set(key, s);
+            // Written to the session so a restart reopens the tab where the page was scrolled. Only
+            // once the restore has had its turn (`scrollArmed`): a restored tab mounts reporting 0,
+            // which would wipe the offset it is about to be given.
+            if (scrollArmed.has(key)) projectStore.rememberScroll(key, s.scrollTop);
+          }}
           onGoto={onEditorGoto}
           onFindInFiles={(q) => bennuUiStore.openFind(q)}
           onLensPress={(key) => void onLensPress(key)}
@@ -5468,6 +5564,61 @@
     text-decoration-color: color-mix(in srgb, var(--syntax-type, #4d78cc) 55%, transparent);
     text-underline-offset: 2px;
   }
+
+  /*
+   * A MyBatis mapper XML. To the markup grammar the SQL of a statement is one flat run of text, so
+   * everything below is painted over it: the SQL in the language's own colours, the bindings in the
+   * violet a Spring `${key}` takes (a name something else resolves for you), and `${}` apart in the
+   * warning colour — it is spliced into the statement rather than bound, the one that can be an
+   * injection. The dynamic tags take the annotation colour: they are not SQL, they decide which SQL
+   * exists.
+   */
+  :global(.cm-content .cm-fw-mybatis-sql-keyword),
+  :global(.cm-content .cm-fw-mybatis-sql-keyword span) { color: var(--syntax-keyword, #cc7832); font-weight: 600; }
+  :global(.cm-content .cm-fw-mybatis-sql-function),
+  :global(.cm-content .cm-fw-mybatis-sql-function span) { color: var(--syntax-function, #ffc66d); }
+  :global(.cm-content .cm-fw-mybatis-sql-string),
+  :global(.cm-content .cm-fw-mybatis-sql-string span) { color: var(--syntax-string, #6a8759); }
+  :global(.cm-content .cm-fw-mybatis-sql-number),
+  :global(.cm-content .cm-fw-mybatis-sql-number span) { color: var(--syntax-number, #6897bb); }
+  :global(.cm-content .cm-fw-mybatis-sql-comment),
+  :global(.cm-content .cm-fw-mybatis-sql-comment span) { color: var(--text-muted); font-style: italic; }
+  :global(.cm-content .cm-fw-mybatis-param),
+  :global(.cm-content .cm-fw-mybatis-param span) {
+    color: var(--syntax-field, #9876aa); font-weight: 600;
+  }
+  :global(.cm-content .cm-fw-mybatis-param) {
+    background: color-mix(in srgb, var(--syntax-field, #9876aa) 12%, transparent);
+    border-radius: 2px;
+  }
+  :global(.cm-content .cm-fw-mybatis-param-raw),
+  :global(.cm-content .cm-fw-mybatis-param-raw span) { color: var(--warning); font-weight: 700; }
+  :global(.cm-content .cm-fw-mybatis-param-raw) {
+    background: color-mix(in srgb, var(--warning) 16%, transparent);
+    border-radius: 2px;
+  }
+  :global(.cm-content .cm-fw-mybatis-dynamic),
+  :global(.cm-content .cm-fw-mybatis-dynamic span) {
+    color: var(--syntax-annotation, #bbb529); font-weight: 600;
+  }
+  :global(.cm-content .cm-fw-mybatis-expr),
+  :global(.cm-content .cm-fw-mybatis-expr span) { color: var(--info); font-style: italic; }
+  :global(.cm-content .cm-fw-mybatis-decl),
+  :global(.cm-content .cm-fw-mybatis-decl span) { color: var(--syntax-function, #ffc66d); font-weight: 700; }
+  /* A reference is something Ctrl+B follows, so it carries the same faint underline a type named as a
+     string does: the affordance that says a name can be followed. */
+  :global(.cm-content .cm-fw-mybatis-ref),
+  :global(.cm-content .cm-fw-mybatis-ref span) {
+    color: var(--syntax-function, #ffc66d);
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-decoration-color: color-mix(in srgb, var(--syntax-function, #ffc66d) 55%, transparent);
+    text-underline-offset: 2px;
+  }
+  :global(.cm-content .cm-fw-mybatis-type),
+  :global(.cm-content .cm-fw-mybatis-type span) { color: var(--syntax-type, #4d78cc); }
+  :global(.cm-content .cm-fw-mybatis-property),
+  :global(.cm-content .cm-fw-mybatis-property span) { color: var(--syntax-field, #9876aa); }
 
   /*
    * The fulcrum i18n markup, inside a TOML string.

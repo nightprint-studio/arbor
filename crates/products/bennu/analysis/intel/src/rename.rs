@@ -1908,7 +1908,7 @@ pub(crate) fn library_override(resolver: &dyn TypeResolver, owner: &str, name: &
 }
 
 /// Whether `binary` declares a method called `name` **itself** (not inherited).
-fn declares_method(resolver: &dyn TypeResolver, binary: &str, name: &str) -> bool {
+pub(crate) fn declares_method(resolver: &dyn TypeResolver, binary: &str, name: &str) -> bool {
     resolver
         .members_of(binary)
         .map(|cm| cm.methods.iter().any(|m| m.name == name))

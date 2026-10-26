@@ -98,9 +98,20 @@ fn feature_at(n: Node, bytes: &[u8]) -> Option<(&'static str, u32)> {
     }
 }
 
-/// Whether anything precedes the explicit constructor invocation `n` in its constructor body.
+/// Whether a **statement** precedes the explicit constructor invocation `n` in its constructor body.
+///
+/// A comment is a named node in this grammar, and one sitting between the opening brace and `this(…)`
+/// is the ordinary way to explain which constructor is being delegated to — so it is not a statement
+/// and must not date the file to Java 25.
 fn follows_a_statement(n: Node) -> bool {
-    n.prev_named_sibling().is_some()
+    let mut prev = n.prev_named_sibling();
+    while let Some(p) = prev {
+        if !matches!(p.kind(), "line_comment" | "block_comment") {
+            return true;
+        }
+        prev = p.prev_named_sibling();
+    }
+    false
 }
 
 /// The dated feature a `case` label uses, if any.
@@ -278,6 +289,18 @@ mod tests {
         let unnamed = "class C { void m(Object o) { if (o instanceof P(int x, _)) {} } }";
         assert_eq!(at(unnamed, 21).len(), 1);
         assert!(at(unnamed, 22).is_empty());
+    }
+
+    #[test]
+    fn a_comment_before_this_or_super_is_not_a_statement() {
+        let line_comments = "class C { C() {\n  // NB: uses the general constructor\n  //     see C(String)\n  this(\"x\");\n } C(String s) {} }";
+        assert!(at(line_comments, 8).is_empty());
+        let block_comment = "class C extends B { C() { /* delegate */ super(1); } }";
+        assert!(at(block_comment, 8).is_empty());
+        // A real statement still dates it, comments or not between it and the call.
+        let statement = "class C extends B { C(int x) { int y = x; // then\n super(y); } }";
+        assert_eq!(at(statement, 8).len(), 1);
+        assert!(at(statement, 25).is_empty());
     }
 
     #[test]

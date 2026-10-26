@@ -33,7 +33,7 @@
   import { RangeSet, type ChangeSet, type Text } from '@codemirror/state';
   import { indentUnit as cmIndentUnit } from '@codemirror/language';
   import { setDiagnostics as cmSetDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
-  import { openSearchPanel } from '@codemirror/search';
+  import { openSearchPanel, searchPanelOpen } from '@codemirror/search';
 
   import type { LanguageDescriptor, EditorDiagnostic, EditorViewSnapshot } from './types';
   import {
@@ -1026,7 +1026,18 @@
   /** Open CodeMirror's search panel + focus its query field (routed here from the
    *  host's Ctrl+F when the editor pane has focus). */
   export function openSearch() {
-    if (view) openSearchPanel(view);
+    if (!view) return;
+    // Already open: CodeMirror's command would re-focus a `[main-field]` it cannot find in our
+    // widget and do nothing, leaving the caret in the code. Focus the Find field ourselves.
+    if (searchPanelOpen(view.state)) {
+      const field = view.dom.querySelector<HTMLInputElement>('.arbor-find-host input');
+      if (field) {
+        field.focus();
+        field.select();
+        return;
+      }
+    }
+    openSearchPanel(view);
   }
 
   export function scrollToOffset(offset: number, select = false) {
@@ -1207,6 +1218,30 @@
     const ln = Math.max(1, Math.min(line, doc.lines));
     const block = view.lineBlockAt(doc.line(ln).from);
     return block.top - view.scrollDOM.scrollTop;
+  }
+
+  /**
+   * Scroll to a remembered pixel offset, retrying across frames until it sticks.
+   *
+   * For a restored session: the offset refers to a layout that exists only once the text has been
+   * measured, and a value written earlier is clamped to 0. While pending, the view state reports the
+   * wanted offset instead of the clamped one, and any wheel / pointer / key takes over.
+   */
+  export function restoreScrollTop(top: number) {
+    const v = view;
+    if (!v || !(top > 0)) return;
+    pendingScrollTop = top;
+    let frames = 0;
+    const step = () => {
+      if (view !== v || pendingScrollTop !== top) return; // superseded, or the reader took over
+      if (v.scrollDOM.clientHeight > 0) {
+        v.scrollDOM.scrollTop = top;
+        if (Math.abs(v.scrollDOM.scrollTop - top) <= 1) { pendingScrollTop = null; return; }
+      }
+      if (++frames > 60) { pendingScrollTop = null; return; }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
   }
 
   export function scrollToLineCol(line: number, col = 1) {

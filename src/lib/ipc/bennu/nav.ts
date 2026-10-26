@@ -519,26 +519,57 @@ export function jspIncludeTarget(file: string, path: string): Promise<string | n
 
 // ── MyBatis mapper-XML navigation ─────────────────────────────────────────────────
 
-/** A resolved go-to target from inside a mapper XML — mirrors the BE `MybatisNavResult`.
- *  Either an intra-file byte `offset` (a `<sql>`/`<resultMap>` in the same mapper) or a
- *  cross-file `line` in a `.java` (the interface method/type); the unused one is `0`. */
+/** A resolved go-to target in or out of a mapper XML — mirrors the BE `MybatisNavResult`.
+ *  Always placed by `line` / `col`, because the editor's navigation history records places that way;
+ *  `offset` is the byte offset for an XML target and `0` for a Java one. */
 export interface MybatisNav {
   /** Absolute path (forward slashes) of the file to open. */
   file: string;
-  /** Byte offset to jump to (intra-file); `0` when `line` is used instead. */
+  /** Byte offset of the target (an XML target); `0` for a Java target. */
   offset: number;
-  /** 1-based line to jump to (cross-file into a `.java`); `0` when `offset` is used. */
+  /** 1-based line of the target. */
   line: number;
+  /** 1-based column of the target. */
+  col: number;
 }
 
-/** Resolve the mapper-XML token at `file`:`offset` — a statement `id` → its Java interface
- *  method, `namespace` → the interface, `<include refid>` → its `<sql>`, a `resultMap="…"`
- *  → its `<resultMap>`. `source` is the current (possibly-unsaved) buffer, so the offset is
- *  classified against what the user sees. `null` when the caret isn't on a navigable
- *  reference or it can't be resolved (no index yet, an as-yet-unsupported cross-namespace
- *  fragment). Wire: `bennu_mybatis_nav` — `MybatisNavArgs { file, source, offset }`. */
+/** Resolve the mapper-XML token at `file`:`offset`: a statement `id` → its Java interface method,
+ *  `namespace` → the interface, `<include refid>` → its `<sql>`, `resultMap` / `extends` → its
+ *  `<resultMap>` (this namespace's or another's), an association's `select` → its statement,
+ *  `type` / `resultType` / `parameterType` / `javaType` / `ofType` → the Java class, a result
+ *  `property` → the field or accessor on the mapped class. `source` is the current (possibly-unsaved)
+ *  buffer. `null` when the caret isn't on a navigable reference or it can't be resolved (no index
+ *  yet, an unknown class). Wire: `bennu_mybatis_nav` — `{ file, source, offset }`. */
 export function mybatisNav(file: string, source: string, offset: number): Promise<MybatisNav | null> {
   return bennu('bennu_mybatis_nav', { args: { file, source, offset } });
+}
+
+/** Find-usages from inside a mapper XML: the references to a `<resultMap>` / `<sql>` (on its
+ *  declaration or on a reference to it) across the project's mappers, or the Java usages of a
+ *  statement's interface method. `null` when the caret is on none of those.
+ *  Wire: `bennu_mybatis_usages` — `{ file, source, offset }`. */
+export function mybatisUsages(file: string, source: string, offset: number): Promise<UsagesResult | null> {
+  return bennu('bennu_mybatis_usages', { args: { file, source, offset } });
+}
+
+/** Java→XML: the mapper method under the caret in a `.java` (its declaration in the interface, or a
+ *  call through a mapper) → its `<select|insert|update|delete>` statement in the mapper XML. `null` when the caret isn't on a method or its owner has no statement of that
+ *  name. Wire: `bennu_mapper_statement` — `{ file, source, offset }`. */
+export function mapperStatement(file: string, source: string, offset: number): Promise<MybatisNav | null> {
+  return bennu('bennu_mapper_statement', { args: { file, source, offset } });
+}
+
+/** Go to implementation — what implements the interface / abstract type at `file`:`offset`, or
+ *  overrides the method there (and, on a MyBatis mapper method, the XML statement implementing it).
+ *  Same shape as find-usages so the one results popover renders both. `null` when no engine owns the
+ *  file, the index is still building, or the caret isn't on a type or method; empty `usages` when
+ *  nothing builds on it. Wire: `bennu_implementations` — `{ file, source, offset }`. */
+export function implementations(
+  file: string,
+  source: string,
+  offset: number,
+): Promise<UsagesResult | null> {
+  return bennu('bennu_implementations', { args: { file, source, offset } });
 }
 
 // ── hover (docs §5) ─────────────────────────────────────────────────────────────

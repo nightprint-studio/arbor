@@ -288,7 +288,17 @@ pub struct LspRegistry {
     /// scan cannot be paid every time. Cleared by [`Self::forget_missing`], which is what an
     /// install calls.
     installed: Mutex<HashMap<String, bool>>,
+    /// When a status event last went out while the app was unfocused — see
+    /// [`Self::emit_status_coalesced`].
+    status_last: Mutex<Option<std::time::Instant>>,
+    /// Whether a delayed trailing status event is already scheduled.
+    status_pending: AtomicBool,
 }
+
+/// While the app is in the background, status events closer than this are folded into one. A server
+/// reports progress several times a second while it indexes, each report re-sends every server's
+/// whole status, and the throttled webview queues them all to deliver at once on the way back.
+const STATUS_UNFOCUSED_INTERVAL: Duration = Duration::from_secs(3);
 
 static REGISTRY: OnceLock<LspRegistry> = OnceLock::new();
 
@@ -301,6 +311,8 @@ impl LspRegistry {
             reaping: AtomicBool::new(false),
             sink: RwLock::new(None),
             installed: Mutex::new(HashMap::new()),
+            status_last: Mutex::new(None),
+            status_pending: AtomicBool::new(false),
         })
     }
 
@@ -1112,6 +1124,49 @@ impl LspRegistry {
         }
     }
 
+    /// [`Self::emit_status`] for a session's own progress reports: immediate while a window is in
+    /// front, and at most one per [`STATUS_UNFOCUSED_INTERVAL`] in the background.
+    ///
+    /// The last change is never lost: one that arrives inside the interval schedules a single
+    /// trailing emit at its end, so the status is right the moment the window comes back. Explicit
+    /// actions (start, stop, restart) call `emit_status` directly and are never delayed.
+    fn emit_status_coalesced(&'static self) {
+        use std::sync::atomic::Ordering;
+        use std::time::Instant;
+
+        if arbor_be::prelude::app_focused() {
+            self.emit_status();
+            return;
+        }
+        let wait = {
+            let mut last = self.status_last.lock().unwrap_or_else(|p| p.into_inner());
+            let now = Instant::now();
+            match *last {
+                Some(prev) if now.duration_since(prev) < STATUS_UNFOCUSED_INTERVAL => {
+                    Some(STATUS_UNFOCUSED_INTERVAL - now.duration_since(prev))
+                }
+                _ => {
+                    *last = Some(now);
+                    None
+                }
+            }
+        };
+        let Some(wait) = wait else {
+            self.emit_status();
+            return;
+        };
+        // A trailing emit is already on its way and will read the newest state when it fires.
+        if self.status_pending.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        std::thread::spawn(move || {
+            std::thread::sleep(wait);
+            self.status_pending.store(false, Ordering::SeqCst);
+            *self.status_last.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
+            self.emit_status();
+        });
+    }
+
     fn emit(&self, topic: &str, payload: serde_json::Value) {
         if let Some(sink) = self.sink() {
             sink.emit(topic, payload);
@@ -1238,7 +1293,7 @@ impl SessionObserver for RegistryObserver {
     }
 
     fn status_changed(&self) {
-        self.registry.emit_status();
+        self.registry.emit_status_coalesced();
     }
 
     fn message(&self, level: &str, text: &str) {

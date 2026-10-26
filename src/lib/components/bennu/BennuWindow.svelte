@@ -724,6 +724,7 @@
     requestCompletion: () => void;
     openIntentions: () => void;
     goToDefinition: () => void;
+    goToImplementation: () => Promise<void>;
     openRename: () => void;
     findUsages: () => void;
     findComponentUsages: () => void;
@@ -1479,6 +1480,8 @@
         when: !!projectStore.project },
       { id: 'gotodef', title: 'Go to declaration', icon: 'Target', shortcut: 'Ctrl+B',
         action: () => run(() => editor?.goToDefinition()), when: canNav },
+      { id: 'gotoimpl', title: 'Go to implementation', icon: 'Target', shortcut: 'Ctrl+Shift+B',
+        action: () => run(() => void editor?.goToImplementation()), when: canNav },
       // The navigation history, findable by name. Back and Forward are muscle memory once you
       // know them, and unfindable until you do.
       { id: 'navback', title: 'Back', icon: 'History', shortcut: 'Ctrl+Alt+Left',
@@ -2156,10 +2159,10 @@
       e.preventDefault(); bennuUiStore.toggleBottom('bevycomponents'); return;
     }
 
-    // Spring beans (Ctrl+Shift+B) — the framework catalog with a keyboard door, since it
+    // Spring beans (Ctrl+Shift+F12) — the framework catalog with a keyboard door, since it
     // is the one you reach for while reading code. Its siblings (Endpoints, Config) stay
     // palette-only. Silent on a project that declares none: no panel to open.
-    if (mod && e.shiftKey && !e.altKey && isKey(e, 'b')) {
+    if (mod && e.shiftKey && !e.altKey && e.key === 'F12') {
       if (!catalogIds.includes('beans')) return;
       e.preventDefault(); bennuUiStore.toggleBottom('beans'); return;
     }
@@ -2318,6 +2321,12 @@
     if (mod && !e.shiftKey && isKey(e, 'b')) {
       if (!supportsCodeNav(projectStore.activeFilePath)) return;
       e.preventDefault(); editor?.goToDefinition(); return;
+    }
+    // Go to implementation (Ctrl+Shift+B) — IntelliJ's Ctrl+Alt+B, moved off the Ctrl+Alt family
+    // that AltGr keyboards lose. Subtypes / overrides, or the XML statement of a mapper method.
+    if (mod && e.shiftKey && !e.altKey && isKey(e, 'b')) {
+      if (!supportsCodeNav(projectStore.activeFilePath)) return;
+      e.preventDefault(); void editor?.goToImplementation(); return;
     }
     if (mod && isKey(e, 'f')) { e.preventDefault(); editor?.openSearch(); return; }
     /*

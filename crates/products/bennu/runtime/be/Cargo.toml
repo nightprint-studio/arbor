@@ -117,6 +117,8 @@ bennu-mapstruct = { path = "../../frameworks/mapstruct" }
 bennu-mockito = { path = "../../frameworks/mockito" }
 # The AssertJ assertion that asserts nothing, and JUnit assertions rewritten as AssertJ.
 bennu-assertj = { path = "../../frameworks/assertj" }
+# A MyBatis mapper XML coloured as what it is: SQL, bindings, dynamic tags.
+bennu-mybatis = { path = "../../frameworks/mybatis" }
 # Jakarta EE: CDI / EJB beans and injection points, and servlets.
 bennu-jakartaee = { path = "../../frameworks/jakartaee" }
 # JAX-RS resources, as routes in the shared Endpoints list.

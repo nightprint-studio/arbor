@@ -109,6 +109,7 @@
     <tr><td>Go to class</td><td><kbd>Ctrl</kbd> + <kbd>N</kbd></td></tr>
     <tr><td>Go to file</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd></td></tr>
     <tr><td>Go to declaration</td><td><kbd>Ctrl</kbd> + <kbd>B</kbd></td></tr>
+    <tr><td>Go to implementation</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></td></tr>
     <tr><td>Find usages</td><td><kbd>Alt</kbd> + <kbd>F7</kbd></td></tr>
     <tr><td>Find in project</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd></td></tr>
     <tr><td>Local history</td><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd></td></tr>

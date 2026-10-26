@@ -26,6 +26,15 @@
     </select>
 </mapper>`, 'markup')}</code></pre>
 
+<h2>Colouring</h2>
+<p>
+  A mapper <code>.xml</code> is coloured for what it is, not only as markup: the SQL of each statement (keywords, functions, strings,
+  numbers, comments), <code>#{'{'}name{'}'}</code> bindings, and <code>${'{'}name{'}'}</code> in the warning colour — it is spliced into the
+  statement rather than bound, so it is the one that can be an injection. The dynamic tags (<code>if</code>, <code>where</code>,
+  <code>foreach</code>, …) and their <code>test</code> conditions stand apart from the SQL they control; statement ids, references
+  (<code>refid</code>, <code>resultMap</code>) and the Java types a mapper names each have their own colour.
+</p>
+
 <h2>Following a piece</h2>
 <p>
   In a mapper <code>.xml</code>, <kbd>Ctrl</kbd> + <kbd>B</kbd> — or <kbd>Ctrl</kbd> + click — follows the piece under the caret:
@@ -39,6 +48,11 @@
     <tr><td>A statement's <code>resultMap="orderMap"</code></td><td>The <code>&lt;resultMap&gt;</code> it uses</td></tr>
   </tbody>
 </table>
+<p>
+  The other way, on the mapper <code>.java</code> interface: <kbd>Ctrl</kbd> + <kbd>B</kbd> on a method's name opens its
+  <code>&lt;select|insert|update|delete&gt;</code> statement in the XML. <strong>Go to implementation</strong>
+  (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>) lists that statement together with any Java override.
+</p>
 <Callout variant="tip" title="Instant inside one file">
   A fragment or result map referenced from the same file resolves at once, with no index needed.
 </Callout>

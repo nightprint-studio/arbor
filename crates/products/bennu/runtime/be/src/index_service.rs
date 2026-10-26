@@ -70,16 +70,6 @@ use crate::web_discovery::{discover_jsp_files, discover_web_inputs};
 /// phase) plus a terminal `{ "phase": "ready", "state": "end" }` once completion is live.
 const EVT_INDEX_PROGRESS: &str = "arbor://bennu/index-progress";
 
-/// The shortest gap between two `references` progress events while a window is in front — about
-/// ten updates a second, which is what a moving bar needs and more than a person can read.
-const PROGRESS_FOCUSED_INTERVAL: Duration = Duration::from_millis(100);
-
-/// …and while the app is in the background, where nobody is reading it and the frontend that
-/// receives it is power-throttled. Not zero: the card must be roughly right the moment you come
-/// back, and the frontend reads a live event stream as "the walk is still working" (its poll's
-/// give-up is only for a backend that emits nothing at all).
-const PROGRESS_UNFOCUSED_INTERVAL: Duration = Duration::from_secs(3);
-
 /// Emitted when a "Download sources" fetch finishes. Payload `{ "path": <decompiled-tab path>,
 /// "ok": <bool> }` — the FE clears the tab's download spinner and, on `ok`, reloads it from disk
 /// (its content flipped from stub to real source).
@@ -2698,6 +2688,39 @@ impl IndexService {
         engine.hierarchy_step(handle, direction)
     }
 
+    /// Every MyBatis mapper of the project owning `file`, as `(namespace, mapper .xml)`. Empty when
+    /// no project owns it or its config graph isn't built yet.
+    pub fn mapper_files(&self, file: &str) -> Vec<(String, String)> {
+        self.config_for_file(file).map(|cfg| cfg.mapper_files()).unwrap_or_default()
+    }
+
+    /// The `(owner binary name, method name)` the caret at `file`:`offset` is on or calls, or `None`
+    /// when it isn't on a method (or no project engine is ready).
+    pub fn method_at(&self, file: &str, source: &str, offset: usize) -> Option<(String, String)> {
+        if !understands(file) {
+            return None;
+        }
+        match self.semantics_for(file)?.key_at(file, source, offset)? {
+            bennu_intel::prelude::DeclKey::Method { owner, name } => Some((owner, name)),
+            _ => None,
+        }
+    }
+
+    /// The declaration at `file`:`offset` and what implements / overrides it, over the owning
+    /// project's engine. `None` when no project owns the file, its index is still building, or the
+    /// caret classifies to nothing. Mirrors [`find_usages`](Self::find_usages).
+    pub fn implementations(
+        &self,
+        file: &str,
+        source: &str,
+        offset: usize,
+    ) -> Option<(bennu_intel::prelude::DeclKey, Vec<bennu_intel::prelude::HierarchyItem>)> {
+        if !understands(file) {
+            return None;
+        }
+        self.semantics_for(file)?.implementations(file, source, offset)
+    }
+
     /// The semantic engine of the project owning `file`, or `None` when no project owns it or its
     /// index is still building. The two-line form every whole-project query starts with.
     fn semantics_for(&self, file: &str) -> Option<Arc<SemanticEngine>> {
@@ -4592,20 +4615,10 @@ fn build_rename_engine(
     // one every few seconds is enough to keep the card honest for whenever you return.
     //
     // The last one is never dropped: a bar that stops at 19 997 of 20 000 looks stuck.
-    let last_progress: Mutex<Option<Instant>> = Mutex::new(None);
+    let gate = crate::progress_gate::ProgressGate::new();
     let on_progress = |done: usize, total: usize| {
-        if done < total {
-            let interval = if arbor_be::prelude::app_focused() {
-                PROGRESS_FOCUSED_INTERVAL
-            } else {
-                PROGRESS_UNFOCUSED_INTERVAL
-            };
-            let now = Instant::now();
-            let mut last = last_progress.lock().unwrap_or_else(|p| p.into_inner());
-            if last.is_some_and(|prev| now.duration_since(prev) < interval) {
-                return;
-            }
-            *last = Some(now);
+        if !gate.allow(done, total) {
+            return;
         }
         sink.emit(
             EVT_INDEX_PROGRESS,

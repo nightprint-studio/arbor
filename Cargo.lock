@@ -994,6 +994,7 @@ dependencies = [
  "bennu-mapstruct",
  "bennu-maven",
  "bennu-mockito",
+ "bennu-mybatis",
  "bennu-naming",
  "bennu-npm",
  "bennu-plugin",
@@ -1342,6 +1343,14 @@ dependencies = [
  "bennu-java",
  "bennu-proto",
  "tree-sitter",
+]
+
+[[package]]
+name = "bennu-mybatis"
+version = "0.3.0"
+dependencies = [
+ "bennu-ext",
+ "bennu-proto",
 ]
 
 [[package]]

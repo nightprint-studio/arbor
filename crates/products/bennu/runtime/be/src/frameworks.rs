@@ -41,6 +41,7 @@ use bennu_jakartaee::prelude::JakartaEeExtension;
 use bennu_jaxrs::prelude::JaxRsExtension;
 use bennu_mapstruct::prelude::MapStructExtension;
 use bennu_mockito::prelude::MockitoExtension;
+use bennu_mybatis::prelude::MyBatisExtension;
 use bennu_project::prelude::normalize_newlines;
 use bennu_proto::prelude::{CapabilitySet, CompletionItem, Diagnostic};
 use bennu_fulcrum_i18n::prelude::FulcrumI18nExtension;
@@ -435,6 +436,9 @@ impl FrameworkService {
                 // assertion that asserts nothing, never fails at all.
                 Arc::new(MockitoExtension::new()) as Arc<dyn FrameworkExtension>,
                 Arc::new(AssertJExtension::new()) as Arc<dyn FrameworkExtension>,
+                // A mapper's SQL is one flat run of text to the XML grammar; this is what makes the
+                // statement, its bindings and its dynamic tags read as what they are.
+                Arc::new(MyBatisExtension::new()) as Arc<dyn FrameworkExtension>,
                 // The container that wires CDI and EJB beans, and the servlets it deploys.
                 Arc::new(JakartaEeExtension::new()) as Arc<dyn FrameworkExtension>,
                 // JAX-RS resources, answering the bare `endpoints` catalog beside Spring and Struts.
@@ -460,7 +464,7 @@ impl FrameworkService {
         // read when it is the *only* active extension is what keeps a plain Maven project from
         // paying a Spring-sized scan to get `pom.xml` completion.
         let wants_java =
-            registry.ids().iter().any(|id| !matches!(*id, "xml" | "maven" | "toolconf" | "jsp" | "fulcrum.i18n" | "bevy"));
+            registry.ids().iter().any(|id| !matches!(*id, "xml" | "maven" | "toolconf" | "jsp" | "fulcrum.i18n" | "bevy" | "mybatis"));
         let java: Vec<ScannedFile> = if wants_java {
             let encoding = crate::index_service::encoding_plan(root);
             bennu_intel::prelude::read_java_sources(path, &encoding)

@@ -210,7 +210,7 @@ private int timeout;
 <table>
   <thead><tr><th>Panel</th><th>Lists</th></tr></thead>
   <tbody>
-    <tr><td><strong>Spring beans</strong> <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></td><td>Every bean, with its stereotype, scope and profile</td></tr>
+    <tr><td><strong>Spring beans</strong> <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F12</kbd></td><td>Every bean, with its stereotype, scope and profile</td></tr>
     <tr><td><strong>Spring configuration</strong></td><td>Every property key, with its value and source file</td></tr>
     <tr><td><strong>Spring bound properties</strong></td><td>What each <code>@ConfigurationProperties</code> field binds</td></tr>
     <tr><td><strong>Spring property reference</strong></td><td>Everything the dependencies accept, set or not</td></tr>

@@ -49,6 +49,9 @@
      *  Drawn heavier, because a list of forty members is unreadable without the divisions
      *  the file itself has. */
     container?: boolean;
+    /** Where the `:tag` suffix of a markup label (`orderMap:resultMap`) starts — drawn quieter, so
+     *  the name leads and the element kind reads as a qualifier. Absent for an unnamed element. */
+    tagAt?: number;
   }
 
   /** The kinds that hold other symbols. A server's vocabulary and Bennu's own, in one set —
@@ -80,6 +83,7 @@
           out.push({
             label: n.name, detail: n.detail, line: n.line, kind: 'element', depth,
             k: n.name.toLowerCase(), container: !!n.children?.length,
+            tagAt: n.name.length > n.tag.length ? n.name.length - n.tag.length - 1 : undefined,
           });
           if (n.children) walk(n.children, depth + 1);
         }
@@ -216,7 +220,7 @@
   });
 
   // ── Virtualized list (same windowing as BennuGotoModal) ──────────────────────
-  const ROW_H = 28;
+  const ROW_H = 30;
   const OVERSCAN = 8;
   let listEl = $state<HTMLDivElement | null>(null);
   let scrollTop = $state(0);
@@ -235,6 +239,27 @@
     else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
   }
   $effect(() => { void rows; active = 0; scrollTop = 0; if (listEl) listEl.scrollTop = 0; });
+
+  interface LabelPart { text: string; hit: boolean; tag: boolean }
+
+  /** The label as drawn: the matched characters lit, and everything from `tagAt` on flagged as the
+   *  element-kind suffix. A match segment that straddles the boundary is split in two. */
+  function labelParts(it: Item, ranges: MatchRange[]): LabelPart[] {
+    const cut = it.tagAt ?? Infinity;
+    const out: LabelPart[] = [];
+    let pos = 0;
+    for (const seg of segments(it.label, ranges)) {
+      const end = pos + seg.text.length;
+      if (pos < cut && end > cut) {
+        out.push({ text: seg.text.slice(0, cut - pos), hit: seg.hit, tag: false });
+        out.push({ text: seg.text.slice(cut - pos), hit: seg.hit, tag: true });
+      } else {
+        out.push({ text: seg.text, hit: seg.hit, tag: pos >= cut });
+      }
+      pos = end;
+    }
+    return out;
+  }
 
   function pick(row: Row | undefined) {
     if (!row) return;
@@ -322,8 +347,8 @@
               <span class="dot" style="background:{VIS_COLOR[it.visibility] ?? 'var(--text-disabled)'}"></span>
             {/if}
             <span class="r-label">
-              {#each segments(it.label, row.ranges) as seg, si (si)}<span
-                class:hit={seg.hit}>{seg.text}</span>{/each}
+              {#each labelParts(it, row.ranges) as part, si (si)}<span
+                class:hit={part.hit} class:tag={part.tag}>{part.text}</span>{/each}
             </span>
             {#if it.detail}<span class="r-detail">{it.detail}</span>{/if}
           </button>
@@ -354,14 +379,19 @@
   }
   .fs-foot span { display: inline-flex; align-items: center; gap: 4px; }
 
-  .list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 6px 8px; }
+  .list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 8px 10px; }
   .row {
-    display: flex; align-items: center; gap: 7px;
+    display: flex; align-items: center; gap: 8px;
     width: 100%; text-align: left; box-sizing: border-box; flex-shrink: 0;
-    padding: 0 8px; background: transparent; border: none; border-radius: var(--radius-sm);
+    padding: 0 10px; background: transparent; border: none; border-radius: var(--radius-md);
     cursor: pointer; font-family: var(--font-ui-sans);
   }
-  .row.active { background: var(--bg-selected); }
+  /* The accent bar on the leading edge says "this one" without a loud fill, which on a long list
+     with a container row at the top used to read as a heading rather than as the selection. */
+  .row.active {
+    background: var(--bg-selected);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
   /* See `SymbolKindIcon.svelte`: a lettered ring's colours are picked to read against the panel,
      not against a selection fill. On the active row it takes the row's colour instead. */
   .row.active .r-icon { --jki-color: currentColor; }
@@ -386,8 +416,16 @@
   /* The matched characters, and the only lit thing in the row. Same device as the Go-to
      navigator, so a subsequence match reads the same wherever it is offered. */
   .r-label :global(.hit) { color: var(--accent); font-weight: 700; }
+  /* The element kind after a markup name (`orderMap:resultMap`): the name is what you look for, the
+     kind only qualifies it. */
+  .r-label :global(.tag) { font-weight: 400; color: var(--text-muted); font-size: var(--font-size-xs); }
+  /* Right-aligned, so the names form one clean column on the left and the secondary text (a type,
+     a signature, an implementation class) forms another on the right. */
   .r-detail {
-    flex: 1; min-width: 0; font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-muted);
+    flex: 0 1 auto; min-width: 0; max-width: 55%; margin-left: auto; text-align: right;
+    font-family: var(--font-code); font-size: var(--font-size-xs); color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .r-label :global(.tag.hit) { color: var(--accent); font-weight: 700; }
+  .row.active .r-detail { color: var(--text-secondary, var(--text-muted)); }
 </style>

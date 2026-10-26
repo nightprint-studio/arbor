@@ -530,6 +530,16 @@ impl ConfigResolver {
         self.graph.validations.len()
     }
 
+    /// Every mapper the graph knows, as `(namespace, mapper .xml)` — what a cross-file reference to
+    /// a `<sql>` / `<resultMap>` is resolved against, and what find-usages scans.
+    pub fn mapper_files(&self) -> Vec<(String, String)> {
+        self.graph
+            .mappers
+            .iter()
+            .map(|m| (m.namespace.clone(), m.source_file.clone()))
+            .collect()
+    }
+
     /// Total MyBatis mappers ingested (accessor for tests / status).
     pub fn mapper_count(&self) -> usize {
         self.graph.mappers.len()
