@@ -554,9 +554,15 @@ export function mybatisUsages(file: string, source: string, offset: number): Pro
 
 /** Java→XML: the mapper method under the caret in a `.java` (its declaration in the interface, or a
  *  call through a mapper) → its `<select|insert|update|delete>` statement in the mapper XML. `null` when the caret isn't on a method or its owner has no statement of that
- *  name. Wire: `bennu_mapper_statement` — `{ file, source, offset }`. */
-export function mapperStatement(file: string, source: string, offset: number): Promise<MybatisNav | null> {
-  return bennu('bennu_mapper_statement', { args: { file, source, offset } });
+ *  name. `dirtyBuffers` are the open files with unsaved edits, so the line is the one on screen.
+ *  Wire: `bennu_mapper_statement` — `{ file, source, offset, dirty_buffers }`. */
+export function mapperStatement(
+  file: string,
+  source: string,
+  offset: number,
+  dirtyBuffers: { file: string; text: string }[] = [],
+): Promise<MybatisNav | null> {
+  return bennu('bennu_mapper_statement', { args: { file, source, offset, dirty_buffers: dirtyBuffers } });
 }
 
 /** Go to implementation — what implements the interface / abstract type at `file`:`offset`, or

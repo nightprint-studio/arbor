@@ -53,6 +53,13 @@ describe('getFileIcon', () => {
     expect(iconFor('data.xml', 'catalog')).toBe(iconFor('beans.xml'));
   });
 
+  it('marks a MyBatis mapper by its root, and by name where the root is not to hand', () => {
+    expect(iconFor('queries.xml', 'mapper')).toBe(iconFor('OrderMapper.xml'));
+    same('OrderMapper.xml', 'mybatis-config.xml');
+    different('OrderMapper.xml', 'beans.xml');
+    different('OrderMapper.xml', 'struts.xml');
+  });
+
   it('lets a recognised root element overrule a name that guessed wrong', () => {
     // Named like a Struts config and it is a Tomcat context: the content wins.
     expect(iconFor('struts-context.xml', 'Context')).toBe(iconFor('context.xml'));

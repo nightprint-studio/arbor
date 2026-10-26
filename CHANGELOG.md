@@ -24,6 +24,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Less to catch up on when you come back to Arbor:** whole-project validation and language-server status updates are throttled while the app is in the background, and the Picus Activity monitor and the process monitor pause their polling until the window is focused again.
 
 ### Fixed
+- **Bennu: a MyBatis result `property` that is no field, getter or setter of the mapped class is now an error.** The mapper XML is also checked for `resultMap` / `refid` / `extends` / association `select` naming nothing, an id declared twice, and a class missing from a project package. Where the class or its hierarchy can't be known for sure, nothing is reported.
+- **Bennu flags a mapper interface method that no XML statement answers** (error on the Java method, since the first call throws `BindingException`), and, as a quiet hint, a statement no method maps. Silent for annotation-based methods, `default` / `static` ones, and interfaces that extend another.
+- **Bennu: Ctrl+click on a `property` inside an `<association>` without a `javaType` no longer lands on the outer class.**
+- **Bennu: Ctrl+click on a mapper method lands on its statement's line in the XML.** The jump used a position recorded at indexing time, so after editing the mapper — saved or not — or with a non-UTF-8 file, it ended on the wrong line.
 - **Bennu no longer reports "Statements before `this(…)` / `super(…)` requires Java 25" for a comment** placed before the call in a constructor.
 - **MyBatis mapper XML: Ctrl+B and Ctrl+click** now resolve types, result-map `extends`, association `select` and result `property` (no longer falling through to the DTD); on a `<resultMap>` / `<sql>` declaration they list its usages, as Alt+F7 does. Jumps from a mapper are recorded in the navigation history, so Ctrl+Alt+← returns from them.
 - **Go to implementation finds the project's subtypes of a library class** (e.g. what extends Spring's `OncePerRequestFilter`).

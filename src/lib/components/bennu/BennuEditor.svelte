@@ -398,8 +398,8 @@
         icon: java ? SymbolKindIcon : IconifyIconView,
         iconProps: java
           ? { kind: javaKindStore.kindOf(p) }
-          : { icon: getFileIcon(baseName(p)), width: 14, height: 14 },
-        iconSize: 13,
+          : { icon: getFileIcon(baseName(p)), width: 16, height: 16 },
+        iconSize: 16,
         // Not your file: a dependency's source or a file owned by another project. Tinted in
         // both states — the badge is read once and then stops being noticed, while "edits
         // here go nowhere" is true every time you glance at the strip.
@@ -4024,7 +4024,10 @@
   async function tryGoToMapperStatement(source: string, offset: number): Promise<boolean> {
     const path = activePath;
     if (!path) return false;
-    const t = await ipcMapperStatement(path, source, offset).catch(() => null);
+    const dirtyXml = projectStore.dirtyPaths
+      .filter((p) => p.toLowerCase().endsWith('.xml'))
+      .map((p) => ({ file: p, text: projectStore.sourceOf(p) }));
+    const t = await ipcMapperStatement(path, source, offset, dirtyXml).catch(() => null);
     if (!t) return false;
     // By line and column, through the history: a bare byte-offset open is not recorded, and a jump
     // that is not recorded is one Back cannot return from.

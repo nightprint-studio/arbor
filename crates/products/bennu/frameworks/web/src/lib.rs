@@ -55,6 +55,7 @@ pub mod jsp_ognl;
 pub mod jsp_vars;
 pub mod model;
 pub mod mybatis;
+pub mod mybatis_check;
 pub mod mybatis_nav;
 pub mod prelude;
 pub mod spring;

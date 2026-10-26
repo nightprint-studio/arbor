@@ -511,7 +511,7 @@ fn superclass_of(src: &str, simple: &str, classes: &[ClassEntry]) -> Option<Stri
 /// its real declaration; the lint never flags it). Stops at the first library/unknown super (its
 /// accessors — e.g. `ActionSupport`'s — are rarely form-bound, so missing them is a false-negative,
 /// never a false positive). Empty when `fqcn` isn't a readable project class.
-fn class_chain(svc: &IndexService, fqcn: &str) -> Vec<(String, String)> {
+pub(crate) fn class_chain(svc: &IndexService, fqcn: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     // Search EVERY open project's class index (not just the JSP's own root): the JSP (webapp) and the
     // action class (a Java module) can live under separate roots, and the go-to must still find it.

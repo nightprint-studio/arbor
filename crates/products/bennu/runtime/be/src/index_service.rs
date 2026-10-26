@@ -2694,6 +2694,24 @@ impl IndexService {
         self.config_for_file(file).map(|cfg| cfg.mapper_files()).unwrap_or_default()
     }
 
+    /// The statement ids the project's mapper XMLs declare for `namespace` (a mapper interface's
+    /// dotted name — `Outer$Inner` and `Outer.Inner` are the same), or `None` when no indexed
+    /// mapper declares that namespace. `None` is "cannot say" — the config graph may still be
+    /// building, or the interface may be annotation-only — and a caller must not read it as "no
+    /// statements".
+    pub fn mapper_statement_ids(&self, file: &str, namespace: &str) -> Option<Vec<String>> {
+        let wanted = namespace.replace('$', ".");
+        let cfg = self.config_for_file(file)?;
+        if !cfg.mapper_files().iter().any(|(ns, _)| ns.replace('$', ".") == wanted) {
+            return None;
+        }
+        let ids = cfg
+            .mapper_statement_ids_of(&wanted)
+            .into_iter()
+            .collect();
+        Some(ids)
+    }
+
     /// The `(owner binary name, method name)` the caret at `file`:`offset` is on or calls, or `None`
     /// when it isn't on a method (or no project engine is ready).
     pub fn method_at(&self, file: &str, source: &str, offset: usize) -> Option<(String, String)> {

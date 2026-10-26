@@ -257,6 +257,39 @@ const junitIcon: IconifyIcon = {
 };
 
 /**
+ * Un mapper MyBatis (`<mapper namespace="…">`) e il suo file di configurazione.
+ *
+ * Una **versione semplificata** della mascotte (l'uccellino con la benda rossa), disegnata qui: il
+ * logo ufficiale è solo un PNG a 350×88 col wordmark, il repository che lo ospita non dichiara una
+ * licenza per gli asset, e incorporare un file di cui non si può dire che lo si possa ridistribuire
+ * non è una scelta da fare a nome del progetto. Questa è un'interpretazione geometrica, leggibile a
+ * 16 px.
+ *
+ * Senza tessera: è la sagoma dell'uccello a riempire la tela, a toni **medi** (corpo ardesia, pancia
+ * chiara, benda rossa viva, becco arancio) così che regga sia sull'albero a tema scuro sia su quello
+ * chiaro — una mascotte scura su fondo scuro spariva. Se un giorno si ottiene il permesso per il
+ * marchio basta sostituire `body`.
+ */
+const mybatisIcon: IconifyIcon = {
+  width: 32,
+  height: 32,
+  body:
+    // Il corpo, con la testa a destra.
+    '<path d="M3 19c0-7.2 5.2-12.5 12.4-12.5 6.2 0 10.8 4 11.8 9.6l4.3 1.7-4.5 1.6C25.4 26 21 30 15.4 30 8 30 3 26 3 19z" fill="#5b6b9c"/>'
+    // La pancia.
+    + '<path d="M8.5 22.5c1.7 3.2 5.2 5 9.3 4.6 3.6-.4 6.3-2.4 7.4-5-3.2 1.7-6.2 2.4-9.3 2.1-3-.3-5.6-1-7.4-1.7z" fill="#e9edf6"/>'
+    // Il becco.
+    + '<path d="M28 16.8l4 1.6-4.2 1.6z" fill="#f2a33a"/>'
+    // La benda rossa sugli occhi, con i due lembi che sventolano.
+    + '<path d="M9 12l17.5-4.8 1.3 4.6L10.2 17z" fill="#e0242c"/>'
+    + '<path d="M10 13.2L2.6 11.2l1.8 5.6z" fill="#e0242c"/>'
+    + '<path d="M10 14.2L3.4 19l3.4 1z" fill="#e0242c"/>'
+    // L'occhio, sulla benda.
+    + '<circle cx="21.2" cy="11.4" r="2.5" fill="#fff"/>'
+    + '<circle cx="21.8" cy="11.5" r="1.1" fill="#1e2433"/>',
+};
+
+/**
  * `.merula` — un **pattern** della DAW live-coding.
  *
  * Non un uccello, anche se il nome è quello del merlo: il marchio del prodotto
@@ -524,6 +557,9 @@ const ROOT_TAG_ICONS: Record<string, IconifyIcon> = {
   // Struts 2 and Struts 1 — different root, same framework, same mark.
   struts: apacheIcon,
   'struts-config': apacheIcon,
+  // A MyBatis mapper, whatever it is called. `<mapper>` is also what `mybatis-config.xml` lists its
+  // mappers with, but never as the root — the config's root is `<configuration>`.
+  mapper: mybatisIcon,
 };
 
 /**
@@ -552,6 +588,11 @@ export function getFileIcon(name: string, rootTag?: string): IconifyIcon {
   // file whose name says Struts and whose content says otherwise is the content's.
   if (isStrutsConfig(lower)) return apacheIcon;
   if (isTomcatConfig(lower)) return tomcatIcon;
+  // `OrderMapper.xml` / `mybatis-config.xml`: a good guess from the name where the root is not to
+  // hand (a tab strip has a path and no bytes). The root element, above, is the certain tier.
+  if (lower.endsWith('.xml') && (lower.endsWith('mapper.xml') || lower.startsWith('mybatis-'))) {
+    return mybatisIcon;
+  }
   // `ValidationMessages_it.properties` e ogni altra lingua: è lo stesso file, tradotto.
   if (isValidationMessages(lower)) return validationMessagesIcon;
   if (lower.startsWith('.env')) return dotenvIcon;

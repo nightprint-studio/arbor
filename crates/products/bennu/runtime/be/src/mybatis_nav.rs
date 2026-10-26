@@ -86,6 +86,17 @@ pub struct MapperStatementArgs {
     pub source: String,
     /// UTF-8 byte offset of the caret.
     pub offset: usize,
+    /// Open XML buffers with **unsaved** edits. The statement's line is taken from the text the
+    /// user sees, not from the disk copy the edit has not reached yet.
+    #[serde(default)]
+    pub dirty_buffers: Vec<DirtyBuffer>,
+}
+
+/// An open file whose live text differs from the one on disk.
+#[derive(Deserialize)]
+pub struct DirtyBuffer {
+    pub file: String,
+    pub text: String,
 }
 
 /// Java→XML go-to by caret: the mapper method under the caret (its declaration in the interface,
@@ -102,9 +113,21 @@ fn bennu_mapper_statement(
         return Ok(None);
     };
     let Some(def) = mapper_statement(&args.file, &owner, &name) else { return Ok(None) };
-    let text = std::fs::read_to_string(&def.config_file).ok();
+    // Lossy, not `read_to_string`: a mapper in Cp1252 is a legitimate file, and failing to decode
+    // it must not turn the jump into "line 1".
+    let live = args.dirty_buffers.iter().find(|b| same_file(&b.file, &def.config_file));
+    let text = match live {
+        Some(buffer) => Some(buffer.text.clone()),
+        None => std::fs::read(&def.config_file).ok().map(|b| String::from_utf8_lossy(&b).into_owned()),
+    };
     Ok(Some(match text {
-        Some(text) => at_offset(&def.config_file, &text, def.offset),
+        Some(text) => {
+            // The indexed offset is a snapshot: the mapper may have been edited (or decoded
+            // differently) since. The statement is looked up again in the text on disk, and the
+            // indexed offset is only the fallback when that lookup finds nothing.
+            let offset = declaration_offset(&text, FragmentKind::Statement, &name).unwrap_or(def.offset);
+            at_offset(&def.config_file, &text, offset)
+        }
         None => MybatisNavResult { file: slash(&def.config_file), offset: def.offset, line: 1, col: 1 },
     }))
 }
@@ -125,6 +148,11 @@ fn fqcn_of_binary(binary: &str) -> String {
 
 fn slash(path: &str) -> String {
     path.replace('\\', "/")
+}
+
+/// Whether two spellings of a path name the same file (separators and case, as on Windows).
+fn same_file(a: &str, b: &str) -> bool {
+    slash(a).eq_ignore_ascii_case(&slash(b))
 }
 
 // ── go-to ─────────────────────────────────────────────────────────────────────────

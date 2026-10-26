@@ -487,6 +487,18 @@ impl ConfigResolver {
         statement_for_method(&self.graph, interface_fqcn, method)
     }
 
+    /// The ids of every statement declared under `namespace`, which is compared with `$` read as `.`
+    /// (a nested mapper interface is written either way in a `namespace`).
+    pub fn mapper_statement_ids_of(&self, namespace: &str) -> Vec<String> {
+        let wanted = namespace.replace('$', ".");
+        self.graph
+            .statements
+            .iter()
+            .filter(|s| s.mapper_namespace.replace('$', ".") == wanted)
+            .map(|s| s.id.clone())
+            .collect()
+    }
+
     /// find-usages / outline: every statement declared in a mapper interface's XML.
     pub fn methods_for_mapper(&self, interface_fqcn: &str) -> Vec<&StatementRecord> {
         methods_for_mapper(&self.graph, interface_fqcn)

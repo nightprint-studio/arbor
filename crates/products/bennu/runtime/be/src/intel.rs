@@ -276,6 +276,19 @@ fn route_diagnostics(args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
         // question. Not restricted to `.java` — a bean XML has diagnostics and no Java validation.
         if args.resolved.unwrap_or(true) {
             java.extend(crate::frameworks::diagnostics_for(&args.file, args.source.as_deref()));
+            // A mapper XML is judged against the class index and the other mappers, which no
+            // framework extension can reach — so it is answered here, from the live buffer.
+            if args.file.to_ascii_lowercase().ends_with(".xml") {
+                if let Some(source) = &args.source {
+                    java.extend(crate::mybatis_check::diagnostics_for(&args.file, source));
+                }
+            }
+            // …and the other direction: a mapper interface method no statement answers.
+            if is_java_file(&args.file) {
+                if let Some(source) = &args.source {
+                    java.extend(crate::mybatis_check::java_diagnostics(&args.file, source));
+                }
+            }
         }
         return Ok(java);
     };

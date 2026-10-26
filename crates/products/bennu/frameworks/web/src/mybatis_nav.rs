@@ -168,15 +168,18 @@ fn classify(
 /// The Java type the members under `node` belong to: the nearest enclosing `<resultMap type>`,
 /// `<association javaType>` or `<collection ofType>`.
 fn type_context(node: &roxmltree::Node) -> Option<String> {
-    node.ancestors().skip(1).find_map(|n| {
-        let attr = match n.tag_name().name() {
-            "resultMap" => "type",
-            "association" => "javaType",
-            "collection" => "ofType",
-            _ => return None,
-        };
-        n.attribute(attr).map(str::to_string)
-    })
+    // The nearest container decides, even when it names no type: an `<association>` without a
+    // `javaType` infers it from the owner, and the outer `<resultMap type>` is not its type.
+    let container = node
+        .ancestors()
+        .skip(1)
+        .find(|n| matches!(n.tag_name().name(), "resultMap" | "association" | "collection"))?;
+    let attr = match container.tag_name().name() {
+        "resultMap" => "type",
+        "association" => "javaType",
+        _ => "ofType",
+    };
+    container.attribute(attr).map(str::to_string)
 }
 
 /// Resolve a declaration reference (`refid` / `resultMap` / `select` value). Prefers a **same-file**

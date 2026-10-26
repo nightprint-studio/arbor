@@ -101,6 +101,11 @@ pub use crate::tiles::{index as index_tiles, resolve_view as resolve_tiles_view}
 // MyBatis mapper-XML parsing (mapper namespace + statement records; graph-only by name).
 pub use crate::mybatis::{parse_mybatis, parse_mybatis_file, MyBatisParse};
 
+// MyBatis mapper-XML validation sites: what a mapper claims that the project can contradict.
+pub use crate::mybatis_check::{
+    scan_mapper, DuplicateId, MapperScan, PropertySite, RefSite, StatementSite, TypeSite,
+};
+
 // MyBatis mapper-XML navigation: resolve the token under the caret (statement id → Java
 // method, namespace → interface, include/resultMap → their fragment, intra- or cross-file).
 pub use crate::mybatis_nav::{

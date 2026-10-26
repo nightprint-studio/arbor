@@ -160,6 +160,10 @@ mod action_props_nav;
 // id → the Java interface method, `namespace` → the interface, `<include refid>` → its `<sql>`,
 // a `resultMap="…"` → its `<resultMap>`).
 mod mybatis_nav;
+// MyBatis mapper-XML validation: a result `property` that is no member of the mapped class, a
+// reference to a declaration the namespace lacks, an id declared twice, a class missing from a
+// project package. Rides `bennu_diagnostics` — no handler of its own.
+mod mybatis_check;
 // Mojibake check: `bennu_mojibake_check` — find UTF-8-decoded-as-Cp1252 corruption (`Ã©` → `é`,
 // `â€™` → `'`) in a file, with the corrected character for a one-click fix.
 mod mojibake;
