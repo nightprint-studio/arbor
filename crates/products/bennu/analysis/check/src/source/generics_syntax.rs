@@ -20,13 +20,16 @@
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-/// All generics/static-context syntax errors in `root`.
+/// All generics/static-context syntax errors in `root`, judged for the strictest target (Java 8),
+/// where every generic `instanceof` is an error.
 pub fn generics_syntax_errors(root: Node, source: &str) -> Vec<Diagnostic> {
-    generics_syntax_errors_nodes(&crate::engine::check::collect_nodes(root), source)
+    generics_syntax_errors_nodes(&crate::engine::check::collect_nodes(root), source, Some(8))
 }
 
 /// Slice-driven core (shared pre-collected node list — one traversal across all pure-AST checks).
-pub fn generics_syntax_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> {
+/// `java_major` is the language level the file is compiled at, when known: whether a generic
+/// `instanceof` is an error depends on it (see [`check_instanceof_generics`]).
+pub fn generics_syntax_errors_nodes(nodes: &[Node], source: &str, java_major: Option<u32>) -> Vec<Diagnostic> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
     for &n in nodes {
@@ -35,7 +38,7 @@ pub fn generics_syntax_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnos
             "class_literal" => check_type_param_class_literal(n, bytes, &mut out),
             "type_arguments" => check_primitive_type_arguments(n, bytes, &mut out),
             "object_creation_expression" => check_type_param_instantiation(n, bytes, &mut out),
-            "instanceof_expression" => check_instanceof_generics(n, &mut out),
+            "instanceof_expression" => check_instanceof_generics(n, bytes, java_major, &mut out),
             "catch_type" => check_catch_generics(n, &mut out),
             "this" | "super" => check_static_this_super(n, &mut out),
             _ => {}
@@ -153,7 +156,7 @@ fn check_type_param_instantiation(n: Node, bytes: &[u8], out: &mut Vec<Diagnosti
 /// `type_parameter` under a `type_parameters` list on ANY enclosing declaration
 /// (class/interface/method/constructor/enum/record). Walking parents and reading the `type_parameters`
 /// child directly (rather than a named field) keeps this robust across the declaration kinds.
-fn type_params_in_scope(node: Node, bytes: &[u8]) -> Vec<String> {
+pub(crate) fn type_params_in_scope(node: Node, bytes: &[u8]) -> Vec<String> {
     let mut names = Vec::new();
     let mut cur = node.parent();
     while let Some(p) = cur {
@@ -201,18 +204,79 @@ fn collect_type_param_names(decl: Node, bytes: &[u8], out: &mut Vec<String>) {
 /// type arguments are NOT a single unbounded wildcard. `List<?>` (the only legal generic instanceof)
 /// has exactly one `wildcard` argument with no bound → skipped. `String` / `List` (raw) aren't
 /// `generic_type` → skipped.
-fn check_instanceof_generics(n: Node, out: &mut Vec<Diagnostic>) {
+///
+/// **Below Java 16 always; from 16 only when the cast is provably unchecked.** From 16 on (JEP 394) a
+/// parameterized type is legal when the cast from the expression's type to it is *checked* —
+/// `Collection<String> c; c instanceof List<String> l` — and telling that apart in general needs the
+/// expression's type, which this pure-AST pass does not have. The one case it can name is a method
+/// parameter written as `Object`: nothing is known of an `Object`'s type arguments, so every
+/// parameterized target is unchecked (`instanceof.reifiable.not.safe`). Anything else stays silent
+/// rather than report code that compiles.
+fn check_instanceof_generics(n: Node, bytes: &[u8], java_major: Option<u32>, out: &mut Vec<Diagnostic>) {
+    let Some(major) = java_major else { return };
     let Some(ty) = n.child_by_field_name("right") else { return };
-    if ty.kind() != "generic_type" {
+    if ty.kind() != "generic_type" || type_arguments_are_all_unbounded_wildcards(ty) {
         return;
     }
-    if type_arguments_are_all_unbounded_wildcards(ty) {
-        return;
+    if major < 16 {
+        out.push(err(
+            ty,
+            "Cannot use generics in an `instanceof` check (only unbounded wildcards are allowed)",
+        ));
+    } else if n.child_by_field_name("left").is_some_and(|left| is_object_parameter(left, bytes)) {
+        out.push(err(
+            ty,
+            "Unchecked cast: an `Object` cannot be tested against a parameterized type, its type arguments are not known at run time",
+        ));
     }
-    out.push(err(
-        ty,
-        "Cannot use generics in an `instanceof` check (only unbounded wildcards are allowed)",
-    ));
+}
+
+/// Whether `expr` is a plain name that the enclosing method declares as a **parameter** of type
+/// `Object`. A parameter cannot be redeclared inside the method, so the name means it everywhere in the
+/// body — unless a class body sits in between, whose own field or method could own the name.
+fn is_object_parameter(expr: Node, bytes: &[u8]) -> bool {
+    if expr.kind() != "identifier" {
+        return false;
+    }
+    let Ok(name) = expr.utf8_text(bytes) else { return false };
+    let mut cur = expr.parent();
+    while let Some(p) = cur {
+        match p.kind() {
+            "class_body" | "interface_body" | "enum_body" => return false,
+            "method_declaration" | "constructor_declaration" => {
+                let Some(params) = p.child_by_field_name("parameters") else { return false };
+                let mut c = params.walk();
+                let found = params.named_children(&mut c).any(|param| {
+                    param.kind() == "formal_parameter"
+                        && param.child_by_field_name("name").and_then(|n| n.utf8_text(bytes).ok()) == Some(name)
+                        && param.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok()) == Some("Object")
+                });
+                return found && !file_declares_type_named_object(p, bytes);
+            }
+            _ => cur = p.parent(),
+        }
+    }
+    false
+}
+
+/// Whether the file declares its own type called `Object` — then `Object` is not `java.lang.Object`.
+pub(crate) fn file_declares_type_named_object(from: Node, bytes: &[u8]) -> bool {
+    let mut root = from;
+    while let Some(p) = root.parent() {
+        root = p;
+    }
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.kind().ends_with("_declaration")
+            && node.child_by_field_name("name").and_then(|n| n.utf8_text(bytes).ok()) == Some("Object")
+            && matches!(node.kind(), "class_declaration" | "interface_declaration" | "enum_declaration" | "record_declaration")
+        {
+            return true;
+        }
+        let mut c = node.walk();
+        stack.extend(node.children(&mut c));
+    }
+    false
 }
 
 /// Whether every argument of a `generic_type`'s `type_arguments` is an UNBOUNDED wildcard (`?` with
@@ -422,6 +486,42 @@ mod tests {
         assert!(!has("class C { boolean m(Object x) { return x instanceof java.util.List; } }", "instanceof"));
     }
 
+    #[test]
+    fn generic_instanceof_is_judged_only_below_java_16() {
+        let src = "class C { boolean m(java.util.Collection<String> x) { return x instanceof java.util.List<String>; } }";
+        let tree = parse(src);
+        let nodes = crate::engine::check::collect_nodes(tree.root_node());
+        let flagged = |major| !generics_syntax_errors_nodes(&nodes, src, major).is_empty();
+        assert!(flagged(Some(8)));
+        assert!(flagged(Some(15)));
+        // 16+ allows a checked cast, which only a type-aware pass can tell from an unchecked one.
+        assert!(!flagged(Some(16)));
+        assert!(!flagged(Some(21)));
+        assert!(!flagged(None));
+    }
+
+    #[test]
+    fn an_object_parameter_tested_against_a_parameterized_type_is_unchecked_from_java_16() {
+        let object = "class C { boolean m(Object x) { return x instanceof java.util.List<String> l; } }";
+        let tree = parse(object);
+        let nodes = crate::engine::check::collect_nodes(tree.root_node());
+        let messages = |src_nodes: &[Node], src: &str| -> Vec<String> {
+            generics_syntax_errors_nodes(src_nodes, src, Some(21)).into_iter().map(|d| d.message).collect()
+        };
+        assert!(messages(&nodes, object).iter().any(|m| m.contains("Unchecked cast")));
+        // A wildcard-only target is reifiable, and any other left-hand side may be a checked cast.
+        for ok in [
+            "class C { boolean m(Object x) { return x instanceof java.util.List<?> l; } }",
+            "class C { boolean m(java.util.Collection<String> x) { return x instanceof java.util.List<String> l; } }",
+            "class C { Object f; boolean m() { return f instanceof java.util.List<String> l; } }",
+            "class C { boolean m(Object x) { return new Object() { Object x; boolean t() { return x instanceof java.util.List<String> l; } }.t(); } }",
+        ] {
+            let tree = parse(ok);
+            let nodes = crate::engine::check::collect_nodes(tree.root_node());
+            assert!(messages(&nodes, ok).is_empty(), "{ok}");
+        }
+    }
+
     // ── 4. parameterized `catch` type ──────────────────────────────────────────
 
     #[test]
@@ -491,7 +591,7 @@ mod reifiable_tests {
         parser.set_language(&tree_sitter_java::LANGUAGE.into()).unwrap();
         let tree = parser.parse(src, None).unwrap();
         let nodes = crate::engine::check::collect_nodes(tree.root_node());
-        generics_syntax_errors_nodes(&nodes, src).into_iter().map(|d| d.message).collect()
+        generics_syntax_errors_nodes(&nodes, src, Some(8)).into_iter().map(|d| d.message).collect()
     }
 
     /// `new Class<?>[] {…}` is legal: an unbounded wildcard is reifiable (JLS §15.10.1). Apache

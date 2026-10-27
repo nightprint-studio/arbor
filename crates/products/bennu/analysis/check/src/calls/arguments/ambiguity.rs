@@ -23,7 +23,7 @@ pub(super) fn provably_ambiguous(kept: &[&Member], args: &[Judged], resolver: &d
     if rest.is_empty() || rest.iter().any(|m| m.params.len() != first.params.len()) {
         return false;
     }
-    if !args.iter().all(|a| matches!(a, Judged::Typed { .. } | Judged::Null)) {
+    if !args.iter().all(|a| matches!(a, Judged::Typed { .. } | Judged::Null) || is_implicit_lambda(a)) {
         return false;
     }
     if !kept.iter().flat_map(|m| &m.params).all(|p| readable(p, resolver)) {
@@ -40,9 +40,38 @@ pub(super) fn provably_ambiguous(kept: &[&Member], args: &[Judged], resolver: &d
     }
     kept.iter().all(|a| {
         kept.iter().all(|b| {
-            a.params.iter().zip(&b.params).all(|(pa, pb)| pa == pb || decided(pa, pb, resolver))
+            a.params.iter().zip(&b.params).zip(args).all(|((pa, pb), arg)| {
+                pa == pb
+                    || match is_implicit_lambda(arg) {
+                        // JLS §15.12.2.5: an implicitly typed lambda gives no basis for preferring one
+                        // functional interface over another, so two that are not related by subtyping
+                        // leave the call ambiguous — and related ones are for the rules to settle.
+                        true => unrelated(pa, pb, resolver),
+                        false => decided(pa, pb, resolver),
+                    }
+            })
         })
     })
+}
+
+/// A lambda whose parameters are written without types (`s -> …`, `(a, b) -> …`) and whose body fits
+/// both a `void` and a value-returning interface — an expression that is also a statement (a call, an
+/// assignment, `++`, `new`), as in `s -> s.length()`. A block, or an expression that is no statement
+/// (`s -> s + 1`), is compatible with only one of the two, and which one is the rules' to decide.
+///
+/// `() -> …` has no parameter to leave untyped, and counts as explicitly typed.
+fn is_implicit_lambda(arg: &Judged) -> bool {
+    let Judged::Lambda(lambda) = arg else { return false };
+    let untyped = lambda.child_by_field_name("parameters").is_some_and(|p| matches!(p.kind(), "identifier" | "inferred_parameters"));
+    let fits_either = lambda.child_by_field_name("body").is_some_and(|body| {
+        matches!(body.kind(), "method_invocation" | "assignment_expression" | "update_expression" | "object_creation_expression")
+    });
+    untyped && fits_either
+}
+
+/// Two parameter types of which neither is a subtype of the other — both answers known and negative.
+fn unrelated(a: &TypeRef, b: &TypeRef, resolver: &dyn TypeResolver) -> bool {
+    subtype_verdict(resolver, a, b) == Some(false) && subtype_verdict(resolver, b, a) == Some(false)
 }
 
 /// `Ambiguous call to `pick`: `pick(String)` and `pick(StringBuilder)` both match`.

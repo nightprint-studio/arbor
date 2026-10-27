@@ -24,6 +24,20 @@ pub(crate) fn check_constant_names(
     resolver: &dyn TypeResolver,
     out: &mut Vec<Diagnostic>,
 ) {
+    check_constant_names_from(value, declared, bytes, symbols, resolver, false, out);
+}
+
+/// [`check_constant_names`] for a value written inside an `@interface` (an element's `default`), where a
+/// bare name may be a field of an ENCLOSING class: `outward` makes the lookup climb to it.
+pub(crate) fn check_constant_names_from(
+    value: Node,
+    declared: &TypeRef,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    outward: bool,
+    out: &mut Vec<Diagnostic>,
+) {
     // The ELEMENT family is what decides: `String[]` takes strings, one per entry.
     let (base, _) = bennu_java::prelude::split_array_dims(&declared.binary_name);
     if !(crate::support::nodes::is_primitive(base) || base == "java/lang/String") {
@@ -38,7 +52,7 @@ pub(crate) fn check_constant_names(
             }
             "unary_expression" => stack.extend(n.child_by_field_name("operand")),
             "identifier" | "field_access" => {
-                if let Some(why) = not_a_constant_variable(n, bytes, symbols, resolver) {
+                if let Some(why) = not_a_constant_variable(n, bytes, symbols, resolver, outward) {
                     out.push(CheckId::NonConstantAnnotationValue.at(
                         n,
                         format!("an annotation value must be a constant, and {why}"),
@@ -74,36 +88,13 @@ fn not_a_constant_variable(
     bytes: &[u8],
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    outward: bool,
 ) -> Option<String> {
-    let (owner, name) = match value.kind() {
-        "identifier" => {
-            if shadowable_position(value) {
-                return None;
-            }
-            let name = value.utf8_text(bytes).ok()?;
-            let crate::support::type_scope::TypeScope::Inside(owner) =
-                crate::support::resolve::enclosing_scope(value, bytes, symbols)
-            else {
-                return None;
-            };
-            (owner, name)
-        }
-        // `Other.K` — a qualified read, so no local can shadow it. The receiver has to name a TYPE.
-        "field_access" => {
-            let object = value.child_by_field_name("object")?;
-            let field = value.child_by_field_name("field")?;
-            let owner = crate::support::resolve::type_binary_at(
-                object.utf8_text(bytes).ok()?,
-                value,
-                bytes,
-                symbols,
-                resolver,
-            )?;
-            (owner, field.utf8_text(bytes).ok()?)
-        }
-        _ => return None,
+    let (owner, name) = field_site(value, bytes, symbols, resolver)?;
+    let (owner, field) = match outward && value.kind() == "identifier" {
+        true => find_field_outward(resolver, &owner, name)?,
+        false => (owner.clone(), find_field(resolver, &owner, name)?),
     };
-    let field = find_field(resolver, &owner, name)?;
     if !field.is_final {
         return Some(format!("`{name}` is not `final`"));
     }
@@ -120,6 +111,76 @@ fn not_a_constant_variable(
     }
     initializer_computed_at_run_time(value, &owner, name, bytes)
         .then(|| format!("`{name}` is `final`, but its value is computed at run time"))
+}
+
+/// The type and the field name a bare or qualified name reads: `K` is a field of the type the use sits
+/// in, `Other.K` one of the type `Other` names. `None` for a name a local or parameter could shadow, a
+/// qualifier that is no type, or any other expression.
+fn field_site<'v>(
+    value: Node<'v>,
+    bytes: &'v [u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+) -> Option<(String, &'v str)> {
+    match value.kind() {
+        "identifier" => {
+            if shadowable_position(value) {
+                return None;
+            }
+            let name = value.utf8_text(bytes).ok()?;
+            let crate::support::type_scope::TypeScope::Inside(owner) =
+                crate::support::resolve::enclosing_scope(value, bytes, symbols)
+            else {
+                return None;
+            };
+            Some((owner, name))
+        }
+        // `Other.K` — a qualified read, so no local can shadow it. The receiver has to name a TYPE.
+        "field_access" => {
+            let object = value.child_by_field_name("object")?;
+            let field = value.child_by_field_name("field")?;
+            let owner = crate::support::resolve::type_binary_at(
+                object.utf8_text(bytes).ok()?,
+                value,
+                bytes,
+                symbols,
+                resolver,
+            )?;
+            Some((owner, field.utf8_text(bytes).ok()?))
+        }
+        _ => None,
+    }
+}
+
+/// An element of an **enum** type given a field that is not one of its constants.
+///
+/// `@Named(level = LEVEL)` with `static final Level LEVEL = Level.HIGH;` in some class: the field holds
+/// an enum constant, but the annotation needs the constant itself (`Level.HIGH`). Judged only when the
+/// field belongs to a type that is not an enum at all — a field of an enum might be a constant of it
+/// (the index models both as static fields of the enum's type).
+pub(crate) fn check_enum_constant(
+    value: Node,
+    declared: &TypeRef,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    out: &mut Vec<Diagnostic>,
+) {
+    let is_enum_element = declared.dims == 0
+        && declared.type_args.is_empty()
+        && resolver.members_of(&declared.binary_name).is_some_and(|m| m.flags.is_enum);
+    if !is_enum_element {
+        return;
+    }
+    let Some((owner, name)) = field_site(value, bytes, symbols, resolver) else { return };
+    let owner_is_plain_type = resolver.members_of(&owner).is_some_and(|m| !m.flags.is_enum);
+    let Some(field) = find_field(resolver, &owner, name) else { return };
+    if owner_is_plain_type && field.is_static {
+        out.push(CheckId::NonConstantAnnotationValue.at(
+            value,
+            format!("an annotation value of an enum type must be an enum constant, and `{name}` is a field"),
+        ));
+    }
 }
 
 /// Whether the field `name` of `owner`, declared in this file, is initialized with an expression
@@ -181,6 +242,22 @@ fn shadowable_position(node: Node) -> bool {
         cur = n.parent();
     }
     false
+}
+
+/// [`find_field`], and when `owner` has no such field, the same in the type that encloses it, and so on
+/// outward — a nested type sees its enclosing classes' fields by their simple names. The declaring type
+/// comes back with the field. The parent of a nested binary name is the name up to its last `/`; it is a
+/// type only when the resolver knows it, which is what stops the climb at the package.
+fn find_field_outward(resolver: &dyn TypeResolver, owner: &str, name: &str) -> Option<(String, Member)> {
+    let mut current = owner.to_string();
+    loop {
+        if let Some(field) = find_field(resolver, &current, name) {
+            return Some((current, field));
+        }
+        let (parent, _) = current.rsplit_once('/')?;
+        resolver.members_of(parent)?;
+        current = parent.to_string();
+    }
 }
 
 /// The field named `name` on `owner` or any KNOWN supertype — `None` when nothing declares it (the

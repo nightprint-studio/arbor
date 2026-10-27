@@ -450,14 +450,20 @@ const javaCompletionSource: CompletionSource = async (
       // A property key is dotted and a bean name may be hyphenated, so the token to
       // replace is not the Java word — `app.tim` must be replaced whole, not appended to.
       const token = ctx.matchBefore(/[\w$.\-/]*$/);
+      // …unless the extension says exactly what it replaces — a JPQL field after `o.` replaces
+      // only what follows the dot, and the alias in front of it must stay.
+      const span = extItems.find((it) => it.replace_start != null);
+      const from = span?.replace_start != null
+        ? makeByteToU16(src)(span.replace_start)
+        : token ? token.from : ctx.pos;
       return {
-        from: token ? token.from : ctx.pos,
+        from,
         // An extension's own ordering is honoured the same way the backend's is — it put the
         // vocabulary it allows HERE ahead of the one it merely allows somewhere.
         options: extItems.map((it, rank) => ({
           label: it.label,
           detail: it.detail ?? undefined,
-          type: it.kind === 'bean' ? 'class' : 'property',
+          type: ({ bean: 'class', class: 'class', keyword: 'keyword', variable: 'variable' } as Record<string, string>)[it.kind] ?? 'property',
           boost: boostForRank(rank),
         })),
         validFor: /^[\w$.\-/]*$/,

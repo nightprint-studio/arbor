@@ -43,17 +43,22 @@ pub fn condition_type_errors_in(
     cache: &InferCache,
 ) -> Vec<Diagnostic> {
     let mut out = Vec::new();
+    let bytes = source.as_bytes();
     for &n in nodes {
         // The boolean-position sub-node lives in the `condition` field of each of these kinds.
         // `if_statement`, `while_statement`, `do_statement`, `for_statement` (classic `for`) and
         // `ternary_expression` all name it `condition`. An enhanced-for has no `condition` field, so
-        // it's naturally skipped.
-        let condition_holder = match n.kind() {
+        // it's naturally skipped. The operands of `!`, `&&` and `||` are boolean positions too.
+        let holders: Vec<Node> = match n.kind() {
             "if_statement" | "while_statement" | "do_statement" | "for_statement"
-            | "ternary_expression" => n.child_by_field_name("condition"),
-            _ => None,
+            | "ternary_expression" => n.child_by_field_name("condition").into_iter().collect(),
+            "unary_expression" if operator_is(n, bytes, &["!"]) => n.child_by_field_name("operand").into_iter().collect(),
+            "binary_expression" if operator_is(n, bytes, &["&&", "||"]) => {
+                n.child_by_field_name("left").into_iter().chain(n.child_by_field_name("right")).collect()
+            }
+            _ => Vec::new(),
         };
-        let Some(holder) = condition_holder else { continue };
+        for holder in holders {
         // The `condition` in tree-sitter-java is usually a `parenthesized_expression` wrapping the
         // real expression (mirrors how `switches::selector_primitive` unwraps `(expr)`). Infer on the
         // inner expression so `(5)` types as the `int` literal, not the parenthesized node.
@@ -85,8 +90,16 @@ pub fn condition_type_errors_in(
                 cond,
             ));
         }
+        }
     }
     out
+}
+
+/// Whether the operator of a `unary_expression` / `binary_expression` is one of `operators`.
+fn operator_is(expr: Node, bytes: &[u8], operators: &[&str]) -> bool {
+    expr.child_by_field_name("operator")
+        .and_then(|op| op.utf8_text(bytes).ok())
+        .is_some_and(|op| operators.contains(&op))
 }
 
 /// Unwrap a `parenthesized_expression` to its inner expression; return `node` unchanged otherwise.

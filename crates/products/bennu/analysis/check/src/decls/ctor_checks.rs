@@ -35,12 +35,35 @@ pub fn ctor_check_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> 
     let bytes = source.as_bytes();
     let mut out = Vec::new();
     for &n in nodes {
-        if n.kind() == "method_declaration" {
-            check_method_named_like_class(n, bytes, &mut out);
+        match n.kind() {
+            "method_declaration" => check_method_named_like_class(n, bytes, &mut out),
+            "constructor_declaration" => check_enum_super_call(n, &mut out),
+            _ => {}
         }
     }
     out.sort_by_key(|d| d.start);
     out
+}
+
+/// `super(…)` as the first statement of an **enum** constructor. An enum's superclass is
+/// `java.lang.Enum`, whose constructor the compiler calls itself, so the explicit call is always an
+/// error (JLS §8.9.2). `this(…)` is fine, and so is a qualified `outer.super(…)` — which an enum, having
+/// no inner superclass, cannot write legally either, but the plain form is the only slip worth naming.
+fn check_enum_super_call(ctor: Node, out: &mut Vec<Diagnostic>) {
+    if !enclosing_type(ctor).is_some_and(|ty| ty.kind() == "enum_declaration") {
+        return;
+    }
+    let Some(body) = ctor.child_by_field_name("body") else { return };
+    let mut c = body.walk();
+    let call = body.named_children(&mut c).find(|ch| ch.kind() == "explicit_constructor_invocation");
+    let Some(call) = call else { return };
+    let calls_super = call.child_by_field_name("constructor").is_some_and(|k| k.kind() == "super");
+    if calls_super && call.child_by_field_name("object").is_none() {
+        out.push(crate::engine::check_id::CheckId::IllegalDeclaration.at(
+            call,
+            "An enum constructor cannot call `super(…)` — the compiler supplies the call to `Enum`",
+        ));
+    }
 }
 
 /// Flag a `method_declaration` whose name equals the simple name of its enclosing class/enum — a
@@ -157,6 +180,18 @@ mod tests {
         let m = msgs("class Outer { class Inner { void Inner() {} } }");
         assert_eq!(m.len(), 1, "{m:?}");
         assert!(m[0].contains("`Inner`"), "{m:?}");
+    }
+
+    #[test]
+    fn super_call_in_an_enum_constructor_is_flagged() {
+        let m = msgs("enum E { A; E() { super(); } }");
+        assert!(m.iter().any(|s| s.contains("enum constructor cannot call `super")), "{m:?}");
+    }
+
+    #[test]
+    fn this_call_in_an_enum_constructor_and_super_in_a_class_are_clean() {
+        assert!(msgs("enum E { A, B(1); E() { this(0); } E(int x) { } }").is_empty());
+        assert!(msgs("class C extends B { C() { super(); } }").is_empty());
     }
 
     #[test]

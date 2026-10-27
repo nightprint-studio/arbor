@@ -1592,6 +1592,9 @@ pub struct JpaConditionArgs {
     pub ignore_case: bool,
     #[serde(default)]
     pub or: bool,
+    /// A value fixed in the query rather than a parameter the caller passes.
+    #[serde(default)]
+    pub value: Option<String>,
 }
 
 /// What a generation produced — both destinations, when both are honest.
@@ -1628,6 +1631,7 @@ fn condition_of(c: JpaConditionArgs) -> bennu_jpa::prelude::Condition {
         keyword: c.keyword,
         ignore_case: c.ignore_case,
         or: c.or,
+        value: c.value.filter(|v| !v.trim().is_empty()),
     }
 }
 

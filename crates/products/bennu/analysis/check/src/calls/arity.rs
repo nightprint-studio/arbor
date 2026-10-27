@@ -22,7 +22,7 @@ use bennu_java::prelude::{extract_symbols, FileSymbols, InferCache, TypeResolver
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::support::constructors::constructor_call;
+use crate::support::constructors::{constructor_call, qualified_constructor_call};
 use crate::support::nodes::simple_name;
 
 /// One overload's arity shape: its parameter count and whether the last parameter is an array
@@ -77,7 +77,7 @@ pub fn arity_errors_in(
                 }
             }
             "object_creation_expression" | "explicit_constructor_invocation" => {
-                check_constructor(n, bytes, symbols, resolver, &mut out)
+                check_constructor(n, &root, source, symbols, resolver, cache, &mut out)
             }
             _ => {}
         }
@@ -211,12 +211,18 @@ fn check_call(
 /// or `this(…)`: see [`constructor_call`] for which constructors those are.
 fn check_constructor(
     n: Node,
-    bytes: &[u8],
+    root: &Node,
+    source: &str,
     symbols: &FileSymbols,
     resolver: &dyn TypeResolver,
+    cache: &InferCache,
     out: &mut Vec<Diagnostic>,
 ) {
-    let Some(call) = constructor_call(n, bytes, symbols, resolver) else { return };
+    let call = match crate::support::nodes::is_qualified_creation(n) {
+        true => qualified_constructor_call(n, root, source, symbols, resolver, cache),
+        false => constructor_call(n, source.as_bytes(), symbols, resolver),
+    };
+    let Some(call) = call else { return };
     if call.args.has_error() {
         return;
     }

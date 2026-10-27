@@ -28,7 +28,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $Root = $PSScriptRoot
-$Modules = @('java8', 'java21')
+$Modules = @('java8', 'java8isolated', 'java11', 'java15', 'java17', 'java21')
 # Realistic legal code without markers: javac must report nothing on them.
 $CleanModules = @('clean8', 'clean21', 'lombok8')
 $Utf8NoBom = New-Object System.Text.UTF8Encoding $false

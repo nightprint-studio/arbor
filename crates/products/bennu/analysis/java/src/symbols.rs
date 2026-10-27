@@ -253,8 +253,9 @@ pub struct MethodDecl {
     /// `#[serde(default)]` for backward-compatible deserialization of a pre-existing persisted symbol.
     #[serde(default)]
     pub throws: Vec<String>,
-    /// The method's own type parameters, by name (`<T, R> R map(T t)` → `["T", "R"]`). A parameter
-    /// typed `T` means the enclosing class's `T` only when the method does not declare one of its own.
+    /// The method's own type parameters as declared (`<T, R extends Number> R map(T t)` →
+    /// `["T", "R extends Number"]`). A parameter typed `T` means the enclosing class's `T` only when the
+    /// method does not declare one of its own; the first word of each entry is the name.
     #[serde(default)]
     pub type_params: Vec<String>,
     /// The method's annotations (`@Override`, `@Bean`, `@Transactional`, …). A type and a field
@@ -1188,8 +1189,29 @@ fn parse_method(node: &Node, bytes: &[u8], enclosing_is_interface: bool) -> Opti
         is_final,
         throws,
         annotations: collect_annotations(node, bytes),
-        type_params: type_param_names(node, bytes),
+        type_params: type_param_declarations(node, bytes),
     })
+}
+
+/// A method's type parameters as declared, bounds included — `<T extends Number, R> …` →
+/// `["T extends Number", "R"]`, whitespace collapsed.
+///
+/// The bounds are what a call site needs to judge an argument for a bare `T`
+/// (`bennu_check::calls::generic_args`). Everything that only wants the names reads them back with
+/// [`Member::method_type_params`](crate::seam::Member::method_type_params), which takes the first
+/// word of each entry.
+fn type_param_declarations(node: &Node, bytes: &[u8]) -> Vec<String> {
+    let Some(tps) = node.child_by_field_name("type_parameters") else {
+        return Vec::new();
+    };
+    let mut c = tps.walk();
+    let declarations = tps
+        .named_children(&mut c)
+        .filter(|tp| tp.kind() == "type_parameter")
+        .filter_map(|tp| node_text(&tp, bytes))
+        .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    declarations
 }
 
 /// The `(name, type)` parameters of a method/constructor `parameters` list. Shared by

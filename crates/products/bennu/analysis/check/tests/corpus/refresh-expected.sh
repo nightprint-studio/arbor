@@ -17,7 +17,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MODULES=(java8 java21)
+MODULES=(java8 java8isolated java11 java15 java17 java21)
 # Realistic legal code without markers: javac must report nothing on them.
 CLEAN_MODULES=(clean8 clean21 lombok8)
 LOG="$ROOT/target/mvn-refresh.log"

@@ -42,6 +42,11 @@ const JPQL: &[&str] = &[
     "concat", "substring", "coalesce", "nullif", "size", "index", "type", "treat", "function",
 ];
 
+/// The JPQL keyword set, for completion and for telling an alias from a clause word.
+pub fn jpql_keywords() -> &'static [&'static str] {
+    JPQL
+}
+
 /// What native SQL adds on top. Kept separate so a JPQL query is never coloured with a word the
 /// provider would reject.
 const SQL_EXTRA: &[&str] = &[

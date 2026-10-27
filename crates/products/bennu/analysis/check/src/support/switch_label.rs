@@ -105,10 +105,16 @@ fn collect_yields<'t>(node: Node<'t>, out: &mut Vec<Node<'t>>) {
 
 /// Whether a `switch_label` is the `default` clause. The keyword is an anonymous (unnamed) child of
 /// the label, so the scan includes unnamed children.
+///
+/// `case null, default` is the other spelling: after the comma the grammar expects an expression, so
+/// the lexer hands `default` over as an `identifier` named "default". No real identifier can be spelled
+/// that (it is a keyword), so such a child is the `default` clause too — missing it made a switch with
+/// `case null, default` look like it had no catch-all.
 pub fn label_is_default(label: Node, bytes: &[u8]) -> bool {
     let mut c = label.walk();
     for ch in label.children(&mut c) {
-        if !ch.is_named() && ch.utf8_text(bytes) == Ok("default") {
+        let is_keyword = if ch.is_named() { ch.kind() == "identifier" } else { true };
+        if is_keyword && ch.utf8_text(bytes) == Ok("default") {
             return true;
         }
     }

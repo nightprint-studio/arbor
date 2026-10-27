@@ -43,10 +43,32 @@ pub fn version_errors_nodes(root: Node, nodes: &[Node], source: &str, java_major
                     start,
                     end,
                 });
+                if n.kind() == "record_declaration" {
+                    out.extend(record_read_as_a_method(n));
+                }
             }
         }
     }
     out
+}
+
+/// What javac says next about an empty `record` below Java 16: it does not know the word, so it reads
+/// `record Point(int x) { }` as a METHOD called `Point` returning a type called `record`, whose empty
+/// body falls off the end without a `return`. The feature error above is the cause; this is javac's
+/// own follow-up, worded so it explains itself — on the closing brace, where javac puts it.
+///
+/// Only for a body with nothing in it. With members the method reading gives javac a pile of unrelated
+/// syntax errors, and repeating those would be noise on top of the one error that matters.
+fn record_read_as_a_method(record: Node) -> Option<Diagnostic> {
+    let body = record.child_by_field_name("body")?;
+    let mut c = body.walk();
+    let has_members = body.named_children(&mut c).any(|ch| !matches!(ch.kind(), "line_comment" | "block_comment"));
+    let close = body.child(body.child_count().checked_sub(1)?).filter(|last| last.kind() == "}");
+    let close = close.filter(|_| !has_members)?;
+    Some(crate::engine::check_id::CheckId::MissingReturn.at(
+        close,
+        "Missing return statement: below Java 16 `record` is not a keyword, so this declaration is read as a method returning a type named `record`",
+    ))
 }
 
 /// The `(feature label, min major version)` a node introduces, if any.
@@ -87,6 +109,16 @@ fn feature_at(n: Node, bytes: &[u8]) -> Option<(&'static str, u32)> {
         // Java 22 (JEP 456): `_` as a pattern, a local, a catch or a lambda parameter. Below it `_`
         // is a reserved word (9+) and the file does not compile.
         "underscore_pattern" => Some(("Unnamed variables and patterns", 22)),
+        // `x instanceof String s` (JEP 394): the binding name is what makes it a pattern, and what
+        // dates it. A record pattern is its own node, below.
+        "instanceof_expression" if n.child_by_field_name("name").is_some() => {
+            Some(("`instanceof` patterns", 16))
+        }
+        // `x instanceof Point(int a, int b)` (JEP 440). One inside a `case` label is dated by the label
+        // already; a nested one by the outermost.
+        "record_pattern" if n.parent().is_some_and(|p| p.kind() == "instanceof_expression") => {
+            Some(("Record patterns", 21))
+        }
         // Java 25 (JEP 511).
         "module_import_declaration" => Some(("`import module`", 25)),
         // Java 25 (JEP 513): a statement ahead of `this(…)` / `super(…)`. javac's own wording below
@@ -126,10 +158,34 @@ fn follows_a_statement(n: Node) -> bool {
 ///     matched in its own right rather than assumed to travel with one;
 ///   * **`case null`** → Java 21. Before it, `null` was the one selector value a `switch` could not
 ///     be given a label for, and reaching one threw instead.
+///   * **several labels in one `case`** (`case 6, 7:`) → Java 14. When the label also carries a newer
+///     feature (`case null, default`), the newer one is the one reported.
 ///
 /// The *selector* widenings that leave no mark on any label (an `enum` or a boxed `Integer`, both
 /// Java 5) are not gated here: no project Bennu opens targets Java 1.4.
 fn switch_label_feature(label: Node) -> Option<(&'static str, u32)> {
+    let widest = widest_label_feature(label);
+    if !has_several_labels(label) {
+        return widest;
+    }
+    match widest {
+        Some((_, min)) if min >= 14 => widest,
+        _ => Some(("Multiple `case` labels", 14)),
+    }
+}
+
+/// Whether one `case` lists more than one constant (`case 1, 2`, `case null, default`).
+fn has_several_labels(label: Node) -> bool {
+    let mut c = label.walk();
+    let listed = label
+        .named_children(&mut c)
+        .filter(|ch| !matches!(ch.kind(), "guard" | "annotation" | "marker_annotation"))
+        .count();
+    listed > 1
+}
+
+/// The newest feature a single label's own operand uses (pattern, guard, `null`, string).
+fn widest_label_feature(label: Node) -> Option<(&'static str, u32)> {
     let mut c = label.walk();
     for ch in label.named_children(&mut c) {
         match ch.kind() {
@@ -305,7 +361,10 @@ mod tests {
 
     #[test]
     fn record_needs_16() {
-        assert_eq!(at("record R(int x) {}", 8).len(), 1);
+        // The gate itself, plus javac's follow-up for an empty record (see
+        // `an_empty_record_below_16_also_gets_javacs_missing_return`).
+        let below = at("record R(int x) {}", 8);
+        assert!(below.iter().any(|m| m.contains("Records require Java 16")), "{below:?}");
         assert!(at("record R(int x) {}", 17).is_empty());
     }
 
@@ -431,6 +490,54 @@ mod tests {
         let src = "class C { void m(Object o, boolean f) { switch (o) { case String s when f -> {} default -> {} } } }";
         let d = at(src, 17);
         assert!(d.iter().any(|m| m.contains("Java 21")), "{d:?}");
+        assert!(at(src, 21).is_empty(), "{:?}", at(src, 21));
+    }
+
+    #[test]
+    fn several_labels_in_one_case_need_14() {
+        let src = "class C { void m(int d) { switch (d) { case 6, 7: break; default: break; } } }";
+        let d = at(src, 11);
+        assert!(d.iter().any(|m| m.contains("Multiple `case` labels require Java 14")), "{d:?}");
+        assert!(at(src, 14).is_empty(), "{:?}", at(src, 14));
+        // A single label is clean on every release, and `case null, default` is dated by the `null`.
+        assert!(at("class C { void m(int d) { switch (d) { case 6: break; default: break; } } }", 8).is_empty());
+        let with_null = "class C { void m(String s) { switch (s) { case null, default -> {} } } }";
+        let d = at(with_null, 17);
+        assert!(d.iter().any(|m| m.contains("`case null` requires Java 21")), "{d:?}");
+        // Two strings are Java 7's feature AND the multi-label one: the later release is reported.
+        let strings = "class C { void m(String s) { switch (s) { case \"a\", \"b\": break; default: break; } } }";
+        assert!(at(strings, 11).iter().any(|m| m.contains("Java 14")), "{:?}", at(strings, 11));
+        assert!(at(strings, 14).is_empty());
+    }
+
+    #[test]
+    fn an_empty_record_below_16_also_gets_javacs_missing_return() {
+        let src = "class C {\n  record P(int x) {\n  }\n}";
+        let d = at(src, 11);
+        assert_eq!(d.len(), 2, "{d:?}");
+        assert!(d[0].contains("Records require Java 16"), "{d:?}");
+        assert!(d[1].contains("Missing return statement"), "{d:?}");
+        // At 16 the record is a record and nothing is added; a record with members only gets the gate.
+        assert!(at(src, 16).is_empty(), "{:?}", at(src, 16));
+        let with_members = "class C { record P(int x) { int twice() { return x * 2; } } }";
+        assert_eq!(at(with_members, 11).len(), 1, "{:?}", at(with_members, 11));
+    }
+
+    #[test]
+    fn an_instanceof_pattern_needs_16() {
+        let src = "class C { boolean m(Object o) { return o instanceof String s && !s.isEmpty(); } }";
+        let d = at(src, 15);
+        assert!(d.iter().any(|m| m.contains("`instanceof` patterns require Java 16")), "{d:?}");
+        assert!(at(src, 16).is_empty(), "{:?}", at(src, 16));
+        // The plain type test has no binding and is clean everywhere.
+        assert!(at("class C { boolean m(Object o) { return o instanceof String; } }", 8).is_empty());
+    }
+
+    #[test]
+    fn a_record_pattern_in_instanceof_needs_21() {
+        let src = "class C { boolean m(Object o) { return o instanceof Point(int x, int y); } }";
+        let d = at(src, 17);
+        assert!(d.iter().any(|m| m.contains("Record patterns require Java 21")), "{d:?}");
         assert!(at(src, 21).is_empty(), "{:?}", at(src, 21));
     }
 

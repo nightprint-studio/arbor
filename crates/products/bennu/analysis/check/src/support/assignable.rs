@@ -222,7 +222,7 @@ fn render(binary: &str) -> String {
 }
 
 /// The class a primitive boxes to (JLS §5.1.7).
-fn box_of(primitive: &str) -> Option<&'static str> {
+pub(crate) fn box_of(primitive: &str) -> Option<&'static str> {
     Some(match primitive {
         "boolean" => "java/lang/Boolean",
         "byte" => "java/lang/Byte",

@@ -63,6 +63,8 @@ pub fn duplicate_signatures_nodes(nodes: &[Node], source: &str) -> Vec<Diagnosti
     // The value is the declaration kept so far: the EARLIEST in the source. The slice does not visit
     // siblings in source order, and javac reports the later declaration — the one that redeclares.
     let mut seen: HashMap<(usize, String, Vec<String>), Node> = HashMap::new();
+    // The same members with every `T...` read as `T[]`: the declaration kept first and the spelling it used.
+    let mut array_seen: HashMap<(usize, String, Vec<String>), (Node, String)> = HashMap::new();
     let mut out = Vec::new();
     for &n in nodes {
         let (kind_name, name_node) = match n.kind() {
@@ -80,6 +82,27 @@ pub fn duplicate_signatures_nodes(nodes: &[Node], source: &str) -> Vec<Diagnosti
         };
         let Some(body) = n.parent() else { continue };
         let params = param_types(n, bytes, &type_var_erasures(n, bytes));
+        // `f(int[])` beside `f(int...)`: one signature after erasure, but javac names it for what it is.
+        let array_form: Vec<String> = params
+            .iter()
+            .map(|p| p.strip_suffix("...").map_or_else(|| p.clone(), |base| format!("{base}[]")))
+            .collect();
+        match array_seen.get(&(body.id(), kind_name.clone(), array_form.clone())).cloned() {
+            Some((kept, kept_ids)) if kept_ids != params_fingerprint(&params) => {
+                let later = if kept.start_byte() > name_node.start_byte() { kept } else { name_node };
+                out.push(Diagnostic {
+                    message: "Cannot declare both a method taking an array and one taking varargs of the same type".to_string(),
+                    severity: crate::engine::check_id::CheckId::DuplicateMethod.severity().to_string(),
+                    code: crate::engine::check_id::CheckId::DuplicateMethod.code().to_string(),
+                    start: later.start_byte(),
+                    end: later.end_byte(),
+                });
+            }
+            Some(_) => {}
+            None => {
+                array_seen.insert((body.id(), kind_name.clone(), array_form), (name_node, params_fingerprint(&params)));
+            }
+        }
         let key = (body.id(), kind_name, params);
         if let Some(kept) = seen.get(&key).copied() {
             let (later, earlier) =
@@ -99,6 +122,12 @@ pub fn duplicate_signatures_nodes(nodes: &[Node], source: &str) -> Vec<Diagnosti
     }
     out.sort_by_key(|d| d.start);
     out
+}
+
+/// The parameter list as one comparable string, so two spellings of a signature (`int[]`, `int...`)
+/// can be told apart after both were read as the same array form.
+fn params_fingerprint(params: &[String]) -> String {
+    params.join("\u{1}")
 }
 
 /// The written parameter types of a method/constructor, whitespace-normalised and with the

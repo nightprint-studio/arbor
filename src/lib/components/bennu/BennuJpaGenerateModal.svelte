@@ -35,8 +35,8 @@
    */
   import { tooltip } from '$lib/actions/tooltip';
   import {
-    Database, Plus, Trash2, Search, Type, ListChecks, Box, FileText, ChevronUp, ChevronDown,
-    ArrowRight, ArrowLeft, ArrowLeftRight, Link2,
+    Plus, Trash2, Search, Type, ListChecks, Box, FileText, ChevronUp, ChevronDown,
+    ArrowRight, ArrowLeft, ArrowLeftRight, Link2, Pencil, ListPlus, Archive, Layers, Zap, Bookmark,
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -260,8 +260,16 @@
   function addCondition() {
     conditions = [
       ...conditions,
-      { path: properties[0]?.path ?? '', keyword: '', ignore_case: false, or: false },
+      { path: properties[0]?.path ?? '', keyword: '', ignore_case: false, or: false, value: null },
     ];
+  }
+  const isConstant = (c: JpaCondition) => c.value != null;
+  /** How many arguments a condition's keyword takes — none means there is nothing to bind or fix. */
+  const argsOf = (c: JpaCondition) => model?.keywords.find((x) => x.keyword === c.keyword)?.args ?? 1;
+  function valuePlaceholder(c: JpaCondition): string {
+    const k = model?.keywords.find((x) => x.keyword === c.keyword);
+    if (k?.args === 2) return 'from, to';
+    return k?.collection ? 'a, b, c' : 'value';
   }
   function removeCondition(i: number) {
     conditions = conditions.filter((_, at) => at !== i);
@@ -534,6 +542,19 @@
   const canMapBy = $derived(['OneToMany', 'ManyToMany', 'OneToOne'].includes(attrRelation));
   const isToMany = $derived(['OneToMany', 'ManyToMany'].includes(attrRelation));
   const title = $derived(spec?.title ?? 'Generate');
+  /** The header tile's glyph names the job. A database cylinder said "database management", which
+   *  is not what any of these do. */
+  const crestIcon = $derived(
+    ({
+      query: Search,
+      modify: spec?.delete ? Trash2 : Pencil,
+      attribute: ListPlus,
+      repository: Archive,
+      projection: Layers,
+      lifecycle: Zap,
+      'named-query': Bookmark,
+    })[body] ?? Search,
+  );
   /** What the header names, and the reason the pickers below can disappear. */
   const target = $derived(
     lockedTo === 'repository'
@@ -591,10 +612,11 @@
   const isFinder = $derived(subject === 'find');
 </script>
 
-<Modal {onClose} width="1000px" height="680px" padBody={false} ariaLabel={title}>
+<Modal {onClose} width="min(1240px, 94vw)" height="min(780px, 92vh)" padBody={false} ariaLabel={title}>
   {#snippet header()}
     <ModalHeader {onClose}>
-      <span class="jg-crest"><Database size={15} /></span>
+      {@const Crest = crestIcon}
+      <span class="jg-crest"><Crest size={15} /></span>
       <span class="jg-heading">
         <span class="modal-title">{title}</span>
         {#if target}
@@ -624,7 +646,7 @@
         {#if asksForEntity}
           <FormSection label="Entity" first>
             <FormRow label="Class" wideControl>
-              <Select value={entityFqcn} options={entityOptions} onchange={(v) => (entityFqcn = v)} />
+              <Select value={entityFqcn} options={entityOptions} searchable searchPlaceholder="Find an entity…" onchange={(v) => (entityFqcn = v)} />
             </FormRow>
           </FormSection>
         {/if}
@@ -669,7 +691,7 @@
             </FormRow>
             {#if projectionNested}
               <FormRow label="Repository" wideControl>
-                <Select value={repositoryFqcn} options={repoOptions} onchange={(v) => (repositoryFqcn = v)} />
+                <Select value={repositoryFqcn} options={repoOptions} searchable searchPlaceholder="Find a repository…" onchange={(v) => (repositoryFqcn = v)} />
               </FormRow>
             {/if}
           </FormSection>
@@ -714,7 +736,7 @@
             </FormRow>
             {#if attrRelation}
               <FormRow label="Target entity" wideControl>
-                <Select value={attrTarget} options={targetOptions} onchange={(v) => (attrTarget = v)} />
+                <Select value={attrTarget} options={targetOptions} searchable searchPlaceholder="Find an entity…" onchange={(v) => (attrTarget = v)} />
               </FormRow>
               {#if isToMany}
                 <FormRow
@@ -880,7 +902,7 @@
           <FormSection label="What it does" first={!asksForEntity}>
             {#if asksForRepository}
               <FormRow label="Repository" wideControl>
-                <Select value={repositoryFqcn} options={repoOptions} onchange={(v) => (repositoryFqcn = v)} />
+                <Select value={repositoryFqcn} options={repoOptions} searchable searchPlaceholder="Find a repository…" onchange={(v) => (repositoryFqcn = v)} />
               </FormRow>
             {/if}
             {#if body === 'query'}
@@ -992,37 +1014,83 @@
                   <span class="jg-join-rule" aria-hidden="true"></span>
                 </div>
               {/if}
+              <!-- Two lines per condition: WHAT is compared on the first, against WHAT on the
+                   second. One line of seven controls was unreadable at any width. -->
               <div class="jg-cond">
-                <Select value={c.path} options={propertyOptions} onchange={(v) => patch(i, { path: v })} />
-                <Select value={c.keyword} options={keywordOptions} onchange={(v) => patch(i, { keyword: v })} />
-                <span class="jg-param" class:jg-none={parameterOf(c) === '—'}>{parameterOf(c)}</span>
-                <Toggle
-                  checked={c.ignore_case}
-                  size="sm"
-                  ariaLabel="Ignore case"
-                  onchange={(v) => patch(i, { ignore_case: v })}
-                />
-                <!-- Order is not cosmetic: Spring Data evaluates the conditions left to right, so
-                     `a or b and c` and `a and b or c` are different queries. -->
-                <IconButton
-                  tooltip="Move earlier"
-                  size={22}
-                  disabled={i === 0}
-                  onclick={() => moveCondition(i, -1)}
-                >
-                  <ChevronUp size={12} />
-                </IconButton>
-                <IconButton
-                  tooltip="Move later"
-                  size={22}
-                  disabled={i === conditions.length - 1}
-                  onclick={() => moveCondition(i, 1)}
-                >
-                  <ChevronDown size={12} />
-                </IconButton>
-                <IconButton tooltip="Remove this condition" size={22} variant="danger" onclick={() => removeCondition(i)}>
-                  <Trash2 size={12} />
-                </IconButton>
+                <div class="jg-cond-main">
+                  <Select
+                    value={c.path}
+                    options={propertyOptions}
+                    searchable
+                    searchPlaceholder="Find a property…"
+                    fill
+                    size="sm"
+                    ariaLabel="Property"
+                    onchange={(v) => patch(i, { path: v })}
+                  />
+                  <Select
+                    value={c.keyword}
+                    options={keywordOptions}
+                    searchable
+                    searchPlaceholder="Find an operator…"
+                    fill
+                    size="sm"
+                    ariaLabel="Operator"
+                    onchange={(v) => patch(i, { keyword: v })}
+                  />
+                  <!-- Order is not cosmetic: Spring Data evaluates the conditions left to right,
+                       so `a or b and c` and `a and b or c` are different queries. -->
+                  <IconButton tooltip="Move earlier" size={22} disabled={i === 0} onclick={() => moveCondition(i, -1)}>
+                    <ChevronUp size={12} />
+                  </IconButton>
+                  <IconButton
+                    tooltip="Move later"
+                    size={22}
+                    disabled={i === conditions.length - 1}
+                    onclick={() => moveCondition(i, 1)}
+                  >
+                    <ChevronDown size={12} />
+                  </IconButton>
+                  <IconButton tooltip="Remove this condition" size={22} variant="danger" onclick={() => removeCondition(i)}>
+                    <Trash2 size={12} />
+                  </IconButton>
+                </div>
+                <div class="jg-cond-arg">
+                  {#if argsOf(c) > 0}
+                    <RadioGroup
+                      value={isConstant(c) ? 'value' : 'param'}
+                      appearance="segment"
+                      size="sm"
+                      options={[
+                        { value: 'param', label: 'Parameter', description: 'the caller passes the value' },
+                        { value: 'value', label: 'Fixed value', description: 'written into the query itself' },
+                      ]}
+                      onchange={(v) => patch(i, { value: v === 'value' ? (c.value ?? '') : null })}
+                    />
+                    {#if isConstant(c)}
+                      <div class="jg-cond-value">
+                        <Input
+                          value={c.value ?? ''}
+                          placeholder={valuePlaceholder(c)}
+                          oninput={(v) => patch(i, { value: v })}
+                        />
+                      </div>
+                    {:else}
+                      <span class="jg-param" use:tooltip={'The method parameter this condition binds'}>{parameterOf(c)}</span>
+                    {/if}
+                  {:else}
+                    <span class="jg-param jg-none">takes no value</span>
+                  {/if}
+                  <label class="jg-ic">
+                    <Toggle
+                      checked={c.ignore_case}
+                      size="sm"
+                      ariaLabel="Ignore case"
+                      onchange={(v) => patch(i, { ignore_case: v })}
+                    />
+                    Ignore case
+                  </label>
+                </div>
               </div>
             {/each}
             <button type="button" class="jg-add" onclick={addCondition}>
@@ -1052,7 +1120,16 @@
             <FormSection label="Ordering">
               {#each orders as o, i (i)}
                 <div class="jg-order">
-                  <Select value={o.path} options={propertyOptions} onchange={(v) => patchOrder(i, { path: v })} />
+                  <Select
+                    value={o.path}
+                    options={propertyOptions}
+                    searchable
+                    searchPlaceholder="Find a property…"
+                    fill
+                    size="sm"
+                    ariaLabel="Order by"
+                    onchange={(v) => patchOrder(i, { path: v })}
+                  />
                   <RadioGroup
                     value={o.desc ? 'desc' : 'asc'}
                     appearance="segment"
@@ -1077,18 +1154,24 @@
 
             <FormSection label="Result">
               {#if isFinder}
+                <!-- One line of names, and the selected one explained underneath: six cards each
+                     wrapping its own description into a column of four words was the noisiest
+                     thing in the dialog. -->
                 <RadioGroup
                   value={returns}
-                  appearance="card"
+                  appearance="segment"
                   size="sm"
                   block
-                  options={returnOptions}
+                  options={returnOptions.map(({ value, label }) => ({ value, label }))}
                   onchange={(v) => (returns = v as JpaReturnShape)}
                 />
+                <p class="jg-note jg-returns">
+                  {returnOptions.find((o) => o.value === returns)?.description ?? ''}
+                </p>
                 <FormRow
                   label="Take a Sort parameter"
                   description={returns === 'page' || returns === 'slice'
-                    ? 'Not offered here: the Pageable this method already takes carries its own Sort, and a method taking both does not compile.'
+                    ? 'Not offered: the Pageable already carries its own Sort.'
                     : 'The caller decides the ordering, instead of it being fixed in the name.'}
                 >
                   <Toggle
@@ -1214,16 +1297,19 @@
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    gap: 14px;
+    grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+    gap: 16px;
     padding: 12px 16px 14px;
+    overflow: hidden;
   }
 
   .jg-form {
+    min-width: 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
     padding-right: 4px;
+    overflow-x: hidden;
     overflow-y: auto;
   }
   /* FormRow's control column is sized for a settings page; in a dense dialog it should take the
@@ -1232,11 +1318,17 @@
   .jg-form :global(.fr-control .select),
   .jg-form :global(.fr-control .input) { width: 100%; }
 
-  .jg-preview { min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+  /* `min-width: 0` all the way down: a flex/grid child defaults to its content's width, so one
+     long generated line used to widen the preview column and put a horizontal scrollbar on the
+     whole dialog — form included. Now the width stops here and only the editor scrolls. */
+  .jg-preview { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
   /* The code pane takes what the head leaves, so the preview grows with the modal instead of
      scrolling the whole column. */
-  .jg-preview-code { flex: 1; min-height: 0; display: flex; }
-  .jg-preview-code > :global(.cp) { flex: 1; min-height: 0; }
+  .jg-preview-code { flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+  .jg-preview-code > :global(.cp) { flex: 1; min-width: 0; min-height: 0; }
+  .jg-preview-code :global(.cm-editor) { min-width: 0; max-width: 100%; }
+  .jg-preview-code :global(.cm-scroller) { overflow-x: auto; }
+  .jg-name { overflow-x: auto; }
   .jg-preview-head {
     display: flex;
     align-items: baseline;
@@ -1278,16 +1370,31 @@
   /* A condition, and the join that precedes it. The joiner sits between the rows rather than
      inside one, because that is where the word belongs — it is about the pair. */
   .jg-cond {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-base);
+  }
+  .jg-cond-main {
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 0.7fr) auto auto auto auto;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto auto auto;
     align-items: center;
     gap: 6px;
   }
+  .jg-cond-arg { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .jg-cond-value { flex: 1; min-width: 0; }
+  .jg-cond-arg > .jg-param { flex: 1; min-width: 0; }
+  .jg-ic {
+    display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto;
+    font-size: var(--font-size-2xs); color: var(--text-muted); cursor: pointer;
+  }
+  .jg-returns { padding: 2px 2px 6px; }
   .jg-join { display: flex; align-items: center; gap: 8px; padding: 1px 0; }
   .jg-join-rule { flex: 1; height: 1px; background: var(--border-subtle); }
   .jg-param {
     font-family: var(--font-code);
-    font-size: var(--font-size-3xs);
+    font-size: var(--font-size-2xs);
     color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }

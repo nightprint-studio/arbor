@@ -57,6 +57,19 @@ pub struct Condition {
     pub ignore_case: bool,
     /// Joined to the previous condition with `Or` rather than `And`.
     pub or: bool,
+    /// A value fixed in the query itself instead of a parameter the caller passes (`status = 'ACTIVE'`).
+    ///
+    /// A derived name cannot carry a value, so a constant forces the `@Query` — see
+    /// [`QuerySpec::name`]. Comma-separated for the keywords that bind several (`In`, `Between`).
+    pub value: Option<String>,
+}
+
+impl Condition {
+    /// Whether this condition binds a method parameter. A constant, and a keyword that takes no
+    /// argument at all (`IsNull`), do not.
+    fn binds_parameter(&self) -> bool {
+        self.value.is_none() && args_for(&self.keyword) > 0
+    }
 }
 
 /// What the query-method form collected.
@@ -212,6 +225,9 @@ pub fn method_name(spec: &QuerySpec) -> String {
         }
         name.push_str(&path_segment(&c.path));
         name.push_str(&c.keyword);
+        if let Some(value) = &c.value {
+            name.push_str(&value_segment(value));
+        }
         if c.ignore_case {
             name.push_str("IgnoreCase");
         }
@@ -227,6 +243,17 @@ pub fn method_name(spec: &QuerySpec) -> String {
         }
     }
     name
+}
+
+/// A constant as the word a method name can carry: `'ACTIVE'` → `ACTIVE`, `18` → `18`,
+/// `a, b` → `AB`. Cosmetic — the `@Query` is what runs — but it keeps two finders that differ
+/// only by their constant from getting the same name.
+fn value_segment(value: &str) -> String {
+    value
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(capitalize)
+        .collect()
 }
 
 /// `customer.name` → `CustomerName` — the camel-cased path a derived name spells it with.
@@ -301,6 +328,9 @@ pub fn query_method(
         let ty = entity
             .and_then(|e| resolve_field_type(model, e, &c.path))
             .unwrap_or_else(|| "Object".to_string());
+        if !c.binds_parameter() {
+            continue;
+        }
         match args_for(&c.keyword) {
             0 => {}
             2 => {
@@ -330,7 +360,8 @@ pub fn query_method(
     // …and one reason not to: with no entity name there is no `from` clause to write, and an
     // annotation holding invalid JPQL is worse than none — it fails at startup instead of at
     // compile time, which is the exact failure mode this whole crate exists to prevent.
-    let wants_query = !spec.name.trim().is_empty() || spec.with_query;
+    let has_constant = spec.conditions.iter().any(|c| c.value.is_some());
+    let wants_query = !spec.name.trim().is_empty() || spec.with_query || has_constant;
     let annotation = if wants_query && entity.is_some() {
         format!("    @Query(\"{}\")\n", jpql_for(model, repo, spec))
     } else {
@@ -378,8 +409,8 @@ fn jpql_for(model: &JpaModel, repo: &Repository, spec: &QuerySpec) -> String {
         } else {
             " and "
         });
-        let param = c.path.rsplit('.').next().unwrap_or(&c.path);
-        out.push_str(&format!("{alias}.{} {}", c.path, comparison(&c.keyword, param)));
+        let ty = entity_type_of(model, repo, &c.path);
+        out.push_str(&format!("{alias}.{} {}", c.path, comparison_of(&c.keyword, &rhs_of(c, &ty))));
     }
     for (i, (path, desc)) in spec.order_by.iter().enumerate() {
         out.push_str(if i == 0 { " order by " } else { ", " });
@@ -391,32 +422,98 @@ fn jpql_for(model: &JpaModel, repo: &Repository, spec: &QuerySpec) -> String {
     out
 }
 
-/// A keyword rendered as JPQL, with the placeholder it binds.
-fn comparison(keyword: &str, param: &str) -> String {
+/// What a condition compares against: a parameter the caller binds, or a value written into the
+/// query.
+enum Rhs<'a> {
+    Param(&'a str),
+    Constant { ty: &'a str, value: &'a str },
+}
+
+impl Rhs<'_> {
+    /// The operand for one slot of the keyword: the only one, a `Between`'s two ends, or a
+    /// collection.
+    fn operand(&self, slot: Slot) -> String {
+        match self {
+            Rhs::Param(p) => match slot {
+                Slot::One => format!(":{p}"),
+                Slot::From => format!(":{p}From"),
+                Slot::To => format!(":{p}To"),
+                Slot::Many => format!(":{p}s"),
+            },
+            Rhs::Constant { ty, value } => {
+                let parts: Vec<String> = value.split(',').map(|v| literal(ty, v.trim())).collect();
+                match slot {
+                    Slot::One | Slot::From => parts[0].clone(),
+                    Slot::To => parts.get(1).unwrap_or(&parts[0]).clone(),
+                    Slot::Many => format!("({})", parts.join(", ")),
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Slot {
+    One,
+    From,
+    To,
+    Many,
+}
+
+/// A constant as JPQL text. Strings are quoted (and a quote inside doubled); numbers, booleans and
+/// anything the user already quoted or qualified (`com.acme.Status.ACTIVE`, an enum constant) go
+/// in as written, because guessing a type's literal syntax wrong is worse than leaving it alone.
+fn literal(ty: &str, value: &str) -> String {
+    let string_like = matches!(ty, "String" | "Character" | "char" | "CharSequence");
+    if string_like && !value.starts_with('\'') {
+        format!("'{}'", value.replace('\'', "''"))
+    } else {
+        value.to_string()
+    }
+}
+
+fn rhs_of<'a>(c: &'a Condition, ty: &'a str) -> Rhs<'a> {
+    match &c.value {
+        Some(value) => Rhs::Constant { ty, value },
+        None => Rhs::Param(leaf(&c.path)),
+    }
+}
+
+/// The declared type of a condition's property, `Object` when it cannot be worked out.
+fn entity_type_of(model: &JpaModel, repo: &Repository, path: &str) -> String {
+    model
+        .entity(&repo.entity)
+        .and_then(|e| resolve_field_type(model, e, path))
+        .unwrap_or_else(|| "Object".to_string())
+}
+
+/// A keyword rendered as JPQL against `rhs`.
+fn comparison_of(keyword: &str, rhs: &Rhs) -> String {
+    let one = || rhs.operand(Slot::One);
     match keyword {
-        "" | "Is" | "Equals" => format!("= :{param}"),
-        "Not" => format!("<> :{param}"),
-        "GreaterThan" => format!("> :{param}"),
-        "GreaterThanEqual" => format!(">= :{param}"),
-        "LessThan" => format!("< :{param}"),
-        "LessThanEqual" => format!("<= :{param}"),
-        "After" => format!("> :{param}"),
-        "Before" => format!("< :{param}"),
-        "Between" => format!("between :{param}From and :{param}To"),
-        "Like" => format!("like :{param}"),
-        "NotLike" => format!("not like :{param}"),
-        "StartingWith" => format!("like concat(:{param}, '%')"),
-        "EndingWith" => format!("like concat('%', :{param})"),
-        "Containing" | "Contains" => format!("like concat('%', :{param}, '%')"),
-        "In" => format!("in :{param}s"),
-        "NotIn" => format!("not in :{param}s"),
+        "" | "Is" | "Equals" => format!("= {}", one()),
+        "Not" => format!("<> {}", one()),
+        "GreaterThan" => format!("> {}", one()),
+        "GreaterThanEqual" => format!(">= {}", one()),
+        "LessThan" => format!("< {}", one()),
+        "LessThanEqual" => format!("<= {}", one()),
+        "After" => format!("> {}", one()),
+        "Before" => format!("< {}", one()),
+        "Between" => format!("between {} and {}", rhs.operand(Slot::From), rhs.operand(Slot::To)),
+        "Like" => format!("like {}", one()),
+        "NotLike" => format!("not like {}", one()),
+        "StartingWith" => format!("like concat({}, '%')", one()),
+        "EndingWith" => format!("like concat('%', {})", one()),
+        "Containing" | "Contains" => format!("like concat('%', {}, '%')", one()),
+        "In" => format!("in {}", rhs.operand(Slot::Many)),
+        "NotIn" => format!("not in {}", rhs.operand(Slot::Many)),
         "IsNull" | "Null" => "is null".to_string(),
         "IsNotNull" | "NotNull" => "is not null".to_string(),
         "True" | "IsTrue" => "= true".to_string(),
         "False" | "IsFalse" => "= false".to_string(),
         "IsEmpty" | "Empty" => "is empty".to_string(),
         "IsNotEmpty" | "NotEmpty" => "is not empty".to_string(),
-        _ => format!("= :{param}"),
+        _ => format!("= {}", one()),
     }
 }
 
@@ -994,7 +1091,8 @@ pub fn modify_method(
         } else {
             " and "
         });
-        jpql.push_str(&format!("{alias}.{} {}", c.path, comparison(&c.keyword, leaf(&c.path))));
+        let ty = entity_type_of(model, repo, &c.path);
+        jpql.push_str(&format!("{alias}.{} {}", c.path, comparison_of(&c.keyword, &rhs_of(c, &ty))));
     }
 
     // Bound by name, so every parameter carries `@Param` — without it the binding depends on the
@@ -1014,6 +1112,9 @@ pub fn modify_method(
     for c in &spec.conditions {
         let name = leaf(&c.path);
         let ty = type_of(&c.path);
+        if !c.binds_parameter() {
+            continue;
+        }
         match args_for(&c.keyword) {
             0 => {}
             2 => {
@@ -1063,6 +1164,9 @@ pub fn modify_method_name(spec: &ModifySpec) -> String {
         }
         name.push_str(&path_segment(&c.path));
         name.push_str(&c.keyword);
+        if let Some(value) = &c.value {
+            name.push_str(&value_segment(value));
+        }
     }
     name
 }
@@ -1191,7 +1295,25 @@ mod tests {
     }
 
     fn cond(path: &str, keyword: &str) -> Condition {
-        Condition { path: path.into(), keyword: keyword.into(), ignore_case: false, or: false }
+        Condition { path: path.into(), keyword: keyword.into(), ignore_case: false, or: false, value: None }
+    }
+
+    #[test]
+    fn a_constant_is_written_into_the_query_and_binds_no_parameter() {
+        let m = model();
+        let repo = m.repositories[0].clone();
+        let spec = QuerySpec {
+            subject: "find".into(),
+            conditions: vec![
+                cond("name", ""),
+                Condition { value: Some("VIP".into()), ..cond("name", "Not") },
+            ],
+            ..QuerySpec::default()
+        };
+        let out = query_method(&m, &repo, "interface R {\n}\n", &spec);
+        assert!(out.preview.contains("@Query"), "a constant cannot live in a derived name");
+        assert!(out.preview.contains("<> 'VIP'"), "{}", out.preview);
+        assert!(out.preview.contains("(String name);"), "only the other condition is a parameter");
     }
 
     /// The point of building the name rather than typing it: it round-trips through the parser

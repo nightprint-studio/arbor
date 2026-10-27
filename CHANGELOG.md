@@ -7,7 +7,20 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- **Bennu's Java validation catches many more compile errors**: language features used below the project's Java level, `super`/constructor misuse, record and `switch` pattern mistakes, generic bounds and wildcards, pattern-variable scope, and checked exceptions from method references and implicit `super()`.
+- **Bennu's Spring Data query dialog is larger and easier to drive**: searchable property and operator pickers, conditions against a fixed value (`status = 'ACTIVE'`, written into the `@Query`), compact return types, and a new icon.
+
+- **Bennu completes JPQL inside a repository's `@Query`, a `@NamedQuery` and `createQuery("…")`**: entity names after `from`, fields after `alias.` (following relations and joins), the method's parameters after `:`, and keywords.
+
+- **Bennu's entity ⇄ repository jump is a clear coloured badge** (`R` on an entity, `E` on a repository) instead of a tiny glyph, and the JPA toolbar buttons have their own icons and colours.
+
+### Fixed
+- **A Java file just created from Bennu's New dialog shows its own icon** (interface, enum, record…) in the tree and the tab, instead of a class until the next index.
+- **Bennu no longer flags legal `case null, default` switches or checked generic `instanceof` tests** on Java 16 and up.
+
 ### Changed
+- **Bennu's "New Java Class" dialog no longer highlights the selected kind in solid blue**, and the query dialog's preview scrolls on its own instead of the whole dialog.
 - **A grant now overrides the AI gates, not just the confirmation prompt.** You can leave a product switched off entirely and hand out a grant when there is work to do: it exposes the tools you ticked on the projects you picked until its budget runs out, and connected clients are told the moment the tool set moves. Grants still live in memory only, and a call whose paths stray outside the grant's projects is still refused without asking.
 - **Bennu's Changes panel shows the diff beside the file list**, with Corvus's own diff viewer: unified or split, full-file context, chunk navigation and staging single lines or hunks.
 - **One setting decides whether Maven may use the network in Bennu.** *Settings → Java → Allow Maven to use the network* now covers the resolve, the build before a run, the run's classpath and the Maven panel's goals; the panel's *Offline* toggle flips the same, persisted setting instead of a per-session one.

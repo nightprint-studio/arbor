@@ -33,9 +33,41 @@ pub fn annotation_decl_errors_in(
     for &n in nodes {
         if n.kind() == "annotation_type_element_declaration" {
             check_element(n, bytes, symbols, resolver, &mut out);
+            check_default(n, bytes, symbols, resolver, &mut out);
         }
     }
     out
+}
+
+/// The `default` of an element is a value like any other written for it: of the element's type
+/// (`int value() default "x"`), and a constant where the type asks for one
+/// (`String value() default mutable`). The use-site checks already know both questions, so the
+/// declaration asks them of its own default — with the lookup of a bare name allowed to climb to the
+/// enclosing classes, since an `@interface` nested in a class sees that class's fields.
+fn check_default(n: Node, bytes: &[u8], symbols: &FileSymbols, resolver: &dyn TypeResolver, out: &mut Vec<Diagnostic>) {
+    let (Some(value), Some(type_node), Some(name)) =
+        (n.child_by_field_name("value"), n.child_by_field_name("type"), n.child_by_field_name("name"))
+    else {
+        return;
+    };
+    let (Ok(written), Ok(element)) = (type_node.utf8_text(bytes), name.utf8_text(bytes)) else { return };
+    // `String a()[]` puts the dimension after the name, as in `check_element`.
+    let trailing = n
+        .child_by_field_name("dimensions")
+        .and_then(|d| d.utf8_text(bytes).ok())
+        .map_or(0, |t| t.matches('[').count());
+    let (base, dims) = split_array_dims(written.trim());
+    let binary = match is_primitive(base) {
+        true => base.to_string(),
+        false => match type_binary_at(base, type_node, bytes, symbols, resolver) {
+            Some(binary) => binary,
+            None => return,
+        },
+    };
+    let declared = bennu_java::prelude::TypeRef::simple(binary).arrayed((dims + trailing).min(u8::MAX as usize) as u8);
+    crate::annotation::annotation_values::check_value_type(value, &declared, element, bytes, resolver, out);
+    crate::annotation::annotation_constants::check_constant_names_from(value, &declared, bytes, symbols, resolver, true, out);
+    crate::annotation::annotation_constants::check_enum_constant(value, &declared, bytes, symbols, resolver, out);
 }
 
 fn check_element(

@@ -1994,7 +1994,8 @@ impl Ctx<'_> {
             .filter(|m| arity_admits(m.params.len(), last_is_array(m), argc))
             .collect();
         if let Some(ret) = unique_return(&arity_ok) {
-            return Some((ret, sole(&arity_ok)));
+            let picked = sole(&arity_ok).or_else(|| self.fixed_arity_over_varargs(&arity_ok, argc));
+            return Some((ret, picked));
         }
         if arity_ok.is_empty() {
             return None;
@@ -2004,6 +2005,21 @@ impl Ctx<'_> {
         // applicable too, and only "no widening needed" singles out the `int` one.
         let applicable = self.narrow_overloads(&arity_ok, args, enclosing);
         unique_return(&applicable).map(|ret| (ret, sole(&applicable)))
+    }
+
+    /// Among overloads that all admit `argc` arguments, the one a call must bind to when it is the only
+    /// fixed-arity method and every other survivor is a varargs one: JLS §15.12.2 tries strict and loose
+    /// invocation, which never expands a varargs, before the variable-arity phase, so a fixed-arity method
+    /// that applies wins. `List.of(E)` against `List.of(E...)` is the shape.
+    ///
+    /// "That applies" is not checked here, so the winner is taken only when it cannot fail to: every
+    /// parameter is a bare type variable, which any non-primitive argument fits (and a primitive boxes).
+    fn fixed_arity_over_varargs<'m>(&self, survivors: &[&'m Member], argc: usize) -> Option<&'m Member> {
+        let mut fixed = survivors.iter().filter(|m| !last_is_array(m) && m.params.len() == argc);
+        let (Some(candidate), None) = (fixed.next(), fixed.next()) else { return None };
+        let others_are_varargs = survivors.iter().all(|m| std::ptr::eq(*m, *candidate) || last_is_array(m));
+        let takes_anything = candidate.params.iter().all(|p| p.dims == 0 && self.is_type_variable(&p.binary_name));
+        (others_are_varargs && takes_anything).then_some(*candidate)
     }
 
     /// Walk the class + its superclass/interfaces, returning the first `f` hit.

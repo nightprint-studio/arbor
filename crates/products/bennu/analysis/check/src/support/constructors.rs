@@ -55,6 +55,34 @@ pub(crate) fn constructor_call<'t>(
     Some(ConstructorCall { binary, candidates, head, args })
 }
 
+/// `outer.new Inner(…)`: `Inner` is looked up among the member types of `outer`'s type (JLS §15.9.1).
+/// Judged only for a member type THIS file declares — a class file's inner-class constructor carries the
+/// enclosing instance as a parameter no source writes — and never with an anonymous body.
+pub(crate) fn qualified_constructor_call<'t>(
+    n: Node<'t>,
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    cache: &bennu_java::prelude::InferCache,
+) -> Option<ConstructorCall<'t>> {
+    let outer = n.child(0).filter(|first| first.kind() != "new")?;
+    let created = n.child_by_field_name("type").filter(|t| t.kind() == "type_identifier")?;
+    let args = n.child_by_field_name("arguments")?;
+    if has_class_body(n) {
+        return None;
+    }
+    let outer_type = bennu_java::prelude::infer_node_type_cached(root, source, symbols, &outer, resolver, cache)
+        .filter(|t| t.dims == 0 && !t.binary_name.is_empty())?;
+    let binary = format!("{}/{}", outer_type.binary_name, created.utf8_text(source.as_bytes()).ok()?);
+    if !declares(symbols, &binary) {
+        return None;
+    }
+    let members = resolver.members_of(&binary)?;
+    let candidates = constructors_of(&binary, &members, symbols)?;
+    Some(ConstructorCall { binary, candidates, head: created, args })
+}
+
 /// `new Foo(…)`, with or without an anonymous body: the body's implicit constructor forwards to the
 /// one of `Foo` the arguments select (JLS §15.9.5.1) — unless `Foo` is an interface.
 fn created_type<'t>(
@@ -100,7 +128,7 @@ fn invoked_type<'t>(
 
 /// `binary`'s own constructors, or the implicit default one of a plain class this file declares
 /// with none.
-fn constructors_of(binary: &str, members: &ClassMembers, symbols: &FileSymbols) -> Option<Vec<Member>> {
+pub(crate) fn constructors_of(binary: &str, members: &ClassMembers, symbols: &FileSymbols) -> Option<Vec<Member>> {
     let declared: Vec<Member> = members
         .methods
         .iter()

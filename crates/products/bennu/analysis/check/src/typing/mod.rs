@@ -1,5 +1,6 @@
 //! Type use and compatibility: unresolved types, type-argument arity, casts, narrowing, condition types.
 
+pub mod bounds;
 pub mod casts;
 pub mod parameterized;
 pub mod condition_type;

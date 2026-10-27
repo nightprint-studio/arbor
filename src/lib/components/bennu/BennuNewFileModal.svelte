@@ -27,6 +27,7 @@
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { javaKindStore } from '$lib/stores/bennu/java-kinds.svelte';
   import { newFile, newFileFromTemplate, type NewFileKind } from '$lib/ipc/bennu/scaffold';
   import { getFileIcon } from '$lib/utils/file-icons';
   import { tooltip } from '$lib/actions/tooltip';
@@ -96,6 +97,10 @@
         return;
       }
       await projectStore.saveText(res.path, res.content);
+      // The dialog knows what it just made; the index will not say so until it next settles.
+      if (!template && !projectStore.isCargo && res.path.endsWith('.java')) {
+        javaKindStore.announce(res.path, JAVA_KINDS.find((k) => k.value === kind)?.iconKind ?? 'class');
+      }
       await projectStore.openFile(res.path);
       projectStore.refreshTree();
       bennuUiStore.revealActiveInTree();
@@ -252,7 +257,9 @@
     border-radius: var(--radius-md);
     font-size: calc(var(--font-size-md) * 1.15);
   }
-  .nf-name:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle); }
+  /* A quiet focus state: the field is focused for the dialog's whole life, so a loud ring would
+     be a permanent glow. The border alone says it. */
+  .nf-name:focus-within { border-color: var(--accent); }
 
   /* No border of its own: with the body card's outline right around it, a second one read as
      a box inside a box. The list is the dialog's main surface — it can just be it. */
@@ -273,15 +280,19 @@
        Appearance setting moves the list as one. */
   }
   .nf-kind:hover { background: var(--bg-hover); }
-  /* The selected row is filled, not merely tinted: this list is steered with the arrow keys
-     while focus is in the NAME field, so the row has to say "this is what Enter makes"
-     loudly enough to be read out of the corner of your eye. */
+  /* The selected row is a raised neutral surface with an accent edge, not an accent fill. This
+     list is steered with the arrow keys while focus is in the NAME field, so the row still has
+     to read as "this is what Enter makes" — but a solid blue slab under a blue-ringed field and
+     blue kind icons was blue on blue, and the icon hues (the whole point of the list) vanished
+     into it. The tint keeps every icon in its own colour. */
+  .nf-kind { position: relative; }
   .nf-kind-on, .nf-kind-on:hover {
-    background: var(--accent);
-    color: var(--bg-base);
-    /* The icon comes along: its kind hue is picked to read on a panel, not on the accent —
-       and `annotation`'s hue IS the accent, so on this row it would be invisible. */
-    --jki-color: currentColor;
+    background: var(--bg-overlay);
+    font-weight: 600;
+  }
+  .nf-kind-on::before {
+    content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 3px;
+    border-radius: 2px; background: var(--accent);
   }
   .nf-group {
     padding: 8px 8px 3px;
@@ -295,7 +306,6 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-size: var(--font-size-xs); color: var(--text-muted);
   }
-  .nf-kind-on .nf-kind-desc { color: inherit; opacity: 0.8; }
   .nf-dir { font-size: var(--font-size-xs); color: var(--text-muted); }
   .nf-dir code { font-family: var(--font-code); color: var(--text-secondary); font-size: var(--font-size-xs); }
   /* The border and focus ring live on `.nf-name` (the row) now, so the input is bare. */

@@ -39,9 +39,9 @@ use tree_sitter::Node;
 
 use crate::calls::lambda_body;
 use crate::support::bare_call::{bare_call_scope, index_covers_file_sigs, BareCalls, MemberOwner};
-use crate::support::constructors::constructor_call;
+use crate::support::constructors::{constructor_call, qualified_constructor_call};
 use crate::engine::check_id::CheckId;
-use crate::support::nodes::{is_primitive, simple_name};
+use crate::support::nodes::{is_primitive, is_qualified_creation, simple_name};
 use crate::support::assignable::{definite_mismatch, null_mismatch, spells_its_type, Mismatch};
 
 /// Parse `source` and flag arguments of the wrong type.
@@ -173,12 +173,29 @@ fn check_bare_call(n: Node, bare: &BareCalls, file: &FileCtx, out: &mut Vec<Diag
 /// `new Foo(a, b)`, `super(a, b)` or `this(a, b)` — one type's own constructors, see
 /// [`constructor_call`].
 fn check_constructor(n: Node, file: &FileCtx, out: &mut Vec<Diagnostic>) {
+    if is_qualified_creation(n) {
+        return check_qualified_creation(n, file, out);
+    }
     let Some(call) = constructor_call(n, file.bytes(), file.symbols, file.resolver) else { return };
     if !file.overloads_current(&call.binary, "<init>", &call.candidates) {
         return;
     }
     let callee = Callee::Constructor(simple_name(&call.binary));
     judge_args(&call.candidates, n, call.head, callee, file, out);
+}
+
+/// `outer.new Inner(a, b)`: `Inner` is looked up among the member types of `outer`'s type (JLS
+/// §15.9.1), and is judged only when this file declares it — a class file's inner-class constructor
+/// carries the enclosing instance as a parameter no source writes, and an anonymous body is left alone.
+fn check_qualified_creation(n: Node, file: &FileCtx, out: &mut Vec<Diagnostic>) {
+    let Some(call) = qualified_constructor_call(n, &file.root, file.source, file.symbols, file.resolver, file.cache)
+    else {
+        return;
+    };
+    if !file.overloads_current(&call.binary, "<init>", &call.candidates) {
+        return;
+    }
+    judge_args(&call.candidates, n, call.head, Callee::Constructor(simple_name(&call.binary)), file, out);
 }
 
 /// `receiver.method(a, b)` — on a value, `this`, `super` or a type (a static call).
@@ -333,8 +350,14 @@ fn judge_args(
         file.cache,
     );
     let args = named_args(arg_list);
+    // A conditional or `switch` passed as an argument is typed by its operands, which the applicability
+    // rules do not take apart: they abstain, and a call they let through may still be refused operand by
+    // operand. So those calls are judged on the overloads the count admits — and only then.
+    let poly = args.iter().any(|a| is_unsettled_argument(*a, file));
     let admitted = match fit {
+        OverloadFit::NoArity => return,
         OverloadFit::Inapplicable(admitted) => admitted,
+        _ if poly => candidates.iter().filter(|m| m.params.len() == args.len()).collect(),
         // Several survivors: an error only when they are provably ambiguous — see `ambiguity`. The
         // arguments are typed here and not before, so a call that binds pays for no second look.
         OverloadFit::Applicable(kept) if kept.len() > 1 => {
@@ -356,8 +379,10 @@ fn judge_args(
             }
             return;
         }
-        OverloadFit::NoArity => return,
     };
+    if admitted.is_empty() {
+        return;
+    }
     let judged: Vec<Judged> = args.iter().map(|a| judged_arg(*a, file)).collect();
     let refusals: Vec<Vec<Option<Mismatch>>> = admitted
         .iter()
@@ -393,6 +418,9 @@ enum Judged<'t> {
     Lambda(Node<'t>),
     /// A method reference, or an expression inference could not type.
     Unjudged,
+    /// A conditional or `switch` expression passed as an argument: a poly expression, whose every
+    /// result expression has to fit the parameter — so one that does not is the argument's mismatch.
+    Alternatives(Vec<Judged<'t>>),
 }
 
 /// Per argument position, the definite mismatch against overload `m` — `None` where the position is
@@ -430,6 +458,7 @@ fn judged_mismatch(arg: &Judged, param: &TypeRef, file: &FileCtx) -> Option<Mism
                 .then(|| Mismatch { found: "lambda".to_string(), expected: rendered(param) })
         }
         Judged::Unjudged => None,
+        Judged::Alternatives(arms) => arms.iter().find_map(|arm| judged_mismatch(arm, param, file)),
     }
 }
 
@@ -446,11 +475,129 @@ fn judged_arg<'t>(arg: Node<'t>, file: &FileCtx) -> Judged<'t> {
         "null_literal" => Judged::Null,
         "lambda_expression" => Judged::Lambda(arg),
         "method_reference" => Judged::Unjudged,
+        "parenthesized_expression" => arg.named_child(0).map_or(Judged::Unjudged, |inner| judged_arg(inner, file)),
+        "ternary_expression" => judged_conditional(arg, file),
+        "switch_expression" => judged_switch(arg, file),
+        "method_invocation" if reads_a_raw_collection(arg, file) => {
+            Judged::Typed { ty: TypeRef::simple("java/lang/Object"), written: true }
+        }
         _ => match infer_node_type_cached(&file.root, file.source, file.symbols, &arg, file.resolver, file.cache) {
             Some(ty) => Judged::Typed { ty, written: spells_its_type(arg) },
             None => Judged::Unjudged,
         },
     }
+}
+
+/// Whether the applicability rules abstain on an argument that this module can still judge: a
+/// conditional or `switch` expression (however many parentheses wrap it), or an element read from a
+/// raw collection.
+fn is_unsettled_argument(arg: Node, file: &FileCtx) -> bool {
+    match arg.kind() {
+        "ternary_expression" | "switch_expression" => true,
+        "parenthesized_expression" => arg.named_child(0).is_some_and(|inner| is_unsettled_argument(inner, file)),
+        _ => reads_a_raw_collection(arg, file),
+    }
+}
+
+/// The classes of `java.util` whose type variables are unbounded, so that a raw use of one gives back
+/// exactly an `Object` (JLS §4.8: the erasure of a variable is the erasure of its bound).
+const RAW_UNBOUNDED: [&str; 16] = [
+    "java/util/List", "java/util/ArrayList", "java/util/LinkedList", "java/util/Set", "java/util/HashSet",
+    "java/util/LinkedHashSet", "java/util/TreeSet", "java/util/Collection", "java/util/Map", "java/util/HashMap",
+    "java/util/LinkedHashMap", "java/util/TreeMap", "java/util/Iterator", "java/util/Optional", "java/util/Deque",
+    "java/util/Queue",
+];
+
+/// `raw.get(0)` where `raw` is declared as a bare `List` (no type arguments): the call returns the
+/// erasure of the class's type variable, an `Object`. Inference leaves it untyped (an erased variable
+/// is not a type it will name), so the read is recognised here instead.
+fn reads_a_raw_collection(arg: Node, file: &FileCtx) -> bool {
+    if arg.kind() != "method_invocation" {
+        return false;
+    }
+    let (Some(object), Some(name)) = (arg.child_by_field_name("object"), arg.child_by_field_name("name")) else { return false };
+    if object.kind() != "identifier" {
+        return false;
+    }
+    let (Ok(variable), Ok(method)) = (object.utf8_text(file.bytes()), name.utf8_text(file.bytes())) else { return false };
+    let Some(declared) = crate::support::scopes::declared_type_text(object, variable, file.bytes(), false) else { return false };
+    let declared = declared.trim();
+    if declared.contains(['<', '[', '.']) {
+        return false;
+    }
+    let Some(class) = crate::support::resolve::type_binary(declared, file.symbols, file.resolver) else { return false };
+    if !RAW_UNBOUNDED.contains(&class.as_str()) {
+        return false;
+    }
+    let argc = arg.child_by_field_name("arguments").map_or(0, |a| a.named_child_count());
+    let res = file.cache.resolve_methods(file.resolver, &class, method);
+    let mut exact = res.candidates.iter().filter(|m| m.params.len() == argc);
+    let (Some(only), None) = (exact.next(), exact.next()) else { return false };
+    res.complete
+        && only.return_type.dims == 0
+        && only.return_type.type_args.is_empty()
+        && file.resolver.members_of(&class).is_some_and(|m| m.type_params.contains(&only.return_type.binary_name))
+        && !only.method_type_params().contains(&only.return_type.binary_name)
+}
+
+/// `flag ? a : b` as an argument. A conditional whose operands are both numeric or both boolean is
+/// typed as a whole (JLS §15.25.1, `flag ? 1 : 2.0` is a `double`) and is inferred like any expression;
+/// any other is a reference conditional, a poly expression, and each operand is judged on its own.
+fn judged_conditional<'t>(arg: Node<'t>, file: &FileCtx) -> Judged<'t> {
+    let (Some(then), Some(otherwise)) = (arg.child_by_field_name("consequence"), arg.child_by_field_name("alternative"))
+    else {
+        return Judged::Unjudged;
+    };
+    let (first, second) = (judged_arg(then, file), judged_arg(otherwise, file));
+    let standalone = |j: &Judged| matches!(j, Judged::Typed { ty, .. } if is_numeric_or_boolean(ty));
+    if standalone(&first) && standalone(&second) {
+        return match infer_node_type_cached(&file.root, file.source, file.symbols, &arg, file.resolver, file.cache) {
+            Some(ty) => Judged::Typed { ty, written: false },
+            None => Judged::Unjudged,
+        };
+    }
+    Judged::Alternatives(vec![without_null(first), without_null(second)])
+}
+
+/// `flag ? 1 : null` is an `Integer` that unboxes (JLS §15.25), so a `null` operand is not refused by a
+/// primitive parameter the way a bare `null` argument is.
+fn without_null(judged: Judged) -> Judged {
+    match judged {
+        Judged::Null => Judged::Unjudged,
+        other => other,
+    }
+}
+
+/// `switch (…) { case A -> x; … }` as an argument: always a poly expression, so each arm that gives its
+/// value as a plain expression has to fit. An arm with a block (`yield`) or `throw` is not read.
+fn judged_switch<'t>(arg: Node<'t>, file: &FileCtx) -> Judged<'t> {
+    let Some(body) = arg.child_by_field_name("body") else { return Judged::Unjudged };
+    let mut c = body.walk();
+    let arms: Vec<Judged> = body
+        .named_children(&mut c)
+        .filter(|rule| rule.kind() == "switch_rule")
+        .filter_map(|rule| rule.named_children(&mut rule.walk()).find(|ch| ch.kind() == "expression_statement"))
+        .filter_map(|statement| statement.named_child(0))
+        .map(|value| without_null(judged_arg(value, file)))
+        .collect();
+    match arms.is_empty() {
+        true => Judged::Unjudged,
+        false => Judged::Alternatives(arms),
+    }
+}
+
+/// A primitive other than `void`, or one of the classes that box them.
+fn is_numeric_or_boolean(ty: &TypeRef) -> bool {
+    if ty.dims > 0 {
+        return false;
+    }
+    let name = ty.binary_name.as_str();
+    (is_primitive(name) && name != "void")
+        || matches!(
+            name,
+            "java/lang/Boolean" | "java/lang/Byte" | "java/lang/Short" | "java/lang/Character" | "java/lang/Integer"
+                | "java/lang/Long" | "java/lang/Float" | "java/lang/Double"
+        )
 }
 
 /// `Argument 3 of `m`: `Widget` cannot be passed where `Animal` is expected` — with every distinct

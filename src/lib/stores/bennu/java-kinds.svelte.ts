@@ -19,8 +19,19 @@ function createJavaKindStore() {
   let loadedRoot: string | null = null;
   /** The read in flight, so a burst of callers costs one round-trip. */
   let inFlight: Promise<void> | null = null;
+  /** Kinds announced by whoever just wrote the file (the New dialog), ahead of the index.
+   *  The index only reloads when it settles, so a brand-new interface would wear a class's
+   *  icon until then — and a reload that does not know the file yet must not wipe the answer. */
+  const announced = new Map<string, string>();
 
   return {
+    /** Record the kind of a file that was just created, before the index has seen it. */
+    announce(path: string, kind: string): void {
+      const key = path.replace(/\\/g, '/');
+      announced.set(key, kind);
+      kinds.set(key, kind);
+    },
+
     /** The kind `path` declares. `class` when unknown — the overwhelmingly common answer,
      *  and what an un-indexed file settles to the moment the index lands. A caller wanting
      *  to distinguish "not known yet" from "a class" should ask {@link isKnown}. */
@@ -52,6 +63,12 @@ function createJavaKindStore() {
           // icon should show. Otherwise keep the first seen.
           if (!kinds.has(key) || c.simple === stem) kinds.set(key, c.kind);
         }
+        // The index answers for every file it knows; an announced one it does not know yet keeps
+        // its announcement, and one it does know is retired.
+        for (const [key, kind] of announced) {
+          if (kinds.has(key)) announced.delete(key);
+          else kinds.set(key, kind);
+        }
         loadedRoot = root;
       })();
       try {
@@ -63,6 +80,7 @@ function createJavaKindStore() {
 
     reset() {
       kinds.clear();
+      announced.clear();
       loadedRoot = null;
       inFlight = null;
     },

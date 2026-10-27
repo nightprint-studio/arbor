@@ -7,7 +7,7 @@ use bennu_ext::prelude::{
     ExtAction, ExtEntry, ExtGutterMark, ExtHighlight, ExtHover, ExtStat, ExtTarget, FileCtx,
     FrameworkExtension, ProjectScan, ScannedFile,
 };
-use bennu_proto::prelude::{CapabilitySet, Diagnostic};
+use bennu_proto::prelude::{CapabilitySet, CompletionItem, Diagnostic};
 
 use crate::index::JavaUnit;
 use crate::intel;
@@ -107,6 +107,14 @@ impl FrameworkExtension for JpaExtension {
         (ctx.extension() == "java")
             .then(|| intel::hover(&self.model(), &ctx.path_str(), ctx.source, offset))
             .flatten()
+    }
+
+    /// Entity names, fields and parameters inside a `@Query` — JPQL, which Java sees as one string.
+    fn completions(&self, ctx: &FileCtx<'_>, offset: usize) -> Vec<CompletionItem> {
+        if ctx.extension() != "java" {
+            return Vec::new();
+        }
+        intel::completions(&self.model(), &ctx.path_str(), ctx.source, offset)
     }
 
     fn navigate(&self, ctx: &FileCtx<'_>, offset: usize) -> Vec<ExtTarget> {

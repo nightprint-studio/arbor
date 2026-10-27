@@ -42,6 +42,30 @@ pub fn highlights(path: &str, source: &str) -> Vec<ExtHighlight> {
     out
 }
 
+/// What can be typed at `offset` when it is inside a JPQL string: a repository method's `@Query`,
+/// a `@NamedQuery`, or the argument of `createQuery`.
+pub fn completions(
+    model: &JpaModel,
+    path: &str,
+    source: &str,
+    offset: usize,
+) -> Vec<bennu_proto::prelude::CompletionItem> {
+    // Found from the text around the caret, so it works in any file — an entity, a service, a DAO.
+    if let Some(q) = crate::hql_sites::query_at(source, offset) {
+        return crate::hql_complete::completions(model, &[], &q, source, offset);
+    }
+    let Some(u) = unit(path, source) else { return Vec::new() };
+    for r in crate::index::repositories(std::slice::from_ref(&u)) {
+        for m in &r.methods {
+            let Some(q) = &m.query else { continue };
+            if (q.start..=q.end).contains(&offset) {
+                return crate::hql_complete::completions(model, &m.params, q, source, offset);
+            }
+        }
+    }
+    Vec::new()
+}
+
 /// A mark beside every entity and every repository, pointing at the other end.
 pub fn gutter(model: &JpaModel, path: &str, source: &str) -> Vec<ExtGutterMark> {
     let Some(u) = unit(path, source) else { return Vec::new() };

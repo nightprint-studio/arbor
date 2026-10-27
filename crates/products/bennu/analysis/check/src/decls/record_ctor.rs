@@ -23,11 +23,87 @@ pub fn record_ctor_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic>
     let bytes = source.as_bytes();
     let mut out = Vec::new();
     for &n in nodes {
-        if n.kind() == "record_declaration" {
-            check_record(n, bytes, &mut out);
+        match n.kind() {
+            "record_declaration" => {
+                check_component_modifiers(n, bytes, &mut out);
+                check_record(n, bytes, &mut out);
+            }
+            "class_declaration" => check_extends_record(n, bytes, &mut out),
+            _ => {}
         }
     }
     out
+}
+
+/// `class C extends Record` — only the compiler may extend `java.lang.Record`, through the `record`
+/// keyword (JLS §8.1.4). Skipped when the file declares a type called `Record` of its own.
+fn check_extends_record(class: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+    let Some(superclass) = class.child_by_field_name("superclass") else { return };
+    let Some(written) = superclass.named_child(0).and_then(|t| t.utf8_text(bytes).ok()) else { return };
+    if !matches!(written, "Record" | "java.lang.Record") || declares_type_named(class, "Record", bytes) {
+        return;
+    }
+    out.push(crate::engine::check_id::CheckId::IllegalDeclaration.at(
+        superclass,
+        "Classes cannot extend `java.lang.Record` directly — declare a `record` instead",
+    ));
+}
+
+/// Whether the file holding `from` declares a class, interface, enum or record called `name`.
+fn declares_type_named(from: Node, name: &str, bytes: &[u8]) -> bool {
+    let mut root = from;
+    while let Some(p) = root.parent() {
+        root = p;
+    }
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        if matches!(n.kind(), "class_declaration" | "interface_declaration" | "enum_declaration" | "record_declaration")
+            && n.child_by_field_name("name").and_then(|id| id.utf8_text(bytes).ok()) == Some(name)
+        {
+            return true;
+        }
+        let mut c = n.walk();
+        stack.extend(n.children(&mut c));
+    }
+    false
+}
+
+/// Names a record component cannot have: they would generate an accessor that clashes with a method
+/// every object already has (JLS §8.10.1).
+const FORBIDDEN_COMPONENT_NAMES: [&str; 8] =
+    ["clone", "finalize", "getClass", "hashCode", "notify", "notifyAll", "toString", "wait"];
+
+/// A record component takes annotations and nothing else: `record R(final int x)` is rejected because
+/// the compiler generates the private final field and the accessor itself (JLS §8.10.1). Any keyword
+/// among the modifiers — `final`, `static`, `private`, … — is the error. Its name may not be one of
+/// [`FORBIDDEN_COMPONENT_NAMES`].
+fn check_component_modifiers(record: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+    let Some(header) = record.child_by_field_name("parameters") else { return };
+    let mut c = header.walk();
+    for component in header.named_children(&mut c) {
+        if !matches!(component.kind(), "formal_parameter" | "spread_parameter") {
+            continue;
+        }
+        let name = component
+            .child_by_field_name("name")
+            .or_else(|| crate::support::nodes::child_of_kind(component, "variable_declarator"))
+            .filter(|n| n.utf8_text(bytes).is_ok_and(|t| FORBIDDEN_COMPONENT_NAMES.contains(&t)));
+        if let Some(name) = name {
+            out.push(crate::engine::check_id::CheckId::IllegalDeclaration.at(
+                name,
+                "A record component cannot be named like a method every object has (`hashCode`, `toString`, `getClass`, …)",
+            ));
+        }
+        let Some(modifiers) = crate::support::nodes::child_of_kind(component, "modifiers") else { continue };
+        let mut mc = modifiers.walk();
+        let has_keyword = modifiers.children(&mut mc).any(|m| !matches!(m.kind(), "annotation" | "marker_annotation"));
+        if has_keyword {
+            out.push(crate::engine::check_id::CheckId::IllegalDeclaration.at(
+                modifiers,
+                "A record component cannot have modifiers other than annotations",
+            ));
+        }
+    }
 }
 
 /// A record header component, or a constructor parameter: its name and its type as written, with
@@ -83,10 +159,16 @@ fn check_constructor(ctor: Node, components: &[Param], record_access: Option<u8>
         return;
     }
     check_canonical_header(ctor, anchor, record_access, bytes, out);
+    let Some(ctor_body) = ctor.child_by_field_name("body") else { return };
+    if let Some(call) = crate::support::nodes::child_of_kind(ctor_body, "explicit_constructor_invocation") {
+        // The canonical constructor is where the fields are assigned, so it may not hand that to another
+        // constructor (`this(…)`) or to a superclass (`super(…)`, a record has none to call).
+        out.push(err("A canonical record constructor cannot contain an explicit constructor invocation".to_string(), call));
+        return;
+    }
     if delegates_via_this(ctor) {
         return;
     }
-    let Some(ctor_body) = ctor.child_by_field_name("body") else { return };
     let assigned = collect_assigned_names(ctor_body, bytes);
     report_unassigned(ctor, components, &assigned, out);
 }

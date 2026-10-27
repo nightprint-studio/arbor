@@ -50,11 +50,48 @@ pub fn super_method_errors_in(
     let bytes = source.as_bytes();
     let mut out = Vec::new();
     for &n in nodes {
-        if n.kind() == "method_invocation" {
-            check_call(n, bytes, symbols, resolver, &mut out);
+        match n.kind() {
+            "method_invocation" => check_call(n, bytes, symbols, resolver, &mut out),
+            "field_access" => check_field(n, bytes, symbols, resolver, &mut out),
+            _ => {}
         }
     }
     out
+}
+
+/// `super.NAME` read as a field: flagged when no class of the (fully known) superclass side declares a
+/// field of that name. Interfaces are left out of the search — a constant they declare is reachable
+/// through the superclass only if the superclass implements them, which the walk covers — and the
+/// name of a member type is never `super.NAME` (a type is not selected through `super`).
+fn check_field(n: Node, bytes: &[u8], symbols: &FileSymbols, resolver: &dyn TypeResolver, out: &mut Vec<Diagnostic>) {
+    if n.child_by_field_name("object").is_none_or(|obj| obj.kind() != "super") {
+        return;
+    }
+    let Some(field) = n.child_by_field_name("field").filter(|f| !f.has_error()) else { return };
+    let Ok(name) = field.utf8_text(bytes) else { return };
+    let Some(class) = enclosing_class(n) else { return };
+    if inside_anonymous_class_below(n, class) {
+        return;
+    }
+    let Some(roots) = super_roots(class, bytes, symbols, resolver) else { return };
+    if !roots.iter().all(|r| hierarchy_fully_known(resolver, r)) {
+        return;
+    }
+    let mut declared = false;
+    for root in &roots {
+        for_each_supertype(resolver, root, &mut |_, cm| {
+            declared |= cm.fields.iter().any(|f| f.name == name);
+        });
+    }
+    if !declared {
+        out.push(crate::engine::check_id::CheckId::UnknownField.at(
+            field,
+            format!(
+                "Cannot resolve field `{name}` in the superclass of `{}`",
+                simple_name(class_name(class, bytes).unwrap_or("this class"))
+            ),
+        ));
+    }
 }
 
 fn check_call(
@@ -122,7 +159,28 @@ fn check_call(
                 simple_name(cls_name)
             ),
         ));
+    } else if super_roots.first().is_some_and(|sup| only_an_abstract_method(n, method, sup, resolver)) {
+        out.push(crate::engine::check_id::CheckId::UnresolvedSuperMethod.at(
+            name,
+            format!("Abstract method `{method}` cannot be accessed directly through `super`"),
+        ));
     }
+}
+
+/// Whether `super.method(…)` can only mean one **abstract** method: the superclass side of the
+/// hierarchy holds exactly one member of that name, it is abstract, and its arity is the call's.
+///
+/// Exactly one is the guard that keeps this sound — an overload, an inherited concrete version
+/// (`Object.toString` redeclared abstract) or a diamond that lists a type twice all make the count
+/// differ and the call is left alone. The arity must match too, so a varargs method or a call that is
+/// wrong for another reason is not reported as this one.
+fn only_an_abstract_method(call: Node, method: &str, superclass: &str, resolver: &dyn TypeResolver) -> bool {
+    let arity = call.child_by_field_name("arguments").map_or(0, |args| args.named_child_count());
+    let mut found: Vec<(bool, usize)> = Vec::new();
+    for_each_supertype(resolver, superclass, &mut |_bn, cm| {
+        found.extend(cm.methods.iter().filter(|m| m.name == method).map(|m| (m.is_abstract, m.params.len())));
+    });
+    matches!(found.as_slice(), [(true, params)] if *params == arity)
 }
 
 /// Binary names of the enclosing class's direct super-hierarchy roots: its declared superclass (or

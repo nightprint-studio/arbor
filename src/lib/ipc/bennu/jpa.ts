@@ -74,6 +74,10 @@ export interface JpaCondition {
   ignore_case: boolean;
   /** Joined to the previous condition with `Or` rather than `And`. */
   or: boolean;
+  /** A value fixed in the query (`status = 'ACTIVE'`) instead of a parameter the caller passes.
+   *  `null`/absent = a parameter. A constant cannot live in a derived name, so the backend writes
+   *  the `@Query`. Comma-separated for `In` and `Between`. */
+  value?: string | null;
 }
 
 export interface JpaQuerySpec {

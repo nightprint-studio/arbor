@@ -22,6 +22,8 @@ tests/corpus/
   java8/  pom.xml          maven.compiler.release = 8
           src/main/java/corpus/<category>/*.java
           expected.txt     javac golden file (generated, committed)
+  java11/ java15/ java17/  release 11 / 15 / 17: the version gates (see below), `corpus.version` only
+          pom.xml, src/main/java/corpus/version/*.java, expected.txt
   java21/ pom.xml          maven.compiler.release = 21: var, records, sealed, switch/patterns, text blocks
           src/main/java/corpus/<category>/*.java
           expected.txt
@@ -39,6 +41,25 @@ tests/corpus/
 The package segment after `corpus` is the **category** the report groups by (`corpus.args` → `args`,
 `corpus.imports.lib` → `imports`). A case that compiles at level 8 goes in `java8`; only cases that
 need a newer language feature go in `java21`.
+
+### Version-gate modules
+
+`java11`, `java15` and `java17` exist for one reason: a language feature is available from a given release
+(`source/version.rs`), and only javac at *that* `--release` can say whether Bennu's threshold is right. Each
+module holds a `Gate<N>Bad` (features newer than N, flagged with `feature.not.supported.in.source[.plural]`)
+and a `Gate<N>Ok` (everything N already allows, plus restricted identifiers used as plain names).
+
+| module | allows (Ok) | rejects (Bad) |
+|---|---|---|
+| java11 | `var` (also in lambda parameters), private interface methods, diamond with anonymous class, effectively-final resources | multiple case labels, arrow rules, switch expressions, records, `instanceof` patterns, `sealed` |
+| java15 | + switch rules / expressions / `yield`, multiple labels, text blocks | records, `instanceof` patterns, `sealed` |
+| java17 | + records, `sealed`/`non-sealed`/`permits`, `instanceof` patterns, local records/enums/interfaces | pattern `switch`, record patterns, `case null` |
+
+javac reports a source-level error **once per file and feature**, so a `Bad` file uses each feature exactly
+once, and Bennu (which flags every occurrence) is only scored fairly under that rule. Two things cannot be
+expressed as a corpus case: a **text block** (the error sits on the opening `"""` line, which cannot carry a
+trailing marker comment) and `yield` inside a colon `switch` (javac turns it into an unrelated syntax error).
+Both stay covered by the unit tests in `source/version.rs`.
 
 The Rust side lives in `crates/products/bennu/analysis/intel/tests/check_corpus.rs` (+ `check_corpus_support/`).
 `lombok8` also needs Lombok's jar in `~/.m2` (`mvn compile`, i.e. the refresh script, downloads it); without it that module is skipped with a reason.
@@ -204,11 +225,16 @@ Marked error lines per category (each `*Bad.java` has a clean `*Ok.java` twin):
 | java8 | `cast` | 34 | inconvertible casts and assignments, lossy conversions, boxing mismatches |
 | java8 | `switches` | 15 | selector types, duplicate/non-constant/qualified/ill-typed labels |
 | java8 | `reported` | 2 | the reported `Optional<Delegate>` wrong-third-argument call, one-line and as formatted |
+| java8 | `ctorcall` | ~25 | `super(…)`/`this(…)` placement and recursion, reading `this` before `super`, enum/qualified/throwing constructors; `super.m()` / `super.f` / `X.super.m()` misuse and legal forms |
+| java8 | `inherit` (cycles) | 3 | `cyclic.inheritance` for classes and interfaces, and the self-referencing generics that are legal |
+| java8 | `switches` (constants) | 8 | duplicates through constants and folding, out-of-range / mistyped / non-constant labels, and the legal classic shapes (fall-through, narrow selectors, scope across cases) |
+| java11 / java15 / java17 | `version` | see above | one boundary per module |
+| java21 | `patterns` | 6 | `instanceof` binding scope, redeclaration, incompatible and unchecked types |
 | java21 | `modern` | 15 | records, `var`, patterns, switch expressions, text blocks in calls |
 | java21 | `inherit` | 7 | sealed hierarchies, extending a record, record modifiers |
-| java21 | `records` | 12 | instance fields/initializers, accessors, canonical/compact/non-canonical constructors |
+| java21 | `records` | ~20 | instance fields/initializers, accessors, canonical/compact/non-canonical constructors, `super(…)` in a record, `extends Record`, illegal component names/modifiers, local records reaching locals |
 | java21 | `flow` | 4 | captures through `var`, pattern variables, switch arms |
-| java21 | `switches` | 27 | selectors and constant labels, exhaustiveness, `yield`/`break`/`return`, dominance, duplicates |
+| java21 | `switches` | ~32 | selectors and constant labels, exhaustiveness, `yield`/`break`/`return`, dominance, duplicates, guards, unconditional patterns, label combinations, mixed colon/arrow |
 | java21 | `reported` | 1 | the reported call with records and `var` |
 
 ## Waves
@@ -226,8 +252,8 @@ Marked error lines per category (each `*Bad.java` has a clean `*Ok.java` twin):
       labels, `return` value from `void` / missing value, not-a-statement, dead `catch`
       (`except.never.thrown.in.try`), multi-catch of related types, non-`AutoCloseable` resources
 - [ ] **instanceof**: inconvertible `instanceof` operands, pattern variables at level 8
-- [ ] **Version-gated features** in `java8`: `var`, records, text blocks, switch expressions, private
-      interface methods (`feature.not.supported.in.source*`)
+- [x] **Version-gated features**: the `java11` / `java15` / `java17` modules (text blocks and colon `yield`
+      stay in `source/version.rs` unit tests; `var` at level 8 and `_` at 21 are not covered)
 - [ ] **Cross-file hierarchy**: overrides, erasure clashes and abstract methods inherited across files
       and generic supertypes; interface/abstract-class diamonds
 - [ ] **Enums**: constructors, constant bodies, `switch` on enums from another package

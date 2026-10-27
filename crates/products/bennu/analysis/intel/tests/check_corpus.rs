@@ -31,6 +31,12 @@ use check_corpus_support::report;
 /// The corpus modules and the language level each is compiled at.
 const MODULES: &[CorpusModule] = &[
     CorpusModule { name: "java8", release: "8", major: 8, libs: &[] },
+    // Cases that poison javac for their neighbours (a supertype cycle breaks `Object`), kept apart.
+    CorpusModule { name: "java8isolated", release: "8", major: 8, libs: &[] },
+    // Version-gate modules: one per boundary where a language feature appears (see `source/version.rs`).
+    CorpusModule { name: "java11", release: "11", major: 11, libs: &[] },
+    CorpusModule { name: "java15", release: "15", major: 15, libs: &[] },
+    CorpusModule { name: "java17", release: "17", major: 17, libs: &[] },
     CorpusModule { name: "java21", release: "21", major: 21, libs: &[] },
 ];
 

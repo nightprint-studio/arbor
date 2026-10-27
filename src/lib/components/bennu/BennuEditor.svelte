@@ -15,9 +15,9 @@
     PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
     History, UserSearch, GitBranch, GitCommitHorizontal, TextSelect,
     Braces, ArrowLeftRight, Package, FolderInput, CircleAlert, TriangleAlert, Check,
-    DownloadCloud, FileDown, Variable, Database, Clock, Columns3, ListPlus, SquarePen,
+    DownloadCloud, FileDown, Variable, Database, ListPlus,
     Languages, CaseSensitive, FileCog, Hammer, PackagePlus, SquarePlus, FilePlus2, Wrench, Puzzle,
-    Layers,
+    Layers, Zap, Bookmark, Archive, Pencil, Search,
     // The gutter's ▶ and the two other things pressing it might have meant.
     Play, Bug, SlidersHorizontal, Beaker,
   } from 'lucide-svelte';
@@ -2125,8 +2125,11 @@
     bean: '◆',       // ◆ a bean is declared on this line
     inject: '→',     // → something is injected here
     endpoint: '»',   // » a route enters here
-    entity: '▤',     // ▤ a persistent entity — points at the repositories that manage it
-    repository: '◇', // ◇ a repository — points at the entity it manages
+    // A letter badge naming where the click goes, not what this is: on an entity `R` takes you to
+    // its repository, on a repository `E` to its entity. A box-drawing glyph at 10px meant nothing
+    // to anyone who had not read the tooltip, and was too small to hit.
+    entity: 'R',
+    repository: 'E',
     // The ECS declarations. Distinct glyphs rather than one for all four, because the question a
     // mark answers is different for each: a component is data on an entity, a resource is a
     // singleton, an event is a buffer, a bundle is a recipe.
@@ -4506,15 +4509,29 @@
    *  unknown key falls back rather than leaving a hole — so an extension can add an action
    *  without waiting for a UI build to learn its icon. */
   const ACTION_ICONS: Record<string, typeof Database> = {
-    database: Database,
-    columns: Columns3,
-    column: ListPlus,
-    clock: Clock,
-    query: FileCode2,
-    search: SearchCode,
-    pencil: SquarePen,
+    database: Archive,   // a repository
+    columns: Layers,     // a projection
+    column: ListPlus,    // an attribute
+    clock: Zap,          // a lifecycle callback
+    query: Bookmark,     // a named query
+    search: Search,      // a query method
+    pencil: Pencil,      // a bulk write
   };
   const actionIcon = (kind: string) => ACTION_ICONS[kind] ?? Wand2;
+  /** The hue each kind of thing wears, the same on the button and in the dialog it opens, and
+   *  matching the gutter mark where there is one (a repository is amber everywhere). Colour
+   *  separates "what am I about to write" at a glance; a row of identical grey outlines made
+   *  the reader read six tooltips to find one. */
+  const ACTION_TINTS: Record<string, string> = {
+    database: 'var(--syntax-function, #ffc66d)',
+    columns: 'var(--syntax-type, #4ec9b0)',
+    column: 'var(--success)',
+    clock: 'var(--warning)',
+    query: 'var(--info)',
+    search: 'var(--info)',
+    pencil: 'var(--syntax-keyword, #cc7832)',
+  };
+  const actionTint = (kind: string) => ACTION_TINTS[kind] ?? 'var(--text-secondary)';
 
   /** Buttons the loaded plugins put on THIS file's toolbar.
    *
@@ -4837,7 +4854,7 @@
                     ariaExpanded={open}
                     onclick={toggle}
                   >
-                    <span class="ed-menu-icon"><Icon size={13} /><ChevronDown size={9} /></span>
+                    <span class="ed-menu-icon" style:color={actionTint(a.icon)}><Icon size={15} /><ChevronDown size={9} /></span>
                   </IconButton>
                 {/snippet}
               </Dropdown>
@@ -4847,7 +4864,7 @@
                 size={26}
                 onclick={() => bennuUiStore.openJpaGenerate(a.id, activePath)}
               >
-                <Icon size={13} />
+                <span class="ed-act-icon" style:color={actionTint(a.icon)}><Icon size={15} /></span>
               </IconButton>
             {/if}
           {/each}
@@ -5351,6 +5368,7 @@
   /* A dropdown trigger in the toolbar: the icon with a small chevron tucked under its right
      edge, so an icon that opens a menu is distinguishable from one that acts immediately
      without costing the row a second glyph's width. */
+  .ed-act-icon { display: inline-flex; align-items: center; justify-content: center; }
   .ed-menu-icon {
     position: relative;
     display: flex;
@@ -5799,8 +5817,28 @@
   :global(.cm-fw-gutter-bean) { color: var(--success); }
   :global(.cm-fw-gutter-inject) { color: var(--info); }
   :global(.cm-fw-gutter-endpoint) { color: var(--warning); }
-  :global(.cm-fw-gutter-entity) { color: var(--syntax-field, #9876aa); }
-  :global(.cm-fw-gutter-repository) { color: var(--syntax-function, #ffc66d); }
+  /* The entity ⇄ repository jump: a small filled badge, coloured by its DESTINATION — amber `R`
+     on an entity (a repository is amber in the toolbar too), purple `E` on a repository. Sized to
+     be hit, and filled on hover so it reads as a button. High specificity on purpose: the
+     editor's base rule for a gutter icon is two classes and would otherwise win. */
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-entity),
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-repository) {
+    --jump: var(--syntax-function, #ffc66d);
+    width: 16px; height: 15px; margin: 2px 1px 0;
+    box-sizing: border-box;
+    border-radius: 4px;
+    font-size: 10px; font-weight: 700; font-family: var(--font-code);
+    color: var(--jump);
+    background: color-mix(in srgb, var(--jump) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--jump) 45%, transparent);
+  }
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-repository) { --jump: var(--syntax-field, #9876aa); }
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-entity:hover),
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-repository:hover) {
+    color: var(--bg-base);
+    background: var(--jump);
+    border-color: var(--jump);
+  }
   /* The ECS marks. Data is one family (component / bundle share a hue), a resource is a singleton
      and an event is a signal — so the colour carries the same distinction the glyph does. */
   :global(.cm-fw-gutter-component) { color: var(--syntax-type, #4ec9b0); }

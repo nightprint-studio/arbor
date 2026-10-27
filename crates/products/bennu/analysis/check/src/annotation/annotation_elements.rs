@@ -19,7 +19,7 @@ use bennu_java::prelude::{FileSymbols, MemberKind, TypeResolver};
 use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
-use crate::annotation::annotation_constants::check_constant_names;
+use crate::annotation::annotation_constants::{check_constant_names, check_enum_constant};
 use crate::annotation::annotation_values::check_value_type;
 use crate::engine::check_id::CheckId;
 use crate::support::resolve::type_binary;
@@ -103,6 +103,7 @@ fn check_annotation(
                         let declared = &element.return_type;
                         check_value_type(pair, declared, "value", bytes, resolver, out);
                         check_constant_names(pair, declared, bytes, symbols, resolver, out);
+                        check_enum_constant(pair, declared, bytes, symbols, resolver, out);
                     }
                     None => out.push(CheckId::UnknownAnnotationElement.at(
                         pair,
@@ -141,6 +142,7 @@ fn check_annotation(
                 let declared = &element.return_type;
                 check_value_type(value, declared, key, bytes, resolver, out);
                 check_constant_names(value, declared, bytes, symbols, resolver, out);
+                check_enum_constant(value, declared, bytes, symbols, resolver, out);
             }
         }
     }
@@ -322,6 +324,7 @@ mod tests {
             "com/acme/Where".into(),
             ClassMembers {
                 flags: ClassFlags { is_enum: true, ..ClassFlags::default() },
+                fields: vec![Member::field("HIGH", TypeRef::simple("com/acme/Where")).stat().final_()],
                 ..ann(Vec::new())
             },
         );
@@ -526,11 +529,20 @@ mod tests {
     }
 
     /// An ENUM-typed element takes an enum constant, which is a `static final` field of a class
-    /// type — exactly the shape the rule above rejects. Judging it by that rule would report the
-    /// only correct spelling, so an element of any other family is never judged.
+    /// type — exactly the shape the constant rule rejects. Judging it by that rule would report the
+    /// only correct spelling, so the enum's own constants are never judged.
     #[test]
-    fn a_name_written_for_an_enum_element_is_never_judged() {
-        assert!(codes(r#"class A { @Level(at = Holder.OBJS) String f; }"#).is_empty());
+    fn an_enum_constant_written_for_an_enum_element_is_never_judged() {
+        assert!(codes(r#"class A { @Level(at = Where.HIGH) String f; }"#).is_empty());
+    }
+
+    /// A field of an ordinary class is not an enum constant, whatever it holds: the element needs
+    /// the constant itself (`enum.annotation.must.be.enum.constant`).
+    #[test]
+    fn a_field_of_a_plain_class_written_for_an_enum_element_is_flagged() {
+        let ds = diags(r#"class A { @Level(at = Holder.OBJS) String f; }"#);
+        assert_eq!(ds.len(), 1, "{ds:?}");
+        assert!(ds[0].message.contains("enum constant"), "{}", ds[0].message);
     }
 
     /// A name inside a method body may be a local shadowing the field, and then the field's own
