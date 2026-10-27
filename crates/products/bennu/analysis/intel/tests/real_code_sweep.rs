@@ -33,7 +33,10 @@ use check_corpus_support::clean::run_clean_module;
 use check_corpus_support::module::CorpusModule;
 use check_corpus_support::report;
 
-const LINTS: &[&str] = &["unused-member", "unused-import", "switch-fallthrough"];
+const LINTS: &[&str] = &["unused-member", "unused-import", "switch-fallthrough", "dead-store"];
+
+/// What a project that needs libraries the sweep does not carry reports for them.
+const MISSING_CLASSPATH: &[&str] = &["unresolved-import", "unresolved-type"];
 
 #[test]
 fn bennu_stays_silent_on_real_code() {
@@ -49,6 +52,11 @@ fn bennu_stays_silent_on_real_code() {
     let mut projects: Vec<String> =
         entries.flatten().filter(|e| e.path().is_dir()).filter_map(|e| e.file_name().into_string().ok()).collect();
     projects.sort();
+    // `BENNU_SWEEP_ONLY=guava,spring` limits the run to those folders.
+    if let Ok(only) = std::env::var("BENNU_SWEEP_ONLY") {
+        let wanted: Vec<&str> = only.split(',').map(str::trim).collect();
+        projects.retain(|p| wanted.contains(&p.as_str()));
+    }
     for name in projects {
         let major = std::fs::read_to_string(root.join(&name).join("level"))
             .ok()
@@ -66,7 +74,12 @@ fn bennu_stays_silent_on_real_code() {
                     *by_code.entry(fp.code.as_str()).or_default() += 1;
                 }
                 eprintln!("real_code_sweep: {name} by check {by_code:?}");
-                for fp in result.false_positives.iter().filter(|f| !LINTS.contains(&f.code.as_str())).take(40) {
+                // Missing-classpath noise is counted above but not listed: it hides the real ones.
+                let listed = result
+                    .false_positives
+                    .iter()
+                    .filter(|f| !LINTS.contains(&f.code.as_str()) && !MISSING_CLASSPATH.contains(&f.code.as_str()));
+                for fp in listed.take(60) {
                     eprintln!("  [{}] {}:{} {}", fp.code, fp.file, fp.first_line, fp.message);
                 }
             }

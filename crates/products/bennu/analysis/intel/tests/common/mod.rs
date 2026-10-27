@@ -562,7 +562,7 @@ fn applied(binary: &str, args: &[&str]) -> CpTypeRef {
         binary_name: binary.to_string(),
         type_args: args.iter().map(|a| CpTypeRef::plain(*a)).collect(),
         dims: 0,
-        wildcard: false,
+        wildcard: false, super_bound: false,
     }
 }
 

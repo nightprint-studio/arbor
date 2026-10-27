@@ -136,7 +136,7 @@ fn check_new_abstract(
     // SKIP: array creation (`new int[]`) is a different node kind, but a diamond / generic we can't
     // resolve, or any name that doesn't resolve, yields `None` here → skip. `type_binary` strips
     // generic arguments, so `new List<>()`-style text resolves to the raw binary when known.
-    let Some(binary) = type_binary(type_text, symbols, resolver) else { return };
+    let Some(binary) = crate::support::resolve::type_binary_at(type_text, ty_node, bytes, symbols, resolver) else { return };
 
     // SKIP: the type isn't in the index — unknown flags, can't assert it's abstract.
     let Some(cm) = resolver.members_of(&binary) else { return };

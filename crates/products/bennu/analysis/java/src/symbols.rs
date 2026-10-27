@@ -1239,6 +1239,7 @@ fn parse_params(node: &Node, bytes: &[u8]) -> Vec<ParamDecl> {
                     let ptype = p
                         .child_by_field_name("type")
                         .and_then(|n| node_text(&n, bytes))
+                        .map(|t| with_declarator_dims(&t, &p, bytes))
                         .unwrap_or_default();
                     params.push(ParamDecl {
                         name: pname,
@@ -1621,6 +1622,20 @@ fn parse_annotation_element(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
     })
 }
 
+/// `type_text` with the brackets written AFTER the name appended: `int PRIMES[]` is an `int[]`, and
+/// `String args[]` a `String[]`. C-style declarators are old but not rare (Spring's cglib, Guava's
+/// `main`s), and reading only the leading type made every such variable a scalar — "`int` is a
+/// primitive and cannot be dereferenced" on perfectly good array indexing.
+pub fn with_declarator_dims(type_text: &str, declarator: &Node, bytes: &[u8]) -> String {
+    let mut cursor = declarator.walk();
+    let dimensions = declarator.named_children(&mut cursor).find(|ch| ch.kind() == "dimensions");
+    let suffix = dimensions
+        .and_then(|d| node_text(&d, bytes))
+        .map(|t| "[]".repeat(t.matches('[').count()))
+        .unwrap_or_default();
+    format!("{type_text}{suffix}")
+}
+
 /// Extract the (possibly multiple) fields of a field_declaration (`int a, b, c;`). `in_interface`
 /// marks an interface's `constant_declaration` (`int MAX = 100;`) — implicitly `public static final`,
 /// so its visibility is public, not the class-default package-private.
@@ -1647,7 +1662,7 @@ fn parse_field(node: &Node, bytes: &[u8], in_interface: bool, out: &mut Vec<Fiel
                     // two rows, and each has to select its own.
                     span: Some(Span::of(&c)),
                     name,
-                    type_text: type_text.clone(),
+                    type_text: with_declarator_dims(&type_text, &c, bytes),
                     is_static,
                     is_final,
                     visibility,

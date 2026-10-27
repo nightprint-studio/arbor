@@ -14,7 +14,7 @@ use bennu_proto::prelude::Diagnostic;
 use tree_sitter::Node;
 
 use crate::engine::check_id::CheckId;
-use crate::support::walk::reaches;
+use crate::support::walk::provably_reaches;
 
 /// Every unconditional `instanceof` pattern among `nodes`, for a project compiled at `java_major`.
 pub fn instanceof_unconditional_errors_in(
@@ -50,7 +50,16 @@ pub fn instanceof_unconditional_errors_in(
         if actual.dims != 0 || actual.binary_name.is_empty() {
             continue;
         }
-        if actual.binary_name == pattern || reaches(resolver, &actual.binary_name, &pattern) {
+        // Both types have to be KNOWN. A name the classpath cannot answer for is not "the same type",
+        // and `reaches` cannot tell "above" from "unknown" through it — Spring sources swept without
+        // the sibling modules reported a hundred `instanceof` patterns that are perfectly conditional.
+        if resolver.members_of(&actual.binary_name).is_none() || resolver.members_of(&pattern).is_none() {
+            continue;
+        }
+        // A provable subtype only: `reaches` answers "maybe" for a hierarchy with an unknown ancestor,
+        // which suits a check that stays silent on doubt and not one that asserts a fact.
+        let unconditional = actual.binary_name == pattern || provably_reaches(resolver, &actual.binary_name, &pattern);
+        if unconditional {
             out.push(CheckId::FeatureRequiresNewerJava.at(
                 n,
                 "An `instanceof` pattern that cannot fail (the expression is already that type) needs Java 21",

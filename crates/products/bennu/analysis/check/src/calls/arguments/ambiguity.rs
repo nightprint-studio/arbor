@@ -15,6 +15,7 @@ use bennu_java::prelude::{subtype_verdict, Member, TypeRef, TypeResolver};
 
 use super::Judged;
 use crate::support::nodes::{is_primitive, is_type_var, simple_name};
+use crate::support::walk::hierarchy_fully_known;
 
 /// Whether `kept` — the overloads the applicability rules left standing — are provably ambiguous
 /// for a call passing `args`.
@@ -27,6 +28,24 @@ pub(super) fn provably_ambiguous(kept: &[&Member], args: &[Judged], resolver: &d
         return false;
     }
     if !kept.iter().flat_map(|m| &m.params).all(|p| readable(p, resolver)) {
+        return false;
+    }
+    // A candidate the caller may not be allowed to call is not a candidate: `new URLClassLoader(urls,
+    // null)` has a package-private `(URL[], AccessControlContext)` beside the public `(URL[],
+    // ClassLoader)`, and `new ExecutionException(null)` a protected `(String)` beside `(Throwable)`.
+    // Whether it is visible from here is the visibility check's question; this one stays out of it.
+    // Candidates of one visibility stand or fall together, so only a MIXED set is in doubt.
+    if kept.iter().any(|m| m.visibility != first.visibility) {
+        return false;
+    }
+    // An argument whose own hierarchy has a gap may satisfy a parameter the walk could not see it
+    // satisfy — or fail one it seemed to — so "both match" is not established. (Guava's
+    // `TrustedListenableFutureTask`, a `Runnable`, was ambiguous with `Callable` through one.)
+    let known = |a: &Judged| match a {
+        Judged::Typed { ty, .. } => ty.dims > 0 || is_primitive(&ty.binary_name) || hierarchy_fully_known(resolver, &ty.binary_name),
+        _ => true,
+    };
+    if !args.iter().all(known) {
         return false;
     }
     // Two survivors with the same erased parameters are ONE method met twice — an override, or a

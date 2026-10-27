@@ -760,6 +760,7 @@ fn convert_typeref(t: &bennu_classpath::prelude::TypeRef) -> JTypeRef {
         // write into a declaration.
         dims: t.dims,
         wildcard: t.wildcard,
+        super_bound: t.super_bound,
     }
 }
 
@@ -974,7 +975,7 @@ mod tests {
                     binary_name: "int".into(),
                     type_args: Vec::new(),
                     dims: 0,
-                    wildcard: false,
+                    wildcard: false, super_bound: false,
                 },
                 params: Vec::new(),
                 is_static: false,

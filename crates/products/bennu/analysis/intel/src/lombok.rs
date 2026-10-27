@@ -818,6 +818,7 @@ mod tests {
             project_types: EMPTY.get_or_init(BTreeMap::new),
             is_project: &|_: &str| false,
             file_types: &[],
+            hierarchy: None,
         }
     }
 

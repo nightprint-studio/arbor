@@ -28,7 +28,7 @@ pub fn syntax_errors(root: Node, source: &str) -> Vec<Diagnostic> {
             continue; // one squiggle per error subtree — don't descend into the wreckage
         }
         if n.is_missing() {
-            out.push(missing_diag(n));
+            out.push(missing_diag(n, bytes));
             continue;
         }
         let mut c = n.walk();
@@ -56,7 +56,7 @@ fn error_diag(n: Node, bytes: &[u8]) -> Diagnostic {
         end = start; // zero-width → the FE widens it to one glyph
     }
     Diagnostic {
-        message: "Syntax error".to_string(),
+        message: describe_error(n, bytes),
         severity: crate::engine::check_id::CheckId::SyntaxError.severity().to_string(),
         code: crate::engine::check_id::CheckId::SyntaxError.code().to_string(),
         start,
@@ -64,13 +64,102 @@ fn error_diag(n: Node, bytes: &[u8]) -> Diagnostic {
     }
 }
 
+/// What a tree-sitter `ERROR` node most likely means, said the way javac says it.
+///
+/// tree-sitter knows only that tokens did not fit; the message has to be recovered from WHAT the
+/// error starts with and WHERE it sits. The guesses are deliberately the plain ones — javac's own
+/// (`illegal start of expression`, `class, interface, enum, or record expected`, `reached end of
+/// file while parsing`) — and the last resort quotes the offending token rather than saying nothing,
+/// which is what "Syntax error" on its own amounted to.
+fn describe_error(n: Node, bytes: &[u8]) -> String {
+    let text = n.utf8_text(bytes).unwrap_or("");
+    let trimmed = text.trim_start();
+    let first: String = trimmed
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+        .collect();
+    let first_char = trimmed.chars().next();
+
+    // Nothing after the error but whitespace and comments: the file simply stops.
+    if bytes.get(n.end_byte()..).is_some_and(|rest| rest.iter().all(u8::is_ascii_whitespace)) && trimmed.is_empty() {
+        return "Reached the end of the file while parsing".to_string();
+    }
+    match first.as_str() {
+        "else" => return "`else` without `if`".to_string(),
+        "catch" => return "`catch` without `try`".to_string(),
+        "finally" => return "`finally` without `try`".to_string(),
+        "try" => return "`try` without `catch`, `finally` or resource declarations".to_string(),
+        "case" | "default" if !inside(n, &["switch_block", "switch_body"]) => {
+            return format!("Orphaned `{first}` — it belongs inside a `switch`");
+        }
+        _ => {}
+    }
+    let parent = n.parent().map(|p| p.kind()).unwrap_or("");
+    let at_top_level = parent == "program";
+    if at_top_level {
+        return "A class, interface, enum or record declaration is expected here".to_string();
+    }
+    // An operator, a closer or a separator where an expression has to start.
+    if matches!(first_char, Some('=' | '+' | '*' | '/' | '%' | '<' | '>' | '|' | '&' | '?' | ':' | ')' | ']' | ',' | '.')) {
+        return format!("Illegal start of expression at `{}`", snippet(trimmed));
+    }
+    if parent == "class_body" || parent == "interface_body" || parent == "enum_body_declarations" {
+        return match first.as_str() {
+            "" => format!("Illegal start of type at `{}`", snippet(trimmed)),
+            _ => "A member declaration is expected here — a statement cannot stand directly in a class body".to_string(),
+        };
+    }
+    if matches!(first_char, Some('}' | '{')) {
+        return format!("Unexpected `{}` — braces do not match", first_char.unwrap_or('}'));
+    }
+    if trimmed.is_empty() {
+        return "Syntax error: something is missing here".to_string();
+    }
+    format!("Syntax error near `{}`", snippet(trimmed))
+}
+
+/// The first few characters of an offending region, on one line, for a message to quote.
+fn snippet(text: &str) -> String {
+    let line = text.lines().next().unwrap_or("");
+    let short: String = line.chars().take(24).collect();
+    if line.chars().count() > 24 { format!("{short}…") } else { short }
+}
+
+/// Whether `n` sits inside a node of one of `kinds`.
+fn inside(n: Node, kinds: &[&str]) -> bool {
+    let mut cur = n.parent();
+    while let Some(p) = cur {
+        if kinds.contains(&p.kind()) {
+            return true;
+        }
+        cur = p.parent();
+    }
+    false
+}
+
+/// What a `MISSING` token's absence is called: javac's own `';' expected`, with the grammar's
+/// internal names (`identifier`, `type_identifier`) turned into `<identifier>`.
+fn expected_token(kind: &str) -> String {
+    match kind {
+        "identifier" | "type_identifier" => "`<identifier>` expected".to_string(),
+        other => format!("`{other}` expected"),
+    }
+}
+
 /// A diagnostic for a zero-width `MISSING` node — the parser expected a token here. `kind()` is the
 /// expected token (`;`, `)`, `}`), so the message names it.
-fn missing_diag(n: Node) -> Diagnostic {
+fn missing_diag(n: Node, bytes: &[u8]) -> Diagnostic {
     let start = n.start_byte();
     let kind = n.kind();
+    // A closer missing with nothing after it: javac's "reached end of file while parsing".
+    let at_end = bytes.get(start..).is_some_and(|rest| rest.iter().all(u8::is_ascii_whitespace));
+    let message = if at_end && matches!(kind, "}" | ")" | "]") {
+        format!("Reached the end of the file while parsing — {}", expected_token(kind))
+    } else {
+        expected_token(kind)
+    };
     Diagnostic {
-        message: format!("Missing `{kind}`"),
+        message,
         severity: crate::engine::check_id::CheckId::MissingToken.severity().to_string(),
         code: crate::engine::check_id::CheckId::MissingToken.code().to_string(),
         start,
@@ -196,4 +285,52 @@ mod parse_gate_tests {
     }
     #[allow(dead_code)]
     fn _unused(_: HashMap<String, ClassMembers>) {}
+}
+
+#[cfg(test)]
+mod message_tests {
+    use super::*;
+
+    fn messages(src: &str) -> Vec<String> {
+        let tree = bennu_java::prelude::parse_java(src).expect("a parse");
+        syntax_errors(tree.root_node(), src).into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn a_missing_semicolon_is_named_like_javac() {
+        assert_eq!(messages("class A { void m() { int x = 1 } }"), ["`;` expected"]);
+    }
+
+    #[test]
+    fn a_dangling_else_catch_and_try_are_named() {
+        assert_eq!(messages("class A { void m() { else { } } }"), ["`else` without `if`"]);
+        assert!(messages("class A { void m() { try { } } }")[0].starts_with("`try` without `catch`"));
+    }
+
+    #[test]
+    fn a_missing_operand_is_an_illegal_start_of_expression() {
+        assert!(messages("class A { int x = 1 + ; }")[0].starts_with("Illegal start of expression"));
+    }
+
+    #[test]
+    fn a_stray_closing_brace_says_a_declaration_is_expected() {
+        assert!(messages("class A { } }")[0].starts_with("A class, interface, enum or record"));
+    }
+
+    #[test]
+    fn a_statement_in_a_class_body_says_so() {
+        assert!(messages("class A { foo(); }")[0].contains("class body"));
+    }
+
+    #[test]
+    fn a_file_that_stops_early_says_it_ended() {
+        assert!(messages("class A { void m() { ").iter().all(|m| m.starts_with("Reached the end of the file")));
+    }
+
+    #[test]
+    fn no_message_is_the_bare_old_one() {
+        for src in ["class A { void m() { x = ; ) } }", "class A { void m() { foo(1, ; } }", "class A { void m() { case 1: break; } }"] {
+            assert!(messages(src).iter().all(|m| m != "Syntax error"), "{src}: {:?}", messages(src));
+        }
+    }
 }

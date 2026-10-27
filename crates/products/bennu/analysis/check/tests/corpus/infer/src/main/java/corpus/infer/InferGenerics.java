@@ -5,7 +5,11 @@ import corpus.infer.InferTypes.Names;
 import corpus.infer.InferTypes.Pair;
 import corpus.infer.InferTypes.Util;
 
+import java.util.AbstractList;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 
 /** The project's own generic types and methods: substitution through a class, a supertype and a method's type variables. */
@@ -38,6 +42,19 @@ public class InferGenerics {
     void wildcards(List<? extends Number> numbers, List<? super Integer> sink) {
         Number head = numbers.get(0); // infer
         int size = numbers.size(); // infer
-        Object taken = sink.get(0); // infer?
+        Object taken = sink.get(0); // infer
+    }
+
+    void lowerBounds(List<? super Integer> sink, java.util.function.Supplier<? super String> supplier) {
+        Object fromSupplier = supplier.get(); // infer
+        List<? super Integer> same = sink; // infer
+    }
+
+    void joinedBranches(boolean flag, java.util.concurrent.atomic.AtomicInteger whole, java.util.concurrent.atomic.AtomicLong fraction, ArrayList<String> array, LinkedList<String> linked) {
+        Number number = flag ? whole : fraction; // infer
+        AbstractList<String> list = flag ? array : linked; // infer
+        List<Number> mixed = Arrays.asList(1, 2.5); // infer
+        List<Integer> same = Arrays.asList(1, 2); // infer
+        String label = flag ? "a" : "b"; // infer
     }
 }

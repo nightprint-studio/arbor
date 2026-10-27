@@ -125,7 +125,7 @@ fn check_class_supertypes(
             // parameterizations apart at run time.
             if n.child_by_field_name("type_parameters").is_some() {
                 let binary = binary_of(&sup.text, n, bytes, symbols, resolver);
-                if binary == THROWABLE || crate::support::walk::reaches(resolver, &binary, THROWABLE) {
+                if binary == THROWABLE || crate::support::walk::provably_reaches(resolver, &binary, THROWABLE) {
                     out.push(CheckId::IllegalGenericUsage.at(
                         sup.node,
                         format!("A generic class cannot extend `{}`, a `Throwable`", simple_name(&binary)),

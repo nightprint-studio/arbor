@@ -87,6 +87,33 @@ fn bennu_check_reports_no_error_javac_does_not() {
     );
 }
 
+/// Legal code Bennu still gets wrong, one reduction per file (see each file's header for the report
+/// it reproduces). javac compiles it silently — `refresh-expected` checks — so each file is a known
+/// FALSE POSITIVE, listed here so it is neither forgotten nor allowed to fail the build.
+const KNOWN_GAP_MODULE: CorpusModule = CorpusModule { name: "clean8gaps", release: "8", major: 8, libs: &[] };
+
+/// The files of [`KNOWN_GAP_MODULE`] that must still be reported. A file that goes quiet has been fixed:
+/// the test then fails so that it is MOVED to `clean8`, where it guards against the regression.
+const KNOWN_GAP_FILES: &[&str] = &["InheritedBeforeEnclosing.java"];
+
+#[test]
+fn known_gaps_are_still_gaps() {
+    let root = corpus_root();
+    let Some(result) = ran(&KNOWN_GAP_MODULE, run_clean_module(&root, &KNOWN_GAP_MODULE)) else { return };
+    for fp in &result.false_positives {
+        eprintln!("known gap: [{}] {}:{} {}", fp.code, fp.file, fp.first_line, fp.message);
+    }
+    let fixed: Vec<&str> = KNOWN_GAP_FILES
+        .iter()
+        .copied()
+        .filter(|name| !result.false_positives.iter().any(|fp| fp.file.ends_with(name)))
+        .collect();
+    assert!(
+        fixed.is_empty(),
+        "these known gaps no longer reproduce — move the files to corpus/clean8 and drop them from KNOWN_GAP_FILES: {fixed:?}"
+    );
+}
+
 /// The module's outcome, or `None` after saying why it was skipped.
 fn ran<T>(module: &CorpusModule, outcome: Result<T, String>) -> Option<T> {
     outcome.map_err(|why| eprintln!("check_corpus: SKIPPED {}: {why}", module.name)).ok()

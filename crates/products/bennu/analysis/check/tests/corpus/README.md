@@ -243,6 +243,9 @@ Rules for adding code:
 | clean8 | `exceptions` | 1 | 150 | declared, caught, wrapped, narrowed by overrides, functional interfaces with `throws`, `throws X` inferred from lambdas |
 | clean8 | `legacy` | 8 | 448 | `Vector`, `Hashtable`, `Enumeration`, raw collections with casts, anonymous raw `Comparator`s, `StringBuffer`, JDBC interfaces, DAO/service layering, snake_case, static single and on-demand imports, `java.util.*` + `java.awt.*` disambiguated by a single-type import |
 | clean8 | `service` | 2 | 156 | the reported `Optional<Delegate>` service: presence guard, `get()` chains, the leading-comma three-argument call |
+| clean8 | `sweep` | 14 | ~330 | **reductions of false positives found by the real-code sweep** (`intel/tests/real_code_sweep.rs`, Guava / Spring / commons): a nested type inherited several files up while an unrelated type of the same name sorts later (`Cell`, `Entry`, `Entries`), a functional interface that redeclares its parent's method with other type letters, constructors of mixed visibility called with `null`, `Queue<byte[]>`, enum constants with bodies and with `super`, a package-private superclass field that must not shadow the enclosing class's own. Each file is the smallest program that reproduced the report, so the sweep needs running only now and then |
+| clean8gaps | — | 1 | ~25 | the known false positives, one reduction per file; see "Known gaps" at the end |
+| clean8 | `legacy` (C-style) | 2 | ~330 | `String names[]` fields, parameters and locals, `int m()[]`, `int a, b[]`, raw `Vector`/`Hashtable`/`Enumeration`, `new Integer(5)`, anonymous classes, labels, string `switch` with fall-through, `String.format` with a conditional argument |
 | clean8 | `statics` | 7 | 239 | single and on-demand static imports of fields and methods, enum constants (imported and as `switch` labels), interface constants, a nested class's statics by their full path, statics inherited across packages, an own method hiding an on-demand import, a local with the name of an imported method, JDK statics (`Collectors`, `Comparator.comparing`, `emptyList`, `TimeUnit`, `StandardCharsets`) whose type arguments come from the target |
 | lombok8 | `lombok` | 10 | 203 | `@Data`, `@Value` + `@Builder(toBuilder)` + `@Singular` + `@With`, `@Builder.Default`, fluent `@Accessors`, `@RequiredArgsConstructor`/`@NonNull`, `@Log`'s `log`, `val`, `@SneakyThrows`/`@Cleanup`, `@Delegate`, a `@SuperBuilder` hierarchy — all read through the members they generate |
 | clean21 | `records` | 2 | 212 | compact canonical and delegating constructors, static factories, generic records, records implementing interfaces, a record nested in a record, local records/enums/interfaces |
@@ -308,3 +311,24 @@ Marked error lines per category (each `*Bad.java` has a clean `*Ok.java` twin):
 - [ ] **Enums**: constructors, constant bodies, `switch` on enums from another package
 - [x] **Lombok**: the `lombok8` clean module (Lombok as annotation processor, jar from `~/.m2`)
 - [ ] **Other dependencies**: Spring, JUnit, Mockito — the same `libs` mechanism, one module per library set
+
+## Known gaps
+
+Legal code Bennu still gets wrong, and what is not yet reduced to a case.
+
+**Reproduced, in `clean8gaps/`.** The module is javac-clean like `clean8`, but `intel/tests/check_corpus.rs`
+(`known_gaps_are_still_gaps`) expects every file listed in `KNOWN_GAP_FILES` to still draw a diagnostic and
+never fails the build for it. When a file goes quiet the test fails and says to move it to `clean8`.
+
+| file | Bennu says | why |
+|---|---|---|
+| `InheritedBeforeEnclosing.java` | `instantiate-abstract` on `new Entries()` | a member type INHERITED by a nested class is in a more inner scope than the enclosing class's own member types (JLS 6.4.1); Bennu takes the enclosing one (Guava `Multimaps.java:1533`) |
+
+**Seen on real code, not yet reduced** (run the sweep: `BENNU_SWEEP_ROOT=… cargo test -p bennu-intel --test real_code_sweep -- --nocapture`):
+
+- collections4 `AbstractPatriciaTrie.firstEntry` / `lastEntry`: `weaker-access-override` on a method that is not an override of the public one.
+- collections4 `CellExtractor`: "private interface methods require Java 9" — the sweep assumes level 8; the project is 9+. A harness setting (`level`), not a bug.
+- Spring modules swept one by one report `argument-type` where an argument's class lives in a sibling module the sweep does not carry; a missing classpath should make a check abstain, and here one does not (`SpelEvaluationException(ex, …)` in `spring-expression`).
+- Guava `Maps.java:3867` (`override-overrides-nothing` on an anonymous `EntrySet`) no longer reproduces in isolation; `sweep/AnonymousOverCollidingName.java` guards the reduction.
+- Some syntax errors still read "Syntax error near …" (`foo(1, ;`, `case` outside a `switch`) instead of javac's own wording.
+- An error shown in the Problems panel but not underlined in the editor: reported, not reproduced. Both read the same diagnostics from the backend.

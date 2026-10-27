@@ -1030,7 +1030,10 @@ impl Ctx<'_> {
         let operand = node.child_by_field_name("operand").or_else(|| node.named_child(0))?;
         let ty = self.infer_expr(&operand, enclosing)?;
         // `++` / `--` do not promote: `byte b; b++` is still a `byte`.
-        if matches!(op.as_str(), "+" | "-" | "~") {
+        // The kind decides, not the first character: a prefix `++x` has no operator field, and its
+        // text starts with `+` — it was promoted like a unary plus, so `++shortField` came out an
+        // `int` and `markSubroutine(++numSubroutines)` was "int cannot be passed where short".
+        if node.kind() != "update_expression" && matches!(op.as_str(), "+" | "-" | "~") {
             return (ty.dims == 0)
                 .then(|| unary_promote(&ty.binary_name))
                 .flatten()
@@ -1107,7 +1110,7 @@ impl Ctx<'_> {
         }
         let a = self.infer_expr(&then, enclosing)?;
         let b = self.infer_expr(&alt, enclosing)?;
-        join_branch_types(vec![a, b])
+        join_branch_types(self.resolver, vec![a, b])
     }
 
     /// A `switch` used as an expression: the type its arms agree on.
@@ -1141,7 +1144,7 @@ impl Ctx<'_> {
             }
             types.push(self.infer_expr(&value, enclosing)?);
         }
-        join_branch_types(types)
+        join_branch_types(self.resolver, types)
     }
 
     /// A bare identifier: resolve as local var / parameter first (walking up scopes), then as an
@@ -1753,13 +1756,26 @@ impl Ctx<'_> {
         {
             return Some(tr);
         }
-        let member = self.resolve_and_walk(&recv.binary_name, |cm| {
-            cm.fields
-                .iter()
-                .find(|m| m.name == field_name)
-                .map(|m| m.return_type.clone())
+        // A field is inherited only if the subclass can SEE it: a private one stays with its class
+        // and a package-private one with its package. `AbstractMap.values` is a package-private
+        // field, so a `values[i]` in a map subclass elsewhere is the enclosing class's own `values`
+        // array — reading it as the `Collection` the JDK keeps there was an "array required" error
+        // on Guava's `DenseImmutableTable` (and on every class that names a field `values`).
+        let file_package = self.symbols.package.as_deref().unwrap_or("").replace('.', "/");
+        let member = crate::hierarchy::walk_up(self.resolver, &TypeRef::simple(recv.binary_name.clone()), |a| {
+            let field = a.members.fields.iter().find(|m| m.name == field_name)?;
+            let declaring = a.ty.binary_name.as_str();
+            let visible = match field.visibility {
+                crate::seam::Visibility::Private => declaring == recv.binary_name,
+                crate::seam::Visibility::Package => {
+                    declaring == recv.binary_name
+                        || declaring.rsplit_once('/').map_or("", |(pkg, _)| pkg) == file_package
+                }
+                _ => true,
+            };
+            visible.then(|| field.return_type.clone())
         })?;
-        Some(self.substitute_generics(&member, recv))
+        Some(read_through_lower_bound(self.substitute_generics(&member, recv)))
     }
 
     /// Return type of `method_name` on a resolved type, applying generic substitution from `recv` (so
@@ -1806,7 +1822,7 @@ impl Ctx<'_> {
         if let Some(tr) =
             self.method_return_of_source_type(&from_binary(&recv.binary_name), method_name, args)
         {
-            return Some(self.substitute_generics(&tr, &declared_on));
+            return Some(read_through_lower_bound(self.substitute_generics(&tr, &declared_on)));
         }
         let res = self
             .cache
@@ -1826,14 +1842,14 @@ impl Ctx<'_> {
             .iter()
             .flat_map(collect_type_variable_names)
             .collect();
-        Some(match picked {
+        Some(read_through_lower_bound(match picked {
             Some(m) => {
                 let witnessed = explicit_bindings(m, explicit);
                 let ret = apply_bindings(&ret, &witnessed);
                 self.bind_method_type_vars(&ret, m, args, enclosing, &declared_on, &from_receiver)
             }
             None => ret,
-        })
+        }))
     }
 
     /// Resolve a **method-level** type variable from the argument that determines it.
@@ -1873,6 +1889,8 @@ impl Ctx<'_> {
             return ret.clone();
         }
         let mut bindings: Vec<(String, TypeRef)> = Vec::new();
+        // Variables whose arguments disagree, or could not be typed: left open for good.
+        let mut conflicted: Vec<String> = Vec::new();
         for (i, p) in m.params.iter().enumerate() {
             if !p.type_args.is_empty() {
                 // Maybe a functional parameter: `map(Function<? super T, ? extends U>)` binds `U` to
@@ -1907,31 +1925,60 @@ impl Ctx<'_> {
             if !self.is_type_variable(&p.binary_name) {
                 continue; // not an identity parameter
             }
-            if bindings.iter().any(|(v, _)| *v == p.binary_name) {
-                continue; // first occurrence wins; a second would need a join we don't compute
-            }
             if from_receiver.iter().any(|v| *v == p.binary_name) {
                 continue; // the receiver's variable, not the callee's — same letter, different thing
             }
-            let Some(arg) = args.get(i) else { continue };
-            let Some(mut arg_ty) = self.infer_expr(arg, enclosing) else { continue };
-            if arg_ty.binary_name.is_empty() || self.is_type_variable(&arg_ty.binary_name) {
-                continue; // an untypeable argument binds nothing
+            if conflicted.contains(&p.binary_name) {
+                continue;
             }
-            // `T[]` is an identity parameter over `T`, not over `T[]`: the array depth belongs to
-            // the PARAMETER and has to come off the argument before it stands for the variable.
-            // `Arrays.stream(T[] a) -> Stream<T>` passed a `String[]` bound `T = String[]`, so the
-            // stream came out `Stream<String[]>` and every `line.startsWith(…)` after it stopped
-            // compiling — forty-nine broken extractions on commons-lang, the single largest family.
-            // An argument shallower than the parameter is the varargs call (`asList("a")` against
-            // `asList(T...)`), where the argument already IS the element: left as it is.
-            if arg_ty.dims >= p.dims {
-                arg_ty.dims -= p.dims;
+            // A variadic `T...` takes every remaining argument; any other identity parameter, its own.
+            let variadic = p.dims > 0 && i + 1 == m.params.len();
+            let indexes = if variadic { i..args.len().max(i + 1) } else { i..i + 1 };
+            // One argument against `T...` may be the array itself, handed over whole.
+            let whole_array = variadic && args.len() == i + 1;
+            let mut joined = bindings.iter().find(|(v, _)| *v == p.binary_name).map(|(_, t)| t.clone());
+            let mut failed = false;
+            for idx in indexes {
+                let Some(arg) = args.get(idx) else { continue };
+                let Some(mut arg_ty) = self.infer_expr(arg, enclosing) else { failed = true; break };
+                if arg_ty.binary_name.is_empty() || self.is_type_variable(&arg_ty.binary_name) {
+                    failed = true; // an untypeable argument binds nothing
+                    break;
+                }
+                // `T[]` is an identity parameter over `T`, not over `T[]`: the array depth belongs to
+                // the PARAMETER and has to come off the argument before it stands for the variable.
+                // `Arrays.stream(T[] a) -> Stream<T>` passed a `String[]` bound `T = String[]`, so the
+                // stream came out `Stream<String[]>` and every `line.startsWith(…)` after it stopped
+                // compiling — forty-nine broken extractions on commons-lang, the single largest family.
+                // An argument shallower than the parameter is the varargs call (`asList("a")` against
+                // `asList(T...)`), where the argument already IS the element: left as it is.
+                if (!variadic || whole_array) && arg_ty.dims >= p.dims {
+                    arg_ty.dims -= p.dims;
+                }
+                // A variable stands for a reference type: `List.of(1, 2)` is a `List<Integer>`, and
+                // `Pair.of("a", 1)` a `Pair<String, Integer>`. Left as `int`, the type argument named a
+                // type no declaration can write, and everything compared against it disagreed.
+                let arg_ty = boxed(arg_ty);
+                // Several arguments for one variable: the closest type they all are. `asList(1, 2.5)`
+                // joins `Integer` and `Double` into `Number`; when no single type fits, the variable
+                // stays open rather than being pinned to whichever argument came first.
+                joined = match joined.take() {
+                    None => Some(arg_ty),
+                    Some(prev) if prev == arg_ty => Some(prev),
+                    Some(prev) => match crate::hierarchy::common_supertype(self.resolver, &prev, &arg_ty) {
+                        Some(common) => Some(common),
+                        None => {
+                            failed = true;
+                            break;
+                        }
+                    },
+                };
             }
-            // A variable stands for a reference type: `List.of(1, 2)` is a `List<Integer>`, and
-            // `Pair.of("a", 1)` a `Pair<String, Integer>`. Left as `int`, the type argument named a
-            // type no declaration can write, and everything compared against it disagreed.
-            bindings.push((p.binary_name.clone(), boxed(arg_ty)));
+            bindings.retain(|(v, _)| *v != p.binary_name);
+            match joined {
+                Some(t) if !failed => bindings.push((p.binary_name.clone(), t)),
+                _ => conflicted.push(p.binary_name.clone()),
+            }
         }
         if bindings.is_empty() {
             return ret.clone();
@@ -2316,7 +2363,7 @@ impl Ctx<'_> {
             // Substituting a type ARGUMENT never changes how deep the array is, nor whether the
             // position stood in for a captured wildcard.
             dims: member_ret.dims,
-            wildcard: member_ret.wildcard,
+            wildcard: member_ret.wildcard, super_bound: member_ret.super_bound,
             type_args: member_ret
                 .type_args
                 .iter()
@@ -2526,6 +2573,11 @@ impl Ctx<'_> {
         });
         let (type_node, varargs) = found??;
         let text = node_text(&type_node, self.bytes)?;
+        // `String names[]`: the brackets sit on the parameter, after the name.
+        let text = match type_node.parent() {
+            Some(parameter) => crate::symbols::with_declarator_dims(&text, &parameter, self.bytes),
+            None => text,
+        };
         let resolved = self.resolve_type_text(&text)?;
         // `T... xs` IS a `T[]` inside the body — the one place the written text and the
         // parameter's real type differ.
@@ -2571,8 +2623,12 @@ impl Ctx<'_> {
                             .child_by_field_name("name")
                             .and_then(|n| node_text(&n, self.bytes));
                         let value = d.child_by_field_name("value");
+                        // `int indexes[] = …` carries its brackets on the declarator.
+                        let declared = type_text
+                            .as_deref()
+                            .map(|t| crate::symbols::with_declarator_dims(t, &d, self.bytes));
                         if let (Some(vn), Some(ty)) =
-                            (name, self.local_ty_of(type_text.as_deref(), value))
+                            (name, self.local_ty_of(declared.as_deref(), value))
                         {
                             map.entry(vn).or_default().push(LocalDecl { start, ty });
                         }
@@ -2896,7 +2952,7 @@ impl Ctx<'_> {
             dims: t.dims,
             // Carried across from the parse: a `? extends X` written in SOURCE is as unwritable at
             // a declaration as one decoded out of bytecode.
-            wildcard: t.wildcard,
+            wildcard: t.wildcard, super_bound: t.super_bound,
         }
     }
 
@@ -3231,6 +3287,17 @@ fn sole<'m>(members: &[&'m Member]) -> Option<&'m Member> {
     }
 }
 
+/// What a READ through a `? super X` argument produces: an `Object`, since the actual argument may be
+/// any supertype of `X`. (Writing an `X` in is fine; that direction never asks for a type.) Only the
+/// top level is touched — `List<? super X>` handed back keeps its wildcard, which is still true.
+fn read_through_lower_bound(ty: TypeRef) -> TypeRef {
+    if ty.super_bound && ty.dims == 0 {
+        TypeRef::simple("java/lang/Object").captured()
+    } else {
+        ty
+    }
+}
+
 /// The method's own variables paired with the type arguments the call wrote — none when the counts
 /// disagree, because then the call is not the one the text seems to say.
 fn explicit_bindings(m: &Member, explicit: &[TypeRef]) -> Vec<(String, TypeRef)> {
@@ -3243,8 +3310,10 @@ fn explicit_bindings(m: &Member, explicit: &[TypeRef]) -> Vec<(String, TypeRef)>
 
 /// The type a conditional or a `switch` expression has when its branches produce `types`: the one
 /// they all share, or — when they are all numeric — the promoted one (`1` and `2L` give `long`).
-/// Anything else would need a least upper bound, which is not computed, so it is `None`.
-fn join_branch_types(types: Vec<TypeRef>) -> Option<TypeRef> {
+/// Otherwise the closest type they all are ([`crate::hierarchy::common_supertype`]) — primitives
+/// boxed first, since `cond ? 1 : "a"` joins `Integer` and `String` — and `None` when that is not one
+/// single type.
+fn join_branch_types(resolver: &dyn TypeResolver, types: Vec<TypeRef>) -> Option<TypeRef> {
     let (first, rest) = types.split_first()?;
     if rest.iter().all(|t| t == first) {
         return Some(first.clone());
@@ -3252,14 +3321,18 @@ fn join_branch_types(types: Vec<TypeRef>) -> Option<TypeRef> {
     let promotable = |t: &TypeRef| {
         t.dims == 0 && matches!(unbox(&t.binary_name), Some("int" | "long" | "float" | "double"))
     };
-    if !types.iter().all(promotable) {
-        return None;
+    if types.iter().all(promotable) {
+        let mut joined = first.binary_name.clone();
+        for t in rest {
+            joined = binary_promote(&joined, &t.binary_name)?.to_string();
+        }
+        return Some(TypeRef::simple(joined));
     }
-    let mut joined = first.binary_name.clone();
+    let mut joined = boxed(first.clone());
     for t in rest {
-        joined = binary_promote(&joined, &t.binary_name)?.to_string();
+        joined = crate::hierarchy::common_supertype(resolver, &joined, &boxed(t.clone()))?;
     }
-    Some(TypeRef::simple(joined))
+    Some(joined)
 }
 
 /// Every `yield` value inside `node`, not descending into a nested `switch` expression, lambda or
@@ -3295,7 +3368,7 @@ fn apply_bindings(ty: &TypeRef, bindings: &[(String, TypeRef)]) -> TypeRef {
         binary_name: ty.binary_name.clone(),
         type_args: ty.type_args.iter().map(|a| apply_bindings(a, bindings)).collect(),
         dims: ty.dims,
-        wildcard: ty.wildcard,
+        wildcard: ty.wildcard, super_bound: ty.super_bound,
     }
 }
 
@@ -3325,23 +3398,40 @@ fn is_public_object_method(m: &Member) -> bool {
 /// `None` when the hierarchy is not fully known, since an unseen supertype could add one. The public
 /// `Object` methods an interface redeclares do not count (JLS §9.8).
 fn abstract_methods_of(resolver: &dyn TypeResolver, fi: &TypeRef) -> Option<Vec<Member>> {
-    let mut abstracts: Vec<Member> = Vec::new();
+    // Each kept method with its parameters AS THE ROOT TYPE SEES THEM. Two declarations are the same
+    // method when those agree, and the raw parameters do not: Guava's `Function<F, T> extends
+    // java.util.function.Function<F, T>` redeclares `apply(F)` over the parent's `apply(T)` — one
+    // method, written with two different letters — and comparing them unsubstituted counted two
+    // abstract methods, so no lambda could ever be passed as a Guava `Function`.
+    let mut abstracts: Vec<(Member, Vec<TypeRef>)> = Vec::new();
+    // Every instance method met on the way up, abstract or not: the walk is nearest-first, so a
+    // `default` (or concrete) declaration seen first OVERRIDES an abstract one further up. Guava's
+    // `Predicate` declares `apply` abstract and `test` as a `default` over the JDK's abstract `test` —
+    // one abstract method, but the parent's `test` counted as a second.
+    let mut implemented: Vec<(String, Vec<TypeRef>)> = Vec::new();
     let walked = crate::hierarchy::walk::<()>(resolver, fi, |a| {
         for m in &a.members.methods {
-            if m.kind == MemberKind::Method
-                && m.is_abstract
-                && !m.is_default
-                && !m.is_static
-                && m.name != "<init>"
-                && !is_public_object_method(m)
-                && !abstracts.iter().any(|u| u.name == m.name && u.params == m.params)
-            {
-                abstracts.push(m.clone());
+            if m.kind != MemberKind::Method || m.is_static || m.name == "<init>" {
+                continue;
+            }
+            let seen: Vec<TypeRef> = m
+                .params
+                .iter()
+                .map(|p| crate::hierarchy::substitute(p, &a.members.type_params, &a.ty.type_args))
+                .collect();
+            let overridden = implemented.iter().any(|(n, p)| *n == m.name && *p == seen);
+            if m.is_abstract && !m.is_default && !is_public_object_method(m) && !overridden {
+                if !abstracts.iter().any(|(u, up)| u.name == m.name && *up == seen) {
+                    abstracts.push((m.clone(), seen.clone()));
+                }
+            }
+            if !m.is_abstract || m.is_default {
+                implemented.push((m.name.clone(), seen));
             }
         }
         None
     });
-    walked.complete.then_some(abstracts)
+    walked.complete.then(|| abstracts.into_iter().map(|(m, _)| m).collect())
 }
 
 /// A functional interface's single abstract method, as declared — generics not substituted. `None`
@@ -3800,7 +3890,7 @@ mod shadowing_tests {
                         binary_name: "java/util/List".into(),
                         type_args: vec![TypeRef::simple("acme/Impresa")],
                         dims: 0,
-                        wildcard: false,
+                        wildcard: false, super_bound: false,
                     },
                     vec![],
                 ),
@@ -4003,7 +4093,7 @@ mod shadowing_tests {
                     binary_name: "acme/Spec".into(),
                     type_args: vec![TypeRef::simple("java/lang/Object")],
                     dims: 0,
-                    wildcard: false,
+                    wildcard: false, super_bound: false,
                 },
                 vec![],
             )])
@@ -4117,7 +4207,7 @@ mod shadowing_tests {
                     binary_name: "java/util/stream/Stream".into(),
                     type_args: vec![TypeRef::simple("T")],
                     dims: 0,
-                    wildcard: false,
+                    wildcard: false, super_bound: false,
                 },
                 vec![TypeRef::simple("T").arrayed(1)],
             )
@@ -4167,7 +4257,7 @@ mod functional_binding_tests {
             binary_name: binary.into(),
             type_args: args.iter().map(|a| TypeRef::simple(*a)).collect(),
             dims: 0,
-            wildcard: false,
+            wildcard: false, super_bound: false,
         }
     }
 
@@ -4346,7 +4436,7 @@ mod method_type_var_tests {
             methods: vec![
                 Member::method(
                     "ofNullable",
-                    TypeRef { binary_name: "acme/Opt".into(), dims: 0, type_args: vec![TypeRef::simple("T")], wildcard: false },
+                    TypeRef { binary_name: "acme/Opt".into(), dims: 0, type_args: vec![TypeRef::simple("T")], wildcard: false, super_bound: false },
                     vec![TypeRef::simple("T")],
                 )
                 .stat(),
@@ -4354,7 +4444,7 @@ mod method_type_var_tests {
                 Member::method(
                     "unwrap",
                     TypeRef::simple("X"),
-                    vec![TypeRef { binary_name: "acme/Opt".into(), dims: 0, type_args: vec![TypeRef::simple("X")], wildcard: false }],
+                    vec![TypeRef { binary_name: "acme/Opt".into(), dims: 0, type_args: vec![TypeRef::simple("X")], wildcard: false, super_bound: false }],
                 )
                 .stat(),
                 meth("orElse", "T", &["T"]),

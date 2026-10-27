@@ -56,6 +56,12 @@ pub struct TypeRef {
     /// is what an ordinary type is.
     #[serde(default)]
     pub wildcard: bool,
+    /// Whether the wildcard is **lower-bounded** (`? super X`). The bound stays in `binary_name`,
+    /// which is what a LAMBDA parameter wants (`Consumer<? super Order>` hands the lambda an
+    /// `Order`); a READ through it is only an `Object`, because the real argument may be any
+    /// supertype of `X`. `#[serde(default)]` so an index persisted before this field still loads.
+    #[serde(default)]
+    pub super_bound: bool,
 }
 
 /// A bare binary name IS a type reference — a raw supertype, a non-generic class.
@@ -81,7 +87,7 @@ impl TypeRef {
             binary_name: binary_name.into(),
             type_args: Vec::new(),
             dims: 0,
-            wildcard: false,
+            wildcard: false, super_bound: false,
         }
     }
 

@@ -1872,7 +1872,7 @@ fn static_import_type(imports: &[bennu_java::prelude::Import], name: &str) -> Op
             // The brackets were trimmed off `base` two lines up; the depth they carried is the
             // difference between `Foo` and `Foo[]` and belongs on the reference.
             dims: written.matches("[]").count().min(u8::MAX as usize) as u8,
-            wildcard: false,
+            wildcard: false, super_bound: false,
         })
     }
 
@@ -3206,7 +3206,7 @@ mod tests {
             binary_name: "java/util/List".into(),
             type_args: vec![TypeRef::simple("java/lang/String")],
             dims: 0,
-            wildcard: false,
+            wildcard: false, super_bound: false,
         };
         assert_eq!(render_type_for_source(&list, &mut imports), "List<String>");
         // `java.lang` is implicit; `java.util` is not.
@@ -3520,7 +3520,7 @@ mod source_render_tests {
             binary_name: "java/lang/Class".into(),
             type_args: vec![TypeRef::simple("java/lang/annotation/Annotation").captured()],
             dims: 0,
-            wildcard: false,
+            wildcard: false, super_bound: false,
         };
         assert!(capture.names_a_wildcard());
         // Nested one level deeper — the shape `Map<String, ? extends Factory>` has.
@@ -3528,7 +3528,7 @@ mod source_render_tests {
             binary_name: "java/util/Map".into(),
             type_args: vec![TypeRef::simple("java/lang/String"), capture.clone()],
             dims: 0,
-            wildcard: false,
+            wildcard: false, super_bound: false,
         };
         assert!(nested.names_a_wildcard());
         // And an ordinary generic stays writable.
@@ -3536,7 +3536,7 @@ mod source_render_tests {
             binary_name: "java/util/List".into(),
             type_args: vec![TypeRef::simple("java/lang/String")],
             dims: 0,
-            wildcard: false,
+            wildcard: false, super_bound: false,
         };
         assert!(!plain.names_a_wildcard());
     }
@@ -3555,7 +3555,7 @@ mod source_render_tests {
                 TypeRef::simple("java/lang/String"),
             ],
             dims: 0,
-            wildcard: false,
+            wildcard: false, super_bound: false,
         };
         assert!(names_object_as_a_type_argument(&collector));
         // A plain `Object` that is the type ITSELF is not a captured argument and stays writable.

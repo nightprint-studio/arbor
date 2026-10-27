@@ -58,12 +58,15 @@ pub struct TypeRef {
     /// no name. `#[serde(default)]` so an index written before this still loads.
     #[serde(default)]
     pub wildcard: bool,
+    /// A `? super X` wildcard; the bound stays in `binary_name`. `#[serde(default)]` for old indexes.
+    #[serde(default)]
+    pub super_bound: bool,
 }
 
 impl TypeRef {
     /// A plain (non-generic, non-array) reference to `binary_name`.
     pub fn plain(binary_name: impl Into<String>) -> Self {
-        Self { binary_name: binary_name.into(), type_args: Vec::new(), dims: 0, wildcard: false }
+        Self { binary_name: binary_name.into(), type_args: Vec::new(), dims: 0, wildcard: false, super_bound: false }
     }
 
     /// The same reference, marked as standing in for a captured wildcard.
@@ -659,7 +662,7 @@ fn class_type_to_ref(ct: &ClassType) -> TypeRef {
     // Phase-1 targets; if present we still surface the outer args, which is what the
     // element-type carry-through uses.
     let type_args = ct.args.iter().map(type_arg_to_ref).collect();
-    TypeRef { binary_name, type_args, dims: 0, wildcard: false }
+    TypeRef { binary_name, type_args, dims: 0, wildcard: false, super_bound: false }
 }
 
 fn type_arg_to_ref(a: &TypeArg) -> TypeRef {
@@ -668,7 +671,11 @@ fn type_arg_to_ref(a: &TypeArg) -> TypeRef {
         // A bounded wildcard collapses onto its bound, which is what a member lookup needs — and is
         // marked, because it is NOT what a declaration may be written with. See [`TypeRef::wildcard`].
         TypeArg::Extends(t) => type_ref_from_sig(t).captured(),
-        TypeArg::Super(t) => type_ref_from_sig(t).captured(),
+        TypeArg::Super(t) => {
+            let mut bound = type_ref_from_sig(t).captured();
+            bound.super_bound = true;
+            bound
+        }
         // Unbounded `?` has no usable element type; Object is the safe upper bound.
         TypeArg::Unbounded => TypeRef::plain("java/lang/Object").captured(),
     }

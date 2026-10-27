@@ -22,6 +22,8 @@ pub struct SimpleTypeRef {
     /// lookup needs, and it is exactly wrong for the one consumer that writes the type back out.
     /// `Class<? extends Annotation>` is not `Class<Annotation>` at a declaration.
     pub wildcard: bool,
+    /// Whether the wildcard is `? super X` — see [`crate::seam::TypeRef::super_bound`].
+    pub super_bound: bool,
 }
 
 /// Parse a Java type text into a [`SimpleTypeRef`]. Returns `None` for empty /
@@ -34,8 +36,19 @@ pub fn parse_type_text(text: &str) -> Option<SimpleTypeRef> {
     // Strip trailing array brackets from the NAME — element member-access isn't Phase-1 (except
     // generics), so we complete against the raw type's members when possible — but count them, so
     // a caller writing the type back into source can put them on again.
-    let base = text.split('[').next().unwrap_or(text).trim();
-    let dims = text.matches('[').count().min(u8::MAX as usize) as u8;
+    //
+    // Only the brackets AFTER the last `>` (or after the name, when there is no argument list) belong
+    // to this type: `Queue<byte[]>` is a plain `Queue` whose argument is an array, and counting its
+    // bracket made every such local an array of queues (`Queue[] cannot be passed where Queue is
+    // expected` — fifty-odd false errors on Guava).
+    let tail_start = text.rfind('>').map_or(0, |i| i + 1);
+    let tail = &text[tail_start..];
+    let dims = tail.matches('[').count().min(u8::MAX as usize) as u8;
+    let base = match tail.find('[') {
+        Some(i) => &text[..tail_start + i],
+        None => text,
+    };
+    let base = base.trim();
 
     let (name_part, args_part) = split_generics(base);
     let name = name_part.trim();
@@ -61,6 +74,7 @@ pub fn parse_type_text(text: &str) -> Option<SimpleTypeRef> {
         args,
         dims,
         wildcard: false,
+        super_bound: false,
     })
 }
 
@@ -113,14 +127,15 @@ fn parse_arg(s: &str) -> Option<SimpleTypeRef> {
         return parse_type_text(rest.trim()).map(mark_wildcard);
     }
     if let Some(rest) = s.strip_prefix("? super ") {
-        return parse_type_text(rest.trim()).map(mark_wildcard);
+        return parse_type_text(rest.trim()).map(|t| SimpleTypeRef { super_bound: true, ..mark_wildcard(t) });
     }
     if s == "?" {
         return Some(SimpleTypeRef {
             name: "Object".to_string(),
             args: Vec::new(),
             dims: 0,
-                wildcard: true,
+            wildcard: true,
+            super_bound: false,
         });
     }
     parse_type_text(s)
@@ -138,6 +153,22 @@ mod tests {
 
     /// A wildcard argument keeps its bound — which is what a member lookup asks for — and says it
     /// is one, which is what a declaration has to know before writing it down.
+    #[test]
+    fn an_array_argument_is_not_an_array_type() {
+        let queue = parse_type_text("Queue<byte[]>").unwrap();
+        assert_eq!((queue.name.as_str(), queue.dims), ("Queue", 0));
+        let arrays = parse_type_text("Map<String, int[]>[]").unwrap();
+        assert_eq!((arrays.name.as_str(), arrays.dims), ("Map", 1));
+        assert_eq!(parse_type_text("String[][]").unwrap().dims, 2);
+    }
+
+    #[test]
+    fn a_super_bounded_wildcard_is_marked_as_such() {
+        let t = parse_type_text("List<? super Integer>").unwrap();
+        assert!(t.args[0].wildcard && t.args[0].super_bound);
+        assert!(!parse_type_text("List<? extends Integer>").unwrap().args[0].super_bound);
+    }
+
     #[test]
     fn a_wildcard_argument_keeps_its_bound_and_is_marked() {
         let t = parse_type_text("Class<? extends Annotation>").unwrap();

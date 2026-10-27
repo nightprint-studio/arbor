@@ -34,7 +34,9 @@ pub(crate) fn method_param_binaries(
             "formal_parameter" => {
                 let ty = p.child_by_field_name("type")?;
                 let written = ty.utf8_text(bytes).ok()?;
-                out.push(type_binary_at(written, ty, bytes, symbols, resolver)?);
+                // `byte b[]`: the brackets after the name are part of the parameter's type.
+                let written = bennu_java::prelude::with_declarator_dims(written, &p, bytes);
+                out.push(type_binary_at(&written, ty, bytes, symbols, resolver)?);
             }
             "spread_parameter" => return None,
             _ => {}

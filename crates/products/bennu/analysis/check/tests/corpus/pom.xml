@@ -32,6 +32,7 @@
     <module>java21</module>
     <module>infer</module>
     <module>clean8</module>
+    <module>clean8gaps</module>
     <module>clean21</module>
     <module>lombok8</module>
   </modules>

@@ -316,7 +316,10 @@ fn check_enum(n: Node, bytes: &[u8], imports: &[ParsedImport], out: &mut Vec<Dia
     for member in body.named_children(&mut c) {
         match member.kind() {
             "enum_constant" => {
-                if member.child_by_field_name("arguments").is_some() && arg_constant.is_none() {
+                // `FIRST() { … }` passes nothing: the default constructor takes it.
+                let passes_arguments =
+                    member.child_by_field_name("arguments").is_some_and(|a| a.named_child_count() > 0);
+                if passes_arguments && arg_constant.is_none() {
                     arg_constant = Some(member);
                 }
             }

@@ -249,11 +249,6 @@ fn through_receiver(receiver: &TypeRef, method: &str, candidates: &[Member], res
         let class_params = &a.members.type_params;
         let args = &a.ty.type_args;
         for m in a.members.methods.iter().filter(|m| m.name == method) {
-            let shape = erased_shape(&m.params, class_params, &m.method_type_params());
-            if seen.contains(&shape) {
-                continue;
-            }
-            seen.push(shape);
             let mut member = m.clone();
             if !args.is_empty() && args.len() == class_params.len() {
                 let own = m.method_type_params();
@@ -268,6 +263,17 @@ fn through_receiver(receiver: &TypeRef, method: &str, candidates: &[Member], res
                     })
                     .collect();
             }
+            // The shape is judged AFTER the receiver's arguments are in, never on the raw variables:
+            // `setConfiguration(RC)` and `setConfiguration(C)` both erase to "one unknown" and used
+            // to count as the same method, so the second overload vanished (JasperReports' exporters
+            // name two variables alike in the interface and the class, in another order). Read through
+            // the receiver they are `PdfReportConfig` and `PdfExporterConfig`; the SAME method met
+            // again up the hierarchy still collapses, because both spellings now read alike.
+            let shape = erased_shape(&member.params, class_params, &m.method_type_params());
+            if seen.contains(&shape) {
+                continue;
+            }
+            seen.push(shape);
             read.push(member);
         }
         None
@@ -357,7 +363,10 @@ fn judge_args(
     let admitted = match fit {
         OverloadFit::NoArity => return,
         OverloadFit::Inapplicable(admitted) => admitted,
-        _ if poly => candidates.iter().filter(|m| m.params.len() == args.len()).collect(),
+        // By the arity each overload ADMITS, a varargs one included: counting parameters exactly left
+        // out `String.format(String, Object...)` and kept only `format(Locale, String, Object...)`,
+        // so any conditional among the arguments read as "a String is not a Locale".
+        _ if poly => candidates.iter().filter(|m| bennu_java::prelude::method_admits_argc(m, args.len())).collect(),
         // Several survivors: an error only when they are provably ambiguous — see `ambiguity`. The
         // arguments are typed here and not before, so a call that binds pays for no second look.
         OverloadFit::Applicable(kept) if kept.len() > 1 => {

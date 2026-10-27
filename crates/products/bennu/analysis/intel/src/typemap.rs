@@ -18,6 +18,8 @@ struct Parsed {
     args: Vec<Parsed>,
     /// A `?`, `? extends X` or `? super X` collapsed onto its bound — see [`TypeRef::wildcard`].
     wildcard: bool,
+    /// The wildcard was `? super X` — see [`TypeRef::super_bound`].
+    super_bound: bool,
 }
 
 /// A simple type name resolved against the type that DECLARES it — its own nested types, then its
@@ -79,6 +81,7 @@ fn to_binary_ref(names: &FileNames, owner: &str, p: &Parsed) -> TypeRef {
             .collect(),
         dims: p.name.matches("[]").count().min(u8::MAX as usize) as u8,
         wildcard: p.wildcard,
+        super_bound: p.super_bound,
     }
 }
 
@@ -101,6 +104,12 @@ pub struct FileNames<'a> {
     pub is_project: &'a dyn Fn(&str) -> bool,
     /// The types this file declares — the only hierarchy available while the index is being built.
     pub file_types: &'a [bennu_java::prelude::TypeDecl],
+    /// The whole project's resolved supertypes — `binary → [direct supertype binaries]` — when the
+    /// build has read every file before resolving any. Lets an inherited member type be found
+    /// however many hops up it sits (`DenseTable → RegularTable → AbstractTable → Table.Cell`),
+    /// where `file_types` stops at the first. `None` for a single-file refresh, which falls back to
+    /// that one hop.
+    pub hierarchy: Option<&'a BTreeMap<String, Vec<String>>>,
 }
 
 impl<'a> FileNames<'a> {
@@ -140,7 +149,7 @@ impl bennu_java::prelude::NameScope for ProjectNameScope<'_> {
         // Class scope, so ahead of everything the FILE binds (JLS §6.4.1). It used to sit between
         // the single-type imports and the package, which let an import of an unrelated `Entry`
         // shadow the one the class inherits.
-        if let Some(b) = self.inherited_nested(simple) {
+        if let Some(b) = self.inherited_nested(simple).or_else(|| self.inherited_nested_deep(simple)) {
             return Some(b);
         }
         // What the FILE binds — single-type imports, its own package (the FILE's: see `FileNames`),
@@ -174,7 +183,88 @@ impl bennu_java::prelude::NameScope for ProjectNameScope<'_> {
     }
 }
 
+/// The member type a JDK supertype hands to its subtypes, for the few the build can state without
+/// reading the JDK: `Entry` for anything that is a `Map`, and `AbstractMap`'s two entry classes.
+///
+/// A class that implements `NavigableMap` writes `Entry<K, V>` with no import — it is inherited — and
+/// the project-wide guess for that bare name picked whichever project type was called `Entry`
+/// (Guava's `Multiset.Entry`), so every override returning one was "incompatible" with its parent.
+fn jdk_inherited_member_type(supertype: &str, simple: &str) -> Option<String> {
+    const MAPS: &[&str] = &[
+        "java/util/Map",
+        "java/util/SortedMap",
+        "java/util/NavigableMap",
+        "java/util/AbstractMap",
+        "java/util/HashMap",
+        "java/util/LinkedHashMap",
+        "java/util/TreeMap",
+        "java/util/Hashtable",
+        "java/util/WeakHashMap",
+        "java/util/IdentityHashMap",
+        "java/util/EnumMap",
+        "java/util/Properties",
+        "java/util/concurrent/ConcurrentMap",
+        "java/util/concurrent/ConcurrentNavigableMap",
+        "java/util/concurrent/ConcurrentHashMap",
+        "java/util/concurrent/ConcurrentSkipListMap",
+    ];
+    const ABSTRACT_MAP_FAMILY: &[&str] = &[
+        "java/util/AbstractMap",
+        "java/util/HashMap",
+        "java/util/LinkedHashMap",
+        "java/util/TreeMap",
+        "java/util/WeakHashMap",
+        "java/util/IdentityHashMap",
+        "java/util/EnumMap",
+        "java/util/concurrent/ConcurrentSkipListMap",
+    ];
+    match simple {
+        "Entry" if MAPS.contains(&supertype) => Some("java/util/Map/Entry".to_string()),
+        "SimpleEntry" | "SimpleImmutableEntry" if ABSTRACT_MAP_FAMILY.contains(&supertype) => {
+            Some(format!("java/util/AbstractMap/{simple}"))
+        }
+        _ => None,
+    }
+}
+
 impl ProjectNameScope<'_> {
+    /// `simple` as a nested type of ANY ancestor of the owner — or of a type the owner is written
+    /// inside — read off the project-wide supertype map, breadth-first and cycle-safe.
+    ///
+    /// The one-hop version below only sees supertypes this file declares itself; a nested type
+    /// inherited from further up lives in another file, and the project-wide guess it fell back to
+    /// keeps one binary per simple name — so Guava's `Cell` inherited from `Table` resolved to the
+    /// unrelated `Striped64.Cell`, and every override comparing the two came out "incompatible".
+    fn inherited_nested_deep(&self, simple: &str) -> Option<String> {
+        let hierarchy = self.names.hierarchy?;
+        let mut scope = self.owner;
+        loop {
+            let mut seen = std::collections::BTreeSet::new();
+            let mut queue: std::collections::VecDeque<&str> = std::collections::VecDeque::new();
+            queue.push_back(scope);
+            while let Some(current) = queue.pop_front() {
+                if !seen.insert(current.to_string()) || seen.len() > 256 {
+                    continue;
+                }
+                for sup in hierarchy.get(current).into_iter().flatten() {
+                    let candidate = format!("{sup}/{simple}");
+                    if (self.names.is_project)(&candidate) {
+                        return Some(candidate);
+                    }
+                    if let Some(jdk) = jdk_inherited_member_type(sup, simple) {
+                        return Some(jdk);
+                    }
+                    queue.push_back(sup);
+                }
+            }
+            let i = scope.rfind('/')?;
+            scope = &scope[..i];
+            if !(self.names.is_project)(scope) {
+                return None;
+            }
+        }
+    }
+
     /// `simple` as a nested type of something the owner — or a type the owner is written inside —
     /// EXTENDS or IMPLEMENTS, read off this file's own declarations.
     ///
@@ -264,7 +354,7 @@ fn parse_type(s: &str) -> Option<Parsed> {
     Some(Parsed {
         name: format!("{name}{}", "[]".repeat(dims)),
         args,
-        wildcard: false,
+        wildcard: false, super_bound: false,
     })
 }
 
@@ -310,17 +400,18 @@ fn push_arg(chunk: &str, out: &mut Vec<Parsed>) {
     }
     // Wildcards `?` / `? extends X` / `? super X` collapse to their bound or Object — and say so,
     // because the bound is the right answer for a member lookup and the wrong one for a declaration.
-    let (resolved, wildcard) = if t == "?" {
-        ("Object", true)
+    let (resolved, wildcard, super_bound) = if t == "?" {
+        ("Object", true, false)
     } else if let Some(rest) = t.strip_prefix("? extends ") {
-        (rest.trim(), true)
+        (rest.trim(), true, false)
     } else if let Some(rest) = t.strip_prefix("? super ") {
-        (rest.trim(), true)
+        (rest.trim(), true, true)
     } else {
-        (t, false)
+        (t, false, false)
     };
     if let Some(mut p) = parse_type(resolved) {
         p.wildcard = wildcard;
+        p.super_bound = super_bound;
         out.push(p);
     }
 }
@@ -341,6 +432,7 @@ mod tests {
             project_types: &Default::default(),
             is_project: &|_| false,
             file_types: &[],
+            hierarchy: None,
         };
         let t = type_text_to_ref(&names, "p/Owner", "java.util.Map<java.lang.String, ? extends p.Factory>");
         assert_eq!(t.type_args.len(), 2, "{t:?}");
@@ -404,6 +496,7 @@ mod tests {
             project_types: &map,
             is_project: &project,
             file_types: &[],
+            hierarchy: None,
         };
         let scope = ProjectNameScope {
             names,
@@ -437,6 +530,7 @@ mod tests {
             project_types: &map,
             is_project: &project,
             file_types: &[],
+            hierarchy: None,
         };
         let scope = ProjectNameScope {
             names,
@@ -463,6 +557,7 @@ mod tests {
             project_types: &map,
             is_project: &project,
             file_types: &[],
+            hierarchy: None,
         };
         let scope = ProjectNameScope { names, owner: "p/Owner" };
         assert_eq!(scope.simple("Riga").as_deref(), Some("a/dto/Riga"));

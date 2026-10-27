@@ -182,7 +182,7 @@ mod tests {
                 TypeRef::simple("com/acme/Order"),
             ],
             dims: 0,
-            wildcard: false,
+            wildcard: false, super_bound: false,
         };
         assert_eq!(render_type(&t), "Map<String, Order>");
     }

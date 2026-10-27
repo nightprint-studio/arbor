@@ -2247,7 +2247,7 @@ mod tests {
                             binary_name: String::new(),
                             type_args: vec![],
                             dims: 0,
-                            wildcard: false,
+                            wildcard: false, super_bound: false,
                         },
                         params: vec![],
                         is_static: m.is_static,

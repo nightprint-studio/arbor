@@ -250,6 +250,11 @@ fn inside_anonymous_class_below(n: Node, class: Node) -> bool {
         if p.id() == class.id() {
             return false; // reached the enclosing class with no anon body in between
         }
+        // An enum constant with a body (`PLAIN { … super.copy(k) … }`) is an anonymous subclass of
+        // its enum: its `super` is that enum, not the class the enum happens to be nested in.
+        if p.kind() == "enum_constant" && p.child_by_field_name("body").is_some() {
+            return true;
+        }
         if p.kind() == "object_creation_expression" {
             // A `new T(){ ... }` with a body means everything below it is in an anonymous class.
             let mut c = p.walk();

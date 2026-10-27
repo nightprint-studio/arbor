@@ -52,7 +52,7 @@ pub const MAGIC: &[u8; 8] = b"BNNUIDX0";
 /// v8: `members_json` records whether a top-level type is package-private. An older index reads as
 /// "not package-private" for every type, which is safe but leaves the access check blind; rebuilding
 /// is what gives it something to judge.
-pub const FORMAT_VERSION: u64 = 8;
+pub const FORMAT_VERSION: u64 = 9;
 /// The header is exactly 16 bytes (8 magic + 8 version), so the first record starts
 /// 16-byte-aligned.
 pub const HEADER_LEN: usize = 16;

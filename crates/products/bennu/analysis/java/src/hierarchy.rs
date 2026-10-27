@@ -65,7 +65,7 @@ pub fn substitute(ty: &TypeRef, params: &[String], args: &[TypeRef]) -> TypeRef 
         dims: ty.dims,
         // A substitution replaces what a variable STANDS FOR, not what it is written as: a position
         // that was a captured wildcard is still one afterwards.
-        wildcard: ty.wildcard,
+        wildcard: ty.wildcard, super_bound: ty.super_bound,
     }
 }
 
@@ -155,6 +155,70 @@ pub fn supertype_names(resolver: &dyn TypeResolver, start: &str) -> Vec<String> 
         None
     });
     out
+}
+
+/// The closest type both `a` and `b` are, for the places Java types an expression by its branches
+/// (`cond ? new Integer(1) : new Double(2)`, the arms of a `switch`, repeated `T` arguments).
+///
+/// JLS §4.10.4 makes the answer an *intersection* whenever the two share several unrelated
+/// supertypes (`Integer`/`String` are `Object & Serializable & Comparable<…> & …`), and nothing here
+/// can be written as one. So the answer is given only when it is a single type: one closest class
+/// or one closest interface (never both), or `Object` when nothing but `Object` is shared. Several
+/// unrelated candidates, or a hierarchy that could not be walked to the top, give `None` — a wrong,
+/// narrower answer would invent members, and "unknown" never does.
+///
+/// A type argument survives only when both sides agree on it; otherwise the type comes back raw.
+pub fn common_supertype(resolver: &dyn TypeResolver, a: &TypeRef, b: &TypeRef) -> Option<TypeRef> {
+    if a.dims > 0 || b.dims > 0 {
+        return (a == b).then(|| a.clone());
+    }
+    let ancestors = |start: &TypeRef| {
+        let mut out: Vec<(TypeRef, bool)> = Vec::new();
+        let walked = walk::<()>(resolver, start, |anc| {
+            out.push((anc.ty.clone(), anc.members.flags.is_interface));
+            None
+        });
+        walked.complete.then_some(out)
+    };
+    let (up_a, up_b) = (ancestors(a)?, ancestors(b)?);
+    let shared: Vec<&(TypeRef, bool)> = up_a
+        .iter()
+        .filter(|(t, _)| t.binary_name != "java/lang/Object")
+        .filter(|(t, _)| up_b.iter().any(|(u, _)| u.binary_name == t.binary_name))
+        .collect();
+    // Closest = not above another shared type.
+    let closest: Vec<&&(TypeRef, bool)> = shared
+        .iter()
+        .filter(|(t, _)| {
+            !shared.iter().any(|(o, _)| {
+                o.binary_name != t.binary_name
+                    && up_a.iter().any(|(x, _)| x.binary_name == o.binary_name)
+                    && seen_as(resolver, o, &t.binary_name).is_some()
+            })
+        })
+        .collect();
+    let classes: Vec<&&(TypeRef, bool)> = closest.iter().filter(|(_, itf)| !itf).copied().collect();
+    // Marker interfaces add no members, so an intersection with one is the other part, for every use
+    // the answer has (`ArrayList`/`LinkedList` are both `Cloneable`, `Serializable`, and `AbstractList`).
+    let marker = |t: &TypeRef| {
+        matches!(t.binary_name.as_str(), "java/io/Serializable" | "java/lang/Cloneable" | "java/util/RandomAccess")
+    };
+    let interfaces: Vec<&&(TypeRef, bool)> =
+        closest.iter().filter(|(t, itf)| *itf && !marker(t)).copied().collect();
+    let pick = match (classes.as_slice(), interfaces.as_slice()) {
+        // A class AND an interface the class does not itself implement is an intersection
+        // (`HashIterator & Iterator<E>`): neither alone is the type, so there is no single answer.
+        ([only], []) => &only.0,
+        ([], [only]) => &only.0,
+        ([], []) => return Some(TypeRef::simple("java/lang/Object")),
+        _ => return None,
+    };
+    let other = up_b.iter().find(|(t, _)| t.binary_name == pick.binary_name).map(|(t, _)| t)?;
+    Some(if other.type_args == pick.type_args {
+        pick.clone()
+    } else {
+        TypeRef::simple(pick.binary_name.clone())
+    })
 }
 
 /// `start` seen **as** `binary`: that supertype's name carrying the arguments that reach it.

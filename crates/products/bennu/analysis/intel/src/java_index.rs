@@ -106,6 +106,7 @@ pub fn build_project_index_from_sources(
         }
     }
     let is_project = |b: &str| project_binaries.contains(b);
+    let hierarchy = project_hierarchy(&parsed, &project_types, &is_project);
 
     let mut builder = IndexBuilder::new(index_dir);
     let mut next_id: u32 = 0;
@@ -115,7 +116,7 @@ pub fn build_project_index_from_sources(
 
     for ((path, fs), (_p2, source)) in parsed.iter().zip(sources.iter()) {
         let (records, ids, types, members) =
-            file_records(path, fs, &project_types, next_id, &is_project);
+            file_records(path, fs, &project_types, next_id, &is_project, Some(&hierarchy));
         next_id = ids;
         type_count += types;
         member_count += members;
@@ -465,7 +466,42 @@ pub fn file_records_from_source(
     is_project: &dyn Fn(&str) -> bool,
 ) -> Vec<IndexRecord> {
     let fs = extract_symbols(source);
-    file_records(path, &fs, project_types, start_id, is_project).0
+    file_records(path, &fs, project_types, start_id, is_project, None).0
+}
+
+/// `binary → direct supertype binaries` for every project type, each supertype name resolved in the
+/// FILE THAT WRITES IT (its package and imports) — the only scope in which the name means anything.
+fn project_hierarchy(
+    parsed: &[(PathBuf, FileSymbols)],
+    project_types: &BTreeMap<String, String>,
+    is_project: &dyn Fn(&str) -> bool,
+) -> BTreeMap<String, Vec<String>> {
+    let mut out = BTreeMap::new();
+    for (_, fs) in parsed {
+        let package = fs.package.as_deref().unwrap_or("");
+        for td in &fs.types {
+            let supers: Vec<String> = td
+                .extends
+                .iter()
+                .chain(td.implements.iter())
+                .filter_map(|written| {
+                    let erased = written.split('<').next().unwrap_or(written).trim();
+                    // `extends java.util.AbstractMap<K, V>` names its package outright.
+                    if erased.chars().next().is_some_and(char::is_lowercase) && erased.contains('.') {
+                        return Some(erased.replace('.', "/"));
+                    }
+                    let simple = erased.rsplit('.').next().unwrap_or(erased).trim();
+                    // A supertype the build cannot read (`implements NavigableMap<K, V>`) is kept by the
+                    // name its import gives it: it is what lets a JDK-inherited member type be found.
+                    bennu_java::prelude::bind_simple_name(simple, Some(package), &fs.imports, is_project)
+                        .or_else(|| bennu_java::prelude::jdk_on_demand_binding(simple, &fs.imports))
+                        .or_else(|| project_types.get(simple).cloned())
+                })
+                .collect();
+            out.insert(td.fqn.replace('.', "/"), supers);
+        }
+    }
+    out
 }
 
 /// Build one file's records; returns `(records, next_id, type_count, member_count)`.
@@ -478,6 +514,7 @@ fn file_records(
     project_types: &BTreeMap<String, String>,
     start_id: u32,
     is_project: &dyn Fn(&str) -> bool,
+    hierarchy: Option<&BTreeMap<String, Vec<String>>>,
 ) -> (Vec<IndexRecord>, u32, usize, usize) {
     let mut records = Vec::new();
     let mut next_id = start_id;
@@ -492,6 +529,7 @@ fn file_records(
         project_types,
         is_project,
         file_types: &fs.types,
+        hierarchy,
     };
 
     for td in &fs.types {
@@ -991,6 +1029,7 @@ mod tests {
             project_types: EMPTY.get_or_init(BTreeMap::new),
             is_project: &|_: &str| false,
             file_types: &fs.types,
+            hierarchy: None,
         }
     }
 

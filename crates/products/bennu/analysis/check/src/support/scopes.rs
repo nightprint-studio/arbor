@@ -516,7 +516,10 @@ pub(crate) fn declared_type_text(use_node: Node, name: &str, bytes: &[u8], field
                 if matches!(p.kind(), "formal_parameter" | "spread_parameter")
                     && p.child_by_field_name("name").and_then(|n| n.utf8_text(bytes).ok()) == Some(name)
                 {
-                    return p.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok()).map(str::to_string);
+                    return p
+                        .child_by_field_name("type")
+                        .and_then(|t| t.utf8_text(bytes).ok())
+                        .map(|t| bennu_java::prelude::with_declarator_dims(t, &p, bytes));
                 }
             }
         }
@@ -551,7 +554,8 @@ fn declarator_type(decl: Node, name: &str, bytes: &[u8]) -> Option<String> {
         if d.kind() == "variable_declarator"
             && d.child_by_field_name("name").and_then(|n| n.utf8_text(bytes).ok()) == Some(name)
         {
-            return Some(ty.to_string());
+            // `String names[]` — the brackets belong to the declarator.
+            return Some(bennu_java::prelude::with_declarator_dims(ty, &d, bytes));
         }
     }
     None

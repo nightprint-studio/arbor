@@ -56,6 +56,19 @@ pub fn reaches(resolver: &dyn TypeResolver, from: &str, target: &str) -> bool {
     walked.found.is_some() || !walked.complete
 }
 
+/// Whether `target` is **provably** `from` itself or one of its supertypes: found on the walk, never
+/// assumed from a gap in it. The question a check that REPORTS something needs; [`reaches`] is the
+/// one for a check that stays silent on doubt, and using it for a positive claim is how
+/// `class Foo<T> extends Bar<T>` came to be "a generic Throwable" whenever `Bar`'s own parent was
+/// not on the classpath.
+pub fn provably_reaches(resolver: &dyn TypeResolver, from: &str, target: &str) -> bool {
+    walk(resolver, &TypeRef::simple(from), |a| {
+        bennu_java::prelude::same_binary_type(&a.ty.binary_name, target).then_some(())
+    })
+    .found
+    .is_some()
+}
+
 /// Whether every class in `binary`'s hierarchy is resolvable (no `members_of` gap). Checks that want
 /// to make a *positive* assertion ("this class fails to implement X") need this: with an unknown
 /// supertype the assertion could be wrong, so they bail. `false` also when `binary` itself is unknown.
