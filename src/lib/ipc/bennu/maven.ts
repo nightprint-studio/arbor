@@ -66,7 +66,7 @@ export interface Advisory {
   fixed: string | null;
 }
 
-/** A pinned dependency with at least one known vulnerability — mirrors the BE `PomAdvisory`. */
+/** A dependency of the pom with at least one known vulnerability — mirrors the BE `PomAdvisory`. */
 export interface PomAdvisory {
   coord: string;
   line: number;
@@ -84,4 +84,34 @@ export interface PomAdvisory {
  *  `bennu_maven_advisories` — `{ file, source }`. */
 export function pomAdvisories(file: string, source: string): Promise<PomAdvisory[]> {
   return bennu('bennu_maven_advisories', { args: { file, source } });
+}
+
+/** One classpath artifact with known vulnerabilities — mirrors the BE `ProjectAdvisory`. */
+export interface ProjectAdvisory {
+  coord: string;
+  /** The version the build resolved, not necessarily the one a pom writes. */
+  version: string;
+  /** Declared by a module, as opposed to dragged in transitively. */
+  direct: boolean;
+  modules: string[];
+  /** Declaration site of a direct dependency; empty / 0 otherwise. */
+  file: string;
+  line: number;
+  advisories: Advisory[];
+}
+
+/** The whole project's vulnerabilities — mirrors the BE `ProjectAdvisories`. */
+export interface ProjectAdvisories {
+  /** `[maven] advisories` is on. When false, nothing was sent and `items` is empty. */
+  enabled: boolean;
+  checked: number;
+  /** More artifacts than one pass covers. */
+  truncated: boolean;
+  items: ProjectAdvisory[];
+}
+
+/** Known vulnerabilities across everything on the project's classpath (OSV.dev).
+ *  Wire: `bennu_project_advisories` — `{ root }`. */
+export function projectAdvisories(root: string): Promise<ProjectAdvisories> {
+  return bennu('bennu_project_advisories', { args: { root } });
 }

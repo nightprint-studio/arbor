@@ -19,7 +19,7 @@
   import { tabsStore }     from '$lib/stores/corvus/tabs.svelte';
   import { securityStore } from '$lib/stores/corvus/security.svelte';
   import { SEVERITY_ORDER, totalCount } from '$lib/types/corvus/security';
-  import { SEVERITY_META, formatMedianAge } from './severity-meta';
+  import { SEVERITY_META, formatMedianAge } from '$lib/components/shared/internal/security/severity-meta';
   import RiskScoreGauge from './RiskScoreGauge.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 

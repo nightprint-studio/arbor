@@ -26,6 +26,15 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   close_tab:          { key: 'w',     ctrl: true,                description: 'Close current tab',          group: 'Navigation' },
   next_tab:           { key: 'Tab',   ctrl: true,                description: 'Next tab',                   group: 'Navigation' },
   prev_tab:           { key: 'Tab',   ctrl: true,  shift: true,  description: 'Previous tab',               group: 'Navigation' },
+  // Bennu's Alt+Tab-style project switcher. Same chord as next_tab/prev_tab on purpose: those are
+  // Corvus's repository tabs, this is Bennu's open projects, and each product only listens in its
+  // own window. Hold the modifier, press Tab to walk, release to switch.
+  switch_project:      { key: 'Tab',  ctrl: true,                description: 'Switch project (Bennu)',     group: 'Navigation' },
+  // The searchable counterpart of switch_project: every project of every workspace plus recents,
+  // found by typing. Ctrl+Shift+D — free in Bennu and in the global map, and not a Chromium
+  // DevTools chord (unlike Ctrl+Shift+J / C / I).
+  goto_project:        { key: 'd',    ctrl: true,  shift: true,  description: 'Go to project (Bennu)',      group: 'Navigation' },
+  switch_project_prev:{ key: 'Tab',  ctrl: true,  shift: true,  description: 'Switch project, backwards (Bennu)', group: 'Navigation' },
   // Generic IDE-style left-rail expand/collapse — closes whatever section is
   // open or restores the last one. The explicit "open Branches" shortcut is
   // `toggle_branches_sidebar` (Alt+Shift+1) under the Sidebar Sections group.

@@ -74,6 +74,8 @@
   <tbody>
     <tr><td><Kbd action="next_tab" size="sm" /></td><td>Next tab</td></tr>
     <tr><td><Kbd action="prev_tab" size="sm" /></td><td>Previous tab</td></tr>
+    <tr><td><Kbd action="switch_project" size="sm" /></td><td>Bennu: switch between open projects, across workspaces, Alt+Tab style — keep pressing to walk the list, release the modifier to switch</td></tr>
+    <tr><td><Kbd action="goto_project" size="sm" /></td><td>Bennu: go to any project by typing — every workspace plus recents</td></tr>
     <tr><td><Kbd action="close_tab" size="sm" /></td><td>Close active tab</td></tr>
     <tr><td><Kbd action="jump_to_head" size="sm" /></td><td>Jump to HEAD commit in graph</td></tr>
     <tr><td><Kbd action="focus_graph" size="sm" /></td><td>Focus the commit graph (enables the arrow / Page / Home / End nav below)</td></tr>

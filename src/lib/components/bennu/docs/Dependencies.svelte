@@ -95,6 +95,27 @@
   The last group, <strong>Pulled in transitively</strong>, is every jar on the classpath that no module asked for: where
   "why is <em>this</em> version of that library here" gets answered.
 </p>
+
+<h3>Who brings what, and version conflicts</h3>
+<p>
+  The list above is read from the poms and never runs Maven, so the window opens instantly. Two questions need Maven itself —
+  which dependency brought a jar in, and why there is more than one version of it — because Maven's choice between versions
+  depends on the whole reactor. The <strong>Resolve tree</strong> button (the flow icon in the toolbar, or the one in the notice
+  at the top) runs <code>mvn dependency:tree</code> in the background. It can take a while on a cold cache, so it only runs when
+  you ask, honours the <em>automatic download</em> setting (offline otherwise), and keeps its answer per project until you resolve again.
+</p>
+<p>Once it has answered:</p>
+<ul class="prop-list">
+  <li><strong>Version conflicts</strong>a group at the top with every artifact the project sees at more than one version. Each lists the version Maven kept, the ones it dropped, and for each version the chain of dependencies that asked for it.</li>
+  <li><strong>via …</strong>every transitive row names the declared dependencies that bring it in</li>
+  <li><strong>Details</strong>a declared row opens (chevron) to show what it pulls in and, when conflicted, its versions</li>
+  <li><strong>Vulnerability badge</strong>a dependency (declared or transitive) with known CVEs carries a shield with the count, coloured by the worst severity — it uses the same OSV answer as the Vulnerabilities window, so it appears only while that check is on</li>
+</ul>
+<p>
+  On a Cargo workspace the same button runs <code>cargo tree --workspace</code>. Cargo never drops a version — two incompatible
+  versions of a crate are both built — so the group is called <strong>Duplicate versions</strong> and lists them without "kept / dropped".
+  Maven runs under the JDK the project is indexed with.
+</p>
 <p>
   Each group header has <strong>Focus in Project</strong> — its locate button, or a right-click on the header — which opens
   the Project tree on that module's (or crate's) folder, expanded and selected, with the keyboard focus on it. The same menu

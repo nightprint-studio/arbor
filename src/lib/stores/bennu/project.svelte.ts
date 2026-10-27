@@ -589,6 +589,49 @@ function createProjectStore() {
     isDemo = false;
   }
 
+  /**
+   * Open `p` as a **member** of the workspace — a session in memory, its tree loading in the
+   * background — without putting it on screen. `warm` says whether to start its engines now (only
+   * for the one that is about to be shown). Resolves to the canonical root, or `null` when it did
+   * not open (a vanished directory is announced, not thrown).
+   *
+   * Shared by a workspace restore and by moving a project into the live workspace, which are the
+   * same act: a stored session becoming a live one.
+   */
+  async function openMember(p: ProjectSession, warm: boolean): Promise<string | null> {
+    let info;
+    try {
+      info = await ipcOpenProject(p.root, warm);
+    } catch (err) {
+      // Not awaited: the status question is a round-trip, and the rest of the workspace should
+      // not wait on explaining one project that is not coming.
+      void projectHealthStore.explainFailedOpen(p.root, err);
+      return null;
+    }
+    const root = canonPath(info.root);
+    projectHealthStore.settle(root);
+    // Before the tree load below, whose completion prunes against it. Replaces whatever was in
+    // memory: the same project in another workspace remembers its own rows, like its own tabs.
+    treeExpansionStore.seed(root, p);
+    const paths = p.open_files.map(canonPath);
+    // The carets ride positionally alongside the tabs, and a session written before they
+    // existed simply has none — hence the index-wise read rather than a zip.
+    paths.forEach((path, i) => {
+      const caret = parseCaret(p.open_carets?.[i] ?? '');
+      if (caret) carets.set(path, caret);
+    });
+    sessions.set(root, {
+      info: { ...info, root },
+      tree: null,
+      openFilePaths: paths,
+      activeFilePath: p.active_file ? canonPath(p.active_file) : null,
+    });
+    workspaceRoots = [...workspaceRoots, root];
+    rememberRecent(root);
+    loadTreeInto(root);
+    return root;
+  }
+
   /** Latest tree request per root — see `loadTreeInto`. */
   const treeLoadSeq = new Map<string, number>();
 
@@ -1013,6 +1056,25 @@ function createProjectStore() {
       return true;
     },
 
+    /** Take a stored session into the live workspace as a background member — the project stays
+     *  where it is on screen. For moving a project into the workspace that is showing. Resolves to
+     *  whether it opened. */
+    async attachMember(p: ProjectSession): Promise<boolean> {
+      if (workspaceRoots.includes(canonPath(p.root))) return true;
+      const root = await openMember(p, false);
+      if (root) persistWorkspace();
+      return root !== null;
+    },
+
+    /** Put the members in `roots` order (roots that are not members are ignored; members left out
+     *  keep their relative order after the listed ones). Order is the user's — the manager's drag
+     *  and the title-bar tree both show it. */
+    reorderMembers(roots: string[]) {
+      const wanted = roots.map(canonPath).filter((r) => workspaceRoots.includes(r));
+      workspaceRoots = [...wanted, ...workspaceRoots.filter((r) => !wanted.includes(r))];
+      persistWorkspace();
+    },
+
     /** Switch the active project to `root` (an existing workspace member). Instant — the target's
      *  state is already in memory; only the active file's source is (lazily) ensured. No-op when
      *  `root` is already active or isn't a member. */
@@ -1021,12 +1083,23 @@ function createProjectStore() {
       if (project?.root === root) return;
       const s = sessions.get(root);
       if (!s) return;
+      // Timing, so "the switch feels slow" can be answered with a number: how long until the new
+      // project is actually painted, and how much of that is the file read behind it. Read it in
+      // the devtools console (filter "bennu switch"); it costs two timestamps and a frame callback.
+      const t0 = performance.now();
       stashActive();
       loadSession(s);
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() =>
+          console.debug(`bennu switch → ${root}: first paint after ${(performance.now() - t0).toFixed(0)}ms`)));
       // Somebody is now looking at this one. Idempotent when its server is already up — and it
       // is what starts one for a member that was restored in the background.
       void ipcActivateProject(root).catch(() => {});
-      if (activeFilePath) await ensureLoaded(activeFilePath);
+      if (activeFilePath) {
+        const tFile = performance.now();
+        await ensureLoaded(activeFilePath);
+        console.debug(`bennu switch → ${root}: active file ready after ${(performance.now() - tFile).toFixed(0)}ms`);
+      }
       persistWorkspace();
     },
 
@@ -1163,37 +1236,8 @@ function createProjectStore() {
       // or when `switchProject` announces them.
       const wanted = canonPath(active);
       for (const p of projects) {
-        let info;
         // eslint-disable-next-line no-await-in-loop
-        try {
-          info = await ipcOpenProject(p.root, canonPath(p.root) === wanted);
-        } catch (err) {
-          // Not awaited: the status question is a round-trip, and the rest of the workspace should
-          // not wait on explaining one project that is not coming.
-          void projectHealthStore.explainFailedOpen(p.root, err);
-          continue;
-        }
-        const root = canonPath(info.root);
-        projectHealthStore.settle(root);
-        // Before the tree load below, whose completion prunes against it. Replaces whatever was in
-        // memory: the same project in another workspace remembers its own rows, like its own tabs.
-        treeExpansionStore.seed(root, p);
-        const paths = p.open_files.map(canonPath);
-        // The carets ride positionally alongside the tabs, and a session written before they
-        // existed simply has none — hence the index-wise read rather than a zip.
-        paths.forEach((path, i) => {
-          const caret = parseCaret(p.open_carets?.[i] ?? '');
-          if (caret) carets.set(path, caret);
-        });
-        sessions.set(root, {
-          info: { ...info, root },
-          tree: null,
-          openFilePaths: paths,
-          activeFilePath: p.active_file ? canonPath(p.active_file) : null,
-        });
-        workspaceRoots = [...workspaceRoots, root];
-        rememberRecent(root);
-        loadTreeInto(root);
+        await openMember(p, canonPath(p.root) === wanted);
       }
       if (!workspaceRoots.length) return; // nothing opened (all gone / BE down)
       // Activate the remembered active project (or the first that opened), then load its active file.

@@ -14,6 +14,9 @@ pub use crate::model::{Dependency, Module, Origin, Report, Site, Transitive};
 // The internal shape of the project, derived from a report.
 pub use crate::module_graph::{module_graph, GraphEdge, GraphNode, ModuleGraph};
 
+// The resolved tree, read from `mvn dependency:tree` output.
+pub use crate::tree::{parse_cargo_tree, parse_tree_output, ModuleTree, TreeNode};
+
 // One pom, for a consumer that has the text and wants the declarations.
 pub use crate::pom::{parse as parse_pom, ParentRef, Pom, RawDependency, Relocation};
 

@@ -105,8 +105,21 @@
   </dd>
   <dt>The workspace manager</dt>
   <dd>
-    <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd>, or <em>Manage workspaces…</em> in the dropdown: create, rename,
-    recolour and delete workspaces, and add or remove their projects.
+    <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd>, or <em>Manage workspaces…</em> in the dropdown. Every workspace is a
+    column and every project a card in it.
+    <ul>
+      <li><strong>Move a project to another workspace</strong> by dragging its card into that column, at the spot where it
+        should go; or select it and press <kbd>Alt</kbd> + <kbd>←</kbd>/<kbd>→</kbd>. A project moved into the workspace you
+        are in opens in the background — it does not take over the screen — and one moved out of it is closed.</li>
+      <li><strong>Reorder projects</strong> by dragging within a column, or <kbd>Alt</kbd> + <kbd>↑</kbd>/<kbd>↓</kbd>.
+        The order is the one the title-bar tree shows.</li>
+      <li><strong>Reorder workspaces</strong> by dragging a column's header, or <kbd>Alt</kbd> + <kbd>←</kbd>/<kbd>→</kbd> on it.</li>
+      <li><kbd>Enter</kbd> (or a double-click) opens a project, <kbd>Del</kbd> removes it from its workspace,
+        <kbd>Esc</kbd> cancels a drag.</li>
+      <li>The panel on the right holds the selected workspace's name, colour, and the switch / delete actions.</li>
+    </ul>
+    Moving a project carries its open tabs with it. If the same folder is already in the destination workspace, it is just
+    taken out of the source.
   </dd>
   <dt>Open project</dt>
   <dd>
@@ -226,7 +239,9 @@
   <strong>Project Configuration</strong> — the title bar's gear, <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>,</kbd>, or
   the command palette — holds everything that is true of <em>this project</em> rather than of you, as four sections with
   a sidebar: <strong>Project</strong> (the JDK level it targets, its encoding, its modules), <strong>Frameworks</strong>
-  (what was detected here, each with the evidence that convinced Bennu), and the two that override your profile —
+  (every capability Bennu knows, grouped by kind: the ones found, each with the evidence that convinced it and a
+  <em>provisional</em> mark when only a pattern in the source supports it, and the ones not found, each with what Bennu
+  looks for — so "why is that feature not here" has an answer; filter the list or hide the missing ones), and the two that override your profile —
   <strong>Naming</strong> and <strong>Spelling</strong>. Settings holds what belongs to you and to the machine instead,
   which is why the two are different dialogs; they share a layout so the boundary is the only thing you have to learn.
 </p>

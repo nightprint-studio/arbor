@@ -1,50 +1,51 @@
 <script lang="ts">
   /**
-   * BennuWorkspaceManagerModal — create / rename / recolor / delete workspaces and manage their
-   * member projects. The Corvus-light equivalent of `WorkspaceManagementModal`: a two-pane layout
-   * (workspace list on the left, selected-workspace detail on the right), no git-specific parts
-   * (groups, health scan, fetch/pull, import/export).
+   * BennuWorkspaceManagerModal — see every workspace at once and rearrange them.
    *
-   * All state lives in `workspacesStore`; this modal is pure presentation + wiring. Adding a project
-   * routes through the store (which switches to the target workspace first so the add goes through
-   * projectStore's live open/index path). Deleting asks via the shared ConfirmModal.
+   * A **board**: one column per workspace, one card per project. Moving a project to another
+   * workspace is a drag from one column to the other (or <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd>);
+   * reordering projects or workspaces is the same drag within a column or by the header. The
+   * board itself is `workspaces/BennuWorkspaceBoard.svelte`.
+   *
+   * The panel on the right is the selected workspace's own settings — name, colour, switching to
+   * it, deleting it — which are about one workspace and so do not belong on the board.
+   *
+   * All state lives in `workspacesStore`; this modal is wiring. Adding a project routes through the
+   * store (which switches to the target workspace first so the add goes through projectStore's live
+   * open/index path). Deleting asks via the shared ConfirmModal.
    */
-  import { Plus, FolderPlus, X, Check, Trash2, ArrowRightLeft, FolderCode } from 'lucide-svelte';
+  import { ArrowRightLeft, FolderCode, Trash2, MousePointer2 } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';
+  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
-  import { tooltip } from '$lib/actions/tooltip';
+  import BennuWorkspaceBoard from './workspaces/BennuWorkspaceBoard.svelte';
   import { workspacesStore, wsColorVar, WS_COLOR_COUNT } from '$lib/stores/bennu/workspaces.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
   const colorIndices = Array.from({ length: WS_COLOR_COUNT }, (_, i) => i);
 
-  // Which workspace's detail is shown on the right. Defaults to the active one; falls back to the
-  // first when the selection is deleted.
+  // Which workspace's settings are shown. Defaults to the active one; falls back to the first when
+  // the selection is deleted.
   let selectedId = $state<string>(workspacesStore.activeId);
   const selected = $derived(
     workspacesStore.workspaces.find((w) => w.id === selectedId) ?? workspacesStore.workspaces[0] ?? null,
   );
 
-  let pickerOpen = $state(false);
+  /** Which workspace the folder picker is adding to; null when it is closed. */
+  let pickerFor = $state<string | null>(null);
   let confirmDeleteId = $state<string | null>(null);
   const confirmTarget = $derived(
     confirmDeleteId ? workspacesStore.workspaces.find((w) => w.id === confirmDeleteId) ?? null : null,
   );
 
-  function basename(path: string): string {
-    const parts = path.split(/[\\/]/).filter(Boolean);
-    return parts[parts.length - 1] ?? path;
-  }
-
   async function createWorkspace() {
-    const id = await workspacesStore.create('New workspace');
-    selectedId = id;
+    selectedId = await workspacesStore.create('New workspace');
   }
 
   async function switchTo(id: string) {
@@ -52,13 +53,10 @@
     selectedId = id;
   }
 
-  function renameSelected(name: string) {
-    if (selected) workspacesStore.rename(selected.id, name);
-  }
-
   async function addProject(dir: string) {
-    pickerOpen = false;
-    if (selected) await workspacesStore.addProjectTo(selected.id, dir);
+    const target = pickerFor;
+    pickerFor = null;
+    if (target) await workspacesStore.addProjectTo(target, dir);
   }
 
   function confirmDelete() {
@@ -67,49 +65,25 @@
   }
 </script>
 
-<Modal {onClose} width="720px" height="520px" padBody={false} ariaLabel="Manage workspaces">
+<Modal {onClose} width="min(1180px, 96vw)" height="min(620px, 88vh)" padBody={false} ariaLabel="Manage workspaces">
   {#snippet header()}
     <ModalHeader {onClose}>
       <FolderCode size={15} />
       <span class="hdr-title">Workspaces</span>
-      <span class="hdr-sub">Group projects · quick-switch · cross-project search</span>
+      <span class="hdr-sub">Drag projects between workspaces · drag to reorder</span>
     </ModalHeader>
   {/snippet}
 
   <div class="mgr">
-    <!-- ── Left: workspace list ─────────────────────────────────────────────── -->
-    <aside class="list" aria-label="Workspaces">
-      <div class="list-scroll">
-        {#each workspacesStore.workspaces as ws (ws.id)}
-          {@const isActive = ws.id === workspacesStore.activeId}
-          <button
-            type="button"
-            class="ws-row"
-            class:selected={ws.id === selected?.id}
-            onclick={() => (selectedId = ws.id)}
-          >
-            <Monogram name={ws.name || 'Workspace'} color={wsColorVar(ws.color_idx)} size={22} />
-            <span class="ws-name">{ws.name || 'Workspace'}</span>
-            {#if isActive}
-              <Check size={13} class="ws-active-check" />
-            {/if}
-            <span class="ws-count">{ws.projects.length}</span>
-          </button>
-        {/each}
-        {#if workspacesStore.workspaces.length === 0}
-          <div class="list-empty">No workspaces yet.</div>
-        {/if}
-      </div>
-      <div class="list-foot">
-        <Button variant="ghost" size="sm" block onclick={createWorkspace}>
-          {#snippet iconStart()}<Plus size={14} />{/snippet}
-          New workspace
-        </Button>
-      </div>
-    </aside>
+    <BennuWorkspaceBoard
+      bind:selectedId
+      onAddProject={(id) => (pickerFor = id)}
+      onNewWorkspace={createWorkspace}
+      {onClose}
+    />
 
-    <!-- ── Right: selected workspace detail ─────────────────────────────────── -->
-    <section class="detail">
+    <!-- ── Right: the selected workspace's own settings ─────────────────────── -->
+    <aside class="detail" aria-label="Workspace settings">
       {#if selected}
         {@const ws = selected}
         {@const isActive = ws.id === workspacesStore.activeId}
@@ -120,98 +94,66 @@
               value={ws.name}
               placeholder="Workspace name"
               ariaLabel="Workspace name"
-              onchange={renameSelected}
+              onchange={(name) => workspacesStore.rename(ws.id, name)}
             />
           </div>
-          {#if isActive}
-            <span class="active-pill">Active</span>
-          {:else}
-            <Button variant="secondary" size="sm" onclick={() => switchTo(ws.id)}>
-              {#snippet iconStart()}<ArrowRightLeft size={13} />{/snippet}
-              Switch to
-            </Button>
-          {/if}
         </div>
 
-        <!-- Color swatches -->
-        <div class="field-label">Color</div>
-        <div class="swatches" role="group" aria-label="Workspace color">
+        {#if isActive}
+          <span class="active-pill">Active workspace</span>
+        {:else}
+          <Button variant="secondary" size="sm" block onclick={() => switchTo(ws.id)}>
+            {#snippet iconStart()}<ArrowRightLeft size={13} />{/snippet}
+            Switch to this workspace
+          </Button>
+        {/if}
+
+        <div class="field-label">Colour</div>
+        <div class="swatches" role="group" aria-label="Workspace colour">
           {#each colorIndices as i (i)}
             <button
               type="button"
               class="swatch"
               class:on={ws.color_idx === i}
               style="--sw: {wsColorVar(i)}"
-              aria-label={`Color ${i + 1}`}
+              aria-label={`Colour ${i + 1}`}
               aria-pressed={ws.color_idx === i}
               onclick={() => workspacesStore.setColor(ws.id, i)}
             ></button>
           {/each}
         </div>
 
-        <!-- Member projects -->
-        <div class="field-label projects-label">
-          Projects <span class="count-badge">{ws.projects.length}</span>
-        </div>
-        <div class="projects">
-          {#each ws.projects as p (p.root)}
-            <div class="proj-row">
-              <FolderCode size={14} class="proj-icon" />
-              <span class="proj-name">{basename(p.root)}</span>
-              <span class="proj-path" use:tooltip={p.root}>{p.root}</span>
-              <button
-                type="button"
-                class="proj-remove"
-                aria-label={`Remove ${basename(p.root)}`}
-                use:tooltip={'Remove from workspace'}
-                onclick={() => workspacesStore.removeProjectFrom(ws.id, p.root)}
-              >
-                <X size={13} />
-              </button>
-            </div>
-          {/each}
-          {#if ws.projects.length === 0}
-            <div class="proj-empty">No projects. Add one to build this workspace.</div>
-          {/if}
-        </div>
+        <div class="spacer"></div>
 
-        <div class="detail-foot">
-          <Button variant="ghost" size="sm" onclick={() => (pickerOpen = true)}>
-            {#snippet iconStart()}<FolderPlus size={14} />{/snippet}
-            Add project…
-          </Button>
-          <span class="spacer"></span>
-          <Button
-            variant="ghost"
-            size="sm"
-            title="Delete workspace"
-            onclick={() => (confirmDeleteId = ws.id)}
-          >
-            {#snippet iconStart()}<Trash2 size={14} />{/snippet}
-            Delete
-          </Button>
-        </div>
+        <Button variant="ghost" size="sm" block onclick={() => (confirmDeleteId = ws.id)}>
+          {#snippet iconStart()}<Trash2 size={14} />{/snippet}
+          Delete workspace
+        </Button>
       {:else}
         <div class="detail-empty">
-          <FolderCode size={30} />
+          <MousePointer2 size={26} />
           <p>Create a workspace to group projects and switch between them instantly.</p>
-          <Button variant="primary" size="sm" onclick={createWorkspace}>
-            {#snippet iconStart()}<Plus size={14} />{/snippet}
-            New workspace
-          </Button>
         </div>
       {/if}
-    </section>
+
+      <div class="keys">
+        <div class="field-label">Keyboard</div>
+        <div class="key-row"><Kbd keys={['Alt', '←', '→']} size="sm" /> <span>move to another workspace</span></div>
+        <div class="key-row"><Kbd keys={['Alt', '↑', '↓']} size="sm" /> <span>reorder</span></div>
+        <div class="key-row"><Kbd keys={['Enter']} size="sm" /> <span>open</span></div>
+        <div class="key-row"><Kbd keys={['Del']} size="sm" /> <span>remove from workspace</span></div>
+      </div>
+    </aside>
   </div>
 </Modal>
 
-{#if pickerOpen}
+{#if pickerFor}
   <FileExplorerModal
     mode="folder"
     title="Add project to workspace"
     onConfirm={addProject}
-    onCancel={() => (pickerOpen = false)}
-    onClose={() => (pickerOpen = false)}
+    onCancel={() => (pickerFor = null)}
+    onClose={() => (pickerFor = null)}
   />
 {/if}
 
@@ -232,52 +174,25 @@
   .hdr-title { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary); }
   .hdr-sub   { flex: 1; font-size: var(--font-size-xs); color: var(--text-muted); }
 
-  .mgr { display: flex; height: 100%; font-family: var(--font-ui-sans); }
+  .mgr { display: flex; height: 100%; min-height: 0; font-family: var(--font-ui-sans); background: var(--bg-base); }
 
-  /* ── Left list ────────────────────────────────────────────────────────── */
-  .list {
-    flex: 0 0 240px; display: flex; flex-direction: column;
-    border-right: 1px solid var(--border); background: var(--bg-elevated);
+  .detail {
+    flex: 0 0 250px; display: flex; flex-direction: column; gap: 10px; padding: 16px;
+    border-left: 1px solid var(--border); background: var(--bg-elevated); min-width: 0; overflow-y: auto;
   }
-  .list-scroll { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
-  .list-foot { padding: 8px; border-top: 1px solid var(--border); }
-  .ws-row {
-    display: flex; align-items: center; gap: 10px; width: 100%;
-    padding: 8px 10px; background: transparent; border: 1px solid transparent;
-    border-radius: var(--radius-sm); cursor: pointer; text-align: left;
-    color: var(--text-primary); transition: background var(--transition-fast);
-  }
-  .ws-row:hover { background: var(--bg-hover); }
-  .ws-row.selected { background: var(--bg-hover); border-color: var(--border-subtle); }
-  .ws-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-sm); }
-  :global(.ws-row .ws-active-check) { color: var(--accent); flex-shrink: 0; }
-  .ws-count {
-    font-size: var(--font-size-2xs); color: var(--text-muted); background: var(--bg-overlay);
-    padding: 1px 7px; border-radius: 9px; font-variant-numeric: tabular-nums; flex-shrink: 0;
-  }
-  .list-empty { padding: 20px 10px; text-align: center; font-size: var(--font-size-xs); color: var(--text-muted); }
-
-  /* ── Right detail ─────────────────────────────────────────────────────── */
-  .detail { flex: 1; display: flex; flex-direction: column; padding: 16px 18px; min-width: 0; }
-  .detail-head { display: flex; align-items: center; gap: 12px; }
+  .detail-head { display: flex; align-items: center; gap: 10px; }
   .detail-name { flex: 1; min-width: 0; }
   .active-pill {
-    font-size: var(--font-size-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
-    color: var(--accent); background: var(--accent-subtle);
+    align-self: flex-start; font-size: var(--font-size-2xs); font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--accent); background: var(--accent-subtle);
     border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
-    border-radius: var(--radius-sm); padding: 3px 8px; flex-shrink: 0;
+    border-radius: var(--radius-sm); padding: 3px 8px;
   }
 
   .field-label {
     font-size: var(--font-size-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px;
-    color: var(--text-disabled); margin: 16px 0 8px;
+    color: var(--text-disabled); margin: 8px 0 4px;
   }
-  .projects-label { display: flex; align-items: center; gap: 8px; }
-  .count-badge {
-    font-size: var(--font-size-2xs); color: var(--text-muted); background: var(--bg-overlay);
-    padding: 1px 6px; border-radius: 8px; letter-spacing: 0;
-  }
-
   .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
   .swatch {
     width: 22px; height: 22px; border-radius: var(--radius-sm); cursor: pointer;
@@ -285,36 +200,17 @@
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sw) 40%, transparent);
     transition: transform var(--transition-fast), border-color var(--transition-fast);
   }
-  .swatch:hover { transform: scale(1.1); }
+  .swatch:hover { transform: scale(1.12); }
   .swatch.on { border-color: var(--text-primary); }
 
-  .projects { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; min-height: 60px; }
-  .proj-row {
-    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
-    border-radius: var(--radius-sm); transition: background var(--transition-fast);
-  }
-  .proj-row:hover { background: var(--bg-hover); }
-  :global(.proj-row .proj-icon) { color: var(--text-muted); flex-shrink: 0; }
-  .proj-name { font-size: var(--font-size-sm); color: var(--text-primary); flex-shrink: 0; }
-  .proj-path {
-    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-code);
-  }
-  .proj-remove {
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-    width: 22px; height: 22px; border: none; background: transparent; cursor: pointer;
-    color: var(--text-muted); border-radius: var(--radius-sm);
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .proj-remove:hover { background: var(--error-subtle); color: var(--error); }
-  .proj-empty { padding: 16px 8px; font-size: var(--font-size-xs); color: var(--text-muted); }
+  .spacer { flex: 1; min-height: 8px; }
 
-  .detail-foot { display: flex; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); margin-top: 8px; }
-  .spacer { flex: 1; }
+  .keys { border-top: 1px solid var(--border-subtle); padding-top: 4px; }
+  .key-row { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: var(--font-size-2xs); color: var(--text-muted); }
 
   .detail-empty {
-    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 12px; color: var(--text-muted); text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px 4px;
+    color: var(--text-muted); text-align: center;
   }
-  .detail-empty p { margin: 0; font-size: var(--font-size-sm); max-width: 280px; line-height: 1.5; }
+  .detail-empty p { margin: 0; font-size: var(--font-size-sm); line-height: 1.5; }
 </style>

@@ -234,7 +234,7 @@ const REACTOR_OUTPUT_FILE_NAME: &str = "bennu-run-classpath.txt";
 /// stdout and stderr are drained by their own threads rather than read after the wait, because a
 /// child that fills a pipe nobody is reading blocks in `write` — and a build log fills 64 KB long
 /// before a reactor finishes.
-fn run_bounded(mut cmd: Command, timeout: Duration) -> std::io::Result<std::process::Output> {
+pub fn run_bounded(mut cmd: Command, timeout: Duration) -> std::io::Result<std::process::Output> {
     use std::io::Read;
     use std::process::Stdio;
 

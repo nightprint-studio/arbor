@@ -14,10 +14,12 @@
 //!    next call continues. A pom with a hundred dependencies converges over a few passes instead of
 //!    stalling on the first.
 //!
-//! ## Only what the pom itself pins
+//! ## The version the build resolved
 //!
-//! Same rule as the version hints: a dependency with no literal `<version>` has no span to mark, and
-//! a warning on a line other than the one that would change is a warning nobody can act on.
+//! A dependency with no literal `<version>` (managed by a BOM or a parent, or a `${property}`) is
+//! still checked: its version is the one the dependency report resolved for that declaration, and
+//! the warning sits on the `<dependency>` tag when there is no version text to mark.
+//! [`bennu_project_advisories`] widens the question to the whole classpath, transitive jars included.
 //!
 //! ## Two calls, because OSV splits them
 //!
@@ -42,7 +44,7 @@ const MAX_DETAIL_FETCHES: usize = 30;
 /// Args for [`bennu_maven_advisories`].
 #[derive(Deserialize)]
 pub struct PomAdvisoryArgs {
-    /// The pom's path. Unused today, kept so the call is shaped like every other buffer request.
+    /// The pom's path — where the resolved versions of its managed dependencies are looked up.
     pub file: String,
     /// The live buffer — the spans must be in *this* text.
     pub source: String,
@@ -91,8 +93,161 @@ async fn bennu_maven_advisories(
     if !cfg.advisories {
         return Ok(Vec::new());
     }
-    let _ = &args.file;
-    Ok(advisories_for(&cfg, &args.source).await)
+    Ok(advisories_for(&cfg, &args.file, &args.source).await)
+}
+
+/// Args for [`bennu_project_advisories`].
+#[derive(Deserialize)]
+pub struct ProjectAdvisoryArgs {
+    /// Absolute path to the project root.
+    pub root: String,
+}
+
+/// One artifact on the project's classpath with at least one advisory.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectAdvisory {
+    /// `groupId:artifactId`.
+    pub coord: String,
+    /// The version actually on the classpath — the one the build resolved, not the one written.
+    pub version: String,
+    /// Declared by a module, as opposed to dragged in by something that is.
+    pub direct: bool,
+    /// The modules that declare it (empty when `direct` is false).
+    pub modules: Vec<String>,
+    /// Where a direct dependency is declared, so the modal can open the pom; empty otherwise.
+    pub file: String,
+    pub line: u32,
+    pub advisories: Vec<Advisory>,
+}
+
+/// The whole project's answer, for the vulnerabilities window.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectAdvisories {
+    /// Whether the `[maven] advisories` switch is on. `false` is a state the modal explains, not an
+    /// error: nothing was sent anywhere.
+    pub enabled: bool,
+    /// How many distinct `coord@version` were looked up.
+    pub checked: usize,
+    /// More artifacts than one pass looks up; the rest are left for the next call.
+    pub truncated: bool,
+    pub items: Vec<ProjectAdvisory>,
+}
+
+/// Known vulnerabilities across **everything on the project's classpath** — declared dependencies,
+/// whatever their version comes from (a BOM, a parent, a property), and what they drag in.
+///
+/// The editor warning can only mark a line in one pom; this is the whole picture, which is what
+/// "do I have a CVE" is really asking.
+#[arbor_rpc::handler]
+async fn bennu_project_advisories(
+    _ctx: &BennuState,
+    args: ProjectAdvisoryArgs,
+) -> Result<ProjectAdvisories, String> {
+    let cfg = bennu_core::config::load().maven;
+    if !cfg.advisories {
+        return Ok(ProjectAdvisories { enabled: false, checked: 0, truncated: false, items: Vec::new() });
+    }
+    let root = args.root;
+    let report = tokio::task::spawn_blocking(move || crate::dependencies::report_of(&root))
+        .await
+        .map_err(|e| format!("report: {e}"))?;
+    Ok(project_advisories(&cfg, &report).await)
+}
+
+/// Distinct artifacts one project pass will look up.
+const MAX_PROJECT_COORDS: usize = 400;
+/// Advisory records one project pass may fetch.
+const MAX_PROJECT_DETAIL_FETCHES: usize = 200;
+
+/// The version a dependency really has: the one the build resolved when the pom did not write a
+/// literal one (BOM, parent management, a `${property}`), read back from the jar's path.
+fn effective_version(d: &bennu_deps::prelude::Dependency) -> Option<String> {
+    if !d.version.is_empty() && !d.version.contains("${") {
+        return Some(d.version.clone());
+    }
+    if d.resolved.is_empty() {
+        return None;
+    }
+    bennu_deps::prelude::coord_of(Path::new(&d.resolved))
+        .map(|c| c.version)
+        .filter(|v| !v.is_empty())
+}
+
+async fn project_advisories(cfg: &MavenConfig, report: &bennu_deps::prelude::Report) -> ProjectAdvisories {
+    use std::collections::BTreeMap;
+    struct Entry {
+        direct: bool,
+        modules: Vec<String>,
+        file: String,
+        line: u32,
+    }
+    let mut by_key: BTreeMap<(String, String), Entry> = BTreeMap::new();
+    for m in &report.modules {
+        for d in &m.dependencies {
+            let Some(version) = effective_version(d) else { continue };
+            let e = by_key.entry((d.coord(), version)).or_insert_with(|| Entry {
+                direct: true,
+                modules: Vec::new(),
+                file: d.declared_in.file.clone(),
+                line: d.declared_in.line,
+            });
+            e.direct = true;
+            if !e.modules.contains(&m.name) {
+                e.modules.push(m.name.clone());
+            }
+        }
+    }
+    for t in &report.transitive {
+        if t.version.is_empty() {
+            continue;
+        }
+        by_key.entry((t.coord(), t.version.clone())).or_insert_with(|| Entry {
+            direct: false,
+            modules: Vec::new(),
+            file: String::new(),
+            line: 0,
+        });
+    }
+
+    let truncated = by_key.len() > MAX_PROJECT_COORDS;
+    let keys: Vec<(String, String)> = by_key.keys().take(MAX_PROJECT_COORDS).cloned().collect();
+    let targets: Vec<Target> = keys
+        .iter()
+        .map(|(coord, version)| Target { coord: coord.clone(), version: version.clone(), line: 0, span: None })
+        .collect();
+
+    let found = resolve_all(&targets, cfg, usize::MAX, MAX_PROJECT_DETAIL_FETCHES).await;
+    let mut items: Vec<ProjectAdvisory> = found
+        .into_iter()
+        .filter(|(_, list)| !list.is_empty())
+        .filter_map(|(i, advisories)| {
+            let key = &keys[i];
+            let e = by_key.get(key)?;
+            Some(ProjectAdvisory {
+                coord: key.0.clone(),
+                version: key.1.clone(),
+                direct: e.direct,
+                modules: e.modules.clone(),
+                file: e.file.clone(),
+                line: e.line,
+                advisories,
+            })
+        })
+        .collect();
+    // Worst first, so the modal opens on what matters; ties keep coordinate order.
+    items.sort_by_key(|p| std::cmp::Reverse(p.advisories.iter().map(|a| severity_rank(&a.severity)).max()));
+    ProjectAdvisories { enabled: true, checked: keys.len(), truncated, items }
+}
+
+/// Higher is worse. `unknown` sits between low and moderate: unrated is not harmless.
+fn severity_rank(severity: &str) -> u8 {
+    match severity {
+        "critical" => 5,
+        "high" => 4,
+        "moderate" | "medium" => 3,
+        "unknown" => 2,
+        _ => 1,
+    }
 }
 
 fn cache_dir() -> PathBuf {
@@ -118,23 +273,18 @@ struct Target {
     coord: String,
     version: String,
     line: u32,
-    span: (usize, usize),
+    /// Where the warning is drawn; `None` for a project-wide lookup, which draws nothing.
+    span: Option<(usize, usize)>,
 }
 
-async fn advisories_for(cfg: &MavenConfig, source: &str) -> Vec<PomAdvisory> {
-    let pom = bennu_deps::prelude::parse_pom(source);
-    let targets: Vec<Target> = crate::maven_central::candidates(&pom)
-        .into_iter()
-        .filter_map(|d| {
-            d.version_span.map(|span| Target {
-                coord: d.coord(),
-                version: d.version.clone(),
-                line: d.line,
-                span,
-            })
-        })
-        .collect();
-
+/// Cached answers for `targets`, plus fresh lookups for up to `max_misses` of the rest (in chunks of
+/// [`MAX_COORDS`]). What is not reached stays uncached, so the next call continues.
+async fn resolve_all(
+    targets: &[Target],
+    cfg: &MavenConfig,
+    max_misses: usize,
+    detail_cap: usize,
+) -> Vec<(usize, Vec<Advisory>)> {
     let dir = cache_dir();
     let mut found: Vec<(usize, Vec<Advisory>)> = Vec::new();
     let mut misses: Vec<usize> = Vec::new();
@@ -144,28 +294,93 @@ async fn advisories_for(cfg: &MavenConfig, source: &str) -> Vec<PomAdvisory> {
             None => misses.push(i),
         }
     }
-    misses.truncate(MAX_COORDS);
-
-    if !misses.is_empty() {
-        for (i, list) in lookup(&targets, &misses, &dir).await {
-            found.push((i, list));
-        }
+    misses.truncate(max_misses);
+    for chunk in misses.chunks(MAX_COORDS) {
+        found.extend(lookup(targets, chunk, &dir, detail_cap).await);
     }
-
     found.sort_by_key(|(i, _)| *i);
     found
+}
+
+/// The pom's dependencies worth asking about, with the version each really has.
+///
+/// A literal `<version>` is its own answer. Everything else — managed by a BOM or a parent, or a
+/// `${property}` — takes the version the **build resolved** for that declaration, read from the
+/// dependency report by (pom, line). That is what lets a Spring Boot project, whose dependencies
+/// almost never carry a version, get its warnings at all.
+fn targets_of(pom: &bennu_deps::prelude::Pom, resolved: &std::collections::HashMap<u32, String>) -> Vec<Target> {
+    pom.dependencies
+        .iter()
+        .filter(|d| {
+            !d.group_id.is_empty()
+                && !d.artifact_id.is_empty()
+                && !d.group_id.contains("${")
+                && !d.artifact_id.contains("${")
+        })
+        .filter_map(|d| {
+            let literal = !d.version.is_empty() && !d.version.contains("${");
+            let version = if literal { d.version.clone() } else { resolved.get(&d.line)?.clone() };
+            // With no `<version>` to point at, the warning sits on the `<dependency` tag.
+            let span = d.version_span.unwrap_or((d.offset, d.offset + "<dependency".len()));
+            Some(Target { coord: d.coord(), version, line: d.line, span: Some(span) })
+        })
+        .collect()
+}
+
+/// Resolved version of each declaration in `file`, keyed by the line of its `<dependency>` tag.
+/// Empty when the file is in no reactor or nothing has resolved yet — the warnings then fall back
+/// to the literal versions, which is what they were before.
+fn resolved_versions(file: &str) -> std::collections::HashMap<u32, String> {
+    let mut out = std::collections::HashMap::new();
+    let Some(root) = reactor_root(Path::new(file)) else { return out };
+    let report = crate::dependencies::report_of(&root.to_string_lossy());
+    let wanted = file.replace('\\', "/");
+    for d in report.modules.iter().flat_map(|m| m.dependencies.iter()) {
+        if d.declared_in.file.eq_ignore_ascii_case(&wanted) {
+            if let Some(v) = effective_version(d) {
+                out.insert(d.declared_in.line, v);
+            }
+        }
+    }
+    out
+}
+
+/// The topmost directory above `file` that still holds a `pom.xml` — the reactor root, as far as
+/// the filesystem can tell without reading the poms.
+fn reactor_root(file: &Path) -> Option<PathBuf> {
+    let mut best: Option<PathBuf> = None;
+    let mut dir = file.parent();
+    while let Some(d) = dir {
+        if d.join("pom.xml").is_file() {
+            best = Some(d.to_path_buf());
+        } else if best.is_some() {
+            break;
+        }
+        dir = d.parent();
+    }
+    best
+}
+
+async fn advisories_for(cfg: &MavenConfig, file: &str, source: &str) -> Vec<PomAdvisory> {
+    let pom = bennu_deps::prelude::parse_pom(source);
+    let owned = file.to_string();
+    let resolved = tokio::task::spawn_blocking(move || resolved_versions(&owned)).await.unwrap_or_default();
+    let targets = targets_of(&pom, &resolved);
+    resolve_all(&targets, cfg, MAX_COORDS, MAX_DETAIL_FETCHES)
+        .await
         .into_iter()
         .filter(|(_, list)| !list.is_empty())
-        .map(|(i, advisories)| {
+        .filter_map(|(i, advisories)| {
             let t = &targets[i];
-            PomAdvisory {
+            let (start, end) = t.span?;
+            Some(PomAdvisory {
                 coord: t.coord.clone(),
                 line: t.line,
-                start: t.span.0,
-                end: t.span.1,
+                start,
+                end,
                 current: t.version.clone(),
                 advisories,
-            }
+            })
         })
         .collect()
 }
@@ -188,14 +403,19 @@ fn write_cached(dir: &Path, t: &Target, list: &[Advisory]) {
 
 /// Ask OSV about `targets[misses]`, then fetch the records of the advisories it names. Coordinates
 /// whose records could not all be fetched are returned but **not cached**, so the next call retries.
-async fn lookup(targets: &[Target], misses: &[usize], dir: &Path) -> Vec<(usize, Vec<Advisory>)> {
+async fn lookup(
+    targets: &[Target],
+    misses: &[usize],
+    dir: &Path,
+    detail_cap: usize,
+) -> Vec<(usize, Vec<Advisory>)> {
     let Ok(ids_per_target) = query_batch(targets, misses).await else { return Vec::new() };
 
     let mut records: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
     let mut wanted: Vec<String> = ids_per_target.iter().flatten().cloned().collect();
     wanted.sort();
     wanted.dedup();
-    wanted.truncate(MAX_DETAIL_FETCHES);
+    wanted.truncate(detail_cap);
     let handles: Vec<_> = wanted
         .into_iter()
         .map(|id| tokio::spawn(async move { (id.clone(), fetch_record(&id).await) }))
@@ -372,6 +592,26 @@ mod tests {
         assert_eq!(a.severity, "unknown");
         assert_eq!(a.summary, "first line");
         assert_eq!(a.cve, None);
+    }
+
+    #[test]
+    fn a_managed_dependency_takes_the_version_the_build_resolved() {
+        let mut d = bennu_deps::prelude::Dependency::default();
+        d.version = "${spring.version}".into();
+        d.resolved = "/home/u/.m2/repository/org/springframework/spring-core/5.3.10/spring-core-5.3.10.jar".into();
+        assert_eq!(effective_version(&d).as_deref(), Some("5.3.10"));
+        d.version = "1.2.3".into();
+        assert_eq!(effective_version(&d).as_deref(), Some("1.2.3"));
+        d.version.clear();
+        d.resolved.clear();
+        assert_eq!(effective_version(&d), None);
+    }
+
+    #[test]
+    fn severity_ranks_worst_first() {
+        assert!(severity_rank("critical") > severity_rank("high"));
+        assert!(severity_rank("high") > severity_rank("moderate"));
+        assert!(severity_rank("unknown") > severity_rank("low"));
     }
 
     #[test]

@@ -19,9 +19,12 @@
   interface Props {
     finding:   SecurityFinding;
     onSelect?: (finding: SecurityFinding) => void;
+    /** Hide the age and state columns — for findings with no lifecycle (a dependency advisory is
+     *  simply present or not). */
+    hideLifecycle?: boolean;
   }
 
-  let { finding, onSelect }: Props = $props();
+  let { finding, onSelect, hideLifecycle = false }: Props = $props();
 
   const sev = $derived(SEVERITY_META[finding.severity]);
 
@@ -97,8 +100,10 @@
   </div>
 
   <span class="right">
-    <span class="age" use:tooltip={'Age'}>{ageLabel}</span>
-    <span class="state" style:color={stateMeta.color}>{stateMeta.label}</span>
+    {#if !hideLifecycle}
+      <span class="age" use:tooltip={'Age'}>{ageLabel}</span>
+      <span class="state" style:color={stateMeta.color}>{stateMeta.label}</span>
+    {/if}
     {#if finding.web_url}<ExternalLink size={11} class="ext" />{/if}
   </span>
 </button>

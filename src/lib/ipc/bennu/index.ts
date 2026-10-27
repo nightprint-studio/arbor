@@ -51,6 +51,13 @@ export function activateProject(root: string): Promise<void> {
   return bennu('bennu_activate_project', { args: { root } });
 }
 
+/** The roots that are loaded in memory — a Java index built, or a language server running. A
+ *  workspace member that was only opened in the background is not in it.
+ *  Wire: `bennu_loaded_projects`. */
+export function loadedProjects(): Promise<string[]> {
+  return bennu('bennu_loaded_projects', { args: {} });
+}
+
 /** Read the project file tree (directories + files) rooted at `root`. `depth` bounds how far it
  *  descends — `1` is one directory's listing, which is what a cheap "is this still right?" check
  *  wants; omitted, the backend's default materialises the whole tree. Wire:

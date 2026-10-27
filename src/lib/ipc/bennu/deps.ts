@@ -137,6 +137,50 @@ export function dependencies(root: string): Promise<DependencyReport> {
   return bennu('bennu_dependencies', { args: { root } });
 }
 
+// ── The resolved tree ───────────────────────────────────────────────────────────
+
+/** One node of a module's resolved tree — mirrors `bennu_deps::tree::TreeNode`. */
+export interface TreeNode {
+  group: string;
+  name: string;
+  version: string;
+  scope: string;
+  kind: string;
+  classifier: string;
+  /** 1 for a direct dependency of the module. */
+  depth: number;
+  /** Index (within the same module's `nodes`) of what brought this in; null at depth 1. */
+  parent: number | null;
+  optional: boolean;
+  /** Empty for a node Maven kept; otherwise `duplicate` · `conflict` · `cycle`. */
+  omitted: string;
+  /** For a `conflict`: the version that won. */
+  kept_version: string;
+}
+
+/** The resolved tree of one module. */
+export interface ModuleTree {
+  /** `group:artifactId` of the module. */
+  module: string;
+  version: string;
+  /** Depth-first; `parent` indexes into this list. */
+  nodes: TreeNode[];
+}
+
+/** Every module's resolved tree. */
+export interface DependencyTree {
+  modules: ModuleTree[];
+  /** Whether dropped nodes (the other versions) are in the answer. */
+  verbose: boolean;
+}
+
+/** Ask Maven for the resolved dependency tree — who brought each artifact in, and which versions
+ *  lost. **Runs Maven** (seconds to minutes), so the panel calls it on request and keeps the answer.
+ *  Rejects with Maven's own reason when it produced no tree. Wire: `bennu_dependency_tree`. */
+export function dependencyTree(root: string): Promise<DependencyTree> {
+  return bennu('bennu_dependency_tree', { args: { root } });
+}
+
 // ── The internal module graph ───────────────────────────────────────────────────
 
 /** One module of the project, as a node of its own dependency graph.

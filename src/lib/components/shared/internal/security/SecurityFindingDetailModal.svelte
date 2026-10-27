@@ -42,7 +42,8 @@
   const sev = $derived(SEVERITY_META[finding.severity]);
 
   const providerLabel = $derived(
-    finding.provider === 'gitlab' ? 'GitLab'
+    finding.provider_label ? finding.provider_label
+      : finding.provider === 'gitlab' ? 'GitLab'
       : finding.provider === 'github' ? 'GitHub'
       : finding.provider === 'gitea' ? 'Gitea'
       : finding.provider === 'bitbucket' ? 'Bitbucket'

@@ -176,6 +176,8 @@ function createBennuUiStore() {
   let indexInspectorOpen = $state(false);
   // The module-graph window (who depends on whom, inside the project).
   let moduleGraphOpen = $state(false);
+  // The vulnerabilities window (known CVEs on the whole classpath, by severity).
+  let vulnerabilitiesOpen = $state(false);
   // Project mojibake-scan modal (whole-project UTF-8-as-Cp1252 corruption report).
   let mojibakeScanOpen = $state(false);
   // Tomcat hot-swap settings modal (link a Tomcat + pick the deployed webapp).
@@ -289,6 +291,7 @@ function createBennuUiStore() {
     get navInitial()   { return navInitial; },
     get indexInspectorOpen() { return indexInspectorOpen; },
     get moduleGraphOpen() { return moduleGraphOpen; },
+    get vulnerabilitiesOpen() { return vulnerabilitiesOpen; },
     get mojibakeScanOpen() { return mojibakeScanOpen; },
     get tomcatConfigOpen() { return tomcatConfigOpen; },
     get fileStructureOpen() { return fileStructureOpen; },
@@ -405,6 +408,8 @@ function createBennuUiStore() {
     closeIndexInspector() { indexInspectorOpen = false; },
     openModuleGraph() { moduleGraphOpen = true; },
     closeModuleGraph() { moduleGraphOpen = false; },
+    openVulnerabilities() { vulnerabilitiesOpen = true; },
+    closeVulnerabilities() { vulnerabilitiesOpen = false; },
     openMojibakeScan() { mojibakeScanOpen = true; },
     closeMojibakeScan() { mojibakeScanOpen = false; },
     openTomcatConfig() { tomcatConfigOpen = true; },

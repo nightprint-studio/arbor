@@ -11,3 +11,8 @@ description  = "The platform's process oddities: suppressing Windows' console-wi
 # `user_home()` — the executable search has to look where tools actually are (`~/.cargo/bin`, a VS
 # Code extension dir, `~/.local/bin`), and a windowed app's PATH holds almost none of them.
 arbor-core = { path = "../../foundation/core" }
+
+# `getpgid` / `killpg` for the Unix watchdog (see `job.rs`). Not a new external crate: `libc` is
+# already pinned by `bennu-be`, `arbor-feedback` and `src-tauri`.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

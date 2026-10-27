@@ -12,7 +12,7 @@
    * and the user expects a tab to be exactly where they left it.
    */
   import type { Component } from 'svelte';
-  import type { SurfaceId } from '$lib/stores/surfaces.svelte';
+  import { surfaceStore, type SurfaceId } from '$lib/stores/surfaces.svelte';
   import SurfaceBoot from './SurfaceBoot.svelte';
 
   interface Props {
@@ -39,7 +39,13 @@
 <!-- `display: none` rather than an `{#if}`: the shell stays mounted (and its
      state alive) while its tab is in the background. `inert` keeps the hidden
      subtree out of the tab order and away from the accessibility tree. -->
-<div class="surface" class:hidden={!active} inert={!active} aria-hidden={!active}>
+<div
+  class="surface"
+  class:hidden={!active}
+  inert={!active}
+  aria-hidden={!active}
+  style:--dir={surfaceStore.direction}
+>
   {#if Shell}
     <Shell />
   {:else}
@@ -57,5 +63,16 @@
     flex-direction: column;
   }
   .surface.hidden { display: none; }
+  /* Re-played on every tab switch: leaving `display: none` restarts the animation. Opacity and a
+     few px of translate only — compositor-cheap, and no blur (WebView2 throttles on it). */
+  .surface:not(.hidden) { animation: surface-in var(--anim-dur-base, 160ms) cubic-bezier(0.2, 0, 0, 1); }
+  /* Slides in from the side the tab sits on: --dir is +1 for a tab to the right, -1 to the left. */
+  @keyframes surface-in {
+    from { opacity: 0; transform: translateX(calc(var(--dir, 0) * 28px)); }
+    to   { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .surface:not(.hidden) { animation: none; }
+  }
 
 </style>

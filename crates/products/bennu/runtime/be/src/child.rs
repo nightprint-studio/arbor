@@ -40,6 +40,22 @@ pub(crate) fn own_group(cmd: &mut Command) {
     let _ = cmd;
 }
 
+/// Announce a freshly spawned run to the exit watchdog, so it is killed even if this backend is
+/// terminated without getting to clean up. Pair with [`untrack`] when the run is reaped.
+pub(crate) fn track(child: &Child) {
+    arbor_process_ext::prelude::track_child_group(child.id());
+}
+
+/// Take a finished run off the watchdog's list (a recycled pid must never be signalled).
+///
+/// `try_lock`: the waiter may still hold the handle, and the watchdog re-checks that a pid leads
+/// its own group before it kills anything, so skipping the message is safe.
+pub(crate) fn untrack(child: &std::sync::Mutex<Child>) {
+    if let Ok(c) = child.try_lock() {
+        arbor_process_ext::prelude::untrack_child_group(c.id());
+    }
+}
+
 /// Kill `child` and its whole process tree.
 ///
 /// `Child::kill` kills exactly the handle we hold, and that handle is regularly a **launcher** or a

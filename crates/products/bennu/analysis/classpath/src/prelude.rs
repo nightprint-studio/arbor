@@ -38,7 +38,7 @@ pub use crate::sources::JavaSourceZip;
 // Dependency-jar sourcing from ~/.m2 via Maven's build-classpath (cached by pom
 // mtime), layered behind the JDK through the same MultiSource.
 pub use crate::maven::{
-    resolve_maven_classpath, source_from_jars, MavenClasspath, MavenClasspathCache, MavenResolveOpts,
+    resolve_maven_classpath, run_bounded, source_from_jars, MavenClasspath, MavenClasspathCache, MavenResolveOpts,
     IGNORE_REPO_ORIGIN_ARG,
 };
 

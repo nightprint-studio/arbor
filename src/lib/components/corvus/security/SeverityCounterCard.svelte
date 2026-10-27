@@ -5,7 +5,7 @@
    * count + median-age subtitle. Click handler is owned by the parent so
    * the grid can route every card to the same detail modal (Phase 4).
    */
-  import { SEVERITY_META, formatMedianAge } from './severity-meta';
+  import { SEVERITY_META, formatMedianAge } from '$lib/components/shared/internal/security/severity-meta';
   import type { Severity } from '$lib/types/corvus/security';
 
   interface Props {

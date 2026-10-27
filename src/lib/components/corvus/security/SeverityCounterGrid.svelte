@@ -9,7 +9,7 @@
    * shapes into the widget's `CounterItem[]`.
    */
   import CounterGrid, { type CounterItem } from '$lib/components/shared/charts/CounterGrid.svelte';
-  import { SEVERITY_META, formatMedianAge } from './severity-meta';
+  import { SEVERITY_META, formatMedianAge } from '$lib/components/shared/internal/security/severity-meta';
   import { SEVERITY_ORDER, type SeverityCounts, type SeverityMedians, type Severity } from '$lib/types/corvus/security';
 
   interface Props {

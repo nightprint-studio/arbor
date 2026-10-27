@@ -536,6 +536,7 @@ name = "arbor-process-ext"
 version = "0.3.0"
 dependencies = [
  "arbor-core",
+ "libc",
 ]
 
 [[package]]

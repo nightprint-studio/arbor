@@ -342,6 +342,7 @@ pub(crate) fn start_maven_run(ctx: &BennuState, args: &RunTestsArgs) -> Result<M
     // Stamp every report that exists BEFORE the run, so "changed since" needs no clock.
     let seen = snapshot_reports(&root);
 
+    crate::child::track(&child);
     let child = Arc::new(Mutex::new(child));
     registry().lock().unwrap_or_else(|p| p.into_inner()).insert(
         run_id.clone(),
@@ -439,7 +440,10 @@ impl MavenRun {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(&self.run_id)
-            .map(|r| *r.cancelled.lock().unwrap_or_else(|p| p.into_inner()))
+            .map(|r| {
+                crate::child::untrack(&r.child);
+                *r.cancelled.lock().unwrap_or_else(|p| p.into_inner())
+            })
             .unwrap_or(false);
         let totals = *self.totals.lock().unwrap_or_else(|p| p.into_inner());
         self.sink.emit(EVT_TEST_EXIT, json!({
@@ -606,6 +610,15 @@ pub(crate) struct LiveRun {
 pub(crate) fn registry() -> &'static Mutex<HashMap<String, LiveRun>> {
     static REG: OnceLock<Mutex<HashMap<String, LiveRun>>> = OnceLock::new();
     REG.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Stop every live test run (Maven and Cargo share the registry) — for the backend exiting.
+pub(crate) fn kill_all_runs() {
+    let ids: Vec<String> =
+        registry().lock().unwrap_or_else(|p| p.into_inner()).keys().cloned().collect();
+    for id in ids {
+        cancel_run(&id);
+    }
 }
 
 /// A monotonically-increasing, process-unique run id — same shape as `bennu_run`'s.

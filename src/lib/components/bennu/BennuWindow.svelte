@@ -155,6 +155,13 @@
   import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import BennuFileStructureModal from './BennuFileStructureModal.svelte';
   import BennuRecentLocationsModal from './BennuRecentLocationsModal.svelte';
+  import BennuProjectSwitcher from './BennuProjectSwitcher.svelte';
+  import BennuProjectGotoModal from './BennuProjectGotoModal.svelte';
+  import { afterPaint } from '$lib/utils/after-paint';
+  import { loadedProjects } from '$lib/ipc/bennu';
+  import BennuVulnerabilitiesModal from './vulnerabilities/BennuVulnerabilitiesModal.svelte';
+  import { projectSwitcherStore, type SwitcherEntry } from '$lib/stores/bennu/project-switcher.svelte';
+  import { dependenciesStore } from '$lib/stores/bennu/dependencies.svelte';
   import { bennuNavStore } from '$lib/stores/bennu/nav-history.svelte';
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
@@ -579,7 +586,7 @@
     }
     // Mid-build: keep what is on screen rather than asking again. The next settle re-reads.
     if (busyIndexing) return;
-    void bennuDiagnosticsStore.refresh(root);
+    return afterPaint(() => void bennuDiagnosticsStore.refresh(root), 250);
   });
 
   // ── Build / Run triggers (mirror the titlebar; shared by keybindings + palette) ─
@@ -993,7 +1000,8 @@
     // semantic index building on one, so there is nothing to race. A project the extensions all
     // decline costs one capability check and no walk at all.
     if (!projectStore.isCargo && busyIndexing) return;
-    void springStore.loadOverview(root, true);
+    // After the swap has painted, and cancelled by a quicker second swap (see `afterPaint`).
+    return afterPaint(() => void springStore.loadOverview(root, true), 350);
   });
 
   /**
@@ -1013,7 +1021,8 @@
     const cargo = projectStore.isCargo;
     const busyIndexing = bennuIndexStore.indexing;
     if (!root || projectStore.isDemo || (!cargo && busyIndexing)) return;
-    void activeTestStore().discover(root);
+    // The walk parses every source file: the heaviest thing a switch starts, so it goes last.
+    return afterPaint(() => void activeTestStore().discover(root), 600);
   });
 
   /**
@@ -1025,10 +1034,12 @@
   $effect(() => {
     const root = projectStore.project?.root ?? null;
     if (!root || projectStore.isDemo) return;
-    void bennuRunConfigStore.load(root);
-    // The breakpoints live beside them, in the same file and for the same reason: the gutter
-    // has to draw them the moment a file opens, long before anything is launched.
-    void bennuDebugStore.load(root);
+    return afterPaint(() => {
+      void bennuRunConfigStore.load(root);
+      // The breakpoints live beside them, in the same file and for the same reason: the gutter
+      // has to draw them the moment a file opens, long before anything is launched.
+      void bennuDebugStore.load(root);
+    });
   });
 
   /**
@@ -1392,12 +1403,13 @@
   // nothing is judged by it. Untracked because `load` writes the state it reads.
   $effect(() => {
     const root = projectStore.project?.root;
-    if (root) {
+    if (!root) return;
+    return afterPaint(() => {
       untrack(() => {
         void bennuNamingStore.load(root);
         void bennuNamingStore.profile.load();
       });
-    }
+    }, 300);
   });
 
   /**
@@ -1490,6 +1502,10 @@
         action: () => run(() => editor?.navForward()), when: !!projectStore.activeFilePath },
       { id: 'navlastedit', title: 'Last edit location', icon: 'History', shortcut: 'Ctrl+Shift+Backspace',
         action: () => run(() => editor?.navLastEdit()), when: bennuNavStore.hasEdits },
+      { id: 'gotoproject', title: 'Go to project…', icon: 'FolderOpen', shortcut: 'Ctrl+Shift+D',
+        action: () => run(() => (gotoProjectOpen = true)), when: true },
+      { id: 'switchproject', title: 'Switch project…', icon: 'FolderOpen', shortcut: 'Ctrl+Tab',
+        action: () => run(() => openProjectSwitcher(1)), when: workspacesStore.allProjects().length > 1 },
       { id: 'recentlocations', title: 'Recent locations…', icon: 'History', shortcut: 'Ctrl+Shift+E',
         action: () => run(() => (recentLocationsOpen = true)),
         when: bennuNavStore.recent.length > 0 },
@@ -1663,6 +1679,15 @@
       // The same subject from the other angle: the list says what each module needs, the graph says
       // who needs *it*, what a change to it rebuilds, and whether the project has a cycle. Named for
       // the ecosystem's own word so a Rust workspace is not offered a "module" graph.
+      { id: 'resolvedeptree', title: 'Resolve dependency tree', icon: 'Workflow',
+        action: () => run(() => {
+          const root = projectStore.project?.root;
+          if (root) void dependenciesStore.loadTree(root, true);
+        }),
+        when: !!projectStore.project },
+      { id: 'vulnerabilities', title: 'Vulnerabilities…', icon: 'ShieldAlert',
+        action: () => run(() => bennuUiStore.openVulnerabilities()),
+        when: !!projectStore.project && !projectStore.isCargo },
       { id: 'modulegraph', title: projectStore.isCargo ? 'Crate graph' : 'Module graph', icon: 'Network',
         shortcut: 'Alt+Shift+D', action: () => run(() => bennuUiStore.openModuleGraph()), when: !!projectStore.project },
       // Offered only on a translation bundle: everywhere else the panel could only say "not here",
@@ -1945,11 +1970,103 @@
   });
 
   // ── Window-level keybindings ─────────────────────────────────────────────────
+  // ── project switcher (Ctrl+Tab, Alt+Tab-style) ──────────────────────────────────
+  //
+  // Ctrl+Tab (`switch_project`) opens the overlay on the previous project, more Tab presses walk it, and RELEASING
+  // Ctrl commits — so toggling between two projects is one chord. Handled before every other key
+  // while open, because the overlay owns the keyboard for as long as Ctrl is held.
+  let gotoProjectOpen = $state(false);
+
+  function pickProject(entry: SwitcherEntry) {
+    projectSwitcherStore.cancel();
+    // Across workspaces: `switchToProject` changes workspace first when the project is in another.
+    void workspacesStore.switchToProject(entry.workspaceId, entry.root);
+  }
+  function openProjectSwitcher(dir: 1 | -1) {
+    // Only projects that are loaded — the one on screen, ones you have been in this session, or
+    // ones the backend holds an index / language server for — in any workspace. A workspace member
+    // that was merely restored in the background would have to start up first, and a project in a
+    // workspace you have not opened is not loaded at all: both are for "Go to project…"
+    // (Ctrl+Shift+D), which searches.
+    const live = workspacesStore.allProjects().filter((p) => projectSwitcherStore.isOpen(p));
+    if (!projectSwitcherStore.begin(live, dir)) {
+      toastStore.show('Only one project is open — use "Go to project…" to find any other', 'info');
+    }
+    // Ask again for next time (an index may have finished since); never waits for the answer.
+    refreshLoadedProjects();
+  }
+
+  /** Keep the switcher's idea of "loaded" current without ever making the overlay wait for it. */
+  function refreshLoadedProjects() {
+    void loadedProjects().then((roots) => projectSwitcherStore.setLoaded(roots)).catch(() => {});
+  }
+  /** @returns true when the key was consumed by the switcher. */
+  function handleSwitcherKey(e: KeyboardEvent): boolean {
+    // "Go to project…" — a modal with its own input, so it opens from here and not mid-switch.
+    if (!projectSwitcherStore.open && matchesBinding(e, keybindingsStore.getBinding('goto_project'))) {
+      e.preventDefault();
+      gotoProjectOpen = true;
+      return true;
+    }
+    const forward = matchesBinding(e, keybindingsStore.getBinding('switch_project'));
+    const backward = matchesBinding(e, keybindingsStore.getBinding('switch_project_prev'));
+    if (forward || backward) {
+      const dir = forward ? 1 : -1;
+      e.preventDefault();
+      if (projectSwitcherStore.open) projectSwitcherStore.step(dir);
+      else if (projectStore.project) openProjectSwitcher(dir);
+      return true;
+    }
+    if (!projectSwitcherStore.open) return false;
+    e.preventDefault();
+    if (e.key === 'Escape') projectSwitcherStore.cancel();
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') projectSwitcherStore.step(1);
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') projectSwitcherStore.step(-1);
+    else if (e.key === 'Enter') { const picked = projectSwitcherStore.commit(); if (picked) pickProject(picked); }
+    return true;
+  }
+  function onKeyUp(e: KeyboardEvent) {
+    if (!projectSwitcherStore.open) return;
+    // Releasing the chord's modifier commits — whichever one the (possibly rebound) binding holds.
+    const b = keybindingsStore.getBinding('switch_project');
+    const released = (b.ctrl && (e.key === 'Control' || e.key === 'Meta')) || (b.alt && e.key === 'Alt');
+    if (!released) return;
+    const entry = projectSwitcherStore.commit();
+    if (entry) pickProject(entry);
+  }
+
+  // Which projects are loaded changes when an index finishes and when you switch; refresh then,
+  // after the paint, so the next Ctrl+Tab already knows.
+  $effect(() => {
+    void projectStore.project?.root;
+    void bennuIndexStore.indexing;
+    return afterPaint(refreshLoadedProjects, 500);
+  });
+
+  // Keep the most-recently-used order current, and play the swap animation on a real switch.
+  let swapping = $state(false);
+  let lastRoot: string | null = null;
+  $effect(() => {
+    const root = projectStore.project?.root ?? null;
+    // Tracked on purpose: the same folder in two workspaces is two places to come back to.
+    const workspaceId = workspacesStore.activeId;
+    // `untrack`: these write state of their own, and an effect that reads what it writes loops.
+    untrack(() => {
+      if (root) projectSwitcherStore.touch(workspaceId, root);
+      if (root && lastRoot && root !== lastRoot) {
+        swapping = false;
+        requestAnimationFrame(() => (swapping = true));
+      }
+      lastRoot = root;
+    });
+  });
+
   function onKeyDown(e: KeyboardEvent) {
     // In the tabbed container this shell stays mounted (and subscribed) while
     // its tab is in the background — ignore keys unless we're the tab on
     // screen. No-op in a standalone Bennu window.
     if (!surfaceStore.hasFocus('bennu')) return;
+    if (handleSwitcherKey(e)) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && isKey(e, 'k')) { e.preventDefault(); bennuUiStore.togglePalette(); return; }
     // The keyboard-inputs overlay, on the same binding as everywhere else. Handled BEFORE the
@@ -2388,12 +2505,12 @@
   <PluginIcon {name} {size} />
 {/snippet}
 
-<svelte:window onkeydown={onKeyDown} />
+<svelte:window onkeydown={onKeyDown} onkeyup={onKeyUp} onblur={() => projectSwitcherStore.cancel()} />
 
 <div class="shell">
   <BennuTitleBar />
 
-  <div class="content-area">
+  <div class="content-area" class:swap={swapping} onanimationend={() => (swapping = false)}>
     <WorkspaceShell>
       {#snippet leftRail()}
         <ActivityBar side="left" ariaLabel="Tool windows" topItems={leftTop} bottomItems={leftBottom} {iconFor} />
@@ -2573,6 +2690,12 @@
   <BennuGotoModal onClose={() => bennuUiStore.closeNav()} />
 {/if}
 
+<BennuProjectSwitcher onPick={pickProject} />
+
+{#if gotoProjectOpen}
+  <BennuProjectGotoModal onClose={() => (gotoProjectOpen = false)} />
+{/if}
+
 {#if recentLocationsOpen}
   <BennuRecentLocationsModal
     onClose={() => (recentLocationsOpen = false)}
@@ -2595,6 +2718,10 @@
 <!-- Git's own history of a file or a selection, answered by Corvus. Same ownership as above:
      opened from the editor's menu and the palette, each AT a file, so the store holds both. -->
 <BennuGitHistoryModal />
+
+{#if bennuUiStore.vulnerabilitiesOpen}
+  <BennuVulnerabilitiesModal onClose={() => bennuUiStore.closeVulnerabilities()} />
+{/if}
 
 {#if bennuUiStore.moduleGraphOpen}
   <BennuModuleGraphModal onClose={() => bennuUiStore.closeModuleGraph()} />
@@ -2792,6 +2919,13 @@
     padding-top: 5px;
     background: var(--bg-elevated);
   }
+  /* A project swap: the panels settle in rather than snapping. Opacity + a few px only. */
+  .content-area.swap { animation: project-swap var(--anim-dur-base, 160ms) cubic-bezier(0.2, 0, 0, 1); }
+  @keyframes project-swap {
+    from { opacity: 0.55; transform: translateX(10px); }
+    to   { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .content-area.swap { animation: none; } }
 
   /* The bg-elevated .workspace + inset .panels live in the shared WorkspaceShell;
      this owns only Bennu's arrangement inside the panels snippet. */

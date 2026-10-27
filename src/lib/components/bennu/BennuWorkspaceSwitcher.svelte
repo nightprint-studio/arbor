@@ -24,20 +24,9 @@
   const projectName = $derived(projectStore.project?.name ?? 'No project');
   const activeRoot = $derived(projectStore.project?.root ?? null);
 
-  function basename(path: string): string {
-    const parts = path.split(/[\\/]/).filter(Boolean);
-    return parts[parts.length - 1] ?? path;
-  }
-
-  /** The projects to list under a workspace: the ACTIVE workspace's come live from projectStore
-   *  (real names + open state); an inactive workspace's come from its persisted member list
-   *  (basename until it's opened). */
+  /** The projects to list under a workspace — the store's cross-workspace list, narrowed. */
   function projectsOf(wsId: string): { root: string; name: string }[] {
-    if (wsId === workspacesStore.activeId) {
-      return projectStore.workspaceProjects;
-    }
-    const ws = workspacesStore.workspaces.find((w) => w.id === wsId);
-    return ws ? ws.projects.map((p) => ({ root: p.root, name: basename(p.root) })) : [];
+    return workspacesStore.allProjects().filter((p) => p.workspaceId === wsId);
   }
 
   /**

@@ -54,6 +54,21 @@ function newId(): string {
   }
 }
 
+/** One project of one workspace, flattened — what a cross-workspace list (the switcher dropdown, the
+ *  Ctrl+Tab overlay) iterates. */
+export interface WorkspaceProject {
+  workspaceId: string;
+  workspaceName: string;
+  colorIdx: number;
+  root: string;
+  name: string;
+}
+
+function basename(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
 function createWorkspacesStore() {
   let workspaces = $state<BennuWorkspace[]>([]);
   let activeId = $state<string>('');
@@ -133,6 +148,24 @@ function createWorkspacesStore() {
     get restoreFailed() { return restoreFailed; },
     /** True when there is more than one workspace (drives showing the switcher list / manager). */
     get hasMany() { return workspaces.length > 1; },
+
+    /** Every project of every workspace. The ACTIVE workspace's come live from projectStore (real
+     *  names); an inactive workspace's come from its persisted member list, named by folder until
+     *  it is opened. */
+    allProjects(): WorkspaceProject[] {
+      return workspaces.flatMap((w) => {
+        const members = w.id === activeId
+          ? projectStore.workspaceProjects
+          : w.projects.map((p) => ({ root: p.root, name: basename(p.root) }));
+        return members.map((p) => ({
+          workspaceId: w.id,
+          workspaceName: w.name || 'Workspace',
+          colorIdx: w.color_idx,
+          root: p.root,
+          name: p.name,
+        }));
+      });
+    },
     /** Friendly display name for the active workspace (implicit default → "Workspace"). */
     get activeName() { return active ? (active.name || 'Workspace') : ''; },
 
@@ -197,6 +230,73 @@ function createWorkspacesStore() {
     async switchToProject(id: string, root: string) {
       if (id !== activeId) await this.switchTo(id);
       await projectStore.switchProject(root);
+    },
+
+    /** Move workspace `id` so it sits at position `toIndex` (0-based, in the list as it is now — the
+     *  index an insertion line between rows would name). Display order is the user's to arrange. */
+    moveWorkspace(id: string, toIndex: number) {
+      const from = workspaces.findIndex((w) => w.id === id);
+      if (from < 0) return;
+      const list = [...workspaces];
+      const [item] = list.splice(from, 1);
+      // `toIndex` names a gap in the list *before* removal; removing an earlier item shifts it.
+      const at = Math.max(0, Math.min(list.length, toIndex > from ? toIndex - 1 : toIndex));
+      list.splice(at, 0, item);
+      workspaces = list;
+      persist();
+    },
+
+    /**
+     * Move project `root` from workspace `fromId` into `toId` at `toIndex` — or, when they are the
+     * same workspace, reorder it there. `toIndex` is a gap in the destination list as it is now.
+     *
+     * The same folder in two workspaces is two separate memberships (each with its own tabs), so a
+     * move carries the project's stored session with it, and a project already in the destination
+     * is simply taken out of the source rather than duplicated.
+     *
+     * The live workspace is kept in step: leaving it closes the project, entering it opens the
+     * project as a background member (it does not steal the screen), reordering within it reorders
+     * the live members.
+     */
+    async moveProject(fromId: string, root: string, toId: string, toIndex: number): Promise<void> {
+      if (!workspaces.some((w) => w.id === fromId) || !workspaces.some((w) => w.id === toId)) return;
+      // The live workspace's tabs and member order first, so what is moved is what is on screen.
+      if (activeId) patchWorkspace(activeId, projectStore.snapshotSession());
+      const source = workspaces.find((w) => w.id === fromId)!;
+      const session = source.projects.find((p) => p.root === root);
+      if (!session) return;
+
+      if (fromId === toId) {
+        const list = [...source.projects];
+        const from = list.indexOf(session);
+        list.splice(from, 1);
+        list.splice(Math.max(0, Math.min(list.length, toIndex > from ? toIndex - 1 : toIndex)), 0, session);
+        patchWorkspace(fromId, { projects: list });
+        if (fromId === activeId) projectStore.reorderMembers(list.map((p) => p.root));
+        persist();
+        return;
+      }
+
+      // Leave the source.
+      const remaining = source.projects.filter((p) => p.root !== root);
+      patchWorkspace(fromId, {
+        projects: remaining,
+        active_project: source.active_project === root ? (remaining[0]?.root ?? '') : source.active_project,
+      });
+      if (fromId === activeId) projectStore.closeProject(root);
+
+      // Enter the destination.
+      const target = workspaces.find((w) => w.id === toId)!;
+      if (!target.projects.some((p) => p.root === root)) {
+        const list = [...target.projects];
+        list.splice(Math.max(0, Math.min(list.length, toIndex)), 0, session);
+        patchWorkspace(toId, { projects: list });
+        if (toId === activeId) {
+          await projectStore.attachMember(session);
+          projectStore.reorderMembers(list.map((p) => p.root));
+        }
+      }
+      persist();
     },
 
     /** Add a project (folder `dir`) to workspace `id`, switching to it first so the add always

@@ -284,6 +284,7 @@ pub(crate) fn start_cargo_run(ctx: &BennuState, args: &RunArgs) -> Result<CargoR
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
+    crate::child::track(&child);
     let child = Arc::new(Mutex::new(child));
     registry().lock().unwrap_or_else(|p| p.into_inner()).insert(
         run_id.clone(),
@@ -353,9 +354,12 @@ impl CargoRun {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(&self.run_id)
-            .map(|r| *r.cancelled.lock().unwrap_or_else(|p| p.into_inner()))
+            .map(|r| {
+                crate::child::untrack(&r.child);
+                *r.cancelled.lock().unwrap_or_else(|p| p.into_inner())
+            })
             .unwrap_or(false);
-        let t = *self.totals.lock().unwrap_or_else(|p| p.into_inner());
+        let t =*self.totals.lock().unwrap_or_else(|p| p.into_inner());
         self.sink.emit(EVT_TEST_EXIT, json!({
             "run_id": self.run_id,
             "code": code,

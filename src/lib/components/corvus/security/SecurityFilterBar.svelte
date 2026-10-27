@@ -18,7 +18,7 @@
   import { Filter, ShieldAlert, Search, X, Loader } from 'lucide-svelte';
 
   import FilterButton from '$lib/components/shared/ui/FilterButton.svelte';
-  import { SEVERITY_META } from './severity-meta';
+  import { SEVERITY_META } from '$lib/components/shared/internal/security/severity-meta';
 
   import { securityStore } from '$lib/stores/corvus/security.svelte';
   import { SEVERITY_ORDER, type Severity } from '$lib/types/corvus/security';

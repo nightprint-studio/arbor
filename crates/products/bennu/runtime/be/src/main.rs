@@ -350,6 +350,8 @@ mod dep_classpath;
 // out of the poms — inheritance, `${properties}`, `<dependencyManagement>` — matched against the jars
 // `dep_classpath` already resolved. Reads files only; never runs Maven.
 mod dependencies;
+// `bennu_dependency_tree`: the resolved tree (who brought what in, which versions lost), from Maven.
+mod dependency_tree;
 // The local repository itself (`bennu_maven_*`): where it is, what is in it, which of this project's
 // coordinates it does NOT have — and the one verb that changes that. The reporting half runs no
 // process; the download is a job, because it is the only thing here that needs the network.
@@ -475,11 +477,25 @@ mod templates_render;
 mod config_class;
 
 fn main() {
+    // The Unix watchdog is this same executable re-run with `--arbor-watchdog` (see
+    // `arbor_process_ext::job`). It must do nothing but its job, so it is decided before anything
+    // else — profile, runtime and protocol pipes included.
+    if arbor_process_ext::prelude::run_watchdog_if_requested() {
+        return;
+    }
+
     // Seed the active profile FIRST — CRITICAL. Without this, `bennu_config_dir()` /
     // `bennu_data_dir()` (which the domain modules read directly) silently resolve the
     // `default` profile instead of the one the launcher spawned us on, so a dev
     // launcher would read config/data from the wrong (or empty) profile.
     arbor_core::prelude::init_active_profile();
+
+    // Everything this backend starts — a service from Run, a test JVM, Maven and the JVMs behind it,
+    // a language server — must die with it, however it dies. The orderly path below kills the live
+    // runs; this covers the rest (a crash, the shell terminating us, a window closed mid-build),
+    // which used to leave microservices running with their ports held and no UI left to stop them.
+    // Before anything spawns, so there is no child that predates the guarantee.
+    arbor_process_ext::prelude::kill_descendants_on_exit();
 
     // Before anything opens a file. A dependency jar is held open for the whole session, so a
     // project with 150 of them needs more descriptors than the 256 macOS hands a GUI app — and
@@ -553,6 +569,11 @@ fn main() {
     // Before the `exit(1)` below on purpose: the error path is exactly when an orphan is most
     // likely, since nothing else is going to clean up after a crashed backend.
     lsp_registry::LspRegistry::global().shutdown_all();
+
+    // And the runs: every service and test run still going, with its whole tree. Killing the handle
+    // is not enough for these — see `child::kill_tree` — so they go through the same path as Stop.
+    build::kill_all_runs();
+    tests::kill_all_runs();
 
     if let Err(e) = outcome {
         eprintln!("bennu-be: serve loop ended with error: {e}");

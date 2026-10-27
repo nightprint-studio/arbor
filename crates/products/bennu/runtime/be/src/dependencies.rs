@@ -57,7 +57,7 @@ pub(crate) fn bennu_module_graph(_ctx: &BennuState, args: DependenciesArgs) -> R
 /// Maven first when both manifests are there, which is the precedence `bennu-project`'s
 /// `open_project` applies: a polyglot root is the Java project, and a panel has to agree with the
 /// rest of the window about what it is looking at.
-fn report_of(root: &str) -> Report {
+pub(crate) fn report_of(root: &str) -> Report {
     let root = std::path::PathBuf::from(root);
     if root.join("pom.xml").is_file() || !root.join("Cargo.toml").is_file() {
         let jars = cached_dep_jars(&root);

@@ -597,6 +597,22 @@ fn bennu_cancel_run(_ctx: &BennuState, args: CancelRunArgs) -> Result<bool, Stri
     Ok(true)
 }
 
+/// Kill every live run and its whole tree — the backend is going away, and a service it started must
+/// not outlive it. The same path as Stop ([`bennu_cancel_run`]), over all of them.
+pub(crate) fn kill_all_runs() {
+    let children: Vec<Arc<Mutex<Child>>> = RunRegistry::global()
+        .live
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .values()
+        .map(|r| r.child.clone())
+        .collect();
+    for child in children {
+        let mut child = child.lock().unwrap_or_else(|p| p.into_inner());
+        crate::child::kill_tree(&mut child);
+    }
+}
+
 /// Args for [`bennu_run_input`].
 #[derive(Deserialize)]
 pub struct RunInputArgs {
@@ -1513,6 +1529,9 @@ impl RunRegistry {
     }
 
     fn register(&self, run_id: &str, child: Arc<Mutex<Child>>, stdin: Option<ChildStdin>) {
+        if let Ok(c) = child.try_lock() {
+            crate::child::track(&c);
+        }
         self.live.lock().unwrap_or_else(|p| p.into_inner()).insert(
             run_id.to_string(),
             LiveRun { child, stdin: Arc::new(Mutex::new(stdin)) },
@@ -1520,7 +1539,10 @@ impl RunRegistry {
     }
 
     fn finish(&self, run_id: &str) {
-        self.live.lock().unwrap_or_else(|p| p.into_inner()).remove(run_id);
+        let gone = self.live.lock().unwrap_or_else(|p| p.into_inner()).remove(run_id);
+        if let Some(run) = gone {
+            crate::child::untrack(&run.child);
+        }
     }
 
     fn child_of(&self, run_id: &str) -> Option<Arc<Mutex<Child>>> {

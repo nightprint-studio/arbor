@@ -182,17 +182,18 @@
 
 <h2>Known vulnerabilities</h2>
 <p>
-  With <strong>Settings → Java → Check dependencies for known vulnerabilities</strong> on, a version a pom pins that has a published
+  With <strong>Settings → Java → Check dependencies for known vulnerabilities</strong> on (the default), a dependency of the pom that has a published
   advisory is underlined as a warning. The message names the CVE (or the advisory id), its severity, a one-line summary and the nearest
   version that fixes it — hover to read it, and use the <em>newer version</em> line above the dependency to move.
 </p>
-<Callout variant="warning" title="Off by default, and different from the version check">
-  The version check reads a public file and says nothing about your project. This one sends each pinned dependency's
-  <code>groupId:artifactId</code> and version to <strong>api.osv.dev</strong> — nothing else — so it waits for your say-so.
+<Callout variant="warning" title="Different from the version check">
+  The version check reads a public file and says nothing about your project. This one sends each dependency's
+  <code>groupId:artifactId</code> and version to <strong>api.osv.dev</strong> — nothing else. Turn it off in the same setting.
 </Callout>
 <ul>
   <li>It runs in the background: a cold lookup can take a few seconds, and typing never waits for it. The warnings appear when the answer arrives.</li>
-  <li>Same scope as the version check — only what <em>this</em> pom pins. A version inherited from a parent or written as a property is not looked up.</li>
+  <li>A dependency with no literal version — managed by a BOM or a parent, or written as a property — is checked at the version the build <em>resolved</em>. The warning sits on the version when there is one, otherwise on the <code>&lt;dependency&gt;</code> tag. It needs the classpath to be resolved, which happens as the project indexes.</li>
+  <li><strong>Vulnerabilities…</strong> (Command Palette, or the shield button in the Dependencies panel) opens the whole-project view: every vulnerability on the classpath, transitive jars included, in the same window the Corvus security dashboard uses — severity tabs with counts, worst first, and a detail view per advisory with the fixed version and a link to osv.dev.</li>
   <li>Answers are cached on disk for a day per dependency and version, and a request looks up a bounded number of them, so a large pom fills in over a few passes.</li>
   <li>The warnings are drawn in the editor; the Problems panel lists the synchronous checks only.</li>
 </ul>

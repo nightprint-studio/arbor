@@ -3184,6 +3184,14 @@ impl IndexService {
         provider.is_subtype_of(candidate, wanted)
     }
 
+    /// Every root this service holds an index for — projects that have been built (or are building)
+    /// and are therefore in memory, as opposed to workspace members that were only *opened* in the
+    /// background. What "open and indexed" means to the project switcher.
+    pub fn indexed_roots(&self) -> Vec<String> {
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        slots.keys().map(|p| p.to_string_lossy().into_owned()).collect()
+    }
+
     /// The dependency jars resolved for `root`, or empty when no project is open there / Maven
     /// never resolved. The classpath as it actually is, which is what any per-artifact reading
     /// (the library-bean scan) has to walk.

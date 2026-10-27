@@ -19,6 +19,7 @@ and answering it means reading the poms the way Maven reads them.
 |---|---|
 | the poms (`pom.rs`, `graph.rs`) | modules, scopes, `optional`, profiles, the version and **its origin**, and the byte offset where it is declared |
 | the resolved classpath (`repo.rs`) | whether it is really there, and what came in behind it |
+| Maven's own `dependency:tree` output, or `cargo tree --prefix depth` for a workspace (`tree.rs`) | **who brought each artifact in**, and which versions Maven dropped (`-Dverbose`) — parsed, never recomputed, because mediation depends on the whole reactor |
 
 Shown next to each other, those two answer the questions a dependency panel is opened for: *why is
 this on my classpath*, *why this version*, and *why is this one missing*.

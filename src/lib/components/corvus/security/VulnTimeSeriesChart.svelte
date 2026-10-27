@@ -15,7 +15,7 @@
   import { securityStore } from '$lib/stores/corvus/security.svelte';
   import { tabsStore }     from '$lib/stores/corvus/tabs.svelte';
   import { SEVERITY_ORDER, type VulnTimeSeries } from '$lib/types/corvus/security';
-  import { SEVERITY_META } from './severity-meta';
+  import { SEVERITY_META } from '$lib/components/shared/internal/security/severity-meta';
 
   interface Props {
     timeSeries: VulnTimeSeries;

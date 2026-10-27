@@ -11,6 +11,7 @@
 //! `.output()` to prevent a visible CMD/shell window from appearing when the
 //! process is created from within a GUI process (e.g. Tauri WebView).
 
+pub mod job;
 pub mod locate;
 
 pub mod prelude;

@@ -67,6 +67,7 @@ function createSurfaceStore() {
   let mounted = $state<SurfaceId[]>([]);
   // Tabs whose backend is still coming up: opened, not yet mountable.
   let pending = $state<SurfaceId[]>([]);
+  let direction = $state<-1 | 0 | 1>(0);
 
   function persist() {
     try {
@@ -109,6 +110,8 @@ function createSurfaceStore() {
     get tabs()   { return tabs; },
     get active() { return active; },
     get mounted() { return mounted; },
+    /** +1 when the last switch went to a tab on the right, -1 to the left, 0 otherwise. */
+    get direction() { return direction; },
 
     /** True when `id` is the tab on screen — the gate a suspended shell reads. */
     isActive(id: SurfaceId) { return active === id; },
@@ -145,6 +148,9 @@ function createSurfaceStore() {
         tabs = tabs.filter((t) => t !== 'home');
         mounted = mounted.filter((t) => t !== 'home');
       }
+      // Which way the strip moved, so the incoming surface can slide in from that side.
+      const from = active ? tabs.indexOf(active) : -1;
+      direction = from < 0 || active === id ? 0 : tabs.indexOf(id) > from ? 1 : -1;
       active = id;
       void markMounted(id);
       persist();

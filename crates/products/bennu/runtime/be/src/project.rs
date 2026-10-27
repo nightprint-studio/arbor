@@ -131,6 +131,21 @@ fn bennu_activate_project(ctx: &BennuState, args: ActivateProjectArgs) -> Result
     open_and_start(ctx, &args.root, SessionOrigin::Window, true).map(|_| ())
 }
 
+/// The projects that are *loaded*: those with a Java symbol index in memory, plus those with a
+/// language server running (a Cargo root has no index, only a server).
+///
+/// A workspace restore opens every member but only starts the engines of the one on screen, so
+/// "member of the workspace" and "ready to switch to without waiting" are different sets. This is
+/// the second one — what the Ctrl+Tab overlay lists, so it shows places you can land instantly.
+#[arbor_rpc::handler]
+fn bennu_loaded_projects(_ctx: &BennuState) -> Result<Vec<String>, String> {
+    let mut roots = crate::index_service::IndexService::global().indexed_roots();
+    roots.extend(crate::lsp_registry::LspRegistry::global().statuses().into_iter().map(|s| s.root));
+    roots.sort();
+    roots.dedup();
+    Ok(roots)
+}
+
 /// Open `root` and start everything that opening it starts: the language-server warm-up,
 /// the framework-extension registration, and the symbol-index build.
 ///

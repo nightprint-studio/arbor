@@ -31,7 +31,7 @@
   /** The `[maven]` section, with a complete default so a config written before it existed reads as
    *  "on, a day" rather than as a half-populated object. */
   const mavenCfg = $derived<MavenConfigDto>(
-    cfg?.maven ?? { central: true, metadata_ttl_hours: 24, advisories: false },
+    cfg?.maven ?? { central: true, metadata_ttl_hours: 24, advisories: true },
   );
 
   async function commitThreads(field: 'validation_threads' | 'index_threads', raw: string) {
@@ -66,12 +66,12 @@
     <Toggle checked={mavenCfg.central} onchange={(on) => void bennuConfigStore.patch({ maven: { ...mavenCfg, central: on } })}
             ariaLabel="Check Maven Central for newer versions" />
   </FormRow>
-  <!-- Off by default and separate from the toggle above: that one fetches a public file and tells
-       nobody anything about the project, this one sends each dependency's coordinate and version to
-       a third party. They are different answers to "may Bennu talk to the network". -->
+  <!-- Separate from the toggle above: that one fetches a public file and tells nobody anything
+       about the project, this one sends each dependency's coordinate and version to a third party.
+       They are different answers to "may Bennu talk to the network". -->
   <FormRow
     label="Check dependencies for known vulnerabilities"
-    description="Asks OSV.dev about the dependencies a pom pins and underlines the affected version as a warning, naming the CVE and the version that fixes it. This sends each dependency's group:artifact and version to api.osv.dev — nothing else about the project. Runs in the background and never blocks typing; answers are cached on disk for a day. Off by default."
+    description="Asks OSV.dev about the project's dependencies — including those whose version comes from a BOM or a parent — and underlines the affected one in the pom as a warning, naming the CVE and the version that fixes it. This sends each dependency's group:artifact and version to api.osv.dev — nothing else about the project. Runs in the background and never blocks typing; answers are cached on disk for a day."
   >
     <Toggle checked={mavenCfg.advisories} onchange={(on) => void bennuConfigStore.patch({ maven: { ...mavenCfg, advisories: on } })}
             ariaLabel="Check dependencies for known vulnerabilities" />

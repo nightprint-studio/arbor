@@ -51,4 +51,6 @@ pub mod repo;
 pub mod model;
 // Who depends on whom *inside* the project: the internal edges, their cycles and their layers.
 pub mod module_graph;
+// The resolved tree (who brought what in, which versions lost), parsed from Maven's own output.
+pub mod tree;
 pub mod prelude;

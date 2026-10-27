@@ -444,15 +444,16 @@ pub struct MavenConfig {
     pub metadata_ttl_hours: u32,
     /// Whether Bennu may ask OSV.dev which of a pom's dependencies have known vulnerabilities.
     ///
-    /// **`false` by default**, unlike [`Self::central`]: the version hints fetch a public file and
-    /// reveal nothing about the project, while this sends each dependency's `group:artifact` and
-    /// version to a third party. Cached for [`Self::metadata_ttl_hours`].
+    /// `true` by default, because a vulnerability warning that has to be found and switched on is
+    /// one most projects never see. Unlike [`Self::central`], it sends each dependency's
+    /// `group:artifact` and version to a third party, so Settings → Java says so next to the toggle.
+    /// Cached for [`Self::metadata_ttl_hours`].
     pub advisories: bool,
 }
 
 impl Default for MavenConfig {
     fn default() -> Self {
-        Self { central: true, metadata_ttl_hours: 24, advisories: false }
+        Self { central: true, metadata_ttl_hours: 24, advisories: true }
     }
 }
 

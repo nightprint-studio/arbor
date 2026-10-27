@@ -42,6 +42,9 @@ export interface SecurityFinding {
    *  `vulnerable_version_range`. Absent on most code-scanning /
    *  secret-scanning alerts. */
   solution?:   string | null;
+  /** Display name of the source when it is not a git provider (e.g. "OSV.dev" for
+   *  Bennu's dependency advisories). Wins over the `provider` mapping. */
+  provider_label?: string;
 }
 
 export interface SeverityCounts {

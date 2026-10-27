@@ -78,6 +78,8 @@ function createBennuIndexStore() {
   // The active safety-net poll timer + a token so a new project open cancels the old.
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let pollToken = 0;
+  // Which `onProjectOpen` is current, so a slow answer about a project we have already left is dropped.
+  let openToken = 0;
   // Hard-cap counter for the poll's last-resort finish: `ready` (event or `index_stats.ready`) is
   // the primary signal; the cap only rescues a BE that emits NOTHING at all (see `sawEvent`).
   let pollCount = 0;
@@ -196,6 +198,21 @@ function createBennuIndexStore() {
     pollTimer = setTimeout(() => pollOnce(root, token), 1500);
   }
 
+  /** `root` is already built: show the footer as indexed, with no job card and no poll. */
+  function settleReady(root: string, types: number) {
+    applyProgress.flush();
+    stopPoll();
+    pollToken += 1;
+    currentRoot = root;
+    done = true;
+    failed = false;
+    indexing = false;
+    phase = null;
+    refProgress = null;
+    typeCount = types;
+    operationsStore.dismiss(OP_ID);
+  }
+
   function pollOnce(root: string, token: number) {
     void ipcIndexStats(root)
       .then((s) => {
@@ -303,7 +320,24 @@ function createBennuIndexStore() {
      *  safety-net poll. Events refine the phase; the poll finishes it if a `ready`
      *  event is missed. */
     onProjectOpen(root: string) {
-      beginCycle(root);
+      // `currentRoot` first, so a build that starts while we ask is attributed to this project.
+      currentRoot = root;
+      const token = ++openToken;
+      // A project switched TO may already be loaded and ready — its index is in the backend's memory
+      // and activating it started nothing. Arming the card for that put up "Indexing project" over
+      // work that was not happening, and held it until the first poll (a second and a half) found
+      // out; every swap between loaded projects flashed it. So ask first, and arm only for a real
+      // build. A stale `ready` from a project being re-opened from scratch is not a risk here: the
+      // backend replaces the slot (not ready) at open, before the window shows the project.
+      void ipcIndexStats(root)
+        .then((s) => {
+          if (token !== openToken) return;
+          if (s.ready && s.provider_stage !== 'failed') settleReady(root, s.types);
+          else beginCycle(root);
+        })
+        .catch(() => {
+          if (token === openToken) beginCycle(root);
+        });
     },
 
     /** Manually invalidate + rebuild the whole project index (BE `bennu_reindex`) — the
@@ -338,6 +372,7 @@ function createBennuIndexStore() {
       applyProgress.flush();
       stopPoll();
       pollToken += 1;
+      openToken += 1;
       done = false;
       indexing = false;
       phase = null;

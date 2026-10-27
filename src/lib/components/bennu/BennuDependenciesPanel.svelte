@@ -10,45 +10,51 @@
    * One group per module (Maven) or crate (Cargo), each row carrying the four things:
    *
    * - **the coordinate and the version** — with `${…}` expanded and `<dependencyManagement>`
-   *   applied, or the requirement replaced by whatever `Cargo.lock` actually chose, because the
-   *   version written in the manifest in front of you is usually not the one you get;
+   *   applied, or the requirement replaced by whatever `Cargo.lock` actually chose;
    * - **where that version came from** — declared here, pinned by a parent's management or by
-   *   `[workspace.dependencies]`, or inherited whole. This is the question the panel exists for, and
-   *   clicking the row opens the manifest that answers it;
+   *   `[workspace.dependencies]`, or inherited whole. Clicking the row opens the manifest that
+   *   answers it;
    * - **the scope** (Maven) or **kind** (Cargo), coloured, because `test` and `dev` change what a
    *   dependency means;
    * - **whether it resolved** — a declared dependency with nothing behind it in the local repository
    *   is exactly the shape of "cannot find symbol" in a file that looks fine.
    *
-   * Plus one group for what nobody declared: what the declared dependencies dragged in. Kept
-   * separate rather than merged, because the two answer different questions and mixing them is how a
-   * dependency panel becomes unreadable.
+   * Plus one group for what nobody declared: what the declared dependencies dragged in.
    *
-   * Each group header carries **Focus in Project** — a button and a right-click menu, shared with
-   * the Cargo panel (`build-unit-menu`): the panel names units the tree also has rows for, and
-   * hunting for the folder by hand is the thing that reading a dependency list sends you to do.
+   * ## The resolved tree (Maven)
    *
-   * All of it comes from `bennu_dependencies`, which reads manifests plus whatever has already been
-   * resolved. Nothing here runs Maven or Cargo, so refreshing is cheap and the panel opens
-   * instantly.
+   * Everything above is read from manifests and never runs the build tool, so the panel opens
+   * instantly. Two questions need Maven itself, because mediation depends on the whole reactor:
+   * **who brought this in** and **why is there more than one version of it**. The toolbar's
+   * *Resolve tree* runs `dependency:tree` in the background (seconds to minutes, so on request and
+   * never at open), and once it has answered the panel adds a *Version conflicts* group at the top,
+   * a "via …" line to every transitive row, and an expandable detail on declared ones.
    */
-  import { Library, Package, GitFork, Layers, LocateFixed, CircleSlash } from 'lucide-svelte';
+  import {
+    Library, Package, Layers, LocateFixed, ShieldAlert, Workflow, TriangleAlert, Link2,
+  } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Alert from '$lib/components/shared/ui/Alert.svelte';
+  import Button from '$lib/components/shared/ui/Button.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
+  import DependencyRow from './dependencies/DependencyRow.svelte';
+  import DependencyConflicts from './dependencies/DependencyConflicts.svelte';
+  import { buildTreeIndex, childrenOf, introducers } from './dependencies/dependency-tree';
+  import { splitCoord } from './dependencies/dep-labels';
+  import { afterPaint } from '$lib/utils/after-paint';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { buildUnitDir, openBuildUnitMenu } from './build-unit-menu';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
-  import { dependenciesStore } from '$lib/stores/bennu/dependencies.svelte';
+  import { dependenciesStore, vulnFor } from '$lib/stores/bennu/dependencies.svelte';
   import {
-    coordOf, scopeLabel,
+    coordOf,
     type Dependency, type DependencyModule,
   } from '$lib/ipc/bennu/deps';
 
@@ -62,6 +68,10 @@
   /** What a module is called here. A Cargo "module" is a crate, and the panel should say so. */
   const unitWord = $derived(isCargo ? 'crate' : 'module');
   const manifestWord = $derived(isCargo ? 'Cargo.toml' : 'pom');
+
+  // The resolved tree, once asked for (Maven only).
+  const tree = $derived(dependenciesStore.tree);
+  const treeIndex = $derived(buildTreeIndex(tree));
 
   // Re-read when the project changes, and again when the index **stops** — that is when a
   // classpath which was unresolved becomes resolved, and the jar column goes from "unknown" to an
@@ -80,11 +90,24 @@
       dependenciesStore.reset();
       return;
     }
+    // A project switch shows the tree already resolved for it (or none) — never starts Maven.
+    dependenciesStore.adoptTree(path);
     // While the JAVA index runs the classpath is in flux; read once when it settles. A Cargo project
     // builds no index, so waiting for one would mean waiting forever.
     if (!cargo && busyIndexing) return;
-    void dependenciesStore.load(path, true);
+    // After the swap has painted (the cached report is already on screen), and dropped if another
+    // swap comes first.
+    return afterPaint(() => {
+      void dependenciesStore.load(path, true).then(() => {
+        // After the report: the badges name artifacts the classpath now knows the versions of.
+        if (!cargo) void dependenciesStore.loadAdvisories(path);
+      });
+    }, 200);
   });
+
+  function resolveTree() {
+    if (root) void dependenciesStore.loadTree(root, true);
+  }
 
   function matches(d: Dependency, q: string): boolean {
     if (!q) return true;
@@ -105,9 +128,16 @@
 
   const transitive = $derived.by(() => {
     const q = filter.trim().toLowerCase();
-    return (report?.transitive ?? []).filter(
-      (t) => !q || `${coordOf(t)} ${t.version}`.toLowerCase().includes(q),
-    );
+    return (report?.transitive ?? []).filter((t) => {
+      if (!q) return true;
+      const via = introducers(treeIndex.artifacts.get(coordOf(t))).join(' ');
+      return `${coordOf(t)} ${t.version} ${via}`.toLowerCase().includes(q);
+    });
+  });
+
+  const conflicts = $derived.by(() => {
+    const q = filter.trim().toLowerCase();
+    return treeIndex.conflicts.filter((c) => !q || `${c.coord} ${c.versions.join(' ')}`.toLowerCase().includes(q));
   });
 
   const total = $derived(
@@ -130,15 +160,6 @@
     open[id] = !isOpen(id, fallback);
   }
 
-  /** The colour a scope (Maven) or kind (Cargo) gets. Both vocabularies have the same three tiers:
-   *  what the library needs, what its tests need, and what is supplied from outside. */
-  function scopeTone(scope: string): 'success' | 'info' | 'warning' | 'neutral' {
-    if (scope === 'compile' || scope === 'normal') return 'success';
-    if (scope === 'provided' || scope === 'system' || scope === 'build') return 'info';
-    if (scope === 'test' || scope === 'dev') return 'warning';
-    return 'neutral';
-  }
-
   /** The pom that decides this dependency — which is the one the row opens. */
   function openDeclaration(d: Dependency) {
     void projectStore.openFile(d.declared_in.file).then(() => {
@@ -150,33 +171,18 @@
     void projectStore.openFile(m.manifest);
   }
 
-  /** What the origin tag says, in the fewest words that are still true. */
-  function originLabel(d: Dependency): string {
-    switch (d.origin.kind) {
-      case 'managed':
-        return `pinned by ${d.origin.from}`;
-      case 'inherited':
-        return `from ${d.origin.from}`;
-      default:
-        return '';
-    }
+  /** What `m`'s dependency drags in, from the resolved tree. The tree names modules by full
+   *  coordinate and the report by artifactId, so match on the tail. */
+  function pullsOf(m: DependencyModule, d: Dependency) {
+    const mod = tree?.modules.find((t) => t.module === m.id || t.module.endsWith(`:${m.id}`));
+    return mod ? childrenOf(tree, mod.module, coordOf(d)) : [];
   }
 
-  function originTooltip(d: Dependency): string {
-    switch (d.origin.kind) {
-      case 'managed':
-        return isCargo
-          ? `Declared here as \`workspace = true\` — ${d.origin.from}'s [workspace.dependencies] supplies ${
-              d.version || 'the version'
-            }.`
-          : `Declared here without a version — ${d.origin.from}'s <dependencyManagement> pins ${
-              d.version || 'it'
-            }. Opens that pom.`;
-      case 'inherited':
-        return `Not declared in this ${unitWord}: inherited from ${d.origin.from}'s own <dependencies>. Opens that pom.`;
-      default:
-        return `Declared in this ${unitWord} (line ${d.declared_in.line}).`;
-    }
+  /** "via spring-web, jackson-databind" for a transitive row; empty before the tree is resolved. */
+  function viaOf(coord: string): string {
+    const names = introducers(treeIndex.artifacts.get(coord)).map((c) => splitCoord(c).name);
+    if (names.length === 0) return '';
+    return names.length > 3 ? `${names.slice(0, 3).join(', ')} +${names.length - 3}` : names.join(', ');
   }
 </script>
 
@@ -187,13 +193,25 @@
   {#snippet toolbar()}
     {#if root}
       <div class="dep-toolbar">
-        <!-- The filter, and only the filter.
-             The module graph, the re-read and the three repository actions used to sit here too.
-             They are about the BUILD rather than about this list — which pom declares what, what is
-             on disk in `~/.m2` — so they live in the build tool's own window now (Maven, Cargo),
-             where the rest of the build already is. One place per question; this panel keeps the
-             one control that acts on the rows it draws. -->
+        <!-- The filter, then the two things that act on the whole list. The module graph, the
+             re-read and the repository actions live in the build tool's own window (Maven, Cargo);
+             this panel keeps what acts on the rows it draws. -->
         <BennuFilterBar bind:query={filter} placeholder="Filter dependencies…" />
+        <IconButton
+          tooltip={dependenciesStore.treeLoading
+            ? 'Resolving the dependency tree…'
+            : tree ? 'Resolve the tree again' : `Resolve the tree — who brings what, and ${isCargo ? 'duplicate versions' : 'version conflicts'}`}
+          size={24}
+          onclick={resolveTree}
+          disabled={dependenciesStore.treeLoading}
+        >
+          {#if dependenciesStore.treeLoading}<Spinner size={12} />{:else}<Workflow size={13} />{/if}
+        </IconButton>
+        {#if !isCargo}
+          <IconButton tooltip="Known vulnerabilities…" size={24} onclick={() => bennuUiStore.openVulnerabilities()}>
+            <ShieldAlert size={13} />
+          </IconButton>
+        {/if}
       </div>
     {/if}
   {/snippet}
@@ -242,7 +260,39 @@
         </div>
       {/if}
 
-      {#if modules.length === 0 && transitive.length === 0}
+      <!-- The tree is the one thing here that runs Maven, so it is offered rather than done. -->
+      {#if !tree && report.modules.length > 0}
+        <div class="dep-notice">
+          {#if dependenciesStore.treeError}
+            <Alert variant="warning" compact text={dependenciesStore.treeError} />
+          {:else}
+            <Alert variant="info" compact>
+              To see <strong>who brings each dependency in</strong> and which ones come in
+              <strong>{isCargo ? 'at more than one version' : 'with conflicting versions'}</strong>, resolve
+              the tree. It runs {isCargo ? 'cargo' : 'Maven'} in the background.
+            </Alert>
+          {/if}
+          <div class="dep-notice-act">
+            <Button variant="secondary" size="sm" loading={dependenciesStore.treeLoading} onclick={resolveTree}>
+              {#snippet iconStart()}<Workflow size={12} />{/snippet}
+              Resolve tree
+            </Button>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Without the dropped nodes the tree can still say who brings what, but a conflict is
+           exactly a dropped node — so an empty conflicts group would read as "none", which it is not. -->
+      {#if tree && !tree.verbose}
+        <div class="dep-notice">
+          <Alert variant="info" compact>
+            This Maven did not report the versions it dropped, so <strong>version conflicts</strong>
+            cannot be listed; who brings each dependency in is still shown.
+          </Alert>
+        </div>
+      {/if}
+
+      {#if modules.length === 0 && transitive.length === 0 && conflicts.length === 0}
         <EmptyState
           message={filter
             ? 'No dependencies match the filter.'
@@ -250,6 +300,19 @@
           compact
         />
       {:else}
+        {#if conflicts.length > 0}
+          <SidebarSection
+            label={isCargo ? 'Duplicate versions' : 'Version conflicts'}
+            expanded={isOpen('__conflicts')}
+            onToggle={() => toggle('__conflicts')}
+            badge={conflicts.length}
+            badgeTitle={`${isCargo ? 'Crates' : 'Artifacts'} the resolved tree sees at more than one version`}
+          >
+            {#snippet icon()}<TriangleAlert size={13} />{/snippet}
+            <DependencyConflicts {conflicts} {ecosystem} />
+          </SidebarSection>
+        {/if}
+
         {#each modules as m (m.module.manifest)}
           <SidebarSection
             label={m.module.name}
@@ -280,63 +343,15 @@
               <ul class="dep-list">
                 {#each m.deps as d (coordOf(d) + '@' + d.variant + '@' + d.scope)}
                   <li>
-                    <button
-                      type="button"
-                      class="dep-row"
-                      class:unresolved={report.resolved_known && !d.resolved}
-                      onclick={() => openDeclaration(d)}
-                      use:tooltip={originTooltip(d)}
-                    >
-                      <span class="dep-main">
-                        <span class="dep-coord mono">{coordOf(d)}</span>
-                        <span class="dep-version mono" class:unknown={!d.version}>
-                          {d.version || 'version unknown'}
-                        </span>
-                      </span>
-                      <span class="dep-meta">
-                        <span use:tooltip={`${scopeLabel(ecosystem)}: ${d.scope}`}>
-                          <Badge variant="tone" tone={scopeTone(d.scope)} size="sm" label={d.scope} />
-                        </span>
-                        {#if d.kind}
-                          <Badge variant="tone" tone="neutral" size="sm" label={d.kind} />
-                        {/if}
-                        <!-- For Maven this is the classifier; for Cargo it is the crate this entry
-                             renames, which is the thing you need to know to find it on crates.io. -->
-                        {#if d.variant}
-                          <Badge
-                            variant="tone"
-                            tone="neutral"
-                            size="sm"
-                            label={isCargo ? `= ${d.variant}` : d.variant}
-                          />
-                        {/if}
-                        <!-- Provenance, for Cargo. `crates.io` is the ordinary case and says nothing
-                             worth a badge; a path, a git URL or the workspace does. -->
-                        {#if d.source && d.source !== 'crates.io'}
-                          <span class="dep-tag dep-tag-profile">{d.source}</span>
-                        {/if}
-                        {#if d.optional}
-                          <span class="dep-tag">optional</span>
-                        {/if}
-                        {#if d.condition}
-                          <span class="dep-tag dep-tag-profile">
-                            {isCargo ? d.condition : `profile: ${d.condition}`}
-                          </span>
-                        {/if}
-                        {#if d.features.length}
-                          <span class="dep-tag">+{d.features.join(' +')}</span>
-                        {/if}
-                        {#if d.origin.kind !== 'declared'}
-                          <span class="dep-origin">
-                            <GitFork size={10} />
-                            <span class="dep-origin-txt">{originLabel(d)}</span>
-                          </span>
-                        {/if}
-                        {#if report.resolved_known && !d.resolved}
-                          <span class="dep-missing"><CircleSlash size={10} /> not resolved</span>
-                        {/if}
-                      </span>
-                    </button>
+                    <DependencyRow
+                      dep={d}
+                      {ecosystem}
+                      resolvedKnown={report.resolved_known}
+                      usage={treeIndex.artifacts.get(coordOf(d))}
+                      vuln={vulnFor(dependenciesStore.advisories, coordOf(d), d.version)}
+                      pulls={pullsOf(m.module, d)}
+                      onOpen={openDeclaration}
+                    />
                   </li>
                 {/each}
               </ul>
@@ -354,13 +369,27 @@
             {#snippet icon()}<Layers size={13} />{/snippet}
             <ul class="dep-list">
               {#each transitive as t (t.name + '@' + t.version)}
-                <li
-                  class="dep-row dep-row-static"
-                  use:tooltip={t.resolved || 'Not in the local cache'}
-                >
-                  <span class="dep-main">
-                    <span class="dep-coord mono">{coordOf(t)}</span>
-                    <span class="dep-version mono">{t.version}</span>
+                {@const coord = coordOf(t)}
+                {@const via = viaOf(coord)}
+                {@const usage = treeIndex.artifacts.get(coord)}
+                {@const parts = splitCoord(coord)}
+                <li class="tr-row" use:tooltip={t.resolved || 'Not in the local cache'}>
+                  <span class="tr-top">
+                    <span class="tr-name">{parts.name}</span>
+                    <span class="tr-ver mono" class:conflict={usage?.conflicted}>{t.version}</span>
+                  </span>
+                  <span class="tr-meta">
+                    {#if parts.group}<span class="tr-group mono">{parts.group}</span>{/if}
+                    {#if via}<span class="tr-via"><Link2 size={10} /> via {via}</span>{/if}
+                    {#if usage?.conflicted}
+                      <Badge variant="tone" tone="warning" size="sm" label={`${usage.versions.length} versions`} />
+                    {/if}
+                    {#if vulnFor(dependenciesStore.advisories, coord, t.version)}
+                      {@const v = vulnFor(dependenciesStore.advisories, coord, t.version)!}
+                      <span use:tooltip={`${v.count} known ${v.count === 1 ? 'vulnerability' : 'vulnerabilities'} (${v.severity})`}>
+                        <Badge variant="tone" tone="error" size="sm" label={`${v.count} CVE`} />
+                      </span>
+                    {/if}
                   </span>
                 </li>
               {/each}
@@ -384,6 +413,7 @@
   .dep-toolbar { display: flex; align-items: center; gap: 4px; padding-right: 4px; }
   .dep-toolbar > :global(:first-child) { flex: 1; min-width: 0; }
   .dep-notice { padding: 6px 8px 2px; }
+  .dep-notice-act { display: flex; justify-content: flex-end; padding-top: 6px; }
   .dep-loading {
     display: flex; align-items: center; gap: 8px;
     padding: 14px 12px; color: var(--text-muted); font-size: var(--font-size-xs);
@@ -399,45 +429,27 @@
   }
   .dep-link {
     background: none; border: 0; padding: 0; cursor: pointer;
-    font: inherit; color: var(--accent-primary); text-decoration: underline;
+    font: inherit; color: var(--accent); text-decoration: underline;
   }
 
-  .dep-row {
-    width: 100%; display: flex; flex-direction: column; gap: 3px; align-items: stretch;
-    padding: 5px 8px; border: 0; background: none; text-align: left; cursor: pointer;
-    border-radius: var(--radius-sm); color: inherit; font: inherit;
+  /* Transitive rows share the declared rows' shape — name over group — but are not a link anywhere:
+     there is no declaration to open. */
+  .tr-row { display: flex; flex-direction: column; gap: 3px; padding: 6px 8px; border-radius: var(--radius-sm); }
+  .tr-row:hover { background: var(--bg-hover); }
+  .tr-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .tr-name {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--text-primary); font-size: var(--font-size-sm); font-weight: 500;
   }
-  .dep-row:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.04)); }
-  .dep-row:focus-visible { outline: 1px solid var(--accent-primary); outline-offset: -1px; }
-  /* The transitive rows are not a link anywhere: there is no declaration to open. */
-  .dep-row-static { cursor: default; }
-  .dep-row-static:hover { background: none; }
-  /* A declared dependency with no jar behind it — the row worth spotting from across the panel. */
-  .dep-row.unresolved .dep-coord { color: var(--color-warning, #d6a640); }
-
-  .dep-main { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-  .dep-coord {
-    flex: 1; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    color: var(--text-primary);
-  }
-  .dep-version { flex-shrink: 0; color: var(--text-muted); }
-  .dep-version.unknown { font-style: italic; color: var(--text-disabled); }
-  .mono { font-family: var(--font-code); font-size: var(--font-size-xs); }
-
-  .dep-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-  .dep-tag {
-    font-size: var(--font-size-3xs); color: var(--text-disabled);
-    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 0 4px;
-  }
-  .dep-tag-profile { color: var(--text-muted); }
-  .dep-origin, .dep-missing {
+  .tr-ver { flex-shrink: 0; color: var(--text-secondary); }
+  .tr-ver.conflict { color: var(--warning); font-weight: 600; }
+  .tr-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+  .tr-group { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tr-via {
     display: inline-flex; align-items: center; gap: 3px;
-    font-size: var(--font-size-3xs); color: var(--text-disabled); min-width: 0;
+    font-size: var(--font-size-3xs); color: var(--text-muted);
   }
-  .dep-missing { color: var(--color-warning, #d6a640); }
-  .dep-origin :global(svg), .dep-missing :global(svg) { flex-shrink: 0; }
-  .dep-origin-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mono { font-family: var(--font-code); font-size: var(--font-size-xs); }
   code {
     font-family: var(--font-code); font-size: var(--font-size-2xs); color: var(--text-primary);
   }
