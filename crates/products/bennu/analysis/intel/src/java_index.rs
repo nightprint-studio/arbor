@@ -817,6 +817,7 @@ fn class_flags(td: &TypeDecl, is_final_by_lombok: bool, has_hidden_members: bool
         is_annotation: matches!(td.kind, TypeKind::Annotation),
         is_record: matches!(td.kind, TypeKind::Record),
         is_sealed: td.is_sealed,
+        is_package_private: td.is_package_private,
         has_hidden_members,
     }
 }

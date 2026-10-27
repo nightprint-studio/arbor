@@ -61,6 +61,7 @@ pub fn inherit_cycle_errors_in(
                 check_cycle(n, bytes, symbols, resolver, &mut out);
                 check_overrides(n, bytes, symbols, resolver, &mut out);
             }
+            "object_creation_expression" => check_anonymous_overrides(n, bytes, symbols, resolver, &mut out),
             _ => {}
         }
     }
@@ -134,23 +135,7 @@ fn check_overrides(
     out: &mut Vec<Diagnostic>,
 ) {
     let Some(body) = n.child_by_field_name("body") else { return };
-    // `(method, its @Override annotation, name)` — reported on the annotation, as javac does: it is
-    // the claim that is wrong, and removing it is one of the two fixes.
-    let mut annotated: Vec<(Node, Node, String)> = Vec::new();
-    let mut mc = body.walk();
-    for m in body.named_children(&mut mc) {
-        if m.kind() != "method_declaration" {
-            continue;
-        }
-        let Some(annotation) = override_annotation(m, bytes) else { continue };
-        let Some(name_node) = m.child_by_field_name("name") else { continue };
-        let Ok(name) = name_node.utf8_text(bytes) else { continue };
-        if crate::support::nodes::has_keyword(m, bytes, "static") {
-            out.push(CheckId::OverrideOverridesNothing.at(annotation, "Static methods cannot be annotated with `@Override`"));
-            continue;
-        }
-        annotated.push((m, annotation, name.to_string()));
-    }
+    let annotated = annotated_overrides(body, bytes, out);
     if annotated.is_empty() {
         return;
     }
@@ -172,6 +157,54 @@ fn check_overrides(
         return;
     }
     check_overrides_in_hierarchy(n, &annotated, &object_methods, bytes, symbols, resolver, out);
+}
+
+/// `(method, its @Override annotation, name)` for each `@Override` instance method of `body` —
+/// reported on the annotation, as javac does: it is the claim that is wrong, and removing it is one
+/// of the two fixes. A `static` one is reported here, at once: it overrides nothing by definition.
+fn annotated_overrides<'t>(body: Node<'t>, bytes: &[u8], out: &mut Vec<Diagnostic>) -> Vec<(Node<'t>, Node<'t>, String)> {
+    let mut annotated = Vec::new();
+    let mut mc = body.walk();
+    for m in body.named_children(&mut mc) {
+        if m.kind() != "method_declaration" {
+            continue;
+        }
+        let Some(annotation) = override_annotation(m, bytes) else { continue };
+        let Some(name_node) = m.child_by_field_name("name") else { continue };
+        let Ok(name) = name_node.utf8_text(bytes) else { continue };
+        if crate::support::nodes::has_keyword(m, bytes, "static") {
+            out.push(CheckId::OverrideOverridesNothing.at(annotation, "Static methods cannot be annotated with `@Override`"));
+            continue;
+        }
+        annotated.push((m, annotation, name.to_string()));
+    }
+    annotated
+}
+
+/// An anonymous class body — `new Base<>() { @Override void m() { } }` — judged against the one type
+/// written after `new`. The diamond and any type arguments are irrelevant to which methods exist.
+fn check_anonymous_overrides(
+    creation: Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    out: &mut Vec<Diagnostic>,
+) {
+    let mut cursor = creation.walk();
+    let Some(body) = creation.named_children(&mut cursor).find(|c| c.kind() == "class_body") else { return };
+    // A qualified creation (`outer.new Inner() { }`) names the type relative to an instance: skip it.
+    if creation.child_by_field_name("object").is_some() {
+        return;
+    }
+    let annotated = annotated_overrides(body, bytes, out);
+    if annotated.is_empty() {
+        return;
+    }
+    let Some(written) = creation.child_by_field_name("type").and_then(|t| t.utf8_text(bytes).ok()) else { return };
+    let erased = written.split('<').next().unwrap_or(written).trim();
+    let Some(binary) = type_binary(erased, symbols, resolver) else { return };
+    let object_methods = crate::hierarchy::inheritance::object_method_names(resolver);
+    judge_overrides(&[binary], &annotated, &object_methods, resolver, out);
 }
 
 /// The `@Override` methods of a type that names supertypes, judged against the whole hierarchy.
@@ -200,6 +233,18 @@ fn check_overrides_in_hierarchy(
     let Some(supers) = crate::support::supertypes::binaries_complete(n, bytes, symbols, resolver) else {
         return;
     };
+    judge_overrides(&supers, annotated, object_methods, resolver, out);
+}
+
+/// Whether each annotated method exists, by name and arity, in the hierarchy of `supers` — judged only
+/// when every one of them is fully known.
+fn judge_overrides(
+    supers: &[String],
+    annotated: &[(Node, Node, String)],
+    object_methods: &HashSet<String>,
+    resolver: &dyn TypeResolver,
+    out: &mut Vec<Diagnostic>,
+) {
     if supers.is_empty() {
         return; // no explicit supertype (only Object) → an @Override can only mean an Object method;
                 // we don't have Object's method table guaranteed, so nothing to assert here safely.
@@ -214,7 +259,7 @@ fn check_overrides_in_hierarchy(
     // counts it is declared with. Because the hierarchy is fully known, a name absent here is
     // DEFINITELY not overridable → a real typo.
     let mut super_methods: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
-    for s in &supers {
+    for s in supers {
         crate::support::walk::for_each_supertype(resolver, s, &mut |_bn, cm| {
             for m in &cm.methods {
                 super_methods.entry(m.name.clone()).or_default().push(m.params.len());

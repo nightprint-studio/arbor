@@ -49,6 +49,10 @@ struct File<'a, 't> {
     symbols: &'a FileSymbols,
     resolver: &'a dyn TypeResolver,
     cache: &'a InferCache,
+    /// Whether the file writes a wildcard type argument at all (`List<?>`, `Map<String, ? extends X>`). Asked
+    /// once: without one, no receiver can have a wildcard type, and the per-call scope walk that looks for
+    /// it is the quadratic part of a large file.
+    has_wildcards: bool,
 }
 
 impl File<'_, '_> {
@@ -85,7 +89,7 @@ pub fn generic_argument_errors_in(
     resolver: &dyn TypeResolver,
     cache: &InferCache,
 ) -> Vec<Diagnostic> {
-    let file = File { root, source, symbols, resolver, cache };
+    let file = File { root, source, symbols, resolver, cache, has_wildcards: writes_a_wildcard(source) };
     let mut out = Vec::new();
     for &n in nodes {
         match n.kind() {
@@ -95,6 +99,15 @@ pub fn generic_argument_errors_in(
         }
     }
     out
+}
+
+/// Whether `source` has a `?` standing as a type argument: right after a `<` or a `,`.
+fn writes_a_wildcard(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    bytes.iter().enumerate().any(|(i, &b)| {
+        b == b'?'
+            && bytes[..i].iter().rev().find(|c| !c.is_ascii_whitespace()).is_some_and(|c| *c == b'<' || *c == b',')
+    })
 }
 
 fn check_call(call: Node, file: &File, out: &mut Vec<Diagnostic>) {
@@ -107,7 +120,7 @@ fn check_call(call: Node, file: &File, out: &mut Vec<Diagnostic>) {
     if args.iter().any(|a| matches!(a.kind(), "lambda_expression" | "method_reference")) {
         return;
     }
-    if let Some(refused) = wildcard_receiver(call, method, &args, file) {
+    if let Some(refused) = file.has_wildcards.then(|| wildcard_receiver(call, method, &args, file)).flatten() {
         out.push(CheckId::ArgumentType.at(
             refused,
             format!("Argument of `{method}` cannot be passed: the receiver's type argument is a wildcard that accepts no such value"),
@@ -140,6 +153,8 @@ struct WildcardCall<'t> {
     class_params: Vec<String>,
     wildcards: Vec<Option<Wildcard<'t>>>,
     own: Vec<Member>,
+    /// The receiver class, to ask whether its type parameters are bounded.
+    class: String,
 }
 
 /// `receiver.method(args)` where the receiver is a variable the enclosing method declares with a
@@ -167,11 +182,11 @@ fn wildcard_call<'t>(call: Node<'t>, method: &str, argc: usize, file: &File) -> 
     if own.is_empty() || inherited.iter().any(|m| !own_shapes.contains(&shape(m))) {
         return None;
     }
-    Some(WildcardCall { class_params: members.type_params.clone(), wildcards, own })
+    Some(WildcardCall { class_params: members.type_params.clone(), wildcards, own, class })
 }
 
 fn wildcard_receiver<'t>(call: Node<'t>, method: &str, args: &[Node<'t>], file: &File) -> Option<Node<'t>> {
-    let WildcardCall { class_params, wildcards, own } = wildcard_call(call, method, args.len(), file)?;
+    let WildcardCall { class_params, wildcards, own, .. } = wildcard_call(call, method, args.len(), file)?;
     let in_scope = type_params_in_scope(call, file.bytes());
     let mut reported: Option<Node> = None;
     for m in &own {
@@ -206,7 +221,11 @@ fn check_declaration(decl: Node, file: &File, out: &mut Vec<Diagnostic>) {
         .filter(|v| v.kind() == "method_invocation")
         .collect();
     for value in values {
-        let message = wildcard_read(declared, value, file).or_else(|| factory_conflict(declared, value, file));
+        let message = file
+            .has_wildcards
+            .then(|| wildcard_read(declared, value, file))
+            .flatten()
+            .or_else(|| factory_conflict(declared, value, file));
         if let Some(message) = message {
             out.push(CheckId::IncompatibleType.at(value, message));
         }
@@ -225,13 +244,28 @@ fn wildcard_read(declared: Node, value: Node, file: &File) -> Option<String> {
     let own_vars = only.method_type_params();
     let k = variable_index(&only.return_type, &call.class_params, &own_vars)?;
     let (read, shown): (String, &str) = match call.wildcards[k].as_ref()? {
-        Wildcard::Unbounded | Wildcard::Super(_) => (OBJECT.to_string(), "Object"),
+        // `Object` only where the type parameter has no bound: `TypeVariable<?>.getGenericDeclaration()`
+        // reads as its parameter's bound (`GenericDeclaration`), not as `Object`. The index does not
+        // keep bounds, so the well-known unbounded JDK generics are the ones judged.
+        Wildcard::Unbounded | Wildcard::Super(_) if is_unbounded_generic(&call.class) => (OBJECT.to_string(), "Object"),
+        Wildcard::Unbounded | Wildcard::Super(_) => return None,
         Wildcard::Extends(bound) => (plain_class(*bound, file)?, "its upper bound"),
     };
     let target = written_type_binary(declared, file.bytes(), file.symbols, file.resolver)?;
     file.certainly_not_a(&read, &target).then(|| {
         format!("Incompatible types: reading through a wildcard gives {shown}, which cannot be assigned to `{}`", declared.utf8_text(file.bytes()).unwrap_or_default())
     })
+}
+
+/// Whether every type parameter of `class` is surely unbounded — the collections, `Optional`, the
+/// functional interfaces, `Iterable`, `Class`. `EnumSet<E extends Enum<E>>` and its kin are not.
+fn is_unbounded_generic(class: &str) -> bool {
+    let simple = class.rsplit(['/', '$']).next().unwrap_or(class);
+    if simple.contains("Enum") {
+        return false;
+    }
+    class.starts_with("java/util/")
+        || matches!(class, "java/lang/Iterable" | "java/lang/Class" | "java/lang/ThreadLocal")
 }
 
 /// `Optional<String> text = Optional.of(1)`: the factory's type variable is fixed to `String` by the

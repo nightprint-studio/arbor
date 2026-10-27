@@ -35,9 +35,7 @@ pub fn func_iface_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> 
         if n.kind() != "interface_declaration" {
             continue;
         }
-        if !has_functional_interface_annotation(n, bytes) {
-            continue;
-        }
+        let Some(annotation) = functional_interface_annotation(n, bytes) else { continue };
         // Inherited abstract methods are invisible from the syntax tree — can't count the full SAM
         // set soundly, so SKIP an interface that extends anything.
         if has_extends_clause(n) {
@@ -57,7 +55,9 @@ pub fn func_iface_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> 
         } else {
             "it has multiple non-overriding abstract methods"
         };
-        let anchor = n.child_by_field_name("name").unwrap_or(n);
+        // On the annotation, where javac puts it: the annotation is the claim being refuted, and
+        // it sits on its own line when the declaration is written the usual way.
+        let anchor = annotation;
         out.push(Diagnostic {
             message: format!(
                 "`{name}` is not a functional interface: it must declare exactly one abstract method ({detail})"
@@ -71,9 +71,9 @@ pub fn func_iface_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> 
     out
 }
 
-/// Whether a `marker_annotation` / `annotation` named `FunctionalInterface` (bare or
-/// `java.lang.FunctionalInterface`) appears in the interface's `modifiers`. Mirrors `annotations.rs`.
-fn has_functional_interface_annotation(node: Node, bytes: &[u8]) -> bool {
+/// The `marker_annotation` / `annotation` named `FunctionalInterface` (bare or
+/// `java.lang.FunctionalInterface`) in the interface's `modifiers`, if any. Mirrors `annotations.rs`.
+fn functional_interface_annotation<'t>(node: Node<'t>, bytes: &[u8]) -> Option<Node<'t>> {
     let mut c = node.walk();
     for ch in node.children(&mut c) {
         if ch.kind() != "modifiers" {
@@ -88,13 +88,13 @@ fn has_functional_interface_annotation(node: Node, bytes: &[u8]) -> bool {
                 if let Ok(t) = name.utf8_text(bytes) {
                     let simple = t.rsplit('.').next().unwrap_or(t);
                     if simple == "FunctionalInterface" {
-                        return true;
+                        return Some(m);
                     }
                 }
             }
         }
     }
-    false
+    None
 }
 
 /// Whether the interface has an `extends A, B` clause (an `extends_interfaces` child).

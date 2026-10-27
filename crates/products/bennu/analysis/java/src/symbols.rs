@@ -304,6 +304,11 @@ pub struct TypeDecl {
     /// A `sealed` class/interface (a `permits` list restricts its subtypes).
     #[serde(default)]
     pub is_sealed: bool,
+    /// A top-level type declared without `public`: visible only inside its own package. `false` for a
+    /// nested type and for an index written before this existed, so the answer is never "private" by
+    /// default.
+    #[serde(default)]
+    pub is_package_private: bool,
     /// The declared generic type-parameter NAMES, in order (`class Pair<L, R>` → `["L","R"]`). Empty
     /// for a non-generic type. Drives exact positional generic substitution downstream (a method
     /// returning `R` maps to the receiver's 2nd type argument). `#[serde(default)]` for old indexes.
@@ -484,6 +489,8 @@ fn collect_type(
     let is_abstract = has_modifier(node, bytes, "abstract");
     let is_final = has_modifier(node, bytes, "final");
     let is_sealed = has_modifier(node, bytes, "sealed");
+    // A top-level type with no `public`: visible only inside its own package.
+    let is_package_private = node.parent().is_some_and(|p| p.kind() == "program") && !has_modifier(node, bytes, "public");
 
     let mut extends = None;
     let mut implements = Vec::new();
@@ -595,6 +602,7 @@ fn collect_type(
         is_abstract,
         is_final,
         is_sealed,
+        is_package_private,
         type_params,
         methods,
         fields,
@@ -919,6 +927,7 @@ fn collect_anonymous_type(
         is_abstract: false,
         is_final: true, // an anonymous class can never be subclassed
         is_sealed: false,
+        is_package_private: false,
         type_params: Vec::new(),
         methods,
         fields,

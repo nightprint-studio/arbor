@@ -7,3 +7,4 @@ pub mod annotation_target;
 pub mod annotation_values;
 pub mod annotations;
 pub mod func_iface;
+pub mod target_dupes;

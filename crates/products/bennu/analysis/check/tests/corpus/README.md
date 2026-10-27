@@ -22,8 +22,11 @@ tests/corpus/
   java8/  pom.xml          maven.compiler.release = 8
           src/main/java/corpus/<category>/*.java
           expected.txt     javac golden file (generated, committed)
-  java11/ java15/ java17/  release 11 / 15 / 17: the version gates (see below), `corpus.version` only
+  java8isolated/           release 8, cases that poison javac for their neighbours (a supertype cycle)
+  java8syntax/             release 8, parse errors, one per file (see below)
+  java11/ java15/ java17/  release 11 / 15 / 17: the version gates (see below); java17 also `corpus.modern`
           pom.xml, src/main/java/corpus/version/*.java, expected.txt
+  infer/   pom.xml         release 21, legal code: the type-inference cases (see below), not scored for errors
   java21/ pom.xml          maven.compiler.release = 21: var, records, sealed, switch/patterns, text blocks
           src/main/java/corpus/<category>/*.java
           expected.txt
@@ -60,6 +63,52 @@ once, and Bennu (which flags every occurrence) is only scored fairly under that 
 expressed as a corpus case: a **text block** (the error sits on the opening `"""` line, which cannot carry a
 trailing marker comment) and `yield` inside a colon `switch` (javac turns it into an unrelated syntax error).
 Both stay covered by the unit tests in `source/version.rs`.
+
+### The syntax module
+
+`java8syntax` holds one **parse error per file** (lexical errors, a missing token, a statement in the wrong
+place). It is a module of its own so a broken file cannot disturb the semantic cases around it, and so each
+marker stays unambiguous. javac's parser recovers differently from tree-sitter: where javac reports a cascade
+(a second error far from the first), the case is written on one line so both land on the same line, and a
+shape that always cascades is left out. Three kinds of case need a Bennu check of their own because
+tree-sitter reads them as legal — the lexer errors javac raises (`source/literals.rs`: `int` too large, a
+float out of range, an illegal escape) and the shapes the forgiving grammar accepts (`source/grammar_gaps.rs`:
+`assert`/`enum` as a name, a modifier on a local, a declaration as an `if` body, a method with no return
+type). Not in the corpus, because Bennu reports the error on another line than javac and the scoring
+correctly calls that a false positive: an unclosed string literal and an instance initializer in an
+interface. `this = null` is not either: tree-sitter fails to parse it, and a file that does not parse is
+checked for syntax only.
+
+### The inference corpus
+
+`infer/` is a different kind of test: **what type does Bennu give an expression?** Each case is a declaration
+whose line ends in `// infer`, with the declared type being exactly the type of its initializer:
+
+```java
+Optional<Integer> mapped = Optional.of("a").map(String::length); // infer
+```
+
+javac compiles the module without a diagnostic (it is a clean module of `refresh-expected`), so every
+expectation is assignable in real Java. `tests/infer_corpus.rs` asks `bennu-java` for the initializer's type and
+compares it with the declared type resolved the way Bennu resolves any written type.
+
+* `// infer` — Bennu must give exactly that type. Silence or any other answer fails the test.
+* `// infer?` — a known gap. Never a failure, but listed in the report (`target/tmp/bennu-infer-corpus.md`) as
+  silent, *arguments unsettled* (`List<T>` for `List<String>`) or wrong, and reported as "now exact" once it is
+  right so the `?` can go.
+
+A declaration is only a fair case when the initializer has a type of its own: a lambda, a method reference or
+`Function.identity()` takes its type from the target, so those are declared without a marker and used by the
+cases after them. Run: `cargo test -p bennu-intel --test infer_corpus -- --nocapture`.
+
+### The real-code sweep
+
+A corpus written by hand only finds what its author thought of. `tests/real_code_sweep.rs` is the other
+measure: unpack the sources of a library that needs only the JDK (`*-sources.jar` in `~/.m2` — commons-lang3,
+commons-collections4 …), and every **error** Bennu reports on it is a false positive, because the library
+compiles. It is opt-in (`BENNU_SWEEP_ROOT=<dir>`, layout in the file header) and never fails; it prints the
+false positives per check. It found the bugs a hand-written case does not: a nested type sharing a simple name
+with another, `T[]` read through a type argument, a `final` declared inside a loop.
 
 The Rust side lives in `crates/products/bennu/analysis/intel/tests/check_corpus.rs` (+ `check_corpus_support/`).
 `lombok8` also needs Lombok's jar in `~/.m2` (`mvn compile`, i.e. the refresh script, downloads it); without it that module is skipped with a reason.

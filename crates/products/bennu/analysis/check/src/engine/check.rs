@@ -105,6 +105,12 @@ pub fn check_file_in(
 ) -> Vec<Diagnostic> {
     let mut out = crate::source::syntax::syntax_errors(root, source);
     out.extend(crate::source::statements::invalid_statements_nodes(nodes, source));
+    out.extend(crate::source::literals::literal_errors_nodes(nodes, source));
+    out.extend(crate::decls::generic_override::generic_override_clash_nodes(nodes, source));
+    out.extend(crate::source::grammar_gaps::grammar_gap_errors_nodes(nodes, source));
+    out.extend(crate::annotation::target_dupes::target_dupe_errors_nodes(nodes, source));
+    out.extend(crate::decls::enum_rules::enum_rule_errors_nodes(nodes, source));
+    out.extend(crate::decls::legacy_nesting::legacy_nesting_errors_nodes(nodes, source, ctx.java_major));
     out.extend(crate::flow::returns::missing_return_nodes(nodes, source));
     out.extend(crate::flow::returns::return_statement_errors_nodes(nodes, source));
     out.extend(crate::flow::returns::lambda_body_errors_nodes(nodes, source));
@@ -146,6 +152,8 @@ pub fn check_file_in(
     out.extend(crate::calls::pattern_scope::pattern_scope_errors_nodes(nodes, source));
     out.extend(crate::typing::static_type_var::static_type_var_errors_nodes(nodes, source));
     out.extend(crate::source::var_target::var_target_errors_nodes(nodes, source));
+    out.extend(crate::source::var_target::var_position_errors_nodes(nodes, source, ctx.java_major));
+    out.extend(crate::decls::forward_ref::forward_ref_errors_nodes(nodes, source));
     out.extend(crate::calls::capture::capture_errors_nodes(nodes, source));
     // Data flow — the checks that follow a value through a method rather than reading a
     // declaration. Pure AST like everything else here: the model is straight-line and forgets at
@@ -296,6 +304,9 @@ pub fn check_file_resolved(
         timed!("switch_label_type", crate::switching::switch_label_type::switch_label_type_errors_in(root, &nodes, source, &symbols, resolver, &cache, ctx.java_major));
         timed!("super_method", crate::hierarchy::super_method::super_method_errors_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("condition_type", crate::typing::condition_type::condition_type_errors_in(root, &nodes, source, &symbols, resolver, &cache));
+        timed!("operand_type", crate::typing::operand_type::operand_type_errors_in(root, &nodes, source, &symbols, resolver, &cache));
+        timed!("type_access", crate::typing::type_access::type_access_errors_in(&nodes, source, &symbols, resolver));
+        timed!("instanceof_unconditional", crate::typing::instanceof_unconditional::instanceof_unconditional_errors_in(root, &nodes, source, &symbols, resolver, &cache, ctx.java_major));
         timed!("type_use", crate::typing::type_use::type_use_errors_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("narrowing", crate::typing::narrowing::narrowing_errors_in(root, &nodes, source, &symbols, resolver, &cache));
         timed!("checked_throw", crate::throwing::checked_throw::checked_throw_errors_in(&nodes, source, &symbols, resolver));

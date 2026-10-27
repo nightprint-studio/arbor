@@ -25,10 +25,12 @@
   <modules>
     <module>java8</module>
     <module>java8isolated</module>
+    <module>java8syntax</module>
     <module>java11</module>
     <module>java15</module>
     <module>java17</module>
     <module>java21</module>
+    <module>infer</module>
     <module>clean8</module>
     <module>clean21</module>
     <module>lombok8</module>

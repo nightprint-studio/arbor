@@ -54,10 +54,44 @@ fn check_block(block: Node, out: &mut Vec<Diagnostic>) {
             });
             return; // one diagnostic per block is enough (the rest cascade from the same cause)
         }
-        if is_terminator(stmt.kind()) {
+        if is_terminator(stmt.kind()) || never_completes(stmt) {
             terminated = true;
         }
     }
+}
+
+/// A loop that cannot finish: its condition is the literal `true` (or a `for` has none) and nothing
+/// inside it contains a `break` at all. `while (true) { work(); }` followed by a statement is the
+/// JLS 14.22 error; a `break` anywhere in the body — even one aimed at an inner loop or a `switch` —
+/// makes this stay silent, because telling which statement it leaves is where a false flag hides.
+fn never_completes(stmt: Node) -> bool {
+    let condition_is_true = match stmt.kind() {
+        "while_statement" | "do_statement" => stmt
+            .child_by_field_name("condition")
+            .is_some_and(|c| c.kind() == "parenthesized_expression" && only_child_is_true(c)),
+        "for_statement" => match stmt.child_by_field_name("condition") {
+            None => true,
+            Some(c) => c.kind() == "true",
+        },
+        _ => false,
+    };
+    condition_is_true && !contains_break(stmt)
+}
+
+fn only_child_is_true(parenthesized: Node) -> bool {
+    parenthesized.named_child_count() == 1 && parenthesized.named_child(0).is_some_and(|c| c.kind() == "true")
+}
+
+fn contains_break(node: Node) -> bool {
+    let mut stack = vec![node];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "break_statement" {
+            return true;
+        }
+        let mut c = n.walk();
+        stack.extend(n.children(&mut c));
+    }
+    false
 }
 
 /// A statement that unconditionally transfers control away from the current block.
@@ -118,6 +152,22 @@ mod tests {
     fn statement_after_break_is_unreachable() {
         let src = "class C { void m() { for (;;) { break; int x = 1; } } }";
         assert_eq!(unreach(src).len(), 1, "{:?}", unreach(src));
+    }
+
+    #[test]
+    fn a_statement_after_an_endless_loop_is_unreachable() {
+        assert_eq!(unreach("class C { void m() { while (true) { } int x = 1; } }").len(), 1);
+        assert_eq!(unreach("class C { void m() { for (;;) { work(); } int x = 1; } }").len(), 1);
+        assert_eq!(unreach("class C { void m() { do { } while (true); int x = 1; } }").len(), 1);
+    }
+
+    #[test]
+    fn a_loop_with_a_break_or_a_real_condition_can_finish() {
+        assert!(unreach("class C { void m() { while (true) { if (f()) break; } int x = 1; } }").is_empty());
+        assert!(unreach("class C { void m(boolean b) { while (b) { } int x = 1; } }").is_empty());
+        assert!(unreach("class C { void m() { for (int i = 0; ; i++) { if (i > 3) break; } int x = 1; } }").is_empty());
+        // A break aimed anywhere — here at a nested loop — is enough to stay silent.
+        assert!(unreach("class C { void m() { while (true) { for (;;) { break; } } int x = 1; } }").is_empty());
     }
 
     #[test]

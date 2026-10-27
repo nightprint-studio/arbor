@@ -184,15 +184,13 @@ fn check_access(
             // never equal a real package, and EVERY same-package access to a package-visible member of
             // a nested type was reported inaccessible.
             //
-            // Telling a nested class apart from a sub-package inside a slash-joined binary needs a
-            // case convention (`Outer` vs `other`), and a check that guesses there would start
-            // flagging correct code the moment a project spells a name unusually. So the rule is
-            // "declared under the accessing package", which is exact for a nested type and
-            // deliberately lenient for a genuine SUB-package: `com/acme` accessing `com/acme/sub/Foo`
-            // is no longer flagged. That is an under-report in a narrow slice, and this check's stated
-            // policy is that under-reporting is acceptable where a wrong diagnostic is not.
-            if declaring_binary.starts_with(&format!("{access_pkg}/")) {
-                return; // same package (or a sub-package we decline to judge) → legal
+            // Telling a nested class apart from a sub-package inside a slash-joined binary is a
+            // question the RESOLVER answers, not a naming convention: `com/acme/Outer/Inner` is nested
+            // when `com/acme/Outer` is a type, and `com/acme/sub/Foo` is in a sub-package when
+            // `com/acme/sub` is not one. A sub-package is a different package, so a package-private
+            // member there is not visible.
+            if declared_in_package(&access_pkg, &declaring_binary, resolver) {
+                return; // same package → legal
             }
             if package_of_binary(&declaring_binary).is_none() {
                 return; // declaring type is in the default (root) package / path-less → SKIP
@@ -207,9 +205,78 @@ fn check_access(
                 ),
             ));
         }
-        // Public / Protected are never flagged (protected subclass rules are subtle → skipped whole).
-        Visibility::Public | Visibility::Protected => {}
+        Visibility::Protected => {
+            // Protected is the package's, plus subclasses'. Flagged only when the access is in another
+            // package AND no type around it is — or might be — a subclass of the declaring type: the
+            // finer rule (through which receiver type a subclass may reach it) stays unjudged.
+            if access_top.as_deref().is_some_and(|t| in_same_nest(t, &declaring_binary)) {
+                return;
+            }
+            let Some(access_pkg) = symbols.package.as_deref() else { return };
+            let access_pkg = access_pkg.replace('.', "/");
+            if declared_in_package(&access_pkg, &declaring_binary, resolver)
+                || package_of_binary(&declaring_binary).is_none()
+                || may_be_subclass_context(n, bytes, symbols, resolver, &declaring_binary)
+            {
+                return;
+            }
+            out.push(CheckId::InaccessibleMember.span(
+                name_node.start_byte(),
+                name_node.end_byte(),
+                format!(
+                    "`{member_name}` has protected access in `{}`",
+                    simple_name(&declaring_binary)
+                ),
+            ));
+        }
+        // A public member is visible everywhere.
+        Visibility::Public => {}
     }
+}
+
+/// Whether `declaring` is declared in `package` (slash form): a top-level type of it, or a type nested
+/// in one. A type in a SUB-package is not — it is another package.
+fn declared_in_package(package: &str, declaring: &str, resolver: &dyn TypeResolver) -> bool {
+    let Some(rest) = declaring.strip_prefix(&format!("{package}/")) else { return false };
+    match rest.split_once('/') {
+        None => true,
+        // `Outer/Inner`: nested iff `Outer` is a type the resolver knows — or is spelled like one, so
+        // an index that has not caught up with its own nested type never turns it into a sub-package.
+        Some((first, _)) => {
+            first.starts_with(char::is_uppercase) || resolver.members_of(&format!("{package}/{first}")).is_some()
+        }
+    }
+}
+
+/// Whether the access might sit in code that inherits from `declaring`: some enclosing type extends or
+/// implements it, an enclosing type's hierarchy is not fully known, or the access is inside an
+/// anonymous class (whose supertype is the one written after `new`). Any of those keeps the check quiet.
+fn may_be_subclass_context(
+    access: Node,
+    bytes: &[u8],
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    declaring: &str,
+) -> bool {
+    let mut cur = access.parent();
+    while let Some(p) = cur {
+        match p.kind() {
+            "class_body" if p.parent().is_some_and(|o| o.kind() == "object_creation_expression") => return true,
+            "class_declaration" | "enum_declaration" | "record_declaration" | "interface_declaration" => {
+                let Some(name) = p.child_by_field_name("name").and_then(|x| x.utf8_text(bytes).ok()) else {
+                    return true;
+                };
+                let Some(td) = symbols.types.iter().find(|t| t.name == name) else { return true };
+                let binary = td.fqn.replace('.', "/");
+                if !hierarchy_fully_known(resolver, &binary) || crate::support::walk::reaches(resolver, &binary, declaring) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        cur = p.parent();
+    }
+    false
 }
 
 /// The binary name of the receiver's declaring type, for BOTH shapes we handle:
@@ -609,8 +676,9 @@ mod tests {
     }
 
     #[test]
-    fn protected_field_is_not_flagged() {
-        // Protected subclass rules are subtle → we never flag protected.
+    fn protected_field_is_not_flagged_when_the_accessing_hierarchy_is_unknown() {
+        // The accessing class is not in the mock index, so its supertypes are not known: it MIGHT be
+        // a subclass of the declaring type, and protected access is only judged when it surely is not.
         assert!(diags(&access("int a = other.prot_value;")).is_empty());
     }
 

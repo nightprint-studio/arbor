@@ -316,7 +316,7 @@ impl<'b> Unit<'b> {
     }
 
     fn while_statement(&mut self, stmt: Node, state: State, label: Option<String>) -> Option<State> {
-        let entry = state.assigned.clone();
+        let entry = (state.assigned.clone(), state.unassigned.clone());
         let (when_true, when_false) = match stmt.child_by_field_name("condition") {
             Some(c) => self.branch_condition(stmt, c, state),
             None => (Some(state), None),
@@ -333,7 +333,7 @@ impl<'b> Unit<'b> {
     }
 
     fn do_statement(&mut self, stmt: Node, state: State, label: Option<String>) -> Option<State> {
-        let entry = state.assigned.clone();
+        let entry = (state.assigned.clone(), state.unassigned.clone());
         self.targets.push(Target { label, breakable: true, is_loop: true, breaks: None, continues: None });
         let end = match stmt.child_by_field_name("body") {
             Some(b) => self.statement(b, Some(state)),
@@ -361,7 +361,7 @@ impl<'b> Unit<'b> {
                 _ => self.expr(init, state),
             };
         }
-        let entry = state.assigned.clone();
+        let entry = (state.assigned.clone(), state.unassigned.clone());
         let (when_true, when_false) = match stmt.child_by_field_name("condition") {
             Some(cond) => self.branch_condition(stmt, cond, state),
             None => (Some(state), None),
@@ -393,7 +393,7 @@ impl<'b> Unit<'b> {
         if let Some(name) = stmt.child_by_field_name("name").and_then(|n| self.text(n)) {
             self.declare(name, &mut state, true, false);
         }
-        let entry = state.assigned.clone();
+        let entry = (state.assigned.clone(), state.unassigned.clone());
         self.targets.push(Target { label, breakable: true, is_loop: true, breaks: None, continues: None });
         let end = match stmt.child_by_field_name("body") {
             Some(b) => self.statement(b, Some(state.clone())),
@@ -607,10 +607,20 @@ impl<'b> Unit<'b> {
 
     /// A blank `final` the loop's body may assign, when it may not have been assigned on entering
     /// the loop: the next iteration assigns it again.
-    fn loop_reassignment(&mut self, entry: &BTreeMap<String, (usize, usize)>, back: &Option<State>) {
+    ///
+    /// Only a variable that already existed when the loop was entered — and was still unassigned
+    /// there: one declared INSIDE the body is a new variable on every iteration, so assigning it once
+    /// per pass is exactly right (`final int x; try { x = f(); } catch (E e) { continue; }`).
+    fn loop_reassignment(
+        &mut self,
+        entry: &(BTreeMap<String, (usize, usize)>, BTreeSet<String>),
+        back: &Option<State>,
+    ) {
         let Some(back) = back else { return };
+        let (entry_assigned, entry_unassigned) = entry;
         for (name, &(start, end)) in &back.assigned {
-            if entry.contains_key(name)
+            if entry_assigned.contains_key(name)
+                || !entry_unassigned.contains(name)
                 || !self.blank_finals.contains(name)
                 || self.abandoned.contains(name)
                 || !self.loop_reported.insert(start)
@@ -915,6 +925,14 @@ mod tests {
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(d[0].contains("in a loop"), "{d:?}");
         assert!(diags("final int v; while (c) { v = 1; break; }").is_empty());
+    }
+
+    /// A variable declared inside the loop body is new on every pass: once per iteration is legal. The
+    /// commons-lang3 shape that was reported as `might be assigned in a loop`.
+    #[test]
+    fn a_blank_final_declared_inside_the_loop_is_not_reassigned() {
+        assert!(diags("while (c) { final int v; v = 1; }").is_empty());
+        assert!(diags("for (;;) { final int v; try { v = f(); } catch (RuntimeException e) { continue; } use(v); }").is_empty());
     }
 
     #[test]

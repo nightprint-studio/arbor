@@ -30,6 +30,37 @@ pub fn var_target_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diagnostic> 
     out
 }
 
+/// `var` where only a local variable may use it — a field, a method's return type or a parameter of a
+/// method (`restricted.type.not.allowed.here`). From Java 10 `var` is a reserved type name there; below
+/// it, `var` is an ordinary identifier and could name a class, so nothing is said.
+pub fn var_position_errors_nodes(nodes: &[Node], source: &str, java_major: Option<u32>) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    if !java_major.is_some_and(|m| m >= 10) {
+        return out;
+    }
+    let bytes = source.as_bytes();
+    for &n in nodes {
+        let holder = match n.kind() {
+            "field_declaration" | "method_declaration" => n.child_by_field_name("type"),
+            // A parameter of a method or constructor; a lambda's `var x` is legal from Java 11.
+            "formal_parameter" => n
+                .parent()
+                .filter(|p| p.kind() == "formal_parameters")
+                .and_then(|p| p.parent())
+                .filter(|owner| matches!(owner.kind(), "method_declaration" | "constructor_declaration"))
+                .and_then(|_| n.child_by_field_name("type")),
+            _ => None,
+        };
+        if let Some(ty) = holder.filter(|t| t.utf8_text(bytes) == Ok("var")) {
+            out.push(crate::engine::check_id::CheckId::SyntaxError.at(
+                ty,
+                "`var` is not allowed here: it can only declare a local variable",
+            ));
+        }
+    }
+    out
+}
+
 fn check_declaration(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
     // SKIP unless the declared type is literally `var`. In tree-sitter-java a `var` declaration carries
     // its type as a `type_identifier` whose text is `var` (Lombok's back-ported `var` reads identically
@@ -45,7 +76,14 @@ fn check_declaration(n: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
         if d.kind() != "variable_declarator" {
             continue;
         }
-        let Some(val) = d.child_by_field_name("value") else { continue };
+        let Some(val) = d.child_by_field_name("value") else {
+            // `var none;` — nothing to infer from.
+            out.push(crate::engine::check_id::CheckId::VarTypeInferenceFailed.at(
+                d,
+                "Cannot infer type for `var`: it needs an initializer",
+            ));
+            continue;
+        };
         if let Some(reason) = untyped_initializer(val.kind()) {
             out.push(Diagnostic {
                 message: format!("Cannot infer type for `var`: {reason}"),
@@ -142,8 +180,23 @@ mod tests {
     }
 
     #[test]
-    fn var_without_initializer_is_ignored() {
-        // `var x;` is a different error (owned by the parser); not ours to double-report.
-        assert!(msgs("var x;").is_empty());
+    fn var_is_only_for_locals_and_only_reserved_from_java_10() {
+        let count = |src: &str, major| {
+            let tree = parse(src);
+            let nodes = crate::engine::check::collect_nodes(tree.root_node());
+            var_position_errors_nodes(&nodes, src, major).len()
+        };
+        assert_eq!(count("class A { var f = 1; }", Some(17)), 1);
+        assert_eq!(count("class A { var m() { return 1; } }", Some(17)), 1);
+        assert_eq!(count("class A { void m(var p) { } }", Some(17)), 1);
+        assert_eq!(count("class A { var f = 1; }", Some(8)), 0);
+        assert_eq!(count("class A { void m() { var x = 1; java.util.function.Function<String,String> f = (var s) -> s; } }", Some(17)), 0);
+    }
+
+    #[test]
+    fn var_without_initializer_cannot_infer_a_type() {
+        // javac reports `var x;` as `cant.infer.local.var.type`, the same key as the other shapes.
+        assert_eq!(msgs("var x;").len(), 1);
+        assert!(msgs("var x = 1;").is_empty());
     }
 }

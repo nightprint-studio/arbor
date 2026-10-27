@@ -56,6 +56,11 @@ fn check_branch(stmt: Node, bytes: &[u8], is_break: bool, out: &mut Vec<Diagnost
                     stmt,
                     format!("no enclosing statement is labelled `{label}`"),
                 ));
+            } else if !is_break && !labels_a_loop(stmt, &label, bytes) {
+                out.push(CheckId::UnknownLabel.at(
+                    stmt,
+                    format!("`continue {label}`: `{label}` does not label a loop"),
+                ));
             }
         }
         None => match enclosure(stmt, is_break) {
@@ -162,6 +167,36 @@ fn label_in_scope(stmt: Node, label: &str, bytes: &[u8]) -> bool {
     false
 }
 
+/// Whether the statement carrying `label` — the nearest enclosing one, which `label_in_scope` already
+/// found — is a loop, once nested labels (`a: b: while …`) are looked through. `continue` can only
+/// target a loop.
+fn labels_a_loop(stmt: Node, label: &str, bytes: &[u8]) -> bool {
+    let mut cur = stmt.parent();
+    while let Some(n) = cur {
+        if n.kind() == "labeled_statement" {
+            let mut cw = n.walk();
+            let mut children = n.named_children(&mut cw);
+            let name = children.next().and_then(|id| id.utf8_text(bytes).ok());
+            if name == Some(label) {
+                let mut target = children.next();
+                // `a: b: while …` — `a` labels the loop through `b`.
+                while let Some(t) = target.filter(|t| t.kind() == "labeled_statement") {
+                    let mut tw = t.walk();
+                    target = t.named_children(&mut tw).nth(1);
+                }
+                return target.is_none_or(|t| {
+                    matches!(
+                        t.kind(),
+                        "for_statement" | "enhanced_for_statement" | "while_statement" | "do_statement"
+                    )
+                });
+            }
+        }
+        cur = n.parent();
+    }
+    true
+}
+
 /// Whether crossing this node leaves the statement's own body.
 ///
 /// A loop around a lambda does not enclose a `break` written inside it, and a method of a local or
@@ -191,6 +226,18 @@ mod tests {
         let tree = bennu_java::prelude::parse_java(src).expect("parse");
         let nodes = collect_nodes(tree.root_node());
         branch_errors_nodes(&nodes, src).into_iter().map(|d| d.code).collect()
+    }
+
+    #[test]
+    fn continue_must_name_a_loop_label() {
+        let on_block = "class A { void m() { b: { for (;;) { continue b; } } } }";
+        assert_eq!(codes(on_block), ["unknown-label"]);
+        let on_loop = "class A { void m() { a: for (;;) { continue a; } } }";
+        assert!(codes(on_loop).is_empty());
+        let nested = "class A { void m() { a: b: while (true) { continue a; } } }";
+        assert!(codes(nested).is_empty());
+        // `break` may leave a labelled block.
+        assert!(codes("class A { void m() { b: { break b; } } }").is_empty());
     }
 
     #[test]

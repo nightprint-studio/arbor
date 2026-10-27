@@ -964,6 +964,8 @@ impl Ctx<'_> {
             "binary_expression" => self.infer_binary(node, enclosing),
             // `c ? a : b`
             "ternary_expression" => self.infer_ternary(node, enclosing),
+            // `switch (x) { case 1 -> a; default -> b; }` used as a value
+            "switch_expression" => self.infer_switch(node, enclosing),
             _ => None,
         }
     }
@@ -1105,16 +1107,41 @@ impl Ctx<'_> {
         }
         let a = self.infer_expr(&then, enclosing)?;
         let b = self.infer_expr(&alt, enclosing)?;
-        if a == b {
-            return Some(a);
+        join_branch_types(vec![a, b])
+    }
+
+    /// A `switch` used as an expression: the type its arms agree on.
+    ///
+    /// Every value the switch can produce counts — an arrow rule's expression, and each `yield` of a
+    /// block or of an old-style group. A `throw` arm produces nothing and a `null` arm is assignable
+    /// to anything, so neither votes. An arm that cannot be typed makes the whole switch untyped:
+    /// the join of the arms we *did* see could be narrower than the real one.
+    fn infer_switch(&self, node: &Node, enclosing: Option<&str>) -> Option<TypeRef> {
+        let body = node.child_by_field_name("body")?;
+        let mut values = Vec::new();
+        let mut cursor = body.walk();
+        for arm in body.named_children(&mut cursor) {
+            match arm.kind() {
+                "switch_rule" => {
+                    let last = arm.named_child(arm.named_child_count().checked_sub(1)?)?;
+                    match last.kind() {
+                        "expression_statement" => values.push(last.named_child(0)?),
+                        "block" => collect_yields(&last, &mut values),
+                        _ => {} // `throw`, or the label itself on a malformed rule
+                    }
+                }
+                "switch_block_statement_group" => collect_yields(&arm, &mut values),
+                _ => {}
+            }
         }
-        let promotable = |t: &TypeRef| {
-            t.dims == 0 && matches!(unbox(&t.binary_name), Some("int" | "long" | "float" | "double"))
-        };
-        (promotable(&a) && promotable(&b))
-            .then(|| binary_promote(&a.binary_name, &b.binary_name))
-            .flatten()
-            .map(TypeRef::simple)
+        let mut types = Vec::new();
+        for value in values {
+            if value.kind() == "null_literal" {
+                continue;
+            }
+            types.push(self.infer_expr(&value, enclosing)?);
+        }
+        join_branch_types(types)
     }
 
     /// A bare identifier: resolve as local var / parameter first (walking up scopes), then as an
@@ -1369,7 +1396,41 @@ impl Ctx<'_> {
             let member = crate::typename::inherited_member_type_of(self.resolver, &outer.binary_name, simple)?;
             return Some(TypeRef::simple(member));
         }
-        self.resolve_type_text(&text)
+        let ty = self.resolve_type_text(&text)?;
+        if text.trim_end().ends_with("<>") && ty.type_args.is_empty() {
+            return Some(self.diamond_arguments(ty, node, enclosing));
+        }
+        Some(ty)
+    }
+
+    /// `new Box<>("x")`: the class's type arguments, read off the one constructor the call can be.
+    ///
+    /// The constructor's parameters bind the class's own variables exactly as a method's bind its
+    /// own (`Box(T value)` passed a `String` gives `T = String`). The raw type comes back unchanged
+    /// when there is not exactly one candidate or a variable stays open — a diamond whose arguments
+    /// come only from the assignment target is that target's to say, not ours.
+    fn diamond_arguments(&self, raw: TypeRef, creation: &Node, enclosing: Option<&str>) -> TypeRef {
+        let Some(members) = self.resolver.members_of(&raw.binary_name) else { return raw };
+        if members.type_params.is_empty() {
+            return raw;
+        }
+        let args = self.call_arg_nodes(creation);
+        let ctors: Vec<&Member> = members
+            .methods
+            .iter()
+            .filter(|m| m.name == "<init>" && method_admits_argc(m, args.len()))
+            .collect();
+        let Some(ctor) = sole(&ctors) else { return raw };
+        let open = TypeRef {
+            type_args: members.type_params.iter().map(|p| TypeRef::simple(p.as_str())).collect(),
+            ..raw.clone()
+        };
+        let bound = self.bind_method_type_vars(&open, ctor, &args, enclosing, &raw, &[]);
+        if self.mentions_type_variable(&bound) {
+            raw
+        } else {
+            bound
+        }
     }
 
     /// The target type of a lambda that is NOT an argument: the declared type of the variable it
@@ -1582,7 +1643,53 @@ impl Ctx<'_> {
             }
         };
 
-        self.method_return_on(&recv_type, &name, &args, enclosing)
+        let explicit = self.explicit_type_arguments(node);
+        let result = self.method_return_with(&recv_type, &name, &args, enclosing, &explicit)?;
+        Some(self.settle_from_target(node, result))
+    }
+
+    /// `Collections.<String>emptyList()`: the type arguments written before the method name.
+    fn explicit_type_arguments(&self, call: &Node) -> Vec<TypeRef> {
+        let mut cursor = call.walk();
+        let Some(list) = call.named_children(&mut cursor).find(|c| c.kind() == "type_arguments") else {
+            return Vec::new();
+        };
+        let mut inner = list.walk();
+        list.named_children(&mut inner)
+            .filter_map(|t| node_text(&t, self.bytes))
+            .filter_map(|text| self.resolve_type_text(&text))
+            .map(boxed)
+            .collect()
+    }
+
+    /// A call whose type still has open variables, initialising a variable declared with a type
+    /// (`Comparator<String> byLength = Comparator.comparing(String::length);`): the declared type
+    /// is the target, and javac reads the variables off it exactly like this. Only the variables
+    /// the call itself could not fix are touched, so an argument-driven answer is never overridden.
+    fn settle_from_target(&self, call: &Node, result: TypeRef) -> TypeRef {
+        if !self.mentions_type_variable(&result) {
+            return result;
+        }
+        let Some(declarator) = call.parent().filter(|p| p.kind() == "variable_declarator") else {
+            return result;
+        };
+        let is_value = declarator.child_by_field_name("value").is_some_and(|v| v.id() == call.id());
+        let Some(declaration) = declarator.parent().filter(|d| {
+            is_value && matches!(d.kind(), "local_variable_declaration" | "field_declaration")
+        }) else {
+            return result;
+        };
+        let Some(type_text) = declaration
+            .child_by_field_name("type")
+            .and_then(|t| node_text(&t, self.bytes))
+            .filter(|t| !is_inferred_type(t))
+        else {
+            return result;
+        };
+        match self.resolve_type_text(&type_text) {
+            Some(target) => self.settle_argument_variables(&target, result, &[]),
+            None => result,
+        }
     }
 
     /// A receiver that names a **type** rather than a value — the static-call form.
@@ -1666,6 +1773,19 @@ impl Ctx<'_> {
         args: &[Node],
         enclosing: Option<&str>,
     ) -> Option<TypeRef> {
+        self.method_return_with(recv, method_name, args, enclosing, &[])
+    }
+
+    /// [`Self::method_return_on`] with the type arguments the call wrote out (`obj.<String>m()`),
+    /// which bind the method's own variables by position before any argument is looked at.
+    fn method_return_with(
+        &self,
+        recv: &TypeRef,
+        method_name: &str,
+        args: &[Node],
+        enclosing: Option<&str>,
+        explicit: &[TypeRef],
+    ) -> Option<TypeRef> {
         // JLS §10.7: an array's `clone()` is covariant — it hands back the array type itself, not
         // `Object`. Every array type overrides it that way, and no array has `ClassMembers` for the
         // walk to find, so the walk climbed to `Object.clone()` and typed `names.clone()` as an
@@ -1707,7 +1827,11 @@ impl Ctx<'_> {
             .flat_map(collect_type_variable_names)
             .collect();
         Some(match picked {
-            Some(m) => self.bind_method_type_vars(&ret, m, args, enclosing, &from_receiver),
+            Some(m) => {
+                let witnessed = explicit_bindings(m, explicit);
+                let ret = apply_bindings(&ret, &witnessed);
+                self.bind_method_type_vars(&ret, m, args, enclosing, &declared_on, &from_receiver)
+            }
             None => ret,
         })
     }
@@ -1741,6 +1865,7 @@ impl Ctx<'_> {
         m: &Member,
         args: &[Node],
         enclosing: Option<&str>,
+        recv: &TypeRef,
         from_receiver: &[String],
     ) -> TypeRef {
         // Only worth the argument inference when something in the return type is still open.
@@ -1752,17 +1877,28 @@ impl Ctx<'_> {
             if !p.type_args.is_empty() {
                 // Maybe a functional parameter: `map(Function<? super T, ? extends U>)` binds `U` to
                 // what the lambda or method reference passed there produces.
-                let binding =
-                    args.get(i).and_then(|arg| self.functional_return_binding(p, arg, enclosing));
-                if let Some((var, bound)) = binding {
-                    let taken = bindings.iter().any(|(v, _)| *v == var);
-                    if !taken && !from_receiver.contains(&var) {
-                        bindings.push((var, bound));
+                let functional = args
+                    .get(i)
+                    .map(|arg| self.functional_return_bindings(p, arg, enclosing))
+                    .unwrap_or_default();
+                if !functional.is_empty() {
+                    for (var, bound) in functional {
+                        let taken = bindings.iter().any(|(v, _)| *v == var);
+                        if !taken && !from_receiver.contains(&var) {
+                            bindings.push((var, bound));
+                        }
                     }
                 } else if let Some(arg) = args.get(i) {
                     // `Optional<X> value` passed an `Optional<Foo>`: X is whatever sits in the
                     // same position of the argument's type.
-                    if let Some(arg_ty) = self.infer_expr(arg, enclosing) {
+                    if let Some(mut arg_ty) = self.infer_expr(arg, enclosing) {
+                        if arg.kind() == "method_invocation" {
+                            // `collect(Collectors.toList())`: the argument is a `Collector<T, ?,
+                            // List<T>>` whose own `T` nothing has fixed yet. The parameter, seen
+                            // from the receiver, says what the stream's elements are.
+                            let wanted = self.substitute_generics(p, recv);
+                            arg_ty = self.settle_argument_variables(&wanted, arg_ty, from_receiver);
+                        }
                         self.unify_type_args(p, &arg_ty, from_receiver, &mut bindings);
                     }
                 }
@@ -1792,7 +1928,10 @@ impl Ctx<'_> {
             if arg_ty.dims >= p.dims {
                 arg_ty.dims -= p.dims;
             }
-            bindings.push((p.binary_name.clone(), arg_ty));
+            // A variable stands for a reference type: `List.of(1, 2)` is a `List<Integer>`, and
+            // `Pair.of("a", 1)` a `Pair<String, Integer>`. Left as `int`, the type argument named a
+            // type no declaration can write, and everything compared against it disagreed.
+            bindings.push((p.binary_name.clone(), boxed(arg_ty)));
         }
         if bindings.is_empty() {
             return ret.clone();
@@ -1845,45 +1984,86 @@ impl Ctx<'_> {
         }
     }
 
-    /// The binding a lambda or method reference `arg` makes for the variable its functional
-    /// parameter `param` returns: `(U, Identity)` for `map(this::toIdentity)` when `toIdentity`
-    /// returns an `Identity`.
+    /// Fix the variables the argument's own type still carries, from what the parameter — seen
+    /// from the receiver — already knows.
     ///
-    /// Abstains at every doubt, like the identity binding: a SAM that does not return a bare
-    /// variable, a block lambda (whose value is spread over its `return`s), a referenced method
-    /// whose overloads disagree on what they return, a result that is itself a variable or `void`.
-    /// A primitive is boxed, because a type argument cannot be one: `map(s -> s.length())` is an
-    /// `Optional<Integer>`.
-    fn functional_return_binding(
+    /// `names.stream().collect(Collectors.toList())`: `toList()` has no argument to read its `T`
+    /// from, so it types as `Collector<T, ?, List<T>>`; `collect` wants `Collector<? super String,
+    /// A, R>`. Matching them position by position gives `T = String`, and the argument becomes
+    /// `Collector<String, ?, List<String>>` — which is what `R` is then read from.
+    ///
+    /// Only a bare variable facing a concrete type is bound, and never one the receiver also names
+    /// (same letter, different thing). Anything that does not line up is returned as it was.
+    fn settle_argument_variables(&self, wanted: &TypeRef, arg: TypeRef, from_receiver: &[String]) -> TypeRef {
+        if wanted.binary_name != arg.binary_name || wanted.type_args.len() != arg.type_args.len() {
+            return arg;
+        }
+        let mut bindings: Vec<(String, TypeRef)> = Vec::new();
+        for (w, a) in wanted.type_args.iter().zip(&arg.type_args) {
+            let bare_variable = a.type_args.is_empty() && a.dims == 0 && self.is_type_variable(&a.binary_name);
+            let concrete = !w.binary_name.is_empty()
+                && w.dims == 0
+                && !w.wildcard
+                && !self.is_type_variable(&w.binary_name);
+            if bare_variable
+                && concrete
+                && !from_receiver.contains(&a.binary_name)
+                && !bindings.iter().any(|(v, _)| *v == a.binary_name)
+            {
+                bindings.push((a.binary_name.clone(), TypeRef { wildcard: false, ..w.clone() }));
+            }
+        }
+        if bindings.is_empty() {
+            arg
+        } else {
+            apply_bindings(&arg, &bindings)
+        }
+    }
+
+    /// The bindings a lambda or method reference `arg` makes for the variables its functional
+    /// parameter `param` returns: `(U, Identity)` for `map(this::toIdentity)` when `toIdentity`
+    /// returns an `Identity`, and `(R, String)` for `flatMap(s -> Stream.of(s))` — the SAM returns
+    /// `Stream<R>`, so the produced `Stream<String>` is read position by position.
+    ///
+    /// Abstains at every doubt, like the identity binding: a block lambda (whose value is spread
+    /// over its `return`s), a referenced method whose overloads disagree on what they return, a
+    /// result that is itself a variable or `void`. A primitive is boxed, because a type argument
+    /// cannot be one: `map(s -> s.length())` is an `Optional<Integer>`.
+    fn functional_return_bindings(
         &self,
         param: &TypeRef,
         arg: &Node,
         enclosing: Option<&str>,
-    ) -> Option<(String, TypeRef)> {
+    ) -> Vec<(String, TypeRef)> {
         if !matches!(arg.kind(), "method_reference" | "lambda_expression") {
-            return None;
+            return Vec::new();
         }
-        let sam = self.sam_of(param)?;
+        let Some(sam) = self.sam_of(param) else { return Vec::new() };
         let wanted = self.substitute_generics(&sam.return_type, param);
-        if !wanted.type_args.is_empty() || wanted.dims > 0 || !self.is_type_variable(&wanted.binary_name) {
-            return None;
+        let bare_variable = wanted.type_args.is_empty() && self.is_type_variable(&wanted.binary_name);
+        if wanted.dims > 0 || !(bare_variable || self.mentions_type_variable(&wanted)) {
+            return Vec::new();
         }
         let produced = if arg.kind() == "method_reference" {
-            self.method_reference_return(arg, enclosing)?
+            self.method_reference_return(arg, enclosing)
         } else {
-            let body = arg.child_by_field_name("body")?;
-            if body.kind() == "block" {
-                return None;
-            }
-            self.infer_expr(&body, enclosing)?
+            arg.child_by_field_name("body")
+                .filter(|body| body.kind() != "block")
+                .and_then(|body| self.infer_expr(&body, enclosing))
         };
+        let Some(produced) = produced else { return Vec::new() };
         if produced.binary_name.is_empty()
             || produced.binary_name == "void"
             || self.is_type_variable(&produced.binary_name)
         {
-            return None;
+            return Vec::new();
         }
-        Some((wanted.binary_name, boxed(produced)))
+        if bare_variable {
+            return vec![(wanted.binary_name, boxed(produced))];
+        }
+        let mut bindings = Vec::new();
+        self.unify_type_args(&wanted, &produced, &[], &mut bindings);
+        bindings
     }
 
     /// What the method a reference names returns — `this::toIdentity`, `order::total`,
@@ -1994,7 +2174,7 @@ impl Ctx<'_> {
             .filter(|m| arity_admits(m.params.len(), last_is_array(m), argc))
             .collect();
         if let Some(ret) = unique_return(&arity_ok) {
-            let picked = sole(&arity_ok).or_else(|| self.fixed_arity_over_varargs(&arity_ok, argc));
+            let picked = sole(&arity_ok).or_else(|| self.fixed_arity_over_varargs(&arity_ok, args, enclosing));
             return Some((ret, picked));
         }
         if arity_ok.is_empty() {
@@ -2014,12 +2194,44 @@ impl Ctx<'_> {
     ///
     /// "That applies" is not checked here, so the winner is taken only when it cannot fail to: every
     /// parameter is a bare type variable, which any non-primitive argument fits (and a primitive boxes).
-    fn fixed_arity_over_varargs<'m>(&self, survivors: &[&'m Member], argc: usize) -> Option<&'m Member> {
+    ///
+    /// **Not when an argument is an array**, or cannot be typed: `Stream.of(names)` with a `String[]`
+    /// binds the varargs method (`T[]` takes the array as it is, and is the more specific of the two),
+    /// giving a `Stream<String>` — where the fixed-arity `of(T)` would give a `Stream<String[]>`. An
+    /// argument of unknown type could be an array, so it declines too.
+    fn fixed_arity_over_varargs<'m>(
+        &self,
+        survivors: &[&'m Member],
+        args: &[Node],
+        enclosing: Option<&str>,
+    ) -> Option<&'m Member> {
+        let argc = args.len();
         let mut fixed = survivors.iter().filter(|m| !last_is_array(m) && m.params.len() == argc);
         let (Some(candidate), None) = (fixed.next(), fixed.next()) else { return None };
         let others_are_varargs = survivors.iter().all(|m| std::ptr::eq(*m, *candidate) || last_is_array(m));
         let takes_anything = candidate.params.iter().all(|p| p.dims == 0 && self.is_type_variable(&p.binary_name));
-        (others_are_varargs && takes_anything).then_some(*candidate)
+        let arg_types: Vec<Option<TypeRef>> = args.iter().map(|a| self.infer_expr(a, enclosing)).collect();
+        let no_array_argument =
+            arg_types.iter().all(|t| t.as_ref().is_some_and(|t| t.dims == 0 && !t.binary_name.is_empty()));
+        if others_are_varargs && takes_anything && no_array_argument {
+            return Some(*candidate);
+        }
+        // The other direction: one array argument for one `T[]`/`T...` parameter is the varargs call
+        // taken as it stands — `Stream.of(names)` over a `String[]` is a `Stream<String>`.
+        if let [Some(arg)] = arg_types.as_slice() {
+            let mut varargs = survivors.iter().filter(|m| {
+                last_is_array(m)
+                    && m.params.len() == 1
+                    && self.is_type_variable(&m.params[0].binary_name)
+                    && m.params[0].dims == arg.dims
+            });
+            if let (Some(v), None) = (varargs.next(), varargs.next()) {
+                if arg.dims > 0 {
+                    return Some(*v);
+                }
+            }
+        }
+        None
     }
 
     /// Walk the class + its superclass/interfaces, returning the first `f` hit.
@@ -2091,7 +2303,10 @@ impl Ctx<'_> {
                 // neither of which Phase-1 models, so the honest answer is "unknown" — the type
                 // variable itself, which every consumer treats as unresolved.
                 Some(a) if a.binary_name == "java/lang/Object" => member_ret.clone(),
-                Some(a) => a.clone(),
+                // `T[]` with `T = Enum` is `Enum[]`: the array depth is the member's, and it adds to
+                // whatever depth the argument already has. Dropping it made `getEnumConstants()` a
+                // single `Enum` — and `Enum[] values = type.getEnumConstants()` an "incompatible type".
+                Some(a) => TypeRef { dims: a.dims + member_ret.dims, ..a.clone() },
                 // Unresolved (method-level var, or position unknown on a heuristic miss).
                 None => member_ret.clone(),
             };
@@ -3013,6 +3228,54 @@ fn sole<'m>(members: &[&'m Member]) -> Option<&'m Member> {
     match members {
         [only] => Some(only),
         _ => None,
+    }
+}
+
+/// The method's own variables paired with the type arguments the call wrote — none when the counts
+/// disagree, because then the call is not the one the text seems to say.
+fn explicit_bindings(m: &Member, explicit: &[TypeRef]) -> Vec<(String, TypeRef)> {
+    let names = m.method_type_params();
+    if explicit.is_empty() || names.len() != explicit.len() {
+        return Vec::new();
+    }
+    names.into_iter().zip(explicit.iter().cloned()).collect()
+}
+
+/// The type a conditional or a `switch` expression has when its branches produce `types`: the one
+/// they all share, or — when they are all numeric — the promoted one (`1` and `2L` give `long`).
+/// Anything else would need a least upper bound, which is not computed, so it is `None`.
+fn join_branch_types(types: Vec<TypeRef>) -> Option<TypeRef> {
+    let (first, rest) = types.split_first()?;
+    if rest.iter().all(|t| t == first) {
+        return Some(first.clone());
+    }
+    let promotable = |t: &TypeRef| {
+        t.dims == 0 && matches!(unbox(&t.binary_name), Some("int" | "long" | "float" | "double"))
+    };
+    if !types.iter().all(promotable) {
+        return None;
+    }
+    let mut joined = first.binary_name.clone();
+    for t in rest {
+        joined = binary_promote(&joined, &t.binary_name)?.to_string();
+    }
+    Some(TypeRef::simple(joined))
+}
+
+/// Every `yield` value inside `node`, not descending into a nested `switch` expression, lambda or
+/// class body — their yields belong to them.
+fn collect_yields<'t>(node: &Node<'t>, out: &mut Vec<Node<'t>>) {
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            "yield_statement" => {
+                if let Some(value) = child.named_child(0) {
+                    out.push(value);
+                }
+            }
+            "switch_expression" | "lambda_expression" | "class_body" => {}
+            _ => collect_yields(&child, out),
+        }
     }
 }
 

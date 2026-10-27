@@ -59,6 +59,7 @@ pub fn final_reassignment_errors_nodes(nodes: &[Node], source: &str) -> Vec<Diag
                 }
             }
             "catch_clause" => check_catch_parameter(n, bytes, &mut out),
+            "try_with_resources_statement" => check_resources(n, bytes, &mut out),
             "enhanced_for_statement" => {
                 if has_final(n, bytes) {
                     if let (Some(name), Some(body)) =
@@ -104,6 +105,71 @@ fn check_final_params(decl: Node, body: Node, bytes: &[u8], out: &mut Vec<Diagno
     }
 }
 
+/// A try-with-resources variable assigned in the `try` block: a resource is implicitly final
+/// (JLS §14.20.3), written `final` or not.
+fn check_resources(stmt: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+    let (Some(specification), Some(body)) = (crate::support::nodes::child_of_kind(stmt, "resource_specification"), stmt.child_by_field_name("body")) else { return };
+    let mut c = specification.walk();
+    for resource in specification.named_children(&mut c) {
+        let Some(name) = resource.child_by_field_name("name").and_then(|x| text(x, bytes)) else {
+            reused_variable_is_not_effectively_final(stmt, resource, bytes, out);
+            continue;
+        };
+        for target in assignments_to(body, &name, bytes) {
+            out.push(err(format!("Auto-closeable resource `{name}` may not be assigned"), target));
+        }
+    }
+}
+
+/// `try (resource) { }` over an existing variable (Java 9): that variable must be final or effectively
+/// final. Judged only for a local declared WITH an initializer in the same method and assigned again
+/// anywhere in it — the one shape that is certainly not effectively final.
+fn reused_variable_is_not_effectively_final(stmt: Node, resource: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
+    let mut cursor = resource.walk();
+    let mut children = resource.named_children(&mut cursor);
+    let (Some(only), None) = (children.next(), children.next()) else { return };
+    if only.kind() != "identifier" {
+        return;
+    }
+    let Some(name) = text(only, bytes) else { return };
+    // The body this local lives in: the nearest method, constructor or lambda around the statement.
+    let mut scope = stmt.parent();
+    while let Some(p) = scope {
+        if matches!(p.kind(), "method_declaration" | "constructor_declaration" | "lambda_expression") {
+            break;
+        }
+        scope = p.parent();
+    }
+    let Some(scope) = scope.and_then(|s| s.child_by_field_name("body")) else { return };
+    // Exactly one declaration of the name in the body: with two, a write may be to either.
+    let declarations = declared_names(scope, bytes).iter().filter(|d| **d == name).count();
+    if declarations != 1 || !declares_with_initializer(scope, &name, bytes) {
+        return;
+    }
+    if !assignments_in(scope, &name, bytes).is_empty() {
+        out.push(crate::engine::check_id::CheckId::CapturedVariableNotFinal.at(
+            only,
+            format!("Variable `{name}` used as a try-with-resources resource must be final or effectively final"),
+        ));
+    }
+}
+
+/// Whether `scope` declares a local called `name` with an initializer.
+fn declares_with_initializer(scope: Node, name: &str, bytes: &[u8]) -> bool {
+    let mut stack = vec![scope];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "variable_declarator"
+            && n.child_by_field_name("value").is_some()
+            && n.child_by_field_name("name").and_then(|x| text(x, bytes)).as_deref() == Some(name)
+        {
+            return true;
+        }
+        let mut c = n.walk();
+        stack.extend(n.children(&mut c));
+    }
+    false
+}
+
 /// A `catch` parameter that is final — written `final`, or implicitly because the clause catches
 /// more than one type (JLS §14.20) — assigned in the catch block.
 fn check_catch_parameter(clause: Node, bytes: &[u8], out: &mut Vec<Diagnostic>) {
@@ -130,6 +196,12 @@ fn assignments_to<'t>(scope: Node<'t>, name: &str, bytes: &[u8]) -> Vec<Node<'t>
     if declared_names(scope, bytes).iter().any(|d| d == name) {
         return Vec::new();
     }
+    assignments_in(scope, name, bytes)
+}
+
+/// [`assignments_to`] without the shadowing guard: for a caller that knows `name` is declared exactly
+/// once in `scope` and wants the writes to that one declaration.
+fn assignments_in<'t>(scope: Node<'t>, name: &str, bytes: &[u8]) -> Vec<Node<'t>> {
     let mut found = Vec::new();
     let mut stack = vec![scope];
     while let Some(n) = stack.pop() {

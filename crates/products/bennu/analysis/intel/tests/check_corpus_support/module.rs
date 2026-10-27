@@ -58,7 +58,7 @@ pub struct Validated {
     pub diagnostics: Vec<BennuError>,
 }
 
-struct JdkIndex(SourceMemberIndex<Box<dyn ClassSource>>);
+pub struct JdkIndex(SourceMemberIndex<Box<dyn ClassSource>>);
 
 impl MemberIndex for JdkIndex {
     fn members_of(&self, binary_name: &str) -> Option<ClassMembers> {
@@ -131,15 +131,13 @@ fn with_libs(jdk: Box<dyn ClassSource>, libs: &[&str]) -> Result<Box<dyn ClassSo
     Ok(Box::new(bennu_classpath::prelude::MultiSource::new(sources)))
 }
 
-/// Every Bennu diagnostic `kept` asks for, in every file of the module.
-fn validate_all(
+/// The module's sources indexed, with the JDK behind them — what the editor resolves types through.
+fn build_resolver(
     src_root: &Path,
     sources: &[SourceFile],
     jdk: Box<dyn ClassSource>,
     index_dir: &Path,
-    major: u32,
-    kept: Kept,
-) -> Result<Vec<BennuError>, String> {
+) -> Result<IndexResolver<JdkIndex>, String> {
     let disk: Vec<(PathBuf, String)> =
         sources.iter().map(|s| (src_root.join(&s.rel), s.text.clone())).collect();
     let built = build_project_index_from_sources(&disk, index_dir);
@@ -150,6 +148,42 @@ fn validate_all(
     for (simple, binary) in built.type_map.iter() {
         resolver.add_simple_hint(simple, binary);
     }
+    Ok(resolver)
+}
+
+/// Index a module against the JDK and hand its sources and resolver to `f` — for a harness that asks
+/// Bennu questions other than "which diagnostics" (the inference corpus). `Err` carries the reason it
+/// was skipped.
+#[allow(dead_code)]
+pub fn with_resolver<R>(
+    root: &Path,
+    module: &CorpusModule,
+    f: impl FnOnce(&IndexResolver<JdkIndex>, &[SourceFile]) -> R,
+) -> Result<R, String> {
+    let src_root = root.join(module.name).join("src").join("main").join("java");
+    let sources = read_sources(&src_root);
+    if sources.is_empty() {
+        return Err(format!("no .java sources under {}", src_root.display()));
+    }
+    let jdk = resolve_jdk_classpath(module.release)
+        .map_err(|why| format!("no JDK resolvable for Java {} ({why})", module.release))?;
+    let jdk = with_libs(jdk, module.libs)?;
+    // Declared before the resolver, so the index files outlive their mmap.
+    let temp = TempDir::new(module.name)?;
+    let resolver = build_resolver(&src_root, &sources, jdk, temp.path())?;
+    Ok(f(&resolver, &sources))
+}
+
+/// Every Bennu diagnostic `kept` asks for, in every file of the module.
+fn validate_all(
+    src_root: &Path,
+    sources: &[SourceFile],
+    jdk: Box<dyn ClassSource>,
+    index_dir: &Path,
+    major: u32,
+    kept: Kept,
+) -> Result<Vec<BennuError>, String> {
+    let resolver = build_resolver(src_root, sources, jdk, index_dir)?;
 
     // `BENNU_CORPUS_DUMP=ArgsCtorBad` prints every diagnostic, warnings included, of the files whose
     // path contains the value: what to reach for once the report names a miss.

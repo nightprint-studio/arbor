@@ -372,6 +372,11 @@ pub struct ClassFlags {
     pub is_annotation: bool,
     pub is_record: bool,
     pub is_sealed: bool,
+    /// A top-level type that is not `public`: usable only from its own package. `false` for a nested
+    /// type, for a library the index could not read this from, and for an index persisted before the
+    /// field existed — never "package-private" by default.
+    #[serde(default)]
+    pub is_package_private: bool,
     /// Whether this type has members that exist at compile time but are NOT in this list — so
     /// "no such member" cannot be concluded from its absence here.
     ///

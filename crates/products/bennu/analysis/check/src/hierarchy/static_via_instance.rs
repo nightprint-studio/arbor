@@ -59,7 +59,9 @@ fn check_call(
 ) {
     let Some(obj) = n.child_by_field_name("object") else { return };
     let Some(name_node) = n.child_by_field_name("name") else { return };
-    if name_node.has_error() || !is_certainly_a_value(obj, bytes) {
+    // The scope walk behind `is_certainly_a_value` is the costly question, so it is asked last — only once
+    // the method is known to be static, which is rare. Asked first, it ran for every call in the file.
+    if name_node.has_error() {
         return;
     }
     let Ok(method) = name_node.utf8_text(bytes) else { return };
@@ -79,6 +81,21 @@ fn check_call(
         return;
     }
     if res.candidates.iter().all(|m| m.is_static) {
+        if !is_certainly_a_value(obj, bytes) {
+            return;
+        }
+        // On an interface the call is not a style problem but an error: a static interface method
+        // can be called only through the interface's own name (`illegal.static.intf.meth.call`).
+        if resolver.members_of(&ty.binary_name).is_some_and(|m| m.flags.is_interface) {
+            out.push(CheckId::StaticContextAccess.at(
+                name_node,
+                format!(
+                    "`{method}` is a static interface method — call it as `{}.{method}`",
+                    simple_name(&ty.binary_name)
+                ),
+            ));
+            return;
+        }
         out.push(CheckId::StaticViaInstance.at(
             name_node,
             format!(

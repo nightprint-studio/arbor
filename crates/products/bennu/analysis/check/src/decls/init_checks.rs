@@ -298,7 +298,9 @@ fn check_uninferrable_var(decl: Node, bytes: &[u8], lombok_val: bool, out: &mut 
             }
             _ => continue, // any other initializer infers fine → never flag
         };
-        out.push(err(msg.to_string(), value));
+        // Under its own kind, not `DefiniteAssignment`: javac reports this as
+        // `cant.infer.local.var.type`, and `var_target` raises the same kind for the `var` case.
+        out.push(crate::engine::check_id::CheckId::VarTypeInferenceFailed.at(value, msg));
     }
 }
 

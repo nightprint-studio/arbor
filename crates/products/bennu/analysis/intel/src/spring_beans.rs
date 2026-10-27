@@ -113,6 +113,7 @@ mod tests {
             is_abstract: false,
             is_final: false,
             is_sealed: false,
+            is_package_private: false,
             type_params: Vec::new(),
             methods: Vec::new(),
             fields: Vec::new(),

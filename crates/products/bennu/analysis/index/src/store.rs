@@ -49,7 +49,10 @@ pub const MAGIC: &[u8; 8] = b"BNNUIDX0";
 /// binary name. Before, `Optional<Foo> find()` in such a file was baked with the bare word
 /// `Optional`, which reads as an unresolved type variable — so a `var` initialised from the call
 /// had no type. An older index still carries the bare names and must be rebuilt.
-pub const FORMAT_VERSION: u64 = 7;
+/// v8: `members_json` records whether a top-level type is package-private. An older index reads as
+/// "not package-private" for every type, which is safe but leaves the access check blind; rebuilding
+/// is what gives it something to judge.
+pub const FORMAT_VERSION: u64 = 8;
 /// The header is exactly 16 bytes (8 magic + 8 version), so the first record starts
 /// 16-byte-aligned.
 pub const HEADER_LEN: usize = 16;

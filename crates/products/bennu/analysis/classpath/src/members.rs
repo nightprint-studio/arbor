@@ -160,6 +160,11 @@ pub struct ClassFlags {
     pub is_record: bool,
     /// A `sealed` class/interface (has a `PermittedSubclasses` attribute).
     pub is_sealed: bool,
+    /// A top-level type without `ACC_PUBLIC`: usable only from its own package. `false` for a nested
+    /// type (its class-file flags do not say what its declaration did) and for an index persisted
+    /// before the field existed.
+    #[serde(default)]
+    pub is_package_private: bool,
     /// Whether this type has members that exist at compile time but are NOT in this list — so
     /// "no such member" cannot be concluded from its absence here.
     ///
@@ -439,6 +444,7 @@ fn decode_class_flags(parsed: &ClassFile) -> ClassFlags {
         is_annotation: af.contains(F::ANNOTATION),
         is_record,
         is_sealed,
+        is_package_private: !af.contains(F::PUBLIC) && !parsed.this_class.contains('$'),
         // A class file lists everything it has: whatever generated it, the members are all there.
         has_hidden_members: false,
     }

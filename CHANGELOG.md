@@ -9,6 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 - **Bennu's Java validation catches many more compile errors**: language features used below the project's Java level, `super`/constructor misuse, record and `switch` pattern mistakes, generic bounds and wildcards, pattern-variable scope, and checked exceptions from method references and implicit `super()`.
+- **Bennu reports more compile errors**: a package-private class used from another package, forward references between fields, `var` as a field or return type, comparing unrelated classes, a clash between a subclass method and a generic base method, out-of-range numeric literals and illegal escapes, `assert`/`enum` used as names, unreachable code after an endless loop, `continue` to a label that is not a loop, enum rules, static members of inner classes before Java 16, an import that clashes with a type of the same file, package-private and protected access from another package, `void` used as a value, and indexing a non-array.
 - **Bennu's Spring Data query dialog is larger and easier to drive**: searchable property and operator pickers, conditions against a fixed value (`status = 'ACTIVE'`, written into the `@Query`), compact return types, and a new icon.
 
 - **Bennu completes JPQL inside a repository's `@Query`, a `@NamedQuery` and `createQuery("…")`**: entity names after `from`, fields after `alias.` (following relations and joins), the method's parameters after `:`, and keywords.
@@ -16,6 +17,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu's entity ⇄ repository jump is a clear coloured badge** (`R` on an entity, `E` on a repository) instead of a tiny glyph, and the JPA toolbar buttons have their own icons and colours.
 
 ### Fixed
+- **Bennu no longer reports legal commons-lang3 / collections code as broken**: `Stream.of(array)` is a stream of the elements, `type.getEnumConstants()` is an array, a `final` declared inside a loop body may be assigned once per pass, a read through `TypeVariable<?>` gives its bound, and a nested type is found before another of the same name. Validation of a large file is also about three times faster.
+- **Bennu types a generic call over primitives correctly**: `List.of(1, 2)` is a `List<Integer>` (it was read as `List<int>`), and a `@FunctionalInterface` error is reported on the annotation, where javac puts it.
+- **Bennu knows the type of more Java expressions**: `switch` expressions, `collect(Collectors.toList())` / `groupingBy` / `partitioningBy`, `flatMap`, `new Box<>(…)`, `Collections.<String>emptyList()` and calls typed by the variable they initialise (`Comparator<String> c = Comparator.comparing(…)`) now give their real type (`List<String>`, not `List<T>`), so completion and hints work after them.
 - **A Java file just created from Bennu's New dialog shows its own icon** (interface, enum, record…) in the tree and the tab, instead of a class until the next index.
 - **Bennu no longer flags legal `case null, default` switches or checked generic `instanceof` tests** on Java 16 and up.
 

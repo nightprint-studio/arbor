@@ -101,6 +101,8 @@ pub enum CheckId {
     InaccessibleMember,
     /// A non-static member referenced from a `static` context.
     StaticContextAccess,
+    /// A field initializer that reads, by simple name, a field declared further down the class.
+    ForwardReference,
     /// A `static` method called through an instance rather than through its type. *Warning.*
     StaticViaInstance,
 
@@ -297,6 +299,7 @@ impl CheckId {
             LambdaArity => "lambda-arity",
             InaccessibleMember => "inaccessible-member",
             StaticContextAccess => "static-context-access",
+            ForwardReference => "illegal-forward-reference",
             StaticViaInstance => "static-via-instance",
             UnresolvedImport => "unresolved-import",
             RedundantImport => "redundant-import",
@@ -437,6 +440,7 @@ impl CheckId {
             LambdaArity,
             InaccessibleMember,
             StaticContextAccess,
+            ForwardReference,
             StaticViaInstance,
             UnresolvedImport,
             RedundantImport,

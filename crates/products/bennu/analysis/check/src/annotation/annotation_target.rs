@@ -39,12 +39,18 @@ pub fn annotation_target_errors_in(
         if !matches!(n.kind(), "annotation" | "marker_annotation") {
             continue;
         }
-        let Some((wanted, what)) = declaration_context(n) else { continue };
         let Some(name) = n.child_by_field_name("name") else { continue };
         let Ok(written) = name.utf8_text(bytes) else { continue };
         let Some(binary) = crate::support::resolve::type_binary_at(written, n, bytes, symbols, resolver) else {
             continue;
         };
+        // `@String`: a class the resolver knows completely, and it is not an annotation interface.
+        if resolver.members_of(&binary).is_some_and(|cm| !cm.flags.is_annotation && !cm.flags.has_hidden_members) {
+            let simple = binary.rsplit(['/', '$']).next().unwrap_or(&binary);
+            out.push(CheckId::IncompatibleType.at(n, format!("`{simple}` is not an annotation interface")));
+            continue;
+        }
+        let Some((wanted, what)) = declaration_context(n) else { continue };
         if JUDGED_ELSEWHERE.contains(&binary.as_str()) {
             continue;
         }

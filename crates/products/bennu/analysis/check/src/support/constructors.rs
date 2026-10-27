@@ -95,7 +95,7 @@ fn created_type<'t>(
         return None;
     }
     let ty = n.child_by_field_name("type")?;
-    let binary = type_binary(ty.utf8_text(bytes).ok()?, symbols, resolver)?;
+    let binary = crate::support::resolve::type_binary_at(ty.utf8_text(bytes).ok()?, ty, bytes, symbols, resolver)?;
     if has_class_body(n) && resolver.members_of(&binary)?.flags.is_interface {
         return None;
     }
