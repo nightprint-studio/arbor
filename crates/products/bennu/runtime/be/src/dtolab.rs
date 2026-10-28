@@ -142,8 +142,14 @@ pub struct ValidatePayloadArgs {
 /// The project is compiled first if it changed, and its classes are loaded and run: static
 /// initialisers execute. A payload that does not bind is reported as `binding_error` rather than as
 /// violations.
-#[arbor_rpc::handler(mcp(title = "Validate a JSON payload against a DTO", safety = write))]
+///
+/// Java (Maven) projects only. Destructive in the MCP sense: it builds the project and runs its code.
+#[arbor_rpc::handler(mcp(title = "Validate a JSON payload against a DTO", safety = destructive))]
 fn bennu_validate_payload(ctx: &BennuState, args: ValidatePayloadArgs) -> Result<Value, String> {
+    // Refused before any build: on a Cargo root the compile step would run `cargo check --workspace`.
+    if crate::agent::is_cargo_root(&args.root) || crate::agent::is_plain_root(&args.root) {
+        return Err("bennu_validate_payload works on Java (Maven) projects only".to_string());
+    }
     let validation = validation_namespace("", &args.root);
     validate_payload(ctx, &args.root, &args.class, &args.json, args.locale.as_deref().unwrap_or(""), &validation)
 }
@@ -361,7 +367,7 @@ fn bennu_dtolab_generate(ctx: &BennuState, args: GenerateArgs) -> Result<Generat
 /// A validation-test template rendered for an AI client or a preview: the expectations predicted from
 /// the source, because there is no editor waiting for the project's JVM to check them.
 pub(crate) fn render_predicted(args: &RenderArgs, template: &Template) -> Result<Rendered, String> {
-    let (file, source) = crate::templates_render::source_of(args)?;
+    let (file, source) = crate::templates_render::java_source_of(args)?;
     let class = crate::templates_render::class_of(args, &file, &source)?;
     let validation = validation_namespace(&source, &args.root);
     let test_class = test_class_name(&class.name);

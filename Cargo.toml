@@ -190,6 +190,7 @@ members = [
     "crates/products/picus/core",
     "crates/products/picus/db-provider/api",
     "crates/products/picus/db-provider/postgres",
+    "crates/products/picus/db-auth/google",
     "crates/products/picus/lineage",
     "crates/products/picus/diff",
     "crates/products/picus/be",

@@ -153,6 +153,18 @@ impl JarSource {
     }
 }
 
+impl JarSource {
+    /// A non-class entry of the jar read as text (`META-INF/spring.factories`, a `…imports` list), or
+    /// `None` when it is absent or not UTF-8. One probe against the central directory when absent.
+    pub fn text_entry(&self, name: &str) -> Option<String> {
+        let mut archive = self.archive.borrow_mut();
+        let mut entry = archive.by_name(name).ok()?;
+        let mut text = String::new();
+        entry.read_to_string(&mut text).ok()?;
+        Some(text)
+    }
+}
+
 impl ClassSource for JarSource {
     fn origin(&self, binary_name: &str) -> Option<std::path::PathBuf> {
         self.holds(binary_name).then(|| self.path.clone())

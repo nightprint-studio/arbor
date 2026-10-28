@@ -50,6 +50,33 @@
   file, a configuration or a log.
 </p>
 
+<h2>Signing in with Google IAM</h2>
+<p>
+  A PostgreSQL database on <b>Google Cloud SQL</b> can log you in with your Google identity instead of a
+  password. Pick <b>Google IAM (Cloud SQL)</b> under <b>Authentication</b> on the connection's Server page: no
+  password is stored, and the <b>User</b> is the IAM identity — your email, or a service account written
+  <code>name@project.iam</code>.
+</p>
+<p>
+  The sign-in itself is not done in Picus. Run <code>gcloud auth application-default login</code> once; Picus
+  reads the credentials file it leaves (or the one named by <code>GOOGLE_APPLICATION_CREDENTIALS</code>, or one
+  you choose on the connection) and asks Google for a fresh short-lived token every time it connects. The token
+  is never written anywhere, and an open session keeps working after the token expires — only the next
+  connect asks again.
+</p>
+<ul>
+  <li><b>Impersonate service account</b> logs in as that account instead. Your account needs <i>Service Account
+    Token Creator</i> on it, and the IAM Credentials API enabled in its project.</li>
+  <li>The server refuses a token over a plaintext connection, so <b>Require TLS</b> is switched on with the method.
+    Cloud SQL signs each instance with its own CA: download <i>server-ca.pem</i> from the instance's Security
+    settings, set it as <b>CA certificate</b> under Advanced, and turn off <b>Verify server name</b> (the certificate
+    names the instance, not its address; the chain is still verified). Through the Cloud SQL Auth Proxy none of
+    this is needed: connect to <code>127.0.0.1</code> without TLS and let the proxy sign in.</li>
+  <li>A service-account <em>key file</em> works too: choose it as the <b>Credentials file</b> (the user is then the
+    account's email). Workload identity federation is not supported; the error says so. A revoked or expired
+    sign-in says to run the gcloud command again.</li>
+</ul>
+
 <h2>Which ones are open</h2>
 <p>
   Every row in the sidebar carries a dot beside its twisty: <b>filled green</b> when the

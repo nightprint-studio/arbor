@@ -23,6 +23,7 @@
 
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view';
 import { StateEffect, StateField, type Extension } from '@codemirror/state';
+import { tooltip } from '$lib/actions/tooltip';
 
 /** One hint: some text, drawn at a document position. */
 export interface InlayHint {
@@ -75,7 +76,7 @@ class HintWidget extends WidgetType {
     // Out of the accessibility tree and out of any text the user asks for: it is not in the file.
     span.setAttribute('aria-hidden', 'true');
     if (this.tooltip) {
-      span.title = this.tooltip;
+      tooltip(span, this.tooltip);
       span.classList.add('cm-inlay-hoverable');
     }
     return span;

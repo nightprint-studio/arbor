@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
   /**
    * BennuIntentionsOverlay — the Alt+Enter intentions/quick-fix popup for the
    * Bennu editor, modeled on merula's caret-anchored intentions picker.
@@ -172,7 +173,7 @@
         onclick={() => runItem(i)}
       >
         <span class="bi-icon"><ItemIcon size={14} /></span>
-        <span class="bi-label" title={item.label}>{item.label}</span>
+        <span class="bi-label" use:tooltip={item.label}>{item.label}</span>
         {#if item.preferred}
           <Badge variant="tone" tone="success" size="sm" label="suggested" />
         {/if}

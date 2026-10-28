@@ -35,6 +35,7 @@
   import ColorPalettePicker from '$lib/components/shared/ui/ColorPalettePicker.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import PicusDialectChip from './PicusDialectChip.svelte';
+  import PicusAuthSection from './PicusAuthSection.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import {
     connectionsStore, connectionColorSlot, CONNECTION_COLOR_SLOTS,
@@ -44,6 +45,8 @@
     type ConnectionSpec,
     type DbProviderDescriptor,
     listProviders,
+    listAuthMethods,
+    type AuthMethodDescriptor,
     testConnection,
   } from '$lib/ipc/picus/db';
   import type { Dialect } from '$lib/types/picus';
@@ -66,10 +69,15 @@
   // engine declares is rendered generically under Advanced, so a third engine that
   // wants a TNS alias gets one without this component changing.
   let providers = $state<DbProviderDescriptor[]>([]);
+  let authMethods = $state<AuthMethodDescriptor[]>([]);
   $effect(() => {
     void listProviders()
       .then((list) => { providers = list; })
       .catch(() => { providers = []; });
+    // Optional: a backend without any extra sign-in method simply offers none.
+    void listAuthMethods()
+      .then((list) => { authMethods = list; })
+      .catch(() => { authMethods = []; });
   });
 
   let name = $state('');
@@ -159,6 +167,20 @@
   $effect(() => { firstField?.focus(); });
 
   const descriptor = $derived(providers.find((p) => p.kind === dialect) ?? null);
+
+  /** Sign-in methods the current engine accepts, and the one this connection uses. */
+  const engineAuthMethods = $derived(authMethods.filter((m) => m.engines.includes(dialect)));
+  const authId = $derived(parseParams().auth || 'password');
+  const activeAuth = $derived(engineAuthMethods.find((m) => m.id === authId) ?? null);
+
+  /** Choosing a method that sends a token turns TLS on with it: the server would refuse otherwise,
+   *  and "forgot the checkbox" is not a failure worth a round trip to discover. */
+  function selectAuth(id: string) {
+    extraParams = setParam('auth', id);
+    const next = engineAuthMethods.find((m) => m.id === id);
+    if (next?.requiresTls) tls = true;
+    testResult = null;
+  }
   const dialectOptions = $derived(
     providers.length
       ? providers.map((p) => ({ value: p.kind, label: p.label }))
@@ -433,7 +455,10 @@
             <Input value={schema} placeholder={String(schemaPlaceholder ?? '')} oninput={(v) => (schema = v)} />
           </FormField>
         {/if}
-        <FormField label={field('user')?.label ?? 'Username'} hint="Stored with the connection; the password is not.">
+        <FormField
+          label={field('user')?.label ?? 'Username'}
+          hint={activeAuth ? 'The IAM identity: your email, or the service account (name@project.iam).' : 'Stored with the connection; the password is not.'}
+        >
           <Input value={username} placeholder={field('user')?.placeholder ?? 'appuser'} oninput={(v) => (username = v)} />
         </FormField>
       </div>
@@ -528,7 +553,7 @@
             <FormField label={f.label} hint={f.help ?? undefined} required={f.required}>
               {#if f.type === 'toggle'}
                 <Toggle
-                  checked={parseParams()[f.id] === 'true'}
+                  checked={(parseParams()[f.id] ?? f.default) === 'true'}
                   size="sm"
                   label={f.label}
                   onchange={(v) => { extraParams = setParam(f.id, String(v)); }}
@@ -567,6 +592,16 @@
          is the one above. -->
     {#if page === 'server'}
     <section class="cm-section">
+      <PicusAuthSection
+        methods={engineAuthMethods}
+        value={authId}
+        param={(key) => parseParams()[key] ?? ''}
+        onSelect={selectAuth}
+        onParam={(key, value) => { extraParams = setParam(key, value); testResult = null; }}
+        {tls}
+        onRequireTls={() => { tls = true; }}
+      />
+      {#if !activeAuth}
       <Alert variant="info" compact>
         <span class="cm-secret">
           <KeyRound size={12} />
@@ -597,6 +632,7 @@
             <span>Saving now will <b>delete</b> the stored password for this connection.</span>
           </span>
         </Alert>
+      {/if}
       {/if}
 
       {#if testResult}

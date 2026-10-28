@@ -123,6 +123,27 @@ export interface DbProviderDescriptor {
   schemaGroups: SchemaGroup[];
 }
 
+/**
+ * A way to sign in other than a stored password (Google IAM, …), as the backend registers it.
+ * Pure data: the connection form renders it without knowing which provider it is.
+ */
+export interface AuthMethodDescriptor {
+  id: string;
+  label: string;
+  help: string;
+  /** Engines it can sign in to. */
+  engines: Dialect[];
+  /** The server refuses its credential over a plaintext connection. */
+  requiresTls: boolean;
+  /** Extra fields; their ids are the connection's `params` keys. */
+  fields: ConnectionField[];
+}
+
+/** The sign-in methods besides a stored password. */
+export function listAuthMethods(): Promise<AuthMethodDescriptor[]> {
+  return picus('picus_list_auth_methods', {});
+}
+
 /** Every engine Picus knows, connectable or not, in display order. */
 export function listProviders(): Promise<DbProviderDescriptor[]> {
   return picus('picus_providers', {});
@@ -425,9 +446,13 @@ export interface ValidationFinding {
  * list when there is nothing to validate against (no session, an engine without the
  * capability); rejects only when the connection itself failed mid-check, so the
  * caller can tell "clean" from "could not ask".
+ *
+ * `strict` is for a caller asking about ONE statement it extracted from somewhere (a Java string, a
+ * mapper): nothing is skipped because the editor's parser does not like it, and a missing session
+ * or an engine that cannot prepare rejects instead of answering "no findings".
  */
-export function validateSql(connectionId: string, sql: string): Promise<ValidationFinding[]> {
-  return picus('picus_validate', { id: connectionId, sql });
+export function validateSql(connectionId: string, sql: string, strict = false): Promise<ValidationFinding[]> {
+  return picus('picus_validate', { id: connectionId, sql, strict });
 }
 
 /** One statement in a buffer, addressed the way the editor addresses text. */

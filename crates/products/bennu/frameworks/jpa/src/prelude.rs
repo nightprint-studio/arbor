@@ -8,6 +8,7 @@
 
 // The extension itself — what a host registers.
 pub use crate::ext::JpaExtension;
+pub use crate::intel::native_sites;
 
 // The model a query answers from.
 pub use crate::model::{

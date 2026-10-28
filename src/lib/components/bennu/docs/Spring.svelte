@@ -24,8 +24,9 @@
 <table>
   <thead><tr><th>Icon</th><th>Beside</th><th>Click to</th></tr></thead>
   <tbody>
-    <tr><td><code>◆</code></td><td>A bean declaration</td><td>See where it is injected</td></tr>
-    <tr><td><code>→</code></td><td>An injection point</td><td>See the beans that can satisfy it</td></tr>
+    <tr><td><code>I</code></td><td>A bean declaration (green badge)</td><td>See where it is injected</td></tr>
+    <tr><td><code>B</code></td><td>An injection point (blue badge)</td><td>See the beans that can satisfy it</td></tr>
+    <tr><td><code>B</code></td><td>An injection only a dependency can satisfy (dashed teal badge)</td><td>See what may provide it — an allowlisted artifact, or Spring Boot's auto-configuration, read from each jar's <code>AutoConfiguration.imports</code> or <code>spring.factories</code>. The tooltip says whose bean it is and on what condition: a library bean is what Spring <em>may</em> register, never a fact. A bean a method returns as a subtype (a <code>HikariDataSource</code> for a <code>DataSource</code>) is matched by the type it returns.</td></tr>
     <tr><td><code>»</code></td><td>A request handler</td><td>See its route</td></tr>
   </tbody>
 </table>

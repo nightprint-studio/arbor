@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
   /**
    * "Implement / override methods" — pick which inherited methods to write.
    *
@@ -166,7 +167,7 @@
                 ariaLabel={`Select every method from ${simple(g.type)}`}
                 onchange={(on) => toggleGroup(g.rows, on)}
               />
-              <span class="ov-group-name" title={g.type}>{simple(g.type)}</span>
+              <span class="ov-group-name" use:tooltip={g.type}>{simple(g.type)}</span>
               <span class="ov-group-pkg">{g.type}</span>
             </div>
             {#each g.rows as m (keyOf(m))}

@@ -16,6 +16,7 @@
 </script>
 
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
   /**
    * TokenListInput — a **list** of short string entries, added one at a time and removed one at a
    * time, each able to say what it turned out to mean.
@@ -147,7 +148,7 @@
         <li class="tl-row">
           <code class="tl-value">{value}</code>
           {#if st}
-            <span class="tl-status tl-{st.tone}" title={st.tooltip ?? ''}>{st.label}</span>
+            <span class="tl-status tl-{st.tone}" use:tooltip={st.tooltip ?? ''}>{st.label}</span>
           {/if}
           <IconButton tooltip="Remove" size={20} onclick={() => remove(value)}>
             <X size={11} />

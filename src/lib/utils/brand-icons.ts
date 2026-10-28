@@ -13,6 +13,7 @@
  * all and falls back to the generic `jetbrains` mark.
  */
 import type { IconifyIcon } from '@iconify/svelte';
+import { markParts } from './product-marks';
 
 // ── Provider brands (used by BrandIcon / BrandTile / pipeline + MR widgets) ──
 import githubIcon    from '@iconify-icons/simple-icons/github';
@@ -67,7 +68,17 @@ const rubymineIcon: IconifyIcon = {
 // RustRover has no entry in simple-icons; fall back to the JetBrains mark.
 const rustroverIcon = jetbrainsIcon;
 
+/** Bennu's own mark (the suite's "B"), as an Iconify body — so it sits among the IDE brands like any of them. */
+const bennuIcon: IconifyIcon = {
+  body: markParts('bennu', 'solid')
+    .map((p) => `<${p.tag} ${Object.entries(p.attrs).map(([k, v]) => `${k}="${v}"`).join(' ')}/>`)
+    .join(''),
+  width: 24,
+  height: 24,
+};
+
 export const IDE_ICON = {
+  bennu:     bennuIcon,
   vscode:    vsCodeIcon,
   cursor:    cursorIcon,
   zed:       zedIcon,

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
   /**
    * "Insert table" — the grid you drag a size out of.
    *
@@ -75,7 +76,7 @@
       onclick={toggle}
       aria-haspopup="dialog"
       aria-expanded={open}
-      title="Insert a table"
+      use:tooltip={'Insert a table'}
     >⊞</button>
   {/snippet}
 

@@ -20,6 +20,7 @@ macro_rules! invoke_handlers {
             // dispatches to the right backend. See `crate::ipc`.
             $crate::commands::rpc_commands::rpc,
             $crate::commands::rpc_commands::ensure_product_backend,
+            $crate::commands::rpc_commands::is_product_installed,
             // Appearance preferences (window control style, font scale, …)
             $crate::commands::config_commands::set_explorer_config,
             // Tyto (screen recorder) preferences — opt-in OS-global shortcut

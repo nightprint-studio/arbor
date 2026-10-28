@@ -8,6 +8,7 @@
   this page, which still say the product is off.
 -->
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
   import { Trash2 } from 'lucide-svelte';
 
   import Badge from '$lib/components/shared/ui/Badge.svelte';
@@ -63,13 +64,13 @@
 
   <div class="budget">
     {#if usesLeft}
-      <div class="meter" title="{usesLeft.left} of {usesLeft.of} calls left">
+      <div class="meter" use:tooltip={`${usesLeft.left} of ${usesLeft.of} calls left`}>
         <span class="meter-label">{usesLeft.left} of {usesLeft.of} calls</span>
         <div class="track"><div class="fill" style:width="{Math.min(100, usesLeft.pct)}%"></div></div>
       </div>
     {/if}
     {#if timeLeft}
-      <div class="meter" title="{timeLeft.label} left">
+      <div class="meter" use:tooltip={`${timeLeft.label} left`}>
         <span class="meter-label">{timeLeft.label} left</span>
         <div class="track"><div class="fill" style:width="{Math.min(100, timeLeft.pct)}%"></div></div>
       </div>

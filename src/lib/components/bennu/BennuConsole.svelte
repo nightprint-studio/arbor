@@ -33,6 +33,12 @@
   import LogLine from '$lib/components/shared/ui/LogLine.svelte';
   import type { RunLogLine } from '$lib/stores/bennu/run.svelte';
   import { openLogLink } from './log-link';
+  import { copyToClipboard } from '$lib/utils/clipboard';
+
+  /** A SQL statement in the log was pressed: copy it, and say so — the click has no other visible effect. */
+  function copySql(sql: string) {
+    void copyToClipboard(sql, { successToast: 'SQL copied', errorToast: true });
+  }
 
   interface Props {
     /** The buffer to show, oldest first. */
@@ -115,6 +121,7 @@
         pieces={l.pieces}
         level={l.level}
         onopen={openLogLink}
+        onsql={copySql}
       />{/if}
   {/snippet}
 </VirtualTextView>

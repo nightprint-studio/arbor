@@ -158,6 +158,7 @@ fn bennu_render_template(_ctx: &BennuState, args: RenderArgs) -> Result<Rendered
 }
 
 pub(crate) fn render_request(args: &RenderArgs) -> Result<Rendered, String> {
+    let args = &resolve_paths(args)?;
     let kind = kind_of(&args.kind)?;
     let template = template_for(args, kind)?;
     if !args.trace_lines {
@@ -225,6 +226,59 @@ pub(crate) fn source_of(args: &RenderArgs) -> Result<(String, String), String> {
     Ok((file, source))
 }
 
+/// [`source_of`] for a kind that parses the file as Java — a `.rs` file would be read as Java and answer
+/// with a confusing "declares no type".
+pub(crate) fn java_source_of(args: &RenderArgs) -> Result<(String, String), String> {
+    let (file, source) = source_of(args)?;
+    match Path::new(&file).extension().and_then(|e| e.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case("java") => Ok((file, source)),
+        _ => Err(format!("{file} is not a Java file — this kind of template works on Java classes only")),
+    }
+}
+
+/// `args` with `file` and `directory` made absolute against `root`; a relative one may not climb out.
+fn resolve_paths(args: &RenderArgs) -> Result<RenderArgs, String> {
+    let mut resolved = args.clone();
+    for path in [&mut resolved.file, &mut resolved.directory] {
+        if let Some(value) = path.as_mut().filter(|v| !v.is_empty()) {
+            *value = crate::project_paths::in_root(&args.root, value)?;
+        }
+    }
+    Ok(resolved)
+}
+
+/// Refuse a path that is not really inside `root`.
+///
+/// A lexical `starts_with` is not enough: `<root>/../../x` starts with the root and lands outside it,
+/// and a symlinked directory does the same without a `..`. The target usually does not exist yet, so
+/// the nearest existing ancestor is the one resolved.
+fn ensure_inside_root(root: &str, path: &Path) -> Result<(), String> {
+    let outside = || format!("{} is outside the project", path.display());
+    if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(outside());
+    }
+    let root = std::fs::canonicalize(root).map_err(|e| format!("{root}: {e}"))?;
+    let ancestor = path.ancestors().find(|a| a.exists()).ok_or_else(outside)?;
+    let ancestor = std::fs::canonicalize(ancestor).map_err(|e| format!("{}: {e}", ancestor.display()))?;
+    match ancestor.starts_with(&root) {
+        true => Ok(()),
+        false => Err(outside()),
+    }
+}
+
+/// A relative name from a template (`bennu.file`) or from the caller: it may not be rooted or climb out,
+/// because it is appended to a directory and then written.
+pub(crate) fn ensure_relative_name(name: &str) -> Result<(), String> {
+    use std::path::Component;
+    let bad = Path::new(name)
+        .components()
+        .any(|c| matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_)));
+    match bad {
+        true => Err(format!("`{name}` is not a file name inside the directory — no `..` and no absolute paths")),
+        false => Ok(()),
+    }
+}
+
 #[derive(Deserialize)]
 pub struct CreateFileArgs {
     pub root: String,
@@ -236,15 +290,14 @@ pub struct CreateFileArgs {
 /// that one is written through the editor, which knows whether it has unsaved changes.
 #[arbor_rpc::handler]
 fn bennu_template_create_file(_ctx: &BennuState, args: CreateFileArgs) -> Result<(), String> {
-    let path = Path::new(&args.file);
-    if !path.starts_with(&args.root) {
-        return Err(format!("{} is outside the project", args.file));
-    }
+    let file = crate::project_paths::in_root(&args.root, &args.file)?;
+    let path = Path::new(&file);
+    ensure_inside_root(&args.root, path)?;
     if path.exists() {
-        return Err(format!("{} already exists", args.file));
+        return Err(format!("{file} already exists"));
     }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    std::fs::write(path, args.text).map_err(|e| format!("{}: {e}", args.file))
+    std::fs::write(path, args.text).map_err(|e| format!("{file}: {e}"))
 }

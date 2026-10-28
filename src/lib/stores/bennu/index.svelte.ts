@@ -90,18 +90,40 @@ function createBennuIndexStore() {
   // fully built) finishes the card.
   let sawEvent = false;
 
+  /** The card is put up only if the build is still running after a moment: switching between two projects
+   *  flips the status twice in a few hundred milliseconds, and a card that flashes for work that ends (or
+   *  never starts) before it can be read is noise. The footer state is immediate; the card is not. */
+  const JOB_DELAY_MS = 700;
+  let jobTimer: ReturnType<typeof setTimeout> | undefined;
+  function cancelJobTimer() {
+    if (jobTimer) { clearTimeout(jobTimer); jobTimer = undefined; }
+  }
+
   function startJob(root: string) {
+    cancelJobTimer();
+    // The previous project's card goes now; this one's comes only if the build is still going.
+    operationsStore.dismiss(OP_ID);
+    jobTimer = setTimeout(() => {
+      jobTimer = undefined;
+      if (!done && indexing && sameRoot(root, currentRoot)) showJob(root);
+    }, JOB_DELAY_MS);
+  }
+
+  function showJob(root: string) {
     operationsStore.start({
       id: OP_ID,
       title: 'Indexing project',
       subtitle: baseName(root),
       steps: PHASES.map((p) => ({ key: p.key, label: p.label })),
-      current: 'project',
+      // Where the build is by now: the card may come up after the first phases have passed.
+      current: phase ?? 'project',
       target: 'bennu',
     });
   }
 
   function finishJob(ok: boolean) {
+    // Done before the card was ever shown: nothing to close, and no "Index ready" to flash either.
+    if (jobTimer) { cancelJobTimer(); return; }
     operationsStore.finish(OP_ID, ok ? { summary: 'Index ready' } : { error: 'Indexing failed' });
   }
 
@@ -210,6 +232,7 @@ function createBennuIndexStore() {
     phase = null;
     refProgress = null;
     typeCount = types;
+    cancelJobTimer();
     operationsStore.dismiss(OP_ID);
   }
 
@@ -244,6 +267,7 @@ function createBennuIndexStore() {
         // BE absent / demo — stop showing an indefinite job.
         indexing = false;
         phase = null;
+        cancelJobTimer();
         operationsStore.dismiss(OP_ID);
       });
   }
@@ -377,6 +401,7 @@ function createBennuIndexStore() {
       indexing = false;
       phase = null;
       currentRoot = null;
+      cancelJobTimer();
       operationsStore.dismiss(OP_ID);
     },
 

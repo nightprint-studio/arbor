@@ -72,11 +72,13 @@ import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 import { html } from '@codemirror/lang-html';
 import { javascript } from '@codemirror/lang-javascript';
 import { javaLanguage } from './java-lang';
+import { mapperCompletion, nativeQueryCompletion, sqlAbbreviationPreview, sqlFileCompletion } from './picus/sql-completion';
 import { angularTemplateHighlight } from './angular-template-highlight';
 import {
   lspLanguage, lspLanguageFrom, backendCompletionSource, backendHoverSource,
 } from './lsp-lang';
 import { isSpringPropertyFile, isDotEnvFile, configPropsLang } from './config-props-lang';
+import { configRootColors } from './config-roots';
 import { isToolConfigFile } from './file-kind';
 import { cargoTomlLang, isCargoManifest } from './cargo-toml-lang';
 import { packageJsonLanguage, isPackageManifest } from './package-json-lang';
@@ -165,6 +167,15 @@ const xmlLang = xmlSchemaLang('xml', xml);
 // leak onto every other XML file.
 const pomLang = xmlSchemaLang('pom', xml, pomSections);
 /**
+ * Plain XML, plus table and column completion inside a MyBatis mapper's statements. One more
+ * descriptor and not a change to `xmlLang`: that is shared with other XML dialects, and the
+ * identity keys the editor.
+ */
+const mapperXmlLang: LanguageDescriptor = {
+  ...xmlLang,
+  intel: { ...xmlLang.intel, completion: mapperCompletion(xmlLang.intel!.completion!) },
+};
+/**
  * HTML — the real lang-html tree (embedded JS/CSS highlight + tag folding), **plus** whatever a
  * language server has to say about it.
  *
@@ -231,12 +242,15 @@ const jsxLang = jsFlavour('javascriptreact', { jsx: true });
 const tsLang = jsFlavour('typescript', { typescript: true });
 const tsxLang = jsFlavour('typescriptreact', { typescript: true, jsx: true });
 const propsLang = streamLang('properties', properties);
-const yamlLang = streamLang('yaml', yaml);
+// A real `.properties` file (not `.gitignore`, `.ini`, …, whose lines are not dotted key paths): its keys
+// are coloured by root.
+const propertiesLang = cmLang('properties-keys', [StreamLanguage.define(properties), configRootColors('properties')]);
+const yamlLang = cmLang('yaml', [StreamLanguage.define(yaml), configRootColors('yaml')]);
 // Same colouring, plus the intelligence a Spring config file can have and a generic one
 // cannot: key/value completion, ghost text, and a hover that knows the type. Built once —
 // the identity has to be stable or the editor remounts on every keystroke.
-const springYamlLang = configPropsLang('spring-yaml', yaml);
-const springPropertiesLang = configPropsLang('spring-properties', properties);
+const springYamlLang = configPropsLang('spring-yaml', yaml, 'yaml');
+const springPropertiesLang = configPropsLang('spring-properties', properties, 'properties');
 // `KEY=value` with `#` comments is what the properties mode already colours; what a `.env` adds is
 // the vocabulary — the variable names Spring binds — which is the backend's, through the same hooks.
 const dotEnvLang = configPropsLang('dotenv', properties);
@@ -385,10 +399,25 @@ const sqlDescriptors = new Map<SqlDialect, LanguageDescriptor>();
 function sqlLangFor(dialect: SqlDialect): LanguageDescriptor {
   const cached = sqlDescriptors.get(dialect);
   if (cached) return cached;
-  const desc = cmLang(`sql-${dialect}`, sqlHighlight(dialect));
+  // Tables and columns from the connected Picus database. Answers nothing without one, and the
+  // other intel hooks stay idle until a host pushes to them (see the code editor).
+  const desc: LanguageDescriptor = {
+    ...cmLang(`sql-${dialect}`, sqlHighlight(dialect)),
+    intel: { completion: sqlFileCompletion(), inlineCompletion: sqlAbbreviationPreview() },
+  };
   sqlDescriptors.set(dialect, desc);
   return desc;
 }
+
+/**
+ * Java, with the database's tables and columns offered inside a native query's string. Defined once:
+ * the descriptor's identity is what keys the editor, so a fresh object per read would remount it.
+ * Everywhere outside such a string the Java completion answers, unchanged.
+ */
+const javaWithSql: LanguageDescriptor = {
+  ...javaLanguage,
+  intel: { ...javaLanguage.intel, completion: nativeQueryCompletion(javaLanguage.intel!.completion!) },
+};
 
 /** Resolve the editor language for a file path. Falls back to a plain (no-highlight,
  *  still editable) descriptor for unknown types.
@@ -430,7 +459,7 @@ export function languageForPath(path: string | null): LanguageDescriptor {
   // By the whole name: `Order.java.jinja` is a template that generates Java, not a Jinja file of no language.
   if (isJinjaFile(name)) return jinjaLang(name);
   switch (ext) {
-    case 'java': return javaLanguage;
+    case 'java': return javaWithSql;
     case 'rs': return rustLang;
     case 'toml': return tomlLang;
     // geode's mole scripts: the grammar colours and folds them here, `nd-dig-lsp` answers
@@ -444,7 +473,8 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     // `merula-be`, and spawning that backend to open a text file is a bigger decision than
     // colouring one.
     case 'merula': return merulaLanguage;
-    case 'xml': case 'xsd': case 'wsdl': case 'xsl': case 'xslt': case 'tld':
+    case 'xml': return mapperXmlLang;
+    case 'xsd': case 'wsdl': case 'xsl': case 'xslt': case 'tld':
     case 'pom': case 'iml': case 'fxml': case 'svg': return xmlLang;
     // `.ent` / `.mod` are the conventional names for a DTD split across files.
     case 'dtd': case 'ent': case 'mod': return dtdLang;
@@ -466,7 +496,8 @@ export function languageForPath(path: string | null): LanguageDescriptor {
       return isPackageManifest(path) ? packageJsonLanguage : jsonDesc;
     case 'md': case 'markdown': return markdownDesc;
     case 'yml': case 'yaml': return yamlLang;
-    case 'properties': case 'ini': case 'conf': case 'cfg': return propsLang;
+    case 'properties': return propertiesLang;
+    case 'ini': case 'conf': case 'cfg': return propsLang;
     case 'ron': return ronLanguage;
     case 'mmd': case 'mermaid': return mermaidDiagramLanguage;
     case 'wgsl': return wgslLang;

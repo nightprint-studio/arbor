@@ -914,7 +914,13 @@ pub struct SafeDeleteDto {
     safety = read,
     description = "What deleting the member at the caret would remove, or every use that still \
 needs it. Plans only — nothing is written. Read `safe` first: when it is false, either `blocked` \
-says why the member can never be removed, or `usages` lists every site that has to go first.",
+says why the member can never be removed, or `usages` lists every site that has to go first. \
+Arguments: `file` (absolute path of a .java file), `source` (the WHOLE text of that file as the \
+editor holds it, not a snippet) and `offset` (a UTF-8 BYTE offset of the caret in `source`, not a \
+character index). There is no `root`: the project is the one that owns `file`. A null result means \
+no plan could be made — the file is not Java, the caret is not on a deletable declaration (a local \
+variable is not one), no opened project owns the file, or its index is still building — so retry \
+later before concluding anything. `usages` is the complete list and is not truncated.",
 ))]
 pub(crate) fn bennu_safe_delete(
     _ctx: &BennuState,

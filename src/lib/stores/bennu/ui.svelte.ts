@@ -51,6 +51,9 @@ export type LeftPanel = 'project' | 'structure' | 'dependencies' | `plugin:${str
  *  else — from the palette, and from its shortcut. */
 export type RightPanel =
   | 'maven' | 'cargo' | 'tests' | 'ast' | 'i18n'
+  /** The database tool window — entities and native queries checked against a Picus connection.
+   *  Offered only when Picus is installed. */
+  | 'picus'
   /** A view a plugin registered with `arbor.ui.add_view`, keyed `plugin:<plugin>:<view_id>`.
    *
    *  Bennu puts plugin views here rather than in the body, and that is a real choice about

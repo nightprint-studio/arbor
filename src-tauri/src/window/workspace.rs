@@ -234,7 +234,7 @@ pub fn workspace_tab_closed(app: AppHandle, product: String) {
         return;
     }
     super::emit_product_state(&app, &product, false);
-    crate::ipc::split_broker::detach(&product, "workspace-tab-closed");
+    crate::ipc::split_broker::detach_unless_borrowed(&product, "workspace-tab-closed");
 }
 
 /// Tear down every product the container was hosting. Called from the window
@@ -250,7 +250,7 @@ pub fn teardown_hosted(app: &AppHandle) {
             continue;
         }
         super::emit_product_state(app, &product, false);
-        crate::ipc::split_broker::detach(&product, "workspace-closed");
+        crate::ipc::split_broker::detach_unless_borrowed(&product, "workspace-closed");
     }
 }
 

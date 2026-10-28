@@ -1315,6 +1315,8 @@ pub struct JpaEntityView {
     /// attribute can be added to any of the three, a repository only to the first, and which
     /// rule applies is the form's business.
     pub kind: String,
+    /// `@Table(name = …)`, empty when defaulted — what a connected database is asked for columns of.
+    pub table: String,
     /// Property paths, one level of relations followed — `total`, `customer.name`.
     pub properties: Vec<JpaPropertyView>,
     /// Whether a repository already manages it.
@@ -1369,6 +1371,7 @@ fn bennu_jpa_form_model(_ctx: &BennuState, args: RootArgs) -> Result<JpaFormMode
                 simple: e.simple.clone(),
                 file: e.file.clone(),
                 kind: e.kind.clone(),
+                table: e.table.clone(),
                 has_repository: !m.repositories_of(&e.simple).is_empty(),
                 properties: property_paths(&m, e),
             })
@@ -1402,6 +1405,171 @@ fn bennu_jpa_form_model(_ctx: &BennuState, args: RootArgs) -> Result<JpaFormMode
             .collect(),
         relations: bennu_jpa::prelude::RELATIONS.iter().map(|r| r.to_string()).collect(),
     })
+}
+
+/// One mapped field, as the database check needs it: the column it names, not the path a query
+/// would address it by.
+#[derive(Serialize, Default)]
+pub struct PersistenceFieldView {
+    pub name: String,
+    pub type_text: String,
+    /// `@Column(name = …)` when written; empty means the provider's naming strategy decides, and
+    /// the check applies the default one (see the frontend's `entity-check`).
+    pub column: String,
+    pub is_id: bool,
+    /// A relation owns a join column the field name says nothing about — left out of the
+    /// comparison rather than guessed at.
+    pub is_relation: bool,
+    /// A to-one relation that holds the foreign key: it owns a column even though `is_relation`.
+    pub owns_column: bool,
+    /// `@JoinColumn(name = …)` of such a relation; empty when the provider defaults it.
+    pub join_column: String,
+    /// Stored through an `AttributeConverter` (`@Convert`, or an auto-applied one): its Java type
+    /// says nothing about the column's.
+    pub converted: bool,
+    /// An embedded object — its columns belong to the embeddable, not to one named after the field.
+    pub embedded: bool,
+    pub line: u32,
+}
+
+#[derive(Serialize, Default)]
+pub struct PersistenceEntityView {
+    pub fqcn: String,
+    pub simple: String,
+    /// `@Table(name = …)`, empty when defaulted.
+    pub table: String,
+    pub kind: String,
+    pub file: String,
+    pub line: u32,
+    pub fields: Vec<PersistenceFieldView>,
+}
+
+/// A `@Query(nativeQuery = true)` — SQL for the database, which is what Picus can check.
+#[derive(Serialize, Default)]
+pub struct NativeQueryView {
+    pub repository: String,
+    pub method: String,
+    pub text: String,
+    pub file: String,
+    pub line: u32,
+    /// Byte span of the literal's contents, so a result can land on the query.
+    pub start: usize,
+    pub end: usize,
+    pub named_params: Vec<String>,
+    pub positional_params: Vec<u32>,
+}
+
+#[derive(Serialize, Default)]
+pub struct PersistenceModel {
+    /// The project has JPA / Hibernate at all — the Database window offers entity tooling only then.
+    pub jpa: bool,
+    pub entities: Vec<PersistenceEntityView>,
+    pub native_queries: Vec<NativeQueryView>,
+}
+
+/// What a project's persistence layer declares, for checking against a live schema.
+///
+/// The JPA crate deliberately knows nothing about a database (see its `model` docs); the other half
+/// of the comparison is Picus's, and the frontend does the joining. Empty for a project with no
+/// JPA extension, like every other framework query.
+#[arbor_rpc::handler]
+fn bennu_persistence_model(_ctx: &BennuState, args: RootArgs) -> Result<PersistenceModel, String> {
+    let Some(ext) = FrameworkService::global().slot(&args.root).and_then(|s| s.jpa.clone()) else {
+        return Ok(PersistenceModel::default());
+    };
+    let m = ext.model();
+    let entities = m
+        .entities
+        .iter()
+        // An `@Embeddable` is stored inside another entity's table; its fields are not a table.
+        .filter(|e| e.kind != "embeddable")
+        .map(|e| PersistenceEntityView {
+            fqcn: e.fqcn.clone(),
+            simple: e.simple.clone(),
+            table: e.table.clone(),
+            kind: e.kind.clone(),
+            file: e.file.clone(),
+            line: e.line,
+            fields: m
+                .fields_of(e)
+                .into_iter()
+                .filter(|f| !f.transient)
+                .map(|f| PersistenceFieldView {
+                    name: f.name.clone(),
+                    type_text: bennu_jpa::prelude::simple_name(&f.type_text).to_string(),
+                    column: f.column.clone(),
+                    is_id: f.is_id,
+                    is_relation: f.is_navigable(),
+                    owns_column: f.owns_column,
+                    join_column: f.join_column.clone(),
+                    converted: f.converted,
+                    embedded: f.embedded
+                        || m.entity(&f.type_text).is_some_and(|e| e.kind == "embeddable"),
+                    line: f.line,
+                })
+                .collect(),
+        })
+        .collect();
+    let native_queries = m
+        .repositories
+        .iter()
+        .flat_map(|r| {
+            r.methods.iter().flat_map(move |method| {
+                let main = method.query.as_ref().filter(|q| q.native);
+                // The count query is SQL too, and is checked on its own: a column renamed in one
+                // and not the other is exactly the slip a page-and-total pair invites.
+                let count = main.and_then(|q| q.count.as_deref()).map(|c| (format!("{} (count)", method.name), c));
+                main.map(|q| (method.name.clone(), q)).into_iter().chain(count).map(move |(name, q)| NativeQueryView {
+                    repository: r.simple.clone(),
+                    method: name,
+                    text: q.text.clone(),
+                    file: r.file.clone(),
+                    line: method.line,
+                    start: q.start,
+                    end: q.end,
+                    named_params: q.named_params.clone(),
+                    positional_params: q.positional_params.clone(),
+                })
+            })
+        })
+        .collect();
+    Ok(PersistenceModel { jpa: true, entities, native_queries })
+}
+
+/// One native SQL string in a Java buffer, by byte span of its contents.
+#[derive(Serialize)]
+pub struct NativeSqlSpan {
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+}
+
+/// The native SQL strings in the live buffer of a Java file, so the editor can have a database check
+/// them where they are written. Empty for a file outside a JPA project, like every framework query.
+#[arbor_rpc::handler]
+fn bennu_native_sql_sites(_ctx: &BennuState, args: FileArgs) -> Result<Vec<NativeSqlSpan>, String> {
+    let Some(slot) = FrameworkService::global().slot_for_file(&args.file) else {
+        return Ok(Vec::new());
+    };
+    if slot.jpa.is_none() {
+        return Ok(Vec::new());
+    }
+    let source = match args.source {
+        Some(s) => s,
+        None => std::fs::read_to_string(&args.file).map_err(|e| e.to_string())?,
+    };
+    // A literal that is one piece of a `"select a " + "from t"` is not a statement on its own, and a
+    // database asked about half of one would reject it: those are left unchecked.
+    // Quotes are stripped from the edges first, so a text block (`"""`) reads like a plain literal.
+    let is_piece = |start: usize, end: usize| {
+        source[end..].trim_start_matches('"').trim_start().starts_with('+')
+            || source[..start].trim_end().trim_end_matches('"').trim_end().ends_with('+')
+    };
+    Ok(bennu_jpa::prelude::native_sites(&args.file, &source)
+        .into_iter()
+        .filter(|q| !is_piece(q.start, q.end))
+        .map(|q| NativeSqlSpan { start: q.start, end: q.end, text: q.text })
+        .collect())
 }
 
 /// The property paths a query may address on `entity`: its own fields, plus one level through
@@ -1810,6 +1978,25 @@ pub struct CatalogArgs {
     pub root: String,
     /// Catalog kind, optionally namespaced by extension id (`"spring.beans"`, `"beans"`).
     pub kind: String,
+    /// At most this many rows, then one closing `truncated` row saying how many were left out.
+    /// Unlimited when absent, which is what the editor's panels rely on.
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// `rows` cut to `limit`, with a final row of kind `truncated` that says so — a list that quietly
+/// ends early reads as the whole answer.
+fn limit_rows(mut rows: Vec<ExtEntry>, limit: Option<usize>) -> Vec<ExtEntry> {
+    let Some(limit) = limit.filter(|l| rows.len() > *l) else { return rows };
+    let total = rows.len();
+    rows.truncate(limit);
+    rows.push(ExtEntry {
+        id: "truncated".to_string(),
+        primary: format!("Truncated: {limit} of {total} rows shown — pass a larger `limit` or none"),
+        kind: "truncated".to_string(),
+        ..ExtEntry::default()
+    });
+    rows
 }
 
 /// The rows of one catalog — what every framework list panel (Beans, Endpoints) reads.
@@ -1832,22 +2019,33 @@ dependency nobody wrote down, and the commonest source of a Bevy bug that only a
 sometimes. It is a NEGATIVE claim, so it holds even though only this project's own \
 sources were read: no system added later can un-conflict a pair. A kind no active \
 extension provides comes back empty rather than as an error. Prefix a kind with its \
-extension when two provide the same name (\"spring.beans\").",
+extension when two provide the same name (\"spring.beans\"). A big project has thousands of \
+rows: pass `limit` (about 200) — the list then ends with a row of kind \"truncated\" saying how \
+many were left out.",
 ))]
 fn bennu_ext_catalog(_ctx: &BennuState, args: CatalogArgs) -> Result<Vec<ExtEntry>, String> {
+    let limit = args.limit;
+    catalog_rows(args).map(|rows| limit_rows(rows, limit))
+}
+
+fn catalog_rows(args: CatalogArgs) -> Result<Vec<ExtEntry>, String> {
+    // The same spelling `FrameworkService::slot` keys by: the index service looks a root up by its
+    // exact string, so a slash or trailing-separator mismatch would find no config graph and the
+    // Struts rows would come back empty while the slot itself was fine.
+    let root = norm(&args.root);
     // One catalog is contributed by the HOST rather than by an extension: the beans an
     // allowlisted dependency declares are read out of jars, and the classpath and the
     // allowlist are the host's, not the Spring extension's — which sees this project's
     // sources and nothing else. Answered before the registry because no extension claims
     // this kind, so falling through would return an empty list rather than the answer.
     if args.kind == crate::library_beans::CATALOG_KIND {
-        return Ok(crate::library_beans::catalog_entries(&args.root));
+        return Ok(crate::library_beans::catalog_entries(&root));
     }
     if args.kind == crate::struts_endpoints::CATALOG_KIND {
-        return Ok(crate::struts_endpoints::catalog_entries(&args.root));
+        return Ok(crate::struts_endpoints::catalog_entries(&root));
     }
     let mut rows = FrameworkService::global()
-        .slot(&args.root)
+        .slot(&root)
         .map(|s| s.registry.catalog(&args.kind))
         .unwrap_or_default();
     // A BARE kind is the concept, not one framework's version of it — so the host's own
@@ -1855,7 +2053,7 @@ fn bennu_ext_catalog(_ctx: &BennuState, args: CatalogArgs) -> Result<Vec<ExtEntr
     // application answers URLs through both Struts actions and `@GetMapping`s, and a panel that
     // showed one of them would be lying about the other.
     if args.kind == "endpoints" {
-        rows.extend(crate::struts_endpoints::catalog_entries(&args.root));
+        rows.extend(crate::struts_endpoints::catalog_entries(&root));
     }
     Ok(rows)
 }
@@ -1917,12 +2115,13 @@ fn bennu_ext_overview(_ctx: &BennuState, args: RootArgs) -> Result<ExtOverview, 
     // matched something that actually declares beans, so a project that configured nothing —
     // or configured a coordinate that turns out to have none — gets no button rather than a
     // door onto an empty list.
-    if let Some(stat) = crate::library_beans::stat(&args.root) {
+    let root = norm(&args.root);
+    if let Some(stat) = crate::library_beans::stat(&root) {
         out.stats.push(stat);
     }
     // Likewise the Struts actions: the config graph is the index build's, so the count comes
-    // from there rather than from an extension.
-    if let Some(stat) = crate::struts_endpoints::stat(&args.root) {
+    // from there rather than from an extension. `root` is normalised like the slot's key.
+    if let Some(stat) = crate::struts_endpoints::stat(&root) {
         out.stats.push(stat);
     }
     if let Some(ext) = &slot.spring {
@@ -1993,6 +2192,16 @@ mod tests {
     fn root_normalization_is_stable_across_separators() {
         assert_eq!(norm(r"C:\p\proj\"), "C:/p/proj");
         assert_eq!(norm("/p/proj"), "/p/proj");
+    }
+
+    #[test]
+    fn a_limited_catalog_says_it_was_cut() {
+        let rows = vec![ExtEntry::default(); 5];
+        let cut = limit_rows(rows.clone(), Some(2));
+        assert_eq!(cut.len(), 3);
+        assert_eq!(cut[2].kind, "truncated");
+        assert_eq!(limit_rows(rows.clone(), None).len(), 5);
+        assert_eq!(limit_rows(rows, Some(5)).len(), 5);
     }
 
     /// The registry is what makes a caret query work on a **non-Java** project, and the bug it fixes

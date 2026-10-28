@@ -145,7 +145,7 @@
             <tr>
               <th class="sv-row">{r + 1}</th>
               {#each row as cell, c (c)}
-                <td class="sv-cell sv-{cell.kind}" title={cell.text}>{cell.text}</td>
+                <td class="sv-cell sv-{cell.kind}" use:tooltip={cell.text}>{cell.text}</td>
               {/each}
             </tr>
           {/each}

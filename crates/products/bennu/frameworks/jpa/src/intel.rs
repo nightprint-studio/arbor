@@ -22,24 +22,62 @@ pub fn highlights(path: &str, source: &str) -> Vec<ExtHighlight> {
     for r in crate::index::repositories(std::slice::from_ref(&u)) {
         for m in &r.methods {
             let Some(q) = &m.query else { continue };
-            // The whole query gets a tint, so it reads as a different language at a glance;
-            // the kind carries whether it is JPQL or SQL, because they are not the same thing
-            // and the theme is entitled to say so.
-            out.push(ExtHighlight {
-                start: q.start,
-                end: q.end,
-                kind: if q.native { "jpa.query.native".into() } else { "jpa.query".into() },
-            });
-            for t in crate::hql::tokens(&q.text, q.native) {
-                out.push(ExtHighlight {
-                    start: q.start + t.start,
-                    end: q.start + t.end,
-                    kind: format!("jpa.query.{}", t.kind),
-                });
+            push_query_highlights(q, &mut out);
+            // The query a page's total is counted with is the same language and reads the same.
+            if let Some(count) = &q.count {
+                push_query_highlights(count, &mut out);
             }
         }
     }
+    // The strings outside a repository: `createNativeQuery`, `@NamedNativeQuery`, and anything a
+    // `// language=sql` comment names. A repository's own `@Query` is never one of these.
+    for q in crate::hql_sites::sites(source) {
+        if !out.iter().any(|h| h.start == q.start) {
+            push_query_highlights(&q, &mut out);
+        }
+    }
     out
+}
+
+/// Every native SQL string in `source` — a repository's `@Query(nativeQuery = true)` and its count
+/// query, plus the ones outside a repository (`createNativeQuery`, `@NamedNativeQuery`, a
+/// `// language=sql` string). What a database can be asked to check; spans are in the live buffer.
+pub fn native_sites(path: &str, source: &str) -> Vec<crate::model::QueryDef> {
+    let mut out: Vec<crate::model::QueryDef> = Vec::new();
+    if let Some(u) = unit(path, source) {
+        for r in crate::index::repositories(std::slice::from_ref(&u)) {
+            for m in &r.methods {
+                let Some(q) = m.query.as_ref().filter(|q| q.native) else { continue };
+                out.push(q.clone());
+                if let Some(count) = &q.count {
+                    out.push((**count).clone());
+                }
+            }
+        }
+    }
+    for q in crate::hql_sites::sites(source) {
+        if q.native && !out.iter().any(|o| o.start == q.start) {
+            out.push(q);
+        }
+    }
+    out
+}
+
+/// The whole query gets a tint, so it reads as a different language at a glance; the kind carries
+/// whether it is JPQL or SQL, because they are not the same thing and the theme is entitled to say so.
+fn push_query_highlights(q: &crate::model::QueryDef, out: &mut Vec<ExtHighlight>) {
+    out.push(ExtHighlight {
+        start: q.start,
+        end: q.end,
+        kind: if q.native { "jpa.query.native".into() } else { "jpa.query".into() },
+    });
+    for t in crate::hql::tokens(&q.text, q.native) {
+        out.push(ExtHighlight {
+            start: q.start + t.start,
+            end: q.start + t.end,
+            kind: format!("jpa.query.{}", t.kind),
+        });
+    }
 }
 
 /// What can be typed at `offset` when it is inside a JPQL string: a repository method's `@Query`,
@@ -60,6 +98,9 @@ pub fn completions(
             let Some(q) = &m.query else { continue };
             if (q.start..=q.end).contains(&offset) {
                 return crate::hql_complete::completions(model, &m.params, q, source, offset);
+            }
+            if let Some(count) = q.count.as_deref().filter(|c| (c.start..=c.end).contains(&offset)) {
+                return crate::hql_complete::completions(model, &m.params, count, source, offset);
             }
         }
     }
@@ -218,10 +259,27 @@ pub fn navigate(model: &JpaModel, path: &str, source: &str, offset: usize) -> Ve
     Vec::new()
 }
 
-/// The checks. Two, both gated so silence is the default.
+fn push_unknown_fields(model: &JpaModel, q: &crate::model::QueryDef, out: &mut Vec<Diagnostic>) {
+    for bad in crate::hql_check::unknown_fields(model, &q.text) {
+        out.push(Diagnostic {
+            start: q.start + bad.start,
+            end: q.start + bad.end,
+            severity: "error".into(),
+            message: bad.message,
+            code: "jpa.unknown-field".into(),
+            ..Diagnostic::default()
+        });
+    }
+}
+
+/// The checks. Each gated so silence is the default.
 pub fn diagnostics(model: &JpaModel, path: &str, source: &str) -> Vec<Diagnostic> {
     let Some(u) = unit(path, source) else { return Vec::new() };
     let mut out = Vec::new();
+    // JPQL outside a repository: `createQuery("…")`, `@NamedQuery`, a `// language=jpaql` string.
+    for q in crate::hql_sites::sites(source).into_iter().filter(|q| !q.native) {
+        push_unknown_fields(model, &q, &mut out);
+    }
     for r in crate::index::repositories(std::slice::from_ref(&u)) {
         let Some(entity) = model.entity(&r.entity) else { continue };
         for m in &r.methods {
@@ -230,6 +288,10 @@ pub fn diagnostics(model: &JpaModel, path: &str, source: &str) -> Vec<Diagnostic
                 // Checkable without knowing anything about the schema, and a mismatch is a
                 // guaranteed startup failure.
                 Some(q) => {
+                    // A JPQL query (and its count query) addressing a field the entity does not have.
+                    for jpql in std::iter::once(q).chain(q.count.as_deref()).filter(|q| !q.native) {
+                        push_unknown_fields(model, jpql, &mut out);
+                    }
                     for name in &q.named_params {
                         if m.params.iter().any(|p| p.effective_name() == name) {
                             continue;

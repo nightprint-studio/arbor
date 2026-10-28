@@ -40,6 +40,7 @@ import { extCompletion, extHover, extInlineHint } from '$lib/ipc/bennu/ext';
 import { applyOf } from './markup-intel';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
 import { makeHoverSource } from './bennu-hover';
+import { configRootColors, type ConfigKind } from './config-roots';
 
 /** Whether a path is a Spring property source — the same test the backend applies, and the
  *  gate for handing out this descriptor at all. `messages.properties` is not one. */
@@ -142,12 +143,14 @@ const intel = {
  *
  *  `id` names the file kind rather than the syntax (`lombok-config`, not `properties`), because it
  *  is what the editor reports and what a bug report quotes back. */
-function configPropsLang(id: string, parser: StreamParser<unknown>): LanguageDescriptor {
+function configPropsLang(id: string, parser: StreamParser<unknown>, roots?: ConfigKind): LanguageDescriptor {
   return {
     id,
     createParser: () => Promise.reject(new Error(`cm-language:${id} has no tree-sitter parser`)),
     classify: () => null,
-    cmExtension: StreamLanguage.define(parser),
+    // `roots` colours each key by the tree it belongs to (see `config-roots`) — for the files whose
+    // keys are paths. A dotenv file's names are flat, and is left out.
+    cmExtension: roots ? [StreamLanguage.define(parser), configRootColors(roots)] : StreamLanguage.define(parser),
     intel,
   };
 }

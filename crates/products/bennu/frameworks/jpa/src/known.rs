@@ -48,6 +48,7 @@ const KNOWN: &[Known] = &[
     Known { simple: "TableGenerator", packages: PERSISTENCE },
     Known { simple: "Temporal", packages: PERSISTENCE },
     Known { simple: "Convert", packages: PERSISTENCE },
+    Known { simple: "Converter", packages: PERSISTENCE },
     // ── Relations ───────────────────────────────────────────────────────────
     Known { simple: "OneToOne", packages: PERSISTENCE },
     Known { simple: "OneToMany", packages: PERSISTENCE },

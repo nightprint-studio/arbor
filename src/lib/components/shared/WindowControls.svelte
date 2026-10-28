@@ -34,6 +34,9 @@
 
   const style = $derived(appearanceStore.windowControlsStyle);
 
+  // macOS greys the trio out while the window is in the background.
+  let windowFocused = $state(true);
+
   // ── Zoom menu (mac trio only) ──────────────────────────────────────────────
   // macOS pops a "Move & Resize" panel when the pointer dwells on the green
   // button; ours does the same. Hover-intent open + a grace period on leave so
@@ -91,7 +94,11 @@
   $effect(() => () => clearTimers());
 </script>
 
-<svelte:window onresize={() => { if (zoomOpen) closeZoom(); }} />
+<svelte:window
+  onresize={() => { if (zoomOpen) closeZoom(); }}
+  onfocus={() => (windowFocused = true)}
+  onblur={() => (windowFocused = false)}
+/>
 
 <!-- On macOS the OS paints the REAL traffic lights over our title bar (native
      Overlay style — see window/mod.rs::native_titlebar), so we render nothing
@@ -101,7 +108,7 @@
      corner). The side swap lives in app.css — see `.window-controls-slot`.
      `forceCustom` opts a macOS window that was built frameless back into ours. -->
 {#if !isMac || forceCustom}
-<div class="window-controls no-drag" data-style={style} class:zoom-open={zoomOpen}>
+<div class="window-controls no-drag" data-style={style} class:zoom-open={zoomOpen} class:inactive={!windowFocused}>
   {#if style === 'windows'}
     <button class="wc-btn wc-win wc-minimize" onclick={() => appWindow.minimize()} use:tooltip={'Minimize'} aria-label="Minimize">
       <svg class="wc-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -130,13 +137,13 @@
          all light up together the moment the pointer enters the group, exactly
          like the real traffic lights. -->
     <button class="wc-btn wc-mac wc-close"    onclick={() => appWindow.close()}    use:tooltip={'Close'}    aria-label="Close window">
-      <svg class="wc-icon" width="10" height="10" viewBox="0 0 8 8" fill="none" aria-hidden="true">
-        <path d="M2.1 2.1l3.8 3.8M5.9 2.1L2.1 5.9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      <svg class="wc-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+        <path d="M3.9 3.9l4.2 4.2M8.1 3.9L3.9 8.1" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
       </svg>
     </button>
     <button class="wc-btn wc-mac wc-minimize" onclick={() => appWindow.minimize()} use:tooltip={'Minimize'} aria-label="Minimize">
-      <svg class="wc-icon" width="10" height="10" viewBox="0 0 8 8" fill="none" aria-hidden="true">
-        <path d="M1.6 4h4.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      <svg class="wc-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+        <path d="M3.1 6h5.8" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/>
       </svg>
     </button>
     <button
@@ -153,15 +160,15 @@
     >
       {#if isMaximized}
         <!-- Collapse: the two arrowheads meet in the centre (tips inward). -->
-        <svg class="wc-icon" width="10" height="10" viewBox="0 0 8 8" aria-hidden="true">
-          <path d="M4 4L0.9 4L4 0.9Z" fill="currentColor" stroke="currentColor" stroke-width="0.55" stroke-linejoin="round"/>
-          <path d="M4 4L7.1 4L4 7.1Z" fill="currentColor" stroke="currentColor" stroke-width="0.55" stroke-linejoin="round"/>
+        <svg class="wc-icon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M6.3 6.3H3L6.3 3Z" fill="currentColor" stroke="currentColor" stroke-width="0.7" stroke-linejoin="round"/>
+          <path d="M5.7 5.7H9L5.7 9Z" fill="currentColor" stroke="currentColor" stroke-width="0.7" stroke-linejoin="round"/>
         </svg>
       {:else}
         <!-- Expand: the platform's outward-pointing pair. -->
-        <svg class="wc-icon" width="10" height="10" viewBox="0 0 8 8" aria-hidden="true">
-          <path d="M1.1 1.1H4.9L1.1 4.9Z" fill="currentColor" stroke="currentColor" stroke-width="0.55" stroke-linejoin="round"/>
-          <path d="M6.9 6.9H3.1L6.9 3.1Z" fill="currentColor" stroke="currentColor" stroke-width="0.55" stroke-linejoin="round"/>
+        <svg class="wc-icon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M3 3H6.5L3 6.5Z" fill="currentColor" stroke="currentColor" stroke-width="0.7" stroke-linejoin="round"/>
+          <path d="M9 9H5.5L9 5.5Z" fill="currentColor" stroke="currentColor" stroke-width="0.7" stroke-linejoin="round"/>
         </svg>
       {/if}
     </button>
@@ -213,26 +220,42 @@
   }
 
   /* ── Mac variant ───────────────────────────────────────────────────── */
+  /* Real macOS metrics: 12px dots on a 20px pitch, a hairline darker ring and a
+     faint top sheen instead of a flat fill. Glyph and ring colours are per
+     button, like the system ones. */
   .wc-btn.wc-mac {
-    width: 18px;
-    height: 18px;
+    position: relative;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     color: transparent;
-    background: var(--wc-mac-bg, transparent);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 55%),
+      var(--wc-mac-bg, transparent);
+    box-shadow: inset 0 0 0 0.5px var(--wc-mac-ring, rgba(0, 0, 0, 0.2));
   }
-  .wc-mac.wc-close    { --wc-mac-bg: #ff5f57; }
-  .wc-mac.wc-minimize { --wc-mac-bg: #ffbd2e; }
-  .wc-mac.wc-maximize { --wc-mac-bg: #28ca41; }
-  .wc-mac:active      { filter: brightness(0.8); }
+  /* Hit area stays comfortable despite the small dot. */
+  .wc-btn.wc-mac::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; }
+  .wc-mac.wc-close    { --wc-mac-bg: #ff5f57; --wc-mac-ring: #e2463f; --wc-mac-glyph: #4c0102; }
+  .wc-mac.wc-minimize { --wc-mac-bg: #febc2e; --wc-mac-ring: #e1a116; --wc-mac-glyph: #985712; }
+  .wc-mac.wc-maximize { --wc-mac-bg: #28c840; --wc-mac-ring: #1aab29; --wc-mac-glyph: #0a6319; }
+  .wc-mac:active      { filter: brightness(0.82) saturate(1.1); }
   .wc-mac:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Background window: the trio goes neutral grey until the pointer is on it
+     (hovering restores the colours, as on macOS). */
+  .window-controls[data-style="mac"].inactive:not(:hover):not(.zoom-open) .wc-mac {
+    background: rgba(128, 128, 128, 0.35);
+    box-shadow: inset 0 0 0 0.5px rgba(128, 128, 128, 0.45);
+  }
 
   /* The glyphs belong to the GROUP, not to the hovered dot: on macOS pointing
      at any one of the three reveals all three. Focus and an open zoom menu
      count as "the user is here" too. */
-  .window-controls[data-style="mac"]:hover .wc-icon,
-  .window-controls[data-style="mac"]:focus-within .wc-icon,
-  .window-controls[data-style="mac"].zoom-open .wc-icon {
-    color: rgba(0, 0, 0, 0.58);
+  .window-controls[data-style="mac"]:hover .wc-mac .wc-icon,
+  .window-controls[data-style="mac"]:focus-within .wc-mac .wc-icon,
+  .window-controls[data-style="mac"].zoom-open .wc-mac .wc-icon {
+    color: var(--wc-mac-glyph);
   }
 
   /* ── Windows / IntelliJ variant ────────────────────────────────────── */

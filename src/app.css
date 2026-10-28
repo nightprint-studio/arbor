@@ -316,6 +316,9 @@ body {
 /* ---- Scrollbars ---- */
 ::-webkit-scrollbar { width: var(--scrollbar-width); height: var(--scrollbar-width); }
 ::-webkit-scrollbar-track { background: transparent; }
+/* Where a vertical and a horizontal scrollbar meet. Left alone it is a square of the system's own white —
+   the one pixel block in the window that ignores the theme. */
+::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
   border-radius: var(--scrollbar-radius);

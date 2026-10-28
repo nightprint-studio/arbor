@@ -53,6 +53,19 @@ fn open_in_ide(
         .or(repo_ide_id.as_deref())
         .unwrap_or(&ide_cfg.default_ide)
         .to_owned();
+    // Bennu is a window of this app, not a program to launch: park the path as its open-intent (the
+    // same one a recent project uses) and bring the window up. The backend is started inside
+    // `open_bennu_window`, on the blocking pool, and the window is built off this thread.
+    if effective_id == "bennu" {
+        let app = state
+            .app_handle()
+            .ok_or_else(|| AppError::Other("Arbor is still starting".into()))?;
+        crate::commands::recents_commands::set_open_intent(app.clone(), "bennu".into(), path);
+        tauri::async_runtime::spawn(async move {
+            crate::window::bennu::open_bennu_window(app).await;
+        });
+        return Ok(());
+    }
     let (command, extra_args) = resolve_ide(&effective_id, &ide_cfg)?;
     ide::open_in_ide(&path, &command, &extra_args)
 }

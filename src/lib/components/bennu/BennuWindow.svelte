@@ -25,8 +25,10 @@
     TerminalSquare, Hammer, 
     Library, Play, ListTodo, 
     TextCursorInput, Beaker, Bug, Braces, 
-    Cog, GitBranch,
+    Cog, GitBranch, Database,
   } from 'lucide-svelte';
+  import BennuPicusPanel from './picus/BennuPicusPanel.svelte';
+  import { bennuPicusStore } from '$lib/stores/bennu/picus.svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
@@ -227,6 +229,9 @@
     // for the first frame and reorders when this lands, which is a reorder nobody sees —
     // blocking the window on a config read to avoid it would be the visible cost.
     void bennuRailsStore.load();
+    // Whether Picus ships with this install — a file check in the shell, nothing spawned. Its tool
+    // window and palette entries exist only if it does.
+    void bennuPicusStore.probe();
     // The integrated terminal's shell catalogue, config and detection. The same three calls
     // Arbor's shell makes, and for the same reason: Bennu's Terminal is Arbor's Terminal —
     // one store, one backend — and a window that never asked showed a shell picker with
@@ -944,6 +949,13 @@
   // Build tool, Tests and Dependencies exist for Maven and Cargo roots only: a plain folder
   // (Node/Angular…) has no manifest behind them, so their rail buttons would open empty panels.
   const hasProjectTooling = $derived(!projectStore.isPlain);
+  /** Picus ships with this install (see `bennuPicusStore.probe`). */
+  const picusTools = $derived(bennuPicusStore.available);
+  // Each project has its own database: switching project drops the previous one's connection from
+  // the checks and brings back the one this project was last paired with.
+  $effect(() => {
+    void bennuPicusStore.followProject(projectStore.project?.root ?? '', picusTools);
+  });
   // Forms reads a JSP's `<form>`s across the include graph, so a project with no pages —
   // a service module, a library, a Cargo root — has nothing it could ever show. Same reasoning
   // as `javaTools`, one notch narrower: the capability set says whether pages exist at all.
@@ -1235,6 +1247,11 @@
           { id: 'ast', tooltip: 'Trees — the parse, and the model Bennu derives from it', shortcut: 'Alt+9', icon: Braces, active: bennuUiStore.rightPanel === 'ast', onclick: () => bennuUiStore.toggleRight('ast') },
         ]
       : []),
+    // Entities and native queries checked against a database. Java-only (it reads JPA), and only
+    // when the Picus backend exists to answer: without it the window could only say "no Picus".
+    ...(javaTools && picusTools
+      ? [{ id: 'picus', tooltip: 'Database — check entities and native queries against a Picus connection', shortcut: 'Alt+D', icon: Database, active: bennuUiStore.rightPanel === 'picus', onclick: () => bennuUiStore.toggleRight('picus') }]
+      : []),
     ...pluginRail('right', 'top'),
   ]);
   // Forms drives the BOTTOM dock (wide, horizontal data), not a side panel — its toggle sits
@@ -1291,6 +1308,7 @@
     const tooling = hasProjectTooling;
     const jsp = jspTools;
     const dtoLab = dtoLabTools;
+    const picus = picusTools;
     const available = catalogIds;
     // `untrack`: the call reads the very panel state it writes, and an effect that depends
     // on what it assigns is the shape that loops (CLAUDE.md · "Runes — trap da evitare").
@@ -1301,7 +1319,7 @@
         // `i18n` is in both branches and needs no capability gate: it has no rail icon to lose, and
         // whether it applies is a question about the open FILE rather than about the project — a
         // fulcrum content tree can sit in a Maven repo as easily as in a Cargo one.
-        right: java ? ['maven', 'tests', 'ast', 'i18n'] : tooling ? ['cargo', 'tests', 'i18n'] : ['i18n'],
+        right: java ? ['maven', 'tests', 'ast', 'i18n', ...(picus ? ['picus' as const] : [])] : tooling ? ['cargo', 'tests', 'i18n'] : ['i18n'],
         bottom: [
           // `hierarchy` survives every switch: it is opened by an action about the caret rather than
           // by a rail button, so there is no icon that could disappear from under it, and its own
@@ -1705,7 +1723,8 @@
       // wrong and the hamburger is one more thing to remember.
       { id: 'pluginlogs', title: 'Toggle Plugin Logs', icon: 'ScrollText',    action: () => run(() => bennuUiStore.togglePluginLogs()), when: true },
       { id: 'maven',     title: 'Toggle Maven',     icon: 'Maven',       shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
-      { id: 'cargo',     title: 'Toggle Cargo',     icon: 'Cog',         shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('cargo')), when: projectStore.isCargo },
+      { id: 'picus',     title: 'Toggle Database (Picus)', icon: 'Database', shortcut: 'Alt+D', action: () => run(() => bennuUiStore.toggleRight('picus')), when: javaTools && picusTools },
+      { id: 'cargo',     title: 'Toggle Cargo',    icon: 'Cog',         shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('cargo')), when: projectStore.isCargo },
       // Runs the real `cargo add`. In the View section beside the Cargo window because that is where
       // it is otherwise reached from, and gated on the ecosystem: there is nothing to add to a pom.
       { id: 'cargoadd',  title: 'Add dependency… (cargo add)', icon: 'Library', action: () => run(() => bennuUiStore.openCargoAdd()), when: projectStore.isCargo },
@@ -2403,6 +2422,8 @@
         // Both views read Bennu's own engines, which have nothing to say about a Rust file —
         // see the rail item.
         if (isKey(e, '9')) { e.preventDefault(); bennuUiStore.toggleRight('ast'); return; }
+        // Database — only with Picus installed, like its rail icon.
+        if (isKey(e, 'd') && picusTools) { e.preventDefault(); bennuUiStore.toggleRight('picus'); return; }
       }
       // The build tool's window — Maven's goals or Cargo's crates, one slot. Outside the Java gate
       // because a Cargo project has one too.
@@ -2602,6 +2623,9 @@
                  move, so there is nothing to preserve — and while hidden it would keep asking the
                  backend about a panel nobody is looking at. -->
             {#if bennuUiStore.rightPanel === 'i18n'}<BennuI18nPanel />{/if}
+            <!-- Mounted only while shown: it brings Picus's backend up and reads a schema, which is
+                 work for someone looking at it. -->
+            {#if bennuUiStore.rightPanel === 'picus' && picusTools}<BennuPicusPanel />{/if}
             <!-- A plugin's own view, mounted with the FULL form renderer — so an `embed`
                  viewport, a split layout and live parameter fields all work here exactly as
                  they do in a modal, minus the modal. -->

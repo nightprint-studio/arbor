@@ -31,6 +31,9 @@ picus-db-api = { path = "../db-provider/api" }
 # …and the one engine this binary links today. Adding Oracle later is a crate here
 # plus one `.with(...)` in `main` — nothing else in the backend changes.
 picus-db-postgres = { path = "../db-provider/postgres" }
+# Google IAM sign-in (a token from the gcloud credentials in place of a password). One crate per
+# method: the next cloud is another line here and another `.with(...)` in `main`.
+picus-auth-google = { path = "../db-auth/google" }
 # The script half, so far: the dialect-free change model and the emitter that turns
 # one model into one correct statement per destination…
 # The abbreviation language `s#t(a)[b=1]`. In `foundation/` and Picus-free by

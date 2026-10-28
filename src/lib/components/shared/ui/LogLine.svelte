@@ -21,6 +21,7 @@
    */
   import type { LogLevel, LogLink, LogPiece } from '$lib/types/log';
   import { tooltip } from '$lib/actions/tooltip';
+  import { findSql, sqlTokens } from '$lib/utils/sql-tokens';
 
   interface Props {
     /** The whole line — the fallback when there are no pieces, and what a copy should see. */
@@ -31,13 +32,47 @@
     level?: LogLevel | null;
     /** What clicking a linked piece means. Omit for a read-only transcript. */
     onopen?: (link: LogLink) => void;
+    /** A SQL statement in the line (a Hibernate `show_sql`, a MyBatis `Preparing:`) is always
+     *  coloured; with this, pressing it hands the whole statement to the host — to copy it, say. */
+    onsql?: (sql: string) => void;
   }
 
-  let { text, pieces, level = null, onopen }: Props = $props();
+  let { text, pieces, level = null, onopen, onsql }: Props = $props();
+
+  /** One run of the line: a piece (or part of one), and whether it lies inside the SQL. */
+  interface Seg { text: string; piece: LogPiece | null; sql: boolean }
+
+  const sqlRange = $derived(findSql(text));
+  const sqlText = $derived(sqlRange ? text.slice(sqlRange.start, sqlRange.end) : '');
+
+  /** The line as runs: its pieces, each cut at the edges of the SQL it overlaps. A piece that is a link
+   *  stays whole — a path inside a statement is still a path. */
+  const segs = $derived.by((): Seg[] => {
+    const parts: { text: string; piece: LogPiece | null }[] =
+      pieces && pieces.length ? pieces.map((p) => ({ text: p.text, piece: p })) : [{ text, piece: null }];
+    if (!sqlRange) return parts.map((p) => ({ ...p, sql: false }));
+    const out: Seg[] = [];
+    let at = 0;
+    for (const part of parts) {
+      const from = at;
+      const to = at + part.text.length;
+      at = to;
+      if (part.piece?.link || to <= sqlRange.start || from >= sqlRange.end) {
+        out.push({ ...part, sql: false });
+        continue;
+      }
+      const cutA = Math.max(from, sqlRange.start) - from;
+      const cutB = Math.min(to, sqlRange.end) - from;
+      if (cutA > 0) out.push({ text: part.text.slice(0, cutA), piece: part.piece, sql: false });
+      out.push({ text: part.text.slice(cutA, cutB), piece: part.piece, sql: true });
+      if (cutB < part.text.length) out.push({ text: part.text.slice(cutB), piece: part.piece, sql: false });
+    }
+    return out;
+  });
 
   /** Whether this piece is something to click: it points somewhere AND someone is listening. */
-  function isLink(p: LogPiece): boolean {
-    return !!p.link && !!onopen;
+  function isLink(p: LogPiece | null): boolean {
+    return !!p?.link && !!onopen;
   }
 
   /** The tooltip of a link — where it goes, since the text on the page rarely says. */
@@ -55,21 +90,30 @@
 </script>
 
 <span class="logln" data-level={level ?? undefined}
->{#if pieces && pieces.length}{#each pieces as p, i (i)}{#if isLink(p)}<button
+>{#each segs as s, i (i)}{#if s.sql}{#if onsql}<button
+        type="button"
+        class="lg lg-sql"
+        data-token={s.piece?.token ?? 'text'}
+        use:tooltip={'Click to copy the SQL'}
+        onclick={() => onsql?.(sqlText)}
+      >{#each sqlTokens(s.text) as t, j (j)}<span class="sq" data-sql={t.kind}>{t.text}</span>{/each}</button>{:else}<span
+        class="lg"
+        data-token={s.piece?.token ?? 'text'}
+      >{#each sqlTokens(s.text) as t, j (j)}<span class="sq" data-sql={t.kind}>{t.text}</span>{/each}</span>{/if}{:else if s.piece && isLink(s.piece)}<button
         type="button"
         class="lg lg-link"
-        data-token={p.token ?? 'text'}
-        data-colour={p.colour ?? undefined}
-        data-bold={p.bold ? '' : undefined}
-        data-lib={p.link?.kind === 'source' ? '' : undefined}
-        use:tooltip={hint(p.link)}
-        onclick={() => open(p.link)}
-      >{p.text}</button>{:else}<span
+        data-token={s.piece.token ?? 'text'}
+        data-colour={s.piece.colour ?? undefined}
+        data-bold={s.piece.bold ? '' : undefined}
+        data-lib={s.piece.link?.kind === 'source' ? '' : undefined}
+        use:tooltip={hint(s.piece.link)}
+        onclick={() => open(s.piece?.link)}
+      >{s.text}</button>{:else}<span
         class="lg"
-        data-token={p.token ?? 'text'}
-        data-colour={p.colour ?? undefined}
-        data-bold={p.bold ? '' : undefined}
-      >{p.text}</span>{/if}{/each}{:else}{text}{/if}</span
+        data-token={s.piece?.token ?? 'text'}
+        data-colour={s.piece?.colour ?? undefined}
+        data-bold={s.piece?.bold ? '' : undefined}
+      >{s.text}</span>{/if}{/each}</span
 >
 
 <style>
@@ -135,4 +179,19 @@
   .lg[data-colour='cyan'] { color: var(--info); }
   .lg[data-colour='white'] { color: var(--text-primary); }
   .lg[data-bold] { font-weight: 700; }
+
+  /* ── SQL inside a line ───────────────────────────────────────────────────────
+     Keywords, literals and placeholders get the editor's own colours, so a statement in a log reads
+     like the one in the source. A statement you can press looks pressable only on hover. */
+  .sq[data-sql='keyword'] { color: var(--syntax-keyword, #cc7832); font-weight: 600; }
+  .sq[data-sql='string'] { color: var(--syntax-string, #6a8759); }
+  .sq[data-sql='number'] { color: var(--syntax-number, #6897bb); }
+  .sq[data-sql='comment'] { color: var(--syntax-comment, #808080); font-style: italic; }
+  .sq[data-sql='param'] { color: var(--syntax-field, #9876aa); font-weight: 600; }
+  .lg-sql {
+    display: inline; padding: 0; background: none; border: none; font: inherit; color: inherit;
+    white-space: inherit; word-break: inherit; cursor: copy; text-align: left;
+    border-radius: 3px; transition: background var(--transition-fast);
+  }
+  .lg-sql:hover, .lg-sql:focus-visible { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 </style>

@@ -12,6 +12,7 @@ pub use picus_types::prelude::{
 };
 
 pub use crate::activity::{ActivitySnapshot, BlockEdge, SessionActivity, StopKind};
+pub use crate::auth::{AuthMethod, AuthMethodDescriptor, AuthRegistry, Resolved, AUTH_PARAM, PASSWORD};
 pub use crate::capability::{EngineCapabilities, SchemaGroup};
 pub use crate::depends::{DependencyEdge, DependencyGraph, DependencyKind, DependencyNode};
 pub use crate::connection::{ConnectionSpec, ConnectionState, ConnectionStatus};

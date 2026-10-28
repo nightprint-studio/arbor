@@ -75,6 +75,13 @@ pub async fn rpc(
     .map_err(|e| AppError::Other(format!("rpc task panicked: {e}")))?
 }
 
+/// Whether a borrowable product is installed (its backend binary ships with this install).
+/// Cheap file check, no spawn — the gate for UI that only exists when the product does.
+#[tauri::command]
+pub fn is_product_installed(app: AppHandle, program: String) -> bool {
+    crate::ipc::product_backend_installed(&app, &program)
+}
+
 /// Bring a product backend up for a caller that is not that product's own window.
 ///
 /// `rpc` only reaches a backend that is already running; a product's window starts its own on
@@ -86,12 +93,22 @@ pub async fn rpc(
 /// Only products meant to be borrowed are listed; this is not a way to spawn arbitrary
 /// programs.
 #[tauri::command]
-pub async fn ensure_product_backend(app: AppHandle, program: String) -> Result<(), AppError> {
+pub async fn ensure_product_backend(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    program: String,
+) -> Result<(), AppError> {
     let ensure: fn(&AppHandle) = match program.as_str() {
         "corvus" => crate::ipc::ensure_corvus_be,
         "picus" => crate::ipc::ensure_picus_be,
         other => return Err(AppError::Other(format!("'{other}' is not a borrowable backend"))),
     };
+    // The caller is a borrower unless it is the product's own window (which already owns the
+    // backend's life). Recorded so that window's close cannot take the backend from under it.
+    let own = crate::window::product_id_for_label(window.label()) == Some(program.as_str());
+    if !own {
+        crate::ipc::split_broker::retain(&program, window.label());
+    }
     tokio::task::spawn_blocking(move || ensure(&app))
         .await
         .map_err(|e| AppError::Other(format!("ensure backend task panicked: {e}")))

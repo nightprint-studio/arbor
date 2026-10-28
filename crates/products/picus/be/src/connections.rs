@@ -15,6 +15,31 @@ use serde::Serialize;
 
 use crate::secrets::HostSecrets;
 
+/// What to connect with: the stored password, or — when the connection names a sign-in method —
+/// that method's fresh credential, together with the login it implies.
+///
+/// The one place that decides, so a connect, a reset and a connection test cannot disagree about
+/// how a connection signs in. A method's failure is returned as its own message (it says what to
+/// run or enable); a password connection behaves exactly as before.
+async fn credentials_for(
+    state: &PicusState,
+    spec: ConnectionSpec,
+) -> Result<(ConnectionSpec, Option<picus_db_api::prelude::Secret>), String> {
+    match state.auths().resolve(&spec).await.map_err(|e| e.to_string())? {
+        Some(resolved) => Ok((resolved.spec, Some(resolved.credential))),
+        None => {
+            let secret = HostSecrets::new(state.host_caller()).secret(&spec.id).map_err(|e| e.to_string())?;
+            Ok((spec, secret))
+        }
+    }
+}
+
+/// The sign-in methods besides a stored password, for the connection form.
+#[arbor_rpc::handler]
+fn picus_list_auth_methods(state: &PicusState) -> Result<Vec<picus_db_api::prelude::AuthMethodDescriptor>, String> {
+    Ok(state.auths().descriptors())
+}
+
 /// A configured connection plus whether it is currently open — what the sidebar
 /// renders. Flattened so the frontend reads one object, not a pair.
 #[derive(Debug, Serialize)]
@@ -92,9 +117,7 @@ async fn picus_connect(state: &PicusState, id: String) -> Result<ConnectionStatu
     let spec = find_spec(&id)?;
     let provider = state.providers().require(spec.engine).map_err(|e| e.to_string())?;
 
-    let secret = HostSecrets::new(state.host_caller())
-        .secret(&spec.id)
-        .map_err(|e| e.to_string())?;
+    let (spec, secret) = credentials_for(state, spec).await?;
 
     let session = provider.connect(&spec, secret).await.map_err(|e| e.to_string())?;
     let session: Arc<dyn picus_db_api::prelude::DbSession> = Arc::from(session);
@@ -137,8 +160,7 @@ async fn picus_reset_connection(state: &PicusState, id: String) -> Result<Connec
 
     let spec = find_spec(&id)?;
     let provider = state.providers().require(spec.engine).map_err(|e| e.to_string())?;
-    let secret =
-        HostSecrets::new(state.host_caller()).secret(&spec.id).map_err(|e| e.to_string())?;
+    let (spec, secret) = credentials_for(state, spec).await?;
 
     let session = provider.connect(&spec, secret).await.map_err(|e| e.to_string())?;
     let session: Arc<dyn picus_db_api::prelude::DbSession> = Arc::from(session);
@@ -177,8 +199,7 @@ async fn picus_test_connection(
     connection: ConnectionSpec,
 ) -> Result<ConnectionStatus, String> {
     let provider = state.providers().require(connection.engine).map_err(|e| e.to_string())?;
-    let secret =
-        HostSecrets::new(state.host_caller()).secret(&connection.id).map_err(|e| e.to_string())?;
+    let (connection, secret) = credentials_for(state, connection).await?;
 
     let session = provider.connect(&connection, secret).await.map_err(|e| e.to_string())?;
     let status = session.status().await;

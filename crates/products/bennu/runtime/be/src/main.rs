@@ -164,6 +164,9 @@ mod mybatis_nav;
 // reference to a declaration the namespace lacks, an id declared twice, a class missing from a
 // project package. Rides `bennu_diagnostics` — no handler of its own.
 mod mybatis_check;
+mod mybatis_sql;
+// Resolving a tool's relative `file` against its `root`, refusing `..` — see the module.
+mod project_paths;
 // Mojibake check: `bennu_mojibake_check` — find UTF-8-decoded-as-Cp1252 corruption (`Ã©` → `é`,
 // `â€™` → `'`) in a file, with the corrected character for a one-click fix.
 mod mojibake;

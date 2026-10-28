@@ -56,6 +56,15 @@ fn connection_fields() -> Vec<ConnectionField> {
             .optional()
             .with_default("false")
             .with_help("Managed cloud databases refuse plaintext connections."),
+        ConnectionField::text("tls_ca", "CA certificate")
+            .optional()
+            .with_placeholder("server-ca.pem")
+            .with_help("A PEM file trusted in addition to the system store — e.g. a Cloud SQL instance's server CA."),
+        ConnectionField::text("tls_verify_name", "Verify server name")
+            .with_kind(FieldKind::Toggle)
+            .optional()
+            .with_default("true")
+            .with_help("Turn off when the certificate names the instance rather than the address you connect to (Cloud SQL). The certificate chain is still checked."),
     ]
 }
 

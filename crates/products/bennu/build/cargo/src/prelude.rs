@@ -31,7 +31,7 @@ pub use crate::home::{cargo_home, registry_dirs};
 
 // The crates.io index. The fetch is the caller's — see the module.
 pub use crate::registry::{
-    cache_path as index_cache_path, index_path, index_url, is_fresh as index_is_fresh, is_release,
+    cache_path as index_cache_path, index_path, index_url, is_fresh as index_is_fresh, is_release, is_valid_crate_name,
     latest_release, parse_index, read_cache as read_index_cache, requirement_admits,
     write_cache as write_index_cache, IndexVersion, CRATES_IO_INDEX,
 };

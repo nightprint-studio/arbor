@@ -54,10 +54,15 @@ pub struct IndexVersion {
 /// syn      → 3/s/syn
 /// serde    → se/rd/serde
 /// ```
+///
+/// An invalid name (see [`is_valid_crate_name`]) yields the empty string rather than a path: the
+/// slicing below is by byte, and a name that is not plain ASCII would panic mid-character.
 pub fn index_path(name: &str) -> String {
+    if !is_valid_crate_name(name) {
+        return String::new();
+    }
     let lower = name.to_ascii_lowercase();
-    match lower.chars().count() {
-        0 => String::new(),
+    match lower.len() {
         1 => format!("1/{lower}"),
         2 => format!("2/{lower}"),
         3 => format!("3/{}/{}", &lower[..1], lower),
@@ -65,7 +70,20 @@ pub fn index_path(name: &str) -> String {
     }
 }
 
+/// Whether `name` can be a crate name: `[A-Za-z0-9_-]+`, at most 64 characters.
+///
+/// This is what makes the byte slicing in [`index_path`] and the file name in [`cache_path`] safe —
+/// the name reaches both from user-typed manifest text and from MCP callers.
+pub fn is_valid_crate_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 /// The full URL for `name` against `base` (normally [`CRATES_IO_INDEX`]).
+///
+/// For an invalid name the path part is empty, so the URL is the bare base — never a request for a
+/// path the caller chose.
 pub fn index_url(base: &str, name: &str) -> String {
     format!("{}/{}", base.trim_end_matches('/'), index_path(name))
 }
@@ -118,9 +136,14 @@ pub fn is_release(version: &str) -> bool {
 
 /// Where `name`'s cached index file goes under `dir`.
 ///
-/// The crate name is the file name, which is safe without escaping: crates.io permits only
-/// alphanumerics, `-` and `_`. Lowercased so a cache written for `Serde` is found for `serde`.
+/// The crate name is the file name, which is safe without escaping *because it is validated*:
+/// crates.io permits only alphanumerics, `-` and `_`. An invalid name (`..\..\x`) maps to a fixed
+/// placeholder file that [`read_cache`]/[`write_cache`] never touch, so it cannot leave `dir`.
+/// Lowercased so a cache written for `Serde` is found for `serde`.
 pub fn cache_path(dir: &Path, name: &str) -> PathBuf {
+    if !is_valid_crate_name(name) {
+        return dir.join("_invalid_.json");
+    }
     dir.join(format!("{}.json", name.to_ascii_lowercase()))
 }
 
@@ -142,6 +165,9 @@ pub fn is_fresh(path: &Path, ttl: Duration) -> bool {
 /// Deliberately indifferent to freshness: the caller decides, because the answer to "may I use this
 /// old copy" is different before a fetch (no) and after one has failed (yes).
 pub fn read_cache(dir: &Path, name: &str) -> Option<String> {
+    if !is_valid_crate_name(name) {
+        return None;
+    }
     std::fs::read_to_string(cache_path(dir, name)).ok()
 }
 
@@ -150,7 +176,7 @@ pub fn read_cache(dir: &Path, name: &str) -> Option<String> {
 /// Best-effort: a cache that cannot be written costs a fetch next time, which is not worth failing a
 /// lookup over.
 pub fn write_cache(dir: &Path, name: &str, body: &str) {
-    if std::fs::create_dir_all(dir).is_err() {
+    if !is_valid_crate_name(name) || std::fs::create_dir_all(dir).is_err() {
         return;
     }
     let _ = std::fs::write(cache_path(dir, name), body);
@@ -222,6 +248,23 @@ mod tests {
         // Lowercased, because the index is — a lookup for `Serde` must find `serde`.
         assert_eq!(index_path("Serde"), "se/rd/serde");
         assert_eq!(index_path(""), "");
+    }
+
+    #[test]
+    fn an_invalid_crate_name_never_panics_or_escapes() {
+        assert!(is_valid_crate_name("serde_json"));
+        assert!(is_valid_crate_name("tracing-subscriber"));
+        assert!(!is_valid_crate_name(""));
+        assert!(!is_valid_crate_name("aééé"));
+        assert!(!is_valid_crate_name(r"..\..\x"));
+        assert!(!is_valid_crate_name("../x"));
+        assert!(!is_valid_crate_name(&"a".repeat(65)));
+
+        assert_eq!(index_path("aééé"), "");
+        assert_eq!(index_path(".."), "");
+        let dir = Path::new("cache");
+        assert_eq!(cache_path(dir, r"..\..\x"), dir.join("_invalid_.json"));
+        assert!(read_cache(dir, "../x").is_none());
     }
 
     #[test]

@@ -33,6 +33,7 @@
   import { RangeSet, type ChangeSet, type Text } from '@codemirror/state';
   import { indentUnit as cmIndentUnit } from '@codemirror/language';
   import { setDiagnostics as cmSetDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
+  import { tooltip } from '$lib/actions/tooltip';
   import { openSearchPanel, searchPanelOpen } from '@codemirror/search';
 
   import type { LanguageDescriptor, EditorDiagnostic, EditorViewSnapshot } from './types';
@@ -550,7 +551,8 @@
       const el = document.createElement('span');
       el.className = `cm-host-gutter-icon ${this.markerClass}`.trim();
       el.textContent = this.glyph;
-      el.title = this.tooltip;
+      // The app's tooltip, not the browser's `title`: the native one is slow, unstyled and ignores the theme.
+      tooltip(el, this.tooltip);
       return el;
     }
   }
@@ -644,7 +646,7 @@
     toDOM() {
       const el = document.createElement('span');
       el.className = `cm-flag-icon ${this.on ? 'cm-flag-on' : ''} ${this.markerClass}`.trim();
-      if (this.tooltip) el.title = this.tooltip;
+      if (this.tooltip) tooltip(el, this.tooltip);
       return el;
     }
   }

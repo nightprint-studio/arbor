@@ -52,7 +52,7 @@ impl DbProvider for PostgresProvider {
         // told apart from any other config error once the secret has been dropped.
         let had_secret = secret.is_some();
 
-        let tls = TlsChoice::build(spec.tls)?;
+        let tls = TlsChoice::build(spec)?;
         let client = spawn_connection(&config, &tls).await
             .map_err(|e| explain_missing_password(e, had_secret, &spec.user))?;
 

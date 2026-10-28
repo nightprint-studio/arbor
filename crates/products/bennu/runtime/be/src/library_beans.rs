@@ -13,7 +13,7 @@
 //! so it is shown, grouped by the artifact it came from, labelled with the conditions
 //! gating it — and believed by nothing.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -191,6 +191,118 @@ fn scan_jar(jar: &str, coord: &bennu_deps::prelude::Coord) -> Vec<LibraryBeanGro
     }]
 }
 
+// ── Auto-configuration ─────────────────────────────────────────────────────────
+
+/// Where Spring Boot 2.7+ lists a jar's auto-configuration classes.
+const AUTOCONFIG_IMPORTS: &str =
+    "META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports";
+/// Where every older Boot (and a few current libraries) list them, under [`ENABLE_AUTO_CONFIGURATION`].
+const SPRING_FACTORIES: &str = "META-INF/spring.factories";
+const ENABLE_AUTO_CONFIGURATION: &str = "org.springframework.boot.autoconfigure.EnableAutoConfiguration";
+
+/// The auto-configuration classes a jar declares, dotted. Both registries are read: a library can ship
+/// either, and Boot 2.7 reads both.
+fn autoconfig_classes(jar: &JarSource) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(text) = jar.text_entry(AUTOCONFIG_IMPORTS) {
+        out.extend(
+            text.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(str::to_string),
+        );
+    }
+    if let Some(text) = jar.text_entry(SPRING_FACTORIES) {
+        // A properties file: a value continues on the next line after a trailing backslash.
+        let joined = text.replace("\\\r\n", "").replace("\\\n", "");
+        for line in joined.lines() {
+            let Some((key, value)) = line.split_once('=') else { continue };
+            if key.trim() == ENABLE_AUTO_CONFIGURATION {
+                out.extend(value.split(',').map(str::trim).filter(|c| !c.is_empty()).map(str::to_string));
+            }
+        }
+    }
+    out
+}
+
+/// The beans a jar's auto-configuration classes declare — and the static classes nested in them, where
+/// Boot puts most of its `@Bean` methods. Empty for a jar with no auto-configuration, which is nearly all.
+fn scan_autoconfig_jar(jar: &str, coord: &bennu_deps::prelude::Coord) -> Vec<LibraryBeanGroupDto> {
+    let Ok(source) = JarSource::open(jar) else { return Vec::new() };
+    let wanted: HashSet<String> = autoconfig_classes(&source).into_iter().map(|c| c.replace('.', "/")).collect();
+    if wanted.is_empty() {
+        return Vec::new();
+    }
+    let mut classes = Vec::new();
+    for binary in source.class_names() {
+        let outer = binary.split('$').next().unwrap_or(&binary);
+        if !wanted.contains(outer) {
+            continue;
+        }
+        let Ok(Some(bytes)) = source.class_bytes(&binary) else { continue };
+        if !may_carry_spring_annotation(&bytes) {
+            continue;
+        }
+        if let Ok(annotations) = parse_class_annotations(&bytes) {
+            if !annotations.is_empty() {
+                classes.push(annotations);
+            }
+        }
+    }
+    let beans = beans_of_classes(classes.iter());
+    if beans.is_empty() {
+        return Vec::new();
+    }
+    vec![LibraryBeanGroupDto {
+        coordinate: coord.ga(),
+        group_id: coord.group_id.clone(),
+        artifact_id: coord.artifact_id.clone(),
+        version: coord.version.clone(),
+        beans: beans.into_iter().map(LibraryBeanDto::from).collect(),
+    }]
+}
+
+/// Session tier for [`autoconfig_defs`], by project root.
+static AUTO_CACHE: Mutex<Option<HashMap<String, Vec<bennu_spring::prelude::BeanDef>>>> = Mutex::new(None);
+
+/// The beans Spring Boot's **auto-configuration** may register in this project — every dependency jar
+/// that names auto-configuration classes (`AutoConfiguration.imports`, `spring.factories`), read without
+/// anyone having to allowlist anything.
+///
+/// Kept out of the library-beans panel (which lists the artifacts someone asked for, and would drown in
+/// thousands of conditional Boot beans) and fed only to injection matching, where each one carries its
+/// artifact and its `@ConditionalOn…` gates: a bean here is what Spring *may* register, never a fact, and
+/// the gutter says so. Artifacts the allowlist already reads are skipped, so a bean is never counted twice.
+fn autoconfig_defs(root: &str, allow: &LibraryBeanAllowlist) -> Vec<bennu_spring::prelude::BeanDef> {
+    if let Ok(guard) = AUTO_CACHE.lock() {
+        if let Some(hit) = guard.as_ref().and_then(|m| m.get(&cache_key(root))) {
+            return hit.clone();
+        }
+    }
+    let mut defs = Vec::new();
+    for jar in IndexService::global().dep_jars_of(root) {
+        let Some(coord) = coord_of(Path::new(&jar)) else { continue };
+        if allow.admits(&coord.group_id, &coord.artifact_id) {
+            continue;
+        }
+        let groups = match library_bean_cache::load_auto(&jar) {
+            Some(hit) => hit,
+            None => {
+                // An empty answer is remembered too: it is the ordinary one, and re-opening three hundred
+                // jars to learn again that they declare no auto-configuration is the cost being avoided.
+                let scanned = scan_autoconfig_jar(&jar, &coord);
+                library_bean_cache::store_auto(&jar, &scanned);
+                scanned
+            }
+        };
+        defs.extend(groups.iter().flat_map(bean_defs_of_group));
+    }
+    if let Ok(mut guard) = AUTO_CACHE.lock() {
+        guard.get_or_insert_with(HashMap::new).insert(cache_key(root), defs.clone());
+    }
+    defs
+}
+
 /// The **session** tier of the cache: the assembled answer for a project root, keyed by the
 /// allowlist that produced it, so editing the setting re-scans and leaving it alone never
 /// does.
@@ -220,6 +332,11 @@ fn cached(root: &str, allow: &LibraryBeanAllowlist) -> Option<Vec<LibraryBeanGro
 /// Drop `root`'s session answer — its dependency jars changed, so the assembled list is
 /// stale even though the per-artifact memos on disk will correctly re-scan what moved.
 pub fn forget(root: &str) {
+    if let Ok(mut guard) = AUTO_CACHE.lock() {
+        if let Some(map) = guard.as_mut() {
+            map.remove(&cache_key(root));
+        }
+    }
     if let Ok(mut guard) = CACHE.lock() {
         if let Some(map) = guard.as_mut() {
             map.remove(&cache_key(root));
@@ -302,16 +419,18 @@ pub fn stat(root: &str) -> Option<ExtStat> {
 /// stat — all three ask the identical question, and the first of them to be called pays.
 fn groups_for(root: &str) -> Vec<LibraryBeanGroupDto> {
     let allow = allowlist_of(&bennu_core::config::load().library_beans);
-    if allow.is_empty() {
-        return Vec::new();
-    }
-    if let Some(hit) = cached(root, &allow) {
-        publish_to_spring(root, &hit);
-        return hit;
-    }
-    let groups = scan(&IndexService::global().dep_jars_of(root), &allow);
-    remember(root, &allow, &groups);
-    publish_to_spring(root, &groups);
+    let groups = if allow.is_empty() {
+        Vec::new()
+    } else if let Some(hit) = cached(root, &allow) {
+        hit
+    } else {
+        let scanned = scan(&IndexService::global().dep_jars_of(root), &allow);
+        remember(root, &allow, &scanned);
+        scanned
+    };
+    // Published on every path, including an empty allowlist: the auto-configuration beans do not
+    // depend on it.
+    publish_to_spring(root, &groups, &allow);
     groups
 }
 
@@ -321,9 +440,10 @@ fn groups_for(root: &str) -> Vec<LibraryBeanGroupDto> {
 /// Here rather than in the scan itself: the cached path returns early, and a cache hit has to
 /// publish too — a project whose beans were scanned before the model was built would otherwise
 /// have them on disk and nowhere else. See `groups_for`, which calls this on both paths.
-fn publish_to_spring(root: &str, groups: &[LibraryBeanGroupDto]) {
-    let defs: Vec<bennu_spring::prelude::BeanDef> =
+fn publish_to_spring(root: &str, groups: &[LibraryBeanGroupDto], allow: &LibraryBeanAllowlist) {
+    let mut defs: Vec<bennu_spring::prelude::BeanDef> =
         groups.iter().flat_map(bean_defs_of_group).collect();
+    defs.extend(autoconfig_defs(root, allow));
     crate::frameworks::set_spring_library_beans(root, defs);
 }
 

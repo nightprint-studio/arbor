@@ -61,8 +61,8 @@
 <table>
   <thead><tr><th>Icon</th><th>Beside</th><th>Opens</th></tr></thead>
   <tbody>
-    <tr><td><code>▤</code></td><td>An entity</td><td>The repositories managing it</td></tr>
-    <tr><td><code>◇</code></td><td>A repository</td><td>Its entity</td></tr>
+    <tr><td><code>R</code></td><td>An entity</td><td>The repositories managing it</td></tr>
+    <tr><td><code>E</code></td><td>A repository</td><td>Its entity</td></tr>
   </tbody>
 </table>
 <p>Hovering a repository method says what it asks for — a derived name rendered as the sentence it compiles to.</p>
@@ -134,3 +134,21 @@
   <strong>Repositories</strong> land in the package the project already keeps them in, read off the ones that exist. A <strong>projection</strong> can be its own file
   <em>or</em> an interface nested in the repository that returns it — both idiomatic, both offered.
 </p>
+
+<h2>Checking against a database</h2>
+<p>
+  With <strong>Picus</strong> installed, the <strong>Database</strong> tool window (<kbd>Alt</kbd>+<kbd>D</kbd>, right rail) checks the persistence layer against a live schema. Pick one of the connections defined in Picus — connections are created and edited there — and connect.
+</p>
+<ul>
+  <li><strong>Entities</strong> compares each <code>@Entity</code> with its table: a missing table, a field with no column, a Java type that cannot be stored in the column's type. Names are compared loosely (<code>firstName</code>, <code>first_name</code> and <code>FIRST_NAME</code> are one column), so the project's naming strategy does not matter. Columns no field maps are listed dimmed — a legacy table has columns an entity never needed. A finding jumps to the field.</li>
+  <li><strong>Queries</strong> prepares every <code>@Query(nativeQuery = true)</code> on the server without running it; the server's own rejection is the finding. <code>:name</code> and <code>?1</code> placeholders are rewritten for the engine first.</li>
+  <li><strong>MyBatis</strong> (shown when the project has mappers) prepares every mapper statement the same way, so a missing table or column, or a join on a column that is not there, comes back as the server's message. Dynamic tags are flattened first — every <code>&lt;if&gt;</code> kept, the first <code>&lt;when&gt;</code> of a <code>&lt;choose&gt;</code>, <code>&lt;where&gt;</code>/<code>&lt;set&gt;</code>/<code>&lt;trim&gt;</code> applied, <code>&lt;foreach&gt;</code> written once — and <code>#&#123;…&#125;</code> becomes <code>NULL</code>. A statement using <code>$&#123;…&#125;</code> or a fragment from another mapper cannot be rendered and is reported as not checked, with the reason.</li>
+  <li>The window shows only what the project has: <strong>Entities</strong> and <strong>Queries</strong> need JPA or Hibernate, <strong>MyBatis</strong> needs mappers. Lists are filterable, every verdict can be checked again, and a field stored through an <code>AttributeConverter</code> (<code>@Convert</code>, or an auto-applied one) or an embedded object is not judged by its Java type. A column no field maps is listed as <em>unmapped</em>; it is left unsaid when an embedded object or a foreign key of an unknown name might own it. A statement that splices <code>$&#123;name&#125;</code> can be given a value in the MyBatis tab, per project, and is then checked too.</li>
+  <li>The first connection is chosen by hand. The project is then paired with it: coming back to the project reconnects that database, and a project with no pairing is checked against nothing (the unlink button forgets it).</li>
+  <li>A native query is also checked as you type: what the server rejects is a red squiggle at the place it names, in a repository's <code>@Query</code> and <code>countQuery</code>, <code>createNativeQuery</code>, <code>@NamedNativeQuery</code>, and any string under <code>// language=sql</code> (or <code>@Language("SQL")</code>), which is also coloured and completed as SQL. A query written as <code>"…" + "…"</code> is left unchecked. A MyBatis statement the database rejects is red on its opening tag in the mapper, and is checked again as you edit it (not when it uses a <code>$&#123;…&#125;</code> with no value, or a fragment from another mapper). A field that a JPQL / HQL query names and its entity does not have is an error where it is written, without a connection.</li>
+  <li><strong>Generate entity</strong> (the wand in the window's header, a dialog) writes an entity from a table: package and source root default to where the existing entities live, and the file is never overwritten if it exists. The preview is syntax-highlighted, and two switches choose <strong>Lombok accessors</strong> (<code>@Getter</code>/<code>@Setter</code>) and <strong>fluent accessors</strong> (<code>name()</code>/<code>name(v)</code> returning <code>this</code>); the last choice is kept and becomes the next default. A single-column foreign key becomes a <code>@ManyToOne(fetch = LAZY)</code> with its <code>@JoinColumn</code> (pointing at the project's entity for that table when there is one), a <code>serial</code> or sequence-default key gets <code>@GeneratedValue</code>, and a composite key gets an <code>@IdClass</code> with a nested key class — each with its own switch. A composite foreign key stays plain columns.</li>
+</ul>
+<p>
+  The same connection feeds <strong>completion</strong> in <code>.sql</code> files, inside native queries (<code>createNativeQuery("…")</code>, <code>@NamedNativeQuery</code>, <code>@Query(…, nativeQuery = true)</code>) and in the text of a MyBatis mapper's statements (<code>&lt;select&gt;</code>, <code>&lt;insert&gt;</code>, <code>&lt;update&gt;</code>, <code>&lt;delete&gt;</code>, <code>&lt;sql&gt;</code>; not inside a tag or a <code>#&#123;…&#125;</code>): tables after <code>FROM</code>/<code>JOIN</code>, the columns of a table or alias after <code>alias.</code>, and the columns of the tables the statement already names elsewhere. In a <code>.sql</code> file Picus's <strong>SQL abbreviations</strong> work too (<code>s#orders(id)[id=1]</code> expands to the full statement, with the column types deciding the quotes and the foreign keys the joins). It works once a connection is chosen and open in the Database window; without one, completion in those places is unchanged.
+</p>
+<p>Without Picus, the tool window and its commands are not offered.</p>

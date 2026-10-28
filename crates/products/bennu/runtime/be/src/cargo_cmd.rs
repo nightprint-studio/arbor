@@ -90,12 +90,16 @@ pub struct RootArgs {
     name = "bennu_cargo_workspace",
     title = "Describe a Cargo workspace and its dependencies",
     safety = read,
-    description = "Describe a Rust project's Cargo workspace: its member crates, what \
-each depends on, and the third-party crates it pulls in with the versions actually \
-resolved. Use it to see the shape of an unfamiliar workspace, to work out what a change \
-to one crate would rebuild, and to spot dependencies that have moved on. Reads the \
-manifests and the lockfile — it does not run cargo, so it answers on a project that has \
-never been built.",
+    description = "Describe the shape of a Rust project's Cargo workspace: its member crates, \
+each one's targets (lib, bins, examples, tests, benches), its declared features, and how many \
+normal, dev and build dependencies it declares (counts only — not their names or versions), plus \
+whether a Cargo.lock exists. Use it to orient yourself in an unfamiliar workspace. It does NOT list \
+which crates depend on which, and it does not report resolved or latest versions: for a crate's \
+dependency versions use bennu_outdated, and for the published versions of one crate use \
+bennu_crate_versions. Reads manifests and the filesystem only — it does not run cargo, so it \
+answers on a project that has never been built. It never errors: a root with no Cargo.toml (a \
+Maven project, a wrong path) comes back as an empty workspace, so an empty answer means 'no Cargo \
+workspace here', not 'a workspace with nothing in it'.",
 ))]
 fn bennu_cargo_workspace(_ctx: &BennuState, args: RootArgs) -> Result<CargoWorkspace, String> {
     Ok(read_workspace(Path::new(&args.root)))

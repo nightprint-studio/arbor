@@ -68,6 +68,9 @@
   import { applyByteEdits } from './rename-apply';
   import { isSamePath } from '$lib/utils/paths';
   import { jpaActionSpec } from './jpa-actions';
+  import { bennuPicusStore } from '$lib/stores/bennu/picus.svelte';
+  import { nameKey, toSnake } from './picus/entity-check';
+  import { javaTypeOf, toCamel } from './picus/entity-generate';
 
   let { action, onClose }: { action: string; onClose: () => void } = $props();
 
@@ -152,6 +155,36 @@
   const root = $derived(projectStore.project?.root ?? '');
   const entity = $derived(model?.entities.find((e) => e.fqcn === entityFqcn) ?? null);
   const properties = $derived(entity?.properties ?? []);
+
+  // ── Columns of the connected database ──────────────────────────────────────────
+  // With a Picus connection open, "Add attribute" can offer the columns of the entity's own table that
+  // no field maps yet — picking one fills the column, the field name, the Java type and the nullability
+  // from the schema, instead of typing them from memory.
+  $effect(() => {
+    if (body === 'attribute' && bennuPicusStore.connected) void bennuPicusStore.ensureSchema();
+  });
+  const entityTable = $derived(
+    entity && entity.kind === 'entity'
+      ? bennuPicusStore.tables.find((t) => nameKey(t.name) === nameKey(entity.table || toSnake(entity.simple))) ?? null
+      : null,
+  );
+  /** Columns of the entity's table that no existing property accounts for. */
+  const freeColumns = $derived.by(() => {
+    if (!entityTable) return [];
+    const mapped = new Set(properties.map((p) => nameKey(p.path.split('.')[0])));
+    return entityTable.columns.filter((c) => !mapped.has(nameKey(c.name)));
+  });
+
+  function adoptColumn(name: string) {
+    const col = freeColumns.find((c) => c.name === name);
+    if (!col) return;
+    attrColumn = col.name;
+    if (!attrName.trim()) attrName = toCamel(col.name);
+    attrType = javaTypeOf(col).name;
+    attrNullable = !col.notNull;
+    const length = /\(\s*(\d+)/.exec(col.type)?.[1];
+    attrLength = length && /char/i.test(col.type) && length !== '255' ? length : '';
+  }
   const visibleProperties = $derived(
     propertyFilter.trim()
       ? properties.filter((p) => p.path.toLowerCase().includes(propertyFilter.trim().toLowerCase()))
@@ -757,6 +790,17 @@
                 </FormRow>
               {/if}
             {:else}
+              {#if freeColumns.length}
+                <FormRow
+                  label="From the database"
+                  wideControl
+                  description="Columns of {entityTable?.name} that no field maps. Picking one fills the rest."
+                >
+                  <Select value="" options={freeColumns.map((c) => ({ value: c.name, label: `${c.name} · ${c.type}` }))}
+                    searchable searchPlaceholder="Find a column…" placeholder="Choose a column…"
+                    onchange={adoptColumn} />
+                </FormRow>
+              {/if}
               <FormRow label="Java type" wideControl>
                 <Input value={attrType} placeholder="String" oninput={(v) => (attrType = v)} />
               </FormRow>

@@ -98,7 +98,7 @@ pub use crate::java_index::{
 
 // A field is also known by the accessors nobody wrote — what a rename must carry, and what
 // find-usages must find. One answer for both.
-pub use crate::rename::{generated_aliases, FieldAlias};
+pub use crate::rename::{generated_aliases, generated_aliases_in, FieldAlias};
 
 // Call / type hierarchy over the Java engine — the same reference index find-usages reads, walked
 // as a tree. Entered through `SemanticEngine::prepare_hierarchy` / `hierarchy_step`; the types are

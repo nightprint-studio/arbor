@@ -32,6 +32,7 @@
 //! `picus_db_api::prelude::...`.
 
 pub mod activity;
+pub mod auth;
 pub mod capability;
 pub mod connection;
 pub mod depends;

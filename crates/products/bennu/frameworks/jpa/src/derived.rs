@@ -373,8 +373,8 @@ pub fn resolve<'a>(
 
     for p in &mut out.predicates {
         match resolve_path(model, entity, &capitalize(&p.path[0])) {
-            Some(path) => p.path = path,
-            None if verifiable => issues.push(Issue {
+            Resolution::Found(path) => p.path = path,
+            Resolution::Missing if verifiable => issues.push(Issue {
                 segment: p.raw.clone(),
                 message: format!(
                     "`{}` is not a property of {} — Spring Data resolves this name at startup, \
@@ -382,17 +382,17 @@ pub fn resolve<'a>(
                     p.path[0], entity.simple,
                 ),
             }),
-            None => {}
+            Resolution::Missing | Resolution::Unverifiable => {}
         }
     }
     for o in &mut out.order_by {
         match resolve_path(model, entity, &o.raw) {
-            Some(path) => o.path = path,
-            None if verifiable => issues.push(Issue {
+            Resolution::Found(path) => o.path = path,
+            Resolution::Missing if verifiable => issues.push(Issue {
                 segment: o.raw.clone(),
                 message: format!("`{}` is not a property of {}.", o.path[0], entity.simple),
             }),
-            None => {}
+            Resolution::Missing | Resolution::Unverifiable => {}
         }
     }
     (out, issues)
@@ -400,7 +400,7 @@ pub fn resolve<'a>(
 
 /// Whether every `@MappedSuperclass` / superclass link of `entity` resolves inside the project.
 /// A chain that leaves the project means an unknown field set, and therefore no reporting.
-fn chain_is_complete<'a>(model: &'a JpaModel, entity: &'a Entity) -> bool {
+pub(crate) fn chain_is_complete<'a>(model: &'a JpaModel, entity: &'a Entity) -> bool {
     let mut current = entity;
     for _ in 0..8 {
         if current.extends.is_empty() {
@@ -421,34 +421,79 @@ fn chain_is_complete<'a>(model: &'a JpaModel, entity: &'a Entity) -> bool {
 ///
 /// Greedy like Spring's own: the whole segment is tried as one property before any split, so a
 /// literal `customerName` field wins over a `customer.name` traversal when both exist.
-fn resolve_path<'a>(model: &'a JpaModel, entity: &'a Entity, camel: &str) -> Option<Vec<String>> {
+fn resolve_path<'a>(model: &'a JpaModel, entity: &'a Entity, camel: &str) -> Resolution {
     let fields = model.fields_of(entity);
+    // `Id_Codice`: the underscore is Spring Data's explicit "descend here", the way to address a
+    // property whose own name would otherwise be split somewhere else (`findById_Codice` on an
+    // embedded key `id`). Taken literally, before any guessing.
+    if let Some((head, rest)) = camel.split_once('_') {
+        let head = decapitalize(head);
+        let Some(field) = fields.iter().find(|f| f.name == head && !f.transient) else {
+            return Resolution::Missing;
+        };
+        let Some(next) = target_entity(model, field) else { return Resolution::Unverifiable };
+        return match resolve_path(model, next, rest) {
+            Resolution::Found(mut tail) => {
+                let mut path = vec![head];
+                path.append(&mut tail);
+                Resolution::Found(path)
+            }
+            other => other,
+        };
+    }
     let whole = decapitalize(camel);
     if fields.iter().any(|f| f.name == whole && !f.transient) {
-        return Some(vec![whole]);
+        return Resolution::Found(vec![whole]);
     }
     // Then splits, longest head first — the same order that makes the greedy rule hold.
+    let mut unverifiable = false;
     for split in uppercase_boundaries(camel).into_iter().rev() {
         let head = decapitalize(&camel[..split]);
         let Some(field) = fields.iter().find(|f| f.name == head && !f.transient) else { continue };
-        let target = if field.relation.is_empty() {
-            crate::model::strip_generics(&field.type_text)
-        } else {
-            field.target.clone()
+        // Not a type we scanned — an `@Embedded` or key class from a jar, a relation outside the
+        // project. Unverifiable, not wrong: saying so (rather than "no such property") is the
+        // difference between a quiet check and a false error on a name that is fine.
+        let Some(next) = target_entity(model, field) else {
+            unverifiable = true;
+            continue;
         };
-        // Not a type we scanned — an `@Embedded` from a jar, a relation outside the project.
-        // Unverifiable, not wrong.
-        let Some(next) = model.entity(&target) else { continue };
         if next.fqcn == entity.fqcn {
             continue;
         }
-        if let Some(mut rest) = resolve_path(model, next, &camel[split..]) {
-            let mut path = vec![head];
-            path.append(&mut rest);
-            return Some(path);
+        match resolve_path(model, next, &camel[split..]) {
+            Resolution::Found(mut rest) => {
+                let mut path = vec![head];
+                path.append(&mut rest);
+                return Resolution::Found(path);
+            }
+            Resolution::Unverifiable => unverifiable = true,
+            Resolution::Missing => {}
         }
     }
-    None
+    if unverifiable {
+        Resolution::Unverifiable
+    } else {
+        Resolution::Missing
+    }
+}
+
+/// What a path segment came to: a property path, nothing, or something this model cannot see into.
+enum Resolution {
+    Found(Vec<String>),
+    /// Addresses nothing in what was scanned.
+    Missing,
+    /// Goes through a type that was not scanned, so there is no telling.
+    Unverifiable,
+}
+
+/// The scanned entity or embeddable a field leads to, if there is one.
+fn target_entity<'a>(model: &'a JpaModel, field: &crate::model::EntityField) -> Option<&'a Entity> {
+    let target = if field.relation.is_empty() {
+        crate::model::strip_generics(&field.type_text)
+    } else {
+        field.target.clone()
+    };
+    model.entity(&target)
 }
 
 /// Indices where a new capitalised word starts (excluding 0).

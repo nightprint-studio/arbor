@@ -18,6 +18,7 @@ import { RangeSet, StateEffect, StateField } from '@codemirror/state';
 import type { EditorState } from '@codemirror/state';
 import { Decoration, EditorView, gutter, GutterMarker, WidgetType } from '@codemirror/view';
 import type { DecorationSet } from '@codemirror/view';
+import { tooltip } from '$lib/actions/tooltip';
 
 /** One annotated line. */
 export interface LineAnnotation {
@@ -55,7 +56,7 @@ class BarMarker extends GutterMarker {
     const el = document.createElement('span');
     el.className = 'cm-line-annotation-bar';
     if (this.a.accent) el.style.background = this.a.accent;
-    if (this.a.tooltip) el.title = this.a.tooltip;
+    if (this.a.tooltip) tooltip(el, this.a.tooltip);
     return el;
   }
 }
@@ -78,7 +79,7 @@ class InlineWidget extends WidgetType {
     const el = document.createElement('span');
     el.className = 'cm-line-annotation-inline';
     el.textContent = this.text;
-    if (this.tooltip) el.title = this.tooltip;
+    if (this.tooltip) tooltip(el, this.tooltip);
     return el;
   }
 

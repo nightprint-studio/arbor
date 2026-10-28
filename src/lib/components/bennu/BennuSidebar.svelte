@@ -58,7 +58,7 @@
   import { bennuFileOpsStore } from '$lib/stores/bennu/file-ops.svelte';
   import { lspWillRename } from '$lib/ipc/bennu/lsp';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
-  import type { DiscoveredRustTest, DiscoveredTest, TreeNode } from '$lib/types/bennu';
+  import { isTruncationMarker, type DiscoveredRustTest, type DiscoveredTest, type TreeNode } from '$lib/types/bennu';
   import type { NewFileKind } from '$lib/ipc/bennu/scaffold';
   import { packageTree, isInPackageRoot, isSourceRoot, packageOfDir } from './package-tree';
   // The shared file-icon vocabulary — the same one Corvus's tree and Sitta's explorer draw
@@ -298,6 +298,10 @@
   function onRowSelect(node: TreeNode) {
     // Any click hands the selection back to the editor — the pin is for one revealed row, not a mode.
     focusedPath = null;
+    if (isTruncationMarker(node)) {
+      toastStore.show('This folder has more entries than the tree lists — use Go to file (Ctrl+Shift+N) to reach the rest.', 'info');
+      return;
+    }
     if (!node.is_dir) void projectStore.openFile(node.path);
   }
 
@@ -1098,7 +1102,7 @@
           <span
             class="tree-label {faint}"
             style:color={git && !ctx.node.is_dir ? GIT_BADGE_COLOR[git] : undefined}
-            use:tooltip={ctx.node.ignored ? 'Ignored by git' : ''}
+            use:tooltip={isTruncationMarker(ctx.node) ? 'The tree is capped; use Go to file for the rest' : ctx.node.ignored ? 'Ignored by git' : ''}
           >{ctx.node.name}</span>
           {#if git}
             <span

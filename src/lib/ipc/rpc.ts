@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 /**
  * Generic Model-D IPC bridge.
@@ -83,6 +84,12 @@ export const picus = <R>(method: string, params: Record<string, unknown> = {}): 
 export const garrulus = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
   rpc<R>('garrulus', method, params);
 
+/** Whether a borrowable product is installed. A file check in the shell — nothing is spawned — so
+ *  it is the gate for UI that should only exist when the product does (Bennu's Picus tool window). */
+export function isProductInstalled(program: 'corvus' | 'picus'): Promise<boolean> {
+  return invoke<boolean>('is_product_installed', { program });
+}
+
 /** Backends already confirmed up this session, so a hot path pays the round-trip once. */
 const ensured = new Set<Program>();
 
@@ -96,6 +103,17 @@ const ensured = new Set<Program>();
  */
 export async function ensureBackend(program: 'corvus' | 'picus'): Promise<void> {
   if (ensured.has(program)) return;
+  // The shell records this window as a borrower, so the owner's window closing leaves the backend
+  // running. A backend that died and came back is a new one with no borrowers: forget that it was
+  // ensured, so the next call asks (and registers) again.
+  watchDown(program);
   await invoke<void>('ensure_product_backend', { program });
   ensured.add(program);
+}
+
+const watching = new Set<Program>();
+function watchDown(program: Program): void {
+  if (watching.has(program)) return;
+  watching.add(program);
+  void listen(`arbor://${program}-be-down`, () => ensured.delete(program));
 }

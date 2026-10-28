@@ -234,7 +234,12 @@ fn describe(source: &str) -> ShaderUniform {
     safety = read,
     description = "Read the uniform block a WGSL material binds: its struct name, its fields \
                    with their types, and the byte offset of each — enough to build a form for \
-                   the material or to write its uniform buffer.",
+                   the material. Offsets are relative to their own block, and the flat `fields` \
+                   list covers the first block only. For an extension of StandardMaterial \
+                   (`owns_group` false) each block sits at its own binding: its buffer position \
+                   is (binding - 100) * 512 bytes plus the offset, so read `blocks`, not \
+                   `fields`. To see the material, pass values by name to bennu_shader_render \
+                   rather than packing bytes yourself.",
 ))]
 fn bennu_shader_uniform(
     _ctx: &BennuState,

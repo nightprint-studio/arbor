@@ -6,15 +6,17 @@
 //! trip `TODO`), like IntelliJ's default TODO patterns — no comment-context parsing.
 //! Emits one [`TodoItem`] per matched line (marker + trimmed remainder).
 //!
-//! The walk skips `target/`, `.git/`, `node_modules/`, `.idea/` and caps at
-//! [`MAX_TODOS`] results (logging to stderr when capped, never erroring). No `regex`
-//! crate — a plain word-boundary substring scan keeps the module dependency-free.
+//! The walk skips the same noise directories as the project tree (`target/`, `.git/`,
+//! `node_modules/`, build output, …), visits entries in name order so a capped result is the same
+//! every time, and caps at [`MAX_TODOS`] results — reported through [`TodoScan::truncated`].
+//! No `regex` crate — a plain word-boundary substring scan keeps the module dependency-free.
 
 use std::path::Path;
 
 use bennu_core::prelude::BennuState;
+use bennu_project::prelude::is_tree_noise_dir;
 use bennu_proto::prelude::TodoItem;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// The marker words recognised (case-sensitive), in the FE's display order.
 const MARKERS: [&str; 4] = ["TODO", "FIXME", "XXX", "HACK"];
@@ -24,11 +26,8 @@ const MARKERS: [&str; 4] = ["TODO", "FIXME", "XXX", "HACK"];
 /// not as "this file type isn't scanned".
 const SCAN_EXTS: [&str; 7] = ["java", "xml", "jsp", "properties", "rs", "toml", "dig"];
 
-/// Directory names never descended into during the scan.
-const SKIP_DIRS: [&str; 4] = ["target", ".git", "node_modules", ".idea"];
-
 /// Upper bound on returned items (a huge legacy project can hold many); capping keeps
-/// the payload bounded. Logged (not errored) when hit.
+/// the payload bounded. Reported through [`TodoScan::truncated`] when hit.
 const MAX_TODOS: usize = 2000;
 
 /// Max length of the captured trailing `text` per item.
@@ -41,43 +40,58 @@ pub struct TodoScanArgs {
     pub root: String,
 }
 
+/// What [`bennu_todos`] returns: the markers, and whether there were more than fit.
+#[derive(Debug, Serialize)]
+pub struct TodoScan {
+    /// Markers in path order, then line order.
+    pub items: Vec<TodoItem>,
+    /// `true` when the scan stopped at the cap: `items` is the first part of the list, not all of it.
+    pub truncated: bool,
+}
+
 /// Find every TODO / FIXME / XXX / HACK marker left in the project's source, with its
 /// file, line and the text of the comment.
+///
+/// Returns `{ items, truncated }`: at most 2,000 markers, in path order, with `truncated` set when
+/// there were more. Build output (`target`, `build`/`dist`/`out` beside a manifest, …) and
+/// dependency directories are not scanned. Errors when `root` is not a directory.
 #[arbor_rpc::handler(mcp(
     title = "Find TODO and FIXME markers",
     safety = read,
 ))]
-fn bennu_todos(_ctx: &BennuState, args: TodoScanArgs) -> Result<Vec<TodoItem>, String> {
-    let mut out = Vec::new();
-    let mut capped = false;
-    scan_dir(Path::new(&args.root), &mut out, &mut capped);
-    if capped {
-        eprintln!("bennu-be: bennu_todos capped at {MAX_TODOS} results for {}", args.root);
+fn bennu_todos(_ctx: &BennuState, args: TodoScanArgs) -> Result<TodoScan, String> {
+    let root = Path::new(&args.root);
+    if !root.is_dir() {
+        return Err(format!("{} is not a directory", args.root));
     }
-    Ok(out)
+    let mut items = Vec::new();
+    let mut truncated = false;
+    scan_dir(root, &mut items, &mut truncated);
+    Ok(TodoScan { items, truncated })
 }
 
-/// Recursively walk `dir`, scanning eligible files. Stops adding once `MAX_TODOS` is
+/// Recursively walk `dir` in name order, scanning eligible files. Stops adding once `MAX_TODOS` is
 /// reached (setting `capped`).
+///
+/// Sorted because `read_dir` order is whatever the filesystem likes: with a cap, an unsorted walk
+/// returns a different 2,000 markers from one call to the next. Typed by `file_type()`, which does not
+/// follow links, so a symlink loop cannot recurse.
 fn scan_dir(dir: &Path, out: &mut Vec<TodoItem>, capped: &mut bool) {
-    if out.len() >= MAX_TODOS {
-        *capped = true;
-        return;
-    }
     let Ok(rd) = std::fs::read_dir(dir) else { return };
-    for entry in rd.flatten() {
+    let mut entries: Vec<_> = rd.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
         if out.len() >= MAX_TODOS {
             *capped = true;
             return;
         }
+        let Ok(kind) = entry.file_type() else { continue };
         let path = entry.path();
-        if path.is_dir() {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if SKIP_DIRS.contains(&name) {
-                continue;
+        if kind.is_dir() {
+            if !is_tree_noise_dir(dir, &entry.file_name().to_string_lossy()) {
+                scan_dir(&path, out, capped);
             }
-            scan_dir(&path, out, capped);
-        } else if is_scannable(&path) {
+        } else if kind.is_file() && is_scannable(&path) {
             scan_file(&path, out, capped);
         }
     }
@@ -98,11 +112,12 @@ fn scan_file(path: &Path, out: &mut Vec<TodoItem>, capped: &mut bool) {
     };
     let file = path.to_string_lossy().replace('\\', "/");
     for (idx, line) in source.lines().enumerate() {
-        if out.len() >= MAX_TODOS {
-            *capped = true;
-            return;
-        }
         if let Some((kind, text)) = match_marker(line) {
+            // Checked on a hit, not per line: a full list only means "truncated" if there is one more.
+            if out.len() >= MAX_TODOS {
+                *capped = true;
+                return;
+            }
             out.push(TodoItem { file: file.clone(), line: idx + 1, kind, text });
         }
     }
@@ -172,6 +187,16 @@ mod tests {
         let (kind, text) = match_marker("<!-- FIXME broken link -->").unwrap();
         assert_eq!(kind, "FIXME");
         assert_eq!(text, "broken link -->");
+    }
+
+    #[test]
+    fn a_missing_root_is_an_error_not_an_empty_list() {
+        let missing = std::env::temp_dir().join("bennu-todos-no-such-dir");
+        assert!(!missing.is_dir());
+        let mut items = Vec::new();
+        let mut capped = false;
+        scan_dir(&missing, &mut items, &mut capped);
+        assert!(items.is_empty() && !capped);
     }
 
     #[test]

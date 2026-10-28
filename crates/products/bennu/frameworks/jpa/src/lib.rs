@@ -49,6 +49,7 @@ pub mod ext;
 pub mod generate;
 // The query text inside a `@Query`, in both of its languages.
 pub mod hql;
+pub mod hql_check;
 pub mod hql_complete;
 pub mod hql_sites;
 // Building the model out of the scan.

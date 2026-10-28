@@ -56,9 +56,13 @@
     editPlaceholder?: string;
     /** Fired when the user commits the edited path. */
     onCommit?:        (path: string) => void;
+    /** One tight line with no band of its own — for a trail that lives inside a status bar or a
+     *  toolbar rather than being a row by itself. Never wraps; the middle collapses instead. */
+    compact?:         boolean;
   }
   let {
     segments, onSelect, max = 6,
+    compact = false,
     editable = false,
     editValue = '',
     editPlaceholder = 'Type a path (e.g. x/y/z)',
@@ -111,7 +115,7 @@
   }
 </script>
 
-<nav class="breadcrumb" aria-label="Breadcrumb" ondblclick={editable && !editing ? startEdit : null}>
+<nav class="breadcrumb" class:compact aria-label="Breadcrumb" ondblclick={editable && !editing ? startEdit : null}>
   {#if editable && editing}
     <input
       bind:this={inputEl}
@@ -186,6 +190,14 @@
     line-height: 1;
     user-select: none;
   }
+
+  .breadcrumb.compact {
+    flex-wrap: nowrap; gap: 0; padding: 0; min-width: 0; overflow: hidden;
+    background: transparent; border-bottom: none;
+    font-family: inherit;
+  }
+  .compact .bc-seg { padding: 1px 4px; gap: 3px; border-radius: 3px; }
+  .compact .bc-label { max-width: 22ch; }
 
   .bc-seg {
     display: inline-flex;

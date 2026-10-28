@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
   /**
    * The reviewable half of a bulk naming fix: what it would rename, narrowed however you like.
    *
@@ -178,7 +179,7 @@
               />
               <ValueChange from={item.name.from} to={item.name.to} />
               {#if filter.by !== 'target'}<span class="meta">{item.name.target}</span>{/if}
-              <span class="where" title={item.name.file}>
+              <span class="where" use:tooltip={item.name.file}>
                 {filter.by === 'file'
                   ? `:${item.name.line}`
                   : `${item.name.file.split(/[\\/]/).pop() ?? ''}:${item.name.line}`}

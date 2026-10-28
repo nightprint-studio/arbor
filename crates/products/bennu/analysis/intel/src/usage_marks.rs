@@ -135,7 +135,8 @@ pub fn usage_marks(
         .collect();
 
     let mut out = Vec::new();
-    let mut walker = Walker { source, index, policy, subtypes, owners: &owners, out: &mut out };
+    let mut walker =
+        Walker { source, index, policy, subtypes, owners: &owners, symbols: &symbols, out: &mut out };
     walker.file(&tree.root_node(), symbols.package.as_deref(), None);
     out.sort_by_key(|m| m.start);
     out
@@ -147,6 +148,8 @@ struct Walker<'a> {
     policy: &'a dyn TypeResolver,
     subtypes: &'a SubtypeMap,
     owners: &'a HashMap<String, String>,
+    /// The file's own symbols, for the members Lombok writes on its fields' behalf.
+    symbols: &'a bennu_java::prelude::FileSymbols,
     out: &'a mut Vec<UsageMark>,
 }
 
@@ -253,7 +256,16 @@ impl Walker<'_> {
                     for (name, name_node) in field_names(&member, bytes) {
                         let key =
                             DeclKey::Field { owner: owner.to_string(), name: name.to_string() };
-                        let count = self.index.usages_of(&key).len();
+                        // A field Lombok writes accessors for is used from outside only through them
+                        // (`order.getName()`), so those calls are uses of the field: the same ones
+                        // find-usages lists. Counting the field's own references alone said "no
+                        // usages" above a field the usages popup showed callers for.
+                        let through_accessors: usize =
+                            crate::rename::generated_aliases_in(self.symbols, owner, &name)
+                                .iter()
+                                .map(|alias| self.index.usages_of(&alias.key).len())
+                                .sum();
+                        let count = self.index.usages_of(&key).len() + through_accessors;
                         let reach = reached_by_the_runtime(&name)
                             .or_else(|| annotation.clone().map(Reach::Maybe))
                             .unwrap_or(Reach::Code);

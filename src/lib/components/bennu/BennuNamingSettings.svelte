@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
   /**
    * Naming conventions — one grid, two levels.
    *
@@ -197,7 +198,7 @@
             {#if pack.source === 'symbols'}
               <span
                 class="pack-source"
-                title="Declarations come from the language server's outline, so locals and parameters are not visible — and the server must be installed for this to check anything"
+                use:tooltip={"Declarations come from the language server's outline, so locals and parameters are not visible — and the server must be installed for this to check anything"}
               >
                 via language server
               </span>
@@ -240,17 +241,17 @@
                     <!-- Not hidden: the row says WHY the rule is unavailable here, which is a fact
                          about the language server, not about the target. Removing it would read as
                          "this kind of declaration does not exist in TypeScript". -->
-                    <span class="rule-note" title="A language server's outline lists types and their members only, so Bennu never sees these">
+                    <span class="rule-note" use:tooltip={"A language server's outline lists types and their members only, so Bennu never sees these"}>
                       not in the outline
                     </span>
                   {:else if fromAbove}
-                    <span class="rule-note inherited" title="This project states nothing here, so your profile answers. Choosing a convention makes it this project's.">
+                    <span class="rule-note inherited" use:tooltip={"This project states nothing here, so your profile answers. Choosing a convention makes it this project's."}>
                       from {inheritedLabel}
                     </span>
                   {:else if current !== 'any' && (pack.source === 'symbols' || !target.fileLocal)}
                     <!-- Stated from both facts, not from the target alone: a declaration an
                          outline reported is reachable from another file whatever kind it is. -->
-                    <span class="rule-note" title="Renaming this can reach other files, so its quick-fix opens the rename preview">
+                    <span class="rule-note" use:tooltip={"Renaming this can reach other files, so its quick-fix opens the rename preview"}>
                       reaches other files
                     </span>
                   {/if}

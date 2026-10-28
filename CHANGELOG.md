@@ -8,6 +8,24 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Added
+- **Bennu › Database tool window (needs Picus)** — check entities against a Picus connection's schema, validate `@Query(nativeQuery = true)` on the server, and generate an entity from a table, highlighted, with optional Lombok / fluent accessors (`Alt`+`D`).
+- **Picus › Google IAM sign-in for Cloud SQL** — a connection can authenticate with the machine's `gcloud` credentials or a service-account key file instead of a stored password (optionally impersonating a service account); the sign-in methods are extensible.
+- **Picus › custom CA certificate per connection** — trust an extra PEM CA (e.g. a Cloud SQL server CA), with an option to skip only the server-name check.
+- **Bennu › MyBatis statements checked against the database** — each mapper statement is rendered (dynamic tags flattened) and prepared on a Picus connection, so missing tables, columns and join columns are reported.
+- **Bennu › SQL abbreviations in `.sql` files, and table/column completion inside MyBatis mapper statements** — both from the database chosen in the Database window.
+- **Bennu › generated entities get associations, generated ids and composite keys** — a single-column foreign key becomes `@ManyToOne`, a serial/sequence key `@GeneratedValue`, a composite key an `@IdClass`; each is a switch.
+- **Bennu › table and column completion in `.sql` files and native queries** — from the database chosen in the Database window (needs Picus): tables after `FROM`/`JOIN`, columns after `alias.`.
+- **Bennu › each project remembers its database** — the first connection is chosen by hand; afterwards the project is paired with it and coming back reconnects it, while a project with none validates against nothing.
+- **Bennu › the entity generator is a dialog** — table picker (hides tables that already have an entity), package picker, an *Immutable* switch, and per-association fetch / cascade / on-delete; associations are written after the plain columns.
+- **Bennu › native queries are checked in the editor** — the database's rejection of a string (`@Query`, its `countQuery`, `createNativeQuery`, `@NamedNativeQuery`, or anything under `// language=sql`) is a red squiggle where the server points; those strings are also coloured as SQL.
+- **Bennu › MyBatis `${name}` can be given a value** in the Database window, so statements that splice text are checked too; the Database lists, entities and queries are filterable and every verdict can be re-checked.
+- **Bennu › "Add attribute" offers the table's unmapped columns** when a database is connected, filling the field name, type and nullability.
+- **Bennu › a MyBatis statement the database rejects is red in the mapper**, on its opening tag, and is asked again as the mapper is edited — the same check the Database window runs, now where the statement is written.
+- **Bennu › a field that does not exist in a JPQL / HQL query is an error** where it is written (`@Query`, its `countQuery`, `createQuery`, `@NamedQuery`) — checked against the entity model, relations and embedded objects followed, and silent when a type is not known.
+- **Bennu › the Ctrl+Tab project switcher** has a dimmed backdrop, larger cards and a selection that slides between them.
+- **Corvus › Bennu is one of the IDEs a project opens in** — "Open in Bennu" in the palette, the worktree menus and the explorer, and it can be the default or a project's IDE; it opens (or reuses) the Bennu window on that folder.
+- **Bennu › SQL in the Run console is coloured, and pressing it copies the statement** — a Hibernate `show_sql` line or a MyBatis `Preparing:` is recognised by its shape, with a "SQL copied" toast.
+- **Bennu › YAML and `.properties` keys are coloured by their root** (`spring`, `server`, …), and the status bar shows the full key path of the caret in a YAML or properties file, each level clickable.
 - **Bennu › Project Configuration › Frameworks lists every capability, found or not** — grouped by kind, with a plain-language description, the evidence for what was found (marked *provisional* when only a source pattern supports it) and what Bennu looks for in what was not, plus a filter.
 - **Bennu workspace manager is a board** — every workspace a column, every project a card: drag a project into another workspace, reorder projects and workspaces by dragging (or `Alt`+arrows), with the settings of the selected workspace on the side.
 - **Bennu Dependencies panel shows who brings what and version conflicts** — a *Resolve tree* button runs Maven's `dependency:tree` in the background; transitive rows then say "via …", conflicting versions get their own group, and the rows are redesigned (name over group, expandable detail).
@@ -24,6 +42,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu's entity ⇄ repository jump is a clear coloured badge** (`R` on an entity, `E` on a repository) instead of a tiny glyph, and the JPA toolbar buttons have their own icons and colours.
 
 ### Fixed
+- **Bennu MCP tools: a round of correctness fixes** — a crate name with accents no longer crashes the backend; a relative `file` resolves inside the project and cannot climb out with `..`; `bennu_write_file` accepts the documented `stamp`; `bennu_validate_payload` is classed as running code; Java-only answers no longer read as "empty"/"clean" for Java files, plain folders and mixed Maven/Cargo roots; truncated results say so; concurrent shader renders no longer overwrite each other.
+- **Closing Picus (or Corvus) no longer stops its backend while Bennu is using it** — the backend ends with the last window that needs it.
+- **Bennu › an injection that only a library can satisfy gets its own mark** — a dashed teal `B`, and Spring Boot's auto-configuration beans (read from each jar's `AutoConfiguration.imports` / `spring.factories`) count as candidates without any allowlist; the tooltip says whose bean it is and under which condition.
+- **Bennu › switching quickly between projects no longer flashes the "Indexing project" card** — it appears only if the build is still running after a moment, and never shows "Index ready" for one that ended before it came up.
+- **Bennu › a collection parameter after `IN` (`in :ids`) is no longer reported as a syntax error** by the database check.
+- **Bennu › the database check no longer misreads valid mappings** — a field stored through a converter, an embedded object and a relation's join column are no longer reported, "unmapped" columns are listed again on entities with relations, and `:name` parameters and `:#{…}` expressions are checked as values; a statement the server cannot be asked about is no longer shown as valid.
+- **Bennu › the Database window shows only what the project has** (no entity tabs or generator without JPA), and a long repository method no longer pushes its verdict out of view.
+- **Editor › the scrollbar preview of XML, `pom.xml`, mappers, YAML, SQL and other non-Java files** is coloured like the file itself.
+- **Editor › the vertical scrollbar was drawn twice** (the native one beside the overview strip), and the white square where two scrollbars meet now follows the theme.
+- **Bennu › the usages count above a field counts its Lombok getters and setters** — a field of a `@Data` class no longer says "no usages" while its usages list shows callers.
+- **Tooltips are the app's own everywhere** — the gutter, inlay hints, blame bars, Markdown links and toolbar and a dozen labels no longer use the browser's native tooltip.
+- **Bennu › Ctrl+Tab no longer lists a project that was never open** — a language server left over on a Java project no longer counts as "loaded".
 - **Bennu: closing Arbor no longer leaves your services, test runs or Maven behind** — everything Bennu started now dies with it, including after a crash or a forced close.
 - **Bennu: switching project is snappier** — the swap paints first and the background analysis (framework overview, test discovery, diagnostics, run configs) starts afterwards, and is skipped when you flip on to another project.
 - **Bennu: CVE warnings now appear for BOM- and parent-managed dependencies** (e.g. Spring Boot), checked at the version the build resolved; the vulnerability check is on by default.
@@ -36,6 +66,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu no longer flags legal `case null, default` switches or checked generic `instanceof` tests** on Java 16 and up.
 
 ### Changed
+- **The macOS-style window buttons are closer to the real ones**: system size and spacing, a subtle ring, per-button glyph colours, redrawn symbols, and a grey state when the window is in the background.
 - **Bennu's "New Java Class" dialog no longer highlights the selected kind in solid blue**, and the query dialog's preview scrolls on its own instead of the whole dialog.
 - **A grant now overrides the AI gates, not just the confirmation prompt.** You can leave a product switched off entirely and hand out a grant when there is work to do: it exposes the tools you ticked on the projects you picked until its budget runs out, and connected clients are told the moment the tool set moves. Grants still live in memory only, and a call whose paths stray outside the grant's projects is still refused without asking.
 - **Bennu's Changes panel shows the diff beside the file list**, with Corvus's own diff viewer: unified or split, full-file context, chunk navigation and staging single lines or hunks.

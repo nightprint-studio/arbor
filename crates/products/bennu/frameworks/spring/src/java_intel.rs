@@ -691,7 +691,9 @@ fn in_open_placeholder(text: &str, offset: usize) -> bool {
 /// only "Injected with `schemaAuthorizationManager`" about one of those states a certainty nobody
 /// has.
 fn injected_with(bean: &crate::model::BeanDef) -> String {
-    let mut out = format!("Injected with `{}`", bean.name);
+    // A bean from a dependency is what Spring MAY register: "can be", never "is".
+    let verb = if bean.artifact.is_empty() { "Injected with" } else { "Can be injected with" };
+    let mut out = format!("{verb} `{}`", bean.name);
     if !bean.artifact.is_empty() {
         out.push_str(&format!(" — from {}", bean.artifact));
     }
@@ -748,9 +750,13 @@ pub fn gutter(model: &SpringModel, path: &str, source: &str) -> Vec<ExtGutterMar
         if candidates.is_empty() && !model.declares_type(&p.type_text) {
             continue;
         }
+        // Every candidate comes out of a dependency (an allowlisted artifact, or Spring Boot's own
+        // auto-configuration): a different kind of mark, drawn in a different colour, because "this
+        // project declares it" and "Spring may register it" are not the same claim.
+        let library_only = !candidates.is_empty() && candidates.iter().all(|b| !b.artifact.is_empty());
         out.push(ExtGutterMark {
             line: line_at(source, p.offset),
-            kind: "inject".to_string(),
+            kind: if library_only { "inject-library" } else { "inject" }.to_string(),
             tooltip: match candidates.len() {
                 // Nothing found, and there are two very different reasons for that. When the
                 // project declares the type, the model has looked everywhere a bean of it could
@@ -1439,8 +1445,8 @@ mod tests {
         );
         let inject = gutter(&m, PATH, &src)
             .into_iter()
-            .find(|g| g.kind == "inject")
-            .expect("an allowlisted dependency's bean is a candidate");
+            .find(|g| g.kind == "inject-library")
+            .expect("an allowlisted dependency's bean is a candidate, and a mark of its own kind");
         assert!(inject.tooltip.contains("schema_authorization_manager"), "{}", inject.tooltip);
         assert!(
             inject.tooltip.contains("it.acme:shared-security"),
@@ -1465,9 +1471,25 @@ mod tests {
         );
         let inject = gutter(&m, PATH, &src)
             .into_iter()
-            .find(|g| g.kind == "inject")
+            .find(|g| g.kind == "inject-library")
             .expect("still a candidate");
         assert!(inject.tooltip.contains("ConditionalOnMissingBean"), "{}", inject.tooltip);
+        assert!(inject.tooltip.starts_with("Can be injected"), "a library bean is a may, not an is: {}", inject.tooltip);
+    }
+
+    #[test]
+    fn a_project_bean_beside_a_library_one_keeps_the_ordinary_mark() {
+        // The mark says what the project declares: with its own candidate among them it is the
+        // ordinary one, and only an injection satisfied by dependencies alone changes colour.
+        let project = "package com.acme;\n@Service class MgrImpl {}\n@Configuration class Cfg { @Bean SchemaAuthorizationManager own() { return null; } }\n";
+        let mut m = model_with(project, "");
+        m.library_beans = vec![library_bean("lib", "it.acme.SchemaAuthorizationManager", &[])];
+        let src = java(
+            "package com.acme;\n@Service class C {\n  @Autowired SchemaAuthorizationManager mgr;\n}\n",
+        );
+        let marks = gutter(&m, PATH, &src);
+        assert!(marks.iter().any(|g| g.kind == "inject"), "the project's own bean makes it an ordinary mark");
+        assert!(!marks.iter().any(|g| g.kind == "inject-library"));
     }
 
     #[test]

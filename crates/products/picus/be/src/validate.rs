@@ -64,23 +64,41 @@ async fn picus_validate(
     state: &PicusState,
     id: String,
     sql: String,
+    strict: Option<bool>,
 ) -> Result<Vec<ValidationFinding>, String> {
     if sql.trim().is_empty() {
         return Ok(Vec::new());
     }
+    // A caller that is asking "does the database accept THIS statement" (Bennu checking a query it
+    // extracted from Java or a mapper) cannot read silence as an answer: a statement the parser trips
+    // on, or classifies as something else, would be skipped below and come back looking valid. Strict
+    // hands every statement to the server, which is the authority on its own syntax.
+    let strict = strict.unwrap_or(false);
     let scope = find_spec(&id)
         .map(|spec| DialectScope::One(spec.engine))
         .unwrap_or(DialectScope::One(EngineKind::Postgres));
-    let Ok(session) = require_session(state, &id) else {
-        return Ok(Vec::new());
+    let session = match require_session(state, &id) {
+        Ok(session) => session,
+        // Strict: "nobody was asked" must not read as "nothing is wrong".
+        Err(e) if strict => return Err(e.to_string()),
+        Err(_) => return Ok(Vec::new()),
     };
 
-    let parsed = parse(&sql, scope);
+    // Strict is one statement, whole: the editor's parser is not consulted, because a statement it
+    // cannot split or classify yields NO statements — and an empty loop reads as "valid".
+    let spans: Vec<std::ops::Range<usize>> = if strict {
+        vec![0..sql.len()]
+    } else {
+        parse(&sql, scope)
+            .statements
+            .iter()
+            .filter(|s| preparable(s.kind) && !s.has_error)
+            .map(|s| s.range.start..s.range.end)
+            .collect()
+    };
     let mut findings = Vec::new();
-    for statement in &parsed.statements {
-        if !preparable(statement.kind) || statement.has_error {
-            continue;
-        }
+    for range in spans {
+        let statement = Span { range };
         let text = &sql[statement.range.start..statement.range.end];
         match session.validate(text).await {
             Ok(()) => {}
@@ -95,6 +113,7 @@ async fn picus_validate(
             }
             // The engine cannot validate at all — the capability was misread, or a
             // second engine has no prepare. Nothing to report, and nothing wrong.
+            Err(e @ DbError::Unsupported { .. }) if strict => return Err(e.to_string()),
             Err(DbError::Unsupported { .. }) => return Ok(Vec::new()),
             // The connection itself is gone/refusing — surface it so the editor shows
             // "unavailable" rather than squiggling valid SQL.
@@ -115,6 +134,11 @@ async fn picus_validate(
         }
     }
     Ok(findings)
+}
+
+/// The byte range of one statement in the buffer.
+struct Span {
+    range: std::ops::Range<usize>,
 }
 
 /// Statements a server can `PREPARE`. DDL, anonymous blocks, `SET`, transaction

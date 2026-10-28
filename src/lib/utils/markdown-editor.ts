@@ -26,6 +26,7 @@
  */
 
 import Prism from 'prismjs';
+import { tooltip } from '$lib/actions/tooltip';
 import './prism-shared';        // side-effect: registers every grammar
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNodeRef } from '@lezer/common';
@@ -1184,7 +1185,7 @@ function renderInlineMdInto(text: string, parent: Node, docPath: string | null):
         a.setAttribute('rel', 'noopener noreferrer');
         // Where it goes, without following it — the one thing a rendered link cannot say on its
         // own, since the label is the label precisely because the URL is hidden.
-        a.setAttribute('title', url);
+        tooltip(a, url);
       }
       parent.appendChild(a);
       i += m[0].length;
@@ -1485,7 +1486,7 @@ class TableWidget extends WidgetType {
       b.type = 'button';
       b.className = 'cm-md-table-tool';
       b.textContent = label;
-      b.title = title;
+      tooltip(b, title);
       b.addEventListener('click', (e) => { e.preventDefault(); run(); });
       bar.appendChild(b);
       return b;

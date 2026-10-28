@@ -508,7 +508,9 @@ function createProjectStore() {
       if (!openFilePaths.includes(path)) openFilePaths = [...openFilePaths, path];
       return;
     }
-    await ensureLoaded(path);
+    // A file the backend refuses to hand over as text (binary content, too large) gets no tab:
+    // an empty editable buffer over it is the one outcome that could later be saved back.
+    if (!(await ensureLoaded(path))) return;
     activeFilePath = path;
     if (!openFilePaths.includes(path)) openFilePaths = [...openFilePaths, path];
   }
@@ -516,15 +518,15 @@ function createProjectStore() {
   /** Read a file's source + encoding into the cache if not already present. The
    *  project root is passed so the backend resolves the pom-declared encoding.
    *  Demo paths are served from the mock (no IPC). */
-  async function ensureLoaded(path: string) {
-    if (sources.has(path)) return;
+  async function ensureLoaded(path: string): Promise<boolean> {
+    if (sources.has(path)) return true;
     // MOCK — demo files never touch the backend.
     if (isDemoPath(path)) {
       const res = demoReadFile(path);
       sources.set(path, res.text);
       savedContent.set(path, res.text); // freshly loaded → not dirty
       encodings.set(path, res.encoding);
-      return;
+      return true;
     }
     try {
       const res = await ipcReadFile(project?.root ?? path, path);
@@ -532,7 +534,13 @@ function createProjectStore() {
       savedContent.set(path, res.text);
       encodings.set(path, res.encoding);
       stamps.set(path, res.stamp);
-    } catch {
+      return true;
+    } catch (e) {
+      const refusal = readRefusal(path, String(e));
+      if (refusal) {
+        toastStore.show(refusal, 'info');
+        return false;
+      }
       sources.set(path, '');
       savedContent.set(path, '');
       encodings.set(path, 'utf-8');
@@ -540,7 +548,18 @@ function createProjectStore() {
       // disables the overwrite guard, which is right — refusing a save here would only trap
       // the buffer, and there is no external edit to protect.
       stamps.delete(path);
+      return true;
     }
+  }
+
+  /** What to tell the user when the backend REFUSES to return a file as text, or `null` for any other
+   *  failure (which keeps its old behaviour). The refusals are the backend's deliberate answers — a
+   *  binary file, or one past the size a single read returns — not read errors. */
+  function readRefusal(path: string, message: string): string | null {
+    const name = path.split(/[\\/]/).pop() ?? path;
+    if (message.includes('binary file')) return `Can't open ${name} — binary file`;
+    if (message.includes('are returned per read')) return `${name} is too large to open in the editor`;
+    return null;
   }
 
   function applyProject(info: ProjectInfo, nextTree: TreeNode | null, demo: boolean) {

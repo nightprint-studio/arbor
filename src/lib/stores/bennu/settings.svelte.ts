@@ -119,6 +119,8 @@ export interface BennuSettingsSnapshot {
   javaIndentCaseBody: boolean;
   finalParams: boolean;
   useLombokVal: boolean;
+  entityLombok: boolean;
+  entityFluent: boolean;
   useLocalVar: boolean;
   switchWithReturn: boolean;
   spaceInBraces: boolean;
@@ -186,6 +188,8 @@ const DEFAULTS: BennuSettingsSnapshot = {
   javaIndentCaseBody: true,
   finalParams: false,
   useLombokVal: false,
+  entityLombok: false,
+  entityFluent: false,
   useLocalVar: false,
   switchWithReturn: true,
   spaceInBraces: false,
@@ -239,6 +243,13 @@ function createSettingsStore() {
   let javaIndentCaseBody = $state(DEFAULTS.javaIndentCaseBody);
   let finalParams = $state(DEFAULTS.finalParams);
   let useLombokVal = $state(DEFAULTS.useLombokVal);
+  let entityLombok = $state(DEFAULTS.entityLombok);
+  /** `<connection id>=<project root>` pairs — see `picusConnectionFor`. */
+  let picusBindings = $state<string[]>([]);
+  /** `<root>\t<name>\t<value>` — see `mybatisSplicesFor`. */
+  let mybatisSplices = $state<string[]>([]);
+  const normalizeRoot = (root: string) => root.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  let entityFluent = $state(DEFAULTS.entityFluent);
   let useLocalVar = $state(DEFAULTS.useLocalVar);
   let switchWithReturn = $state(DEFAULTS.switchWithReturn);
   let spaceInBraces = $state(DEFAULTS.spaceInBraces);
@@ -285,7 +296,7 @@ function createSettingsStore() {
       autoPopup, popupDelayMs, caseSensitive, importCensus, autoImport,
       foldingEnabled, foldBlockComments,
       javaBlankLines, javaIndentCaseBody,
-      finalParams, useLombokVal, useLocalVar, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
+      finalParams, useLombokVal, entityLombok, entityFluent, useLocalVar, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
       rustVisibility, rustDerives, rustDocComments, rustErrorStyle, rustSelfInImpl,
       defaultEncoding, rebuildIndexOnOpen, excludedDirs,
     };
@@ -343,6 +354,10 @@ function createSettingsStore() {
         // Java style: persisted, because the generators and every code template read it.
         java_final_params: finalParams,
         java_lombok_val: useLombokVal,
+        java_entity_lombok: entityLombok,
+        java_entity_fluent: entityFluent,
+        picus_bindings: picusBindings,
+        mybatis_splices: mybatisSplices,
         java_local_var: useLocalVar,
         java_switch_with_return: switchWithReturn,
         java_space_in_braces: spaceInBraces,
@@ -466,6 +481,51 @@ function createSettingsStore() {
     setFinalParams(v: boolean) { finalParams = v; void persistConfigBacked(); },
     get useLombokVal() { return useLombokVal; },
     setUseLombokVal(v: boolean) { useLombokVal = v; void persistConfigBacked(); },
+    /** Generated entities use Lombok (`@Getter`/`@Setter`) instead of written accessors. Remembered:
+     *  the Database tool window writes the last choice back here. */
+    get entityLombok() { return entityLombok; },
+    setEntityLombok(v: boolean) { entityLombok = v; void persistConfigBacked(); },
+    /** Generated accessors are fluent (`name()` / `name(v)` returning `this`). */
+    get entityFluent() { return entityFluent; },
+    setEntityFluent(v: boolean) { entityFluent = v; void persistConfigBacked(); },
+    /** What each MyBatis `${name}` of `root` stands for, as `[name, value]` pairs. */
+    mybatisSplicesFor(root: string): [string, string][] {
+      const key = normalizeRoot(root);
+      const out: [string, string][] = [];
+      for (const entry of mybatisSplices) {
+        const [r, name, ...value] = entry.split('\t');
+        if (name && normalizeRoot(r) === key) out.push([name, value.join('\t')]);
+      }
+      return out;
+    },
+    /** Give `${name}` a value in `root`; an empty value forgets it. */
+    setMybatisSplice(root: string, name: string, value: string) {
+      const key = normalizeRoot(root);
+      const rest = mybatisSplices.filter((e) => {
+        const [r, n] = e.split('\t');
+        return !(normalizeRoot(r) === key && n === name);
+      });
+      mybatisSplices = value.trim() ? [...rest, `${root}\t${name}\t${value}`] : rest;
+      void persistConfigBacked();
+    },
+    /** The Picus connection a project was bound to, or `''`. */
+    picusConnectionFor(root: string): string {
+      const key = normalizeRoot(root);
+      for (const entry of picusBindings) {
+        const at = entry.indexOf('=');
+        if (at > 0 && normalizeRoot(entry.slice(at + 1)) === key) return entry.slice(0, at);
+      }
+      return '';
+    },
+    /** Remember which connection `root` is checked against; `null` forgets the pairing. */
+    bindPicusConnection(root: string, connectionId: string | null) {
+      const key = normalizeRoot(root);
+      const rest = picusBindings.filter((e) => normalizeRoot(e.slice(e.indexOf('=') + 1)) !== key);
+      const next = connectionId ? [...rest, `${connectionId}=${root}`] : rest;
+      if (next.length === picusBindings.length && next.every((e, i) => e === picusBindings[i])) return;
+      picusBindings = next;
+      void persistConfigBacked();
+    },
     get useLocalVar() { return useLocalVar; },
     setUseLocalVar(v: boolean) { useLocalVar = v; void persistConfigBacked(); },
     get switchWithReturn() { return switchWithReturn; },
@@ -578,6 +638,10 @@ function createSettingsStore() {
         javaIndentCaseBody = cfg.java_indent_case_body ?? DEFAULTS.javaIndentCaseBody;
         finalParams = cfg.java_final_params ?? DEFAULTS.finalParams;
         useLombokVal = cfg.java_lombok_val ?? DEFAULTS.useLombokVal;
+        entityLombok = cfg.java_entity_lombok ?? DEFAULTS.entityLombok;
+        entityFluent = cfg.java_entity_fluent ?? DEFAULTS.entityFluent;
+        picusBindings = cfg.picus_bindings ?? [];
+        mybatisSplices = cfg.mybatis_splices ?? [];
         useLocalVar = cfg.java_local_var ?? DEFAULTS.useLocalVar;
         switchWithReturn = cfg.java_switch_with_return ?? DEFAULTS.switchWithReturn;
         spaceInBraces = cfg.java_space_in_braces ?? DEFAULTS.spaceInBraces;
@@ -645,6 +709,8 @@ function createSettingsStore() {
       javaIndentCaseBody = DEFAULTS.javaIndentCaseBody;
       finalParams = DEFAULTS.finalParams;
       useLombokVal = DEFAULTS.useLombokVal;
+      entityLombok = DEFAULTS.entityLombok;
+      entityFluent = DEFAULTS.entityFluent;
       useLocalVar = DEFAULTS.useLocalVar;
       switchWithReturn = DEFAULTS.switchWithReturn;
       spaceInBraces = DEFAULTS.spaceInBraces;

@@ -110,6 +110,15 @@ export interface ProjectInfo {
 /** One node of the project file tree (`bennu_project_tree`). Directories carry
  *  `children`; files carry an empty array. `is_dir` distinguishes a not-yet-expanded
  *  directory (empty `children`) from a file. */
+/** Name of the node the backend appends to the root when the tree hit its size cap. It is a
+ *  stand-in for the entries that were not listed, not a file — mirrors `TRUNCATED_MARKER` in
+ *  `build/project/src/tree.rs`. */
+export const TREE_TRUNCATED_MARKER = '… tree truncated (too many entries)';
+
+export function isTruncationMarker(node: { name: string; is_dir: boolean }): boolean {
+  return !node.is_dir && node.name === TREE_TRUNCATED_MARKER;
+}
+
 export interface TreeNode {
   /** Display name (final path segment). */
   name: string;

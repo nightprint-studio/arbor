@@ -22,8 +22,10 @@ const KEYWORDS = new Set([
   'function', 'let', 'const', 'typeof', 'in', 'of',
 ]);
 
+import { findSql, sqlTokens, type SqlTokenKind } from '$lib/utils/sql-tokens';
+
 /** Escape the four HTML-significant characters so buffer content is never interpreted as markup. */
-function esc(s: string): string {
+export function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;'));
 }
 
@@ -31,6 +33,26 @@ function esc(s: string): string {
  *  between matches (operators, punctuation, whitespace) are emitted escaped, uncoloured. */
 const TOKEN =
   /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(@[A-Za-z_$][\w$.]*)|(\b\d[\w.]*)|([A-Za-z_$][\w$]*)/g;
+
+/** The editor's token class for each SQL piece; plain text takes none. */
+const SQL_CLASS: Record<SqlTokenKind, string | null> = {
+  keyword: 'cm-tok-keyword', string: 'cm-tok-string', number: 'cm-tok-number',
+  comment: 'cm-tok-comment', param: 'cm-tok-field', text: null,
+};
+
+/** Whether `text` opens with a SQL statement (after at most a quote) — a Java string that is a query. */
+export function looksLikeSql(text: string): boolean {
+  const found = findSql(text);
+  return !!found && found.start <= 1;
+}
+
+/** SQL text as HTML: keywords, strings, numbers, comments and `:named` / `?` placeholders. For text that
+ *  is known to be SQL — a line inside a text block, or the contents of a string that reads as a query. */
+export function sqlToHtml(sql: string): string {
+  return sqlTokens(sql)
+    .map((t) => (SQL_CLASS[t.kind] ? '<span class="' + SQL_CLASS[t.kind] + '">' + esc(t.text) + '</span>' : esc(t.text)))
+    .join('');
+}
 
 /** Render one line (or a short block) of code as highlighted HTML using the editor's `cm-tok-*`
  *  classes. Safe to drop straight into `innerHTML` — every character is HTML-escaped. */
@@ -45,7 +67,8 @@ export function highlightToHtml(code: string): string {
     if (comment !== undefined) {
       out += `<span class="cm-tok-comment">${esc(comment)}</span>`;
     } else if (str !== undefined) {
-      out += `<span class="cm-tok-string">${esc(str)}</span>`;
+      // A string that is a query reads as one: its keywords are coloured inside the string colour.
+      out += `<span class="cm-tok-string">${str.startsWith('"') && looksLikeSql(str) ? sqlToHtml(str) : esc(str)}</span>`;
     } else if (anno !== undefined) {
       out += `<span class="cm-tok-annotation">${esc(anno)}</span>`;
     } else if (num !== undefined) {

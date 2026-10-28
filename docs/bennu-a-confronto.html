@@ -221,7 +221,7 @@
 
 <header class="masthead">
   <div class="wrap">
-    <div class="eyebrow">Sesta stesura · solo l'editor · 20 ottobre 2026 · aggiornata il 26 ottobre</div>
+    <div class="eyebrow">Sesta stesura · solo l'editor · 20 ottobre 2026 · aggiornata il 28 ottobre</div>
     <h1>Bennu a confronto</h1>
     <p class="standfirst">
       Bennu contro IntelliJ IDEA Ultimate e Community, Eclipse, VS Code con il Java pack e NetBeans:
@@ -257,6 +257,35 @@
   <div class="wrap">
     <h2>In breve <span class="kicker">tre righe</span></h2>
     <div class="callout green">
+      <b>Aggiornamento del 28 ottobre: provato tutto, tre righe e un asse salgono, e la scheda diventa più severa.</b>
+      <p>Il maintainer ha provato il lavoro di ieri e di oggi: la finestra Database, la validazione delle query (native, MyBatis, countQuery), la generazione di entità,
+        la connessione ricordata per progetto, le correzioni agli strumenti MCP. Si aggiungono: <code>// language=sql</code> anche nei text block, errori del database
+        in rosso nell'editor, un valore per ogni <code>${…}</code> di MyBatis, percorso della chiave e colori per radice in YAML e <code>.properties</code>, SQL colorato e copiabile nei log
+        di esecuzione, Bennu fra gli IDE di Corvus, il selettore <kbd>Ctrl</kbd>+<kbd>Tab</kbd> rifatto, i tooltip tutti dell'app.</p>
+      <ul>
+        <li><b>MyBatis 4 → 5</b>: la scala è relativa («il migliore del gruppo») e provata; in assoluto è un 4, e la nota lo dice.</li>
+        <li><b>Database 3 → 4</b>: evidenziazione, completion, validazione di query ed entità, generazione. Non 5: la struttura, le query e i dati si aprono in Picus, che è un
+          altro prodotto nello stesso workspace; un collegamento «Apri in Picus» dalla finestra Database sarebbe il passo piccolo che manca.</li>
+        <li><b>Trova utilizzi e gerarchie 4 → 5</b>, con la riserva scritta nella riga.</li>
+        <li><b>Funziona davvero 6.5 → 7.0</b>, con la riserva scritta nell'asse.</li>
+        <li><b>Dodici righe nuove</b>, otto delle quali sono cose che gli altri hanno e Bennu no (split, procedura guidata, client HTTP, Docker, sviluppo remoto, collaborazione,
+          assistente AI, sincronizzazione). Totale 154 su 240, il 64%: sulle righe di prima, 138 su 180 (77%).</li>
+        <li><b>Indice simbolico: IntelliJ resta 5, Bennu 4</b>: la nota della riga dice perché.</li>
+      </ul>
+      <p>Non rimisurati oggi: i conteggi di crate, test e pagine della sezione «Quindici settembre → oggi», e i corpora.</p>
+    </div>
+    <div class="callout">
+      <b>Aggiornamento del 27 ottobre: Bennu e Picus si parlano.</b>
+      <p>Con Picus installato, Bennu ha una finestra <b>Database</b> (<code>Alt+D</code>) che usa le connessioni definite in Picus e il suo backend:
+        le entità JPA confrontate con le tabelle (tabella mancante, campo senza colonna, tipo incompatibile); le query native
+        <code>@Query(nativeQuery = true)</code> e gli statement dei mapper MyBatis <em>preparati sul server</em>, quindi tabelle, colonne e join che non esistono
+        tornano con il messaggio del server; la generazione di un'entità da una tabella, evidenziata, con Lombok e accessor fluent opzionali;
+        la completion di tabelle e colonne nei file <code>.sql</code> e dentro le query native. In Picus, il login IAM di Google per Cloud SQL (credenziali di
+        <code>gcloud</code> o chiave di un service account, anche con impersonation) e una CA personalizzata per connessione.
+        <b>Nessuna riga si muove</b>: è scritto e compila, ma non è stato provato su un database vero, e questa pagina non alza un voto sulla fiducia.
+        La riga Database restava a 3 quel giorno; il 28 ottobre, provata, sale a 4 (vedi sopra).</p>
+    </div>
+    <div class="callout green">
       <b>Aggiornamento del 26 ottobre: Bennu è l'IDE di tutti i giorni.</b>
       <p>Dal 20 ottobre quattro commit (<code>78c20eab</code> … <code>64c60d00</code>) e un cambio di condizione: il lavoro che qui era
         «scritto oggi e non compilato» — pannello Changes con il diff di Corvus, visualizzatore condiviso, job «Indexing project» — è
@@ -283,12 +312,12 @@
         dubbio tace, e le famiglie nuove non sono ancora state rimisurate su Commons Lang e h2.
       </div>
       <div>
-        <b>L'affidabilità resta ferma, e la lista dei fix dice perché.</b>
+<b>L'affidabilità sale di mezzo punto, e la lista dei fix dice perché.</b>
         Il lotto del 15 settembre è stato compilato e committato, i test salgono (6.523 Rust, 248 frontend). Ma da allora il
         <code>CHANGELOG</code> registra una dozzina di difetti di base corretti — errori non riportati dentro le lambda,
         «indietro» che non atterra dove eri, due falsi positivi, un avvio che chiedeva un <code>mvn clean package</code> a mano — e il
-        lavoro del 20 ottobre è committato ma senza una misura nuova. «Funziona davvero» resta 6.5. Il distacco da Ultimate sul profilo legacy scende da
-        sette punti a cinque.
+        lavoro del 20 ottobre è committato ma senza una misura nuova. «Funziona davvero» resta 6.5 fino al 27 ottobre, e il 28 sale a 7.0 (vedi l'asse). Il distacco da Ultimate sul profilo legacy, sulle righe di prima, scende da
+        sette punti a tre (82% contro 85%).
       </div>
     </div>
   </div>
@@ -313,7 +342,7 @@
       <table>
         <thead><tr><th>Fonte</th><th>Cosa decide</th><th>Dove non arriva</th></tr></thead>
         <tbody>
-          <tr><td>Il codice al commit <code>978389e6</code> (20 ottobre), più i quattro commit fino a <code>64c60d00</code> (26 ottobre)</td><td>Se una funzione c'è: handler RPC, crate, pagine di documentazione in-app, voci del <code>CHANGELOG</code></td><td>Se funziona sul tuo progetto: i commit del 26 ottobre non sono stati compilati né eseguiti da chi scrive la pagina</td></tr>
+          <tr><td>Il codice al commit <code>978389e6</code> (20 ottobre), più i quattro commit fino a <code>64c60d00</code> (26 ottobre), più il lavoro del 27 e 28 ottobre, <b>non ancora committato</b> e provato dal maintainer</td><td>Se una funzione c'è: handler RPC, crate, pagine di documentazione in-app, voci del <code>CHANGELOG</code></td><td>Se funziona sul tuo progetto: i commit del 26 ottobre non sono stati compilati né eseguiti da chi scrive la pagina</td></tr>
           <tr><td>Il <code>CHANGELOG</code>, sezione <code>[Unreleased]</code>, confrontato voce per voce con quello del 15 settembre</td><td>Quando una funzione è arrivata rispetto alla stesura precedente</td><td>—</td></tr>
           <tr><td>I conteggi dal repository: crate, test, pagine, tool MCP, <code>git diff --shortstat</code>, tutti con lo stesso metodo di <code>git grep</code> sul commit di allora e su quello di oggi</td><td>Quanto è cresciuto, in numeri</td><td>Quanto regge: un test scritto non è un test passato</td></tr>
           <tr><td>Le misure registrate sui corpora (Commons Lang, h2)</td><td>Il refactoring, in numeri</td><td>Non rifatte: le famiglie di errori di compilazione arrivate dopo non sono state misurate sugli stessi file</td></tr>
@@ -382,7 +411,7 @@
             <td class="n2 own">8.5<small>invariato</small></td>
             <td class="n2 own">8.5<small class="up">era 8.0</small></td>
             <td class="n2 own">8.5<small>invariato</small></td>
-            <td class="n2 own">6.5<small>invariato</small></td>
+            <td class="n2 own">7.0<small class="up">era 6.5</small></td>
             <td class="n2 own">9.5<small>invariato</small></td>
             <td class="own">Primo sullo stack legacy; sul generalista davanti a Eclipse, dietro Community solo per le righe a zero</td>
           </tr>
@@ -395,13 +424,13 @@
       </table>
     </div>
 
-    <div class="chart" role="img" aria-label="Bennu, voti in decimi dal 15 settembre a oggi: stack legacy 9.0 invariato, generalista 8.5 invariato, UI/UX da 8.0 a 8.5, estensibilità 8.5 invariato, funziona davvero 6.5 invariato">
+    <div class="chart" role="img" aria-label="Bennu, voti in decimi dal 15 settembre a oggi: stack legacy 9.0 invariato, generalista 8.5 invariato, UI/UX da 8.0 a 8.5, estensibilità 8.5 invariato, funziona davvero da 6.5 a 7.0">
       <div class="chart-title">Bennu, 15 settembre → 20 ottobre</div>
       <div class="crow"><span class="lab">Stack legacy</span><div class="track"><span class="prev" style="width:90%"></span><span class="now" style="width:90%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">9.0 → <b>9.0</b></span></div>
       <div class="crow"><span class="lab">Java generalista</span><div class="track"><span class="prev" style="width:85%"></span><span class="now" style="width:85%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">8.5 → <b>8.5</b></span></div>
       <div class="crow"><span class="lab">UI/UX</span><div class="track"><span class="prev" style="width:80%"></span><span class="now" style="width:85%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">8.0 → <b>8.5</b> <span class="up">+0.5</span></span></div>
       <div class="crow"><span class="lab">Estensibilità</span><div class="track"><span class="prev" style="width:85%"></span><span class="now" style="width:85%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">8.5 → <b>8.5</b></span></div>
-      <div class="crow"><span class="lab">Funziona davvero</span><div class="track"><span class="prev" style="width:65%"></span><span class="now" style="width:65%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">6.5 → <b>6.5</b></span></div>
+      <div class="crow"><span class="lab">Funziona davvero</span><div class="track"><span class="prev" style="width:65%"></span><span class="now" style="width:70%"></span><span class="grid" style="left:20%"></span><span class="grid" style="left:40%"></span><span class="grid" style="left:60%"></span><span class="grid" style="left:80%"></span></div><span class="val">6.5 → <b>7.0</b> <span class="up">+0.5</span></span></div>
       <div class="scale"><span></span><div class="ticks"><span style="left:0">0</span><span style="left:20%">2</span><span style="left:40%">4</span><span style="left:60%">6</span><span style="left:80%">8</span><span style="left:100%">10</span></div><span></span></div>
       <div class="chart-key"><span><i style="background:var(--line)"></i>15 settembre</span><span><i style="background:var(--accent)"></i>oggi</span></div>
     </div>
@@ -442,7 +471,7 @@
         <p><b>Non 9:</b> l'ecosistema dei plugin resta quello di un maintainer solo.</p>
       </article>
       <article class="axis">
-        <header><b>Funziona davvero</b><span class="flat">6.5 = 6.5</span></header>
+        <header><b>Funziona davvero</b><span class="up">6.5 → 7.0</span></header>
         <p>A favore: il lotto del 15 settembre è stato compilato e committato (i commit del 19 ottobre si chiamano «many compilation fix»);
           i test Rust passano da 6.110 a 6.523 e quelli frontend da 123 a 248; un avvio non richiede più un <code>mvn clean package</code> fatto
           a mano, e un classpath che non si risolve viene detto invece di partire lo stesso.</p>
@@ -454,6 +483,11 @@
           <code>CHANGELOG</code> ci sono un falso positivo (un commento prima di <code>this(…)</code> letto come istruzione), uno switch su <code>Integer</code> o <code>String</code>
           con etichette enum non segnalato, un build che falliva su un <code>~/.m2</code> riempito da IntelliJ, un run che moriva su una dipendenza
           che l'editor risolveva. Tutti corretti, tutti emersi usando (e non tutti datati: la data certa è solo quella dei commit). Il voto si muove quando quella lista si ferma, non quando si allunga con ritocchi.</p>
+        <p><b>28 ottobre: 7.0, un mezzo punto, con una riserva.</b> Il maintainer ha provato tutto il lavoro del giorno — la finestra Database, la validazione delle query,
+          la generazione di entità, le correzioni agli strumenti MCP — e lo usa come IDE da otto giorni: è la prova che il 26 ottobre mancava, e la ragione per muoversi. La riserva:
+          anche oggi sono emersi difetti reali usando — un conteggio «no usages» su un campo di una classe Lombok, una derived query con <code>_</code> segnalata come errata,
+          una lista di query che validava il testo di prima di una modifica. Sono corretti e tutti nel codice scritto negli ultimi giorni, non nelle basi: per questo mezzo punto e non uno.
+          Se la prossima settimana ne emerge uno nelle basi, torna a 6.5.</p>
       </article>
       <article class="axis">
         <header><b>Peso e avvio</b><span class="flat">9.5 = 9.5</span></header>
@@ -466,17 +500,17 @@
 </section>
 <section id="scheda">
   <div class="wrap">
-    <h2>La scheda <span class="kicker">36 aree · 6 editor · da 0 a 5</span></h2>
-    <p>Le 35 aree del 15 settembre, più una: la sicurezza delle dipendenze. Sotto il voto di Bennu trovi quello del
-      15 settembre quando è cambiato; «nuova» marca la riga che allora non c'era.</p>
+    <h2>La scheda <span class="kicker">48 aree · 6 editor · da 0 a 5</span></h2>
+    <p>Le 35 aree del 15 settembre, la sicurezza delle dipendenze, e dal 28 ottobre dodici righe nuove — otto delle quali sono cose che
+      altri editor hanno e Bennu no (voto 0 o 1). Sotto il voto di Bennu trovi quello del 15 settembre quando è cambiato; «nuova» marca la riga che allora non c'era.</p>
 
     <div class="callout blue">
-      <b>Sulle stesse 35 righe del 15 settembre: da 128 a 132 su 175, dal 73% al 75%.</b>
-      <p>Quattro punti da quattro righe; la quarta, MyBatis da 3 a 4, è del 26 ottobre. <b>Errori di compilazione</b> da 3 a 4: le famiglie elencate nel <code>CHANGELOG</code> coprono ora
-        gran parte di quello che javac rifiuta nel Java di tutti i giorni; manca la misura su Commons Lang e h2, ed è per questo che
-        non è 5. <b>Local history</b> da 4 a 5: oltre a file e cartelle c'è la cronologia per selezione, che IntelliJ ha da sempre.
-        <b>Ergonomia dell'editor</b> da 3 a 4: gutter delle modifiche, barra Trova/Sostituisci, menu del tasto destro raggruppato; restano
-        multi-caret e bookmark. <b>MyBatis</b> da 3 a 4: la navigazione parte anche dal mapper, e SQL e parametri sono colorati. Con la riga nuova, 135 su 180: il 75%.</p>
+      <b>Sulle stesse 35 righe del 15 settembre: da 128 a 135 su 175, dal 73% al 77%.</b>
+      <p>Sette punti da sei righe. <b>Errori di compilazione</b> da 3 a 4 e <b>Local history</b> da 4 a 5 (come prima); <b>Ergonomia dell'editor</b> da 3 a 4;
+        <b>MyBatis</b> da 3 a 5, <b>Database</b> da 3 a 4 e <b>Trova utilizzi e gerarchie</b> da 4 a 5 sono del 28 ottobre e le spiega la sezione «Cosa è salito».
+        Con le righe nuove la scheda ha 48 aree e 240 punti: Bennu ne prende 154, il 64%. La percentuale <b>scende</b> perché la scheda è cresciuta
+        con funzioni che Bennu non ha — client HTTP, Docker, sviluppo remoto, collaborazione, assistente AI, sincronizzazione, editor affiancati, procedura
+        guidata per un nuovo progetto — e non perché Bennu sia peggiorato.</p>
     </div>
 
     <div class="legend">
@@ -488,10 +522,11 @@
     <div class="tw"><table id="board" class="board"><caption class="fine" style="caption-side:bottom;text-align:left;padding:10px 12px">Totali, subtotali e percentuali sono calcolati dalla pagina sulle righe che vedi, non scritti a mano.</caption></table></div>
 
     <div class="callout">
-      <b>Senza pesi, Bennu supera IntelliJ Community di dodici punti — su righe ancora opposte.</b>
-      <p>Il 15 settembre erano sei. Community continua a prendere i suoi punti sul Java di tutti i giorni: refactoring,
-        debugger, coverage, Gradle. Bennu li prende dove Community ha zero — Struts e JSP, Jakarta EE, i controlli sui
-        framework, gli encoding — e da questa stesura si avvicina anche sugli errori di compilazione. La sezione successiva
+      <b>Senza pesi: sulle 35 righe di allora Bennu supera IntelliJ Community di tredici punti; sulle 48 di oggi è a tre punti sotto.</b>
+      <p>Il 15 settembre erano sei, poi dodici, ora tredici sulle righe di allora. Community continua a prendere i suoi punti sul Java di tutti i giorni: refactoring,
+        debugger, coverage, Gradle — e ora anche sulle righe nuove che Bennu non ha, dove Community ha spesso 3 o 4 (split, collaborazione,
+        sincronizzazione, assistente AI). Bennu li prende dove Community ha zero — Struts e JSP, Jakarta EE, i controlli sui framework, gli encoding,
+        il database. È un risultato onesto: aggiungere righe che mancano <em>deve</em> abbassare il totale. La sezione successiva
         pesa le righe, perché due strumenti con totali vicini e poche righe in comune dicono poco.</p>
     </div>
   </div>
@@ -518,9 +553,10 @@
     </div>
     <div class="callout blue">
       <b>Cosa dicono.</b>
-      <p>Per il monolite legacy Bennu resta secondo, e il distacco da Ultimate scende da sette punti a cinque: 80% contro
-        85%. Per il servizio Spring Boot resta terzo, al 73%, e Community scende da sei punti avanti a tre: gli errori di
-        compilazione pesano ×3 su un servizio nuovo, ed è la riga che si è mossa.</p>
+      <p>Per il monolite legacy Bennu resta secondo: 74% contro l'86% di Ultimate e il 65% di Community. Per il servizio Spring Boot resta terzo, al 64%,
+        dietro Ultimate (91%) e Community (68%). Le percentuali sono più basse di quelle del 26 ottobre (80% e 73%) per una ragione sola: le dodici righe
+        nuove, in buona parte a 0 o 1 per Bennu, pesano nelle due squadre — soprattutto l'assistente AI, il client HTTP e Docker nel servizio nuovo.
+        Sulle 36 righe di prima, con i voti di oggi, il monolite è all'82% e il servizio al 75%: <b>Bennu è migliorato, la scheda è diventata più severa</b>.</p>
       <p>Il dato utile è lo stesso di allora: le funzioni sui framework non spostano più la distanza da Ultimate, perché su
         quelle Bennu è già davanti. La spostano le righe generaliste a zero o a tre — Change Signature, debugger, coverage —
         e il tempo.</p>
@@ -713,6 +749,17 @@
         <tr><td>Spring Data: query derivate dal nome del metodo, validate contro le property</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c n">✗</td></tr>
         <tr><td>DTO Lab: payload JSON provato con il Jackson e la Bean Validation del progetto</td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
         <tr><td>Generazione di entità JPA in stile JPA Buddy</td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Entità generate da una tabella, con Lombok e accessor fluent a scelta <span class="tag new">27 ott</span><small class="why">Ora è una finestra, con la scelta della tabella (nascondendo quelle che hanno già un'entità), del package fra quelli in uso, e switch per Lombok, fluent, <em>immutable</em>, associazioni, id generati; per ogni chiave esterna fetch, cascade e <code>@OnDelete</code>. Le associazioni vanno dopo tutte le colonne. L'ultima scelta diventa il default; l'anteprima è evidenziata. Una chiave composta resta colonne semplici; mancano gli enum.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Entità JPA confrontate con lo schema vivo: tabella, colonne, tipi <span class="tag new">27 ott</span><small class="why">Provato dal maintainer il 28 ottobre su un suo database. I nomi si confrontano senza distinguere maiuscole e underscore; la lista si rilegge ogni volta che si apre la scheda.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Query native controllate contro lo schema: tabelle, colonne, join <span class="tag new">27 ott</span><small class="why">Il server prepara la query senza eseguirla e il suo messaggio è la segnalazione. Ogni «Check» rilegge la query com'è adesso, e si può ripetere. I parametri <code>:nome</code> e <code>:#{…}</code> si controllano come valori.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Statement MyBatis controllati contro lo schema <span class="tag new">27 ott</span><small class="why">I tag dinamici sono appiattiti in un'espansione possibile (ogni <code>&lt;if&gt;</code>, il primo <code>&lt;when&gt;</code>), i <code>#{…}</code> diventano <code>NULL</code>; un <code>${…}</code> si controlla se gli si dà un valore, altrimenti, come un include da un altro mapper, non si controlla e lo dice. Si prova una sola espansione dei rami dinamici.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Completion di tabelle e colonne in <code>.sql</code> e nelle query native, dal database collegato <span class="tag new">27 ott</span><small class="why">Anche nel testo degli statement di un mapper MyBatis, e le abbreviazioni SQL di Picus nei file <code>.sql</code>. Alias risolti dal testo con espressioni regolari, non da un parser: una subquery annidata o una CTE complessa può non completare. Le abbreviazioni non valgono dentro una stringa Java.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>La connessione al database è ricordata per progetto <span class="tag new">28 ott</span><small class="why">La prima volta si sceglie a mano; poi il progetto la riapre da sé, e un progetto senza abbinamento non valida contro nessun database — quello del progetto precedente non resta attaccato.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Query native in rosso nell'editor, dove il server indica l'errore <span class="tag new">28 ott</span><small class="why"><code>@Query</code> e la sua <code>countQuery</code>, <code>createNativeQuery</code>, <code>@NamedNativeQuery</code>, ogni stringa sotto <code>// language=sql</code>, anche nei text block. Una query scritta come <code>"…" + "…"</code> non si controlla.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Un valore per ogni <code>${…}</code> di MyBatis, perché lo statement si possa controllare <span class="tag new">28 ott</span></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Conteggio degli usi di un campo che somma i getter e i setter generati da Lombok <span class="tag new">28 ott</span><small class="why">Corretto oggi: prima un campo di una classe <code>@Data</code> diceva «no usages» mentre la lista degli usi mostrava i chiamanti.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>«Add attribute» propone le colonne della tabella che nessun campo mappa <span class="tag new">28 ott</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Il confronto entità ↔ tabella non giudica un campo con <code>@Convert</code>, un embedded, la colonna di un join <span class="tag new">28 ott</span><small class="why">E elenca le colonne che nessun campo mappa, anche su entità con relazioni; tace quando un embedded o un join dal nome ignoto potrebbe possederle.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
       </tbody>
     </table></div>
 
@@ -799,6 +846,32 @@
         <tr><td>Command palette: nuove voci per template, albero, progetto; scorciatoie aggiunte</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr class="chg"><td>Superficie MCP nativa: 32 tool di Bennu, 45 in tutta la suite, con permessi per prodotto, percorso e azione e autorizzazioni a tempo <span class="tag">allargata</span><small class="why">Corvus legge stato, storia e blame e committa ciò che è in stage — mai push né amend; Tyto registra video. Un'autorizzazione sostituisce la conferma, mai un rifiuto, e vive solo in memoria.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c y">✓</td><td class="c n">✗</td></tr>
         <tr><td>Plugin di terze parti, marketplace</td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Percorso della chiave nella barra di stato per YAML e <code>.properties</code>, chiavi colorate per radice <span class="tag new">28 ott</span><small class="why">Tutti i livelli sopra il cursore, anche gli indici di una lista, ognuno cliccabile. IntelliJ ha il percorso; il colore per radice è solo di Bennu.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>SQL nei log di esecuzione: colorato, e un clic lo copia <span class="tag new">28 ott</span><small class="why">Riconosciuto dalla forma (<code>select … from</code> con colonne o segnaposto, <code>insert into … values</code>, …), non da una parola: «Select a file from the list» non si colora. Solo gli statement su una riga.</small></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Tooltip tutti dell'app, nessuno del browser, nemmeno nel gutter <span class="tag new">28 ott</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Selettore dei progetti aperti (<kbd>Ctrl</kbd>+<kbd>Tab</kbd>) con la selezione che scorre fra le schede <span class="tag new">28 ott</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Bennu fra gli IDE di Corvus: «Open in Bennu» dalla palette, dai worktree e dall'explorer <span class="tag new">28 ott</span></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Quello che gli altri hanno e Bennu no</h3>
+    <p>Righe aggiunte il 28 ottobre per completare il quadro: tutte a ✗ o ◐ per Bennu, cercate nel sorgente e non trovate. Entrano anche nella scheda, e abbassano la
+      percentuale di Bennu — è quello che devono fare.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
+      <tbody>
+        <tr class="chg"><td>Editor affiancati (split orizzontale e verticale) <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Nuovo progetto da procedura guidata: Spring Initializr, archetype Maven <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Client HTTP: file <code>.http</code> con variabili, esecuzione dal gutter <span class="tag new">28 ott</span><small class="why">Bennu ha il pannello degli endpoint, non un client.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Docker e Kubernetes: compose, immagini, container, cluster <span class="tag new">28 ott</span><small class="why">Bennu colora il Dockerfile e nient'altro.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Sviluppo remoto: SSH, dev container, WSL <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Collaborazione dal vivo nello stesso file <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Assistente AI dentro l'editor: chat, completion <span class="tag new">28 ott</span><small class="why">Bennu si lascia pilotare da un agente esterno (tool MCP); non ne ha uno dentro.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Sincronizzazione delle impostazioni fra macchine <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Iniezione di linguaggio nelle stringhe oltre a SQL e JPQL: JSON, regex, HTML <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Diagramma delle entità e finestra Persistence per JPA <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Console di query, griglia dei dati e albero dello schema nella stessa finestra del codice <span class="tag new">28 ott</span><small class="why">In Bennu si aprono in Picus, un altro prodotto dello stesso workspace.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Raggruppamento degli usi per tipo (lettura, scrittura, commento, stringa) <span class="tag new">28 ott</span><small class="why">Non trovato nel sorgente; se lo usi e ti manca, «Trova utilizzi» torna a 4.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
       </tbody>
     </table></div>
   </div>
@@ -873,8 +946,11 @@
         <tr><td><b>Local history</b></td><td class="n2">4 → 5</td><td>La voce <em>Local History for a selection</em> nel <code>CHANGELOG</code> e <code>BennuLocalHistoryModal.svelte</code>. IntelliJ ha la stessa funzione: la riga passa dal quasi al pari.</td></tr>
         <tr><td><b>Ergonomia dell'editor</b></td><td class="n2">3 → 4</td><td>Il gutter delle modifiche (voce <em>Change markers</em>, con <code>change_markers_by_path</code> sul backend di Corvus), la barra Trova/Sostituisci, il menu del tasto destro raggruppato. Non 5: multi-caret e bookmark mancano.</td></tr>
         <tr><td><b>Sicurezza delle dipendenze</b></td><td class="n2">nuova · 3</td><td>La voce <em>Known vulnerabilities as warnings in a pom</em>. Non 4: è opt-in e vale solo per le dipendenze a versione fissata.</td></tr>
-        <tr><td><b>MyBatis</b></td><td class="n2">3 → 4</td><td>Le voci del <code>CHANGELOG</code> del 26 ottobre su Ctrl+B / Ctrl+clic dal mapper, gli usi di un <code>resultMap</code> o <code>sql</code>, la colorazione dell'XML e dell'SQL. Non 5: è scritto da leggere il changelog, non misurato su un progetto MyBatis reale.</td></tr>
-        <tr><td><b>Assi</b></td><td class="n2">+0.5 × 1</td><td>Solo la UI/UX: gutter, blame, cronologia, Changes con il diff accanto, barra Trova/Sostituisci. Gli altri cinque assi non si muovono, e le pagine sopra dicono perché.</td></tr>
+        <tr><td><b>MyBatis</b></td><td class="n2">3 → 4 → 5</td><td>26 ottobre, a 4: le voci del <code>CHANGELOG</code> su Ctrl+B / Ctrl+clic dal mapper, gli usi di un <code>resultMap</code> o <code>sql</code>, XML e SQL colorati. 28 ottobre, a 5: gli statement controllati contro il database (<code>mybatis_sql.rs</code>, <code>mybatis_check.rs</code>), un valore per ogni <code>${…}</code>, completion di tabelle e colonne nel testo dello statement — e il maintainer li ha provati. <b>5 perché la scala è relativa</b> («il migliore del gruppo», con il resto del gruppo a 1 o 2); in assoluto è un 4, e la nota della riga lo scrive.</td></tr>
+        <tr><td><b>Database</b></td><td class="n2">3 → 4</td><td><code>BennuPicusPanel.svelte</code> e le schede, <code>picus.svelte.ts</code>, <code>bennu_persistence_model</code>, <code>bennu_native_sql_sites</code> sul backend, la connessione ricordata per progetto nella configurazione di Bennu. Provato dal maintainer il 28 ottobre. Non 5: la struttura, le query e i dati stanno in Picus, non nella stessa finestra del codice.</td></tr>
+        <tr><td><b>Trova utilizzi e gerarchie</b></td><td class="n2">4 → 5</td><td>Le matrici di dettaglio hanno tutte e tre le funzioni a ✓ da prima, e il conteggio sopra le dichiarazioni somma ora i getter e i setter di Lombok (<code>usage_marks.rs</code>). <b>Riserva:</b> il raggruppamento degli usi per tipo di IntelliJ non è nel sorgente; se serve, la riga torna a 4.</td></tr>
+        <tr><td><b>Righe nuove</b></td><td class="n2">+12 aree</td><td>Dodici righe che il confronto non aveva, otto delle quali con Bennu a 0 o 1 (split, nuovo progetto, client HTTP, Docker, sviluppo remoto, collaborazione, assistente AI, sincronizzazione). I voti degli altri IDE vengono da conoscenza generale e non sono stati riverificati su un'installazione; chi lo conosce meglio può correggerli nel sorgente della pagina.</td></tr>
+        <tr><td><b>Assi</b></td><td class="n2">+0.5 × 2</td><td>UI/UX: gutter, blame, cronologia, Changes con il diff accanto, barra Trova/Sostituisci. «Funziona davvero» da 6.5 a 7.0, con la riserva scritta nell'asse. Gli altri quattro assi non si muovono.</td></tr>
       </tbody>
     </table></div>
 
@@ -900,10 +976,11 @@
     <div class="tw"><table>
       <thead><tr><th>Riga o asse</th><th>Oggi</th><th>Cosa servirebbe</th></tr></thead>
       <tbody>
-        <tr><td><b>Funziona davvero</b></td><td class="n2">6.5</td><td>I test verdi sul lavoro del 20 ottobre, e una settimana d'uso quotidiano in cui i difetti li trovino i test prima di te.</td></tr>
+        <tr><td><b>Funziona davvero</b></td><td class="n2">7.0</td><td>Una settimana in cui nessun difetto emerge nelle basi (i difetti nel codice scritto negli ultimi giorni non contano contro): quello è il passo verso 7.5. I test verdi sul lavoro del 20 ottobre restano da rieseguire.</td></tr>
         <tr><td><b>UI/UX</b></td><td class="n2">8.5</td><td>Multi-caret, bookmark, e il diff come vista affiancata nell'editor invece che in un pannello. E lo stesso popup in Merula e Studio, che hanno ancora la copia vecchia.</td></tr>
         <tr><td><b>Refactoring</b> (scheda)</td><td class="n2">4</td><td>Change Signature, Introduce Parameter, estrai interfaccia e superclasse. Nessuna delle quattro è nel sorgente.</td></tr>
         <tr><td><b>Errori di compilazione</b></td><td class="n2">4</td><td>La misura a zero falsi positivi su Commons Lang e h2 delle famiglie nuove, e la dominance dei pattern. Il dataflow completo resta fuori per principio: senza un motore vero produce falsi positivi.</td></tr>
+        <tr><td><b>Database</b> (scheda)</td><td class="n2">4</td><td>Per il 5: un collegamento «Apri in Picus» dalla finestra Database (il passo piccolo); poi una console di query e i risultati dentro Bennu, l'albero dello schema, da <code>@Table</code> alle righe, da uno statement MyBatis all'esecuzione con i parametri; il controllo dei nomi di campo dentro una JPQL contro il modello; gli enum nella generazione di entità; le query scritte come <code>"…" + "…"</code>. Provato su Postgres; Cloud SQL con IAM e Oracle (che non ha ancora un driver) no.</td></tr>
         <tr><td><b>Gradle, Ant, altri server</b></td><td class="n2">0</td><td>Un modello Gradle. Non serve al target legacy; è l'unico zero su una riga che un team generalista apre ogni giorno.</td></tr>
         <tr><td><b>Coverage e profiling</b></td><td class="n2">0</td><td>La coverage letta da <code>jacoco.xml</code> nel gutter: la tool window Maven riconosce già il plugin, manca leggere il report. Vale anche per Rust.</td></tr>
         <tr><td><b>Debugger</b></td><td class="n2">3</td><td>Hot-swap delle classi (<code>RedefineClasses</code> è nel protocollo JDWP, non nel crate), eval di espressioni Java, attach remoto.</td></tr>
@@ -916,6 +993,13 @@
     <h3>Difetti aperti, con il loro numero</h3>
     <div class="callout">
       <ul>
+        <li><b>Il lavoro Bennu ↔ Picus è provato dal maintainer, non dai test.</b> Il 28 ottobre lo ha usato su un database suo; i test scritti per il rendering dei mapper,
+          l'estrazione delle query, le derived query con <code>_</code> e i file di credenziali Google non sono stati lanciati da chi scrive la pagina. Il login IAM di Google per Cloud SQL
+          non è stato provato. Il confronto entità ↔ tabella taceva già sui campi convertiti, embedded e sulle colonne dei join; sui nomi di join di default resta una stima.</li>
+        <li><b>Difetti emersi il 28 ottobre usando, tutti corretti:</b> «no usages» su un campo di una classe Lombok; una derived query con <code>_</code> (<code>findById_Codice</code>) segnalata come errata;
+          una lista di query che validava il testo di prima di una modifica; uno statement MyBatis che risultava valido senza essere stato chiesto al server; il quadratino bianco e la scrollbar doppia
+          dell'editor; l'anteprima della scrollbar con i colori sbagliati sui pom.</li>
+        <li><b>Il conteggio dei riferimenti sul backend è fatto, non provato.</b> Chiudere Picus non spegne più il suo backend finché una finestra lo usa, e chiudere l'ultima lo spegne. La finestra che lo prende in prestito è registrata per etichetta: un prodotto aperto come tab nel contenitore tiene il backend finché il contenitore resta aperto.</li>
         <li><b>Il lavoro del 20 ottobre è committato, ma senza una verifica di questa pagina.</b> Il pannello Changes riscritto sul visualizzatore dei diff di Corvus, il
           visualizzatore spostato in <code>shared/internal/diff/</code> (cinque componenti, quattro file che li importano),
           il nuovo handler <code>get_workdir_file_diff</code> in Corvus, <code>git_repo_root_by_path</code> al posto di
@@ -940,7 +1024,9 @@
     <h2>Prossimi passi <span class="kicker">in ordine di ritorno</span></h2>
     <p>L'ordine è il punto: ogni voce è messa dove sta per quanto sposta rispetto a quanto costa.</p>
     <ol class="next">
-      <li><div><b>Far girare i test sul lavoro del 20 ottobre</b><span>Il pannello Changes con il diff accanto è la voce che ha mosso la UI/UX: se non regge, l'asse torna a 8.0. L'uso quotidiano lo sta già mettendo alla prova.</span></div></li>
+      <li><div><b>«Apri in Picus» dalla finestra Database</b><span>Il passo piccolo che separa il 4 dal 5 della riga Database: struttura, query e dati restano in Picus, ma a un clic e sulla stessa connessione.</span></div></li>
+      <li><div><b>Editor affiancati</b><span>La più frequente delle righe nuove a 0: chiunque confronti due file la usa. Con il multi-caret e i bookmark, fa il pacchetto «editor» della UI/UX.</span></div></li>
+            <li><div><b>Far girare i test sul lavoro del 20 ottobre</b><span>Il pannello Changes con il diff accanto è la voce che ha mosso la UI/UX: se non regge, l'asse torna a 8.0. L'uso quotidiano lo sta già mettendo alla prova.</span></div></li>
       <li><div><b>Rimisurare gli errori di compilazione su Commons Lang e h2</b><span>Sono le famiglie che hanno mosso la riga da 3 a 4. Una misura a zero falsi positivi la rende difendibile; un solo falso positivo la riporta giù.</span></div></li>
       <li><div><b>Change Signature, poi Introduce Parameter</b><span>Il refactoring frequente che manca ancora. Con questi due, più estrai interfaccia, la riga del refactoring ha le carte per il 5.</span></div></li>
       <li><div><b>Multi-caret e bookmark</b><span>Piccoli, frequenti, ed è quello che separa l'8.5 della UI/UX dal 9.</span></div></li>
@@ -986,12 +1072,13 @@
   //  peso «monolite legacy», peso «servizio Spring Boot»]
   const SECTIONS = [
     ['Intelligenza del codice Java', [
-      ['Indice simbolico del progetto', 'Sorgenti e jar in un indice proprio; il goto in una dipendenza apre il -sources.jar o uno stub decompilato.', 4, 4, 5, 5, 4, 4, 4, 2, 2],
-      ['Trova utilizzi e gerarchie', 'Conteggi sopra ogni dichiarazione; gli entry point dei framework non risultano mai «inutilizzati».', 4, 4, 5, 5, 4, 3, 3, 2, 2],
+      ['Indice simbolico del progetto', 'Sorgenti e jar in un indice proprio; il goto in una dipendenza apre il -sources.jar o uno stub decompilato. Perché IntelliJ ha 5: il suo indice copre ogni linguaggio (Java, Kotlin, XML, SQL, JavaScript) con stub aggiornati a ogni tasto e li condivide con tutte le funzioni; quello di Bennu copre Java, XML e properties e si ricostruisce per modulo, in background.', 4, 4, 5, 5, 4, 4, 4, 2, 2],
+      ['Trova utilizzi e gerarchie', 'Conteggi sopra ogni dichiarazione, compresi i getter e setter che Lombok genera; gli entry point dei framework non risultano mai «inutilizzati»; gerarchia di chiamate, di tipi e dei membri. Non verificato nel sorgente: il raggruppamento degli usi per tipo (lettura, scrittura, commento) di IntelliJ. Se lo usi e ti manca, la riga torna a 4.', 4, 5, 5, 5, 4, 3, 3, 2, 2],
       ['Completion', 'Tipo atteso con sottotipi e preselezione, postfix tipati e per versione, method reference, nome della dichiarazione, template tuoi. Manca la statement completion.', 5, 5, 5, 5, 3, 4, 3, 2, 3],
       ['Refactoring', 'Sedici al caret più rename e safe delete, ricompilati su Commons Lang e h2; cure che selezionano il segnaposto. Mancano Change Signature ed estrai interfaccia.', 4, 4, 5, 5, 4, 2, 3, 2, 3],
       ['Errori di compilazione mentre scrivi', 'Bennu non compila e nel dubbio tace, ma le famiglie sono ormai quelle di javac per il Java di tutti i giorni: definite assignment, eccezioni checked, lambda, switch esaustivi, generics. Eclipse e VS Code girano su ECJ, NetBeans su javac.', 3, 4, 5, 5, 5, 5, 5, 2, 3],
       ['Ispezioni Java oltre il compilatore', 'Bug probabili sul Java puro. IntelliJ ne ha centinaia; Bennu una manciata, dataflow solo sui campi final.', 2, 2, 5, 5, 3, 2, 3, 1, 2],
+      ['Iniezione di linguaggio nelle stringhe', '// language=sql e @Language: SQL e JPQL colorati, completati e (SQL) controllati sul database, anche nei text block. Niente JSON, regex o HTML nelle stringhe, e niente refactoring dentro la stringa.', null, 3, 5, 3, 1, 2, 2, 2, 2],
     ]],
     ['Stack legacy e framework', [
       ['Struts 2, JSP, taglib, OGNL, Tiles', 'Action → frammento → vista → property OGNL come un grafo solo, più struts.properties e la DTD della versione più vicina.', 5, 5, 3, 0, 2, 1, 2, 3, 0],
@@ -1000,7 +1087,8 @@
       ['Bean Validation e Jackson', 'Vincoli che il motore non può validare, messaggi controllati sul bundle, @JsonCreator, forma JSON dei DTO, DTO Lab.', 4, 4, 3, 1, 1, 1, 2, 0.5, 2],
       ['Jakarta EE e JAX-RS', 'Bean CDI ed EJB con le iniezioni, servlet in conflitto, risorse JAX-RS negli endpoint, @PathParam controllato.', 4, 4, 5, 0, 3, 1, 4, 2, 0.5],
       ['MapStruct', 'Path di @Mapping controllati, completati e navigabili; target non mappati; pannello Mappers.', 4, 4, 4, 4, 1, 1, 1, 0.5, 2],
-      ['MyBatis', 'Statement ↔ metodo dell\'interfaccia nei due sensi, include, result map; dal mapper si naviga a tipi, extends, select e property; SQL e parametri colorati, ${} segnalato.', 3, 4, 2, 2, 1, 1, 1, 2, 0.5],
+      ['MyBatis', 'Statement ↔ metodo dell\'interfaccia nei due sensi, include, result map; dal mapper si naviga a tipi, extends, select e property; SQL e parametri colorati; statement controllati contro il database, con un valore per ogni ${}. La scala è relativa («il migliore del gruppo»): in assoluto resta un 4 — gli statement dinamici si provano in una sola espansione, non si eseguono.', 3, 5, 2, 2, 1, 1, 1, 2, 0.5],
+      ['JPA e HQL', 'Entità, repository, derived query controllate, JPQL colorato e completato con i parametri controllati, gutter entità ↔ repository, generatori. I nomi di campo dentro una JPQL si controllano contro il modello dal 28 ottobre (scritto, non ancora provato: il voto non si muove finché non lo è); le native si controllano contro il database. Non ha il diagramma delle entità né una finestra Persistence.', null, 3, 5, 1, 4, 1, 3, 2, 3],
       ['Lombok', 'Annotazioni lette per quello che generano; solo quelle che generano un nome lo coprono. IntelliJ lo include anche in Community.', 4, 4, 5, 5, 4, 4, 3, 1, 2],
       ['File di configurazione degli strumenti', 'lombok.config, junit-platform.properties, struts.properties: completion, hover e gate sulla versione risolta.', 5, 5, 3, 2, 1, 1, 1, 1, 1],
       ['XML con XSD e DTD', 'Schemi scaricati e in cache; la versione più vicina risponde quando l\'esatta non c\'è, con i controlli spenti.', 4, 4, 4, 4, 4, 3, 3, 2, 0.5],
@@ -1014,7 +1102,7 @@
       ['Test', 'Catalogo, run in streaming, ▶ nell\'editor, classi che nessun engine eseguirà, test generati dai vincoli.', 4, 4, 5, 5, 4, 4, 4, 1, 2],
       ['Librerie di test', 'Mockito e AssertJ controllati mentre scrivi, con le cure; conversione da JUnit ad AssertJ.', 4, 4, 4, 4, 1, 1, 1, 1, 2],
       ['Coverage e profiling', 'Assenti entrambi; il plugin jacoco è solo riconosciuto.', 0, 0, 5, 3, 3, 2, 4, 1, 1],
-      ['Database', 'Un prodotto fratello nello stesso workspace, con la sua intelligenza SQL.', 3, 3, 5, 0, 3, 3, 3, 1, 1],
+      ['Database', 'Con Picus installato, un prodotto fratello nello stesso workspace: connessione ricordata per progetto; entità e query native (anche la countQuery) confrontate con lo schema vivo, con l\'errore del server in rosso nell\'editor; MyBatis; colore, completion e abbreviazioni SQL; generazione di entità; completamento delle colonne in «Add attribute». Chi vuole la struttura, le query e i dati apre Picus: non c\'è una console né un albero dello schema dentro Bennu. Non 5: IntelliJ li ha nella stessa finestra.', 3, 4, 5, 0, 3, 3, 3, 1, 1],
     ]],
     ['Editor e ambiente', [
       ['Versionamento', 'Un client git completo accanto e, nell\'editor, gutter delle modifiche, blame, cronologia di file e di selezione, pannello Changes con il diff accanto alla lista e il commit.', 5, 5, 4, 4, 3, 4, 3, 1, 1],
@@ -1024,11 +1112,21 @@
       ['Template e generazione di codice', 'Jinja in sette tipi con anteprima dal vivo e scelta per progetto; abbreviazioni e postfix tuoi. I live template di IntelliJ restano più ricchi.', 4, 4, 5, 5, 4, 3, 3, 1, 1],
       ['Tastiera e command palette', 'Ogni flusso completabile da tastiera per regola di progetto; voci e scorciatoie aggiunte.', 4, 4, 5, 5, 3, 5, 3, 1, 1],
       ['Peso e avvio', 'Nessuna JVM in-process, indice mmap, progetti inattivi rilasciati. Da rimisurare a 55 crate.', 5, 5, 2, 3, 3, 4, 3, 1, 1],
+      ['Percorso della chiave in YAML e .properties', 'Barra di stato con tutti i livelli sopra il cursore (liste comprese), ognuno cliccabile; chiavi colorate per radice. IntelliJ ha il percorso, non il colore per radice.', null, 4, 5, 5, 2, 4, 2, 1, 1],
+      ['SQL nei log di esecuzione', 'Una riga di Hibernate show_sql o di MyBatis è colorata, e un clic copia lo statement con un avviso. Gli altri mostrano il testo piatto.', null, 4, 1, 1, 1, 1, 1, 1, 2],
+      ['Editor affiancati (split)', 'Due file uno accanto all\'altro, in orizzontale o in verticale. Non trovato nel sorgente di Bennu.', null, 0, 5, 5, 4, 5, 4, 1, 1],
+      ['Nuovo progetto da procedura guidata', 'Spring Initializr, archetype Maven. Bennu crea classi, moduli e file, non un progetto.', null, 0, 5, 3, 4, 4, 4, 1, 2],
     ]],
     ['Piattaforma', [
       ['Altri linguaggi', 'Rust di prima classe, cartelle senza pom o Cargo come progetti solo editor, il resto quanto dà il language server (Angular compreso); template e abbreviazioni per ogni linguaggio.', 3, 3, 4, 3, 3, 5, 3, 0.5, 1],
       ['Ecosistema di plugin', 'Un host Lua documentato e una decina di plugin, contro due marketplace enormi.', 1, 1, 5, 5, 4, 5, 2, 0.5, 1],
       ['Superficie per agenti AI', '32 tool MCP di Bennu con permessi per prodotto, percorso e azione; la suite ne espone 45, con Corvus (commit di ciò che è in stage, mai push) e Tyto, e autorizzazioni a tempo.', 4, 4, 4, 3, 1, 5, 1, 1, 1],
+      ['Client HTTP e prove di API', 'File .http con variabili ed esecuzione dal gutter. Bennu ha il pannello degli endpoint, non un client.', null, 0, 5, 0, 1, 4, 1, 0.5, 2],
+      ['Docker e Kubernetes', 'Dockerfile colorato in Bennu; niente compose, immagini, container né cluster come in IntelliJ Ultimate e VS Code.', null, 1, 5, 1, 3, 5, 3, 0.5, 2],
+      ['Sviluppo remoto (SSH, dev container, WSL)', 'Il progetto sta su un\'altra macchina o in un container e l\'editor ci lavora sopra. Bennu apre cartelle locali.', null, 0, 4, 3, 2, 5, 2, 0.5, 1],
+      ['Collaborazione dal vivo', 'Code With Me, Live Share: più persone nello stesso file. Assente in Bennu.', null, 0, 4, 4, 1, 5, 1, 0.5, 0.5],
+      ['Assistente AI nell\'editor', 'Chat e completion integrate. Bennu si lascia pilotare da un agente (i tool MCP) ma non ne ha uno dentro.', null, 1, 5, 4, 3, 5, 1, 1, 2],
+      ['Sincronizzazione delle impostazioni', 'Le preferenze seguono l\'utente fra macchine. Bennu tiene i suoi file di configurazione per profilo, in locale.', null, 0, 4, 4, 1, 5, 1, 0.5, 0.5],
       ['Maturità', '6.523 test Rust e 248 frontend, due corpora misurati; un utente solo, che però ora lo usa ogni giorno.', 2, 2, 5, 5, 4, 4, 3, 2, 2],
     ]],
   ];

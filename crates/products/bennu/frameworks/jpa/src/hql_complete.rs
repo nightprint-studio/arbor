@@ -129,7 +129,7 @@ fn names(model: &JpaModel, aliases: &Aliases, lead: &str) -> Vec<CompletionItem>
     }
 }
 
-type Aliases<'a> = HashMap<String, &'a Entity>;
+pub(crate) type Aliases<'a> = HashMap<String, &'a Entity>;
 
 /// Follow `alias.relation.relation` to the entity at its end.
 fn resolve_path<'a>(model: &'a JpaModel, aliases: &Aliases<'a>, path: &str) -> Option<&'a Entity> {
@@ -150,7 +150,7 @@ fn resolve_path<'a>(model: &'a JpaModel, aliases: &Aliases<'a>, path: &str) -> O
 ///
 /// Read over the whole text rather than the part before the caret: the `from` clause normally
 /// comes after the `select` list the caret is in.
-fn aliases<'a>(model: &'a JpaModel, text: &str) -> Aliases<'a> {
+pub(crate) fn aliases<'a>(model: &'a JpaModel, text: &str) -> Aliases<'a> {
     let tokens = tokens(text);
     let mut out: Aliases<'a> = HashMap::new();
     let mut i = 0;

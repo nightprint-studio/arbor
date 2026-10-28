@@ -40,6 +40,7 @@ const REPOSITORY_BASES: &[&str] = &[
 /// Every `@Entity` / `@Embeddable` / `@MappedSuperclass` in the scan.
 pub fn entities(units: &[JavaUnit]) -> Vec<Entity> {
     let mut out = Vec::new();
+    let auto_converted = auto_converted_types(units);
     for u in units {
         for t in &u.facts.types {
             let Some(kind) = entity_kind(t, &u.facts) else { continue };
@@ -58,7 +59,7 @@ pub fn entities(units: &[JavaUnit]) -> Vec<Entity> {
                     .unwrap_or_default(),
                 kind: kind.to_string(),
                 extends: strip_generics(&t.extends),
-                fields: entity_fields(t, &u.facts, &u.text),
+                fields: entity_fields(t, &u.facts, &u.text, &auto_converted),
                 file: u.facts.file.clone(),
                 offset: t.name_offset,
                 line: line_at(&u.text, t.name_offset),
@@ -80,12 +81,63 @@ fn entity_kind(t: &TypeFacts, facts: &JavaFacts) -> Option<&'static str> {
     }
 }
 
-fn entity_fields(t: &TypeFacts, facts: &JavaFacts, text: &str) -> Vec<EntityField> {
+/// The Java types an `@Converter(autoApply = true)` converts: every field of one is stored through
+/// the converter without a `@Convert` saying so. Primitives are boxed, since a converter's type
+/// argument cannot be one and a `boolean` field is converted by a `Boolean` converter.
+fn auto_converted_types(units: &[JavaUnit]) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    for u in units {
+        for t in &u.facts.types {
+            let auto = known::find(&t.annotations, &u.facts, "Converter")
+                .is_some_and(|a| a.pair("autoApply").is_some_and(|v| v.trim() == "true"));
+            if !auto {
+                continue;
+            }
+            for base in &t.implements {
+                if simple_name(&strip_generics(base)) == "AttributeConverter" {
+                    if let Some(attribute) = type_argument(base, 0) {
+                        out.insert(boxed(simple_name(&strip_generics(&attribute))).to_string());
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+fn boxed(simple: &str) -> &str {
+    match simple {
+        "boolean" => "Boolean",
+        "int" => "Integer",
+        "long" => "Long",
+        "short" => "Short",
+        "double" => "Double",
+        "float" => "Float",
+        "char" => "Character",
+        other => other,
+    }
+}
+
+fn entity_fields(
+    t: &TypeFacts,
+    facts: &JavaFacts,
+    text: &str,
+    auto_converted: &std::collections::HashSet<String>,
+) -> Vec<EntityField> {
     t.fields
         .iter()
         .filter(|f| !f.is_static)
         .map(|f| {
             let relation = known::is_any_of(&f.annotations, facts, known::RELATIONS);
+            // A to-one relation holds the foreign key unless the other side says it does (`mappedBy`).
+            let owns_column = match relation.as_str() {
+                "ManyToOne" => true,
+                "OneToOne" => known::find(&f.annotations, facts, "OneToOne")
+                    .is_some_and(|a| a.pair("mappedBy").is_none()),
+                _ => false,
+            };
+            let converted = known::has(&f.annotations, facts, "Convert")
+                || auto_converted.contains(boxed(simple_name(&strip_generics(&f.type_text))));
             // A to-many relation's target is inside the collection, a to-one's is the field type.
             let target = match relation.as_str() {
                 "" => String::new(),
@@ -104,6 +156,14 @@ fn entity_fields(t: &TypeFacts, facts: &JavaFacts, text: &str) -> Vec<EntityFiel
                 relation,
                 target,
                 transient: known::has(&f.annotations, facts, "Transient"),
+                join_column: known::find(&f.annotations, facts, "JoinColumn")
+                    .and_then(|a| a.strings_for("name").next().or_else(|| a.value()))
+                    .map(|s| s.value.clone())
+                    .unwrap_or_default(),
+                owns_column,
+                converted,
+                embedded: known::has(&f.annotations, facts, "Embedded")
+                    || known::has(&f.annotations, facts, "EmbeddedId"),
                 offset: f.name_offset,
                 line: line_at(text, f.name_offset),
             }
@@ -188,6 +248,17 @@ fn query_def(ann: &AnnFacts) -> Option<QueryDef> {
         start: s.start,
         end: s.end,
         native,
+        count: ann.strings_for("countQuery").next().map(|c| {
+            let found = crate::hql::placeholders(&c.value);
+            Box::new(QueryDef {
+                named_params: found.iter().filter(|p| !p.positional).map(|p| p.name.clone()).collect(),
+                text: c.value.clone(),
+                start: c.start,
+                end: c.end,
+                native,
+                ..QueryDef::default()
+            })
+        }),
     })
 }
 

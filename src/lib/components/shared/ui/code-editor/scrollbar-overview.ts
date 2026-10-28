@@ -19,7 +19,52 @@
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 import { forEachDiagnostic } from '@codemirror/lint';
-import { highlightToHtml } from './mini-highlight';
+import { ensureSyntaxTree } from '@codemirror/language';
+import { highlightTree } from '@lezer/highlight';
+import { esc, highlightToHtml } from './mini-highlight';
+import { lezerHighlightStyle } from './theme';
+
+/**
+ * One line highlighted the way the buffer is, when the buffer's language is a Lezer / stream one (XML,
+ * pom, mappers, YAML, JSON, SQL, …): the SAME parse tree and the SAME style the editor paints with, so
+ * the lens can never colour a line differently from where it came from. `null` for a language with no
+ * such tree (the Tree-sitter ones), which then use the approximate {@link highlightToHtml}.
+ */
+function lezerLineHtml(view: EditorView, lineNumber: number): string | null {
+  const state = view.state;
+  const line = state.doc.line(lineNumber);
+  // Parsed on demand up to this line: a stream language only parses what was scrolled to, and the
+  // lens shows lines that never were. Bounded, so a huge file cannot stall a pointer move.
+  const tree = ensureSyntaxTree(state, line.to, 40);
+  if (!tree || tree.length === 0) return null;
+
+  // The spans the language paints, and the ones the HOST adds on top (a pom's coordinates, a `${…}`, a
+  // query's tint): both are read off the editor, so the lens shows the line as the buffer does. Marks
+  // are class-only decorations, which the lens rows carry under a `.cm-content` so the host's own
+  // stylesheet (written as `.cm-content .cm-fw-…`) reaches them.
+  const spans: { from: number; to: number; cls: string }[] = [];
+  highlightTree(tree, lezerHighlightStyle, (from, to, cls) => spans.push({ from, to, cls }), line.from, line.to);
+  for (const source of state.facet(EditorView.decorations)) {
+    const set = typeof source === 'function' ? source(view) : source;
+    set.between(line.from, line.to, (from, to, deco) => {
+      const cls = (deco.spec as { class?: string }).class;
+      if (cls && to > from) spans.push({ from: Math.max(from, line.from), to: Math.min(to, line.to), cls });
+    });
+  }
+
+  // Cut the line at every span edge; each piece takes the classes of all spans covering it.
+  const cuts = new Set<number>([line.from, line.to]);
+  for (const s of spans) { cuts.add(s.from); cuts.add(s.to); }
+  const points = [...cuts].sort((a, b) => a - b);
+  let out = '';
+  for (let i = 0; i + 1 < points.length; i++) {
+    const [a, b] = [points[i], points[i + 1]];
+    const cls = spans.filter((s) => s.from <= a && s.to >= b).map((s) => s.cls).join(' ');
+    const text = esc(state.sliceDoc(a, b));
+    out += cls ? `<span class="${cls}">${text}</span>` : text;
+  }
+  return out;
+}
 
 /** Width of the overview strip in px (a hair wider than a typical scrollbar so marks read). */
 const STRIP_W = 14;
@@ -215,10 +260,11 @@ export function scrollbarOverview(): Extension {
         for (let n = from; n <= to; n++) {
           const cls = n === line ? 'cm-overview-preview-row cm-overview-preview-cur' : 'cm-overview-preview-row';
           // Highlighted like the buffer (the token classes are HTML-escaped inside `highlightToHtml`).
-          const html = highlightToHtml(doc.line(n).text) || '&nbsp;';
+          const html = (lezerLineHtml(this.view, n) ?? highlightToHtml(doc.line(n).text)) || '&nbsp;';
           rows.push(`<div class="${cls}">${html}</div>`);
         }
-        this.preview.innerHTML = rows.join('');
+        // Under a `.cm-content`, so the host's marks (styled as `.cm-content .cm-fw-…`) apply to the rows.
+        this.preview.innerHTML = `<div class="cm-content cm-overview-rows">${rows.join('')}</div>`;
         this.preview.style.display = 'block';
         // Anchor the lens to the LEFT of the strip, vertically centred on the pointer but clamped
         // inside the editor box.
@@ -248,11 +294,14 @@ export function scrollbarOverview(): Extension {
 const overviewTheme = EditorView.baseTheme({
   // Hide the native vertical scrollbar for an editor that owns an overview strip (the strip is the
   // scroll affordance now). The horizontal scrollbar is left intact.
-  '.cm-has-overview .cm-scroller': { scrollbarWidth: 'none' },
-  '.cm-has-overview .cm-scroller::-webkit-scrollbar:vertical': { width: '0' },
+  // `&` and not a leading descendant selector: `cm-has-overview` sits on the editor root itself, so
+  // `.root .cm-has-overview …` could never match it — and the native scrollbar stayed, drawing a second
+  // scrollbar beside the strip's own thumb.
+  '&.cm-has-overview .cm-scroller': { scrollbarWidth: 'none' },
+  '&.cm-has-overview .cm-scroller::-webkit-scrollbar:vertical': { width: '0' },
   // Reserve the strip's width as a right gutter so text never runs under it (a proper scrollbar
   // gutter, like the native scrollbar used to reserve).
-  '.cm-has-overview .cm-content': { paddingRight: `${STRIP_W}px` },
+  '&.cm-has-overview .cm-content': { paddingRight: `${STRIP_W}px` },
 
   '.cm-overview': {
     position: 'absolute',
@@ -309,6 +358,9 @@ const overviewTheme = EditorView.baseTheme({
     overflow: 'hidden',
     pointerEvents: 'none',
   },
+  // The rows sit in a `.cm-content` only to be reached by host stylesheets; none of the editor's own
+  // content chrome (padding, caret, wrapping) belongs to the lens.
+  '.cm-overview-preview .cm-overview-rows': { padding: '0', margin: '0', display: 'block', minHeight: '0', flex: 'none', caretColor: 'transparent' },
   '.cm-overview-preview-row': { overflow: 'hidden', textOverflow: 'ellipsis' },
   '.cm-overview-preview-cur': {
     color: 'var(--text, #e8e8e8)',

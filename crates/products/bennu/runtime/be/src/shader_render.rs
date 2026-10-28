@@ -46,8 +46,8 @@ use std::process::Command;
 use base64::Engine as _;
 use bennu_core::prelude::BennuState;
 use bennu_wgsl::prelude::{
-    material_bind_group, preview_plan_with, PreviewCaps, SlotFamily, TEXTURE_2D_ARRAY_SLOTS,
-    TEXTURE_2D_SLOTS,
+    material_bind_group, preview_plan_with, PreviewCaps, SlotFamily, UniformField,
+    TEXTURE_2D_ARRAY_SLOTS, TEXTURE_2D_SLOTS,
 };
 use serde::{Deserialize, Serialize};
 
@@ -61,13 +61,60 @@ const RENDERER_EXE: &str = "arbor-shader-render";
 /// not the session.
 const RENDER_TIMEOUT_SECS: u64 = 90;
 
+/// Largest PNG handed back (it is base64'd, so ~4/3 of this travels). A 4096² render of a noisy
+/// material can run to tens of MB, which no client wants inline.
+const MAX_PNG_BYTES: usize = 6_000_000;
+
+/// Longest `--data` argument. Windows caps the whole command line near 32k characters.
+const MAX_DATA_ARG_CHARS: usize = 24_000;
+
+/// The temporary files of one render, deleted when it ends however it ends.
+///
+/// Names carry the process id *and* a counter: every request runs on its own thread, so two
+/// concurrent renders share a pid and would overwrite each other's shader.
+struct TempFiles {
+    id: u64,
+    created: std::cell::RefCell<Vec<PathBuf>>,
+}
+
+impl TempFiles {
+    fn new() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        Self {
+            id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            created: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+
+    /// A fresh path for this render, remembered for cleanup.
+    fn path(&self, suffix: &str) -> PathBuf {
+        let p = std::env::temp_dir()
+            .join(format!("arbor-shader-{}-{}.{suffix}", std::process::id(), self.id));
+        self.created.borrow_mut().push(p.clone());
+        p
+    }
+}
+
+impl Drop for TempFiles {
+    fn drop(&mut self) {
+        for p in self.created.borrow().iter() {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
 // ── Arguments ───────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct ShaderRenderArgs {
-    /// The `.wgsl` file's absolute path. Used to read the shader when `source` is absent.
+    /// The `.wgsl` file's path. Used to read the shader when `source` is absent. Absolute, or
+    /// relative to `root`.
     #[serde(default)]
     pub path: Option<String>,
+    /// The project root a relative `path` is resolved against. Not needed for an absolute `path`
+    /// or for `source`.
+    #[serde(default)]
+    pub root: Option<String>,
     /// The shader's text, for a buffer that is not on disk. Preferred over `path` when both
     /// are given — an editor asking about what it is showing means what it is showing.
     #[serde(default)]
@@ -238,6 +285,63 @@ struct Packed {
     owns_group: bool,
 }
 
+/// The 32-bit words a field holds, as the floats the renderer's text channel carries.
+///
+/// Integer fields are written as integers: their bit pattern is stored in the float, so `3u`
+/// reaches the buffer as `0x00000003` and not as `3.0f` (`0x40400000`). The count must match the
+/// field exactly — a short vector padded with zeros or a long one truncated would render a
+/// plausible picture of the wrong values.
+fn lanes_for(field: &UniformField, v: &serde_json::Value) -> Result<Vec<f32>, String> {
+    let expected = (field.columns.max(1) * field.rows.max(1)) as usize;
+    let items: Vec<&serde_json::Value> = match v {
+        serde_json::Value::Array(a) => a.iter().collect(),
+        serde_json::Value::Number(_) => vec![v],
+        other => {
+            return Err(format!(
+                "'{}' wants a number or an array of numbers, got {other}",
+                field.name
+            ))
+        }
+    };
+    if items.len() != expected {
+        return Err(format!(
+            "'{}' is a {} and wants {expected} number(s), got {}",
+            field.name,
+            field.ty,
+            items.len()
+        ));
+    }
+    items.iter().map(|item| lane(field, item)).collect()
+}
+
+fn lane(field: &UniformField, item: &serde_json::Value) -> Result<f32, String> {
+    let n = item.as_f64().ok_or_else(|| {
+        format!("'{}' wants numbers only, got {item}", field.name)
+    })?;
+    let ty = field.ty.replace(' ', "");
+    let bits = if ty.contains("u32") {
+        (n.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(&n)).then(|| n as u32)
+    } else if ty.contains("i32") {
+        (n.fract() == 0.0 && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&n))
+            .then(|| n as i32 as u32)
+    } else {
+        return Ok(n as f32);
+    };
+    let bits = bits.ok_or_else(|| {
+        format!("'{}' is a {} and cannot hold {n}", field.name, field.ty)
+    })?;
+    let word = f32::from_bits(bits);
+    // The renderer reads decimal text, which cannot carry a NaN's payload.
+    if word.is_nan() {
+        return Err(format!(
+            "'{}': {n} is a bit pattern the renderer's text channel cannot carry (keep integers \
+             below 2139095040)",
+            field.name
+        ));
+    }
+    Ok(word)
+}
+
 fn pack_named(
     source: &str,
     values: &HashMap<String, serde_json::Value>,
@@ -281,18 +385,7 @@ fn pack_named(
             known.push(field.name.clone());
             let Some(v) = values.get(&field.name) else { continue };
 
-            let lanes: Vec<f32> = match v {
-                serde_json::Value::Number(n) => vec![n.as_f64().unwrap_or(0.0) as f32],
-                serde_json::Value::Array(a) => {
-                    a.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32).collect()
-                }
-                other => {
-                    return Err(format!(
-                        "'{}' wants a number or an array of numbers, got {other}",
-                        field.name
-                    ))
-                }
-            };
+            let lanes = lanes_for(field, v)?;
 
             if field.columns > 1 {
                 // Column-major, each column at its own stride.
@@ -344,8 +437,10 @@ fn shader_errors(stderr: &str) -> Vec<String> {
     stderr
         .lines()
         .filter(|l| {
-            let low = l.to_ascii_lowercase();
-            low.contains("error") && !low.contains("error_handler")
+            let low = l.trim().to_ascii_lowercase();
+            // A diagnostic, not any line that mentions the word: a log level of ERROR, or naga's
+            // `error:`. "no errors found" or an `error_handler` path must not fail a render.
+            (low.starts_with("error") || low.contains("error:")) && !low.contains("error_handler")
         })
         .map(|l| l.trim().to_string())
         .collect()
@@ -362,6 +457,9 @@ fn shader_errors(stderr: &str) -> Vec<String> {
 ///
 /// Read `bennu_shader_uniform` first to learn the parameter names; values are given by name and
 /// anything omitted is written as zero.
+///
+/// This spawns the native `bevy-runtime` renderer on the GPU, and a `mesh` addressed
+/// `<package>/<shape>` runs that installed package's own code to build the geometry.
 #[arbor_rpc::handler(mcp(
     name = "bennu_shader_render",
     title = "Render a WGSL material",
@@ -384,8 +482,11 @@ fn bennu_shader_render(ctx: &BennuState, args: ShaderRenderArgs) -> Result<Inlin
     // everywhere else in this system; a buffer that is not on disk gets a temporary one.
     let source = match (&args.source, &args.path) {
         (Some(text), _) => text.clone(),
-        (None, Some(p)) => std::fs::read_to_string(p)
-            .map_err(|e| format!("cannot read {p}: {e}"))?,
+        (None, Some(p)) => {
+            // A relative path means "inside the project", never the backend's working directory.
+            let full = crate::project_paths::in_root(args.root.as_deref().unwrap_or(""), p)?;
+            std::fs::read_to_string(&full).map_err(|e| format!("cannot read {full}: {e}"))?
+        }
         (None, None) => return Err("give either `path` or `source`".to_string()),
     };
 
@@ -487,13 +588,13 @@ fn bennu_shader_render(ctx: &BennuState, args: ShaderRenderArgs) -> Result<Inlin
     // Always a temporary file, even when the caller gave a path: what the renderer has to
     // compile is the renumbered copy, and writing that back over somebody's shader would be a
     // preview editing the thing it is previewing.
-    let shader_path =
-        std::env::temp_dir().join(format!("arbor-shader-{}.wgsl", std::process::id()));
+    // The guard owns every temp file from here on, so no `?` below can leak one.
+    let temp = TempFiles::new();
+    let shader_path = temp.path("wgsl");
     std::fs::write(&shader_path, &source)
         .map_err(|e| format!("cannot write the shader: {e}"))?;
 
-    let out = std::env::temp_dir().join(format!("arbor-shader-{}.png", std::process::id()));
-    let _ = std::fs::remove_file(&out);
+    let out = temp.path("png");
 
     // Parameters, either already packed or written by name into the blocks the shader declares.
     //
@@ -533,8 +634,8 @@ fn bennu_shader_render(ctx: &BennuState, args: ShaderRenderArgs) -> Result<Inlin
     }
     // Vertices go through a FILE. A mesh worth previewing is tens of thousands of floats,
     // which is past what any platform's command line will carry.
-    let mesh_path = std::env::temp_dir().join(format!("arbor-shader-mesh-{}.json", std::process::id()));
     if let Some(data) = &geometry {
+        let mesh_path = temp.path("mesh.json");
         let text = serde_json::to_string(data)
             .map_err(|e| format!("cannot encode the mesh: {e}"))?;
         std::fs::write(&mesh_path, text)
@@ -543,7 +644,17 @@ fn bennu_shader_render(ctx: &BennuState, args: ShaderRenderArgs) -> Result<Inlin
     }
     if !data.is_empty() {
         let list: Vec<String> = data.iter().map(|f| format!("{f}")).collect();
-        cmd.arg("--data").arg(list.join(","));
+        let joined = list.join(",");
+        // Goes on the command line, whose Windows limit is ~32k for the whole line.
+        if joined.len() > MAX_DATA_ARG_CHARS {
+            return Err(format!(
+                "the packed values take {} characters on the renderer's command line, over the {} \
+                 it can carry — pass fewer floats or use `params`",
+                joined.len(),
+                MAX_DATA_ARG_CHARS
+            ));
+        }
+        cmd.arg("--data").arg(joined);
     }
     if !roles.is_empty() {
         cmd.arg("--textures").arg(roles.join(","));
@@ -555,16 +666,10 @@ fn bennu_shader_render(ctx: &BennuState, args: ShaderRenderArgs) -> Result<Inlin
         cmd.arg("--vertex");
     }
 
-    let result = run_with_timeout(cmd, RENDER_TIMEOUT_SECS);
-    let _ = std::fs::remove_file(&shader_path);
-    if geometry.is_some() {
-        let _ = std::fs::remove_file(&mesh_path);
-    }
-    let (status_ok, stderr) = result?;
+    let (status_ok, stderr) = run_with_timeout(cmd, RENDER_TIMEOUT_SECS)?;
 
     let errors = shader_errors(&stderr);
     if !errors.is_empty() {
-        let _ = std::fs::remove_file(&out);
         return Err(format!("the material did not compile:\n{}", errors.join("\n")));
     }
     if !status_ok {
@@ -576,7 +681,13 @@ fn bennu_shader_render(ctx: &BennuState, args: ShaderRenderArgs) -> Result<Inlin
 
     let bytes = std::fs::read(&out)
         .map_err(|e| format!("the renderer wrote no image: {e}\n{}", tail(&stderr, 20)))?;
-    let _ = std::fs::remove_file(&out);
+    if bytes.len() > MAX_PNG_BYTES {
+        return Err(format!(
+            "the image is {} MB, over the {} MB an answer can carry — lower `size`",
+            bytes.len() / 1_000_000,
+            MAX_PNG_BYTES / 1_000_000
+        ));
+    }
 
     Ok(InlineImage {
         mime_type: "image/png".to_string(),
@@ -604,22 +715,26 @@ fn run_with_timeout(mut cmd: Command, secs: u64) -> Result<(bool, String), Strin
     cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| format!("cannot start the renderer: {e}"))?;
 
-    // The pipe is drained on this thread after the wait, which is safe here because the
-    // renderer's log is small and bounded — a few dozen lines. A chattier child would need the
-    // reader running alongside the wait to avoid filling the pipe buffer.
+    // Drained while the child runs: a verbose driver fills the ~4 KB Windows pipe buffer, blocks
+    // on its own write, and would otherwise look like a hang until the deadline.
+    let reader = child.stderr.take().map(|mut pipe| {
+        std::thread::spawn(move || {
+            let mut err = String::new();
+            let _ = pipe.read_to_string(&mut err);
+            err
+        })
+    });
+    let collect = |reader: Option<std::thread::JoinHandle<String>>| {
+        reader.and_then(|h| h.join().ok()).unwrap_or_default()
+    };
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => {
-                let mut err = String::new();
-                if let Some(mut pipe) = child.stderr.take() {
-                    let _ = pipe.read_to_string(&mut err);
-                }
-                return Ok((status.success(), err));
-            }
+            Ok(Some(status)) => return Ok((status.success(), collect(reader))),
             Ok(None) => {
                 if std::time::Instant::now() >= deadline {
                     let _ = child.kill();
+                    let _ = child.wait();
                     return Err(format!("the render did not finish within {secs}s"));
                 }
                 std::thread::sleep(std::time::Duration::from_millis(25));
@@ -714,6 +829,27 @@ var<uniform> second: vec4<f32>;
         // slot 0 — and slot 1 must still be the binding at 101, untouched by it.
         assert_eq!(&packed.floats[4..8], &[9.0, 9.0, 9.0, 9.0]);
         assert_eq!(packed.floats[SLOT_FLOATS], 5.0);
+    }
+
+    #[test]
+    fn a_wrong_lane_count_is_refused() {
+        let err = pack_named(SHADER, &values(&[("tint", serde_json::json!([1.0, 2.0, 3.0]))]))
+            .expect_err("a vec3 for a vec4 must not be zero padded");
+        assert!(err.contains("'tint'") && err.contains('4'), "{err}");
+        assert!(pack_named(SHADER, &values(&[("tint", serde_json::json!([1.0, "x", 3.0, 4.0]))])).is_err());
+    }
+
+    #[test]
+    fn an_integer_field_is_packed_as_an_integer() {
+        let shader = "struct P { n: u32, };\n@group(#{MATERIAL_BIND_GROUP}) @binding(0)\nvar<uniform> p: P;\n";
+        let packed = pack_named(shader, &values(&[("n", serde_json::json!(3))])).expect("packs").floats;
+        assert_eq!(packed[0].to_bits(), 3);
+        assert!(pack_named(shader, &values(&[("n", serde_json::json!(1.5))])).is_err());
+    }
+
+    #[test]
+    fn a_benign_log_line_is_not_a_shader_error() {
+        assert!(shader_errors("INFO checked: no errors found\nINFO error_handler installed").is_empty());
     }
 
     #[test]

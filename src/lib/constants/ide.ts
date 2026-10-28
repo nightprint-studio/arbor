@@ -62,6 +62,8 @@ export const BUILTIN_IDES: readonly BuiltinIde[] = [
   { id: 'phpstorm',  name: 'PhpStorm',       command: 'phpstorm',  iconify: IDE_ICON.phpstorm,  color: '#B345F1' },
   { id: 'sublime',   name: 'Sublime Text',   command: 'subl',      iconify: IDE_ICON.sublime,   color: '#FF9800' },
   { id: 'rustrover', name: 'RustRover',      command: 'rustrover', iconify: IDE_ICON.rustrover, color: '#FE2857' },
+  // Arbor's own editor: "launching" it opens the Bennu window on the project, so it has no command.
+  { id: 'bennu',     name: 'Bennu',          command: '',          iconify: IDE_ICON.bennu,     color: '#E03131' },
   { id: 'vim',       name: 'Vim',            command: 'vim',       iconify: IDE_ICON.vim,       color: '#019733' },
   { id: 'neovim',    name: 'Neovim',         command: 'nvim',      iconify: IDE_ICON.neovim,    color: '#57A143' },
 ];

@@ -108,6 +108,14 @@ export interface BennuConfig {
   java_final_params: boolean;
   /** Java style — locals are Lombok's `val`, where the project has Lombok. */
   java_lombok_val: boolean;
+  /** Java style — entities generated from a table use Lombok accessors. */
+  java_entity_lombok: boolean;
+  /** Java style — generated entity accessors are fluent. */
+  java_entity_fluent: boolean;
+  /** The Picus connection each project is checked against, as `<connection id>=<project root>`. */
+  picus_bindings: string[];
+  /** What a MyBatis `${name}` stands for per project, as `<root>\t<name>\t<value>`. */
+  mybatis_splices: string[];
   /** Java style — locals are `var`, where the project is on Java 10 or later. */
   java_local_var: boolean;
   /** Java style — a switch that yields a value is an arrow-style switch expression. */

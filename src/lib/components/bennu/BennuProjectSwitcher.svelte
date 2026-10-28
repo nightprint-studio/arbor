@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
   /**
    * BennuProjectSwitcher — the Alt+Tab-style overlay over your open projects.
    *
@@ -34,14 +35,51 @@
   function isCurrent(e: SwitcherEntry): boolean {
     return e.root === activeRoot && e.workspaceId === activeWorkspace;
   }
+
+  // The selection is one highlight that SLIDES to the tile under the selection, rather than a style
+  // toggled on each tile: a Tab press then reads as movement, and a wrap from last to first as a
+  // sweep across the strip. Transform only (no layout, no blur).
+  let strip = $state<HTMLElement | null>(null);
+  let tiles = $state<HTMLElement[]>([]);
+  let glow = $state<{ x: number; y: number; w: number; h: number } | null>(null);
+  /** False for the first placement, so the highlight appears in place instead of flying in from 0,0. */
+  let glowAnimated = $state(false);
+
+  $effect(() => {
+    const i = projectSwitcherStore.index;
+    const open = projectSwitcherStore.open;
+    void projectSwitcherStore.entries.length;
+    if (!open) {
+      glow = null;
+      glowAnimated = false;
+      return;
+    }
+    const tile = tiles[i];
+    if (!tile) return;
+    tile.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    glow = { x: tile.offsetLeft, y: tile.offsetTop, w: tile.offsetWidth, h: tile.offsetHeight };
+    // Switched on a frame later: the transition must not run for the placement that creates it.
+    if (!glowAnimated) requestAnimationFrame(() => (glowAnimated = true));
+  });
 </script>
 
 {#if projectSwitcherStore.open}
   <div class="ps-scrim">
     <div class="ps-card" role="dialog" aria-label="Switch project" tabindex="-1">
-      <div class="ps-strip" role="listbox" aria-label="Open projects">
+      <div class="ps-strip" role="listbox" aria-label="Open projects" bind:this={strip}>
+        {#if glow}
+          <span
+            class="ps-glow"
+            class:animated={glowAnimated}
+            style:width="{glow.w}px"
+            style:height="{glow.h}px"
+            style:transform="translate({glow.x}px, {glow.y}px)"
+            style:--ws={showWorkspace && selected ? wsColorVar(selected.colorIdx) : 'var(--accent)'}
+          ></span>
+        {/if}
         {#each projectSwitcherStore.entries as p, i (p.workspaceId + '|' + p.root)}
           <button
+            bind:this={tiles[i]}
             type="button"
             class="ps-tile"
             class:active={i === projectSwitcherStore.index}
@@ -58,7 +96,7 @@
                 size={44}
                 color={showWorkspace ? wsColorVar(p.colorIdx) : undefined}
               />
-              {#if isCurrent(p)}<span class="ps-dot" title="Current project"></span>{/if}
+              {#if isCurrent(p)}<span class="ps-dot" use:tooltip={'Current project'}></span>{/if}
             </span>
             <span class="ps-name">{p.name}</span>
             {#if showWorkspace}<span class="ps-ws">{p.workspaceName}</span>{/if}
@@ -68,7 +106,7 @@
 
       <!-- Keyed by the selection so the line re-fades each time it changes. -->
       {#key projectSwitcherStore.index}
-        <div class="ps-path" title={selected?.root}>{selected?.root ?? ''}</div>
+        <div class="ps-path" use:tooltip={selected?.root}>{selected?.root ?? ''}</div>
       {/key}
 
       <div class="ps-foot">
@@ -85,43 +123,55 @@
   .ps-scrim {
     position: fixed; inset: 0; z-index: 1000;
     display: flex; align-items: center; justify-content: center;
-    background: color-mix(in srgb, var(--bg-base) 62%, transparent);
-    animation: ps-fade 120ms ease both;
+    /* A dimmed vignette, not a blur: blurring what is behind costs the compositor a pass per frame on
+       WebView2. Darker at the edges so the card is what the eye lands on. */
+    background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.42) 0%, rgba(0, 0, 0, 0.7) 100%);
+    animation: ps-fade 140ms ease both;
   }
   .ps-card {
-    max-width: min(760px, calc(100vw - 48px)); max-height: 80vh;
+    max-width: min(820px, calc(100vw - 48px)); max-height: 80vh;
     display: flex; flex-direction: column; align-items: stretch;
-    padding: 14px 14px 0;
-    background: var(--bg-elevated); border: 1px solid var(--border-subtle);
+    padding: 16px 16px 0;
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 90px),
+      var(--bg-elevated);
+    border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, var(--accent) 12%);
     border-radius: var(--radius-lg);
-    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), 0 2px 0 rgba(255, 255, 255, 0.04) inset;
     overflow: hidden;
-    animation: ps-pop 200ms cubic-bezier(0.18, 0.9, 0.25, 1.1) both;
+    animation: ps-pop 220ms cubic-bezier(0.18, 0.9, 0.25, 1.1) both;
   }
 
   .ps-strip {
-    display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;
-    padding: 6px 4px 4px; overflow-y: auto;
+    position: relative;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
+    padding: 8px 4px 6px; overflow-y: auto;
+  }
+  /* The sliding selection: sits behind the tiles and travels to the active one. */
+  .ps-glow {
+    position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none;
+    border-radius: var(--radius-md, 10px);
+    background: linear-gradient(160deg, color-mix(in srgb, var(--ws) 22%, transparent), color-mix(in srgb, var(--ws) 8%, transparent));
+    border: 1px solid color-mix(in srgb, var(--ws) 60%, transparent);
+    box-shadow: 0 10px 28px color-mix(in srgb, var(--ws) 30%, transparent);
+    will-change: transform;
+  }
+  .ps-glow.animated {
+    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), width 240ms cubic-bezier(0.22, 1, 0.36, 1),
+      height 240ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .ps-tile {
-    position: relative; width: 112px; padding: 12px 8px 10px;
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    position: relative; z-index: 1; width: 120px; padding: 14px 8px 12px;
+    display: flex; flex-direction: column; align-items: center; gap: 7px;
     background: transparent; border: 1px solid transparent; border-radius: var(--radius-md, 10px);
     color: var(--text-secondary); font-family: var(--font-ui-sans); cursor: pointer;
-    transition: transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1.25), background var(--transition-fast),
-      border-color var(--transition-fast), box-shadow 160ms ease, color var(--transition-fast);
-    /* `backwards`, not `both`: a fill that holds `transform: none` after the entrance would beat
-       the `.active` lift below for as long as the overlay is open. */
-    animation: ps-tile-in 240ms cubic-bezier(0.2, 0.9, 0.3, 1.1) backwards;
-    animation-delay: calc(var(--i) * 22ms);
+    transition: color var(--transition-fast);
+    animation: ps-tile-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1.1) backwards;
+    animation-delay: calc(var(--i) * 24ms);
   }
-  .ps-tile.active {
-    transform: translateY(-3px) scale(1.06);
-    color: var(--text-primary);
-    background: color-mix(in srgb, var(--ws) 13%, transparent);
-    border-color: color-mix(in srgb, var(--ws) 55%, transparent);
-    box-shadow: 0 8px 22px color-mix(in srgb, var(--ws) 28%, transparent);
-  }
+  .ps-mark { transition: transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1.3); }
+  .ps-tile.active { color: var(--text-primary); }
+  .ps-tile.active .ps-mark { transform: translateY(-2px) scale(1.1); }
   .ps-mark { position: relative; display: inline-flex; }
   .ps-dot {
     position: absolute; right: -3px; bottom: -3px; width: 10px; height: 10px; border-radius: 50%;
@@ -160,6 +210,6 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .ps-scrim, .ps-card, .ps-tile, .ps-path { animation: none; }
-    .ps-tile { transition: none; }
+    .ps-tile, .ps-mark, .ps-glow.animated { transition: none; }
   }
 </style>

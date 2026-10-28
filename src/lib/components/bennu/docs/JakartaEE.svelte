@@ -24,8 +24,8 @@
 <table>
   <thead><tr><th>Icon</th><th>Beside</th><th>Click to</th></tr></thead>
   <tbody>
-    <tr><td><code>◆</code></td><td>A bean class or a <code>@Produces</code> method or field</td><td>See the injection points it satisfies</td></tr>
-    <tr><td><code>→</code></td><td>An <code>@Inject</code> field, constructor or initializer parameter, or an <code>@EJB</code> field</td><td>See the beans that may satisfy it</td></tr>
+    <tr><td><code>I</code></td><td>A bean class or a <code>@Produces</code> method or field</td><td>See the injection points it satisfies</td></tr>
+    <tr><td><code>B</code></td><td>An <code>@Inject</code> field, constructor or initializer parameter, or an <code>@EJB</code> field</td><td>See the beans that may satisfy it</td></tr>
   </tbody>
 </table>
 <dl class="meta-grid">

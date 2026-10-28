@@ -140,10 +140,28 @@ fn bennu_activate_project(ctx: &BennuState, args: ActivateProjectArgs) -> Result
 #[arbor_rpc::handler]
 fn bennu_loaded_projects(_ctx: &BennuState) -> Result<Vec<String>, String> {
     let mut roots = crate::index_service::IndexService::global().indexed_roots();
-    roots.extend(crate::lsp_registry::LspRegistry::global().statuses().into_iter().map(|s| s.root));
+    // A language server counts only for a root that has no index to be judged by (a Cargo root),
+    // and only while it is actually up. A Java member whose server was started in passing — a
+    // request against one of its files, a failed or exited slot left in the registry — is not
+    // "ready to land on", and listing it put a project in Ctrl+Tab that was never open.
+    roots.extend(
+        crate::lsp_registry::LspRegistry::global()
+            .statuses()
+            .into_iter()
+            .filter(|s| s.state == "ready" && !is_java_manifest_root(&s.root))
+            .map(|s| s.root),
+    );
     roots.sort();
     roots.dedup();
     Ok(roots)
+}
+
+/// Whether `root` carries a Java build manifest — the cheap check `bennu_loaded_projects` needs to
+/// tell "judged by its index" from "judged by its server", without parsing the project.
+fn is_java_manifest_root(root: &str) -> bool {
+    ["pom.xml", "build.gradle", "build.gradle.kts"]
+        .iter()
+        .any(|m| Path::new(root).join(m).is_file())
 }
 
 /// Open `root` and start everything that opening it starts: the language-server warm-up,
@@ -284,18 +302,28 @@ pub struct ProjectTreeArgs {
     pub depth: Option<usize>,
 }
 
-/// List the files and directories under a project path, directories first, with build
-/// output and VCS noise already excluded.
+/// The deepest an explicitly requested `depth` goes. Omitting `depth` materialises the whole
+/// source tree for the editor; a caller that names one is asking for a bounded look.
+const MAX_REQUESTED_DEPTH: usize = 12;
+
+/// List the files and directories under a project path, directories first, with the usual
+/// noise left out.
 ///
 /// Use it to find your way around a project you have not read yet. `depth` bounds how
-/// far it descends — keep it small on a large tree and call again on the sub-directory
-/// you care about, rather than pulling the whole thing into context at once.
+/// far it descends (at most 12) — keep it small on a large tree and call again on the
+/// sub-directory you care about, rather than pulling the whole thing into context at once.
+///
+/// Never walked: `target`, `.git`, `node_modules`, `.idea`, `.gradle`, `.venv`, `__pycache__`, and
+/// `build` / `dist` / `out` beside a build manifest. Symbolic links are listed but not followed.
+/// The tree holds at most 20,000 entries; past that the root's last child is a marker node saying
+/// the listing was cut, and the way to see the rest is to list a sub-directory.
 #[arbor_rpc::handler(mcp(
     title = "List a project's files",
     safety = read,
 ))]
 fn bennu_project_tree(_ctx: &BennuState, args: ProjectTreeArgs) -> Result<TreeNode, String> {
-    build_tree(Path::new(&args.root), args.depth.unwrap_or(TREE_DEPTH)).map_err(Into::into)
+    let depth = args.depth.map_or(TREE_DEPTH, |d| d.min(MAX_REQUESTED_DEPTH));
+    build_tree(Path::new(&args.root), depth).map_err(Into::into)
 }
 
 /// Args for [`bennu_read_file`].
@@ -340,22 +368,19 @@ pub struct ReadFileArgs {
     safety = read,
 ))]
 fn bennu_read_file(_ctx: &BennuState, args: ReadFileArgs) -> Result<FileContents, String> {
+    let file = crate::project_paths::in_root(&args.root, &args.file)?;
     let cfg = bennu_core::config::load();
-    // A per-file override wins over a per-project one (both keyed by absolute path).
-    let override_label = cfg
-        .encoding_overrides
-        .get(&args.file)
-        .or_else(|| cfg.encoding_overrides.get(&args.root))
-        .map(|s| s.as_str());
+    let override_label = encoding_override_for(&cfg, &args.root, &file);
     let mut contents =
-        read_file(Path::new(&args.root), Path::new(&args.file), &cfg.default_encoding, override_label)?;
+        read_file(Path::new(&args.root), Path::new(&file), &cfg.default_encoding, override_label)?;
+    refuse_binary(&file, &contents.text)?;
 
     let total = contents.text.lines().count() as u32;
     contents.total_lines = total;
 
     // A named declaration first: it is the precise request, and it decides the range.
     let (from, to) = match args.symbol.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(name) => match crate::agent::declaration_lines(&args.file, &contents.text, name) {
+        Some(name) => match crate::agent::declaration_lines(&file, &contents.text, name) {
             Some(range) => range,
             None => {
                 return Err(format!(
@@ -365,7 +390,7 @@ fn bennu_read_file(_ctx: &BennuState, args: ReadFileArgs) -> Result<FileContents
                 ));
             }
         },
-        None => (args.from_line.unwrap_or(1).max(1), args.to_line.unwrap_or(total).max(1)),
+        None => requested_range(args.from_line, args.to_line, total)?,
     };
 
     if from > 1 || to < total {
@@ -378,7 +403,80 @@ fn bennu_read_file(_ctx: &BennuState, args: ReadFileArgs) -> Result<FileContents
             .join("\n");
         contents.from_line = from;
     }
+    if contents.text.len() > MAX_READ_BYTES {
+        return Err(format!(
+            "{} is {} KB of text; at most {} KB are returned per read. Ask for a slice with \
+             `from_line` / `to_line` (the file has {total} lines) or a `symbol`.",
+            args.file,
+            contents.text.len() / 1024,
+            MAX_READ_BYTES / 1024
+        ));
+    }
     Ok(contents)
+}
+
+/// The most text one read returns. Generous enough that the editor opening a large generated source
+/// still works, small enough that a model is never handed a whole log file by accident.
+const MAX_READ_BYTES: usize = 4 * 1024 * 1024;
+
+/// The 1-based inclusive line range a caller asked for, validated against the file's `total` lines.
+///
+/// Errors rather than clamping: `from_line > to_line` used to come back as a single line, and a
+/// `from_line` past the end as empty text — both read as "that part of the file is empty".
+fn requested_range(from: Option<u32>, to: Option<u32>, total: u32) -> Result<(u32, u32), String> {
+    let from = from.unwrap_or(1).max(1);
+    let to = to.unwrap_or(total).max(1);
+    if from > to {
+        return Err(format!("from_line ({from}) is after to_line ({to})"));
+    }
+    if from > total.max(1) {
+        return Err(format!("from_line ({from}) is past the end of the file, which has {total} lines"));
+    }
+    Ok((from, to))
+}
+
+/// Extensions that are never text. Checked next to the NUL sniff because a short binary can be NUL-free.
+const BINARY_EXTS: [&str; 18] = [
+    "class", "jar", "war", "ear", "zip", "gz", "png", "jpg", "jpeg", "gif", "ico", "pdf", "exe", "dll",
+    "so", "bin", "o", "wasm",
+];
+
+/// Refuse to return a binary file as lossy text: the reply would be mojibake the caller cannot tell
+/// from a real file, at the cost of its whole context.
+fn refuse_binary(file: &str, text: &str) -> Result<(), String> {
+    let by_ext = Path::new(file)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| BINARY_EXTS.iter().any(|b| b.eq_ignore_ascii_case(e)));
+    // Sniffed on the decoded text: a UTF-16 file is full of NULs on disk but has none once decoded.
+    let sniff_end = text.char_indices().nth(8192).map_or(text.len(), |(i, _)| i);
+    if by_ext || text[..sniff_end].contains('\0') {
+        return Err(format!("{file} is a binary file; it cannot be read as text"));
+    }
+    Ok(())
+}
+
+/// The encoding override for `file`, falling back to the project's.
+///
+/// A per-file override wins over a per-project one. The config is keyed by whatever spelling the
+/// editor stored, so keys are compared normalised (`\` vs `/`, drive-letter case on Windows) — the
+/// read and the write must agree, or a save re-encodes a file the read decoded differently.
+fn encoding_override_for<'a>(
+    cfg: &'a bennu_core::config::BennuConfig,
+    root: &str,
+    file: &str,
+) -> Option<&'a str> {
+    let want = normalise_key(file);
+    cfg.encoding_overrides
+        .iter()
+        .find(|(k, _)| normalise_key(k) == want)
+        .map(|(_, v)| v.as_str())
+        .or_else(|| cfg.encoding_overrides.get(root).map(|s| s.as_str()))
+}
+
+fn normalise_key(path: &str) -> String {
+    let slashed = path.replace('\\', "/");
+    if cfg!(windows) { slashed.to_lowercase() } else { slashed }
 }
 
 /// Args for [`bennu_file_stamps`].
@@ -423,7 +521,10 @@ pub struct WriteFileArgs {
     /// matching, the save proceeds; when the file has changed underneath, the save is
     /// **refused** (see [`bennu_project::prelude::write_file`]). Omitted / empty disables
     /// the check — `#[serde(default)]`, so a caller that never read the file still saves.
-    #[serde(default)]
+    ///
+    /// `stamp` is accepted as an alias: the tool text used to say "pass the `stamp`", and serde
+    /// silently dropped it — which switched the guard off for exactly the caller that asked for it.
+    #[serde(default, alias = "stamp")]
     pub expect_stamp: Option<String>,
 }
 
@@ -443,18 +544,15 @@ Use this instead of an ordinary file write for anything inside a Java project: l
 sources are frequently Cp1252 or Latin-1, and writing UTF-8 bytes over them silently \
 mangles every accented character — a corruption that reads back fine to you, because you \
 read through bennu_read_file, and is wrong for everyone else. Pass the `stamp` \
-bennu_read_file gave you and the save is refused if the file changed underneath instead \
+bennu_read_file gave you as `expect_stamp` and the save is refused if the file changed underneath instead \
 of overwriting someone's work.",
 ))]
 fn bennu_write_file(_ctx: &BennuState, args: WriteFileArgs) -> Result<WriteResult, String> {
+    let file = crate::project_paths::in_root(&args.root, &args.file)?;
+    let args = WriteFileArgs { file, ..args };
     let cfg = bennu_core::config::load();
-    // A per-file override wins over a per-project one (both keyed by absolute path) — the
-    // same resolution `bennu_read_file` uses, so a read and its save agree on encoding.
-    let override_label = cfg
-        .encoding_overrides
-        .get(&args.file)
-        .or_else(|| cfg.encoding_overrides.get(&args.root))
-        .map(|s| s.as_str());
+    // The same resolution `bennu_read_file` uses, so a read and its save agree on encoding.
+    let override_label = encoding_override_for(&cfg, &args.root, &args.file);
     // Read BEFORE the write: once it has happened, what the file used to be exists
     // nowhere else. Only needed for a file history has never heard of — after the first
     // revision, the previous save is the "before" — and `on_write` is what decides that,
@@ -595,5 +693,39 @@ struct ProjectClassNames {
 impl bennu_spring::prelude::ClassNameSource for ProjectClassNames {
     fn matching(&self, typed: &str, limit: usize) -> Vec<String> {
         IndexService::global().type_name_matches(&self.root, typed, limit)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_reversed_or_out_of_range_line_range_is_an_error() {
+        assert_eq!(requested_range(None, None, 10), Ok((1, 10)));
+        assert_eq!(requested_range(Some(3), Some(5), 10), Ok((3, 5)));
+        assert!(requested_range(Some(5), Some(3), 10).is_err());
+        assert!(requested_range(Some(11), None, 10).is_err());
+        // An empty file still has a line 1 to ask for.
+        assert_eq!(requested_range(None, None, 0), Ok((1, 1)));
+    }
+
+    #[test]
+    fn binary_files_are_refused() {
+        assert!(refuse_binary("a/Foo.class", "x").is_err());
+        assert!(refuse_binary("a/Foo.java", "ab\0cd").is_err());
+        assert!(refuse_binary("a/Foo.java", "class Foo {}").is_ok());
+    }
+
+    #[test]
+    fn encoding_keys_compare_across_slash_styles() {
+        assert_eq!(normalise_key("C:\\p\\A.java"), normalise_key("C:/p/A.java"));
+    }
+
+    #[test]
+    fn the_stamp_alias_arms_the_overwrite_guard() {
+        let args: WriteFileArgs =
+            serde_json::from_str(r#"{"root":"/p","file":"A","text":"t","stamp":"1:2"}"#).unwrap();
+        assert_eq!(args.expect_stamp.as_deref(), Some("1:2"));
     }
 }

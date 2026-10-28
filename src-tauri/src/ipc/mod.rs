@@ -1422,6 +1422,18 @@ fn backend_binary(app: &AppHandle, name: &str) -> Option<std::path::PathBuf> {
     p.exists().then_some(p)
 }
 
+/// Whether `program`'s backend binary is shipped with this install — the answer to "is Picus
+/// installed", for a product that offers extra features only when it is. Only checks the file;
+/// nothing is spawned.
+pub fn product_backend_installed(app: &AppHandle, program: &str) -> bool {
+    let name = match program {
+        "corvus" => "corvus-be",
+        "picus" => "picus-be",
+        _ => return false,
+    };
+    backend_binary(app, name).is_some()
+}
+
 /// Lazily spawn `corvus-be` and attach it to the router, **idempotently**.
 /// Called when the Corvus product window opens
 /// (`window::corvus::open_corvus_window`), off the main thread — the spawn blocks

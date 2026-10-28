@@ -54,6 +54,16 @@ pub struct EntityField {
     pub target: String,
     /// `@Transient` — mapped by nothing, and therefore not addressable in a query.
     pub transient: bool,
+    /// `@JoinColumn(name = …)` on a relation, empty when defaulted or absent.
+    pub join_column: String,
+    /// A to-one relation that holds the foreign key itself: a `@ManyToOne`, or a `@OneToOne` that is
+    /// not `mappedBy` the other side. Such a field owns a column the field name does not spell.
+    pub owns_column: bool,
+    /// `@Convert` — an `AttributeConverter` stores it, so its Java type says nothing about the
+    /// column's.
+    pub converted: bool,
+    /// `@Embedded` / `@EmbeddedId`: the columns are the embeddable's, not one named after the field.
+    pub embedded: bool,
     pub offset: usize,
     pub line: u32,
 }
@@ -141,6 +151,10 @@ pub struct QueryDef {
     pub named_params: Vec<String>,
     /// The `?1` positional placeholders it uses, deduplicated and sorted.
     pub positional_params: Vec<u32>,
+    /// `countQuery = "…"` — the query Spring Data runs for the total of a page. Same language as
+    /// the query it belongs to (it is native exactly when that one is), so it is coloured and
+    /// checked the same way.
+    pub count: Option<Box<QueryDef>>,
 }
 
 /// Everything the extension knows about a project's persistence layer.

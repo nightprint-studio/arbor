@@ -15,12 +15,15 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
-  import { todos as ipcTodos } from '$lib/ipc/bennu';
+  import { todoScan } from '$lib/ipc/bennu';
+  import Alert from '$lib/components/shared/ui/Alert.svelte';
   import type { TodoItem } from '$lib/types/bennu';
 
   const KINDS = ['TODO', 'FIXME', 'XXX', 'HACK'] as const;
 
   let items = $state<TodoItem[]>([]);
+  /** The scan stopped at its cap, so the list is the first part of a longer one. */
+  let truncated = $state(false);
   let loading = $state(false);
   const collapsed = new SvelteSet<string>();
   const hiddenKinds = new SvelteSet<string>();
@@ -33,12 +36,15 @@
 
   export async function refresh() {
     const root = projectStore.project?.root;
-    if (!root) { items = []; return; }
+    if (!root) { items = []; truncated = false; return; }
     loading = true;
     try {
-      items = await ipcTodos(root);
+      const scan = await todoScan(root);
+      items = scan.items;
+      truncated = scan.truncated;
     } catch {
       items = [];
+      truncated = false;
     } finally {
       loading = false;
     }
@@ -115,6 +121,12 @@
       >{k} <span class="chip-n">{countOf(k)}</span></button>
     {/each}
   </div>
+
+  {#if truncated && !loading}
+    <Alert variant="warning" compact>
+      Only the first {items.length} markers are listed — the project has more. Narrow it down with Find in Files.
+    </Alert>
+  {/if}
 
   {#if loading}
     <div class="state"><Spinner size={13} /> Scanning…</div>

@@ -11,9 +11,9 @@
 //! / interface / enum, including nested types).
 //!
 //! `extract_symbols`' [`TypeDecl`] carries no byte offset / line, so the declaration
-//! line is recovered here by locating the `class`/`interface`/`enum <Name>` token in
-//! the source and counting newlines up to it; a type that can't be located that way
-//! falls back to line 1. Sources are decoded in the project's declared encoding (Maven
+//! line is recovered here by lexing the source for `class`/`interface`/`enum`/`record <Name>`
+//! (comments and literals skipped; repeated names claimed in source order); a type that can't
+//! be located that way falls back to line 1. Sources are decoded in the project's declared encoding (Maven
 //! `sourceEncoding`) via `read_source_for_index`, recovering a mislabelled file rather than
 //! dropping it, so a non-UTF-8 file still surfaces its classes; only a genuine IO error skips
 //! a file (and that's logged, not silent).
@@ -53,6 +53,11 @@ fn bennu_class_index(_ctx: &BennuState, args: ClassIndexArgs) -> Result<Vec<Clas
         return Ok(cached);
     }
 
+    // A Cargo root has no Java to scan; an empty list would read as "this project declares no types".
+    if crate::agent::is_cargo_root(&args.root) {
+        return Err("bennu_class_index lists Java classes only; this is a Cargo project".to_string());
+    }
+
     let mut paths = Vec::new();
     collect_java(Path::new(&args.root), &mut paths);
 
@@ -69,8 +74,9 @@ fn bennu_class_index(_ctx: &BennuState, args: ClassIndexArgs) -> Result<Vec<Clas
         let source = decoded.text;
         let file = path.to_string_lossy().replace('\\', "/");
         let symbols = extract_symbols(&source);
+        let mut sites = DeclSites::scan(&source);
         for td in &symbols.types {
-            let line = decl_line(&source, &td.name).unwrap_or(1);
+            let line = sites.next_line(&td.name).unwrap_or(1);
             out.push(ClassEntry {
                 fqcn: td.fqn.clone(),
                 simple: td.name.clone(),
@@ -83,70 +89,159 @@ fn bennu_class_index(_ctx: &BennuState, args: ClassIndexArgs) -> Result<Vec<Clas
     Ok(out)
 }
 
-/// Find the 1-based line of a type declaration by locating the first
-/// `class`/`interface`/`enum` keyword immediately followed (ignoring whitespace) by
-/// the type `name`. Returns `None` when no such site is found (caller defaults to 1).
-fn decl_line(source: &str, name: &str) -> Option<usize> {
-    for (idx, line) in source.lines().enumerate() {
-        if line_declares_type(line, name) {
-            return Some(idx + 1);
-        }
-    }
-    None
+/// Where each type declaration sits in one source file, found by a small lexer rather than a text
+/// search: comments, string literals and text blocks are skipped (a `class Foo` inside a Javadoc
+/// example is not a declaration), and a name declared twice — nested `Builder`s — keeps every
+/// occurrence, handed out in source order so each type gets its own line.
+struct DeclSites {
+    lines: std::collections::HashMap<String, std::collections::VecDeque<usize>>,
 }
 
-/// Whether `line` contains a `class|interface|enum <name>` declaration token — a
-/// keyword whose next non-space word is exactly `name` (bounded so `Foo` doesn't
-/// match `FooBar`).
-fn line_declares_type(line: &str, name: &str) -> bool {
-    for kw in ["class", "interface", "enum"] {
-        let mut rest = line;
-        while let Some(pos) = rest.find(kw) {
-            let after = &rest[pos + kw.len()..];
-            // The keyword must be a standalone word (space/tab before the name).
-            let before_ok = pos == 0
-                || !rest.as_bytes()[pos - 1].is_ascii_alphanumeric()
-                    && rest.as_bytes()[pos - 1] != b'_';
-            let name_after = after.trim_start();
-            if before_ok
-                && after.len() != name_after.len() // there WAS whitespace after the kw
-                && name_after.starts_with(name)
-            {
-                let tail = &name_after[name.len()..];
-                // The name must end here (bound: `{`, `<`, whitespace, `extends`…).
-                let bounded = tail
-                    .chars()
-                    .next()
-                    .map(|c| !c.is_alphanumeric() && c != '_')
-                    .unwrap_or(true);
-                if bounded {
-                    return true;
+impl DeclSites {
+    fn scan(source: &str) -> Self {
+        let mut lines: std::collections::HashMap<String, std::collections::VecDeque<usize>> =
+            std::collections::HashMap::new();
+        for (name, line) in declaration_sites(source) {
+            lines.entry(name).or_default().push_back(line);
+        }
+        Self { lines }
+    }
+
+    /// The line of the next not-yet-claimed declaration of `name`.
+    fn next_line(&mut self, name: &str) -> Option<usize> {
+        self.lines.get_mut(name)?.pop_front()
+    }
+}
+
+/// `(name, 1-based line)` of every `class | interface | enum | record | @interface` declaration, in
+/// source order.
+fn declaration_sites(source: &str) -> Vec<(String, usize)> {
+    let bytes = source.as_bytes();
+    let (mut i, mut line) = (0usize, 1usize);
+    // True right after a declaration keyword: the next identifier is the type's name.
+    let mut pending = false;
+    let mut out = Vec::new();
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b'\n' => {
+                line += 1;
+                i += 1;
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
                 }
             }
-            rest = &rest[pos + kw.len()..];
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i < bytes.len() && !(bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/')) {
+                    line += usize::from(bytes[i] == b'\n');
+                    i += 1;
+                }
+                i = (i + 2).min(bytes.len());
+            }
+            b'"' | b'\'' => {
+                i = skip_literal(bytes, i, &mut line);
+                pending = false;
+            }
+            _ if is_ident_byte(b) && !b.is_ascii_digit() => {
+                let start = i;
+                while i < bytes.len() && is_ident_byte(bytes[i]) {
+                    i += 1;
+                }
+                let word = &source[start..i];
+                if pending {
+                    out.push((word.to_string(), line));
+                    pending = false;
+                } else {
+                    pending = matches!(word, "class" | "interface" | "enum" | "record");
+                }
+            }
+            _ if b.is_ascii_whitespace() => i += 1,
+            // Anything else (`.class`, `)`, `=`) means the keyword was not introducing a declaration.
+            _ => {
+                pending = false;
+                i += 1;
+            }
         }
     }
-    false
+    out
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$' || b >= 0x80
+}
+
+/// Index just past the string, text block or char literal that starts at `start`, counting newlines.
+fn skip_literal(bytes: &[u8], start: usize, line: &mut usize) -> usize {
+    let quote = bytes[start];
+    let text_block = quote == b'"' && bytes[start..].starts_with(b"\"\"\"");
+    let mut i = start + if text_block { 3 } else { 1 };
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 1,
+            b'\n' => {
+                *line += 1;
+                // A plain literal never spans lines; recover rather than swallow the file.
+                if !text_block {
+                    return i + 1;
+                }
+            }
+            b if b == quote && (!text_block || bytes[i..].starts_with(b"\"\"\"")) => {
+                return i + if text_block { 3 } else { 1 };
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    bytes.len()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn lines_of(src: &str, name: &str) -> Vec<usize> {
+        declaration_sites(src).into_iter().filter(|(n, _)| n == name).map(|(_, l)| l).collect()
+    }
+
     #[test]
     fn locates_class_and_interface_lines() {
         let src = "package a.b;\n\npublic class Order {\n  int x;\n}\n";
-        assert_eq!(decl_line(src, "Order"), Some(3));
-
-        let src2 = "interface Repo {}\n";
-        assert_eq!(decl_line(src2, "Repo"), Some(1));
+        assert_eq!(lines_of(src, "Order"), vec![3]);
+        assert_eq!(lines_of("interface Repo {}\n", "Repo"), vec![1]);
     }
 
     #[test]
     fn name_is_word_bounded() {
         // `Foo` must not match the declaration of `FooBar`.
         let src = "class FooBar {}\n";
-        assert_eq!(decl_line(src, "Foo"), None);
-        assert_eq!(decl_line(src, "FooBar"), Some(1));
+        assert!(lines_of(src, "Foo").is_empty());
+        assert_eq!(lines_of(src, "FooBar"), vec![1]);
+    }
+
+    #[test]
+    fn records_and_annotation_types_are_found() {
+        assert_eq!(lines_of("\npublic record Point(int x) {}\n", "Point"), vec![2]);
+        assert_eq!(lines_of("@interface Marker {}\n", "Marker"), vec![1]);
+    }
+
+    #[test]
+    fn comments_and_strings_do_not_declare_types() {
+        let src = "// class Fake\n/* class Fake\n */\nString s = \"class Fake\";\nclass Real {}\n";
+        assert!(lines_of(src, "Fake").is_empty());
+        assert_eq!(lines_of(src, "Real"), vec![5]);
+        // `Foo.class` is a class literal, not a declaration of whatever follows it.
+        assert!(lines_of("Object o = Foo.class;\nint x;\n", "x").is_empty());
+    }
+
+    #[test]
+    fn repeated_names_get_their_own_line() {
+        let src = "class A {\n  static class Builder {}\n}\nclass B {\n  static class Builder {}\n}\n";
+        let mut sites = DeclSites::scan(src);
+        assert_eq!(sites.next_line("Builder"), Some(2));
+        assert_eq!(sites.next_line("Builder"), Some(5));
+        assert_eq!(sites.next_line("Builder"), None);
     }
 }

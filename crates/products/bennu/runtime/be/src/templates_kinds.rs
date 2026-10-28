@@ -17,12 +17,18 @@ use bennu_templates::prelude::{
 use crate::frameworks::FrameworkService;
 use crate::templates_facts::{facts_at, facts_for};
 use crate::templates_imports::{import_edits, imports_note, with_imports};
-use crate::templates_render::{class_of, source_of, RenderArgs, Rendered};
+use crate::templates_render::{class_of, ensure_relative_name, java_source_of, RenderArgs, Rendered};
 
 /// A directive that reads as yes. Written out rather than "anything but empty", so a
 /// `bennu.stops: later` in somebody's notes does not turn the snippet grammar on.
 fn truthy(value: Option<&str>) -> bool {
     matches!(value.map(str::trim), Some("true" | "yes" | "on" | "1"))
+}
+
+/// `directory` + `name` with one separator style — the forward slashes the rest of the project's paths use —
+/// instead of whatever mix `format!("{a}/{b}")` leaves on Windows.
+fn joined(directory: &str, name: &str) -> String {
+    Path::new(directory).join(name).to_string_lossy().replace('\\', "/")
 }
 
 /// A New file template, for the name typed in a directory. `bennu.file` can name the file.
@@ -31,14 +37,17 @@ pub(crate) fn new_file(args: &RenderArgs, template: &Template) -> Result<Rendere
     let directory = directory.trim_end_matches(['/', '\\']);
     let typed = args.name.as_deref().unwrap_or("NewFile");
     let context = NewFileContext::new(Path::new(directory), typed, &template.extension);
-    let facts = facts_at(&args.root, &format!("{directory}/{}", context.file_name));
+    ensure_relative_name(&context.file_name)?;
+    let facts = facts_at(&args.root, &joined(directory, &context.file_name));
     let parameters = args.parameters.as_ref();
     let output = render_code(&template.text, &context, &facts, parameters)?;
     let file_name = match Directives::read(&template.text).get("file") {
         Some(pattern) => render_with(pattern, &context, &facts, parameters)?.trim().to_string(),
         None => context.file_name.clone(),
     };
-    let path = format!("{directory}/{file_name}");
+    // A `bennu.file` pattern is rendered from the typed name, so it is checked after rendering.
+    ensure_relative_name(&file_name)?;
+    let path = joined(directory, &file_name);
     let text = with_imports(&path, output.text, &output.imports);
     Ok(Rendered::file(&template.name, text, path, Vec::new()))
 }
@@ -46,7 +55,7 @@ pub(crate) fn new_file(args: &RenderArgs, template: &Template) -> Result<Rendere
 /// A template run on a class: members inserted into it, a file beside it, or text — `bennu.output` says
 /// which, `members` when it does not.
 pub(crate) fn class(args: &RenderArgs, template: &Template) -> Result<Rendered, String> {
-    let (file, source) = source_of(args)?;
+    let (file, source) = java_source_of(args)?;
     // The class's file for naming: members go into it, and a file beside it is in the same part of the project.
     let facts = facts_at(&args.root, &file);
     let class = class_of(args, &file, &source)?;
@@ -102,7 +111,7 @@ pub(crate) fn class(args: &RenderArgs, template: &Template) -> Result<Rendered, 
 /// The keys a `@ConfigurationProperties` class binds, from the Spring model, as text for a property file.
 pub(crate) fn config_properties(args: &RenderArgs, template: &Template) -> Result<Rendered, String> {
     let facts = facts_for(&args.root);
-    let (file, source) = source_of(args)?;
+    let (file, source) = java_source_of(args)?;
     let class = class_of(args, &file, &source)?;
     let prefix = class
         .annotations
@@ -130,7 +139,7 @@ pub(crate) fn config_properties(args: &RenderArgs, template: &Template) -> Resul
 
 /// An abbreviation, as it would expand in the file it is typed in.
 pub(crate) fn live(args: &RenderArgs, template: &Template) -> Result<Rendered, String> {
-    let (file, source) = source_of(args)?;
+    let (file, source) = java_source_of(args)?;
     let facts = facts_at(&args.root, &file);
     let context = LiveContext::new(&file, &source);
     let output = render_code(&template.text, &context, &facts, args.parameters.as_ref())?;
@@ -148,7 +157,7 @@ pub(crate) fn postfix(args: &RenderArgs, template: &Template) -> Result<Rendered
     // Read first, so a mistake in `bennu.applies` is what the preview shows — it is what keeps the template
     // out of the popup.
     PostfixApplicability::read(&template.text)?;
-    let opened = source_of(args).ok();
+    let opened = java_source_of(args).ok();
     let typed_in = opened.as_ref().map(|(file, source)| (file.as_str(), source.as_str()));
     let facts = match typed_in {
         Some((file, _)) => facts_at(&args.root, file),

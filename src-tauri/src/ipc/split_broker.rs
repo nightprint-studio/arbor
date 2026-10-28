@@ -37,7 +37,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::{Arc, LazyLock, Mutex, RwLock};
 
 use arbor_ipc::prelude::{BrokerClient, Bytes, IpcError};
 
@@ -68,6 +68,56 @@ pub fn next_gen() -> u64 {
 /// process per product, so one slot per program.
 static OOP: LazyLock<RwLock<HashMap<&'static str, Oop>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// Who is borrowing a backend they do not own: `program` → the labels of the windows using it.
+///
+/// A backend's life is owned by the window with the same name, and closing that window ends it.
+/// A second consumer (Bennu using `picus-be` for its Database window, or `corvus-be` for the
+/// blame gutter) breaks that: closing the owner's window would pull the backend out from under
+/// the borrower, whose view empties with nothing to say why. So a borrower registers here, the
+/// owner's close path asks [`is_borrowed`] first, and the borrower's own close hands the backend
+/// back (see [`release_holder`]).
+///
+/// Plain data behind its own lock, never held across a call: nothing here can stall routing.
+static HOLDERS: LazyLock<Mutex<HashMap<String, HashSet<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Record that window `holder` is using `program`'s backend. Idempotent.
+pub fn retain(program: &str, holder: &str) {
+    if let Ok(mut g) = HOLDERS.lock() {
+        g.entry(program.to_string()).or_default().insert(holder.to_string());
+    }
+}
+
+/// Whether any window other than the owner is using `program`'s backend.
+pub fn is_borrowed(program: &str) -> bool {
+    HOLDERS.lock().map(|g| g.get(program).is_some_and(|h| !h.is_empty())).unwrap_or(false)
+}
+
+/// `holder` is gone: drop it from every program, and return the programs nobody holds any more.
+/// The caller decides whether each should now be detached — that depends on whether its own window
+/// is still open, which this module cannot see.
+pub fn release_holder(holder: &str) -> Vec<String> {
+    let Ok(mut g) = HOLDERS.lock() else { return Vec::new() };
+    let mut freed = Vec::new();
+    for (program, holders) in g.iter_mut() {
+        if holders.remove(holder) && holders.is_empty() {
+            freed.push(program.clone());
+        }
+    }
+    freed
+}
+
+/// [`detach`] unless a borrower still needs the backend — what the owner's window-close path
+/// calls. Returns `true` when it detached.
+pub fn detach_unless_borrowed(program: &str, reason: &str) -> bool {
+    if is_borrowed(program) {
+        tracing::info!("split_broker::detach({program}) skipped — borrowed by another window (reason={reason})");
+        return false;
+    }
+    detach(program, reason);
+    true
+}
 
 /// Attach a freshly-spawned backend for `program`: route its advertised `methods`
 /// to `child` from now on. Replaces any prior channel for that program.
@@ -126,6 +176,10 @@ pub fn attach(program: &'static str, gen: u64, methods: HashSet<String>, child: 
 /// `reason` is for the diagnostic log only (e.g. `"window-closed"` /
 /// `"disconnect"`), so an interleaved attach/detach trace says who tore down what.
 pub fn detach(program: &str, reason: &str) {
+    // The backend is going away, and so are the borrows on it: a later respawn starts unheld.
+    if let Ok(mut g) = HOLDERS.lock() {
+        g.remove(program);
+    }
     let removed = {
         let mut g = match OOP.write() {
             Ok(g) => g,

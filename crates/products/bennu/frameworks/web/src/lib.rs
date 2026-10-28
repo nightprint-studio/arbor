@@ -57,6 +57,7 @@ pub mod model;
 pub mod mybatis;
 pub mod mybatis_check;
 pub mod mybatis_nav;
+pub mod mybatis_sql;
 pub mod prelude;
 pub mod spring;
 pub mod struts;

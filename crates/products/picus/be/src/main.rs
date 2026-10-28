@@ -143,6 +143,12 @@ fn main() {
     let providers =
         DbProviderRegistry::new().with(Arc::new(picus_db_postgres::prelude::PostgresProvider::new()));
 
+    // The sign-in methods other than a stored password. Same shape as the engines above: a
+    // crate and a `.with(...)`, nothing else in the backend changes for the next one (AWS RDS IAM,
+    // Azure AD).
+    let auths =
+        picus_db_api::prelude::AuthRegistry::new().with(Arc::new(picus_auth_google::prelude::GoogleIam::new()));
+
     // The state every handler gets: event egress, the reverse channel, the engine
     // registry and the live-session pool. The channel is load-bearing for Picus —
     // the product stores no password, so a connection's secret is resolved through
@@ -151,7 +157,8 @@ fn main() {
     let state = Arc::new(
         PicusState::new(app.sink())
             .with_host_caller(app.host_caller())
-            .with_providers(providers),
+            .with_providers(providers)
+            .with_auths(auths),
     );
 
     watchdog::spawn(Arc::clone(&state), &app.runtime_handle());

@@ -229,6 +229,19 @@ pub struct BennuConfig {
     pub java_final_params: bool,
     /// Locals are Lombok's `val`, where the project has Lombok.
     pub java_lombok_val: bool,
+    /// Entities generated from a database table use Lombok's `@Getter`/`@Setter`. Written back by
+    /// the Database tool window, so the last choice is the next default.
+    pub java_entity_lombok: bool,
+    /// Accessors of a generated entity are fluent: `name()` / `name(v)` returning `this`.
+    pub java_entity_fluent: bool,
+    /// Which Picus connection each project is checked against, as `<connection id>=<project root>`.
+    /// A flat list of strings rather than a table keyed by path: this struct is serialized as TOML,
+    /// where a table has to follow every scalar. Opaque here — the frontend owns the pairing.
+    pub picus_bindings: Vec<String>,
+    /// What a MyBatis `${name}` stands for in a project, as `<root>\t<name>\t<value>`. Only the
+    /// project knows (a table chosen by the caller, a column list); with a value the statement can
+    /// be checked against the database. Opaque here — the frontend owns the format.
+    pub mybatis_splices: Vec<String>,
     /// Locals are `var`, where the project is on Java 10 or later — Lombok's `val` winning where both apply.
     pub java_local_var: bool,
     /// A switch that yields a value is an arrow-style switch expression.
@@ -683,6 +696,10 @@ impl Default for BennuConfig {
             java_indent_case_body: true,
             java_final_params: false,
             java_lombok_val: false,
+            java_entity_lombok: false,
+            java_entity_fluent: false,
+            picus_bindings: Vec::new(),
+            mybatis_splices: Vec::new(),
             java_local_var: false,
             java_switch_with_return: true,
             java_space_in_braces: false,

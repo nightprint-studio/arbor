@@ -425,14 +425,33 @@ export function setRunConfig(root: string, configSet: RunConfigSetDto): Promise<
 
 /** List every project class (a fresh source scan) for the Go-to-Class navigator.
  *  Wire: `bennu_class_index` — `ClassIndexArgs { root }`. */
-export function classIndex(root: string): Promise<ClassEntry[]> {
-  return bennu('bennu_class_index', { args: { root } });
+export async function classIndex(root: string): Promise<ClassEntry[]> {
+  try {
+    return await bennu<ClassEntry[]>('bennu_class_index', { args: { root } });
+  } catch (e) {
+    // The backend refuses a Cargo root with a "Java classes only" error (an agent needs to hear it);
+    // the Go-to-Class navigator just has no classes to offer there.
+    if (String(e).includes('Java classes only')) return [];
+    throw e;
+  }
 }
 
-/** Scan the project for TODO/FIXME/XXX/HACK markers (the TODO tool window). Wire:
+/** The TODO scan's raw answer: the markers, and whether the backend's cap cut the list short. */
+export interface TodoScan {
+  items: TodoItem[];
+  truncated: boolean;
+}
+
+/** Scan the project for TODO/FIXME/XXX/HACK markers, keeping the `truncated` flag. Wire:
  *  `bennu_todos` — `TodoScanArgs { root }`. */
-export function todos(root: string): Promise<TodoItem[]> {
+export function todoScan(root: string): Promise<TodoScan> {
   return bennu('bennu_todos', { args: { root } });
+}
+
+/** Scan the project for TODO/FIXME/XXX/HACK markers (the TODO tool window). The markers only —
+ *  use {@link todoScan} to also learn whether the list was truncated. */
+export async function todos(root: string): Promise<TodoItem[]> {
+  return (await todoScan(root)).items;
 }
 
 /** Index statistics for the open project (the index inspector). Pass the EXACT opened

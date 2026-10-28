@@ -109,8 +109,9 @@ pub(crate) fn ask(root: &str, op: &str, args: &[&str]) -> Result<Value, String> 
 }
 
 fn session_for(root: &str, java: &Path) -> Result<Arc<Mutex<Session>>, String> {
+    let key = session_key(root);
     let mut map = sessions().lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(existing) = map.get(root) {
+    if let Some(existing) = map.get(&key) {
         // A session busy answering someone else is alive by definition; only an idle one is looked at.
         let usable = match existing.try_lock() {
             Ok(mut s) => s.java == java && matches!(s.child.try_wait(), Ok(None)),
@@ -119,12 +120,19 @@ fn session_for(root: &str, java: &Path) -> Result<Arc<Mutex<Session>>, String> {
         if usable {
             return Ok(Arc::clone(existing));
         }
-        map.remove(root);
+        map.remove(&key);
     }
     let session = Arc::new(Mutex::new(spawn(root, java)?));
-    map.insert(root.to_string(), Arc::clone(&session));
+    map.insert(key, Arc::clone(&session));
     ensure_reaper();
     Ok(session)
+}
+
+/// One JVM per project however the caller spells the path: `C:\p`, `C:/p` and `c:/p/` are the same.
+fn session_key(root: &str) -> String {
+    let key = root.replace('\\', "/");
+    let key = key.trim_end_matches('/');
+    if cfg!(windows) { key.to_lowercase() } else { key.to_string() }
 }
 
 fn spawn(root: &str, java: &Path) -> Result<Session, String> {
@@ -243,7 +251,7 @@ fn request(s: &mut Session, op: &str, args: &[&str]) -> Result<Value, Failure> {
 }
 
 fn forget(root: &str) {
-    sessions().lock().unwrap_or_else(|p| p.into_inner()).remove(root);
+    sessions().lock().unwrap_or_else(|p| p.into_inner()).remove(&session_key(root));
 }
 
 fn ensure_reaper() {

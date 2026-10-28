@@ -24,7 +24,7 @@ import { findThemeSpec } from './find-theme';
  * (that emits mark decorations, not Lezer tags), so it can sit in the base extension
  * set unconditionally.
  */
-const lezerHighlightStyle = HighlightStyle.define([
+export const lezerHighlightStyle = HighlightStyle.define([
   { tag: t.comment, color: 'var(--syntax-comment, #808080)', fontStyle: 'italic' },
   { tag: [t.string, t.special(t.string), t.attributeValue], color: 'var(--syntax-string, #6a8759)' },
   { tag: [t.number, t.bool, t.atom], color: 'var(--syntax-number, #6897bb)' },

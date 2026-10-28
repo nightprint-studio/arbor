@@ -135,6 +135,9 @@ pub struct AppState {
     /// — an `OnceLock` like [`scheduler`](Self::scheduler). Read via
     /// [`AppState::router`].
     pub router: Arc<OnceLock<Arc<Router>>>,
+    /// The app handle, for a handler that has to drive a window (open a product on a path) and was
+    /// given only the state. Filled by `wire_backend`; read via `app_handle`.
+    pub app: Arc<OnceLock<tauri::AppHandle>>,
     /// The Corvus (git) backend's headless state — the seed of `corvus-be`
     /// (`corvus-core`). Published in `setup()` (it needs the `AppHandle` to back
     /// its event sink, which `AppState::new()` predates, hence the `OnceLock`).
@@ -394,6 +397,7 @@ impl AppState {
             frontend_ready:         Arc::new((Mutex::new(false), Condvar::new())),
             scheduler:              Arc::new(OnceLock::new()),
             router:                 Arc::new(OnceLock::new()),
+            app:                    Arc::new(OnceLock::new()),
             corvus:                 Arc::new(OnceLock::new()),
         }
     }
@@ -440,6 +444,11 @@ impl AppState {
         crate::ipc::reload_corvus_plugins(self);
     }
 
+    /// The app handle, once `setup()` has wired the backend.
+    pub fn app_handle(&self) -> Option<tauri::AppHandle> {
+        self.app.get().cloned()
+    }
+
     /// Shared trigger engine, once `setup()` has built it. Returns `None`
     /// during the brief window between `AppState::new()` and the scheduler
     /// being wired in — callers in that window should log + skip rather
@@ -462,6 +471,7 @@ impl AppState {
     /// `AppState::new()` predates. The event sink is backed by `AppHandle::emit`;
     /// the router fronts an in-process `LoopbackBroker`.
     pub fn wire_backend(&self, app: &tauri::AppHandle) {
+        let _ = self.app.set(app.clone());
         let sink: Arc<dyn EventSink> =
             Arc::new(crate::ipc::event_sink::TauriEventSink::new(app.clone()));
         let _ = self.corvus.set(

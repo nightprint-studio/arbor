@@ -84,10 +84,17 @@ struct Entry {
 /// one small file instead of the whole set, and a corrupt entry costs one artifact rather
 /// than all of them.
 fn entry_path(jar: &str) -> PathBuf {
+    entry_path_kind(jar, "")
+}
+
+/// [`entry_path`] for one **kind** of scan of the same jar: the allowlist scan (`""`) and the
+/// auto-configuration scan (`"#autoconfig"`) read the same bytes and answer different questions, so they
+/// must not share a file. The empty kind hashes exactly what the single kind used to.
+fn entry_path_kind(jar: &str, kind: &str) -> PathBuf {
     // The same FNV-1a the index base uses — short, filesystem-safe, and collision-resistant
     // enough for a local cache whose worst case is one needless re-scan.
     let mut hash: u64 = 0xcbf29ce484222325;
-    for b in jar.as_bytes() {
+    for b in jar.as_bytes().iter().chain(kind.as_bytes()) {
         hash ^= *b as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }
@@ -102,8 +109,20 @@ fn entry_path(jar: &str) -> PathBuf {
 /// Every failure is a miss: a corrupt or unreadable entry means "scan it again", never an
 /// error. A cache that can fail a request is worse than no cache.
 pub fn load(jar: &str) -> Option<Vec<LibraryBeanGroupDto>> {
+    load_kind(jar, "")
+}
+
+/// The remembered **auto-configuration** scan of `jar` — see [`entry_path_kind`].
+pub fn load_auto(jar: &str) -> Option<Vec<LibraryBeanGroupDto>> {
+    load_kind(jar, AUTO)
+}
+
+/// The kind of the auto-configuration scan.
+const AUTO: &str = "#autoconfig";
+
+fn load_kind(jar: &str, kind: &str) -> Option<Vec<LibraryBeanGroupDto>> {
     let current = Fingerprint::of(Path::new(jar))?;
-    let text = fs::read_to_string(entry_path(jar)).ok()?;
+    let text = fs::read_to_string(entry_path_kind(jar, kind)).ok()?;
     let entry: Entry = serde_json::from_str(&text).ok()?;
     (entry.schema == SCHEMA && entry.fingerprint == current).then_some(entry.groups)
 }
@@ -111,6 +130,15 @@ pub fn load(jar: &str) -> Option<Vec<LibraryBeanGroupDto>> {
 /// Remember `groups` as the scan of `jar`. Best-effort: a cache that cannot be written is a
 /// slower next launch, not a failure, so nothing here is reported.
 pub fn store(jar: &str, groups: &[LibraryBeanGroupDto]) {
+    store_kind(jar, "", groups);
+}
+
+/// Remember `groups` as the **auto-configuration** scan of `jar`.
+pub fn store_auto(jar: &str, groups: &[LibraryBeanGroupDto]) {
+    store_kind(jar, AUTO, groups);
+}
+
+fn store_kind(jar: &str, kind: &str, groups: &[LibraryBeanGroupDto]) {
     let Some(fingerprint) = Fingerprint::of(Path::new(jar)) else { return };
     let entry = Entry {
         schema: SCHEMA,
@@ -119,7 +147,7 @@ pub fn store(jar: &str, groups: &[LibraryBeanGroupDto]) {
         groups: groups.to_vec(),
     };
     let Ok(text) = serde_json::to_string(&entry) else { return };
-    let path = entry_path(jar);
+    let path = entry_path_kind(jar, kind);
     if let Some(dir) = path.parent() {
         if fs::create_dir_all(dir).is_err() {
             return;

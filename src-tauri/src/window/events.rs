@@ -101,6 +101,20 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
             // Window menu. Broadcast for ALL windows, not just product ones —
             // the launcher and the explorer list there too.
             super::emit_windows_changed(window.app_handle());
+            // A window that was borrowing another product's backend (Bennu on `picus-be`) hands
+            // it back. If the owner's own window is already gone and nobody else holds it, nothing
+            // is left to keep it alive — that is the other half of "closing Picus must not kill
+            // the backend under Bennu": the backend then outlives Picus, and ends with Bennu.
+            for program in crate::ipc::split_broker::release_holder(label) {
+                let owner_open = window
+                    .app_handle()
+                    .webview_windows()
+                    .keys()
+                    .any(|l| l.as_str() != label && super::product_id_for_label(l) == Some(program.as_str()));
+                if !owner_open {
+                    crate::ipc::split_broker::detach(&program, "last-borrower-closed");
+                }
+            }
             // The tabbed container carries products that have no window of their
             // own, so nothing below would ever tear them down: do it here.
             if label == super::workspace::WORKSPACE_WINDOW_LABEL {
@@ -159,7 +173,7 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
                         id,
                         "corvus" | "merula" | "sitta" | "tyto" | "bennu" | "picus" | "garrulus"
                     ) {
-                        crate::ipc::split_broker::detach(id, "window-closed");
+                        crate::ipc::split_broker::detach_unless_borrowed(id, "window-closed");
                     }
                 }
             }

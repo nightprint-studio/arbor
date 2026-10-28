@@ -1193,6 +1193,21 @@ pub fn generated_aliases(decl_source: &str, owner: &str, field: &str) -> Vec<Fie
         });
     }
     let symbols = bennu_java::prelude::extract_symbols(decl_source);
+    out.extend(generated_aliases_in(&symbols, owner, field));
+    out
+}
+
+/// The members generated for `field` of the type `owner`, from symbols a caller already extracted —
+/// Lombok's accessors and the nested types it writes. [`generated_aliases`] without the parse, for
+/// the caller that asks about every field of a file (the usage lens) and cannot afford one per field.
+/// A record component's accessor is not here: that one needs the syntax tree, and a record's
+/// components are not field declarations in the first place.
+pub fn generated_aliases_in(
+    symbols: &bennu_java::prelude::FileSymbols,
+    owner: &str,
+    field: &str,
+) -> Vec<FieldAlias> {
+    let mut out = Vec::new();
     if let Some(td) = symbols
         .types
         .iter()

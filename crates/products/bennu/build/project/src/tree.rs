@@ -24,11 +24,34 @@ use crate::ignored::IgnoreStack;
 ///
 /// Public because the tree's filesystem watcher has to agree with it: a change to an entry the
 /// tree never lists is a reload that shows nothing new.
-pub const SKIP_DIRS: [&str; 3] = ["target", ".git", "node_modules"];
+pub const SKIP_DIRS: [&str; 7] =
+    ["target", ".git", "node_modules", ".idea", ".gradle", ".venv", "__pycache__"];
+
+/// Build output that is only noise **next to a build manifest**. `build`, `dist` and `out` are also
+/// perfectly good Java package names (`com.acme.build`), so they are skipped only where they sit
+/// beside a `pom.xml` / `Cargo.toml` / … — i.e. where they can only be the tool's output.
+const OUTPUT_DIRS: [&str; 3] = ["build", "dist", "out"];
+
+/// Files whose presence makes a sibling [`OUTPUT_DIRS`] entry build output.
+const MANIFESTS: [&str; 5] = ["pom.xml", "Cargo.toml", "build.gradle", "build.gradle.kts", "package.json"];
+
+/// The deepest a tree is ever walked, whatever the caller asks for.
+const MAX_DEPTH: usize = 64;
+
+/// The most nodes one tree holds. A directory of generated files can have five-figure counts that
+/// no caller wants materialised; past the cap the walk stops and the tree says so.
+pub const MAX_NODES: usize = 20_000;
+
+/// Name of the marker node appended to the root when [`MAX_NODES`] was hit.
+pub const TRUNCATED_MARKER: &str = "… tree truncated (too many entries)";
 
 /// Build the tree rooted at `root`, descending at most `max_depth` levels. A
 /// directory at the depth limit is returned with empty `children` (the FE re-requests
 /// it). `root` must be a directory.
+///
+/// Bounded in three ways: depth (clamped to 64), node count ([`MAX_NODES`], marked by a trailing
+/// [`TRUNCATED_MARKER`] child of the root) and links — a symlink or junction is listed but never
+/// followed, so a link back up the tree cannot recurse until the path is too long.
 pub fn build(root: &Path, max_depth: usize) -> Result<TreeNode, ProjectError> {
     if !root.is_dir() {
         return Err(ProjectError::NotADirectory(root.display().to_string()));
@@ -37,17 +60,67 @@ pub fn build(root: &Path, max_depth: usize) -> Result<TreeNode, ProjectError> {
     // honours the `.gitignore` at the top — where the rules that matter live.
     let mut ignores = IgnoreStack::at(root);
     let root_ignored = ignores.is_ignored(root, true);
-    Ok(build_node(root, max_depth, &mut ignores, root_ignored))
+    let mut remaining = MAX_NODES;
+    let mut node = build_node(root, max_depth.min(MAX_DEPTH), &mut ignores, root_ignored, &mut remaining);
+    if remaining == 0 {
+        node.children.push(truncation_marker(root));
+    }
+    Ok(node)
+}
+
+fn truncation_marker(root: &Path) -> TreeNode {
+    TreeNode {
+        name: TRUNCATED_MARKER.to_string(),
+        path: root.join(TRUNCATED_MARKER).display().to_string(),
+        is_dir: false,
+        children: Vec::new(),
+        hidden: false,
+        ignored: true,
+        root_tag: String::new(),
+    }
+}
+
+/// Whether `name`, a real directory under `parent`, is noise the tree never walks.
+///
+/// Public so the other whole-project walkers (TODO scan, …) skip exactly what the tree skips.
+pub fn is_noise_dir(parent: &Path, name: &str) -> bool {
+    SKIP_DIRS.contains(&name)
+        || (OUTPUT_DIRS.contains(&name) && MANIFESTS.iter().any(|m| parent.join(m).is_file()))
+}
+
+/// The children of `path`, noise removed and ordered dirs-first then case-insensitively by name.
+///
+/// Typed by `file_type()` rather than `path.is_dir()`: it does not follow links (so a `target`
+/// *file* is kept — only a directory of that name is noise), and it is free where `is_dir` is a stat.
+fn sorted_children(path: &Path) -> Vec<(std::fs::DirEntry, bool)> {
+    let Ok(entries) = std::fs::read_dir(path) else { return Vec::new() };
+    let mut kids: Vec<_> = entries
+        .flatten()
+        .filter_map(|e| {
+            let real_dir = e.file_type().ok()?.is_dir();
+            let name = e.file_name().to_string_lossy().into_owned();
+            (!(real_dir && is_noise_dir(path, &name))).then_some((e, real_dir))
+        })
+        .collect();
+    kids.sort_by(|(a, ad), (b, bd)| {
+        bd.cmp(ad).then_with(|| {
+            a.file_name().to_string_lossy().to_lowercase().cmp(&b.file_name().to_string_lossy().to_lowercase())
+        })
+    });
+    kids
 }
 
 /// `inherited` is whether an ancestor is already ignored. Git has no way to un-ignore a
 /// file under an ignored directory (it never descends into one), so this short-circuits
 /// the match instead of asking again at every level.
+///
+/// `remaining` is the node budget shared by the whole walk; a node is only built while it is above zero.
 fn build_node(
     path: &Path,
     depth_left: usize,
     ignores: &mut IgnoreStack,
     inherited: bool,
+    remaining: &mut usize,
 ) -> TreeNode {
     let name = path
         .file_name()
@@ -58,28 +131,18 @@ fn build_node(
 
     if is_dir && depth_left > 0 {
         let pushed = ignores.enter(path);
-        if let Ok(entries) = std::fs::read_dir(path) {
-            let mut kids: Vec<_> = entries
-                .flatten()
-                .filter(|e| !SKIP_DIRS.contains(&e.file_name().to_string_lossy().as_ref()))
-                .collect();
-            // Dirs first, then alphabetical (case-insensitive).
-            kids.sort_by(|a, b| {
-                let ad = a.path().is_dir();
-                let bd = b.path().is_dir();
-                bd.cmp(&ad).then_with(|| {
-                    a.file_name()
-                        .to_string_lossy()
-                        .to_lowercase()
-                        .cmp(&b.file_name().to_string_lossy().to_lowercase())
-                })
-            });
-            for kid in kids {
-                let kid_path = kid.path();
-                let kid_ignored =
-                    inherited || ignores.is_ignored(&kid_path, kid_path.is_dir());
-                children.push(build_node(&kid_path, depth_left - 1, ignores, kid_ignored));
+        for (kid, real_dir) in sorted_children(path) {
+            if *remaining == 0 {
+                break;
             }
+            *remaining -= 1;
+            let kid_path = kid.path();
+            let kid_is_dir = real_dir || kid_path.is_dir();
+            let kid_ignored = inherited || ignores.is_ignored(&kid_path, kid_is_dir);
+            // A link to a directory is shown as a directory but not entered: only a real directory
+            // can be the start of a cycle-free walk.
+            let kid_depth = if real_dir { depth_left - 1 } else { 0 };
+            children.push(build_node(&kid_path, kid_depth, ignores, kid_ignored, remaining));
         }
         ignores.pop(pushed);
     }
@@ -295,5 +358,38 @@ mod tests {
         let tree = build(&t.0, 8).unwrap();
         assert!(find(&tree, "target").is_none());
         assert!(find(&tree, "A.java").is_some());
+    }
+
+    #[test]
+    fn a_file_named_like_a_noise_dir_is_kept() {
+        let t = TempDir::new("targetfile");
+        t.write("target", "not a directory");
+        let tree = build(&t.0, 2).unwrap();
+        assert!(find(&tree, "target").is_some());
+    }
+
+    #[test]
+    fn output_dirs_are_noise_only_beside_a_manifest() {
+        let t = TempDir::new("output");
+        t.write("pom.xml", "");
+        t.write("build/x.class", "");
+        t.write("src/build/Pkg.java", "");
+        let tree = build(&t.0, 8).unwrap();
+        // The tool's output at the project root is skipped; a `build` package under src is source.
+        assert!(find(&tree, "x.class").is_none());
+        assert!(find(&tree, "Pkg.java").is_some());
+    }
+
+    #[test]
+    fn the_node_budget_stops_the_walk_and_says_so() {
+        let t = TempDir::new("cap");
+        for i in 0..5 {
+            t.write(&format!("f{i}.txt"), "");
+        }
+        let mut remaining = 2;
+        let mut ignores = IgnoreStack::at(&t.0);
+        let node = build_node(&t.0, 4, &mut ignores, false, &mut remaining);
+        assert_eq!(node.children.len(), 2);
+        assert_eq!(remaining, 0);
     }
 }

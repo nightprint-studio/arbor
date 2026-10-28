@@ -65,7 +65,8 @@ pub struct MavenStatus {
     /// catalog has not been scanned yet, not that the repository is empty.
     pub artifacts: usize,
     pub versions: usize,
-    /// Whether a Maven launcher was found, and which one.
+    /// The Maven launcher that was found (its path); empty when there is none on `PATH`, in the usual
+    /// install directories, or as the project's wrapper.
     pub maven: String,
     /// Jars the offline resolve produced — what the index would get with no Maven run at all.
     pub resolved_jars: usize,
@@ -110,13 +111,20 @@ pub(crate) fn bennu_maven_status(_ctx: &BennuState, args: MavenRootArgs) -> Resu
         repository_exists: repo.exists(),
         artifacts: catalog.len(),
         versions: catalog.version_count(),
-        maven: crate::dep_classpath::find_mvn_launcher(&root),
+        maven: found_launcher(crate::dep_classpath::find_mvn_launcher(&root)),
         resolved_jars: resolution.jars.len(),
         modules: resolution.reactor.clone(),
         missing: missing_rows(&repo, &resolution),
         unversioned: resolution.unversioned.iter().map(|c| c.gav()).collect(),
         shortfall: resolution.shortfall().unwrap_or_default(),
     })
+}
+
+/// `find_mvn_launcher` ends in the bare string `mvn` when it found nothing, leaving it to the child
+/// process to resolve — a fallback for spawning, not a finding. Reported as empty so "no Maven" is
+/// not read as "Maven is `mvn`".
+fn found_launcher(launcher: String) -> String {
+    if launcher == "mvn" { String::new() } else { launcher }
 }
 
 fn missing_rows(repo: &LocalRepo, resolution: &Resolution) -> Vec<MissingArtifact> {

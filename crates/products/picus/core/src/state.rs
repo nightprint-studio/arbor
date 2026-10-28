@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use arbor_ipc::prelude::{EventSink, HostCaller};
-use picus_db_api::prelude::DbProviderRegistry;
+use picus_db_api::prelude::{AuthRegistry, DbProviderRegistry};
 use serde_json::Value;
 
 use crate::connections::SessionPool;
@@ -38,6 +38,9 @@ pub struct PicusState {
     /// linked. An engine absent from here is still fully supported on the *script*
     /// side — that is the Oracle case today.
     providers: DbProviderRegistry,
+    /// The ways, other than a stored password, a connection can sign in. Populated at boot by
+    /// `picus-be` for the same reason `providers` is.
+    auths: AuthRegistry,
     /// The sessions currently open. In memory only: a database session's lifetime
     /// is the backend process, never the disk.
     sessions: SessionPool,
@@ -59,6 +62,7 @@ impl PicusState {
             sink,
             host: None,
             providers: DbProviderRegistry::new(),
+            auths: AuthRegistry::new(),
             sessions: SessionPool::new(),
             scripts: ScriptCache::new(),
             schemas: SchemaCache::new(),
@@ -75,6 +79,17 @@ impl PicusState {
     pub fn with_providers(mut self, providers: DbProviderRegistry) -> Self {
         self.providers = providers;
         self
+    }
+
+    /// Attach the registry of sign-in methods this backend links.
+    pub fn with_auths(mut self, auths: AuthRegistry) -> Self {
+        self.auths = auths;
+        self
+    }
+
+    /// The registered sign-in methods.
+    pub fn auths(&self) -> &AuthRegistry {
+        &self.auths
     }
 
     /// The registered database engines.

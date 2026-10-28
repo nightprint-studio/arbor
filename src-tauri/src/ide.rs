@@ -58,6 +58,10 @@ pub const BUILTIN_IDES: &[BuiltinIde] = &[
                  mac_apps: &["Sublime Text.app"] },
     BuiltinIde { id: "rustrover", name: "RustRover",       cmd: "rustrover", args: &[],
                  mac_apps: &["RustRover.app"] },
+    // Arbor's own Java / Rust editor. Not a process to spawn: opening it is opening the Bennu window
+    // on the path (see `ipc::corvus::ide::open_in_ide`), so it has no command, and is "found" whenever
+    // Arbor is.
+    BuiltinIde { id: "bennu",    name: "Bennu",            cmd: "",         args: &[], mac_apps: &[] },
     BuiltinIde { id: "vim",      name: "Vim",              cmd: "vim",      args: &[], mac_apps: &[] },
     BuiltinIde { id: "neovim",   name: "Neovim",           cmd: "nvim",     args: &[], mac_apps: &[] },
 ];
@@ -82,6 +86,10 @@ pub const BUILTIN_IDES: &[BuiltinIde] = &[
 /// Steps 1–3 win over 4 when both exist: a shim honours the catalogue's `args` (VS Code's
 /// `--new-window`), a bundle launch can't.
 pub fn locate_ide(ide: &BuiltinIde, cmd: &str) -> Option<String> {
+    // Bennu ships inside Arbor: nothing to look for on disk.
+    if ide.id == "bennu" {
+        return Some("Arbor".to_string());
+    }
     let p = Path::new(cmd);
     if p.is_absolute() && p.exists() {
         return Some(cmd.to_string());

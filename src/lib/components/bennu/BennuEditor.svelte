@@ -101,6 +101,7 @@
   import { markupEdit } from './i18n/markup-edit';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
+  import { bennuPicusStore } from '$lib/stores/bennu/picus.svelte';
   import { diagnostics as ipcDiagnostics, projectTree as ipcProjectTree } from '$lib/ipc/bennu';
   import {
     definition as ipcDefinition, references as ipcReferences,
@@ -128,6 +129,8 @@
     type ExtHighlight, type ExtGutterMark, type ExtTarget, type ExtAction, type EnvVarView,
   } from '$lib/ipc/bennu/ext';
   import { isSpringPropertyFile } from './config-props-lang';
+  import { propertiesPath, yamlPath } from './config-path';
+  import Breadcrumb from '$lib/components/shared/ui/Breadcrumb.svelte';
   import { isCargoManifest } from './cargo-toml-lang';
   import { cargoVersionHints, type CargoVersionHint } from '$lib/ipc/bennu/cargo';
   import {
@@ -1156,7 +1159,7 @@
     'unresolved-super-method', 'unknown-member', 'unknown-field', 'unknown-enum-case-label',
   ]);
   const allDiags = $derived(
-    [...diags, ...buildDiags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags, ...advisoryDiags]
+    [...diags, ...buildDiags, ...spellDiags, ...mojibakeDiags, ...propertyDiags, ...strutsDiags, ...advisoryDiags, ...nativeSqlDiags]
       .map((d) => (d.code && UNDEFINED_NAME_CODES.has(d.code) ? { ...d, emphasis: 'text' as const } : d)),
   );
 
@@ -2119,11 +2122,30 @@
     });
   });
 
+  /** Every key above the caret in a YAML or `.properties` file — the status bar's trail. Recomputed from
+   *  the live text on each caret move; a configuration file is small enough that this is cheaper than
+   *  keeping a parse in step. */
+  const configCrumbs = $derived.by(() => {
+    const path = activePath;
+    if (!path) return [];
+    const lower = path.toLowerCase();
+    const yaml = lower.endsWith('.yml') || lower.endsWith('.yaml');
+    if (!yaml && !lower.endsWith('.properties')) return [];
+    const lines = projectStore.sourceOf(path).split(/\r?\n/);
+    const segments = yaml ? yamlPath(lines, caretLine) : propertiesPath(lines, caretLine);
+    return segments.map((s) => ({ label: s.label, value: s.line }));
+  });
+
   /** Glyph per gutter-mark kind. Text, not an icon set: the shared editor draws whatever
    *  string it is given, so a new kind costs a character here and nothing anywhere else. */
   const GUTTER_GLYPHS: Record<string, string> = {
-    bean: '◆',       // ◆ a bean is declared on this line
-    inject: '→',     // → something is injected here
+    // Same scheme as entity ⇄ repository: a letter naming where the click goes. On a bean `I` goes to
+    // where it is injected, on an injection point `B` goes to the bean that satisfies it.
+    bean: 'I',
+    inject: 'B',
+    // The same `B`, for an injection only a dependency can satisfy (an allowlisted artifact, Spring Boot's
+    // auto-configuration): drawn in another colour and dashed, because it says what Spring MAY register.
+    'inject-library': 'B',
     endpoint: '»',   // » a route enters here
     // A letter badge naming where the click goes, not what this is: on an entity `R` takes you to
     // its repository, on a repository `E` to its entity. A box-drawing glyph at 10px meant nothing
@@ -2830,6 +2852,36 @@
         })
         .catch(() => { if (!cancelled) propertyDiags = []; });
     }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
+  // Native SQL in a Java file, checked by the database the project is paired with: the server's own
+  // rejection of a string (a column that is not there, a join on nothing) lands as a red squiggle at the
+  // place it names, in the string. Only with a connection open; it asks again only about the string an
+  // edit touched, and stays silent when it cannot ask.
+  let nativeSqlDiags = $state<EditorDiagnostic[]>([]);
+  $effect(() => {
+    const path = activePath;
+    const lower = path?.toLowerCase() ?? '';
+    const src = path ? projectStore.sourceOf(path) : '';
+    // Java files (native SQL strings) and MyBatis mappers (their statements).
+    const isMapper = lower.endsWith('.xml') && src.includes('<mapper');
+    const live = !!path && (lower.endsWith('.java') || isMapper) && bennuPicusStore.connected;
+    if (!path || !live) { nativeSqlDiags = []; return; }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void (isMapper ? bennuPicusStore.mapperDiagnostics(src) : bennuPicusStore.nativeDiagnostics(path, src))
+        .then((hits) => {
+          if (cancelled) return;
+          nativeSqlDiags = hits.map((h) => ({
+            from: h.from,
+            to: h.to,
+            severity: cmSeverity('error' as DiagnosticSeverity),
+            message: `Database: ${h.message}`,
+          }));
+        })
+        .catch(() => { if (!cancelled) nativeSqlDiags = []; });
+    }, 600);
     return () => { cancelled = true; clearTimeout(t); };
   });
 
@@ -5216,6 +5268,13 @@
       {#if completionNoteStore.note}
         <span class="ed-note">{completionNoteStore.note}</span>
       {/if}
+      {#if configCrumbs.length}
+        <!-- Where the caret is in a YAML / properties file: every key above it. -->
+        <div class="ed-cfg-crumbs">
+          <Breadcrumb compact max={8} segments={configCrumbs}
+            onSelect={(line) => editorComp?.scrollToLineCol(line as number, 1)} />
+        </div>
+      {/if}
       <span class="ed-pos"><MapPin size={11} /> Ln {caretLine}, Col {caretCol}</span>
       <span class="ed-foot-sep">·</span>
       <span class="ed-enc" use:tooltip={'File encoding'}>{projectStore.activeEncoding}</span>
@@ -5462,6 +5521,7 @@
     font-size: var(--font-size-xs); color: var(--text-muted);
     user-select: none;
   }
+  .ed-cfg-crumbs { margin-right: auto; min-width: 0; overflow: hidden; display: flex; align-items: center; }
   .ed-pos { display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .ed-pos :global(svg) { color: var(--text-disabled); }
   .ed-foot-sep { color: var(--text-disabled); }
@@ -5702,13 +5762,19 @@
    * risks: JPQL is checked against the entity model, native SQL is sent to the database as
    * written and nothing here can vouch for it.
    */
+  /* An inline background only covers the text's own box, not the line's — so a tint over several lines
+     showed a stripe of editor background between every two of them. The shadows grow the tint by half the
+     leading above and below (line-height is 1.55, the text box about 1.25em), which closes the gap
+     without a second layer; the same colour on both sides, so there is no darker overlap band. */
   :global(.cm-content .cm-fw-jpa-query) {
-    background: color-mix(in srgb, var(--syntax-function, #ffc66d) 9%, transparent);
-    border-radius: 2px;
+    --tint: color-mix(in srgb, var(--syntax-function, #ffc66d) 9%, transparent);
+    background: var(--tint);
+    box-shadow: 0 0.14em 0 0 var(--tint), 0 -0.14em 0 0 var(--tint);
   }
   :global(.cm-content .cm-fw-jpa-query-native) {
-    background: color-mix(in srgb, var(--warning) 12%, transparent);
-    border-radius: 2px;
+    --tint: color-mix(in srgb, var(--warning) 12%, transparent);
+    background: var(--tint);
+    box-shadow: 0 0.14em 0 0 var(--tint), 0 -0.14em 0 0 var(--tint);
   }
   :global(.cm-content .cm-fw-jpa-query-keyword),
   :global(.cm-content .cm-fw-jpa-query-keyword span) {
@@ -5814,15 +5880,16 @@
 
   /* Gutter icons: colour by what the mark means, so a glance separates "a bean is
      declared here" from "something is injected here" without reading the tooltip. */
-  :global(.cm-fw-gutter-bean) { color: var(--success); }
-  :global(.cm-fw-gutter-inject) { color: var(--info); }
   :global(.cm-fw-gutter-endpoint) { color: var(--warning); }
   /* The entity ⇄ repository jump: a small filled badge, coloured by its DESTINATION — amber `R`
      on an entity (a repository is amber in the toolbar too), purple `E` on a repository. Sized to
      be hit, and filled on hover so it reads as a button. High specificity on purpose: the
      editor's base rule for a gutter icon is two classes and would otherwise win. */
   :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-entity),
-  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-repository) {
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-repository),
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-bean),
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject),
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject-library) {
     --jump: var(--syntax-function, #ffc66d);
     width: 16px; height: 15px; margin: 2px 1px 0;
     box-sizing: border-box;
@@ -5833,8 +5900,19 @@
     border: 1px solid color-mix(in srgb, var(--jump) 45%, transparent);
   }
   :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-repository) { --jump: var(--syntax-field, #9876aa); }
+  /* Spring: a bean is green (as in the Spring tool window), an injection point blue. */
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-bean) { --jump: var(--success); }
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject) { --jump: var(--info); }
+  /* A library bean: teal and dashed, so "declared in this project" and "a dependency may provide it" read apart. */
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject-library) {
+    --jump: var(--syntax-type, #4ec9b0);
+    border-style: dashed;
+  }
   :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-entity:hover),
-  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-repository:hover) {
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-repository:hover),
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-bean:hover),
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject:hover),
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject-library:hover) {
     color: var(--bg-base);
     background: var(--jump);
     border-color: var(--jump);

@@ -28,6 +28,8 @@ export interface JpaEntityView {
   /** `entity` | `embeddable` | `mapped-superclass`. Sent rather than filtered on: an attribute
    *  can be added to any of the three, a repository only to the first. */
   kind: string;
+  /** `@Table(name = …)`, empty when defaulted. */
+  table: string;
   properties: JpaProperty[];
   has_repository: boolean;
 }

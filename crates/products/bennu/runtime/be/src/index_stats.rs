@@ -37,13 +37,35 @@ pub struct IndexStatsArgs {
     safety = read,
 ))]
 fn bennu_index_stats(_ctx: &BennuState, args: IndexStatsArgs) -> Result<IndexStats, String> {
-    let mut stats = IndexService::global().index_stats(&args.root);
     let cargo = crate::agent::is_cargo_root(&args.root);
+    // The index is keyed by the exact string the project was opened with, so a differently spelled
+    // root (`c:\p` vs `C:/p`) used to miss and report zeros — indistinguishable from "still building".
+    let opened = opened_spelling(&args.root);
+    let mut stats = IndexService::global().index_stats(opened.as_deref().unwrap_or(&args.root));
     let server = cargo.then(|| crate::agent::server_for_root(&args.root)).flatten();
     let (ready, engine) = readiness(cargo, stats.ready, server.as_ref());
     stats.ready = ready;
     stats.engine = engine;
+    if !cargo && opened.is_none() {
+        stats.engine = NOT_OPEN.to_string();
+    }
     Ok(stats)
+}
+
+/// Said in full, and distinct from "still building": a root nobody opened will never finish.
+const NOT_OPEN: &str = "project not open — no Java index exists for this root; check the path or open the project first";
+
+/// The spelling `root` was opened under, if it is open at all.
+fn opened_spelling(root: &str) -> Option<String> {
+    let want = normalise_root(root);
+    IndexService::global().indexed_roots().into_iter().find(|r| normalise_root(r) == want)
+}
+
+/// `\` vs `/`, a trailing separator and (on Windows) drive-letter case do not make a different project.
+fn normalise_root(root: &str) -> String {
+    let slashed = root.replace('\\', "/");
+    let trimmed = slashed.trim_end_matches('/');
+    if cfg!(windows) { trimmed.to_lowercase() } else { trimmed.to_string() }
 }
 
 /// What `ready` and `engine` should say, given the project kind and who is serving it.
@@ -72,7 +94,7 @@ const NO_SERVER: &str = "no language server is running for this project yet — 
 
 #[cfg(test)]
 mod tests {
-    use super::readiness;
+    use super::{normalise_root, readiness};
     use bennu_proto::prelude::LspStatus;
 
     fn server(state: &str) -> LspStatus {
@@ -115,6 +137,11 @@ mod tests {
         assert!(!ready);
         // The instruction has to be "ask", not "wait": nothing starts a server except a question.
         assert!(engine.contains("first question"), "{engine}");
+    }
+
+    #[test]
+    fn root_spellings_of_one_project_compare_equal() {
+        assert_eq!(normalise_root("C:\\p\\app\\"), normalise_root("C:/p/app"));
     }
 
     #[test]

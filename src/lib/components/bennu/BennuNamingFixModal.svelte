@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tooltip } from '$lib/actions/tooltip';
   /**
    * Review a bulk naming fix before it happens.
    *
@@ -211,7 +212,7 @@
               <li class="row">
                 <span class="from">{r.name}</span>
                 <span class="reason">{r.reason}</span>
-                <span class="file" title={r.file}>{baseName(r.file)}:{r.line}</span>
+                <span class="file" use:tooltip={r.file}>{baseName(r.file)}:{r.line}</span>
               </li>
             {/each}
           </ul>
