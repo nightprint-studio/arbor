@@ -206,7 +206,14 @@ fn missing_methods_at(site: &Site<'_>, resolver: &dyn TypeResolver) -> Vec<Compl
     let cache = bennu_java::prelude::InferCache::new();
     let nl = if site.sited.contains("\r\n") { "\r\n" } else { "\n" };
     let mut out = Vec::new();
-    for call in bennu_refactor::prelude::undeclared_calls(&site.sited, site.type_node) {
+    let mut root = site.type_node;
+    while let Some(parent) = root.parent() {
+        root = parent;
+    }
+    // The signature is written with what the resolver says the arguments and the position ARE, not
+    // `Object` for everything the tree cannot declare — the same reading the quick fix makes.
+    let types = crate::call_types::ResolverCallTypes::new(root, &site.sited, &site.symbols, resolver, &cache);
+    for call in bennu_refactor::prelude::undeclared_calls_with(&site.sited, site.type_node, &types) {
         if !typed.matches(&call.name) {
             continue;
         }
@@ -231,10 +238,6 @@ fn missing_methods_at(site: &Site<'_>, resolver: &dyn TypeResolver) -> Vec<Compl
     // `toIdentity` as a call is. A reference has no arguments to read a signature off — its
     // signature is the functional interface it is passed as — so this family needs the resolver
     // even to be described, and a target that cannot be read without guessing offers nothing.
-    let mut root = site.type_node;
-    while let Some(parent) = root.parent() {
-        root = parent;
-    }
     for reference in bennu_refactor::prelude::undeclared_references(&site.sited, site.type_node) {
         if !typed.matches(&reference.name) || out.iter().any(|i| i.label == reference.name) {
             continue;
@@ -405,7 +408,7 @@ pub struct ReferencedMethod {
 }
 
 /// A type as a signature writes it: simple names, generics and array brackets kept.
-fn written_type(ty: &TypeRef) -> String {
+pub(crate) fn written_type(ty: &TypeRef) -> String {
     format!("{}{}", bennu_query::prelude::render_type(ty), "[]".repeat(ty.dims as usize))
 }
 
@@ -434,7 +437,7 @@ fn parameter_name(ty: &TypeRef) -> Option<String> {
 }
 
 /// The classes `ty` names, its type arguments included, dotted and without repeats.
-fn collect_classes(ty: &TypeRef, out: &mut Vec<String>) {
+pub(crate) fn collect_classes(ty: &TypeRef, out: &mut Vec<String>) {
     if ty.binary_name.contains('/') {
         let dotted = ty.binary_name.replace(['/', '$'], ".");
         if !out.contains(&dotted) {

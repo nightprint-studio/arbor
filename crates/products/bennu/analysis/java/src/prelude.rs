@@ -116,7 +116,8 @@ pub use crate::templates::{matching as matching_templates, Template, TEMPLATES};
 // Variable names: the one a written type reads as, and the one a declaration at a caret is about to
 // be given (the ghost text after `private final OrderRepository `).
 pub use crate::declaration_name::{
-    declaration_name_at, declared_variable_names, DeclarationKind, DeclarationName, NameContext,
+    catch_variable_at, declaration_name_at, declared_variable_names, DeclarationKind, DeclarationName,
+    NameContext,
 };
 pub use crate::names::suggested_name_for_type;
 

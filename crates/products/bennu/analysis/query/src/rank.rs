@@ -47,9 +47,56 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use bennu_java::prelude::{ClassMembers, Member, MemberKind, TypeRef, TypeResolver, Visibility};
 use bennu_proto::prelude::MemberOrigin;
+
+use crate::affinity::name_affinity;
+use crate::chain_context::{chain_context, ChainContext};
+use crate::tuning::Tuning;
+
+/// What the PROJECT does with its members — counted while the index builds, asked while a
+/// completion ranks. A trait and not a struct so the ranking depends on the question and not on how
+/// (or where) the answer was counted; the index crate provides the implementation.
+///
+/// Both answers are by simple member NAME: attributing a call site to its declaring type is a type
+/// inference per site, which is a price an index build should not pay for a tie-breaker.
+pub trait ProjectUsage: Send + Sync {
+    /// How many call sites in the project call a method with this name.
+    fn member_uses(&self, name: &str) -> u32;
+    /// How many times the project calls `next` immediately after `previous` in one chain
+    /// (`open()` then `close()`).
+    fn follows(&self, previous: &str, next: &str) -> u32;
+}
+
+/// The most a project-wide use count can add to a score, before the strength setting scales it.
+const MAX_USAGE_POINTS: i32 = 16;
+/// The most a project-wide sequence count can add.
+const MAX_SEQUENCE_POINTS: i32 = 24;
+/// What a method already called in this chain loses. Not scaled by the strength setting: it is a
+/// statement about the code ("this setter is already set"), not a learned preference.
+const REPEATED_IN_CHAIN: i32 = 25;
+/// What a local that is declared and never used yet gains — it is very probably what comes next.
+const UNUSED_LOCAL: i32 = 10;
+
+/// Points for a project-wide use count, as a **band**: each step is a doubling, and a name used once
+/// is a coincidence, not evidence — the same reading the import census gives a count.
+pub fn usage_points(count: u32) -> i32 {
+    if count < 2 {
+        return 0;
+    }
+    (2 * (32 - count.leading_zeros()) as i32).min(MAX_USAGE_POINTS)
+}
+
+/// Points for a project-wide "B follows A" count, banded like [`usage_points`] but worth more per
+/// step: a sequence is a far more specific fact than a popularity.
+pub fn sequence_points(count: u32) -> i32 {
+    if count < 2 {
+        return 0;
+    }
+    (4 * (32 - count.leading_zeros()) as i32).min(MAX_SEQUENCE_POINTS)
+}
 
 /// How well what a candidate PRODUCES answers the type the position wants — the leading sort key
 /// of every completion list that has an expected type. Ordered worst to best, so `max` is the
@@ -93,6 +140,17 @@ pub struct Context {
     /// The shape a METHOD REFERENCE being written has to have — set only after a `::`, and only
     /// when the slot the reference is passed to describes one. See [`ReferenceShape`].
     pub reference: Option<ReferenceShape>,
+    /// Which smart signals are on, and how strongly — a snapshot, so one completion never sees two
+    /// tunings. See [`crate::tuning`].
+    pub tuning: Tuning,
+    /// The name of the thing being filled (`customer` in `Customer customer = |`, the callee in an
+    /// argument slot) — what [`name_affinity`] compares a candidate with.
+    pub hole_name: Option<String>,
+    /// The calls already made in the chain being extended.
+    pub chain: ChainContext,
+    /// What the project does with its members; `None` before the index has counted, and in a file
+    /// no project owns.
+    pub usage: Option<Arc<dyn ProjectUsage>>,
     /// Produced binary name → whether it is a subtype of [`Context::expected`], asked once per
     /// type rather than once per candidate: forty members of one receiver return a handful of
     /// distinct types, and each answer is a hierarchy walk.
@@ -201,8 +259,64 @@ impl Context {
             uses,
             expected: None,
             reference: None,
+            tuning: crate::tuning::current(),
+            hole_name: None,
+            chain: ChainContext::default(),
+            usage: None,
             subtype_memo: RefCell::default(),
         }
+    }
+
+    /// Use `tuning` instead of the process-wide one. Call BEFORE [`Context::at_caret`], which
+    /// reads it to decide what is worth computing.
+    pub fn with_tuning(mut self, tuning: Tuning) -> Self {
+        self.tuning = tuning;
+        self
+    }
+
+    /// Read the text around the caret for the signals that need it: the name being filled and the
+    /// chain being extended. Only what the tuning has on is computed.
+    pub fn at_caret(mut self, source: &str, caret: usize) -> Self {
+        if self.tuning.name_affinity {
+            self.hole_name = crate::hole::hole_name(source, caret);
+        }
+        if self.tuning.context_filters || self.tuning.sequence {
+            self.chain = chain_context(source, caret);
+        }
+        self
+    }
+
+    /// Hand the ranking what the project does with its members — see [`ProjectUsage`].
+    pub fn with_usage(mut self, usage: Option<Arc<dyn ProjectUsage>>) -> Self {
+        self.usage = usage;
+        self
+    }
+
+    /// What the smart signals add to a member's score: name affinity with the hole, a repeat in the
+    /// chain, how often the project calls it, and whether the project calls it after the previous
+    /// call. All of it is zero with the tuning off.
+    fn smart_points(&self, m: &Member) -> i32 {
+        let t = &self.tuning;
+        let mut s = 0;
+        if t.name_affinity {
+            if let Some(hole) = &self.hole_name {
+                s += t.scaled(name_affinity(&m.name, hole));
+            }
+        }
+        if t.context_filters && m.kind == MemberKind::Method && self.chain.called.contains(&m.name) {
+            s -= REPEATED_IN_CHAIN;
+        }
+        if let Some(usage) = &self.usage {
+            if t.project_usage {
+                s += t.scaled(usage_points(usage.member_uses(&m.name)));
+            }
+            if t.sequence {
+                if let Some(previous) = &self.chain.previous {
+                    s += t.scaled(sequence_points(usage.follows(previous, &m.name)));
+                }
+            }
+        }
+        s
     }
 
     /// Tell the ranking the shape a method reference must have here — see [`ReferenceShape`].
@@ -385,6 +499,18 @@ pub fn score_binding(
     if let Some(n) = ctx.uses.get(name) {
         s += 6 * (*n).min(MAX_COUNTED_USES) as i32;
     }
+    // `Customer customer = cu|` — the hole and the local say the same word.
+    if ctx.tuning.name_affinity {
+        if let Some(hole) = &ctx.hole_name {
+            s += ctx.tuning.scaled(name_affinity(name, hole));
+        }
+    }
+    // Declared and not used yet: the buffer holds its declaration and nothing else, and what was
+    // just declared is very probably what comes next. A parameter is exempt — it is usually used
+    // later, and the parameter bonus above already speaks for it.
+    if ctx.tuning.context_filters && !is_parameter && ctx.uses.get(name) == Some(&1) {
+        s += UNUSED_LOCAL;
+    }
     s
 }
 
@@ -461,6 +587,10 @@ pub fn score(m: &Member, declaring: &str, depth: usize, ctx: &Context) -> i32 {
     // constrains what compiles, and a habit only says what is likely — and stronger than the
     // buffer's own use count, which is the same signal read off a worse source.
     s += crate::picked::weight(declaring, &m.name);
+
+    // What the text around the caret and the project's own habits say — each switchable, none able
+    // to overturn the position's type (the list is ordered by `Fit` before it is ordered by this).
+    s += ctx.smart_points(m);
 
     // A member you cannot see from anywhere else is, where it IS offered, usually your own.
     if m.visibility == Visibility::Private {
@@ -745,6 +875,188 @@ mod tests {
         assert_eq!(origin(&method("hashCode"), "acme/ServiceRoute", 0, &record), MemberOrigin::Inherited);
         // Its component accessors are its own.
         assert_eq!(origin(&method("prefix"), "acme/ServiceRoute", 0, &record), MemberOrigin::Own);
+    }
+
+    // ── The smart signals: name affinity, the chain, the project's habits ───────────────────────
+
+    fn string_getter(name: &str) -> Member {
+        Member::method(name, TypeRef::simple("java/lang/String"), Vec::new())
+    }
+
+    fn on() -> Tuning {
+        Tuning::DEFAULT
+    }
+
+    /// A hand-written project: what it calls, and what it calls after what.
+    struct Habits {
+        uses: HashMap<&'static str, u32>,
+        sequences: HashMap<(&'static str, &'static str), u32>,
+    }
+
+    impl ProjectUsage for Habits {
+        fn member_uses(&self, name: &str) -> u32 {
+            self.uses.get(name).copied().unwrap_or(0)
+        }
+        fn follows(&self, previous: &str, next: &str) -> u32 {
+            self.sequences
+                .iter()
+                .find(|((p, n), _)| *p == previous && *n == next)
+                .map_or(0, |(_, count)| *count)
+        }
+    }
+
+    fn habits() -> Arc<dyn ProjectUsage> {
+        Arc::new(Habits {
+            uses: HashMap::from([("stream", 40), ("map", 1)]),
+            sequences: HashMap::from([(("open", "close"), 5)]),
+        })
+    }
+
+    #[test]
+    fn project_counts_are_banded_and_a_single_use_is_a_coincidence() {
+        assert_eq!((usage_points(0), usage_points(1)), (0, 0));
+        assert_eq!((usage_points(2), usage_points(3), usage_points(4)), (4, 4, 6));
+        assert_eq!(usage_points(1_000_000), MAX_USAGE_POINTS);
+        assert_eq!((sequence_points(1), sequence_points(2), sequence_points(8)), (0, 8, 16));
+        assert_eq!(sequence_points(1_000_000), MAX_SEQUENCE_POINTS);
+        assert!(sequence_points(2) > usage_points(2), "a sequence is worth more than a popularity");
+    }
+
+    #[test]
+    fn a_member_echoing_the_name_being_filled_outranks_one_that_does_not() {
+        let mut c = ctx(false).with_tuning(on());
+        c.hole_name = Some("name".to_string());
+        let echo = score(&string_getter("getName"), "acme/Order", 0, &c);
+        let other = score(&string_getter("getId"), "acme/Order", 0, &c);
+        assert!(echo > other, "{echo} should beat {other}");
+    }
+
+    #[test]
+    fn name_affinity_does_nothing_when_switched_off_or_without_a_hole() {
+        let mut off = ctx(false).with_tuning(Tuning { name_affinity: false, ..on() });
+        off.hole_name = Some("name".to_string());
+        let a = score(&string_getter("getName"), "acme/Order", 0, &off);
+        let b = score(&string_getter("getId"), "acme/Order", 0, &off);
+        assert_eq!(a, b);
+
+        let no_hole = ctx(false).with_tuning(on());
+        let c = score(&string_getter("getName"), "acme/Order", 0, &no_hole);
+        let d = score(&string_getter("getId"), "acme/Order", 0, &no_hole);
+        assert_eq!(c, d);
+    }
+
+    #[test]
+    fn the_strength_setting_scales_what_affinity_adds() {
+        let gap = |strength: u32| {
+            let mut c = ctx(false).with_tuning(Tuning { strength, ..on() });
+            c.hole_name = Some("name".to_string());
+            score(&string_getter("getName"), "acme/Order", 0, &c)
+                - score(&string_getter("getId"), "acme/Order", 0, &c)
+        };
+        assert!(gap(50) < gap(100) && gap(100) < gap(200), "{} {} {}", gap(50), gap(100), gap(200));
+        assert_eq!(gap(0), 0);
+    }
+
+    #[test]
+    fn a_setter_already_called_in_the_chain_sinks() {
+        let mut c = ctx(false).with_tuning(on());
+        c.chain.called.insert("customer".to_string());
+        let again = score(&method("customer"), "acme/Builder", 0, &c);
+        let fresh = score(&method("total"), "acme/Builder", 0, &c);
+        assert!(fresh > again, "{fresh} should beat the repeat {again}");
+
+        let mut off = ctx(false).with_tuning(Tuning { context_filters: false, ..on() });
+        off.chain.called.insert("customer".to_string());
+        assert_eq!(
+            score(&method("customer"), "acme/Builder", 0, &off),
+            score(&method("total"), "acme/Builder", 0, &off)
+        );
+    }
+
+    /// A field with the same name as a called method is not a repeat.
+    #[test]
+    fn only_methods_are_demoted_for_repeating() {
+        let mut c = ctx(false).with_tuning(on());
+        c.chain.called.insert("size".to_string());
+        let field = Member::field("size", TypeRef::simple("int"));
+        assert_eq!(score(&field, "acme/Box", 0, &c), score(&Member::field("width", TypeRef::simple("int")), "acme/Box", 0, &c));
+    }
+
+    #[test]
+    fn what_the_project_calls_often_rises_and_a_coincidence_does_not() {
+        let c = ctx(false).with_tuning(on()).with_usage(Some(habits()));
+        let popular = score(&method("stream"), "acme/Repo", 0, &c);
+        let once = score(&method("map"), "acme/Repo", 0, &c);
+        let unknown = score(&method("zip"), "acme/Repo", 0, &c);
+        assert!(popular > unknown);
+        assert_eq!(once, unknown, "one use is not evidence");
+    }
+
+    #[test]
+    fn a_call_the_project_makes_after_the_previous_one_rises() {
+        let mut c = ctx(false).with_tuning(on()).with_usage(Some(habits()));
+        c.chain.previous = Some("open".to_string());
+        let close = score(&method("close"), "acme/Handle", 0, &c);
+        let flush = score(&method("flush"), "acme/Handle", 0, &c);
+        assert!(close > flush, "{close} should beat {flush}");
+    }
+
+    #[test]
+    fn usage_and_sequence_switch_off_independently() {
+        let mut c = ctx(false)
+            .with_tuning(Tuning { project_usage: false, sequence: false, ..on() })
+            .with_usage(Some(habits()));
+        c.chain.previous = Some("open".to_string());
+        assert_eq!(
+            score(&method("close"), "acme/Handle", 0, &c),
+            score(&method("flush"), "acme/Handle", 0, &c)
+        );
+        assert_eq!(
+            score(&method("stream"), "acme/Repo", 0, &c),
+            score(&method("zip"), "acme/Repo", 0, &c)
+        );
+    }
+
+    #[test]
+    fn a_local_echoing_the_hole_outranks_one_that_does_not() {
+        let mut c = ctx(false).with_tuning(on());
+        c.hole_name = Some("customer".to_string());
+        let echo = score_binding("customer", false, 0, 10, &c);
+        let other = score_binding("order", false, 0, 10, &c);
+        assert!(echo > other);
+    }
+
+    #[test]
+    fn a_local_declared_and_not_used_yet_rises() {
+        let fresh = Context::new("int total = 0;", false).with_tuning(on());
+        let used = Context::new("int total = 0; total++; total++;", false).with_tuning(on());
+        let off = Context::new("int total = 0;", false).with_tuning(Tuning { context_filters: false, ..on() });
+        let a = score_binding("total", false, 0, 10, &fresh);
+        // The use-count term grows with uses (up to its cap); the unused bonus must outweigh the
+        // difference between one and three occurrences' worth only in the sense that it is present.
+        assert_eq!(a - score_binding("total", false, 0, 10, &off), UNUSED_LOCAL);
+        assert!(score_binding("total", false, 0, 10, &used) >= score_binding("total", false, 0, 10, &off));
+    }
+
+    #[test]
+    fn a_parameter_is_never_given_the_unused_bonus() {
+        let c = Context::new("void m(int total) {}", false).with_tuning(on());
+        let off = Context::new("void m(int total) {}", false).with_tuning(Tuning { context_filters: false, ..on() });
+        assert_eq!(score_binding("total", true, 0, 10, &c), score_binding("total", true, 0, 10, &off));
+    }
+
+    /// `at_caret` computes only what the tuning wants.
+    #[test]
+    fn at_caret_reads_the_hole_and_the_chain_only_when_asked_to() {
+        let src = "void m() { Customer customer = Order.builder().id(1).";
+        let c = Context::new(src, false).with_tuning(on()).at_caret(src, src.len());
+        assert_eq!(c.hole_name.as_deref(), Some("customer"));
+        assert!(c.chain.called.contains("builder") && c.chain.called.contains("id"));
+        assert_eq!(c.chain.previous.as_deref(), Some("id"));
+
+        let silent = Context::new(src, false).with_tuning(Tuning::OFF).at_caret(src, src.len());
+        assert_eq!(silent.hole_name, None);
+        assert!(silent.chain.called.is_empty());
     }
 
     /// The counter is a scan, not a parse — but it must at least agree with itself.

@@ -248,7 +248,7 @@
   }
 </script>
 
-<Modal {onClose} width="720px" height="560px" padBody={false} bodyBorder ariaLabel="Generate Java members">
+<Modal {onClose} width="880px" height="580px" padBody={false} bodyBorder ariaLabel="Generate Java members">
   {#snippet header()}
     <ModalHeader {onClose}>
       <Wand2 size={14} />
@@ -385,7 +385,7 @@
 
   {#snippet footer()}
     <ModalFooter align="between">
-      <div class="gen-left">
+      <div class="gen-foot-left">
         <span class="gen-hint">Inserts at the caret.</span>
         {#if onTemplates}
           <Button variant="ghost" size="sm" tooltip="Generate with one of your code templates instead" onclick={onTemplates}>
@@ -412,7 +412,7 @@
 <style>
   .gen {
     display: grid;
-    grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
     height: 100%;
     min-height: 0;
   }
@@ -423,9 +423,11 @@
     flex-direction: column;
     gap: 14px;
     padding: 14px;
+    overflow-x: hidden;
     overflow-y: auto;
     border-right: 1px solid var(--border-subtle);
     min-height: 0;
+    min-width: 0;
   }
 
   .gen-sec { display: flex; flex-direction: column; gap: 7px; }
@@ -477,6 +479,7 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     padding: 3px;
+    overflow-x: hidden;
     overflow-y: auto;
     min-height: 0;
     max-height: 200px;
@@ -518,6 +521,7 @@
     font-family: var(--font-code);
     font-size: var(--font-size-sm);
     color: var(--text-primary);
+    flex: 1 1 auto;
     min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
@@ -538,7 +542,6 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    margin-left: auto;
     flex-shrink: 0;
   }
   .gen-acc-chip {
@@ -566,7 +569,10 @@
     font-family: var(--font-code);
     font-size: var(--font-size-xs);
     color: var(--text-muted);
-    flex-shrink: 0;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 38%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 
   .gen-opts { gap: 9px; }
@@ -607,5 +613,5 @@
   /* ── Footer ── */
   .gen-hint { font-size: var(--font-size-xs); color: var(--text-muted); }
   .gen-actions { display: flex; align-items: center; gap: 8px; }
-  .gen-left { display: flex; align-items: center; gap: 10px; }
+  .gen-foot-left { display: flex; align-items: center; gap: 10px; }
 </style>

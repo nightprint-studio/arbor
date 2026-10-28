@@ -37,11 +37,51 @@ use crate::selection::{descendants, enclosing_callable, enclosing_type, indent_a
 
 const ID: (&str, &str) = ("create-method", "Create method");
 
+/// What a **resolver** knows about a call site, for the places the text alone cannot say.
+///
+/// This crate reads the tree and nothing else, so an argument that is a literal or a plain local is
+/// typed from its declaration and everything else — `total(order.getCustomer())`,
+/// `log(a + b)`, `x = call()` — used to be `Object`. The caller that has a resolver (the editor
+/// backend) implements this, and what it answers is written into the signature; what it declines
+/// stays `Object`, which is honest rather than clever.
+///
+/// Both answers are **source text of a type** (`List<Order>`, `int`), already in the form a
+/// signature writes — the implementation also knows which imports that text needs.
+pub trait CallTypes {
+    /// The type of the argument expression `node`.
+    fn argument(&self, node: &Node<'_>) -> Option<String>;
+    /// The type the position of `call` wants — what its result is assigned to, passed as, or returned as.
+    fn result(&self, call: &Node<'_>) -> Option<String>;
+}
+
+/// No resolver: every question is declined, and the signature is what the text says.
+pub struct NoTypes;
+
+impl CallTypes for NoTypes {
+    fn argument(&self, _node: &Node<'_>) -> Option<String> {
+        None
+    }
+    fn result(&self, _call: &Node<'_>) -> Option<String> {
+        None
+    }
+}
+
 /// Plan the method a call at `[start, end)` is asking for.
 ///
 /// `[start, end)` is the diagnostic's span — the call's *name*. A caret works too: pass it as an
 /// empty range.
 pub fn create_method(root: Node<'_>, source: &str, start: usize, end: usize) -> Outcome {
+    create_method_with(root, source, start, end, &NoTypes)
+}
+
+/// [`create_method`], with the types a resolver can add — see [`CallTypes`].
+pub fn create_method_with(
+    root: Node<'_>,
+    source: &str,
+    start: usize,
+    end: usize,
+    types: &dyn CallTypes,
+) -> Outcome {
     let (id, label) = ID;
     let at = node_at(root, start)?;
     let call = crate::selection::enclosing(at, &["method_invocation"])?;
@@ -74,8 +114,8 @@ pub fn create_method(root: Node<'_>, source: &str, start: usize, end: usize) -> 
     }
 
     let request = LocalCall {
-        params: parameters_for(&call, &method, &type_decl, source),
-        returns: return_type_for(&call, &method, source),
+        params: parameters_for(&call, &method, &type_decl, source, types),
+        returns: return_type_for(&call, &method, source, types),
         is_static: is_static(&method, source),
         name,
     };
@@ -181,6 +221,11 @@ impl LocalCall {
 /// Says nothing about whether the name is INHERITED — that is a question about the whole
 /// classpath, and this crate has no resolver. The caller filters.
 pub fn undeclared_calls(source: &str, type_decl: Node<'_>) -> Vec<LocalCall> {
+    undeclared_calls_with(source, type_decl, &NoTypes)
+}
+
+/// [`undeclared_calls`], with the types a resolver can add — see [`CallTypes`].
+pub fn undeclared_calls_with(source: &str, type_decl: Node<'_>, types: &dyn CallTypes) -> Vec<LocalCall> {
     let mut seen: Vec<String> = Vec::new();
     let mut out = Vec::new();
     for call in descendants(type_decl, "method_invocation") {
@@ -198,8 +243,8 @@ pub fn undeclared_calls(source: &str, type_decl: Node<'_>) -> Vec<LocalCall> {
         let Some(method) = enclosing_callable(call) else { continue };
         seen.push(name.clone());
         out.push(LocalCall {
-            params: parameters_for(&call, &method, &type_decl, source),
-            returns: return_type_for(&call, &method, source),
+            params: parameters_for(&call, &method, &type_decl, source, types),
+            returns: return_type_for(&call, &method, source, types),
             is_static: is_static(&method, source),
             name,
         });
@@ -358,6 +403,17 @@ pub fn foreign_call_at(
     start: usize,
     end: usize,
 ) -> Option<ForeignCall> {
+    foreign_call_at_with(root, source, start, end, &NoTypes)
+}
+
+/// [`foreign_call_at`], with the types a resolver can add — see [`CallTypes`].
+pub fn foreign_call_at_with(
+    root: Node<'_>,
+    source: &str,
+    start: usize,
+    end: usize,
+    types: &dyn CallTypes,
+) -> Option<ForeignCall> {
     let at = node_at(root, start)?;
     let call = crate::selection::enclosing(at, &["method_invocation"])?;
     let name_node = call.child_by_field_name("name")?;
@@ -376,8 +432,8 @@ pub fn foreign_call_at(
     Some(ForeignCall {
         name: text(&name_node, source).to_string(),
         receiver: receiver_text,
-        params: parameters_for(&call, &method, &type_decl, source),
-        returns: return_type_for(&call, &method, source),
+        params: parameters_for(&call, &method, &type_decl, source, types),
+        returns: return_type_for(&call, &method, source, types),
     })
 }
 
@@ -387,13 +443,14 @@ fn parameters_for(
     method: &Node<'_>,
     type_decl: &Node<'_>,
     source: &str,
+    types: &dyn CallTypes,
 ) -> Vec<(String, String)> {
     let Some(arguments) = call.child_by_field_name("arguments") else { return Vec::new() };
     let mut cursor = arguments.walk();
     let mut taken: Vec<String> = Vec::new();
     let mut out = Vec::new();
     for (i, argument) in arguments.named_children(&mut cursor).enumerate() {
-        let type_text = argument_type(&argument, method, type_decl, source);
+        let type_text = argument_type(&argument, method, type_decl, source, types);
         let mut name = argument_name(&argument, source).unwrap_or_else(|| format!("arg{}", i + 1));
         while taken.contains(&name) {
             name = format!("{name}{}", i + 1);
@@ -413,36 +470,39 @@ fn render_params(params: &[(String, String)]) -> String {
         .join(", ")
 }
 
-/// The declared type of an argument, or `Object` when the text does not say.
+/// The type of an argument: what the text declares, then what the resolver says, then `Object`.
+///
+/// The text comes first where it speaks — a declared `List<Order> orders` is copied verbatim, so the
+/// signature reads like the code around it. The resolver answers for what the text cannot: a `var`
+/// local, a method call, an expression, an array element.
 fn argument_type(
     argument: &Node<'_>,
     method: &Node<'_>,
     type_decl: &Node<'_>,
     source: &str,
+    types: &dyn CallTypes,
 ) -> String {
     if let Some(literal) = literal_type(argument, source) {
         return literal;
     }
-    // A `var` / `val` local says nothing about its type, so `Object` is the honest answer — writing
-    // `var` into a parameter list is not a worse guess, it is a syntax error.
-    let written = |t: Option<String>| {
-        t.filter(|t| !crate::selection::is_inferred_type(t)).unwrap_or_else(|| "Object".to_string())
-    };
-    match argument.kind() {
-        "identifier" => {
-            written(declared_type_of(text(argument, source), method, type_decl, source))
-        }
-        "field_access" => written(
+    // A `var` / `val` local says nothing about its type, so the text declines it — writing `var`
+    // into a parameter list is not a worse guess, it is a syntax error.
+    let declared = |t: Option<String>| t.filter(|t| !crate::selection::is_inferred_type(t));
+    let from_text = match argument.kind() {
+        "identifier" => declared(declared_type_of(text(argument, source), method, type_decl, source)),
+        "field_access" => declared(
             argument
                 .child_by_field_name("field")
                 .and_then(|f| declared_type_of(text(&f, source), method, type_decl, source)),
         ),
-        "object_creation_expression" | "cast_expression" => argument
-            .child_by_field_name("type")
-            .map(|t| text(&t, source).to_string())
-            .unwrap_or_else(|| "Object".to_string()),
-        _ => "Object".to_string(),
-    }
+        "object_creation_expression" | "cast_expression" => {
+            argument.child_by_field_name("type").map(|t| text(&t, source).to_string())
+        }
+        _ => None,
+    };
+    from_text
+        .or_else(|| types.argument(argument))
+        .unwrap_or_else(|| "Object".to_string())
 }
 
 fn literal_type(node: &Node<'_>, source: &str) -> Option<String> {
@@ -517,7 +577,7 @@ fn declared_type_of(
 }
 
 /// What the call's result is used as.
-fn return_type_for(call: &Node<'_>, method: &Node<'_>, source: &str) -> String {
+fn return_type_for(call: &Node<'_>, method: &Node<'_>, source: &str, types: &dyn CallTypes) -> String {
     // A condition's parentheses are a node of their own, so `if (ready())` reaches the `if` only
     // through them — and without this step every condition answers `Object`.
     let mut node = *call;
@@ -526,25 +586,25 @@ fn return_type_for(call: &Node<'_>, method: &Node<'_>, source: &str) -> String {
     }
     let call = &node;
     let Some(parent) = call.parent() else { return "void".to_string() };
-    match parent.kind() {
+    // The type a written declaration names, unless it is `var` (which names nothing).
+    let named = |t: Option<Node<'_>>| {
+        t.map(|t| text(&t, source).to_string()).filter(|t| !crate::selection::is_inferred_type(t))
+    };
+    let from_text = match parent.kind() {
         // Nobody reads it.
-        "expression_statement" => "void".to_string(),
+        "expression_statement" => return "void".to_string(),
         // `Foo f = call();` — the declaration says exactly what is wanted.
-        "variable_declarator" => parent
-            .parent()
-            .and_then(|d| d.child_by_field_name("type"))
-            .map(|t| text(&t, source).to_string())
-            .unwrap_or_else(|| "Object".to_string()),
+        "variable_declarator" => named(parent.parent().and_then(|d| d.child_by_field_name("type"))),
         // `return call();` — the enclosing method already declared it.
-        "return_statement" => method
-            .child_by_field_name("type")
-            .map(|t| text(&t, source).to_string())
-            .unwrap_or_else(|| "Object".to_string()),
+        "return_statement" => named(method.child_by_field_name("type")),
         // `if (call())`, `while (call())` — the grammar leaves no doubt.
-        "if_statement" | "while_statement" | "do_statement" => "boolean".to_string(),
-        "unary_expression" if text(&parent, source).starts_with('!') => "boolean".to_string(),
-        _ => "Object".to_string(),
-    }
+        "if_statement" | "while_statement" | "do_statement" => Some("boolean".to_string()),
+        "unary_expression" if text(&parent, source).starts_with('!') => Some("boolean".to_string()),
+        _ => None,
+    };
+    // What the text cannot say — an assignment to a field, a `var`, a position the grammar is silent
+    // about — is the resolver's to answer; what it declines stays `Object`.
+    from_text.or_else(|| types.result(call)).unwrap_or_else(|| "Object".to_string())
 }
 
 /// A type that does not exist, and what the code using it says it should be.
@@ -621,6 +681,90 @@ mod tests {
         let tree = parse_java(source).unwrap();
         let at = source.find(call).unwrap();
         create_method(tree.root_node(), source, at, at + call.find('(').unwrap_or(call.len()))
+    }
+
+    /// A resolver stand-in: answers by the TEXT of the node it is asked about.
+    struct Knows {
+        /// A `Node` carries no text, so the stand-in keeps the source it reads names from.
+        source: String,
+        arguments: Vec<(&'static str, &'static str)>,
+        result: Option<&'static str>,
+    }
+
+    impl Knows {
+        fn new(source: &str, arguments: &[(&'static str, &'static str)], result: Option<&'static str>) -> Self {
+            Knows { source: source.to_string(), arguments: arguments.to_vec(), result }
+        }
+    }
+
+    impl CallTypes for Knows {
+        fn argument(&self, node: &Node<'_>) -> Option<String> {
+            let written = node.utf8_text(self.source.as_bytes()).ok()?;
+            self.arguments.iter().find(|(text, _)| *text == written).map(|(_, ty)| (*ty).to_string())
+        }
+        fn result(&self, _call: &Node<'_>) -> Option<String> {
+            self.result.map(str::to_string)
+        }
+    }
+
+    fn run_typed(source: &str, call: &str, types: &Knows) -> Outcome {
+        let tree = parse_java(source).unwrap();
+        let at = source.find(call).unwrap();
+        create_method_with(tree.root_node(), source, at, at + call.find('(').unwrap_or(call.len()), types)
+    }
+
+    /// The reported bug: everything the text could not read became `Object`.
+    #[test]
+    fn what_the_text_cannot_say_is_asked_of_the_resolver() {
+        let source = "class A {\n    void f(Order order) {\n        report(order.total(), order.customer().name());\n    }\n}";
+        let types = Knows::new(source, &[("order.total()", "long"), ("order.customer().name()", "String")], None);
+        let Some(Ok(plan)) = run_typed(source, "report(order", &types) else { panic!("no plan") };
+        let applied = plan.apply(source);
+        assert!(applied.contains("private void report(long arg1, String arg2) {"), "{applied}");
+    }
+
+    #[test]
+    fn without_a_resolver_the_same_call_is_still_object() {
+        let source = "class A {\n    void f(Order order) {\n        report(order.total());\n    }\n}";
+        let Some(Ok(plan)) = run(source, "report(order") else { panic!("no plan") };
+        assert!(plan.apply(source).contains("private void report(Object arg1) {"), "{}", plan.apply(source));
+    }
+
+    /// A `var` local names nothing in the text, but the resolver knows what it was initialised with.
+    #[test]
+    fn a_var_local_is_typed_by_the_resolver() {
+        let source = "class A {\n    void f() {\n        var total = compute();\n        report(total);\n    }\n}";
+        let types = Knows::new(source, &[("total", "BigDecimal")], None);
+        let Some(Ok(plan)) = run_typed(source, "report(total", &types) else { panic!("no plan") };
+        assert!(plan.apply(source).contains("private void report(BigDecimal total) {"), "{}", plan.apply(source));
+    }
+
+    /// The text wins where it speaks: a declared type is copied verbatim, never replaced.
+    #[test]
+    fn a_declared_type_is_not_overridden_by_the_resolver() {
+        let source = "class A {\n    void f(java.util.List<String> rows) {\n        report(rows);\n    }\n}";
+        let types = Knows::new(source, &[("rows", "Collection<?>")], None);
+        let Some(Ok(plan)) = run_typed(source, "report(rows", &types) else { panic!("no plan") };
+        assert!(plan.apply(source).contains("report(java.util.List<String> rows)"), "{}", plan.apply(source));
+    }
+
+    #[test]
+    fn the_return_type_a_position_wants_comes_from_the_resolver_when_the_text_is_silent() {
+        let source = "class A {\n    private long total;\n    void f() {\n        total = compute();\n    }\n}";
+        let Some(Ok(plan)) = run_typed(source, "compute()", &Knows::new(source, &[], Some("long"))) else { panic!("no plan") };
+        assert!(plan.apply(source).contains("private long compute() {"), "{}", plan.apply(source));
+        let Some(Ok(plain)) = run(source, "compute()") else { panic!("no plan") };
+        assert!(plain.apply(source).contains("private Object compute() {"), "{}", plain.apply(source));
+    }
+
+    /// `var x = call()` says nothing about the type, and writing `var` as a return type is not Java.
+    #[test]
+    fn a_var_declaration_never_writes_var_as_the_return_type() {
+        let source = "class A {\n    void f() {\n        var x = compute();\n    }\n}";
+        let Some(Ok(plan)) = run(source, "compute()") else { panic!("no plan") };
+        let applied = plan.apply(source);
+        assert!(!applied.contains("private var compute"), "{applied}");
+        assert!(applied.contains("private Object compute() {"), "{applied}");
     }
 
     #[test]

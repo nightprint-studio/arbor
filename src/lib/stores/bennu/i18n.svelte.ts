@@ -26,6 +26,7 @@
  * project's config for no gain.
  */
 
+import { setFocusedTimeout, clearFocusedTimeout } from '$lib/utils/focused-timeout';
 import { SvelteMap } from 'svelte/reactivity';
 
 import { i18nStudio, type StudioAnswer, type StudioView } from '$lib/ipc/bennu/i18n';
@@ -75,12 +76,12 @@ function createBennuI18nStore() {
    */
   let retry = $state(0);
 
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timer: number | null = null;
   /** Which fetch is current. A slower earlier answer must not overwrite a newer one. */
   let generation = 0;
 
   function clear() {
-    if (timer) { clearTimeout(timer); timer = null; }
+    if (timer) { clearFocusedTimeout(timer); timer = null; }
     generation += 1;
     view = null;
     answer = null;
@@ -104,10 +105,10 @@ function createBennuI18nStore() {
      * old sentence for 200ms reads better than a spinner for 200ms.
      */
     track(file: string, source: string, caret: number) {
-      if (timer) clearTimeout(timer);
+      if (timer) clearFocusedTimeout(timer);
       if (!view) loading = true;
       const mine = ++generation;
-      timer = setTimeout(() => {
+      timer = setFocusedTimeout(() => {
         timer = null;
         void i18nStudio(file, source, caret)
           .then((next) => {

@@ -746,6 +746,10 @@ struct ProjectSlot {
     /// built twice per build (JDK-only, then with the dependency tier) and the census is a fact
     /// about the project's sources that neither of those two stages produces.
     imports: RwLock<Arc<bennu_intel::prelude::ImportCensus>>,
+    /// What the project calls and what it calls after what — the completion ranking's habit
+    /// signals, counted in the same build. On the slot for the import census's reason: the
+    /// fallback provider rebuild reads it back from here.
+    usage: RwLock<Arc<bennu_intel::prelude::UsageCensus>>,
     /// The "Go to Class" navigator entries, captured during the full build (same parse as
     /// the symbol index — no separate whole-project scan). Served by `bennu_class_index`
     /// instantly after the first index. Empty until the build lands; refreshed best-effort
@@ -1099,6 +1103,7 @@ impl IndexService {
         // Pick up a config edited outside the app. The save handler pushes this too, so the toggle
         // is immediate; this is the other way it can have changed.
         refresh_import_census_setting();
+        crate::completion_tuning::refresh_completion_tuning_setting();
         // Keep the background-work sink current: the classpath watcher has no request of its
         // own to take one from.
         *self.sink.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&sink));
@@ -1119,6 +1124,7 @@ impl IndexService {
             non_compliant: RwLock::new(Vec::new()),
             simple_names: Mutex::new(BTreeMap::new()),
             imports: RwLock::new(Arc::default()),
+            usage: RwLock::new(Arc::default()),
             classes: RwLock::new(Vec::new()),
             provider: RwLock::new(Arc::new(NativeJavaProvider::new())),
             config: RwLock::new(None),
@@ -1231,6 +1237,8 @@ impl IndexService {
             *slot.simple_names.lock().unwrap_or_else(|p| p.into_inner()) = simple;
             let census = Arc::new(built.imports);
             *slot.imports.write().unwrap_or_else(|p| p.into_inner()) = Arc::clone(&census);
+            let usage = Arc::new(built.usage);
+            *slot.usage.write().unwrap_or_else(|p| p.into_inner()) = Arc::clone(&usage);
             eprintln!(
                 "bennu-be: index built for {} ({types} types, {members} members)",
                 root_path.display()
@@ -1269,7 +1277,7 @@ impl IndexService {
                 jdk_index_path(&jdk_version),
                 None,
             )
-            .map(|p| p.with_imports(Arc::clone(&census)))
+            .map(|p| p.with_imports(Arc::clone(&census)).with_usage(Arc::clone(&usage)))
             {
                 Ok(p) => {
                     slot.type_names.store(p.class_name_count(), Ordering::Relaxed);
@@ -2508,6 +2516,137 @@ impl IndexService {
         self.foreign_member_refusal(&slot, source, offset, new_name)
     }
 
+    /// Plan adding a parameter to the method at `file`:`offset`, over the owning project's engine —
+    /// and the imports its type needs in every file whose declaration gained it.
+    ///
+    /// `known_imports` are fully-qualified names the caller already resolved (the quick fix read them
+    /// off the argument's inferred type); the dialog passes none, and every capitalised name written in
+    /// the type is resolved here when exactly one class answers to it — a wrong import compiles
+    /// against the wrong type, so an ambiguous name gets none. `None` while the index is still
+    /// building or when the caret is on no method this project declares.
+    pub fn plan_add_parameter(
+        &self,
+        file: &str,
+        source: &str,
+        offset: usize,
+        param: &bennu_intel::prelude::NewParameter,
+        anchor: bennu_intel::prelude::Anchor,
+        known_imports: &[String],
+    ) -> Option<bennu_intel::prelude::AddParameterPlan> {
+        use bennu_intel::prelude::{Edit, EditReason, FileEdits};
+        let slot = self.slot_for_file(file)?;
+        let mut plan = slot.semantics()?.add_parameter(file, source, offset, param, anchor)?;
+        if plan.plan.blocked.is_some() {
+            return Some(plan);
+        }
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        let mut fqns: Vec<String> = known_imports.to_vec();
+        for simple in crate::add_parameter::written_type_names(&param.type_text) {
+            if fqns.iter().any(|f| f.rsplit('.').next() == Some(simple.as_str())) {
+                continue;
+            }
+            if let [only] = provider.import_candidates(&simple) {
+                fqns.push(only.clone());
+            }
+        }
+        let root = norm_path(&slot.root);
+        for decl_file in plan.declaration_files.clone() {
+            let text = if decl_file == file {
+                Some(source.to_string())
+            } else {
+                read_project_source(&root, &decl_file)
+            };
+            let Some(text) = text else { continue };
+            let found: Vec<(usize, usize, String)> =
+                fqns.iter().filter_map(|fqn| crate::intentions::import_edit_for(&text, fqn)).collect();
+            // Imports that land on the same spot are one insertion — two edits at one offset would
+            // leave their order to whoever applies them.
+            let same_spot = found.windows(2).all(|w| w[0].0 == w[1].0 && w[0].1 == w[1].1);
+            let edits = match found.first() {
+                Some(&(start, end, _)) if same_spot => {
+                    vec![(start, end, found.iter().map(|f| f.2.as_str()).collect::<String>())]
+                }
+                _ => found,
+            };
+            for (start, end, new_text) in edits {
+                let edit = Edit {
+                    file: decl_file.clone(),
+                    start,
+                    end,
+                    new_text,
+                    old: text.get(start..end).unwrap_or("").to_string(),
+                    reason: EditReason::Import,
+                    inferred: false,
+                };
+                match plan.plan.files.iter_mut().find(|f| f.file == decl_file) {
+                    Some(f) => {
+                        f.edits.push(edit);
+                        f.edits.sort_by_key(|e| e.start);
+                    }
+                    None => plan.plan.files.push(FileEdits { file: decl_file.clone(), edits: vec![edit] }),
+                }
+            }
+        }
+        Some(plan)
+    }
+
+    /// The plan that adds the parameter a call is already passing — the fix for *no overload takes N
+    /// arguments*. The extra argument is the new parameter's value (so that call is left alone); its
+    /// type is what the resolver says the argument is, its name the variable or property it reads,
+    /// and every other call passes the type's default.
+    ///
+    /// `Err` carries the reason when the answer is no — the quick fix shows it, because a fix that
+    /// silently does nothing teaches the user to stop pressing the key.
+    pub fn add_parameter_for_call(
+        &self,
+        file: &str,
+        source: &str,
+        start: usize,
+    ) -> Result<bennu_intel::prelude::AddParameterPlan, String> {
+        use bennu_refactor::prelude::CallTypes;
+        let tree = bennu_java::prelude::parse_java(source).ok_or("This file cannot be parsed.")?;
+        let root = tree.root_node();
+        let argument = crate::add_parameter::last_argument_of_call(root, start)
+            .ok_or("There is no call here to read the new parameter from.")?;
+        let resolver = self
+            .caret_resolver_for(file)
+            .ok_or("The project index is still building — try again in a moment.")?;
+        let symbols = bennu_java::prelude::extract_symbols(source);
+        let cache = bennu_java::prelude::InferCache::new();
+        let types = bennu_intel::prelude::ResolverCallTypes::new(
+            root,
+            source,
+            &symbols,
+            &*resolver as &dyn bennu_java::prelude::TypeResolver,
+            &cache,
+        );
+        let type_text = types.argument(&argument).unwrap_or_else(|| "Object".to_string());
+        let written = source.get(argument.byte_range()).unwrap_or("");
+        let param = bennu_intel::prelude::NewParameter {
+            name: crate::add_parameter::parameter_name_for(written, &type_text),
+            default_value: bennu_intel::prelude::default_value_for(&type_text),
+            type_text,
+            before: None,
+        };
+        let plan = self
+            .plan_add_parameter(
+                file,
+                source,
+                start,
+                &param,
+                bennu_intel::prelude::Anchor::ExtraArgument,
+                &types.classes(),
+            )
+            .ok_or("This is not a method the project declares, so there is nowhere to add a parameter.")?;
+        match &plan.plan.blocked {
+            Some(why) => Err(why.clone()),
+            None => Ok(plan),
+        }
+    }
+
     /// What a safe delete at `file`:`offset` would do, or why it will not.
     ///
     /// Through the slot's engine like the rename above, so the two ask the reference index the same
@@ -2848,9 +2987,27 @@ impl IndexService {
         let Some(tree) = bennu_java::prelude::parse_java(source) else {
             return Vec::new();
         };
-        let Some(call) =
-            bennu_refactor::prelude::foreign_call_at(tree.root_node(), source, start, end)
-        else {
+        // The types of the arguments and of what the result is used as come from the resolver when
+        // there is one — `order.bill(c.address())` asks for `bill(Address arg1)`, not for `Object`.
+        // Without one (a cold index) the call is read from the text alone, as it always was.
+        let root_node = tree.root_node();
+        let symbols = bennu_java::prelude::extract_symbols(source);
+        let cache = bennu_java::prelude::InferCache::new();
+        let resolver = self.caret_resolver_for(file);
+        let types = resolver.as_deref().map(|r| {
+            bennu_intel::prelude::ResolverCallTypes::new(
+                root_node,
+                source,
+                &symbols,
+                r as &dyn bennu_java::prelude::TypeResolver,
+                &cache,
+            )
+        });
+        let call = match &types {
+            Some(t) => bennu_refactor::prelude::foreign_call_at_with(root_node, source, start, end, t),
+            None => bennu_refactor::prelude::foreign_call_at(root_node, source, start, end),
+        };
+        let Some(call) = call else {
             return Vec::new();
         };
         // The receiver's type. `start` is the called name's first byte, which is exactly one past
@@ -4535,7 +4692,8 @@ fn build_dependency_tier(
                 .map(|p| {
                     let census =
                         Arc::clone(&slot.imports.read().unwrap_or_else(|e| e.into_inner()));
-                    p.with_imports(census)
+                    let usage = Arc::clone(&slot.usage.read().unwrap_or_else(|e| e.into_inner()));
+                    p.with_imports(census).with_usage(usage)
                 })
             });
         match built {

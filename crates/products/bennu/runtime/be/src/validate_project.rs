@@ -62,7 +62,7 @@ fn bennu_validate_project(
     ctx: &BennuState,
     args: ValidateProjectArgs,
 ) -> Result<ProjectValidationResult, String> {
-    let _guard = BuildGuard::acquire().ok_or_else(|| BUSY_MSG.to_string())?;
+    let _guard = BuildGuard::acquire(&args.root).ok_or_else(|| BUSY_MSG.to_string())?;
     let sink = ctx.event_sink();
     let encoding = crate::index_service::encoding_plan(&args.root);
     let svc = IndexService::global();

@@ -98,7 +98,7 @@
   import JUnitIcon from './JUnitIcon.svelte';
   import { testIcon } from './test-icon';
   import BennuBottomDock from './BennuBottomDock.svelte';
-  import BennuEditor from './BennuEditor.svelte';
+  import BennuEditorSplit from './BennuEditorSplit.svelte';
   import BennuDocsPanel from './BennuDocsPanel.svelte';
   import BennuSettingsModal from './BennuSettingsModal.svelte';
   import BennuFindInFilesModal from './BennuFindInFilesModal.svelte';
@@ -135,6 +135,7 @@
   import BennuNamingFixModal from './BennuNamingFixModal.svelte';
   import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
   import BennuRenameModal from './BennuRenameModal.svelte';
+  import BennuAddParameterModal from './BennuAddParameterModal.svelte';
   import BennuMoveTargetPicker from './BennuMoveTargetPicker.svelte';
   import type { MoveTarget } from '$lib/ipc/bennu/refactor';
   import BennuUsagesPopover from './BennuUsagesPopover.svelte';
@@ -724,7 +725,7 @@
       : bennuTestStore.classesInFile(file).length > 0;
   });
 
-  let editor = $state<{
+  let editorFirst = $state<{
     openGoto: () => void;
     /** Walk the lines changed since the last commit. */
     gotoChange: (direction: 1 | -1, fromLine?: number) => void;
@@ -738,6 +739,7 @@
     goToDefinition: () => void;
     goToImplementation: () => Promise<void>;
     openRename: () => void;
+    openAddParameter: () => void;
     findUsages: () => void;
     findComponentUsages: () => void;
     showCallHierarchy: () => void;
@@ -768,6 +770,11 @@
       edits: readonly { start: number; end: number; replacement: string }[],
     ) => void;
   } | null>(null);
+  // The second pane's editor, while the editor is split — the same component, so the same API.
+  let editorSecond = $state<typeof editorFirst>(null);
+  /** The editor that has the focus: what every command below talks to. With one pane that is the only
+   *  editor; with two, the pane the caret is in. */
+  const editor = $derived(projectStore.focusedPane === 1 && editorSecond ? editorSecond : editorFirst);
 
   // The DTO Lab reads the caret and writes into an open test file through the editor. Bound once:
   // both closures read `editor` when called, so a remounted editor is picked up without re-binding.
@@ -1562,6 +1569,24 @@
         action: () => run(() => editor?.showTypeHierarchy()), when: isJava || isLspFile(path) },
       { id: 'rename', title: 'Rename…', icon: 'Target', shortcut: 'Shift+F6',
         action: () => run(() => editor?.openRename()), when: canNav },
+      // The editor in two panes. A tab moves with drag too — onto the other pane, or onto the zone at
+      // the right edge of a lone editor — these are the same moves without the mouse.
+      { id: 'split-right', title: 'Editor: move tab to the other pane', icon: 'PanelRight',
+        action: () => run(() => {
+          const file = projectStore.activeFilePath;
+          if (file) projectStore.moveTab(file, projectStore.focusedPane === 0 ? 1 : 0);
+        }),
+        when: !!projectStore.activeFilePath && (projectStore.isSplit || projectStore.openFilePaths.length > 1) },
+      { id: 'focus-other-pane', title: 'Editor: focus the other pane', icon: 'ArrowLeftRight',
+        action: () => run(() => {
+          projectStore.focusPane(projectStore.focusedPane === 0 ? 1 : 0);
+          queueMicrotask(() => editor?.focusEditor());
+        }),
+        when: projectStore.isSplit },
+      { id: 'unsplit', title: 'Editor: close split', icon: 'PanelRightClose',
+        action: () => run(() => projectStore.unsplit()), when: projectStore.isSplit },
+      { id: 'add-parameter', title: 'Add parameter…', icon: 'ListPlus', shortcut: 'Ctrl+F6',
+        action: () => run(() => editor?.openAddParameter()), when: isJava },
       { id: 'safedelete', title: 'Safe delete…', icon: 'Trash2', shortcut: 'Alt+Delete',
         action: () => run(() => void openSafeDelete()), when: isJava },
       // The bulk half of the naming check. Two entries and not one: "this file" is the answer to a
@@ -2145,6 +2170,11 @@
       if (!supportsCodeNav(projectStore.activeFilePath)) return;
       e.preventDefault(); editor?.openRename(); return;
     }
+    // Add parameter (Ctrl+F6) — IntelliJ's Change Signature key; the method under the caret, with a preview.
+    if (mod && !e.shiftKey && !e.altKey && e.key === 'F6') {
+      if (!isJavaFile(projectStore.activeFilePath)) return;
+      e.preventDefault(); editor?.openAddParameter(); return;
+    }
     // Safe delete (Alt+Delete) — IntelliJ's own. Never deletes on the keystroke: it opens the
     // dialog, which either confirms or shows what is in the way.
     if (e.altKey && !mod && !e.shiftKey && e.key === 'Delete') {
@@ -2563,7 +2593,12 @@
 
         <div class="main-col">
           <div class="card grow">
-            <BennuEditor bind:this={editor} onGenerate={openGenerateFromIntention} onOverride={() => void openOverrides()} />
+            <BennuEditorSplit
+              bind:first={editorFirst}
+              bind:second={editorSecond}
+              onGenerate={openGenerateFromIntention}
+              onOverride={() => void openOverrides()}
+            />
           </div>
           {#if showJobOutput}
             <PanelCard
@@ -2894,6 +2929,9 @@
   />
 {/if}
 
+{#if bennuRefactorStore.addParameterCtx}
+  <BennuAddParameterModal onClose={() => { bennuRefactorStore.closeAddParameter(); editor?.focusEditor(); }} />
+{/if}
 {#if bennuRefactorStore.renameOpen}
   <BennuRenameModal onClose={() => { bennuRefactorStore.closeRename(); editor?.focusEditor(); }} />
 {/if}

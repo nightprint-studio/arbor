@@ -1,6 +1,11 @@
 //! `generate hint` domain — `bennu_generate_hint` (the ghost text for what is certainly being written).
 //!
-//! Two proposals share the one ghost-text seam, asked in order:
+//! Four proposals share the one ghost-text seam, asked in order — the first two below, then the
+//! statement-level pair, which the user can switch off as one (`completion_tuning().ghost_text`):
+//! the name of a caught exception (`catch (IOException ` → `e`) and the next `case` of an enum
+//! `switch`. Each answers only where it is certain, as the two below do.
+//!
+//! The first two:
 //!
 //! 1. **A member being written.** Typing `getCust` in a class body has, most of the time, exactly one
 //!    thing it can mean, and the editor already knows what: the field is in the buffer, the
@@ -58,17 +63,55 @@ fn bennu_generate_hint(
         return Ok(None);
     }
     let resolver = IndexService::global().caret_resolver_for(&args.file);
+    let typed = resolver.as_deref().map(|r| r as &dyn bennu_java::prelude::TypeResolver);
     let accessor = bennu_intel::prelude::generated_hint(
         &args.source,
         args.offset,
         bennu_complete::prelude::MatchCase::from_flag(args.case_sensitive),
-        resolver.as_deref().map(|r| r as &dyn bennu_java::prelude::TypeResolver),
+        typed,
     );
-    Ok(accessor.or_else(|| {
-        declaration_name_hint(&args.source, args.offset, args.case_sensitive, |target| {
-            crate::naming::declared_convention(&args.file, target)
+    // The statement-level rules (the caught exception's name, the next `case`) are the user's to
+    // switch off, as one setting — Settings → Completion → Ghost text.
+    let statements = bennu_query::prelude::completion_tuning().ghost_text;
+    Ok(accessor
+        .or_else(|| {
+            declaration_name_hint(&args.source, args.offset, args.case_sensitive, |target| {
+                crate::naming::declared_convention(&args.file, target)
+            })
         })
-    }))
+        .or_else(|| {
+            statements
+                .then(|| {
+                    catch_variable_hint(&args.source, args.offset, |target| {
+                        crate::naming::declared_convention(&args.file, target)
+                    })
+                })
+                .flatten()
+        })
+        .or_else(|| {
+            let resolver = typed.filter(|_| statements)?;
+            bennu_intel::prelude::next_case_hint(&args.source, args.offset, resolver)
+        }))
+}
+
+/// The name of the exception a `catch (Type ` is about to declare — `e`, spelled the project's way.
+///
+/// Nothing is drawn unless the caret sits right after the caught type with nothing typed: an
+/// exception variable is named by convention, so the proposal is derived rather than guessed.
+fn catch_variable_hint(
+    source: &str,
+    offset: usize,
+    declared: impl Fn(Target) -> Option<Convention>,
+) -> Option<AccessorHint> {
+    let found = bennu_java::prelude::catch_variable_at(source, offset, |name, context| {
+        spelled(name, context, declared(Target::Local))
+    })?;
+    Some(AccessorHint {
+        preview: found.name.clone(),
+        insert: found.name,
+        replace_start: found.typed_start,
+        replace_end: found.typed_end,
+    })
 }
 
 /// The predicted name of the declaration at the caret, shaped as ghost text.
@@ -188,6 +231,29 @@ mod tests {
         let parameters_snake = |target: Target| (target == Target::Parameter).then_some(Convention::LowerSnake);
         assert_eq!(name_in("class A { void m(FilterConfigurator ", parameters_snake), "filter_configurator");
         assert_eq!(name_in("class A { FilterConfigurator ", parameters_snake), "filterConfigurator");
+    }
+
+    #[test]
+    fn a_caught_exception_is_named_e_and_inserted_at_the_caret() {
+        let src = "class A { void m() { try { run(); } catch (IOException ";
+        let hint = catch_variable_hint(src, src.len(), undeclared).expect("a hint");
+        assert_eq!((hint.preview.as_str(), hint.insert.as_str()), ("e", "e"));
+        assert_eq!((hint.replace_start, hint.replace_end), (src.len(), src.len()));
+    }
+
+    /// A catch parameter may not shadow a local, so the digit is not a style choice.
+    #[test]
+    fn a_caught_exception_never_reuses_a_name_in_scope() {
+        let src = "class A { void m(String e) { try { run(); } catch (IOException ";
+        assert_eq!(catch_variable_hint(src, src.len(), undeclared).expect("a hint").insert, "e1");
+    }
+
+    #[test]
+    fn no_catch_hint_once_a_name_is_started_or_outside_a_catch() {
+        let started = "class A { void m() { try { } catch (IOException e";
+        assert!(catch_variable_hint(started, started.len(), undeclared).is_none());
+        let elsewhere = "class A { void m() { IOException ";
+        assert!(catch_variable_hint(elsewhere, elsewhere.len(), undeclared).is_none());
     }
 
     /// A snake-case name that is already taken gets its digit in the same spelling.

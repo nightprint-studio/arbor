@@ -161,7 +161,10 @@ pub fn completion_in<M: CpMemberIndex>(
     // the middle of `String s = order.|` sits inside a declarator whose type is three words to
     // the left, and no amount of looking at `order` finds it.
     let expected = bennu_java::prelude::expected_type(source, byte_offset, resolver);
-    let ctx = rank::Context::new(source, receiver_is_type).expecting(expected);
+    let ctx = rank::Context::new(source, receiver_is_type)
+        .expecting(expected)
+        .at_caret(source, dot_offset)
+        .with_usage(resolver.project_usage());
     collect_members(resolver, &recv, typed, site.as_deref(), false, &ctx, &mut out, &mut seen);
     // A nested type is a member of its outer, named `Outer.Inner` with no import — so `Outer.`
     // offers it alongside the statics. Only when the receiver IS a type: `instance.Inner` is not
@@ -177,6 +180,14 @@ pub fn completion_in<M: CpMemberIndex>(
     preselect_the_only_exact_fit(&mut out);
     if prefix.is_empty() {
         preselect_the_first_own_member(&mut out);
+    }
+    // Chains (`getCustomer().getName()`) go in AFTER the preselection: they are added by hand below
+    // the members that fit directly, and must not take part in "the only exact fit". Skipped when
+    // the call is already written, since a chain cannot replace half of one.
+    if !call_is_written(source, byte_offset) {
+        let chains = crate::chain_members::chain_members(resolver, &recv, receiver_is_type, typed, &ctx);
+        let after_the_fits = out.iter().take_while(|r| r.fit != rank::Fit::None).count();
+        out.splice(after_the_fits..after_the_fits, chains);
     }
     let mut items: Vec<CompletionItem> = out
         .into_iter()
@@ -699,6 +710,17 @@ fn call_syntax(m: &Member) -> (Option<String>, Vec<SnippetStop>) {
     (Some(insert), stops)
 }
 
+/// Whether the identifier being completed already has its argument list written after it —
+/// `list.ad|()` and `list.ad|(x, y)`. The test is the buffer to the right of the identifier, not of
+/// the caret, and it stops at the end of the LINE (a `(` on the next line opens a different
+/// expression).
+pub(crate) fn call_is_written(source: &str, caret: usize) -> bool {
+    let rest = &source[caret.min(source.len())..];
+    let line = rest.split('\n').next().unwrap_or(rest);
+    let after = line.trim_start_matches(|c: char| c.is_alphanumeric() || c == '_' || c == '$');
+    after.trim_start().starts_with('(')
+}
+
 /// Undo [`call_syntax`] for the candidates at a caret that **already has** a call around it.
 ///
 /// `list.ad|()` and `list.ad|(x, y)` are the ordinary shape of adding an argument to a call you
@@ -712,10 +734,7 @@ fn call_syntax(m: &Member) -> (Option<String>, Vec<SnippetStop>) {
 /// newline would leave the parentheses off every candidate whose statement happens to be followed
 /// by a parenthesised one.
 pub(crate) fn drop_call_syntax_if_written(items: &mut [CompletionItem], source: &str, caret: usize) {
-    let rest = &source[caret.min(source.len())..];
-    let line = rest.split('\n').next().unwrap_or(rest);
-    let after = line.trim_start_matches(|c: char| c.is_alphanumeric() || c == '_' || c == '$');
-    if !after.trim_start().starts_with('(') {
+    if !call_is_written(source, caret) {
         return;
     }
     for item in items.iter_mut() {

@@ -224,6 +224,13 @@ export function frameSource(
   return bennu('bennu_frame_source', { args: { root, class: cls, method, line } });
 }
 
+/** The line a method is declared on in a project source file — where a log link that names a
+ *  method but no line (`com.acme.Order#total`) lands. `null` when the file has no such method.
+ *  Wire: `bennu_method_line` — `{ path, method }`. */
+export function methodLine(path: string, method: string): Promise<number | null> {
+  return bennu('bennu_method_line', { args: { path, method } });
+}
+
 /** Download the `-sources.jar` for the dependency that owns the library type `name` (resolved via
  *  `file`'s buffer `source`), via `mvn dependency:get`, as a tracked background job. `viewPath` is
  *  the open decompiled tab's path, echoed back in `arbor://bennu/sources-ready { path, ok }` so the

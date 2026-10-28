@@ -13,10 +13,14 @@
 
 import { keymap, type Command } from '@codemirror/view';
 import expandAbbreviation, { extract } from 'emmet';
+import { hasMultipleCursors } from './multi-cursor';
 
 /** Expand the Emmet abbreviation left of the caret, or return false to let Tab indent. */
-const expandOnTab: Command = (view) => {
+export const expandOnTab: Command = (view) => {
   const { state } = view;
+  // With several cursors the abbreviation left of the main one would expand there and nowhere else;
+  // Tab indents instead, as it does for any other multi-cursor edit.
+  if (hasMultipleCursors(state)) return false;
   const sel = state.selection.main;
   // Only on a collapsed caret — a Tab with a selection is "indent the block".
   if (!sel.empty) return false;

@@ -15,7 +15,7 @@ pub use crate::contract::{
     JdkStatus, JspActionBinding, JspActionOption, JspNav, MemberOrigin, PropertyLintHit,
     InheritedMember, InheritedSource, JdkInfo, MainClassEntry, ProjectInfo, ProjectKind,
     ProjectValidationResult,
-    RenameApplyResult, RenameEdit, RenameFileEdits, RenameFileMove, RenamePreview, RunConfig, RunConfigSet, RunHandle, SnippetStop, SpellHit,
+    AddParameterPreview, RenameApplyResult, RenameEdit, RenameFileEdits, RenameFileMove, RenamePreview, RunConfig, RunConfigSet, RunHandle, SnippetStop, SpellHit,
     SpellStatus,
     TodoItem, TreeNode, UsageHit, UsagesResult, ValidationContext, WriteResult,
 };

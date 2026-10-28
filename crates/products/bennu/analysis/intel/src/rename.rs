@@ -194,7 +194,7 @@ pub fn rename_plan(
                     // A library supertype declaring the same method makes this an override of code
                     // we cannot edit. Plan it anyway — the edit list is what makes the refusal
                     // legible — but mark it unappliable.
-                    let family = override_family(resolver, subtypes, owner, name);
+                    let (family, library) = method_family(resolver, policy, subtypes, owner, name);
                     // Asked of EVERY member of the family, not just the caret's own type. A method
                     // can be declared by a project interface AND, in one of that interface's
                     // implementors, override a library class's method of the same name:
@@ -210,16 +210,13 @@ pub fn rename_plan(
                     // family — it is only walked through — and asking the family alone let the rename
                     // through: the method moved, and two inner classes stopped implementing
                     // `Enumeration`.
-                    let heirs = inheriting_subtypes(subtypes, &family);
-                    blocked = family.iter().chain(heirs.iter()).find_map(|o| {
-                        library_override(policy, o, name).map(|lib| {
-                            format!(
-                                "`{name}` overrides {} — a library type, which cannot be renamed \
-                                 with it. Renaming only this side would stop the class implementing \
-                                 what it declares.",
-                                lib.replace('/', ".")
-                            )
-                        })
+                    blocked = library.map(|lib| {
+                        format!(
+                            "`{name}` overrides {} — a library type, which cannot be renamed \
+                             with it. Renaming only this side would stop the class implementing \
+                             what it declares.",
+                            lib.replace('/', ".")
+                        )
                     });
                     family
                 }
@@ -332,21 +329,12 @@ pub fn rename_plan(
                 // accessors are called.
                 let mut names = vec![name.clone()];
                 names.extend(also_named.iter().cloned());
-                let unseen: Vec<&crate::refs::UsageLocation> = names
-                    .iter()
-                    .flat_map(|n| index.unresolved_named(n))
-                    .filter(|u| !edits.iter().any(|e| e.file == u.file && e.start == u.start))
-                    .collect();
-                if let Some(first) = unseen.first() {
-                    blocked = Some(format!(
-                        "`{name}` is also written at {} site(s) whose receiver this engine cannot \
-                         resolve — the first is {}:{}. Renaming would leave them calling a name \
-                         that no longer exists.",
-                        unseen.len(),
-                        first.file.rsplit('/').next().unwrap_or(&first.file),
-                        first.line
-                    ));
-                }
+                let unseen = unseen_uses(index, &names, |u| {
+                    edits.iter().any(|e| e.file == u.file && e.start == u.start)
+                });
+                blocked = unseen_uses_note(&name, &unseen).map(|note| {
+                    format!("{note} Renaming would leave them calling a name that no longer exists.")
+                });
             }
             (member_name(key), key.label(), edits)
         }
@@ -368,6 +356,20 @@ pub fn rename_plan(
         }
     };
 
+    Some(plan_from_edits(old_name, new_name, label, edits, file_rename, blocked))
+}
+
+/// The plan a flat edit list makes: grouped per file in the order files first appear, each file's
+/// edits in source order, and flagged `has_inferred` when any of them is. What a rename and an
+/// add-parameter both hand to the preview.
+pub(crate) fn plan_from_edits(
+    old_name: String,
+    new_name: &str,
+    target_label: String,
+    edits: Vec<Edit>,
+    file_rename: Option<FileRename>,
+    blocked: Option<String>,
+) -> RenamePlan {
     let mut order: Vec<String> = Vec::new();
     let mut by_file: HashMap<String, Vec<Edit>> = HashMap::new();
     let mut has_inferred = false;
@@ -386,16 +388,60 @@ pub fn rename_plan(
             FileEdits { file: f, edits }
         })
         .collect();
-
-    Some(RenamePlan {
+    RenamePlan {
         old_name,
         new_name: new_name.to_string(),
-        target_label: label,
+        target_label,
         files,
         has_inferred,
         blocked,
         file_rename,
-    })
+    }
+}
+
+/// A method's override family, and the library type it is bound to, if any.
+///
+/// Every refactor that changes a method's SHAPE has to change every declaration of it together, and
+/// has to refuse when one of them sits in a jar: the family is the project's declarations, the
+/// library check is asked of those AND of the types that merely inherit it (see
+/// [`inheriting_subtypes`]). The wording of the refusal belongs to the caller.
+pub(crate) fn method_family(
+    resolver: &dyn TypeResolver,
+    policy: &dyn TypeResolver,
+    subtypes: &SubtypeMap,
+    owner: &str,
+    name: &str,
+) -> (Vec<String>, Option<String>) {
+    let family = override_family(resolver, subtypes, owner, name);
+    let heirs = inheriting_subtypes(subtypes, &family);
+    let library = family.iter().chain(heirs.iter()).find_map(|o| library_override(policy, o, name));
+    (family, library)
+}
+
+/// The uses of `names` the reference walk could not type, that the plan does not already cover.
+///
+/// Such a use is one the plan cannot rewrite, so a refactor that changes how the method is called
+/// has to refuse over it. Keyed on the NAME alone, deliberately: the engine cannot know whose member
+/// an untyped receiver meant, so the only sound reading is that it might be this one.
+pub(crate) fn unseen_uses<'i>(
+    index: &'i ReferenceIndex,
+    names: &[String],
+    planned: impl Fn(&crate::refs::UsageLocation) -> bool,
+) -> Vec<&'i crate::refs::UsageLocation> {
+    names.iter().flat_map(|n| index.unresolved_named(n)).filter(|u| !planned(u)).collect()
+}
+
+/// The sentence a refusal opens with when [`unseen_uses`] found something; the caller says what that
+/// would break.
+pub(crate) fn unseen_uses_note(name: &str, unseen: &[&crate::refs::UsageLocation]) -> Option<String> {
+    let first = unseen.first()?;
+    Some(format!(
+        "`{name}` is also written at {} site(s) whose receiver this engine cannot resolve — the first \
+         is {}:{}.",
+        unseen.len(),
+        first.file.rsplit('/').next().unwrap_or(&first.file),
+        first.line
+    ))
 }
 
 /// The file move a type rename implies, or `None` when the file is not named after the type.
@@ -1740,7 +1786,7 @@ pub fn plan_types(
 /// (which collects declarations) and decisive for the refusal (which asks what contract a type is
 /// bound by). A subtype implements a library interface with a method it inherited just as surely as
 /// with one it wrote.
-fn inheriting_subtypes(subtypes: &SubtypeMap, family: &[String]) -> Vec<String> {
+pub(crate) fn inheriting_subtypes(subtypes: &SubtypeMap, family: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = family.iter().cloned().collect();
     let mut queue: Vec<String> = family.to_vec();
@@ -2228,7 +2274,7 @@ fn smallest_named_covering<'t>(root: &Node<'t>, offset: usize) -> Option<Node<'t
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::refs::{build_reference_index, SourceFile};
     use bennu_java::prelude::{
@@ -2236,12 +2282,13 @@ mod tests {
         Visibility,
     };
 
-    struct SrcResolver {
+    pub(crate) struct SrcResolver {
         project: HashMap<String, ClassMembers>,
         simple: HashMap<String, String>,
     }
 
-    fn build_resolver(files: &[(&str, &str)]) -> (SrcResolver, HashMap<String, String>) {
+    /// A resolver over in-memory sources, shared with the other refactors' tests.
+    pub(crate) fn build_resolver(files: &[(&str, &str)]) -> (SrcResolver, HashMap<String, String>) {
         let mut project_types: HashMap<String, String> = HashMap::new();
         for (_p, s) in files {
             for td in extract_symbols(s).types {

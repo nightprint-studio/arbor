@@ -22,6 +22,8 @@
  * `AccessorMap` shape stays the same, so both consumers are agnostic.
  */
 
+import { accessorStem, toCamelCase } from './java-generate';
+
 /** Which accessors already exist for one field. */
 export interface AccessorFlags {
   getter: boolean;
@@ -84,15 +86,17 @@ export function detectAccessors(source: string, fieldNames: string[]): AccessorM
   const { noArg, withArg } = scanMethods(source);
   const out: AccessorMap = {};
   for (const name of fieldNames) {
-    const Cap = upperFirst(name);
+    // A `foo_bar` field is read through `getFooBar` (what Generate writes) as well as the
+    // literal `getFoo_bar`.
+    const stems = [...new Set([upperFirst(name), accessorStem(name, 'camelCase')])];
+    const fluents = [...new Set([name, toCamelCase(name)])];
     const getter =
-      noArg.has('get' + Cap) || // getName()
-      noArg.has('is' + Cap) ||  // isName()  (boolean bean)
-      noArg.has(name);          // name()    (record / fluent)
+      stems.some((Cap) => noArg.has('get' + Cap) || noArg.has('is' + Cap)) || // getName() / isName()
+      fluents.some((n) => noArg.has(n));                                      // name() (record / fluent)
     const setter =
-      withArg.has('set' + Cap) || // setName(T)
-      withArg.has(name);          // name(T)   (fluent)
-    const wither = withArg.has('with' + Cap); // withName(T)
+      stems.some((Cap) => withArg.has('set' + Cap)) || // setName(T)
+      fluents.some((n) => withArg.has(n));             // name(T)   (fluent)
+    const wither = stems.some((Cap) => withArg.has('with' + Cap)); // withName(T)
     out[name] = { getter, setter, wither };
   }
   return out;

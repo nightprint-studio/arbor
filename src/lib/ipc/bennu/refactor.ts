@@ -19,7 +19,7 @@
  */
 
 import { bennu } from '../rpc';
-import type { UsageHit } from './nav';
+import type { RenameEdit, RenamePreview, UsageHit } from './nav';
 import type { SourceEdit } from '$lib/types/bennu';
 
 /** One row of the refactoring list. */
@@ -169,6 +169,57 @@ export function createMethodIn(
   end: number,
 ): Promise<SourceEdit[]> {
   return bennu('bennu_create_method_in', { args: { file, source, start, end } });
+}
+
+// ── add parameter ─────────────────────────────────────────────────────────────
+
+/** What the add-parameter dialog sends: the method (by caret) and the parameter to add. */
+export interface AddParameterRequest {
+  file: string;
+  /** The current (possibly-unsaved) buffer — the caret is classified against it. */
+  source: string;
+  /** Caret byte offset: on the method's declaration, or on a call of it. */
+  offset: number;
+  /** The parameter's type, as written. */
+  type_text: string;
+  name: string;
+  /** What every existing call passes. Omitted: the type's default (`0`, `false`, `null`). */
+  default_value?: string;
+  /** The index of the parameter it goes before. Omitted: last. */
+  before?: number;
+}
+
+/** The preview of adding a parameter — a rename-shaped edit list, plus the positions on offer. */
+export interface AddParameterPreview {
+  /** Every edit, grouped by file, with `blocked` and `inferred` as in a rename. */
+  preview: RenamePreview;
+  /** The parameters the method takes today, each written `Type name`. */
+  parameters: string[];
+}
+
+/**
+ * Plan adding a parameter to the method at the caret: the declaration, every override, and every
+ * call that has to pass a value. `null` while the index is still building or when the caret is on no
+ * method this project declares. A preview with `blocked` set is a refusal (a method reference, a
+ * library override, a name already taken) — the edits are still listed, but must not be applied.
+ *
+ * Wire: `bennu_add_parameter_plan`. */
+export function addParameterPlan(req: AddParameterRequest): Promise<AddParameterPreview | null> {
+  return bennu('bennu_add_parameter_plan', { args: req });
+}
+
+/**
+ * The edits that add the parameter a call is already passing — the fix for *no overload takes N
+ * arguments*. Rejects with the reason when the change cannot be made, so the caller can show it.
+ *
+ * Wire: `bennu_add_parameter_for_call` — `{ file, source, start, end }`. */
+export function addParameterForCall(
+  file: string,
+  source: string,
+  start: number,
+  end: number,
+): Promise<RenameEdit[]> {
+  return bennu('bennu_add_parameter_for_call', { args: { file, source, start, end } });
 }
 
 // ── safe delete ───────────────────────────────────────────────────────────────

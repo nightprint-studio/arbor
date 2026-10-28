@@ -287,6 +287,12 @@ fn quick_fix_offers(args: &IntentionsArgs) -> Vec<OfferWire> {
                 &*resolver,
             ));
         }
+        // A typed *Create method* supersedes the text-only one for the same place.
+        out = crate::quick_fix::prefer_typed_create(out);
+        // A call with an argument too many is, as often as not, a method waiting for that parameter.
+        for d in under.iter().filter(|d| d.code == "wrong-argument-count") {
+            out.extend(crate::quick_fix::add_parameter_fix(&args.file, &args.source, d.start));
+        }
     }
     out
 }
@@ -410,6 +416,15 @@ fn java_file_offers(args: &IntentionsArgs) -> Vec<RankedOffer> {
         offers.push(
             action_offer("generate-getters-setters", "Generate getters and setters…", offset)
                 .in_section(OfferCategory::Generate),
+        );
+    }
+
+    // "Add parameter…" on a method's own name: it changes the method's shape and everything that calls
+    // it, so it is an intention on the declaration (a dialog, since the type, name and value are the
+    // user's to say).
+    if crate::add_parameter::on_method_declaration_name(source, offset) {
+        offers.push(
+            action_offer("add-parameter", "Add parameter…", offset).in_section(OfferCategory::Intention),
         );
     }
 

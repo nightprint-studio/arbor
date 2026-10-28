@@ -42,6 +42,24 @@ export interface BennuConfig {
    *  each candidate, as a ranking term. Read on every completion, so turning it off stops the
    *  counts being used at once rather than at the next index build. */
   completion_import_census: boolean;
+  /** Smart suggestions — each switch turns a ranking *signal* off, never a candidate. Pushed to the
+   *  ranking on save, like the census flag. Name affinity: rank a candidate higher when it echoes
+   *  the name of the thing being filled. */
+  completion_smart_name_affinity: boolean;
+  /** Rank a member higher when the project calls it often. */
+  completion_smart_project_usage: boolean;
+  /** Rank a member higher when the project calls it right after the previous call in the chain. */
+  completion_smart_sequence: boolean;
+  /** Also offer members of members that produce the expected type. */
+  completion_smart_chain: boolean;
+  /** Setters already called sink, `catch`/`case` lead with what fits, a never-used local rises. */
+  completion_smart_context: boolean;
+  /** Whole-statement templates that read the surrounding code. */
+  completion_smart_statements: boolean;
+  /** Ghost text for the continuations that are certain. */
+  completion_smart_ghost_text: boolean;
+  /** How strongly the learned signals count, in percent (0..250; 100 as designed). */
+  completion_smart_strength: number;
   /** Directory names the Java indexer never walks into, on top of its own skips. */
   excluded_dirs: string[];
   /** Absolute paths of the project roots spell-check is turned on for. A list rather than a
@@ -277,6 +295,13 @@ export interface ProjectSession {
    *  {@link open_files}; `''` for a tab the caret never visited. May be shorter than — or absent
    *  from — a session written by an older build, so read it defensively. */
   open_carets?: string[];
+  /** The tabs of the editor's second pane while it is split — a subset of {@link open_files}, which
+   *  stays the whole list. Absent when the editor is not split. */
+  split_files?: string[];
+  /** The active tab of the first pane, when split ({@link active_file} is the focused pane's). */
+  first_active?: string;
+  /** The active tab of the second pane, when split. */
+  split_active?: string;
   /** Tree rows opened against their default, as `<tree>:<stable key>` (`project:core/src`,
    *  `maven:module/app`) — see `components/bennu/tree-expansion.ts`. Absent when none. */
   expanded?: string[];

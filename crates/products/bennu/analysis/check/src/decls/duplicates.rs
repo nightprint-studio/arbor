@@ -133,7 +133,7 @@ fn params_fingerprint(params: &[String]) -> String {
 /// The written parameter types of a method/constructor, whitespace-normalised and with the
 /// member's own type variables replaced by what they erase to. A varargs `T...` keeps its `...` so
 /// `f(T...)` and `f(T)` stay distinct.
-fn param_types(member: Node, bytes: &[u8], vars: &HashMap<String, String>) -> Vec<String> {
+pub(crate) fn param_types(member: Node, bytes: &[u8], vars: &HashMap<String, String>) -> Vec<String> {
     let Some(params) = member.child_by_field_name("parameters") else { return Vec::new() };
     let mut out = Vec::new();
     let mut c = params.walk();
@@ -173,7 +173,7 @@ fn param_types(member: Node, bytes: &[u8], vars: &HashMap<String, String>) -> Ve
 /// A multi-bound `<T extends A & B>` keeps its whole bound text rather than erasing to `A` the way
 /// javac does, so it stays distinct from `<T extends A>`. That under-reports, which is this
 /// check's standing preference over risking a false positive.
-fn type_var_erasures(member: Node, bytes: &[u8]) -> HashMap<String, String> {
+pub(crate) fn type_var_erasures(member: Node, bytes: &[u8]) -> HashMap<String, String> {
     let mut out = HashMap::new();
     let Some(tps) = member.child_by_field_name("type_parameters") else { return out };
     let mut c = tps.walk();
@@ -250,6 +250,11 @@ fn flush_word(out: &mut String, word: &mut String, vars: &HashMap<String, String
 
 fn normalize(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join("")
+}
+
+/// A written type, whitespace-normalised the way [`param_types`] spells a parameter.
+pub(crate) fn normalize_type(s: &str) -> String {
+    normalize(s)
 }
 
 #[cfg(test)]

@@ -213,7 +213,7 @@ total = a + b;`, 'java')}</code></pre>
   <div class="feature-card">
     <div class="fc-eyebrow">On a call to a method that does not exist</div>
     <div class="fc-title">Create method</div>
-    <div class="fc-desc">Written just below the calling method. The call site is the specification: argument types and names become the signature, how the result is used the return type — nothing means <code>void</code>, a condition <code>boolean</code> — and a <code>static</code> caller gets a <code>static</code> method. The body throws, so it compiles and fails loudly rather than returning a plausible <code>null</code>.</div>
+    <div class="fc-desc">Written just below the calling method. The call site is the specification: argument types and names become the signature, how the result is used the return type — nothing means <code>void</code>, a condition <code>boolean</code>, an assignment the type of what it assigns to — and a <code>static</code> caller gets a <code>static</code> method. A declared type is copied as written; for what the text cannot declare — a method call or chain, an expression, a <code>var</code> local — the type is the one the call resolves to, with the imports it needs. Only what cannot be resolved stays <code>Object</code>. The completion popup writes the same signature. The body throws, so it compiles and fails loudly rather than returning a plausible <code>null</code>.</div>
   </div>
   <div class="feature-card">
     <div class="fc-eyebrow">On <code>.map(this::toIdentity)</code></div>
@@ -294,6 +294,27 @@ total = a + b;`, 'java')}</code></pre>
 <Callout variant="warning" title="Refused when it would break an override that cannot follow">
   A method implementing an interface from a dependency has its name fixed by that dependency; renaming only your side leaves a class that no longer implements
   what it declares. The preview still shows what it would have done and names the library type, but will not apply it.
+</Callout>
+
+<h2>Add parameter</h2>
+<ol class="step-list">
+  <li>Put the caret on a method's name — its declaration or a call of it — and press <kbd>Ctrl</kbd> + <kbd>F6</kbd>, or choose <strong>Add parameter…</strong> from <kbd>Alt</kbd> + <kbd>Enter</kbd>.</li>
+  <li>Write the parameter's <strong>type</strong> and <strong>name</strong>, the <strong>value</strong> every existing call passes (empty passes <code>0</code>, <code>false</code> or <code>null</code> for the type), and where it goes.</li>
+  <li>The preview lists the declaration, every override and every call, grouped by file. <kbd>Ctrl</kbd> + <kbd>Enter</kbd> applies it all as one bulk edit, with the imports the type needs.</li>
+</ol>
+<p>
+  A call is edited only when it passes as many arguments as the declaration being changed takes, so the calls of another overload are left alone. When two overloads
+  take the same number of parameters their calls cannot be told apart by counting: from a call Bennu asks for the caret on the declaration, and from the
+  declaration the call edits are marked <strong>inferred</strong> for review.
+</p>
+<p>
+  It is also a quick fix. A call that passes one argument too many — <em>No overload of <code>total</code> takes 2 arguments</em> — offers
+  <strong>Add parameter 'Type name' to 'total'</strong>: the extra argument becomes the parameter, taking its type and its name from what is written, and every other call passes the type's default.
+</p>
+<Callout variant="warning" title="Refused rather than guessed">
+  A <strong>method reference</strong> (<code>this::total</code>) has no argument list to add a value to, a <strong>varargs</strong> method has no single place for a new parameter, a method
+  overriding a <strong>library</strong> type cannot have its signature changed, and a name the method already uses for a parameter or a local would collide. So does a call whose
+  receiver the engine could not resolve. The preview names the reason and does not apply.
 </Callout>
 
 <h2>Generate</h2>

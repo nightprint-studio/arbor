@@ -8,6 +8,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Added
+- **Bennu › two editors side by side** — drag a tab to the right edge of the editor, or onto the other pane, to split it; each side has its own tab strip, the divider resizes (drag or arrow keys), and a file lives on one side at a time. Also in the palette: move tab, focus the other pane, close split.
+- **Tabs › smooth drag to reorder** — the tab you hold follows the pointer, lifted above the strip, while the tabs it passes slide aside to open the slot it will land in; on release it slides into place, and Esc cancels.
+- **Editor › multiple cursors** — Alt+click adds a cursor, Alt+Shift+drag selects a column, Alt+J adds the next occurrence of the selection and Ctrl+Shift+L selects them all; autocomplete and Emmet stand down while there are several.
+- **Bennu › Add parameter** (`Ctrl+F6`, Alt+Enter on a method's name) — adds a parameter to a method, to every override and, with a value you choose, to every call, with a per-file preview and the imports its type needs; it also appears as a quick fix on a call that passes one argument too many. Method references, varargs, library overrides and name clashes are refused with the reason.
+- **Bennu › run console links to classes and methods** — a class named in the output (a package, an exception, a logger) opens its file when the project declares it, and `Order#total` / `Order::total` lands on the method.
+- **Bennu › the run console reads the project's log format** — from Logback / Log4j / Spring `logging.pattern.console`, so the date, level, logger class and MDC keys and values are coloured by position and the logger is a link; an `MDC:[key=value,…]` block is highlighted even without a configuration.
+- **Bennu › smarter completion** — suggestions now echo the name being filled (`Customer customer = |`, the argument of `findByCustomerId(|)`), favour what the project calls often and what it calls next in a chain, and sink a setter already called on a builder; a declared-but-unused local rises.
+- **Bennu › chain completion** — when the position wants a type, members of members that produce it are offered below the direct fits (`getCustomer().getName()` for a `String`).
+- **Bennu › `catch (` leads with what its `try` throws**, from `throw new` and from the `throws` clause of the methods it calls.
+- **Bennu › `iter` template and two new ghost-text hints** — `iter` loops over the nearest collection or array in scope; ghost text names the caught exception (`catch (IOException |` → `e`) and proposes the next uncovered enum `case`.
+- **Bennu › Settings → Completion → Smart suggestions** — a switch for each of the above, plus a strength for the learned signals.
 - **Bennu › Database tool window (needs Picus)** — check entities against a Picus connection's schema, validate `@Query(nativeQuery = true)` on the server, and generate an entity from a table, highlighted, with optional Lombok / fluent accessors (`Alt`+`D`).
 - **Picus › Google IAM sign-in for Cloud SQL** — a connection can authenticate with the machine's `gcloud` credentials or a service-account key file instead of a stored password (optionally impersonating a service account); the sign-in methods are extensible.
 - **Picus › custom CA certificate per connection** — trust an extra PEM CA (e.g. a Cloud SQL server CA), with an option to skip only the server-name check.
@@ -42,6 +53,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu's entity ⇄ repository jump is a clear coloured badge** (`R` on an entity, `E` on a repository) instead of a tiny glyph, and the JPA toolbar buttons have their own icons and colours.
 
 ### Fixed
+- **Bennu › a hand-written constructor repeating the one `@RequiredArgsConstructor` / `@AllArgsConstructor` / `@NoArgsConstructor` generates** is now reported as a duplicate constructor, as javac does.
+- **Bennu › Usages popover** — wider, grouped by file (with a "test" tag), the symbol highlighted in each line, the type name leading its package in the title, and the selection scrolls into view with the keyboard.
+- **Bennu › Generate** — getters, setters and withers of a `snake_case` field are named in camelCase (`getGareRepository`) when camelCase is chosen, and the dialog no longer clips its field list or footer.
+- **Bennu › Create method no longer types every parameter as `Object`** — arguments that are calls, chains, expressions or `var` locals, and the type the result is used as, are resolved (with their imports), in the quick fix, the popup and "Create method in <class>".
+- **Bennu › a launch no longer waits for another project's build** — builds are per project, and a second launch of the same project waits its turn instead of being dropped.
+- **Bennu › the first launch after a restart no longer re-runs Maven when nothing changed** — the build record and the resolved run classpath are kept between sessions and checked before they are trusted.
+- **Bennu › a stray token between members no longer silences the whole file** — typing `p` on its own line between two methods used to hide every error in the class, including one in the method above; only that stray text is set aside now.
+- **Bennu › non-Java files (XML, tool configs) are validated on a debounce** instead of on every keystroke.
 - **Bennu MCP tools: a round of correctness fixes** — a crate name with accents no longer crashes the backend; a relative `file` resolves inside the project and cannot climb out with `..`; `bennu_write_file` accepts the documented `stamp`; `bennu_validate_payload` is classed as running code; Java-only answers no longer read as "empty"/"clean" for Java files, plain folders and mixed Maven/Cargo roots; truncated results say so; concurrent shader renders no longer overwrite each other.
 - **Closing Picus (or Corvus) no longer stops its backend while Bennu is using it** — the backend ends with the last window that needs it.
 - **Bennu › an injection that only a library can satisfy gets its own mark** — a dashed teal `B`, and Spring Boot's auto-configuration beans (read from each jar's `AutoConfiguration.imports` / `spring.factories`) count as candidates without any allowlist; the tooltip says whose bean it is and under which condition.
@@ -66,6 +85,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu no longer flags legal `case null, default` switches or checked generic `instanceof` tests** on Java 16 and up.
 
 ### Changed
+- **Bennu › background work waits for the window** — validation, hints, marks and change tracking that come due while the window is behind another one are held and run when it is focused again.
 - **The macOS-style window buttons are closer to the real ones**: system size and spacing, a subtle ring, per-button glyph colours, redrawn symbols, and a grey state when the window is in the background.
 - **Bennu's "New Java Class" dialog no longer highlights the selected kind in solid blue**, and the query dialog's preview scrolls on its own instead of the whole dialog.
 - **A grant now overrides the AI gates, not just the confirmation prompt.** You can leave a product switched off entirely and hand out a grant when there is work to do: it exposes the tools you ticked on the projects you picked until its budget runs out, and connected clients are told the moment the tool set moves. Grants still live in memory only, and a call whose paths stray outside the grant's projects is still refused without asking.

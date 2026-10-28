@@ -13,6 +13,7 @@
 use bennu_java::prelude::{InferCache, TypeResolver};
 use bennu_refactor::prelude::{EditSelection, Plan};
 
+use crate::index_service::IndexService;
 use crate::intentions::{edit_wire, offer_of, EditWire, OfferWire};
 
 /// The catch body *Surround with try/catch* writes: rethrown unchecked, so nothing is swallowed
@@ -40,10 +41,85 @@ pub(crate) fn resolver_fixes(
         "unknown-member" => {
             let mut out = create_in_receiver_fixes(source, start, end, resolver);
             out.extend(create_for_reference_fixes(source, start, end, resolver));
+            out.extend(create_method_typed_fix(source, start, end, resolver));
             out
         }
+        // The bare call — `report(x)` in the class being written. [`tree_fixes`] offers the same
+        // fix from the text alone; this one replaces it (see `prefer_typed_create`) when there is a
+        // resolver, because it can write the types the text cannot declare.
+        "unresolved-call" | "unresolved-symbol" => create_method_typed_fix(source, start, end, resolver),
         _ => Vec::new(),
     }
+}
+
+/// "Add parameter 'String label' to 'total'" — for a call that passes one argument more than the
+/// method takes. The argument becomes the parameter (its type, its name), and every other call of the
+/// method passes the type's default.
+///
+/// Offered only when the whole plan holds — the method is the project's, nothing blocks it — because
+/// an offer that opens onto a refusal is a row to learn to skip. What is run is
+/// `bennu_add_parameter_for_call`, which plans again against the buffer as it is by then.
+pub(crate) fn add_parameter_fix(file: &str, source: &str, start: usize) -> Option<OfferWire> {
+    let plan = IndexService::global().add_parameter_for_call(file, source, start).ok()?;
+    let method = plan.plan.old_name;
+    Some(OfferWire {
+        id: "add-parameter".to_string(),
+        label: format!("Add parameter '{}' to '{method}'", plan.added),
+        start,
+        end: start,
+        replacement: method,
+        action: Some("add-parameter-from-call".to_string()),
+        edits: Vec::new(),
+        select: None,
+    })
+}
+
+/// "Create method 'total'" with the signature the resolver reads off the call: the arguments'
+/// real types — `total(order.getCustomer().name())` is `total(String arg1)`, not `total(Object arg1)`
+/// — and the type its result is used as, plus the imports those types need, all in one undo.
+fn create_method_typed_fix(
+    source: &str,
+    start: usize,
+    end: usize,
+    resolver: &dyn TypeResolver,
+) -> Vec<OfferWire> {
+    let Some(tree) = bennu_java::prelude::parse_java(source) else { return Vec::new() };
+    let root = tree.root_node();
+    let symbols = bennu_java::prelude::extract_symbols(source);
+    let cache = InferCache::new();
+    let types = bennu_intel::prelude::ResolverCallTypes::new(root, source, &symbols, resolver, &cache);
+    let Some(Ok(plan)) = bennu_refactor::prelude::create_method_with(root, source, start, end, &types)
+    else {
+        return Vec::new(); // a refusal is about another file, which `create_in_receiver_fixes` handles
+    };
+    let imports: Vec<EditWire> = types
+        .classes()
+        .iter()
+        .filter_map(|fqn| crate::intentions::import_edit_for(source, fqn))
+        .map(|(start, end, text)| EditWire { start, end, text })
+        .collect();
+    plan_offer(&plan, imports).into_iter().collect()
+}
+
+/// Of the *Create method* offers for one place, keep the resolver-backed one — it is a superset of
+/// what [`tree_fixes`] writes, and listing both would be the same fix twice with different types.
+pub(crate) fn prefer_typed_create(offers: Vec<OfferWire>) -> Vec<OfferWire> {
+    let mut seen: Vec<(usize, usize)> = Vec::new();
+    let mut kept: Vec<OfferWire> = Vec::new();
+    // Walked back to front so the LAST create-method offer for a span (the resolver's, which is
+    // appended after the tree's) is the one that stays.
+    for offer in offers.into_iter().rev() {
+        if offer.id == "create-method" {
+            let key = (offer.start, offer.end);
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+        }
+        kept.push(offer);
+    }
+    kept.reverse();
+    kept
 }
 
 /// "Create method 'toIdentity'" — for a method reference to this class, `this::toIdentity` or

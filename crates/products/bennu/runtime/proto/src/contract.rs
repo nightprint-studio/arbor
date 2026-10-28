@@ -591,6 +591,17 @@ pub struct RenameApplyResult {
     pub file_rename: Option<RenameFileMove>,
 }
 
+/// Result of `bennu_add_parameter_plan` — the same preview a rename shows (every edit grouped by
+/// file, with `blocked` and `inferred`), plus what the dialog needs to offer a position.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddParameterPreview {
+    /// The edits. `old_name` / `new_name` are both the method's name.
+    pub preview: RenamePreview,
+    /// The parameters the method takes today, each written `Type name` — the positions the new one
+    /// can go before.
+    pub parameters: Vec<String>,
+}
+
 /// A source file that has to be renamed along with the type it declares.
 ///
 /// Java ties a public top-level type to its filename, so renaming the type without the file leaves

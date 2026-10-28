@@ -225,6 +225,23 @@ impl Project {
         }
     }
 
+    /// Count the project's method calls and call sequences and hand the census to the completion
+    /// resolver, as the backend does after an index build.
+    ///
+    /// Opt-in rather than done by [`Project::build`]: a census changes the order of every member
+    /// list in a project where a name is called twice, and the many ordering tests that predate it
+    /// are about the other signals.
+    pub fn with_usage_census(self) -> Self {
+        let sources: Vec<(PathBuf, String)> = self
+            .sources
+            .iter()
+            .map(|(path, text)| (PathBuf::from(path), text.clone()))
+            .collect();
+        let census = bennu_intel::java_index::usage_census_of(&sources);
+        self.completion_resolver.set_project_usage(Arc::new(census));
+        self
+    }
+
     /// Whether the project index recognises `binary` as a type this project declares.
     ///
     /// This is the guard that keeps go-to from opening a decompiled stub of the user's own code:
@@ -350,6 +367,25 @@ impl Project {
         )
     }
 
+    /// The GHOST `case` at `file`:`offset` — the next constant of an enum `switch`, or `None`.
+    pub fn next_case_hint(&self, file: &str, offset: usize) -> Option<bennu_intel::prelude::AccessorHint> {
+        bennu_intel::prelude::next_case_hint(self.source(file), offset, &self.completion_resolver)
+    }
+
+    /// The `iter` loop offered at `file`:`offset` (a bare word typed at the start of a statement),
+    /// at Java 8 with no declared naming convention.
+    pub fn iter_complete(&self, file: &str, offset: usize) -> Vec<CompletionItem> {
+        bennu_intel::prelude::iter_completion(
+            file,
+            self.source(file),
+            offset,
+            &self.completion_resolver,
+            None,
+            None,
+            Default::default(),
+        )
+    }
+
     /// The classes the function slot at `file`:`offset` receives — what leads the bare-word answer
     /// in `opt.map(Re|)`.
     pub fn functional_types(&self, file: &str, offset: usize) -> Vec<String> {
@@ -362,6 +398,22 @@ impl Project {
         .into_iter()
         .map(|c| c.label)
         .collect()
+    }
+
+    /// The exceptions the `try` above a `catch (` caret throws — what leads the type-name answer
+    /// there, as the simple names offered.
+    pub fn caught_types(&self, file: &str, offset: usize) -> Vec<String> {
+        self.caught_items(file, offset).into_iter().map(|c| c.label).collect()
+    }
+
+    /// [`Self::caught_types`] with the whole rows, for a test about preselection or the import.
+    pub fn caught_items(&self, file: &str, offset: usize) -> Vec<CompletionItem> {
+        bennu_query::prelude::caught_exception_types(
+            self.source(file),
+            offset,
+            &self.completion_resolver,
+            Default::default(),
+        )
     }
 
     /// The static type of the expression spanning `[start, end)` in `file`, against the FULL

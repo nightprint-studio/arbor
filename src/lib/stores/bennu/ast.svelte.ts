@@ -46,6 +46,7 @@
  * Rune store — private `$state`, returned getters + methods (CLAUDE.md).
  */
 
+import { setFocusedTimeout, clearFocusedTimeout } from '$lib/utils/focused-timeout';
 import { untrack } from 'svelte';
 
 import { symbolTreeOf, syntaxPathAt, syntaxTreeOf } from '$lib/ipc/bennu/ast';
@@ -111,7 +112,7 @@ function createBennuAstStore() {
 
   /** Guards against an older answer landing after a newer one. Per view: they race separately. */
   const seq: Record<AstViewId, number> = { syntax: 0, model: 0 };
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timer: number | null = null;
 
   /**
    * What each view *should* be showing.
@@ -270,13 +271,13 @@ function createBennuAstStore() {
       path = file;
       want.syntax++;
       want.model++;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void load(active), DEBOUNCE_MS);
+      if (timer) clearFocusedTimeout(timer);
+      timer = setFocusedTimeout(() => void load(active), DEBOUNCE_MS);
     },
 
     /** The document went away. */
     clear() {
-      if (timer) clearTimeout(timer);
+      if (timer) clearFocusedTimeout(timer);
       for (const id of ['syntax', 'model'] as AstViewId[]) {
         seq[id]++;
         want[id]++;

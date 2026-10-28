@@ -8,6 +8,7 @@
  *
  * Rune-store pattern: private `$state`, returned getters + methods (CLAUDE.md).
  */
+import { setFocusedTimeout, clearFocusedTimeout } from '$lib/utils/focused-timeout';
 import { getChangeMarkers } from '$lib/ipc/corvus/changeMarkers';
 import type { ChangeHunk } from '$lib/components/shared/ui/code-editor/change-gutter';
 import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
@@ -20,11 +21,11 @@ function createChangeMarkersStore() {
   // Replaced wholesale, never mutated.
   let hunks = $state.raw<ChangeHunk[]>([]);
   let forPath = $state<string | null>(null);
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: number | undefined;
   let token = 0;
 
   function reset() {
-    if (timer) clearTimeout(timer);
+    if (timer) clearFocusedTimeout(timer);
     token++;
     hunks = [];
     forPath = null;
@@ -38,12 +39,12 @@ function createChangeMarkersStore() {
 
     /** The buffer of `path` is now `text` (or the file/commit changed): re-diff after a pause. */
     request(path: string | null, text: string) {
-      if (timer) clearTimeout(timer);
+      if (timer) clearFocusedTimeout(timer);
       if (!path || !bennuSettingsStore.showChangeMarkers || !bennuGitStatusStore.inRepo) {
         reset();
         return;
       }
-      timer = setTimeout(async () => {
+      timer = setFocusedTimeout(async () => {
         const mine = ++token;
         try {
           const r = await getChangeMarkers(path, text);

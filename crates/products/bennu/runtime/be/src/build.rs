@@ -65,7 +65,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -103,33 +103,52 @@ const EVT_RUN_EXIT: &str = "arbor://bennu/run-exit";
 
 // ── single-run guard (build + project validation) ───────────────────────────────
 
-/// `true` while a build or a project validation is running. Both acquire the same guard so only
-/// **one** compile/validation runs at a time — two `mvn` processes (or a build racing a validation)
-/// on the same tree would thrash `target/` and the index.
-static BUILD_BUSY: AtomicBool = AtomicBool::new(false);
+/// The project roots with a build, a test run or a validation in flight. A build and a validation
+/// of the SAME project share one slot, so only one of them runs on a tree at a time — two `mvn`
+/// processes (or a build racing a validation) on one tree would thrash `target/` and the index.
+///
+/// **Per project**, not per process: two different projects share no `target/` and no index, and
+/// making one wait for the other's compile was the reason a launch could not start until the
+/// previous project's had.
+static BUSY_ROOTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-/// RAII lock over [`BUILD_BUSY`]. [`acquire`](BuildGuard::acquire) returns `None` when one is already
-/// held; the flag is released on drop (so an early return / panic can't leave it stuck).
-pub(crate) struct BuildGuard;
+/// How a project root is told apart from another spelling of it: separators unified, trailing
+/// separator dropped, and — on Windows, where paths are case-insensitive — lower-cased.
+pub(crate) fn busy_key(root: &str) -> String {
+    let unified = root.replace('\\', "/");
+    let trimmed = unified.trim_end_matches('/');
+    if cfg!(windows) { trimmed.to_lowercase() } else { trimmed.to_string() }
+}
+
+/// RAII lock over one project's slot in [`BUSY_ROOTS`]. [`acquire`](BuildGuard::acquire) returns
+/// `None` when that project already has one held; the slot is released on drop (so an early
+/// return / panic can't leave it stuck).
+pub(crate) struct BuildGuard {
+    key: String,
+}
 
 impl BuildGuard {
-    /// Take the single-run lock, or `None` if a build/validation is already in progress.
-    pub(crate) fn acquire() -> Option<Self> {
-        BUILD_BUSY
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .ok()
-            .map(|_| BuildGuard)
+    /// Take `root`'s lock, or `None` if a build/validation of that project is already in progress.
+    pub(crate) fn acquire(root: &str) -> Option<Self> {
+        let key = busy_key(root);
+        let mut busy = BUSY_ROOTS.lock().unwrap_or_else(|p| p.into_inner());
+        if busy.contains(&key) {
+            return None;
+        }
+        busy.push(key.clone());
+        Some(BuildGuard { key })
     }
 }
 
 impl Drop for BuildGuard {
     fn drop(&mut self) {
-        BUILD_BUSY.store(false, Ordering::Release);
+        let mut busy = BUSY_ROOTS.lock().unwrap_or_else(|p| p.into_inner());
+        busy.retain(|k| *k != self.key);
     }
 }
 
 /// The message returned when a concurrent build/validation is refused.
-pub(crate) const BUSY_MSG: &str = "A build or validation is already running";
+pub(crate) const BUSY_MSG: &str = "A build or validation is already running for this project";
 
 // ── bennu_build ────────────────────────────────────────────────────────────────
 
@@ -170,7 +189,7 @@ pub(crate) fn compile_project(
     module: Option<&str>,
 ) -> Result<CompileOutcome, String> {
     // Refuse to start a second build/validation while one is running (only one at a time).
-    let _guard = BuildGuard::acquire().ok_or_else(|| BUSY_MSG.to_string())?;
+    let _guard = BuildGuard::acquire(root_path).ok_or_else(|| BUSY_MSG.to_string())?;
     let sink = ctx.event_sink();
     let root = PathBuf::from(root_path);
     let module = module.map(str::trim).filter(|m| !m.is_empty());
@@ -908,8 +927,10 @@ fn jdk_major(level: &str) -> u32 {
 // ── "has anything changed since the last compile" ──────────────────────────────
 //
 // The model lives in `build_freshness`: per module, what its inputs and its upstream modules' code
-// looked like at its last successful compile. In memory only — persisting it would mean trusting a
-// record written before someone ran `mvn clean` outside the editor, and the cost of being wrong is a
+// looked like at its last successful compile. It is kept between sessions — the first launch of a
+// session used to run Maven with nothing changed — but never taken on faith: the inputs are stat'ed
+// again, and a record is adopted only while `target/classes` still holds the newest class the compile
+// recorded, so a `mvn clean` or a build run outside the editor voids it. The cost of being wrong is a
 // run against stale classes, the single most confusing failure a build system can produce.
 
 /// Compile `root` unless nothing changed since its last successful compile.
@@ -962,6 +983,9 @@ pub(crate) fn lab_classpath(root: &str) -> (String, String) {
 pub(crate) fn forget_build_stamp(root: &str) {
     build_freshness::forget(Path::new(root));
     run_deps_cache().lock().unwrap_or_else(|p| p.into_inner()).retain(|(r, _, _), _| r != root);
+    // …and what an earlier session stored. Marked as read so it is not loaded back.
+    hydrated_roots().lock().unwrap_or_else(|p| p.into_inner()).insert(root.to_string());
+    crate::run_deps_store::remove(root);
 }
 
 // ── run classpath ──────────────────────────────────────────────────────────────
@@ -1117,6 +1141,7 @@ fn resolve_run_deps(
 
     let key = (root.display().to_string(), rel.to_string(), scope.to_string());
     let fingerprint = poms_fingerprint(root, modules, &base);
+    hydrate_run_deps(&key.0);
     if let Some(hit) = run_deps_cache().lock().unwrap_or_else(|p| p.into_inner()).get(&key) {
         // The poms say whether the answer could have changed; the entries say whether it is still
         // on disk (a purged `~/.m2`, a sibling's `target/` cleaned in a terminal).
@@ -1203,12 +1228,54 @@ fn resolve_run_deps(
     // Only a complete answer is kept. An incomplete one is asked again next launch — the missing jar
     // may be downloaded by then — rather than served until the pom is next edited.
     if deps.mvn_ok && deps.missing.is_empty() {
+        let root_key = key.0.clone();
         run_deps_cache()
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .insert(key, CachedRunDeps { fingerprint, deps: deps.clone() });
+        persist_run_deps(&root_key);
     }
     Ok(deps)
+}
+
+/// The projects whose stored resolutions have been read this session.
+fn hydrated_roots() -> &'static Mutex<HashSet<String>> {
+    static HYDRATED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    HYDRATED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Load what an earlier session resolved for `root` into the cache, once per session. Nothing
+/// stored is trusted any more than a fresh answer: the lookup that follows still checks the poms'
+/// fingerprint and that every entry exists (see [`crate::run_deps_store`]).
+fn hydrate_run_deps(root: &str) {
+    if !hydrated_roots().lock().unwrap_or_else(|p| p.into_inner()).insert(root.to_string()) {
+        return;
+    }
+    let stored = crate::run_deps_store::load(root);
+    let mut cache = run_deps_cache().lock().unwrap_or_else(|p| p.into_inner());
+    for s in stored {
+        cache.entry((root.to_string(), s.rel, s.scope)).or_insert(CachedRunDeps {
+            fingerprint: s.fingerprint,
+            deps: RunDeps { entries: s.entries, missing: Vec::new(), mvn_ok: true },
+        });
+    }
+}
+
+/// Write everything cached for `root` to disk — only complete answers ever reach the cache.
+fn persist_run_deps(root: &str) {
+    let stored: Vec<crate::run_deps_store::StoredDeps> = run_deps_cache()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .filter(|((r, _, _), _)| r == root)
+        .map(|((_, rel, scope), cached)| crate::run_deps_store::StoredDeps {
+            rel: rel.clone(),
+            scope: scope.clone(),
+            fingerprint: cached.fingerprint,
+            entries: cached.deps.entries.clone(),
+        })
+        .collect();
+    crate::run_deps_store::save(root, &stored);
 }
 
 /// A hash of every pom that can change a module's resolved classpath: the reactor's (a sibling's
@@ -2111,5 +2178,45 @@ mod tests {
     fn quoting_only_kicks_in_for_whitespace() {
         assert_eq!(quoted("-Xmx512m"), "-Xmx512m");
         assert_eq!(quoted("C:/Program Files/jdk/bin/java.exe"), "\"C:/Program Files/jdk/bin/java.exe\"");
+    }
+
+    // ── the per-project guard ───────────────────────────────────────────────────
+
+    /// The reported case: one project compiling must not stop another from compiling.
+    #[test]
+    fn two_projects_build_at_the_same_time() {
+        let a = BuildGuard::acquire("/guard-test/alpha").expect("alpha is free");
+        let b = BuildGuard::acquire("/guard-test/beta").expect("beta is not blocked by alpha");
+        drop((a, b));
+    }
+
+    #[test]
+    fn one_project_builds_one_thing_at_a_time() {
+        let first = BuildGuard::acquire("/guard-test/gamma").expect("free");
+        assert!(BuildGuard::acquire("/guard-test/gamma").is_none(), "a second build of the same tree is refused");
+        drop(first);
+        assert!(BuildGuard::acquire("/guard-test/gamma").is_some(), "and is accepted once the first is done");
+    }
+
+    /// `C:\p\app` and `C:/p/app/` are one tree; a trailing separator must not open a second slot.
+    #[test]
+    fn spellings_of_one_root_share_a_slot() {
+        let first = BuildGuard::acquire("/guard-test/delta/").expect("free");
+        assert!(BuildGuard::acquire("/guard-test/delta").is_none());
+        assert!(BuildGuard::acquire("\\guard-test\\delta").is_none());
+        drop(first);
+    }
+
+    #[test]
+    fn a_dropped_guard_never_leaves_its_slot_taken() {
+        {
+            let _g = BuildGuard::acquire("/guard-test/epsilon").expect("free");
+        }
+        assert!(BuildGuard::acquire("/guard-test/epsilon").is_some());
+    }
+
+    #[test]
+    fn the_key_ignores_separator_style() {
+        assert_eq!(busy_key("C:\\p\\app\\"), busy_key("C:/p/app"));
     }
 }

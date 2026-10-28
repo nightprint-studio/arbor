@@ -480,6 +480,36 @@ impl SemanticEngine {
         )
     }
 
+    /// Plan adding `param` to the method at `file`:`offset`.
+    ///
+    /// Wired like [`Self::plan`] — both resolvers, in both roles — because it asks the same two
+    /// questions: who calls this (the index) and whether a library type binds it (the policy).
+    pub fn add_parameter(
+        &self,
+        file: &str,
+        source: &str,
+        offset: usize,
+        param: &crate::add_parameter::NewParameter,
+        anchor: crate::add_parameter::Anchor,
+    ) -> Option<crate::add_parameter::AddParameterPlan> {
+        let policy = self.full_policy()?;
+        let live = self.live();
+        crate::add_parameter::add_parameter_plan(
+            &live.index,
+            file,
+            source,
+            offset,
+            param,
+            anchor,
+            &*self.resolver,
+            &*policy,
+            &live.project_types,
+            &live.subtypes,
+            &live.java_files,
+            self.lang_level,
+        )
+    }
+
     /// What a **safe delete** at `file`:`offset` would do, or why it will not.
     ///
     /// The same wiring as [`Self::plan`], and deliberately so: both resolvers, in both roles. The

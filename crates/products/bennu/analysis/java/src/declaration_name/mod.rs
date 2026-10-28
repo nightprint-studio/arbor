@@ -24,6 +24,7 @@
 //! With a partial name already typed (`OrderRepository ord|`), the proposal stands only if it
 //! continues what was typed; the typed part is what accepting replaces.
 
+mod catch;
 mod position;
 mod taken;
 #[cfg(test)]
@@ -32,6 +33,10 @@ mod tokens;
 
 use crate::names::suggested_name_for_type;
 use tokens::Kind;
+
+// `catch (IOException ` → `e`: a rule of its own, because a caught exception is named by convention
+// and not by its type.
+pub use catch::catch_variable_at;
 
 /// A declaration's predicted name, and the half-typed name it replaces.
 #[derive(Debug, Clone, PartialEq, Eq)]

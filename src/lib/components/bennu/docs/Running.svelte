@@ -182,7 +182,28 @@
     decompiled stub, where the tab offers <em>Download sources</em>. Those frames are muted — a Spring trace is forty framework lines around three of yours.</li>
   <li>A frame of something <strong>made at runtime</strong> — a lambda carrier, a CGLIB or JDK proxy, a generated accessor — is marked but not a link: no source exists anywhere.</li>
   <li><em>URLs</em> open in the browser, and <em>paths</em>, with the <code>:42</code> a compiler appends, in the editor.</li>
+  <li>A <strong>class named in a message</strong> — <code>com.acme.order.OrderService</code>, an exception, a logger — opens its file when this project declares it. Write the
+    method too and the editor lands on it: <code>com.acme.Order#total</code>, <code>Order::total</code> or <code>com.acme.Order.total</code>. A name no class of the project answers to is
+    coloured but not a link, so a click never opens the wrong class.</li>
 </ul>
+
+<h3>The project's log format</h3>
+<p>
+  When the project says how its logs are written, the console reads it instead of guessing. Bennu looks in <code>logback-spring.xml</code>, <code>logback.xml</code>,
+  <code>log4j2-spring.xml</code>, <code>log4j2.xml</code> and the <code>logging.pattern.console</code> of <code>application.properties</code> / <code>.yml</code>, in the project and its
+  modules' <code>src/main/resources</code>. For a pattern like
+</p>
+<pre><code>{'%d{yyyy-MM-dd HH:mm:ss} | %-5level | %logger{1} | MDC:[tenant=%X{tenant.id},trace_id=%X{Trace-Id}] | %msg%n'}</code></pre>
+<p>
+  the date, the level and the thread are known by position, the <strong>logger</strong> column is the class (a bare <code>OrderService</code>, or abbreviated like
+  <code>c.a.o.OrderService</code>, opens its file when exactly one class fits), and every MDC entry is marked — the <strong>key</strong> quiet, the <strong>value</strong> it names in colour. An <code>MDC:[tenant=acme,trace_id=…]</code> block is recognised by its shape even when no
+  configuration is found, as is any bracketed group of two or more <code>key=value</code> pairs. The message after the prefix is read as before, so a URL or a class name
+  inside it is still a link. Lines that are not in the layout — stack frames, other libraries' output — keep the ordinary rules.
+</p>
+<p>
+  A pattern the console cannot model (<code>%replace</code>, an unresolved <code>{'${property}'}</code>, Spring Boot's built-in default) is not used, and the output is read by shape alone.
+  The configuration is read when a run starts.
+</p>
 
 <h3>Tabs</h3>
 <ul>
@@ -210,7 +231,9 @@
   <dt>A launch builds first</dt>
   <dd>And stops if the compile fails — the console says so, the Build panel has details. That build is <code>mvn compile -pl «module» -am</code>: the run's module and the modules it is built from, and no <code>package</code> — the run starts from <code>target/classes</code> and the jars. Resources are copied, so an edited <code>application.yml</code> is picked up, and a deleted one is removed from <code>target/classes</code>. Without Maven there is no launch: the <code>javac</code> fallback only reports errors, and does not rebuild the classes a run uses.</dd>
   <dt>Nothing changed, nothing runs</dt>
-  <dd>Before Maven, Bennu compares each module in the build — its <code>src/main</code> and its poms, sizes and times, no file opened — with how it looked at its last successful compile. Unchanged, it says <em>Up to date</em> and launches at once: Maven's floor is seconds <em>with nothing to do</em>. A build of one module never counts for a module outside it, and a module whose <code>target/classes</code> is missing is compiled however quiet the rest has been. The record is per session and dropped on reindex; the first build of a session always runs Maven.</dd>
+  <dd>Before Maven, Bennu compares each module in the build — its <code>src/main</code> and its poms, sizes and times, no file opened — with how it looked at its last successful compile. Unchanged, it says <em>Up to date</em> and launches at once: Maven's floor is seconds <em>with nothing to do</em>. A build of one module never counts for a module outside it, and a module whose <code>target/classes</code> is missing is compiled however quiet the rest has been. The record is kept between sessions, so the first launch after a restart is as fast as the next one — but it is never taken on faith: the files are compared again, and a module's record is used only while its <code>target/classes</code> still holds the newest class that compile left. A <code>mvn clean</code>, or a build run from a terminal, makes it void and the launch compiles. The resolved run classpath is kept the same way, and used only while the poms are unchanged and every entry is still on disk. <em>Rebuild index</em> drops both.</dd>
+  <dt>Projects build independently</dt>
+  <dd>Two different projects share no <code>target/</code> and no index, so one compiling does not hold up the other: launch a second project while the first is still compiling and it starts at once. Two builds of the <em>same</em> project do line up — a launch pressed while that project is compiling or being validated waits for it (the console says so) instead of being dropped.</dd>
   <dt>No <code>mvn clean</code> needed</dt>
   <dd>Maven's incremental compile leaves three kinds of stale output, and Bennu removes them before compiling, rebuilding that module from scratch — its <code>.class</code> files, <code>target/generated-sources/annotations</code> and the compiler's status — and saying why in the Build log:
     <ul>

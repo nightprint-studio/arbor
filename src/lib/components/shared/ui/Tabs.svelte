@@ -86,6 +86,10 @@
   // copy of them inside a widget that sits in every product is exactly the surface that drifts.
   import Dropdown from './Dropdown.svelte';
   import type { DropdownItem } from './Dropdown.svelte';
+  import {
+    clampOffset, insertBefore, landingIndex, settleOffset, shiftDirection, type TabSlot,
+  } from './tabs-sort';
+  import { tabDragStore } from '$lib/stores/tab-drag.svelte';
 
   interface Props {
     items:        TabItem[];
@@ -106,6 +110,11 @@
     onClose?:       (id: string, item: TabItem) => void;
     onAdd?:         () => void;
     onReorder?:     (fromIndex: number, toIndex: number) => void;
+    /** Names this strip as a place tabs come from and go to (`draggable` only). With it, a tab can be
+     *  carried out of the strip: it follows the pointer freely, and a release over an element marked
+     *  `data-tab-drop="<zone>"` for another zone calls {@link onDropOnZone}. */
+    dropZone?:      string;
+    onDropOnZone?:  (id: string, zone: string) => void;
     onContextMenu?: (id: string, item: TabItem, e: MouseEvent) => void;
 
     // ── presentation ────────────────────────────────────────────────────────
@@ -136,6 +145,8 @@
     onClose,
     onAdd,
     onReorder,
+    dropZone,
+    onDropOnZone,
     onContextMenu,
     addLabel        = 'Add',
     ariaLabel,
@@ -145,52 +156,212 @@
   }: Props = $props();
 
   // ── Drag & Drop ───────────────────────────────────────────────────────────
-  let dragFromIndex     = $state<number | null>(null);
-  let insertBeforeIndex = $state<number | null>(null);
+  //
+  // A sortable, drawn the way a browser draws its own tab strip: the tab you hold follows the pointer,
+  // lifted above the rest, and the tabs it passes slide aside to open the slot it would land in — so
+  // what is on screen while you drag IS the order you will get. On release it slides the last few
+  // pixels into the slot before the order is committed. The geometry is `tabs-sort.ts`; this is the
+  // pointer handling and the transforms.
+  //
+  // Mouse events, not native drag-and-drop: Tauri's WebView2 swallows the DOM `drop`.
+  let dragFromIndex = $state<number | null>(null);
+  let dragOffset    = $state(0);
+  let dragOffsetY   = $state(0);
+  let dragFree      = $state(false);
+  let dragInsert    = $state(0);
+  let dragShift     = $state(0);
+  let dragSettling  = $state(false);
   let suppressNextClick = false;
   let stripEl: HTMLElement | undefined;
 
+  const SETTLE_MS = 170;
+
+  function measureSlots(): TabSlot[] {
+    if (!stripEl) return [];
+    return [...stripEl.querySelectorAll<HTMLElement>('[data-tab-idx]:not(.tab-hidden)')].map((el) => {
+      const r = el.getBoundingClientRect();
+      return { index: parseInt(el.getAttribute('data-tab-idx') ?? '0', 10), left: r.left, width: r.width };
+    });
+  }
+
+  // A strip that names a `dropZone` lets its tabs leave it: once the pointer is clear of the strip the
+  // held tab follows it freely (both axes) and the others stop making room, and wherever the pointer is
+  // over another zone — an element marked `data-tab-drop="<zone>"` — that zone lights up and a release
+  // there hands the tab over (`onDropOnZone`). Released anywhere else, it slides back into its own strip.
+  const LEAVE_MARGIN = 10;
+
+  function zoneUnder(x: number, y: number): string | null {
+    return document.elementFromPoint(x, y)?.closest('[data-tab-drop]')?.getAttribute('data-tab-drop') ?? null;
+  }
+
   function startTabDrag(e: MouseEvent, fromIndex: number) {
-    if (!draggable || e.button !== 0) return;
+    if (!draggable || e.button !== 0 || dragSettling) return;
     const startX = e.clientX;
+    const startY = e.clientY;
+    const tabId = items[fromIndex]?.id;
     let active = false;
+    let slots: TabSlot[] = [];
+    let gap = 0;
+    let rawOffset = 0;
+    let hotZone: string | null = null;
+    // While the tab is carried away from its strip it is drawn as a copy fixed to the viewport: the
+    // real tab sits inside containers that clip, and a tab that vanishes at the edge of its own pane
+    // is a drag with no sign of where it is going.
+    let ghost: HTMLElement | null = null;
+    let grabX = 0;
+    let grabY = 0;
+
+    function showGhost(ev: MouseEvent) {
+      if (!ghost) {
+        const tab = stripEl?.querySelector<HTMLElement>(`[data-tab-idx="${fromIndex}"]`);
+        const root = stripEl?.parentElement;
+        if (!tab || !root) return;
+        const r = tab.getBoundingClientRect();
+        grabX = startX - r.left;
+        grabY = startY - r.top;
+        // The root's classes come along so the tab's scoped styles (`.tabs-panel .tabs-tab`) still match.
+        const wrap = document.createElement('div');
+        wrap.className = root.className;
+        wrap.style.cssText = `position:fixed;z-index:10000;pointer-events:none;width:${r.width}px;height:${r.height}px;` +
+          'display:block;opacity:0.96;box-shadow:0 8px 24px rgba(0,0,0,0.45);border-radius:6px;overflow:hidden;';
+        const copy = tab.cloneNode(true) as HTMLElement;
+        copy.style.cssText = 'transform:none;transition:none;width:100%;height:100%;';
+        copy.classList.remove('tab-dragging', 'tab-ghosted');
+        wrap.appendChild(copy);
+        document.body.appendChild(wrap);
+        ghost = wrap;
+      }
+      ghost.style.left = `${ev.clientX - grabX}px`;
+      ghost.style.top = `${ev.clientY - grabY}px`;
+    }
+    function hideGhost() {
+      ghost?.remove();
+      ghost = null;
+    }
+
+    function recompute() {
+      dragOffset = clampOffset(slots, fromIndex, rawOffset);
+      const me = slots.find((s) => s.index === fromIndex);
+      if (!me) return;
+      dragInsert = insertBefore(slots, fromIndex, me.left + me.width / 2 + dragOffset);
+    }
+    /** Whether the pointer is clear of this strip — free to carry the tab somewhere else. */
+    function outsideStrip(ev: MouseEvent): boolean {
+      if (dropZone === undefined || !stripEl?.parentElement) return false;
+      const r = stripEl.parentElement.getBoundingClientRect();
+      return (
+        ev.clientX < r.left - LEAVE_MARGIN || ev.clientX > r.right + LEAVE_MARGIN ||
+        ev.clientY < r.top - LEAVE_MARGIN || ev.clientY > r.bottom + LEAVE_MARGIN
+      );
+    }
     function onMove(ev: MouseEvent) {
       if (!active) {
         if (Math.abs(ev.clientX - startX) < 5) return;
+        slots = measureSlots();
+        const me = slots.find((s) => s.index === fromIndex);
+        if (!me) { stop(); return; }
+        gap = stripEl ? parseFloat(getComputedStyle(stripEl).columnGap) || 0 : 0;
+        dragShift = me.width + gap;
+        dragInsert = fromIndex + 1;
         active = true;
         dragFromIndex = fromIndex;
         document.body.style.cursor = 'grabbing';
       }
-      insertBeforeIndex = calcInsert(ev.clientX);
+      rawOffset = ev.clientX - startX;
+      if (outsideStrip(ev)) {
+        // Free: the tab goes where the pointer goes, the strip closes ranks around the gap, and the
+        // zone under the pointer (the held tab ignores the pointer, so it does not hide it) is hot.
+        dragFree = true;
+        dragOffset = rawOffset;
+        dragOffsetY = ev.clientY - startY;
+        dragInsert = fromIndex + 1;
+        const zone = zoneUnder(ev.clientX, ev.clientY);
+        hotZone = zone !== null && zone !== dropZone ? zone : null;
+        tabDragStore.begin();
+        tabDragStore.setHot(hotZone);
+        showGhost(ev);
+        return;
+      }
+      hideGhost();
+      dragFree = false;
+      dragOffsetY = 0;
+      hotZone = null;
+      tabDragStore.setHot(null);
+      recompute();
     }
-    function onUp() {
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key !== 'Escape' || !active) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      dragFree = false;
+      hotZone = null;
+      dragOffsetY = 0;
+      dragInsert = fromIndex + 1; // back where it was
+      finish();
+    }
+    function stop() {
       window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mouseup', finish);
+      window.removeEventListener('keydown', onKey, true);
       document.body.style.cursor = '';
-      const wasActive   = active;
-      const finalInsert = insertBeforeIndex;
-      active = false;
-      dragFromIndex = null;
-      insertBeforeIndex = null;
-      if (!wasActive || finalInsert === null) return;
-      suppressNextClick = true;
-      const to = finalInsert <= fromIndex ? finalInsert : finalInsert - 1;
-      if (to !== fromIndex) onReorder?.(fromIndex, to);
     }
+    function finish() {
+      stop();
+      hideGhost();
+      tabDragStore.end();
+      if (!active) return;
+      active = false;
+      // The click that follows a drag must not select: swallowed once, and only for this gesture.
+      suppressNextClick = true;
+      setTimeout(() => { suppressNextClick = false; }, 0);
+
+      // Dropped on another zone: handed over, with no slide — the tab is leaving this strip, and
+      // there is no slot here to settle into.
+      if (dragFree && hotZone !== null && tabId !== undefined) {
+        const zone = hotZone;
+        dragFromIndex = null;
+        dragFree = false;
+        dragOffset = 0;
+        dragOffsetY = 0;
+        onDropOnZone?.(tabId, zone);
+        return;
+      }
+
+      // Otherwise back into this strip: from wherever the pointer left it, into the slot it opened.
+      if (dragFree) {
+        rawOffset = 0;
+        dragFree = false;
+        dragOffsetY = 0;
+        recompute();
+      }
+      const insert = dragInsert;
+      const to = landingIndex(fromIndex, insert);
+      // Slide into the slot, THEN reorder — the DOM order after the reorder puts the tab exactly
+      // where the slide ended, so clearing the transforms in the same tick changes nothing visible.
+      dragSettling = true;
+      dragOffset = settleOffset(slots, fromIndex, insert, gap);
+      setTimeout(() => {
+        if (to !== fromIndex) onReorder?.(fromIndex, to);
+        dragFromIndex = null;
+        dragSettling = false;
+        dragOffset = 0;
+      }, SETTLE_MS);
+    }
+
     window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mouseup', finish);
+    window.addEventListener('keydown', onKey, true);
   }
 
-  function calcInsert(x: number): number {
-    if (!stripEl) return 0;
-    const els = stripEl.querySelectorAll<HTMLElement>('[data-tab-idx]:not(.tab-hidden)');
-    for (let i = 0; i < els.length; i++) {
-      const r = els[i].getBoundingClientRect();
-      if (x < r.left + r.width / 2) {
-        return parseInt(els[i].getAttribute('data-tab-idx') ?? '0', 10);
-      }
+  /** The transform a tab wears while a drag is in progress: the held tab follows the pointer, the
+   *  ones it passes slide by the held tab's width, the rest are untouched. */
+  function dragTransform(i: number): string | undefined {
+    if (dragFromIndex === null) return undefined;
+    if (i === dragFromIndex) {
+      return dragFree ? `translate(${dragOffset}px, ${dragOffsetY}px)` : `translateX(${dragOffset}px)`;
     }
-    return items.length;
+    const dir = shiftDirection(i, dragFromIndex, dragInsert);
+    return dir === 0 ? undefined : `translateX(${dir * dragShift}px)`;
   }
 
   // ── Overflow (cache-based — same algorithm as the legacy TabBar) ──────────
@@ -386,15 +557,13 @@
 <div
   class="tabs tabs-{variant} tabs-sz-{size} {rootClass}"
   class:tabs-fill={fill}
+  class:tabs-sorting={dragFromIndex !== null}
   role="tablist"
   aria-label={ariaLabel}
 >
   <div class="tabs-strip" bind:this={stripEl}>
     {#each items as item, i (item.id)}
       {@const active = item.id === value}
-      {#if draggable && insertBeforeIndex === i && dragFromIndex !== null}
-        <div class="tabs-drag-indicator" aria-hidden="true"></div>
-      {/if}
       <div
         class="tabs-tab"
         class:tab-external={item.tone === 'external'}
@@ -402,6 +571,8 @@
         class:tab-active={active}
         class:tab-hidden={hiddenIds.has(item.id)}
         class:tab-dragging={dragFromIndex === i}
+        class:tab-settling={dragFromIndex === i && dragSettling}
+        class:tab-ghosted={dragFromIndex === i && dragFree}
         class:tab-disabled={item.disabled}
         class:tab-draggable={draggable}
         data-tab-id={item.id}
@@ -410,7 +581,8 @@
         tabindex={item.disabled ? -1 : 0}
         aria-selected={active}
         aria-disabled={item.disabled || undefined}
-        use:tooltip={item.title ?? ''}
+        style:transform={dragTransform(i)}
+        use:tooltip={dragFromIndex === null ? (item.title ?? '') : ''}
         onmousedown={(e) => startTabDrag(e, i)}
         onclick={() => selectItem(item)}
         onkeydown={(e) => handleKeydown(e, item)}
@@ -442,9 +614,6 @@
         {/if}
       </div>
     {/each}
-    {#if draggable && insertBeforeIndex === items.length && dragFromIndex !== null}
-      <div class="tabs-drag-indicator" aria-hidden="true"></div>
-    {/if}
   </div>
 
   {#if overflow && hiddenCount > 0}
@@ -542,7 +711,31 @@
     cursor: not-allowed;
   }
   .tabs-tab.tab-hidden    { display: none !important; }
-  .tabs-tab.tab-dragging  { opacity: 0.45; cursor: grabbing; }
+  /* While sorting, the strip stops clipping so the lifted tab's shadow is not cut off, and the tabs it
+     passes slide rather than jump. The held tab follows the pointer with no transition at all — any
+     easing on it would read as lag — until it is released, when it slides into its slot. */
+  .tabs-sorting .tabs-strip { overflow: visible; }
+  .tabs-sorting .tabs-tab:not(.tab-dragging) {
+    transition: transform 190ms cubic-bezier(0.2, 0.8, 0.2, 1), background var(--transition-fast);
+    will-change: transform;
+  }
+  .tabs-tab.tab-dragging {
+    z-index: 50;
+    cursor: grabbing;
+    /* Never the target of its own drag: the zone under the pointer is what is asked about. */
+    pointer-events: none;
+    transition: none;
+    will-change: transform;
+    background: var(--bg-elevated);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38), 0 0 0 1px var(--border);
+  }
+  /* Carried away from the strip: the copy on the viewport is the one you see, and the strip shows only
+     the gap it left. */
+  .tabs-tab.tab-ghosted { opacity: 0; box-shadow: none; }
+  .tabs-tab.tab-dragging.tab-settling {
+    transition: transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 170ms;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  }
   .tabs-tab.tab-draggable { cursor: grab; }
   .tabs-tab:focus-visible {
     box-shadow: 0 0 0 2px var(--accent-subtle), 0 0 0 3px var(--accent);
@@ -741,18 +934,6 @@
   .tab-close:hover {
     background: color-mix(in srgb, var(--error) 22%, transparent);
     color: var(--error);
-  }
-
-  /* ── Drag indicator ─────────────────────────────────────────────────────── */
-  .tabs-drag-indicator {
-    width: 2px;
-    min-width: 2px;
-    height: 18px;
-    background: var(--accent);
-    border-radius: 1px;
-    flex-shrink: 0;
-    pointer-events: none;
-    align-self: center;
   }
 
   /* ── Trailing action buttons (overflow / add) ─────────────────────────── */

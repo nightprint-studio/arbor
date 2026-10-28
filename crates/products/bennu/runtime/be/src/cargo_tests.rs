@@ -251,7 +251,7 @@ pub(crate) struct CargoRun {
 pub(crate) fn start_cargo_run(ctx: &BennuState, args: &RunArgs) -> Result<CargoRun, String> {
     // The same lock the build takes: two cargo processes on one workspace queue on cargo's own
     // `target/` lock, which looks like a hang rather than like a queue.
-    let guard = BuildGuard::acquire().ok_or_else(|| BUSY_MSG.to_string())?;
+    let guard = BuildGuard::acquire(&args.root).ok_or_else(|| BUSY_MSG.to_string())?;
 
     let root = PathBuf::from(&args.root);
     let plan = cargo_plan(&args.scope, args.include_ignored);

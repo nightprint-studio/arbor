@@ -169,8 +169,11 @@ fn qualified_rule(text: &str, at: usize) -> Option<Hit> {
         return None;
     }
     let word = &text[at..end];
-    let segments: Vec<&str> = word.split('.').collect();
-    if segments.iter().any(|s| !is_java_ident(s)) {
+    // `com.acme.Order#total` and `Order::total` name a method on purpose — the one spelling
+    // where a bare `Order` is still deliberate enough to mark.
+    let (name, method) = split_member(word);
+    let segments: Vec<&str> = name.split('.').collect();
+    if segments.iter().any(|s| !is_java_ident(s)) || method.is_some_and(|m| !is_java_ident(m)) {
         return None;
     }
     let last = segments[segments.len() - 1];
@@ -178,16 +181,39 @@ fn qualified_rule(text: &str, at: usize) -> Option<Hit> {
 
     // One dot is only a qualified name when it reads as one: `com.Acme` yes, `foo.bar` no —
     // otherwise every `object.method` in a message becomes a package.
-    let qualified = dots >= 2 || (dots == 1 && starts_upper(last));
+    let qualified = dots >= 2 || (dots == 1 && starts_upper(last)) || (method.is_some() && starts_upper(last));
     if !qualified {
         // A bare `OrderNotFoundException` is worth marking even with no package in front of
         // it. Long enough to exclude the bare word `Exception`, which is prose.
         let bare_throwable =
             dots == 0 && starts_upper(last) && last.len() > 9 && last.ends_with("Exception");
-        return bare_throwable.then(|| Hit::one(at, end, Token::Exception));
+        return bare_throwable.then(|| name_hit(at, end, Token::Exception, name, method));
     }
     let token = if is_throwable_name(last) { Token::Exception } else { Token::Package };
-    Some(Hit::one(at, end, token))
+    Some(name_hit(at, end, token, name, method))
+}
+
+/// `Order#total` / `Order::total` → (`Order`, `total`); anything else is all name.
+fn split_member(word: &str) -> (&str, Option<&str>) {
+    match word.split_once('#').or_else(|| word.split_once("::")) {
+        Some((name, method)) => (name, Some(method)),
+        None => (word, None),
+    }
+}
+
+/// A qualified name as a hit, linked to the class it names. The link is a [`Link::Source`]
+/// with neither file nor line — which is how a host tells a NAME from a stack frame: a frame
+/// always carries its line, and a name is the host's to resolve (or to drop when no class of
+/// the project answers to it, so that prose which merely looks like a package is not offered
+/// as a click).
+fn name_hit(at: usize, end: usize, token: Token, class: &str, method: Option<&str>) -> Hit {
+    let link = Link::Source {
+        class: class.to_string(),
+        method: method.map(str::to_string),
+        file: None,
+        line: None,
+    };
+    Hit::linked(at, end, token, link)
 }
 
 fn is_java_ident(s: &str) -> bool {
@@ -294,6 +320,48 @@ mod tests {
     #[test]
     fn a_logger_is_a_package() {
         assert_eq!(tokens("com.acme.order.OrderService starting")[0].1, Token::Package);
+    }
+
+    /// A name is linked to its class, with neither file nor line: that absence is how a host tells
+    /// it from a frame, and decides whether any class of its own answers to it.
+    #[test]
+    fn a_qualified_name_links_its_class_without_a_location() {
+        assert_eq!(
+            links("started com.acme.order.OrderService ok"),
+            vec![Link::Source { class: "com.acme.order.OrderService".into(), method: None, file: None, line: None }]
+        );
+    }
+
+    #[test]
+    fn an_exception_name_is_linked_too() {
+        let got = links("Caused by: com.acme.OrderNotFoundException: no such order");
+        assert!(matches!(&got[0], Link::Source { class, file: None, line: None, .. } if class == "com.acme.OrderNotFoundException"));
+    }
+
+    #[test]
+    fn a_hash_names_the_method() {
+        let got = links("failed in com.acme.Order#total(); retrying");
+        assert_eq!(
+            got,
+            vec![Link::Source { class: "com.acme.Order".into(), method: Some("total".into()), file: None, line: None }]
+        );
+        assert_eq!(tokens("failed in com.acme.Order#total(); retrying")[0].0, "com.acme.Order#total");
+    }
+
+    #[test]
+    fn a_double_colon_names_the_method_and_a_bare_class_is_enough_with_one() {
+        let got = links("see Order::total now");
+        assert_eq!(
+            got,
+            vec![Link::Source { class: "Order".into(), method: Some("total".into()), file: None, line: None }]
+        );
+        // Without the explicit member a bare capitalised word is just a word.
+        assert!(tokens("see Order now").is_empty());
+    }
+
+    #[test]
+    fn a_member_that_is_not_an_identifier_declines() {
+        assert!(tokens("see com.acme.Order#12 now").is_empty());
     }
 
     #[test]

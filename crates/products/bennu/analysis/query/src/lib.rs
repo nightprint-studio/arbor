@@ -16,12 +16,21 @@
 //! `bennu_query::prelude::...`.
 
 pub mod access;
+// How much a candidate's name echoes the name of the thing being filled.
+pub mod affinity;
+// What the chain to the left of a dot has already called.
+pub mod catch_types;
+pub mod chain_context;
+// Chain completion: members of members that produce the expected type.
+pub(crate) mod chain_members;
 pub mod classpath_index;
 pub mod completion;
 pub mod dep_record;
 // The types a function slot receives — `opt.map(Re|)` names the Optional's element first.
 pub mod functional_types;
 pub mod hints;
+// The name of the thing a caret is filling.
+pub mod hole;
 pub mod inherited;
 pub mod jdk;
 pub mod member_text;
@@ -38,3 +47,5 @@ pub mod resolver;
 // Completion for a bare identifier: what the scope at the caret binds.
 pub mod scope_completion;
 pub mod source;
+// The switches and strength of the smart completion signals (Settings → Completion).
+pub mod tuning;

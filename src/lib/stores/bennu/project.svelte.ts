@@ -56,6 +56,13 @@ import { bennuSettingsStore } from './settings.svelte';
 // Which tree rows are open, per project — written into each project's session (see
 // `snapshotSession`). A leaf store: it imports nothing back from here.
 import { treeExpansionStore } from './tree-expansion.svelte';
+// Which files are open in which of the editor's two panes — a pure model; see its notes.
+import {
+  activate as activateTab, activeOf, allTabs, close as closeTab, closeAll as closeAllTabs,
+  closeOthers as closeOtherTabs, closeToRight as closeTabsToRight, emptyPanes, focus as focusPaneIn,
+  fromStored, merge as mergePanes, moveTo as moveTabTo, open as openTab, paneOf, reorder as reorderTabs, replacePath,
+  toStored, type PaneIndex, type Panes,
+} from './editor-panes';
 import { directoryKeys } from '$lib/components/bennu/tree-expansion';
 import type { ProjectSession } from '$lib/ipc/bennu/config';
 import type { ProjectInfo, SourceEdit, TreeNode } from '$lib/types/bennu';
@@ -140,8 +147,12 @@ function createProjectStore() {
   // them and the conflict modal is driven off it. Autosave is suspended for these — it
   // would only produce refused writes and a toast per attempt.
   const conflicted = new SvelteSet<string>();
-  let activeFilePath = $state<string | null>(null);
-  let openFilePaths = $state<string[]>([]);
+  // Which files are open in which of the editor's two panes — see `editor-panes.ts`, which also keeps
+  // the invariants. What the rest of the store and the app call "the open tabs" and "the active file"
+  // is derived from it, so those stay what they always were: all of them, and the focused pane's.
+  let panes = $state<Panes>(emptyPanes);
+  const activeFilePath = $derived(activeOf(panes));
+  const openFilePaths = $derived(allTabs(panes));
 
   // ── Where the caret was, per open tab ─────────────────────────────────────────
   // Persisted with the session, so a restart reopens the tabs *at the line you were on* rather
@@ -184,8 +195,7 @@ function createProjectStore() {
   interface StashedSession {
     info: ProjectInfo;
     tree: TreeNode | null;
-    openFilePaths: string[];
-    activeFilePath: string | null;
+    panes: Panes;
   }
   const sessions = new Map<string, StashedSession>();
   // The workspace member roots (canonical), in switch order. Always includes the active root.
@@ -451,19 +461,17 @@ function createProjectStore() {
       if (r === activeRoot) {
         return {
           root: r,
-          open_files: openFilePaths,
-          active_file: activeFilePath ?? '',
+          ...toStored(panes),
           open_carets: caretsFor(openFilePaths),
           ...treeExpansionStore.snapshot(r),
         };
       }
       const s = sessions.get(r);
-      const paths = s?.openFilePaths ?? [];
+      const stored = toStored(s?.panes ?? emptyPanes);
       return {
         root: r,
-        open_files: paths,
-        active_file: s?.activeFilePath ?? '',
-        open_carets: caretsFor(paths),
+        ...stored,
+        open_carets: caretsFor(stored.open_files),
         ...treeExpansionStore.snapshot(r),
       };
     });
@@ -504,15 +512,14 @@ function createProjectStore() {
     // A previewed file gets a tab but no buffer: the viewer reads the bytes itself, so nothing
     // decodes megabytes of PNG — or a ZIP of XML — as UTF-8 on the way to a text editor.
     if (opensAsPreview(path)) {
-      activeFilePath = path;
-      if (!openFilePaths.includes(path)) openFilePaths = [...openFilePaths, path];
+      panes = openTab(panes, path);
       return;
     }
     // A file the backend refuses to hand over as text (binary content, too large) gets no tab:
     // an empty editable buffer over it is the one outcome that could later be saved back.
     if (!(await ensureLoaded(path))) return;
-    activeFilePath = path;
-    if (!openFilePaths.includes(path)) openFilePaths = [...openFilePaths, path];
+    // Where it is already open if it is (focusing that pane), else in the focused pane.
+    panes = openTab(panes, path);
   }
 
   /** Read a file's source + encoding into the cache if not already present. The
@@ -568,8 +575,7 @@ function createProjectStore() {
     isDemo = demo;
     rememberRecent(info.root);
     // Reset the open-file model for the new project.
-    activeFilePath = null;
-    openFilePaths = [];
+    panes = emptyPanes;
     sources.clear();
     encodings.clear();
     carets.clear();
@@ -594,7 +600,7 @@ function createProjectStore() {
   /** Stash the active project's live state into `sessions` (so a later switch restores it). */
   function stashActive() {
     if (project) {
-      sessions.set(project.root, { info: project, tree, openFilePaths, activeFilePath });
+      sessions.set(project.root, { info: project, tree, panes });
     }
   }
 
@@ -603,8 +609,7 @@ function createProjectStore() {
   function loadSession(s: StashedSession) {
     project = s.info;
     tree = s.tree;
-    openFilePaths = s.openFilePaths;
-    activeFilePath = s.activeFilePath;
+    panes = s.panes;
     isDemo = false;
   }
 
@@ -633,6 +638,13 @@ function createProjectStore() {
     // memory: the same project in another workspace remembers its own rows, like its own tabs.
     treeExpansionStore.seed(root, p);
     const paths = p.open_files.map(canonPath);
+    const panesOfSession = fromStored({
+      open_files: paths,
+      active_file: p.active_file ? canonPath(p.active_file) : '',
+      split_files: (p.split_files ?? []).map(canonPath),
+      first_active: p.first_active ? canonPath(p.first_active) : '',
+      split_active: p.split_active ? canonPath(p.split_active) : '',
+    });
     // The carets ride positionally alongside the tabs, and a session written before they
     // existed simply has none — hence the index-wise read rather than a zip.
     paths.forEach((path, i) => {
@@ -642,8 +654,7 @@ function createProjectStore() {
     sessions.set(root, {
       info: { ...info, root },
       tree: null,
-      openFilePaths: paths,
-      activeFilePath: p.active_file ? canonPath(p.active_file) : null,
+      panes: panesOfSession,
     });
     workspaceRoots = [...workspaceRoots, root];
     rememberRecent(root);
@@ -763,6 +774,34 @@ function createProjectStore() {
    * Returns how many files could not be written. Counted per file rather than aborting: the others
    * are still correct, and stopping halfway leaves a project that neither builds nor explains itself.
    */
+  /**
+   * Applies edits to a file the EDITOR has open, as a transaction of its own — `true` when it did.
+   *
+   * Registered by the editor. A file that is open must not have its text swapped underneath it: the
+   * editor treats a new `value` as "this document was replaced", swaps the whole text and EMPTIES the
+   * undo history (anything undoable would apply to positions of a document that is gone). So a rename
+   * wrote the files, and the next Ctrl+Z found nothing to undo — or, with typing before it, undid
+   * against the wrong text. Applied through the editor, the whole rename is ONE undo step and the
+   * caret and scroll position stay where they were.
+   */
+  type LiveEditApplier = (file: string, edits: readonly SourceEdit[]) => boolean;
+  // One per mounted editor — the split editor has two, and each answers only for the file it shows
+  // (a file is open in one pane at a time), so the first that takes the edits is the right one.
+  const liveEditAppliers = new Set<LiveEditApplier>();
+
+  /** Register an editor's applier; returns the unregistering function. */
+  function setLiveEditApplier(applier: LiveEditApplier): () => void {
+    liveEditAppliers.add(applier);
+    return () => {
+      liveEditAppliers.delete(applier);
+    };
+  }
+
+  function applyLive(file: string, edits: readonly SourceEdit[]): boolean {
+    for (const applier of liveEditAppliers) if (applier(file, edits)) return true;
+    return false;
+  }
+
   async function applyEditsAcrossFiles(edits: readonly SourceEdit[]): Promise<number> {
     const byFile = new Map<string, SourceEdit[]>();
     for (const e of edits) {
@@ -796,6 +835,14 @@ function createProjectStore() {
             rejected,
           );
           failed += 1;
+          continue;
+        }
+        // The file on screen takes the edits as a transaction (one undo step); its own input handler
+        // brings the store's copy up to date, and that copy is what is written. Anything not on
+        // screen has no history to protect and is written from the spliced text.
+        if (applyLive(file, fileEdits)) {
+          const live = sources.get(file) ?? text;
+          if (!(await saveText(file, live))) failed += 1;
           continue;
         }
         if (!(await saveText(file, text))) failed += 1;
@@ -879,9 +926,9 @@ function createProjectStore() {
     } catch { /* the guard simply stays off for this path until it is re-read */ }
 
     // Re-point the tab only if one was open: renaming from the tree must not open the file.
-    openFilePaths = openFilePaths.filter((p) => p !== path);
+    // The tab keeps its pane and its place; only its name changes.
+    panes = replacePath(panes, path, newPath);
     if (wasOpen) await openFileInternal(newPath);
-    else if (activeFilePath === path) activeFilePath = openFilePaths[0] ?? null;
 
     // AFTER the move: the edits are expressed against files as they are now, and one of them is
     // very often the renamed file itself.
@@ -914,6 +961,50 @@ function createProjectStore() {
      *  claim it for a plain folder too. `true` with nothing open, like {@link kind}. */
     get isJava()         { return (project?.kind ?? 'maven') === 'maven'; },
     get activeFilePath() { return activeFilePath; },
+
+    // ── Editor panes ──────────────────────────────────────────────────────────────
+    // The editor can be split in two. `activeFilePath` and `openFilePaths` above keep their meaning —
+    // the focused pane's file, and every open file — and these are the per-pane view of the same state.
+    /** Whether the editor is split in two. */
+    get isSplit() { return panes.tabs[1].length > 0; },
+    /** The pane that has the focus. */
+    get focusedPane(): PaneIndex { return panes.focused; },
+    /** The open tabs of `pane`, in strip order. */
+    paneTabs(pane: PaneIndex): readonly string[] { return panes.tabs[pane]; },
+    /** The active tab of `pane`, which is not "the active file" unless the pane has the focus. */
+    paneActive(pane: PaneIndex): string | null { return panes.active[pane]; },
+    /** Give `pane` the focus. A pane that does not exist cannot have it. */
+    focusPane(pane: PaneIndex) {
+      if (panes.focused === pane) return;
+      panes = focusPaneIn(panes, pane);
+    },
+    /**
+     * Move a tab to `pane` (at `index`, the end by default) and focus it there. Moving to the second
+     * pane when there is none splits the editor; moving the last tab out of a pane collapses it. A
+     * file lives in one pane at a time, so this MOVES it — it never leaves a copy behind.
+     */
+    moveTab(path: string, pane: PaneIndex, index?: number) {
+      path = canonPath(path);
+      const next = moveTabTo(panes, path, pane, index);
+      if (next === panes) return;
+      panes = next;
+      for (const active of panes.active) if (active) void ensureLoaded(active);
+      persistWorkspace();
+    },
+    /** Close the split: the second pane's tabs join the first's. */
+    unsplit() {
+      const next = mergePanes(panes);
+      if (next === panes) return;
+      panes = next;
+      persistWorkspace();
+    },
+    /** Reorder the tabs of one pane: the tab at `from` ends up at `to`. */
+    reorderTab(pane: PaneIndex, from: number, to: number) {
+      const next = reorderTabs(panes, pane, from, to);
+      if (next === panes) return;
+      panes = next;
+      persistWorkspace();
+    },
     /**
      * `path` written relative to the open project's root, forward slashes — the root itself
      * being `.`. Falls back to the absolute path when it is outside the project, which is the
@@ -1066,7 +1157,7 @@ function createProjectStore() {
       if (workspaceRoots.includes(root)) { void this.switchProject(root); return true; }
       stashActive();
       const canonInfo: ProjectInfo = { ...info, root };
-      sessions.set(root, { info: canonInfo, tree: null, openFilePaths: [], activeFilePath: null });
+      sessions.set(root, { info: canonInfo, tree: null, panes: emptyPanes });
       loadSession(sessions.get(root)!);
       workspaceRoots = [...workspaceRoots, root];
       rememberRecent(root);
@@ -1141,7 +1232,7 @@ function createProjectStore() {
           loadSession(sessions.get(next)!);
           if (activeFilePath) void ensureLoaded(activeFilePath);
         } else {
-          project = null; tree = null; openFilePaths = []; activeFilePath = null;
+          project = null; tree = null; panes = emptyPanes;
         }
       }
       persistWorkspace();
@@ -1225,8 +1316,7 @@ function createProjectStore() {
       workspaceRoots = [];
       project = null;
       tree = null;
-      openFilePaths = [];
-      activeFilePath = null;
+      panes = emptyPanes;
       isDemo = false;
       stamps.clear();
       conflicted.clear();
@@ -1245,8 +1335,7 @@ function createProjectStore() {
       workspaceRoots = [];
       project = null;
       tree = null;
-      openFilePaths = [];
-      activeFilePath = null;
+      panes = emptyPanes;
       isDemo = false;
       // Which one will end up on screen, decided before the loop so the others can be opened
       // WITHOUT a language server. Opening five Cargo projects used to warm-start five
@@ -1266,7 +1355,6 @@ function createProjectStore() {
       // server. Announcing it is what starts one.
       if (target !== wanted) void ipcActivateProject(target).catch(() => {});
       loadSession(sessions.get(target)!);
-      if (!activeFilePath && openFilePaths.length) activeFilePath = openFilePaths[0];
       if (activeFilePath) await ensureLoaded(activeFilePath);
     },
 
@@ -1286,6 +1374,8 @@ function createProjectStore() {
     /** Apply byte-offset edits across files (a server's `applyEdit`, a code action, a rename's
      *  implied edits). Returns how many files could not be written. */
     applyEdits: applyEditsAcrossFiles,
+    /** Let the editor take the edits for the file it has open, as one undo step. */
+    setLiveEditApplier,
 
     /**
      * Rename the file at `path` to `newName` in the same directory.
@@ -1355,7 +1445,7 @@ function createProjectStore() {
         if (fresh?.stamp) stamps.set(newPath, fresh.stamp);
       } catch { /* the guard simply stays off for this path until it is re-read */ }
       // Re-point the tab: drop the old path, open the new one, refresh the tree to show the move.
-      openFilePaths = openFilePaths.filter((p) => p !== path);
+      panes = replacePath(panes, path, newPath);
       await openFileInternal(newPath);
       if (project?.root && !isDemo) loadTreeInto(project.root);
       persistWorkspace();
@@ -1364,20 +1454,17 @@ function createProjectStore() {
 
     /** Close a tab; pick a neighbour as active. */
     closeFile(path: string) {
-      const idx = openFilePaths.indexOf(path);
-      if (idx === -1) return;
-      openFilePaths = openFilePaths.filter((p) => p !== path);
+      if (paneOf(panes, path) === null) return;
+      // The neighbour that takes over is the one in the SAME pane, and closing the last tab of a
+      // pane collapses the split — see `editor-panes.ts`.
+      panes = closeTab(panes, path);
       // The conflict flag deliberately SURVIVES the close. Closing a tab doesn't discard its
       // unsaved edits here (`dirty` and the buffer both persist, so reopening restores them),
       // so clearing the flag would re-arm autosave on a file that is still mid-conflict — the
       // exact overwrite this guards against. `conflictedPaths` hides it from the modal while
       // no tab shows it; the decision comes back with the tab.
-      if (activeFilePath === path) {
-        activeFilePath = openFilePaths.length
-          ? openFilePaths[Math.min(idx, openFilePaths.length - 1)]
-          : null;
-        if (activeFilePath) void ensureLoaded(activeFilePath); // a restored neighbour may be lazy
-      }
+      // A restored neighbour may be lazy, in whichever pane it took over.
+      for (const active of panes.active) if (active) void ensureLoaded(active);
       persistWorkspace();
     },
 
@@ -1385,17 +1472,15 @@ function createProjectStore() {
      *  tab is always focused, regardless of what was active before). No-op when the
      *  path isn't open. */
     closeOthers(path: string) {
-      if (!openFilePaths.includes(path)) return;
-      openFilePaths = [path];
-      activeFilePath = path;
+      if (paneOf(panes, path) === null) return;
+      panes = closeOtherTabs(panes, path);
       void ensureLoaded(path);
       persistWorkspace();
     },
 
     /** Close all open tabs. */
     closeAll() {
-      openFilePaths = [];
-      activeFilePath = null;
+      panes = closeAllTabs();
       persistWorkspace();
     },
 
@@ -1403,15 +1488,10 @@ function createProjectStore() {
      *  If the active tab was among those closed, `path` becomes active so focus stays
      *  on a surviving tab. No-op when the path isn't open. */
     closeToRight(path: string) {
-      const idx = openFilePaths.indexOf(path);
-      if (idx === -1) return;
-      const kept = openFilePaths.slice(0, idx + 1);
-      if (kept.length === openFilePaths.length) return; // nothing to the right
-      openFilePaths = kept;
-      if (activeFilePath && !kept.includes(activeFilePath)) {
-        activeFilePath = path;
-        void ensureLoaded(path);
-      }
+      const next = closeTabsToRight(panes, path);
+      if (next === panes) return; // not open, or nothing to the right
+      panes = next;
+      void ensureLoaded(path);
       persistWorkspace();
     },
 
@@ -1425,7 +1505,7 @@ function createProjectStore() {
       // and missing, and a miss here used to be a silent `return`, which from outside is a click
       // that did nothing at all.
       path = canonPath(path);
-      if (!openFilePaths.includes(path)) {
+      if (paneOf(panes, path) === null) {
         // Asked for a tab that is not in the list: open it. Somebody wanting to look at that file
         // is what the request means, and refusing it without a word is the one outcome nobody can
         // debug from the screen.
@@ -1433,11 +1513,14 @@ function createProjectStore() {
         persistWorkspace();
         return;
       }
-      const leaving = activeFilePath;
+      // The file you are leaving is the one that was active IN THIS PANE: switching tabs within a
+      // pane leaves that pane's tab, and arriving in the other pane leaves nothing behind (the file
+      // you were editing there is still on screen).
+      const leaving = panes.active[paneOf(panes, path) as PaneIndex];
       if (leaving && leaving !== path && autosaveEnabled() && dirty.has(leaving)) {
         await saveText(leaving, sources.get(leaving) ?? '');
       }
-      activeFilePath = path;
+      panes = activateTab(panes, path);
       await ensureLoaded(path);
       persistWorkspace();
       // Arriving at a tab is the moment its staleness matters: a clean buffer refreshes

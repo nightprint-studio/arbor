@@ -21,6 +21,8 @@
 
 // Completions for members that do not exist yet — the accessors a field is missing.
 pub mod accessor_completion;
+// The types a Create method signature is written with, read from the resolver.
+pub mod call_types;
 pub mod class_names;
 // Where the method a call asks for goes in the OTHER file, and what it says.
 pub mod create_in;
@@ -45,13 +47,21 @@ mod lombok;
 // Postfix templates in the completion list: the receiver typed, handed to `bennu-java`'s catalogue — and the
 // site and item shape the backend's user-written postfix templates share with it.
 pub mod postfix;
+// Add parameter: the declaration, its overrides and every call, planned like a rename.
+pub mod add_parameter;
 pub mod prelude;
 pub mod provider;
 pub mod refcache;
 pub mod refs;
 pub mod rename;
 pub mod safe_delete;
+// Ghost text for the continuations of a statement that are facts (the next `case` of an enum switch).
+pub mod statement_hint;
+// Whole-statement templates that read the surrounding code (`iter`).
+pub mod statement_templates;
 pub mod usage_marks;
+// What the project calls, and what it calls after what — the completion ranking's habit signals.
+pub mod usage_census;
 pub mod spell;
 // Bare static member name → the classes declaring it: what the "Import static" intention offers.
 pub mod static_members;

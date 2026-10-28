@@ -82,10 +82,13 @@ pub fn quarantine(root: Node<'_>) -> Quarantine {
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         if node.is_error() || node.is_missing() {
-            let Some(member) = enclosing_member(&node) else {
-                return Quarantine::WholeFile;
-            };
-            ranges.push((member.start_byte(), member.end_byte()));
+            match enclosing_member(&node) {
+                Some(member) => ranges.push((member.start_byte(), member.end_byte())),
+                // A token typed BETWEEN members — a stray `p` on its own line — belongs to no
+                // member, but the class around it is sound: only the stray text is unknown.
+                None if is_stray_between_members(&node) => ranges.push((node.start_byte(), node.end_byte())),
+                None => return Quarantine::WholeFile,
+            }
             continue; // the whole member is out; its own children add nothing
         }
         let mut c = node.walk();
@@ -102,6 +105,34 @@ pub fn quarantine(root: Node<'_>) -> Quarantine {
     ranges.sort_unstable();
     merge(&mut ranges);
     Quarantine::Members(ranges)
+}
+
+/// The bodies whose direct children are members.
+const BODIES: [&str; 4] = ["class_body", "interface_body", "enum_body_declarations", "annotation_type_body"];
+
+/// Whether `node` is an `ERROR` sitting directly in a type body, between its members, in a body
+/// whose braces are both there.
+///
+/// This is the half-typed member at its earliest: `p` on a line of its own, before it is anything.
+/// Charging it to the whole file silenced every check in a class because one identifier had been
+/// typed — including the one on the method above it. What distinguishes it from the case the
+/// whole-file rule exists for is that the **body is intact**: its closing brace is present, so
+/// nothing after the stray text has been re-nested. (An unbalanced brace shows up as a missing
+/// closer, and a stray token that ate the closer is not between members at all.)
+fn is_stray_between_members(node: &Node<'_>) -> bool {
+    if !node.is_error() {
+        return false;
+    }
+    let Some(parent) = node.parent() else { return false };
+    if !BODIES.contains(&parent.kind()) {
+        return false;
+    }
+    let count = parent.child_count();
+    // The closing brace is the body's last child, really there, and the error ends before it.
+    // (An enum's declarations body has no braces of its own, so it stays a whole-file case.)
+    count > 0
+        && parent.child(count - 1).is_some_and(|last| last.kind() == "}" && !last.is_missing())
+        && node.end_byte() < parent.end_byte().saturating_sub(1)
 }
 
 /// The smallest member declaration containing `node`, or `None` when none does.
@@ -166,6 +197,26 @@ mod tests {
         // Nothing smaller than the file is to blame: the brace changes what every member below it
         // is nested in.
         assert_eq!(q("class A {\n  void f() { }\n"), Quarantine::WholeFile);
+    }
+
+    /// The reported case: an identifier typed on its own line between two methods.
+    #[test]
+    fn a_stray_token_between_members_costs_only_itself() {
+        let src = "class A {\n  void f() { g(); }\n\n  p\n\n  private boolean m() { return true; }\n}\n";
+        let Quarantine::Members(ranges) = q(src) else { panic!("expected members, got {:?}", q(src)) };
+        let hidden = |needle: &str| {
+            let at = src.find(needle).unwrap();
+            q(src).hides(at, at + needle.len())
+        };
+        assert!(!ranges.is_empty());
+        assert!(!hidden("g();"), "the method above the stray token must still be checked");
+        assert!(hidden("p\n"), "the stray text itself is out");
+    }
+
+    #[test]
+    fn an_unclosed_body_with_a_stray_token_still_gives_up_the_file() {
+        // No closing brace: whatever follows may be nested somewhere nobody wrote.
+        assert_eq!(q("class A {\n  void f() { }\n  p\n"), Quarantine::WholeFile);
     }
 
     #[test]

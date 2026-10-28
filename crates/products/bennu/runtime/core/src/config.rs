@@ -79,6 +79,44 @@ pub struct BennuConfig {
     /// other.
     #[serde(default = "yes")]
     pub completion_import_census: bool,
+    /// **Name affinity**: rank a candidate higher when its name echoes the name of the thing being
+    /// filled (`Customer customer = |`, the argument of `findByCustomerId(|)`). `true` by default.
+    ///
+    /// The `completion_smart_*` switches below are pushed to the ranking when the config is saved
+    /// (see `completion_tuning` in bennu-be), for the same reason the census flag is: completion is
+    /// the hot path and must not parse a TOML file per keystroke. Each one turns a *signal* off and
+    /// never a candidate — nothing is filtered by them.
+    #[serde(default = "yes")]
+    pub completion_smart_name_affinity: bool,
+    /// **Project usage**: rank a member higher when the project calls it often. `true` by default.
+    #[serde(default = "yes")]
+    pub completion_smart_project_usage: bool,
+    /// **Call sequences**: rank a member higher when the project calls it right after the previous
+    /// call in the chain (`open()` then `close()`). `true` by default.
+    #[serde(default = "yes")]
+    pub completion_smart_sequence: bool,
+    /// **Chain completion**: also offer members of members that produce the expected type
+    /// (`order.getCustomer().getName()`). `true` by default.
+    #[serde(default = "yes")]
+    pub completion_smart_chain: bool,
+    /// **Context-aware candidates**: setters already called on a builder sink, a never-used local
+    /// rises, a `catch` leads with the exceptions its `try` throws, a `case` with the enum constants
+    /// not yet covered. `true` by default.
+    #[serde(default = "yes")]
+    pub completion_smart_context: bool,
+    /// **Statement templates**: offer whole-statement completions that read the surrounding code
+    /// (`iter`). `true` by default.
+    #[serde(default = "yes")]
+    pub completion_smart_statements: bool,
+    /// **Ghost text for facts**: draw the continuations that are certain (`catch (X |` → `e`, the
+    /// next uncovered `case`) ahead of the caret. `true` by default.
+    #[serde(default = "yes")]
+    pub completion_smart_ghost_text: bool,
+    /// How strongly the learned signals (name affinity, project usage, call sequences) count, in
+    /// percent of their designed weight: `0` ignores them, `100` is as designed, `250` is the
+    /// ceiling. `100` by default.
+    #[serde(default = "full_strength")]
+    pub completion_smart_strength: u32,
     /// Absolute paths of the project roots the user has turned **spell-check** on for.
     ///
     /// A list of roots and not a switch, because that is the shape of the decision: spell-checking
@@ -624,6 +662,12 @@ fn yes() -> bool {
     true
 }
 
+/// The designed strength of the learned completion signals, in percent — a bare
+/// `#[serde(default)]` on a `u32` would be `0`, which silently turns them all off.
+fn full_strength() -> u32 {
+    100
+}
+
 /// The default Rust visibility for generated items. `pub(crate)` rather than `pub`: a generator
 /// that makes everything public writes a crate's API by accident.
 fn pub_crate() -> String {
@@ -657,6 +701,14 @@ impl Default for BennuConfig {
             completion_delay_ms: 150,
             completion_case_sensitive: false,
             completion_import_census: true,
+            completion_smart_name_affinity: true,
+            completion_smart_project_usage: true,
+            completion_smart_sequence: true,
+            completion_smart_chain: true,
+            completion_smart_context: true,
+            completion_smart_statements: true,
+            completion_smart_ghost_text: true,
+            completion_smart_strength: 100,
             spell_check_roots: Vec::new(),
             html_scripts_allowed: Vec::new(),
             maven_auto_download: true,
@@ -750,6 +802,18 @@ pub struct ProjectSession {
     /// Read defensively: a shorter (or absent) list means "no remembered caret" for the tabs it
     /// does not reach, which is exactly what a file written by an older build looks like.
     pub open_carets: Vec<String>,
+    /// The tabs of the editor's **second pane**, in order, while it is split — a subset of
+    /// `open_files`, which stays the whole list (so a build that knows no split still opens every
+    /// tab, in one pane). Omitted when the editor is not split.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub split_files: Vec<String>,
+    /// The active tab of the first pane, when split. `active_file` is the FOCUSED pane's, so the
+    /// other pane's is what would otherwise be lost. Omitted when empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub first_active: String,
+    /// The active tab of the second pane. Omitted when empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub split_active: String,
     /// Rows of Bennu's trees the user opened against their default, as `<tree>:<stable key>` —
     /// `project:core/src/main/java` (a folder, relative to the root), `maven:module/app/plugins`.
     /// Opaque here: the FE owns the key scheme. Two flat lists rather than a `key → open` table
@@ -1035,6 +1099,44 @@ scroll = 42
         let old = parse_workspaces(older);
         assert_eq!(old.workspaces[0].projects[0].open_files.len(), 1, "the tabs survived");
         assert!(old.workspaces[0].projects[0].open_carets.is_empty(), "no caret is remembered");
+    }
+
+    /// A split editor survives the TOML round trip, is left out of the file when there is none, and a
+    /// session written before it existed still loads with all its tabs.
+    #[test]
+    fn a_split_round_trips_and_an_older_file_still_loads() {
+        let mut store = BennuWorkspaces {
+            active_id: "w1".to_string(),
+            workspaces: vec![ws("w1", "Backend", &["c:/a", "c:/b"])],
+        };
+        {
+            let first = &mut store.workspaces[0].projects[0];
+            first.open_files = vec!["c:/a/A.java".into(), "c:/a/B.java".into(), "c:/a/C.java".into()];
+            first.split_files = vec!["c:/a/C.java".into()];
+            first.first_active = "c:/a/B.java".into();
+            first.split_active = "c:/a/C.java".into();
+        }
+        let text = toml::to_string_pretty(&store).expect("serializes");
+        let back = parse_workspaces(&text);
+        let first = &back.workspaces[0].projects[0];
+        assert_eq!(first.split_files, vec!["c:/a/C.java"]);
+        assert_eq!((first.first_active.as_str(), first.split_active.as_str()), ("c:/a/B.java", "c:/a/C.java"));
+        assert_eq!(first.open_files.len(), 3, "the whole list is still the whole list");
+
+        let second = &back.workspaces[0].projects[1];
+        assert!(second.split_files.is_empty() && second.first_active.is_empty());
+        assert_eq!(text.matches("split_files").count(), 1, "an unsplit project writes nothing");
+
+        let older = "active_id = \"w1\"\n\
+                     [[workspaces]]\n\
+                     id = \"w1\"\n\
+                     active_project = \"/p\"\n\
+                     [[workspaces.projects]]\n\
+                     root = \"/p\"\n\
+                     open_files = [\"/p/A.java\", \"/p/B.java\"]\n";
+        let old = parse_workspaces(older);
+        assert_eq!(old.workspaces[0].projects[0].open_files.len(), 2);
+        assert!(old.workspaces[0].projects[0].split_files.is_empty());
     }
 
     /// The remembered tree rows survive the TOML round trip, are left out of the file when there

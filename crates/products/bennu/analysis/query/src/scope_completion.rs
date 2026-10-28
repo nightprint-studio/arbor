@@ -97,7 +97,10 @@ pub fn scope_completion<M: CpMemberIndex>(
     // The plain buffer, not `sited`: the expected-type walk makes its own repair, and it needs a
     // terminator as well as an identifier — see `expected_type`.
     let expected = expected_type(source, at, resolver);
-    let ctx = rank::Context::new(source, statik).expecting(expected);
+    let ctx = rank::Context::new(source, statik)
+        .expecting(expected)
+        .at_caret(source, start)
+        .with_usage(resolver.project_usage());
     let mut out: Vec<Ranked> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 

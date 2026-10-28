@@ -6,6 +6,7 @@ pub mod ctor_checks;
 pub mod ctor_recursion;
 pub mod declarations;
 pub mod duplicates;
+pub mod lombok_ctor;
 pub mod enum_rules;
 pub mod erasure_clash;
 pub mod forward_ref;

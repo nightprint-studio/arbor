@@ -257,6 +257,22 @@
   <div class="wrap">
     <h2>In breve <span class="kicker">tre righe</span></h2>
     <div class="callout green">
+      <b>Aggiornamento del 28 ottobre, in serata: provato anche questo, una riga sale, nove entrano, e due assenze cadono.</b>
+      <p>Il maintainer ha provato il lavoro del pomeriggio, e questa stesura lo conta come provato: i suggerimenti intelligenti del completamento (affinità col nome, abitudini del
+        progetto, catene, eccezioni dei catch, ghost text, con le impostazioni), i link nei log di esecuzione e il pattern di Logback con i suoi MDC, la creazione di un metodo con i tipi
+        veri, il rename che non rompe più l'undo, un build che si ricorda fra i riavvii e una coda per progetto, la dialog Generate rimessa a posto, il popup degli usi rifatto,
+        la cura sul costruttore ripetuto di Lombok, <b>aggiungi parametro</b>, i <b>cursori multipli</b>, il riordino dei tab trascinandoli e i <b>due editor affiancati</b>.</p>
+      <ul>
+        <li><b>Editor affiancati 0 → 3</b>: due pannelli con i loro tab, un tab si sposta trascinandolo, il divisore si ridimensiona. Non 4: solo verticale e un file per pannello.</li>
+        <li><b>Il multi-caret non è più un'assenza</b>: una delle tre cose che tenevano la UI/UX a 8.5 cade (restano i bookmark e il diff come vista nell'editor). L'asse non si muove.</li>
+        <li><b>Nove righe nuove</b>: cursori multipli (3), log di esecuzione (4), terminale integrato (4, c'era già e mancava dalla scheda), firma dei metodi (2) e cinque dove Bennu ha 0: segnalibri,
+          macro, contesti e attività, file scratch, modalità senza distrazioni. Totale 170 su 285, il 60%; sulle righe di prima non cambia nulla (138 su 180, 77%).</li>
+        <li><b>Non si muovono</b>: Completion (già 5), Refactoring (4: aggiungi parametro non basta contro Change Signature intero), Errori di compilazione (4), Funziona davvero (7.0: il codice di oggi è nuovo e
+          «funziona davvero» è la misura che si sposta quando una settimana passa senza difetti nelle basi).</li>
+      </ul>
+      <p>Non rimisurati: i conteggi di crate e di pagine, i corpora e il peso. I test sono contati nel sorgente (9.698 <code>#[test]</code>, 333 test frontend), non eseguiti.</p>
+    </div>
+    <div class="callout green">
       <b>Aggiornamento del 28 ottobre: provato tutto, tre righe e un asse salgono, e la scheda diventa più severa.</b>
       <p>Il maintainer ha provato il lavoro di ieri e di oggi: la finestra Database, la validazione delle query (native, MyBatis, countQuery), la generazione di entità,
         la connessione ricordata per progetto, le correzioni agli strumenti MCP. Si aggiungono: <code>// language=sql</code> anche nei text block, errori del database
@@ -460,9 +476,9 @@
           <kbd>Alt</kbd>+<kbd>F3</kbd> per scorrerle — insieme al blame, alla cronologia, al ramo nella status bar e a un pannello Changes
           che mostra il diff di Corvus accanto alla lista. A questo si aggiungono la barra Trova/Sostituisci flottante, il menu del
           tasto destro raggruppato e colorato, i nomi non dichiarati in rosso e il form delle run configuration a sezioni ripiegabili.</p>
-        <p><b>Non 9:</b> il multi-caret manca, i bookmark mancano, e il diff nell'editor è ancora un pannello e non una vista affiancata
+        <p><b>Non 9:</b> i bookmark mancano, e il diff nell'editor è ancora un pannello e non una vista affiancata
           sul testo che stai scrivendo. Il pannello Changes con il diff accanto, scritto il 20 ottobre, è ora committato e in uso: se non regge, l'asse
-          torna a 8.0.</p>
+          torna a 8.0. Il multi-caret e due editor affiancati, che mancavano fino al 28 ottobre, ci sono: tolgono una delle tre assenze, e il voto resta 8.5 finché le altre due restano.</p>
       </article>
       <article class="axis">
         <header><b>Estensibilità</b><span class="flat">8.5 = 8.5</span></header>
@@ -500,17 +516,18 @@
 </section>
 <section id="scheda">
   <div class="wrap">
-    <h2>La scheda <span class="kicker">48 aree · 6 editor · da 0 a 5</span></h2>
-    <p>Le 35 aree del 15 settembre, la sicurezza delle dipendenze, e dal 28 ottobre dodici righe nuove — otto delle quali sono cose che
-      altri editor hanno e Bennu no (voto 0 o 1). Sotto il voto di Bennu trovi quello del 15 settembre quando è cambiato; «nuova» marca la riga che allora non c'era.</p>
+    <h2>La scheda <span class="kicker">57 aree · 6 editor · da 0 a 5</span></h2>
+    <p>Le 35 aree del 15 settembre, la sicurezza delle dipendenze, e dal 28 ottobre ventuno righe nuove: dodici al mattino — otto delle quali sono cose che
+      altri editor hanno e Bennu no (voto 0 o 1) — e nove in serata, di cui cinque dove Bennu non ha niente (segnalibri, macro, contesti, scratch, senza distrazioni). Sotto il voto di Bennu trovi quello del 15 settembre quando è cambiato; «nuova» marca la riga che allora non c'era.</p>
 
     <div class="callout blue">
       <b>Sulle stesse 35 righe del 15 settembre: da 128 a 135 su 175, dal 73% al 77%.</b>
       <p>Sette punti da sei righe. <b>Errori di compilazione</b> da 3 a 4 e <b>Local history</b> da 4 a 5 (come prima); <b>Ergonomia dell'editor</b> da 3 a 4;
         <b>MyBatis</b> da 3 a 5, <b>Database</b> da 3 a 4 e <b>Trova utilizzi e gerarchie</b> da 4 a 5 sono del 28 ottobre e le spiega la sezione «Cosa è salito».
-        Con le righe nuove la scheda ha 48 aree e 240 punti: Bennu ne prende 154, il 64%. La percentuale <b>scende</b> perché la scheda è cresciuta
-        con funzioni che Bennu non ha — client HTTP, Docker, sviluppo remoto, collaborazione, assistente AI, sincronizzazione, editor affiancati, procedura
-        guidata per un nuovo progetto — e non perché Bennu sia peggiorato.</p>
+        Con le righe nuove la scheda ha 57 aree e 285 punti: Bennu ne prende 170, il 60% (al mattino erano 154 su 240, il 64%). La percentuale <b>scende</b> perché la scheda è cresciuta
+        con funzioni che Bennu non ha — client HTTP, Docker, sviluppo remoto, collaborazione, assistente AI, sincronizzazione, procedura guidata per un nuovo progetto,
+        segnalibri, macro, contesti, scratch, modalità senza distrazioni — e non perché Bennu sia peggiorato: in serata sono saliti l'editor affiancato (0 → 3) e,
+        fra le righe nuove, i cursori multipli, i log e il terminale.</p>
     </div>
 
     <div class="legend">
@@ -522,9 +539,9 @@
     <div class="tw"><table id="board" class="board"><caption class="fine" style="caption-side:bottom;text-align:left;padding:10px 12px">Totali, subtotali e percentuali sono calcolati dalla pagina sulle righe che vedi, non scritti a mano.</caption></table></div>
 
     <div class="callout">
-      <b>Senza pesi: sulle 35 righe di allora Bennu supera IntelliJ Community di tredici punti; sulle 48 di oggi è a tre punti sotto.</b>
+      <b>Senza pesi: sulle 35 righe di allora Bennu supera IntelliJ Community di tredici punti; sulle 57 di oggi è a ventisette punti sotto.</b>
       <p>Il 15 settembre erano sei, poi dodici, ora tredici sulle righe di allora. Community continua a prendere i suoi punti sul Java di tutti i giorni: refactoring,
-        debugger, coverage, Gradle — e ora anche sulle righe nuove che Bennu non ha, dove Community ha spesso 3 o 4 (split, collaborazione,
+        debugger, coverage, Gradle — e ora anche sulle righe nuove che Bennu non ha, dove Community ha spesso 3, 4 o 5 (segnalibri, scratch, split, collaborazione,
         sincronizzazione, assistente AI). Bennu li prende dove Community ha zero — Struts e JSP, Jakarta EE, i controlli sui framework, gli encoding,
         il database. È un risultato onesto: aggiungere righe che mancano <em>deve</em> abbassare il totale. La sezione successiva
         pesa le righe, perché due strumenti con totali vicini e poche righe in comune dicono poco.</p>
@@ -553,9 +570,10 @@
     </div>
     <div class="callout blue">
       <b>Cosa dicono.</b>
-      <p>Per il monolite legacy Bennu resta secondo: 74% contro l'86% di Ultimate e il 65% di Community. Per il servizio Spring Boot resta terzo, al 64%,
-        dietro Ultimate (91%) e Community (68%). Le percentuali sono più basse di quelle del 26 ottobre (80% e 73%) per una ragione sola: le dodici righe
-        nuove, in buona parte a 0 o 1 per Bennu, pesano nelle due squadre — soprattutto l'assistente AI, il client HTTP e Docker nel servizio nuovo.
+      <p>Per il monolite legacy Bennu resta secondo: 71% contro l'86% di Ultimate e il 67% di Community. Per il servizio Spring Boot resta terzo, al 62%,
+        dietro Ultimate (91%) e Community (70%). Le percentuali sono più basse di quelle del 26 ottobre (80% e 73%) per una ragione sola: le ventuno righe
+        nuove, in buona parte a 0 o 1 per Bennu, pesano nelle due squadre — soprattutto l'assistente AI, il client HTTP e Docker nel servizio nuovo. Le nove di serata
+        pesano poco (da 0,5 a 2 ciascuna) e portano il monolite dal 75% al 71% e il servizio dal 64% al 62%.
         Sulle 36 righe di prima, con i voti di oggi, il monolite è all'82% e il servizio al 75%: <b>Bennu è migliorato, la scheda è diventata più severa</b>.</p>
       <p>Il dato utile è lo stesso di allora: le funzioni sui framework non spostano più la distanza da Ultimate, perché su
         quelle Bennu è già davanti. La spostano le righe generaliste a zero o a tre — Change Signature, debugger, coverage —
@@ -825,7 +843,7 @@
         <tr><td>Inlay hint, code lens, signature help, ghost text</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr><td>La vista resta sulla riga mentre arrivano le code lens</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Scrivere intorno a una selezione la avvolge: virgolette, parentesi, text block</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
-        <tr><td>Multi-caret e selezione a colonna</td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Multi-caret e selezione a colonna <span class="tag new">28 ott</span><small class="why"><kbd>Alt</kbd>+clic, <kbd>Alt</kbd>+<kbd>Shift</kbd>+trascina, <kbd>Alt</kbd>+<kbd>J</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>; un solo undo. Completion ed Emmet si fermano con più cursori. Manca il cursore sopra/sotto da tastiera.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr class="chg"><td>Local History con cambi esterni, ripristino di cartelle e file cancellati, e cronologia per selezione <span class="tag">allargata</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
         <tr class="chg"><td>Gutter delle modifiche, con vecchio testo, ripristino e copia del blocco <span class="tag">era ✗</span><small class="why">Barra colorata per le righe aggiunte, cambiate o tolte dall'ultimo commit; <kbd>Alt</kbd>+<kbd>F3</kbd> e <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F3</kbd> le scorrono. Spegnibile dalle impostazioni, che fermano anche le chiamate.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr class="chg"><td>Annotate con Git Blame: barra per commit, autore e data a inizio blocco <span class="tag new">nuova</span><small class="why">Il messaggio del commit è opzionale. Corvus fornisce il dato: nessun repository da aprire là.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c y">✓</td></tr>
@@ -835,6 +853,8 @@
         <tr class="chg"><td>Barra Trova/Sostituisci flottante, con contatore e opzioni dentro il campo <span class="tag new">nuova</span><small class="why">Ricerca incrementale, riga di sostituzione su <kbd>Alt</kbd>+<kbd>P</kbd>, scorciatoia verso Trova nei file; occorrenze del testo selezionato e risultati con più contrasto.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr class="chg"><td>File <code>.env</code>: colori, nomi delle variabili che Spring Boot lega, valori chiusi, proprietà sovrascritta in hover <span class="tag new">nuova</span></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c n">✗</td></tr>
         <tr class="chg"><td>Cartelle senza <code>pom.xml</code> o <code>Cargo.toml</code> aperte come progetti solo editor <span class="tag new">nuova</span><small class="why">Progetti SQL e Node/Angular; template Angular colorati.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Tab che si riordinano trascinando, con il posto in cui cadono che si apre mentre trascini <span class="tag new">28 ott</span></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Link nei log di esecuzione: classi, <code>Classe#metodo</code>, e il pattern di Logback con i suoi MDC evidenziati <span class="tag new">28 ott</span><small class="why">Il pattern si legge da <code>logback.xml</code>, <code>log4j2</code>, <code>.properties</code> o <code>.yml</code> del progetto, non si indovina dalle righe.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
         <tr><td>Terminale integrato, pannello TODO</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr><td>Template di codice in Jinja: nuovo file, dalla classe, configurazione, test, abbreviazioni, postfix<small class="why">Con anteprima mentre scrivi, righe del template collegate a quelle generate, scelta per progetto, e lo stile Java tuo letto dal template.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c p">◐</td></tr>
         <tr><td>Fogli di calcolo come griglia: <code>.xlsx</code>, <code>.xls</code>, <code>.xlsb</code>, <code>.ods</code></td><td class="c own y">✓</td><td class="c n">✗</td><td class="c p">◐</td><td class="c n">✗</td></tr>
@@ -855,12 +875,12 @@
     </table></div>
 
     <h3>Quello che gli altri hanno e Bennu no</h3>
-    <p>Righe aggiunte il 28 ottobre per completare il quadro: tutte a ✗ o ◐ per Bennu, cercate nel sorgente e non trovate. Entrano anche nella scheda, e abbassano la
+    <p>Righe aggiunte il 28 ottobre per completare il quadro: tutte a ✗ o ◐ per Bennu, cercate nel sorgente e non trovate (l'editor affiancato e la firma dei metodi sono salite a ◐ in giornata). Entrano anche nella scheda, e abbassano la
       percentuale di Bennu — è quello che devono fare.</p>
     <div class="tw"><table>
       <thead><tr><th>Funzione</th><th class="own">Bennu</th><th>IntelliJ&nbsp;U</th><th>VS&nbsp;Code+Java</th><th>Eclipse</th></tr></thead>
       <tbody>
-        <tr class="chg"><td>Editor affiancati (split orizzontale e verticale) <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Editor affiancati (split orizzontale e verticale) <span class="tag">era ✗</span><small class="why">Due editor con i loro tab, un tab si sposta trascinandolo, il divisore si ridimensiona. Solo verticale e un file per pannello; i tab dei due pannelli si ricordano al riavvio. Per questo ◐.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr class="chg"><td>Nuovo progetto da procedura guidata: Spring Initializr, archetype Maven <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
         <tr class="chg"><td>Client HTTP: file <code>.http</code> con variabili, esecuzione dal gutter <span class="tag new">28 ott</span><small class="why">Bennu ha il pannello degli endpoint, non un client.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c n">✗</td></tr>
         <tr class="chg"><td>Docker e Kubernetes: compose, immagini, container, cluster <span class="tag new">28 ott</span><small class="why">Bennu colora il Dockerfile e nient'altro.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
@@ -871,6 +891,12 @@
         <tr class="chg"><td>Iniezione di linguaggio nelle stringhe oltre a SQL e JPQL: JSON, regex, HTML <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
         <tr class="chg"><td>Diagramma delle entità e finestra Persistence per JPA <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
         <tr class="chg"><td>Console di query, griglia dei dati e albero dello schema nella stessa finestra del codice <span class="tag new">28 ott</span><small class="why">In Bennu si aprono in Picus, un altro prodotto dello stesso workspace.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Cambiare la firma di un metodo: rimuovere, riordinare, cambiare il tipo di un parametro <span class="tag new">28 ott</span><small class="why">Aggiungi parametro c'è (dichiarazione, override, chiamate, anteprima); il resto di Change Signature no.</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Segnalibri: segnare una riga e tornarci da una lista <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>Registrazione di macro <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Contesti e attività: i file aperti e le modifiche legati a un compito <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c n">✗</td><td class="c y">✓</td></tr>
+        <tr class="chg"><td>File scratch fuori dal progetto <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr class="chg"><td>Modalità senza distrazioni (Distraction Free, Zen) <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c n">✗</td></tr>
         <tr class="chg"><td>Raggruppamento degli usi per tipo (lettura, scrittura, commento, stringa) <span class="tag new">28 ott</span><small class="why">Non trovato nel sorgente; se lo usi e ti manca, «Trova utilizzi» torna a 4.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c p">◐</td></tr>
       </tbody>
     </table></div>
@@ -949,7 +975,13 @@
         <tr><td><b>MyBatis</b></td><td class="n2">3 → 4 → 5</td><td>26 ottobre, a 4: le voci del <code>CHANGELOG</code> su Ctrl+B / Ctrl+clic dal mapper, gli usi di un <code>resultMap</code> o <code>sql</code>, XML e SQL colorati. 28 ottobre, a 5: gli statement controllati contro il database (<code>mybatis_sql.rs</code>, <code>mybatis_check.rs</code>), un valore per ogni <code>${…}</code>, completion di tabelle e colonne nel testo dello statement — e il maintainer li ha provati. <b>5 perché la scala è relativa</b> («il migliore del gruppo», con il resto del gruppo a 1 o 2); in assoluto è un 4, e la nota della riga lo scrive.</td></tr>
         <tr><td><b>Database</b></td><td class="n2">3 → 4</td><td><code>BennuPicusPanel.svelte</code> e le schede, <code>picus.svelte.ts</code>, <code>bennu_persistence_model</code>, <code>bennu_native_sql_sites</code> sul backend, la connessione ricordata per progetto nella configurazione di Bennu. Provato dal maintainer il 28 ottobre. Non 5: la struttura, le query e i dati stanno in Picus, non nella stessa finestra del codice.</td></tr>
         <tr><td><b>Trova utilizzi e gerarchie</b></td><td class="n2">4 → 5</td><td>Le matrici di dettaglio hanno tutte e tre le funzioni a ✓ da prima, e il conteggio sopra le dichiarazioni somma ora i getter e i setter di Lombok (<code>usage_marks.rs</code>). <b>Riserva:</b> il raggruppamento degli usi per tipo di IntelliJ non è nel sorgente; se serve, la riga torna a 4.</td></tr>
-        <tr><td><b>Righe nuove</b></td><td class="n2">+12 aree</td><td>Dodici righe che il confronto non aveva, otto delle quali con Bennu a 0 o 1 (split, nuovo progetto, client HTTP, Docker, sviluppo remoto, collaborazione, assistente AI, sincronizzazione). I voti degli altri IDE vengono da conoscenza generale e non sono stati riverificati su un'installazione; chi lo conosce meglio può correggerli nel sorgente della pagina.</td></tr>
+        <tr><td><b>Editor affiancati</b></td><td class="n2">0 → 3</td><td><code>BennuEditorSplit.svelte</code> e il modello dei pannelli in <code>stores/bennu/editor-panes.ts</code>, con i suoi test: un file in un pannello solo, il secondo pannello che esiste finché ha tab, la divisione che si chiude da sé. Non 4: solo verticale e un file per pannello; i tab si ricordano al riavvio, il divisore no.</td></tr>
+        <tr><td><b>Cursori multipli</b></td><td class="n2">nuova · 3</td><td><code>multi-caret</code> in <code>shared/ui/code-editor/multi-cursor.ts</code> e il suo test: abilitato per tutti gli editor, con completion ed Emmet che tacciono con più cursori.</td></tr>
+        <tr><td><b>Cambiare la firma di un metodo</b></td><td class="n2">nuova · 2</td><td><code>analysis/intel/src/add_parameter.rs</code> con i suoi test e la cura sull'errore di numero di argomenti. Pesata 2: solo l'aggiunta, non la rimozione né il riordino.</td></tr>
+        <tr><td><b>Link e pattern nei log</b></td><td class="n2">nuova · 4</td><td><code>crates/foundation/logscan</code> (<code>layout.rs</code>) e <code>runtime/be/src/log_pattern.rs</code>: il pattern letto dalla configurazione del progetto.</td></tr>
+        <tr><td><b>Terminale integrato</b></td><td class="n2">nuova · 4</td><td><code>BennuTerminalView.svelte</code>, già nel dock: la riga mancava dalla scheda, non da Bennu.</td></tr>
+        <tr><td><b>Righe nuove</b></td><td class="n2">+9 aree</td><td>Nove righe aggiunte più tardi il 28 ottobre: tre dove Bennu ha qualcosa (cursori multipli, log, terminale), una a metà (firma dei metodi) e cinque dove non ha niente (segnalibri, macro, contesti, scratch, senza distrazioni). I voti degli altri IDE vengono da conoscenza generale delle versioni rilasciate, come per le altre.</td></tr>
+        <tr><td><b>Righe nuove del mattino</b></td><td class="n2">+12 aree</td><td>Dodici righe che il confronto non aveva, otto delle quali con Bennu a 0 o 1 (split, nuovo progetto, client HTTP, Docker, sviluppo remoto, collaborazione, assistente AI, sincronizzazione). I voti degli altri IDE vengono da conoscenza generale e non sono stati riverificati su un'installazione; chi lo conosce meglio può correggerli nel sorgente della pagina.</td></tr>
         <tr><td><b>Assi</b></td><td class="n2">+0.5 × 2</td><td>UI/UX: gutter, blame, cronologia, Changes con il diff accanto, barra Trova/Sostituisci. «Funziona davvero» da 6.5 a 7.0, con la riserva scritta nell'asse. Gli altri quattro assi non si muovono.</td></tr>
       </tbody>
     </table></div>
@@ -977,8 +1009,8 @@
       <thead><tr><th>Riga o asse</th><th>Oggi</th><th>Cosa servirebbe</th></tr></thead>
       <tbody>
         <tr><td><b>Funziona davvero</b></td><td class="n2">7.0</td><td>Una settimana in cui nessun difetto emerge nelle basi (i difetti nel codice scritto negli ultimi giorni non contano contro): quello è il passo verso 7.5. I test verdi sul lavoro del 20 ottobre restano da rieseguire.</td></tr>
-        <tr><td><b>UI/UX</b></td><td class="n2">8.5</td><td>Multi-caret, bookmark, e il diff come vista affiancata nell'editor invece che in un pannello. E lo stesso popup in Merula e Studio, che hanno ancora la copia vecchia.</td></tr>
-        <tr><td><b>Refactoring</b> (scheda)</td><td class="n2">4</td><td>Change Signature, Introduce Parameter, estrai interfaccia e superclasse. Nessuna delle quattro è nel sorgente.</td></tr>
+        <tr><td><b>UI/UX</b></td><td class="n2">8.5</td><td>Bookmark, e il diff come vista affiancata nell'editor invece che in un pannello. Il multi-caret e i due editor affiancati ci sono dal 28 ottobre. E lo stesso popup in Merula e Studio, che hanno ancora la copia vecchia.</td></tr>
+        <tr><td><b>Refactoring</b> (scheda)</td><td class="n2">4</td><td>Il resto di Change Signature (rimozione, riordino, cambio di tipo), Introduce Parameter, estrai interfaccia e superclasse. Aggiungi parametro c'è dal 28 ottobre; le altre non sono nel sorgente.</td></tr>
         <tr><td><b>Errori di compilazione</b></td><td class="n2">4</td><td>La misura a zero falsi positivi su Commons Lang e h2 delle famiglie nuove, e la dominance dei pattern. Il dataflow completo resta fuori per principio: senza un motore vero produce falsi positivi.</td></tr>
         <tr><td><b>Database</b> (scheda)</td><td class="n2">4</td><td>Per il 5: un collegamento «Apri in Picus» dalla finestra Database (il passo piccolo); poi una console di query e i risultati dentro Bennu, l'albero dello schema, da <code>@Table</code> alle righe, da uno statement MyBatis all'esecuzione con i parametri; il controllo dei nomi di campo dentro una JPQL contro il modello; gli enum nella generazione di entità; le query scritte come <code>"…" + "…"</code>. Provato su Postgres; Cloud SQL con IAM e Oracle (che non ha ancora un driver) no.</td></tr>
         <tr><td><b>Gradle, Ant, altri server</b></td><td class="n2">0</td><td>Un modello Gradle. Non serve al target legacy; è l'unico zero su una riga che un team generalista apre ogni giorno.</td></tr>
@@ -1025,11 +1057,11 @@
     <p>L'ordine è il punto: ogni voce è messa dove sta per quanto sposta rispetto a quanto costa.</p>
     <ol class="next">
       <li><div><b>«Apri in Picus» dalla finestra Database</b><span>Il passo piccolo che separa il 4 dal 5 della riga Database: struttura, query e dati restano in Picus, ma a un clic e sulla stessa connessione.</span></div></li>
-      <li><div><b>Editor affiancati</b><span>La più frequente delle righe nuove a 0: chiunque confronti due file la usa. Con il multi-caret e i bookmark, fa il pacchetto «editor» della UI/UX.</span></div></li>
+      <li><div><b>Editor affiancati: orizzontale e lo stesso file in due pannelli</b><span>Il primo taglio c'è dal 28 ottobre, con i tab ricordati al riavvio. Mancano le due cose che lo separano da quello di IntelliJ.</span></div></li>
             <li><div><b>Far girare i test sul lavoro del 20 ottobre</b><span>Il pannello Changes con il diff accanto è la voce che ha mosso la UI/UX: se non regge, l'asse torna a 8.0. L'uso quotidiano lo sta già mettendo alla prova.</span></div></li>
       <li><div><b>Rimisurare gli errori di compilazione su Commons Lang e h2</b><span>Sono le famiglie che hanno mosso la riga da 3 a 4. Una misura a zero falsi positivi la rende difendibile; un solo falso positivo la riporta giù.</span></div></li>
-      <li><div><b>Change Signature, poi Introduce Parameter</b><span>Il refactoring frequente che manca ancora. Con questi due, più estrai interfaccia, la riga del refactoring ha le carte per il 5.</span></div></li>
-      <li><div><b>Multi-caret e bookmark</b><span>Piccoli, frequenti, ed è quello che separa l'8.5 della UI/UX dal 9.</span></div></li>
+      <li><div><b>Il resto di Change Signature, poi Introduce Parameter</b><span>Aggiungi parametro c'è; rimozione, riordino e cambio di tipo sono il refactoring frequente che manca ancora. Con questi due, più estrai interfaccia, la riga del refactoring ha le carte per il 5.</span></div></li>
+      <li><div><b>Bookmark</b><span>Piccolo e frequente: con il multi-caret e i due editor già arrivati, è quello che separa l'8.5 della UI/UX dal 9.</span></div></li>
       <li><div><b>Hot-swap delle classi e attach remoto</b><span>Le due righe del debugger che un team legacy usa ogni giorno su Tomcat.</span></div></li>
       <li><div><b>Coverage letta da <code>jacoco.xml</code></b><span>Il plugin è già riconosciuto: si legge un report che Maven produce, e una riga lascia lo zero. Una versione per Rust sposta la stessa riga nella tabella di Rust.</span></div></li>
       <li><div><b>Informazioni dall'applicazione Spring in esecuzione</b><span>La riga a zero che il confronto con Spring Tools ha messo in luce. Il metadata dell'actuator c'è già: manca parlare con un'app viva.</span></div></li>
@@ -1047,7 +1079,7 @@
       committato del 20 ottobre, dal <code>CHANGELOG</code> confrontato voce per voce con quello del 15 settembre, dai conteggi sul
       repository (stesso metodo sul commit di allora e su quello di oggi), dalle misure registrate sui corpora e dalle parole del
       maintainer sulla UI/UX. Le assenze — Change Signature, Introduce Parameter, estrai interfaccia, Gradle, hot-swap delle
-      classi, coverage, multi-caret, informazioni dall'app Spring viva — sono state cercate nel sorgente. Le colonne degli altri IDE,
+      classi, coverage, bookmark, macro, informazioni dall'app Spring viva — sono state cercate nel sorgente. Le colonne degli altri IDE,
       RustRover e Spring Tools compresi, vengono da conoscenza generale delle versioni rilasciate e non sono state riverificate su
       un'installazione. Le matrici non sono esaustive: l'assenza di una riga non è un giudizio.</p>
     <p>Stesure precedenti: <code>docs/arbor-a-confronto.html</code> (2 settembre, tutta la suite), la scheda
@@ -1074,8 +1106,9 @@
     ['Intelligenza del codice Java', [
       ['Indice simbolico del progetto', 'Sorgenti e jar in un indice proprio; il goto in una dipendenza apre il -sources.jar o uno stub decompilato. Perché IntelliJ ha 5: il suo indice copre ogni linguaggio (Java, Kotlin, XML, SQL, JavaScript) con stub aggiornati a ogni tasto e li condivide con tutte le funzioni; quello di Bennu copre Java, XML e properties e si ricostruisce per modulo, in background.', 4, 4, 5, 5, 4, 4, 4, 2, 2],
       ['Trova utilizzi e gerarchie', 'Conteggi sopra ogni dichiarazione, compresi i getter e setter che Lombok genera; gli entry point dei framework non risultano mai «inutilizzati»; gerarchia di chiamate, di tipi e dei membri. Non verificato nel sorgente: il raggruppamento degli usi per tipo (lettura, scrittura, commento) di IntelliJ. Se lo usi e ti manca, la riga torna a 4.', 4, 5, 5, 5, 4, 3, 3, 2, 2],
-      ['Completion', 'Tipo atteso con sottotipi e preselezione, postfix tipati e per versione, method reference, nome della dichiarazione, template tuoi. Manca la statement completion.', 5, 5, 5, 5, 3, 4, 3, 2, 3],
-      ['Refactoring', 'Sedici al caret più rename e safe delete, ricompilati su Commons Lang e h2; cure che selezionano il segnaposto. Mancano Change Signature ed estrai interfaccia.', 4, 4, 5, 5, 4, 2, 3, 2, 3],
+      ['Completion', 'Tipo atteso con sottotipi e preselezione, postfix tipati e per versione, method reference, nome della dichiarazione, template tuoi. Manca la statement completion. Dal 28 ottobre regolabile dalle impostazioni: affinità col nome del buco, abitudini del progetto, catene di getter, eccezioni dei catch, ghost text.', 5, 5, 5, 5, 3, 4, 3, 2, 3],
+      ['Refactoring', 'Sedici al caret più rename e safe delete, ricompilati su Commons Lang e h2, e aggiungi parametro; cure che selezionano il segnaposto. Mancano estrai interfaccia e il resto di Change Signature.', 4, 4, 5, 5, 4, 2, 3, 2, 3],
+      ['Cambiare la firma di un metodo', 'Aggiungi parametro, con anteprima: dichiarazione, override e ogni chiamata (con il valore che scegli), gli import del tipo, e come cura su una chiamata con un argomento di troppo. Rifiutato, con il motivo, su method reference, varargs, override di un tipo di libreria e nomi già usati. Mancano rimozione, riordino e cambio di tipo.', null, 2, 5, 5, 5, 3, 4, 1, 2],
       ['Errori di compilazione mentre scrivi', 'Bennu non compila e nel dubbio tace, ma le famiglie sono ormai quelle di javac per il Java di tutti i giorni: definite assignment, eccezioni checked, lambda, switch esaustivi, generics. Eclipse e VS Code girano su ECJ, NetBeans su javac.', 3, 4, 5, 5, 5, 5, 5, 2, 3],
       ['Ispezioni Java oltre il compilatore', 'Bug probabili sul Java puro. IntelliJ ne ha centinaia; Bennu una manciata, dataflow solo sui campi final.', 2, 2, 5, 5, 3, 2, 3, 1, 2],
       ['Iniezione di linguaggio nelle stringhe', '// language=sql e @Language: SQL e JPQL colorati, completati e (SQL) controllati sul database, anche nei text block. Niente JSON, regex o HTML nelle stringhe, e niente refactoring dentro la stringa.', null, 3, 5, 3, 1, 2, 2, 2, 2],
@@ -1095,7 +1128,7 @@
       ['Encoding legacy', 'Cp1252 letto come Cp1252, file non conformi segnalati, scan mojibake del progetto.', 5, 5, 2, 2, 2, 2, 2, 3, 0],
     ]],
     ['Build, test, debug', [
-      ['Maven', 'Tool window per modulo, pom colorato, nuovi moduli, livello e compilazione per modulo, moduli rinominati dichiarati.', 5, 5, 5, 5, 4, 3, 5, 2, 1],
+      ['Maven', 'Tool window per modulo, pom colorato, nuovi moduli, livello e compilazione per modulo, moduli rinominati dichiarati. Lo stato di build si ricorda fra i riavvii e ogni progetto ha la sua coda: un run che non ha cambiato niente non rilancia Maven, e due progetti non si aspettano.', 5, 5, 5, 5, 4, 3, 5, 2, 1],
       ['Sicurezza delle dipendenze', 'Versioni più nuove nel pom e vulnerabilità note (OSV.dev, opt-in, in cache un giorno) per le dipendenze a versione fissata.', null, 3, 4, 1, 1, 3, 1, 1, 1],
       ['Gradle, Ant, altri application server', 'Assente: Maven e Tomcat soltanto.', 0, 0, 5, 3, 4, 3, 5, 0, 2],
       ['Debugger', 'Breakpoint condizionali e nelle sorgenti delle librerie, più sessioni, step oltre i proxy, debug dei test. Mancano hot-swap delle classi, eval Java, attach remoto.', 3, 3, 5, 5, 4, 4, 4, 2, 2],
@@ -1107,15 +1140,23 @@
     ['Editor e ambiente', [
       ['Versionamento', 'Un client git completo accanto e, nell\'editor, gutter delle modifiche, blame, cronologia di file e di selezione, pannello Changes con il diff accanto alla lista e il commit.', 5, 5, 4, 4, 3, 4, 3, 1, 1],
       ['Local history', 'Timeline per file, per cartella e per selezione, indipendente da git, con cambi esterni e ripristino.', 4, 5, 5, 5, 3, 1, 2, 1, 1],
-      ['Ergonomia dell\'editor', 'Minimap, sticky scroll, inlay, code lens, barra Trova/Sostituisci, gutter delle modifiche, popup rifatto. Niente multi-caret, niente bookmark.', 3, 4, 5, 5, 3, 5, 3, 1, 2],
+      ['Ergonomia dell\'editor', 'Minimap, sticky scroll, inlay, code lens, barra Trova/Sostituisci, gutter delle modifiche, popup rifatto, tab che si trascinano mostrando dove cadono. Niente bookmark.', 3, 4, 5, 5, 3, 5, 3, 1, 2],
       ['File che non sono codice', 'Fogli di calcolo in quattro formati, docx, font, immagini, markdown e HTML in anteprima.', 5, 5, 3, 3, 1, 3, 1, 1, 0.5],
       ['Template e generazione di codice', 'Jinja in sette tipi con anteprima dal vivo e scelta per progetto; abbreviazioni e postfix tuoi. I live template di IntelliJ restano più ricchi.', 4, 4, 5, 5, 4, 3, 3, 1, 1],
       ['Tastiera e command palette', 'Ogni flusso completabile da tastiera per regola di progetto; voci e scorciatoie aggiunte.', 4, 4, 5, 5, 3, 5, 3, 1, 1],
       ['Peso e avvio', 'Nessuna JVM in-process, indice mmap, progetti inattivi rilasciati. Da rimisurare a 55 crate.', 5, 5, 2, 3, 3, 4, 3, 1, 1],
       ['Percorso della chiave in YAML e .properties', 'Barra di stato con tutti i livelli sopra il cursore (liste comprese), ognuno cliccabile; chiavi colorate per radice. IntelliJ ha il percorso, non il colore per radice.', null, 4, 5, 5, 2, 4, 2, 1, 1],
       ['SQL nei log di esecuzione', 'Una riga di Hibernate show_sql o di MyBatis è colorata, e un clic copia lo statement con un avviso. Gli altri mostrano il testo piatto.', null, 4, 1, 1, 1, 1, 1, 1, 2],
-      ['Editor affiancati (split)', 'Due file uno accanto all\'altro, in orizzontale o in verticale. Non trovato nel sorgente di Bennu.', null, 0, 5, 5, 4, 5, 4, 1, 1],
+      ['Editor affiancati (split)', 'Due editor uno accanto all\'altro, ciascuno con i suoi tab: un tab si trascina sull\'altro pannello o sul bordo destro per dividere, e il divisore si ridimensiona. Solo in verticale e un file per pannello (mai due viste dello stesso buffer); i tab di ciascun pannello si ricordano al riavvio, la posizione del divisore no.', null, 3, 5, 5, 4, 5, 4, 1, 1],
       ['Nuovo progetto da procedura guidata', 'Spring Initializr, archetype Maven. Bennu crea classi, moduli e file, non un progetto.', null, 0, 5, 3, 4, 4, 4, 1, 2],
+      ['Cursori multipli e selezione a colonna', 'Alt+clic aggiunge un cursore, Alt+Maiusc+trascina una colonna, Alt+J la prossima occorrenza del testo selezionato, Ctrl+Maiusc+L tutte; un solo passo di undo, e completion ed Emmet si fermano finché i cursori sono più d\'uno. Niente cursore sopra/sotto da tastiera.', null, 3, 5, 5, 2, 5, 3, 1, 1],
+      ['Link e pattern nei log di esecuzione', 'Classi, package ed eccezioni nell\'output aprono il file e <code>Classe#metodo</code> atterra sul metodo; il pattern di Logback o Log4j2 del progetto dice dove sono data, livello, logger e MDC (chiavi e valori), evidenziati. Gli altri collegano gli stack trace e i percorsi, non il pattern.', null, 4, 3, 3, 2, 2, 2, 1, 1.5],
+      ['Terminale integrato', 'Più sessioni nel dock in basso, aperte nella cartella del progetto, sullo stesso terminale (xterm.js) di Corvus.', null, 4, 5, 5, 3, 5, 3, 1, 1],
+      ['Segnalibri', 'Segnare una riga e tornarci da una lista. Assenti in Bennu.', null, 0, 5, 5, 4, 4, 4, 0.5, 0.5],
+      ['Registrazione di macro', 'Registrare una sequenza di tasti e riprodurla. Assente in Bennu.', null, 0, 4, 4, 1, 2, 3, 0.5, 0.5],
+      ['Contesti e attività', 'Un compito è l\'insieme dei file aperti e delle modifiche, richiamabile dopo (Tasks &amp; Contexts, Mylyn). Assente in Bennu, che ricorda i tab per workspace.', null, 0, 4, 4, 5, 1, 1, 0.5, 0.5],
+      ['File scratch', 'Un file fuori dal progetto per provare una query o uno snippet, con la sintassi giusta. Assenti in Bennu.', null, 0, 5, 5, 1, 3, 1, 0.5, 0.5],
+      ['Modalità senza distrazioni', 'Nascondere barre e pannelli per scrivere (Distraction Free, Zen). Assente in Bennu.', null, 0, 4, 4, 1, 5, 2, 0.5, 0.5],
     ]],
     ['Piattaforma', [
       ['Altri linguaggi', 'Rust di prima classe, cartelle senza pom o Cargo come progetti solo editor, il resto quanto dà il language server (Angular compreso); template e abbreviazioni per ogni linguaggio.', 3, 3, 4, 3, 3, 5, 3, 0.5, 1],
@@ -1127,7 +1168,7 @@
       ['Collaborazione dal vivo', 'Code With Me, Live Share: più persone nello stesso file. Assente in Bennu.', null, 0, 4, 4, 1, 5, 1, 0.5, 0.5],
       ['Assistente AI nell\'editor', 'Chat e completion integrate. Bennu si lascia pilotare da un agente (i tool MCP) ma non ne ha uno dentro.', null, 1, 5, 4, 3, 5, 1, 1, 2],
       ['Sincronizzazione delle impostazioni', 'Le preferenze seguono l\'utente fra macchine. Bennu tiene i suoi file di configurazione per profilo, in locale.', null, 0, 4, 4, 1, 5, 1, 0.5, 0.5],
-      ['Maturità', '6.523 test Rust e 248 frontend, due corpora misurati; un utente solo, che però ora lo usa ogni giorno.', 2, 2, 5, 5, 4, 4, 3, 2, 2],
+      ['Maturità', '9.698 test Rust e 333 frontend dichiarati (un conteggio statico, non una esecuzione: quelli del 28 ottobre non sono stati lanciati), due corpora misurati; un utente solo, che però ora lo usa ogni giorno.', 2, 2, 5, 5, 4, 4, 3, 2, 2],
     ]],
   ];
 

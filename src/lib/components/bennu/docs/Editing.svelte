@@ -79,6 +79,22 @@
   <li>A tab keeps its cursor, its scroll position and its <strong>undo history</strong> while it is open, so coming back to
     a file lands you where you left it and <kbd>Ctrl/Cmd</kbd> + <kbd>Z</kbd> still takes back what you typed there. Closing
     the tab lets them go.</li>
+  <li><strong>Drag a tab</strong> to reorder it: the tab you hold follows the pointer while the ones it passes slide aside, so
+    what you see is the order you will get. <kbd>Esc</kbd> cancels.</li>
+</ul>
+
+<h2>Two editors side by side</h2>
+<p>
+  The editor splits in two, each side with its own tab strip. <strong>Drag a tab</strong> out of its strip: over a lone editor a
+  <em>Split right</em> zone appears at its right edge, and over a split the other pane lights up — release to move the tab there.
+  The same moves are in the command palette (<strong>Editor: move tab to the other pane</strong>, <strong>focus the other pane</strong>,
+  <strong>close split</strong>). Drag the divider to resize it, or focus it and use <kbd>←</kbd> / <kbd>→</kbd>; double-click puts it back in the middle.
+</p>
+<ul>
+  <li>A file is open on <strong>one side at a time</strong>, so moving a tab moves the file, and opening a file that is already open on the other
+    side takes you to it — two views of one buffer would each keep their own undo history.</li>
+  <li>The side with the caret is the one <kbd>Shift</kbd> + <kbd>F6</kbd>, <kbd>Alt</kbd> + <kbd>Enter</kbd>, the status bar and the palette commands act on.</li>
+  <li>Closing the last tab of a side, or <strong>close split</strong>, gives you one editor again. The split — which tabs are on which side, and each side's active tab — is remembered across a restart; the divider's position is not.</li>
 </ul>
 
 <h2>Markdown</h2>

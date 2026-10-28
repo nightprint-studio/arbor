@@ -59,6 +59,9 @@ pub use crate::diag_cache::{
 // already imports (the provider's `validate_recording` returns these).
 pub use bennu_query::prelude::{ProjectView, RecordedDeps};
 
+pub use crate::add_parameter::{
+    add_parameter_plan, default_value_for, is_type_text, AddParameterPlan, Anchor, NewParameter,
+};
 // RENAME planning + apply (docs §5 #10-12): best-effort, preview-first, config-aware.
 // Plus go-to-declaration (`resolve_declaration` + `DeclarationLocation`), which reuses the
 // same caret classifier + decl-site name-span finders.
@@ -110,6 +113,7 @@ pub use crate::hierarchy::{
 pub use crate::safe_delete::{safe_delete_plan, SafeDelete};
 pub use crate::framework_entry::{entry_for_method, entry_for_type};
 pub use crate::import_census::{ImportCensus, MAX_BAND, SATURATE_AT};
+pub use crate::usage_census::UsageCensus;
 pub use crate::usage_marks::{usage_marks, UsageMark};
 
 // The accessors a class is missing, offered where they are reached for.
@@ -117,6 +121,14 @@ pub use crate::accessor_completion::{
     accessor_completions, generated_hint, generated_members, missing_method_completions,
     reference_call, AccessorHint, ReferencedMethod,
 };
+
+// The resolver-backed types a *Create method* signature is written with (see `call_types`).
+pub use crate::call_types::ResolverCallTypes;
+
+// Statement-level help: the ghost `case` after the arms of an enum switch, and the `iter` loop over the
+// array or iterable in scope.
+pub use crate::statement_hint::next_case_hint;
+pub use crate::statement_templates::{iter_completion, ITER};
 
 // Where a postfix template goes — the expression before the dot, typed — and the item one makes: what the
 // backend's user postfix templates are offered through, the same path the built-in catalogue takes.

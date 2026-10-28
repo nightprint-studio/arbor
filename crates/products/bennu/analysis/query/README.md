@@ -27,6 +27,21 @@ folds them), and with nothing typed the first own member is preselected. Each me
 `signature` (`(String prefix, int limit)`), `detail` = the return type (`getClass()` typed
 `Class<? extends Receiver>`), `member_origin` and `modifiers`.
 
+**Smart ranking signals** sit on top of that ordering, each switchable (`tuning::Tuning`, a
+process-wide snapshot the backend refreshes from Settings → Completion; a `rank::Context` takes a copy
+at construction). They add to a candidate's score and never filter it, and none can overrule `Fit`:
+
+- `affinity::name_affinity` + `hole::hole_name` — a candidate whose name echoes the name being filled
+  (`Customer customer = |`, the callee of an argument slot) rises; verbs, filler words and plurals are
+  read past.
+- `chain_context::chain_context` — the calls already made in the chain (a repeated setter sinks) and
+  the call right before the dot, also looked up in earlier statements on the same variable.
+- `rank::ProjectUsage` — what the PROJECT does (call counts, "B after A" counts); implemented by
+  `bennu-intel`'s `UsageCensus` and installed on `IndexResolver` (`set_project_usage`).
+- `chain_members` — members of members that produce the expected type (`getCustomer().getName()`),
+  inserted below the direct fits.
+- `catch_types::caught_exception_types` — what the `try` above a `catch (` can throw, as leaders.
+
 `module_scope` says which module the file being resolved lives in (`enter_module(Some(m))`, a
 thread-local guard set around one file's validation): when two modules declare the same type,
 `IndexResolver` reads the asking module's own record (its per-module alias key in `bennu-index`)
@@ -81,6 +96,15 @@ fn protected_visible(resolver, declaring: &str, receiver: &TypeRef, is_static: b
 // The classes a function slot receives (`opt.map(Re|)` → the Optional's element), as type items.
 fn functional_argument_types(source, caret, resolver, case) -> Vec<CompletionItem>
 fn inherited_members(resolver, java_files: &[PlanFile], file, type_name, line) -> Vec<InheritedMember>
+// The smart signals: switches + strength, the name being filled, the chain being extended, the project's habits.
+struct Tuning { name_affinity, project_usage, sequence, chain, context_filters, statements, ghost_text, strength }
+fn completion_tuning() -> Tuning                  // the snapshot in force
+fn set_completion_tuning(Tuning)                  // called by the backend when the setting changes
+fn name_affinity(candidate: &str, hole: &str) -> i32
+fn hole_name(source: &str, caret: usize) -> Option<String>
+fn chain_context(source: &str, caret: usize) -> ChainContext   // { called, previous }
+trait ProjectUsage { fn member_uses(&self, name) -> u32; fn follows(&self, previous, next) -> u32 }
+fn caught_exception_types(source, caret, resolver, case) -> Vec<CompletionItem>
 ```
 
 ## Who consumes it

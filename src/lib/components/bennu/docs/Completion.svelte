@@ -68,7 +68,35 @@
     carry no annotations in compiled form.</li>
   <li><strong>What this file already uses.</strong> A name already in the buffer is likely wanted again. It decides between otherwise-equal
     candidates, and cannot do more.</li>
+  <li><strong>The name being filled.</strong> <code>String customerName = c.</code> has three <code>String</code> members and the alphabet puts
+    <code>email</code> first; the declaration says <code>name</code>. A candidate whose words echo the hole's rise — <code>getName</code> reads as
+    <code>name</code>, <code>orders</code> as <code>order</code>, a shared tail or head counts less than the whole name. In an argument slot the
+    hole is named by the callee: <code>findByCustomerId(</code> lifts <code>customerId</code>.</li>
+  <li><strong>What the project does.</strong> How often the project calls each method, and which method it calls <em>after</em> the previous one in
+    the chain — <code>close()</code> after <code>open()</code>, on the same variable even when the calls are statements apart. Counted while
+    the index builds, as a band (each step a doubling, a name used once counts for nothing), never written to disk.</li>
 </ol>
+<p>
+  The last two, and the shape of the code below, are <strong>Smart suggestions</strong> in Settings → Completion: each is a switch, and a
+  strength scales the learned ones. They only add to a score — nothing is hidden — and none can overrule the type the position wants.
+</p>
+
+<h3>Smart suggestions</h3>
+<dl class="meta-grid">
+  <dt>Chains</dt>
+  <dd>When the position wants a type, members of members that produce it are offered below the direct fits: <code>String name = order.</code> also
+    lists <code>getCustomer().getName()</code>. Zero-argument calls only, one level deep, through your own classes; a member that already
+    fits is not chained through, and a call that is already written gets none.</dd>
+  <dt>Builders</dt>
+  <dd>A setter already called in the chain sinks: after <code>Order.builder().customer(c).</code> the next property or <code>build()</code> leads, not
+    <code>customer</code> again.</dd>
+  <dt>Unused locals</dt>
+  <dd>A local declared and not used yet rises: it is very probably what comes next.</dd>
+  <dt><code>catch (</code></dt>
+  <dd>The exceptions the <code>try</code> above can throw come first — from <code>throw new</code> and from the <code>throws</code> clause of each call it
+    makes (the first few calls; one that cannot be bound to a single overload says nothing). A multi-catch leaves out the alternatives it
+    already lists, and a second <code>catch</code> reads the same <code>try</code>.</dd>
+</dl>
 <p>
   Keywords come below anything the index resolved. Words <em>scraped from the buffer</em> are offered only when the index answered nothing —
   before it finished building, or in a file no project owns: they are a regular expression over the text, and beside resolved names they bury
@@ -257,7 +285,7 @@ ConfigurazioneCors.MyProva prova;    // accepting "MyProva" writes this`, 'java'
   <tbody>
     <tr><td>Modifiers</td><td><code>pf</code>, <code>prf</code>, <code>psf</code>, <code>psfi</code>,<code>psfs</code>, <code>prsf</code>, <code>prsfi</code>, <code>prsfs</code>, <code>psvm</code> for a <code>main</code></td></tr>
     <tr><td>Printing</td><td><code>sout</code>, <code>souf</code>, <code>serr</code></td></tr>
-    <tr><td>Statements</td><td><code>fori</code>, <code>ifn</code>, <code>inn</code>, <code>thr</code></td></tr>
+    <tr><td>Statements</td><td><code>fori</code>, <code>ifn</code>, <code>inn</code>, <code>thr</code>, <code>iter</code></td></tr>
   </tbody>
 </table>
 <ul>
@@ -270,9 +298,14 @@ ConfigurazioneCors.MyProva prova;    // accepting "MyProva" writes this`, 'java'
     expands in a Rust file, answered by rust-analyzer, and one written with no language expands in any file. The
     built-in family above stays Java's.</li>
 </ul>
+<p>
+  <code>iter</code> is the one that <em>reads the surrounding code</em>: it loops over the nearest array or <code>Iterable</code> local or parameter
+  in scope, with the element type and a name spelled the project's way (<code>var</code> from Java 10). It is offered only where such a variable
+  exists, at the start of a statement, and its row says which variable it loops over.
+</p>
 <Callout variant="info" title="What is deliberately missing">
-  The abbreviations that must <em>read the surrounding code</em> to be right — IntelliJ's <code>iter</code>, inferring the collection in scope. A
-  version that guesses writes a name that is not there.
+  Abbreviations that would have to <em>guess</em> — a version that guesses writes a name that is not there. <code>iter</code> is offered only when
+  there is something to iterate.
 </Callout>
 
 <h2>Postfix templates</h2>
@@ -425,6 +458,22 @@ ConfigurazioneCors.MyProva prova;    // accepting "MyProva" writes this`, 'java'
   place for the whole set, with the style options — fluent accessors, snake_case names, <code>final</code> parameters. A completion takes the
   conventional form.
 </Callout>
+
+<h2>Ghost text for certain continuations</h2>
+<p>
+  Beside the accessors above, two more continuations are drawn ahead of the caret, because each can only be one thing. <kbd>Tab</kbd> writes it;
+  anything else you type replaces it, and when there is any doubt nothing is drawn. Settings → Completion → <em>Ghost text for certain
+  continuations</em> turns both off.
+</p>
+<dl class="meta-grid">
+  <dt>A caught exception's name</dt>
+  <dd><code>catch (IOException&nbsp;</code> draws <code>e</code>, spelled the project's way, and <code>e1</code> when <code>e</code> is already in scope —
+    a catch parameter may not shadow a local. Qualified types, <code>final</code> and a multi-catch are read; nothing is drawn once a name is started.</dd>
+  <dt>The next <code>case</code></dt>
+  <dd>On an empty line after the last arm of a <code>switch</code> over an enum, the first constant not yet covered, in declaration order, written in the
+    style of the arms already there (<code>case X:</code> or <code>case X -&gt;</code>). Not drawn when there is a <code>default</code>, a pattern or
+    <code>null</code> label, an arm that falls through, or a selector whose enum cannot be read.</dd>
+</dl>
 
 <h2>Generated members</h2>
 <p>

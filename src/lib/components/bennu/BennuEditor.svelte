@@ -81,6 +81,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuGitStatusStore } from '$lib/stores/bennu/git-status.svelte';
   import { GIT_BADGE_COLOR, GIT_BADGE_LABEL } from '$lib/utils/git-badge';
+  import { setFocusedTimeout, clearFocusedTimeout } from '$lib/utils/focused-timeout';
   import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
   import { discoverTests as ipcDiscoverTests } from '$lib/ipc/bennu/tests';
   import type { DiscoveredTest } from '$lib/types/bennu';
@@ -161,7 +162,7 @@
     intentionsAt as ipcIntentionsAt, type IntentionOffer, type DiagRef,
   } from '$lib/ipc/bennu/intentions';
   import {
-    createClass, createMethodIn, moveTargets, refactorings, refactorPlan,
+    addParameterForCall, createClass, createMethodIn, moveTargets, refactorings, refactorPlan,
     type MoveTarget, type RefactorPlan,
   } from '$lib/ipc/bennu/refactor';
   import BennuMoveTargetPicker from './BennuMoveTargetPicker.svelte';
@@ -189,13 +190,19 @@
   // FE carries native separators, so a `===` between them is quietly false on Windows — and the
   // bug it causes is always a silent fallback rather than a visible error.
   import { baseName, isSamePath } from '$lib/utils/paths';
+  import type { PaneIndex } from '$lib/stores/bennu/editor-panes';
+  import { tabDragStore } from '$lib/stores/tab-drag.svelte';
 
   let {
     /** Open the Generate modal in `mode` (routed to the window's BennuGenerateModal).
      *  Passed down so the Alt+Enter "Generate…" intentions can trigger it. */
     onGenerate,
     onOverride,
+    pane = 0,
   }: {
+    /** Which of the editor's two panes this instance is. It shows that pane's tabs and that pane's
+     *  active file; only the focused pane drives the status bar and the syntax-tree panel. */
+    pane?: PaneIndex;
     onGenerate?: (mode: GenerateMode) => void;
     /** Alt+Enter → "Implement / override methods": the window hosts the picker, so the offer is
      *  relayed rather than handled here. */
@@ -297,8 +304,13 @@
   };
   let editorComp = $state<EditorController | null>(null);
 
-  const activePath = $derived(projectStore.activeFilePath);
-  const openPaths = $derived(projectStore.openFilePaths);
+  // This pane's file and tabs. With one pane that is "the active file" and "the open files"; with two,
+  // each instance reads its own, so everything below that says `activePath` means THIS editor's file.
+  const activePath = $derived(projectStore.paneActive(pane));
+  const openPaths = $derived(projectStore.paneTabs(pane));
+  /** Whether this pane has the focus — the only one whose caret the status bar shows and whose file the
+   *  syntax-tree panel follows. */
+  const paneFocused = $derived(projectStore.focusedPane === pane);
   /**
    * The open tab is an image, so this area shows a preview instead of an editor.
    *
@@ -445,7 +457,7 @@
   // wrapped around CodeMirror. What this file owns is the wiring: what "ready" means, what a
   // scroll is, where the caret is. What the flow owns is when.
   const navFlow = new NavFlow({
-    activeFile: () => projectStore.activeFilePath,
+    activeFile: () => activePath,
     openFile: (file) => projectStore.openFile(file),
     // The three conditions that make a line number mean something. The second is the one the old
     // design could not ask at all: the editor **on screen** is the one for this file. A tab switch
@@ -454,7 +466,7 @@
     // it. The third is the empty-buffer case: line 400 of no text is line 1, and afterwards
     // nothing can tell that apart from a jump to line 1 that worked.
     ready: (file) => {
-      if (!isSamePath(file, projectStore.activeFilePath)) return false;
+      if (!isSamePath(file, activePath)) return false;
       const held = editorComp?.documentKey();
       if (!held || !isSamePath(held, file)) return false;
       return (projectStore.sourceOf(file)?.length ?? 0) > 0;
@@ -471,7 +483,7 @@
     // Asked only after `ready`, which is the whole point of it being here: a byte offset read
     // against the file being LEFT resolves to a line in the wrong document.
     lineOfByteOffset: (file, offset) =>
-      isSamePath(file, projectStore.activeFilePath)
+      isSamePath(file, activePath)
         ? editorComp?.lineColOfByteOffset(offset) ?? null
         : null,
     // A frame, not a microtask: what is being waited for is a buffer arriving and an editor
@@ -542,7 +554,7 @@
   function onCaret(line: number, col: number, info?: { key?: string; user: boolean }) {
     caretLine = line; caretCol = col;
     caretFile = info?.key ?? activePath ?? null;
-    bennuUiStore.setCaret(line, col);
+    if (paneFocused) bennuUiStore.setCaret(line, col);
     templateCaret = { line, col };
 
     // Occurrence highlighting keys off this, through a `$state` rather than a direct call so the
@@ -655,7 +667,7 @@
     if (atTop && scroll <= 0) { scrollArmed.add(path); return; }
     void tick().then(() => {
       scrollArmed.add(path);
-      if (projectStore.activeFilePath !== path) return;
+      if (activePath !== path) return;
       // No history call here: restoring the caret is not a navigation. It only moves where the
       // reader is settled in this tab, which is what the next jump records as its origin.
       if (caret && !atTop) editorComp?.scrollToLineCol(caret.line, caret.col);
@@ -696,7 +708,7 @@
     if (!t || t.nonce === consumedGotoNonce) return;
     consumedGotoNonce = t.nonce;
     void tick().then(() => {
-      const file = projectStore.activeFilePath;
+      const file = activePath;
       if (!file) return;
       // A go-to names the place; the remembered caret must not overrule it when the buffer lands.
       void goTo({ file, line: t.line, col: t.col }, true);
@@ -719,7 +731,7 @@
     const t = bennuUiStore.gotoOffsetTarget;
     if (!t || t.nonce === consumedGotoOffsetNonce) return;
     consumedGotoOffsetNonce = t.nonce;
-    const file = projectStore.activeFilePath;
+    const file = activePath;
     if (!file) return;
     // A go-to names the place; the remembered caret must not overrule it when the buffer lands.
     restoredCaretFor = file;
@@ -971,8 +983,14 @@
   function onMarkdownCaret(line: number, col: number) {
     caretLine = line;
     caretCol = col;
-    bennuUiStore.setCaret(line, col);
+    if (paneFocused) bennuUiStore.setCaret(line, col);
   }
+
+  // The status bar follows the pane that has the focus: when it changes hands, this editor's caret is
+  // what the footer should now say.
+  $effect(() => {
+    if (paneFocused) bennuUiStore.setCaret(caretLine, caretCol);
+  });
 
   // ── The syntax-tree panel, both directions ───────────────────────────────────
   /** Only while the panel is open. A tree costs a round trip per pause in typing, and one
@@ -984,6 +1002,9 @@
   // file's tree until you touched this one.
   $effect(() => {
     const path = activePath;
+    // Only the focused pane's file: two editors feeding one panel would swap its tree on every
+    // keystroke in whichever was typed in last.
+    if (!paneFocused) return;
     if (!astOpen || !path) {
       if (!astOpen) bennuAstStore.clear();
       return;
@@ -1079,11 +1100,11 @@
           })
           .catch(() => {});
       };
-      const t = setTimeout(read, 150);
+      const t = setFocusedTimeout(read, 150);
       const detach = bennuLspStore.onDiagnosticsPublished((file) => {
         if (!cancelled && isSamePath(file, path)) read();
       });
-      return () => { cancelled = true; clearTimeout(t); detach(); };
+      return () => { cancelled = true; clearFocusedTimeout(t); detach(); };
     }
     if (isJava) {
       // Two-tier validation (IntelliJ's fast-syntax-then-semantic model) so a big file stays
@@ -1093,7 +1114,7 @@
       // (~600ms idle). The full set is a superset, so it simply supersedes; the fast pass touches
       // ONLY the editor (not the Problems store) so the panel never shows a briefly-incomplete set,
       // and `fullDone` stops a late fast response from clobbering an already-applied full set.
-      const tFast = setTimeout(() => {
+      const tFast = setFocusedTimeout(() => {
         void ipcDiagnostics(path, src, false)
           .then((ds) => {
             if (cancelled || fullDone) return;
@@ -1101,11 +1122,16 @@
           })
           .catch(() => {});
       }, 120);
-      const tFull = setTimeout(runFull, 600);
-      return () => { cancelled = true; clearTimeout(tFast); clearTimeout(tFull); };
+      const tFull = setFocusedTimeout(runFull, 600);
+      return () => { cancelled = true; clearFocusedTimeout(tFast); clearFocusedTimeout(tFull); };
     }
-    runFull();
-    return () => { cancelled = true; };
+    // Every other file the analyzers understand (XML, the tool configs, a JSP) used to be asked
+    // for on the keystroke itself — `src` is tracked, so each edit re-ran this effect and sent
+    // the whole buffer to the backend before the previous answer had come back. The same
+    // debounce as the pushed-diagnostics path, and held back while the window is in the
+    // background like everything else here.
+    const tOther = setFocusedTimeout(runFull, 250);
+    return () => { cancelled = true; clearFocusedTimeout(tOther); };
   });
 
   // ── Spell-check (opt-in per project) — merged into the editor as hint squiggles ──
@@ -1208,11 +1234,11 @@
     void lspState; // re-request when the server becomes ready (or dies)
     const src = projectStore.sourceOf(path);
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void lspSemanticTokens(path, src)
         .then((tokens) => {
           // A late answer for a tab the user has already left must not paint over the new one.
-          if (cancelled || projectStore.activeFilePath !== path) return;
+          if (cancelled || activePath !== path) return;
           editorComp?.setSemanticTokens(tokens);
           // Recorded so the footer can say how many landed. "All white" has two causes — none
           // arrived, or they arrived and lost the colour fight — and they look identical.
@@ -1220,7 +1246,7 @@
         })
         .catch(() => {});
     }, 250);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   // ── Folding, from the server ────────────────────────────────────────────────────
@@ -1238,15 +1264,15 @@
     void lspState;
     const src = projectStore.sourceOf(path);
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void lspFolding(path, src)
         .then((ranges) => {
-          if (cancelled || projectStore.activeFilePath !== path) return;
+          if (cancelled || activePath !== path) return;
           editorComp?.setFoldRanges(ranges);
         })
         .catch(() => {});
     }, 400);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   // ── Code lenses ─────────────────────────────────────────────────────────────────
@@ -1362,15 +1388,15 @@
     void lspState;
     const src = projectStore.sourceOf(path);
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void lspCodeLenses(path, src)
         .then((found) => {
-          if (cancelled || projectStore.activeFilePath !== path) return;
+          if (cancelled || activePath !== path) return;
           pushLenses(found.map((lens) => ({ kind: 'lsp' as const, lens })));
         })
         .catch(() => {});
     }, 600);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   // ── Version hints (Cargo.toml) ──────────────────────────────────────────────────
@@ -1389,15 +1415,15 @@
     if (!path || !isCargoManifest(path)) return;
     const src = projectStore.sourceOf(path);
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void cargoVersionHints(path, src)
         .then((hints) => {
-          if (cancelled || projectStore.activeFilePath !== path) return;
+          if (cancelled || activePath !== path) return;
           pushLenses(hints.map((hint) => ({ kind: 'version' as const, hint })));
         })
         .catch(() => {});
     }, 900);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   // ── Version hints (pom.xml) ─────────────────────────────────────────────────────
@@ -1415,15 +1441,15 @@
     const src = projectStore.sourceOf(path);
     let cancelled = false;
     // The same long debounce, for the same reason: behind it is one request per dependency.
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void pomVersionHints(path, src)
         .then((hints) => {
-          if (cancelled || projectStore.activeFilePath !== path) return;
+          if (cancelled || activePath !== path) return;
           pushLenses(hints.map((hint) => ({ kind: 'pom-version' as const, hint })));
         })
         .catch(() => {});
     }, 900);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   // ── Known vulnerabilities (pom.xml) ─────────────────────────────────────────────
@@ -1454,10 +1480,10 @@
     if (!path || !isPomFile(path)) { advisoryDiags = []; return; }
     const src = projectStore.sourceOf(path);
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void pomAdvisories(path, src)
         .then((found) => {
-          if (cancelled || projectStore.activeFilePath !== path) return;
+          if (cancelled || activePath !== path) return;
           advisoryDiags = found.map((a) => ({
             from: a.start,
             to: a.end,
@@ -1468,7 +1494,7 @@
         })
         .catch(() => {});
     }, 1200);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   // ── package.json: run controls, and version hints ───────────────────────────────
@@ -1493,10 +1519,10 @@
 
     // Short: this is a parse of text the editor already has, and a run control that appears half a
     // second after you finish typing a script name looks broken.
-    const scripts = setTimeout(() => {
+    const scripts = setFocusedTimeout(() => {
       void npmManifest(path, src)
         .then((m) => {
-          if (cancelled || projectStore.activeFilePath !== path) return;
+          if (cancelled || activePath !== path) return;
           npmScripts = m.scripts;
           npmManager = m.package_manager;
         })
@@ -1505,16 +1531,16 @@
 
     // Long, for the same reason the Cargo one is: behind it is a request per dependency. A package
     // being one minor version behind does not become more true by being checked while you type.
-    const hints = setTimeout(() => {
+    const hints = setFocusedTimeout(() => {
       void npmVersionHints(path, src)
         .then((found) => {
-          if (cancelled || projectStore.activeFilePath !== path) return;
+          if (cancelled || activePath !== path) return;
           npmHints = found;
         })
         .catch(() => {});
     }, 900);
 
-    return () => { cancelled = true; clearTimeout(scripts); clearTimeout(hints); };
+    return () => { cancelled = true; clearFocusedTimeout(scripts); clearFocusedTimeout(hints); };
   });
 
   // The two halves, merged. A `$effect` rather than a call at each arrival so the layer is written
@@ -1719,17 +1745,17 @@
     }
     const src = editorComp?.getValue() ?? '';
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void lspHighlights(path, src, caret)
         .then((spans) => {
           // Both guards matter: the tab may have changed, and the caret may have moved to a
           // position this answer says nothing about.
-          if (cancelled || projectStore.activeFilePath !== path) return;
+          if (cancelled || activePath !== path) return;
           editorComp?.setDocumentHighlights(spans);
         })
         .catch(() => {});
     }, 220);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   // ── Parameter hints ─────────────────────────────────────────────────────────────
@@ -1751,18 +1777,18 @@
     }
     const src = editorComp?.getValue() ?? '';
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       const fetch = isJavaFileOf(path)
         ? ipcSignatureHelp(path, src, caret).then(javaSignatureToHint)
         : lspSignatureHelp(path, src, caret).then(lspSignatureToHint);
       void fetch
         .then((hint) => {
-          if (cancelled || projectStore.activeFilePath !== path) return;
+          if (cancelled || activePath !== path) return;
           editorComp?.setSignatureHint(hint);
         })
         .catch(() => {});
     }, 160);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   /** Bennu's own answer, which already carries a span per parameter. */
@@ -1826,15 +1852,15 @@
     void sources;
     const src = editorComp?.getValue() ?? '';
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void ipcInlayHints(path, src)
         .then((hints) => {
-          if (cancelled || projectStore.activeFilePath !== path) return;
+          if (cancelled || activePath !== path) return;
           editorComp?.setInlayHints(hints);
         })
         .catch(() => {});
     }, 400);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   // ── Usage counts, and what nothing reaches ──────────────────────────────────────
@@ -1867,16 +1893,16 @@
     void indexed;
     const src = editorComp?.getValue() ?? '';
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void ipcUsageCounts(path, src)
         .then((marks) => {
-          if (cancelled || projectStore.activeFilePath !== path) return;
+          if (cancelled || activePath !== path) return;
           pushLenses(marks.map((mark) => ({ kind: 'usages' as const, mark })));
           editorComp?.setUnusedRanges(marks.filter((m) => m.unused));
         })
         .catch(() => {});
     }, 600);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   // ── Expand / shrink selection ───────────────────────────────────────────────────
@@ -1910,7 +1936,7 @@
       const chain = await lspSelectionRanges(path, src, editorComp.caretByteOffset()).catch(
         () => [] as [number, number][],
       );
-      if (chain.length === 0 || projectStore.activeFilePath !== path) return false;
+      if (chain.length === 0 || activePath !== path) return false;
       selectionChain = chain;
       // The first link is the token the caret is in. Selecting it IS the first expansion, so the
       // depth starts below it and the step below moves onto it.
@@ -2027,7 +2053,7 @@
     const src = projectStore.sourceOf(path);
     void bennuIndexStore.buildRevision; // new beans / new keys after a rebuild
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void extHighlights(path, src)
         .then((hs) => {
           if (cancelled) return;
@@ -2047,7 +2073,7 @@
         // sits at an offset the buffer may no longer have; a button carries no offset.
         .catch(() => {});
     }, 220);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   /*
@@ -2257,14 +2283,14 @@
       return;
     }
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void ipcDiscoverTests(root, { file: path })
         .then((found) => {
-          if (!cancelled && projectStore.activeFilePath === path) fileTests = found;
+          if (!cancelled && activePath === path) fileTests = found;
         })
         .catch(() => {});
     }, 400);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   /** What a test arrow on a given line runs. */
@@ -2612,8 +2638,8 @@
     // prologue) where a Java method signature does not, and Rust's lifetimes and raw strings would
     // desync a scanner written for Java literals.
     const language = breakLanguage ?? 'java';
-    const t = setTimeout(() => { breakpointable = breakpointableLines(src, language); }, 200);
-    return () => clearTimeout(t);
+    const t = setFocusedTimeout(() => { breakpointable = breakpointableLines(src, language); }, 200);
+    return () => clearFocusedTimeout(t);
   });
 
   /** A new identity per recomputation, which is what tells the editor its column has changed. */
@@ -2765,10 +2791,10 @@
     // once per index-progress event — thousands during a reference walk, and all of them at once
     // when a backgrounded window drains its event backlog on regaining focus. The timer is reset
     // by each re-run, so a burst costs one request instead of one per tick.
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void ipcJspActions(path).then((b) => { if (!cancelled) jspBinding = b; }).catch(() => { if (!cancelled) jspBinding = null; });
     }, 250);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
   /** Pin (qname) or clear (null) the JSP's bound action, then re-fetch + re-lint. */
   async function selectJspAction(qname: string | null) {
@@ -2839,7 +2865,7 @@
     if (!isJspFileOf(path) && !isValidation) { propertyDiags = []; return; }
     const src = projectStore.sourceOf(path);
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void ipcActionPropertyLint(path, src)
         .then((hits) => {
           if (cancelled) return;
@@ -2852,7 +2878,7 @@
         })
         .catch(() => { if (!cancelled) propertyDiags = []; });
     }, 350);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   // Native SQL in a Java file, checked by the database the project is paired with: the server's own
@@ -2869,7 +2895,7 @@
     const live = !!path && (lower.endsWith('.java') || isMapper) && bennuPicusStore.connected;
     if (!path || !live) { nativeSqlDiags = []; return; }
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void (isMapper ? bennuPicusStore.mapperDiagnostics(src) : bennuPicusStore.nativeDiagnostics(path, src))
         .then((hits) => {
           if (cancelled) return;
@@ -2882,7 +2908,7 @@
         })
         .catch(() => { if (!cancelled) nativeSqlDiags = []; });
     }, 600);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   // Struts config XML: lint the `<result>` targets (JSP-not-found + OGNL-not-a-property). Only on a
@@ -2895,7 +2921,7 @@
     if (!path || !isXml || isValidation) { strutsDiags = []; return; }
     const src = projectStore.sourceOf(path);
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void ipcStrutsResultLint(path, src)
         .then((hits) => {
           if (cancelled) return;
@@ -2908,7 +2934,7 @@
         })
         .catch(() => { if (!cancelled) strutsDiags = []; });
     }, 350);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   function spellDiagOf(h: SpellHit, root: string): EditorDiagnostic {
@@ -2936,12 +2962,12 @@
     if (!path || !bennuSpellStore.activeFor(root)) { spellDiags = []; return; }
     const src = projectStore.sourceOf(path);
     let cancelled = false;
-    const t = setTimeout(() => {
+    const t = setFocusedTimeout(() => {
       void ipcSpellcheck(path, src)
         .then((hits) => { if (!cancelled) spellDiags = hits.map((h) => spellDiagOf(h, root!)); })
         .catch(() => { if (!cancelled) spellDiags = []; });
     }, 450);
-    return () => { cancelled = true; clearTimeout(t); };
+    return () => { cancelled = true; clearFocusedTimeout(t); };
   });
 
   // ── Goto-line overlay (Ctrl+G) ───────────────────────────────────────────────
@@ -3044,7 +3070,7 @@
     const src = editorComp.getValue();
     let hits: Awaited<ReturnType<typeof ipcMojibakeCheck>> = [];
     try { hits = await ipcMojibakeCheck(path, src); } catch { hits = []; }
-    if (projectStore.activeFilePath !== path) return; // file switched mid-scan → drop
+    if (activePath !== path) return; // file switched mid-scan → drop
     mojibakeDiags = supportsDiagnostics(path)
       ? []
       : hits.map((h) => ({
@@ -3092,7 +3118,7 @@
     if (id === 'create-method' || id === 'create-method-in') return SquarePlus;
     if (id === 'create-class') return FilePlus2;
     if (id.startsWith('declare-throws:') || id.startsWith('surround-try:')) return ShieldCheck;
-    if (id === 'fill-enum-switch') return ListPlus;
+    if (id === 'fill-enum-switch' || id === 'add-parameter') return ListPlus;
     if (id === 'log-parameterize') return Braces;
     if (id === 'np-equals') return ArrowLeftRight;
     if (id === 'change-package') return Package;
@@ -3121,6 +3147,8 @@
     if (o.action === 'move-to-package') { await moveFileToPackage(path); return; }
     if (o.action === 'create-class') { await createMissingClass(path, o); return; }
     if (o.action === 'create-method-in') { await createMethodInReceiver(path, o); return; }
+    if (o.action === 'add-parameter') { openAddParameter(); return; }
+    if (o.action === 'add-parameter-from-call') { await addParameterFromCall(path, o); return; }
     if (o.action === 'override-methods') { onOverride?.(); return; }
     if (o.action === 'generate-constructor') { onGenerate?.('constructor'); return; }
     if (o.action === 'generate-getters-setters') { onGenerate?.('getters-setters'); return; }
@@ -3243,6 +3271,42 @@
     }
   }
 
+  /**
+   * Add the parameter a call is already passing (the `add-parameter-from-call` quick fix).
+   *
+   * The plan is recomputed against the buffer as it is now and comes back as edits for every file
+   * the method touches — the declaration, its overrides, every other call. The store writes them as
+   * one bulk edit, and routes the ones for the open file through the editor so Ctrl+Z undoes the lot.
+   * A refusal arrives as the rejection and is shown as it is: it names what stands in the way.
+   */
+  async function addParameterFromCall(path: string, offer: IntentionOffer) {
+    if (!editorComp) return;
+    const source = editorComp.getValue();
+    try {
+      const edits = await addParameterForCall(path, source, offer.start, offer.end);
+      if (!edits.length) { toastStore.show('Nothing to add there', 'info'); return; }
+      const files = new Set(edits.map((e) => e.file)).size;
+      const failed = await projectStore.applyEdits(edits);
+      if (failed) toastStore.show(`Added, but ${failed} file(s) could not be written`, 'error');
+      else toastStore.show(`Added a parameter to ${offer.replacement}() · ${edits.length} edit(s) in ${files} file(s)`, 'success');
+    } catch (e) {
+      toastStore.show(`Couldn't add the parameter: ${e}`, 'error');
+    }
+  }
+
+  /** Open the *Add parameter* dialog for the method under the caret — on its declaration or on a
+   *  call of it. The BE finds the method from the caret; a caret on anything else is answered in
+   *  the dialog itself. */
+  export function openAddParameter() {
+    if (!activePath || !editorComp) return;
+    bennuRefactorStore.openAddParameter({
+      file: activePath,
+      source: editorComp.getValue(),
+      offset: editorComp.caretByteOffset(),
+      method: editorComp.wordAtCaret() ?? '',
+    });
+  }
+
   async function moveFileToPackage(path: string) {
     try {
       const newPath = await projectStore.moveFileToPackage(path);
@@ -3293,7 +3357,7 @@
       // the caret. They are the editor's own, already computed and already drawn — revalidating the
       // file to rediscover them would run every check in it for the sake of one squiggle.
       const offers = await ipcIntentionsAt(path, src, offset, diagRefsForFixes()).catch(() => []);
-      if (projectStore.activeFilePath === path) {
+      if (activePath === path) {
         for (const o of offers) {
           dynamic.push({
             id: o.id,
@@ -3345,7 +3409,7 @@
           ? lspExpandMacro(path, src, editorComp.caretByteOffset()).catch(() => null)
           : Promise.resolve(null),
       ]);
-      if (projectStore.activeFilePath === path) {
+      if (activePath === path) {
         if (macro) {
           dynamic.push({
             id: 'expand-macro',
@@ -3385,7 +3449,7 @@
       const src = editorComp.getValue();
       const sel = editorComp.selectionByteRange();
       const offers = await refactorings(path, src, sel.start, sel.end).catch(() => []);
-      if (projectStore.activeFilePath === path) {
+      if (activePath === path) {
         for (const offer of offers) {
           // A refusal is a row, greyed, carrying its reason — see `bennu/refactor.ts`.
           dynamic.push({
@@ -3438,7 +3502,7 @@
       toastStore.show(String(e), 'error');
       return;
     }
-    if (projectStore.activeFilePath !== path) return;
+    if (activePath !== path) return;
     // The backend planned those edits against the file **on disk**, because it does not hold the
     // editor's buffers. An unsaved buffer for that file is different text, so every offset after
     // the first difference is wrong — and the apply path would drop the edits with "did not match"
@@ -3513,7 +3577,7 @@
     if (!req) return;
     // Only against the file it was asked about: a target chosen after switching tabs describes a
     // member that is not under the caret any more.
-    if (projectStore.activeFilePath !== req.file) return;
+    if (activePath !== req.file) return;
     await runRefactoring(req.file, req.id, target);
   }
 
@@ -3656,6 +3720,20 @@
       edits.map((e) => ({ startByte: e.start, endByte: e.end, text: e.replacement })),
     );
   }
+
+  // A rename (or a server's edit, or a file rename's implied ones) that touches the file on screen
+  // goes through the editor as ONE undo step, instead of the store writing the file and the editor
+  // swapping its whole document — which empties the undo history. See `setLiveEditApplier`.
+  $effect(() =>
+    projectStore.setLiveEditApplier((file, edits) => {
+      if (!editorComp || !activePath || !isSamePath(file, activePath)) return false;
+      return (
+        editorComp.replaceByteRanges(
+          edits.map((e) => ({ startByte: e.start, endByte: e.end, text: e.new_text })),
+        ) > 0
+      );
+    }),
+  );
 
   /**
    * Apply an Alt+Enter offer's edits as ONE undo step, then select the range its `select` names —
@@ -4851,7 +4929,17 @@
   }
 </script>
 
-<div class="ed">
+<!-- The pane is a place a tab can be dropped (`data-tab-drop`), and taking the focus anywhere inside it —
+     a click on the strip, a key in the editor — makes it the focused pane. -->
+<div
+  class="ed"
+  class:ed-drop-hot={tabDragStore.hot === String(pane)}
+  data-tab-drop={String(pane)}
+  data-pane={pane}
+  onfocusin={() => projectStore.focusPane(pane)}
+  onmousedowncapture={() => projectStore.focusPane(pane)}
+  role="presentation"
+>
   {#if openPaths.length > 0}
     <div class="ed-tabs">
       <Tabs
@@ -4861,6 +4949,10 @@
         size="sm"
         closable
         overflow
+        draggable
+        dropZone={String(pane)}
+        onReorder={(from, to) => projectStore.reorderTab(pane, from, to)}
+        onDropOnZone={(id, zone) => projectStore.moveTab(id, zone === 'new' ? 1 : (Number(zone) as PaneIndex))}
         onSelect={(id) => projectStore.setActive(id)}
         onClose={(id) => projectStore.closeFile(id)}
         onContextMenu={onTabContextMenu}
@@ -5394,6 +5486,15 @@
     flex: 1; min-width: 0; min-height: 0;
     background: var(--bg-base);
     position: relative;
+  }
+
+  /* A tab being dragged is over this pane: it will land here. Drawn over the content (and ignoring the
+     pointer) so the whole pane reads as the target, not only its strip. */
+  .ed.ed-drop-hot::after {
+    content: ''; position: absolute; inset: 0; z-index: 30; pointer-events: none;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    box-shadow: inset 0 0 0 2px var(--accent);
+    border-radius: var(--radius-sm);
   }
 
   .ed-tabs {

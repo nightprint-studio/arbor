@@ -95,3 +95,14 @@ therefore appears as its successive states, which is the honest rendering of the
 
 `serde`, and only because `Piece` crosses an IPC seam on its way to a frontend — which is the
 whole reason it produces pieces rather than markup.
+
+## Recognising a project's own layout
+
+`PatternLayout::parse` reads a Logback / Log4j conversion pattern (`%d{…} | %-5level | %logger{1} | MDC:[tenant=%X{tenant.id}] | %msg%n`)
+and becomes a rule (`.over_java()` puts it first on `RuleSet::java()`): at the start of a line it names the date, level, thread, the
+`Token::Logger` column and each `Token::Mdc` value by position, and leaves the message to the ordinary rules. A line outside the layout
+falls through; a pattern it does not model (`%replace`, an unknown conversion) does not parse.
+
+A qualified name is also linked now — a `Link::Source` with neither file nor line (that absence is how a host tells it from a frame),
+`com.acme.Order#total` / `Order::total` carrying the method. `Link::File` gained an optional `method` for a host that resolved the class
+but not the line.

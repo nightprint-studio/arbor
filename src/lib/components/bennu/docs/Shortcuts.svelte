@@ -72,6 +72,11 @@
     <tr><td><kbd>Alt</kbd> + <kbd>Enter</kbd> — <kbd>Option</kbd> + <kbd>Enter</kbd> on a Mac</td><td><strong>Intentions</strong> at the caret — Bennu's quick fixes on Java, the server's code actions on a file it owns</td></tr>
     <tr><td><kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>Enter</kbd></td><td>A <strong>blank line below</strong>, caret on it — not intentions, one modifier away on a Mac</td></tr>
     <tr><td><kbd>Shift</kbd> + <kbd>F6</kbd></td><td><strong>Rename</strong> the symbol under the caret, with a preview</td></tr>
+    <tr><td><kbd>Alt</kbd> + click</td><td>Add a <strong>cursor</strong> where you click — type, delete and move at all of them, and one <kbd>Ctrl</kbd> + <kbd>Z</kbd> undoes it</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + drag</td><td>Select a <strong>column</strong>: one cursor per line</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>J</kbd></td><td>Add the next occurrence of the selected text as another cursor</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd></td><td>Select <strong>every</strong> occurrence of the selected text; <kbd>Esc</kbd> returns to one cursor. Completion and Emmet stand down while there are several</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>F6</kbd></td><td><strong>Add parameter</strong> to the method under the caret — its declaration, overrides and every call, with a preview</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Delete</kbd></td><td><strong>Safe delete</strong> the member under the caret — only when nothing uses it; otherwise every use is listed</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Insert</kbd></td><td><strong>Generate</strong> a constructor, getters or setters</td></tr>
     <tr><td><kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>I</kbd></td><td><strong>Implement / override methods</strong>, grouped by declaring type, abstract ones ticked</td></tr>

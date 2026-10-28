@@ -79,6 +79,7 @@ import type { TestScope } from '$lib/types/bennu';
 // One-way edge (the project store knows nothing about runs): `runPreferred` needs the
 // active project's KIND, because "Validate (no compile)" is a Java-only build.
 import { projectStore } from './project.svelte';
+import { createRootLocks, rootKey } from './build-locks';
 
 /** The two build kinds the split-button offers. */
 export type BuildType = 'mvn' | 'validate';
@@ -247,7 +248,16 @@ const MAX_TABS = 8;
 let tabSeq = 0;
 
 function createBennuRunStore() {
-  let building = $state(false);
+  // The projects with a build (or a validation) running or waiting. One lane per project: two
+  // projects build side by side, and two builds of one project line up instead of the second being
+  // dropped. See `build-locks.ts` for why.
+  let busyRoots = $state<string[]>([]);
+  const locks = createRootLocks(() => {
+    busyRoots = locks.busyKeys();
+  });
+  /** The lane of the project the window is showing — what the buttons and the panels reflect. */
+  const currentKey = () => rootKey(projectStore.project?.root ?? '');
+  const building = $derived(busyRoots.includes(currentKey()));
   // The tool the last build ran with (`mvn` | `javac`) + whether it succeeded.
   let tool = $state('');
   let ok = $state<boolean | null>(null);
@@ -549,69 +559,73 @@ function createBennuRunStore() {
    *  log, resolves with the parsed result (or null on a hard failure). No-op while already
    *  building. */
   async function build(root: string, focus = true, module = ''): Promise<BuildResult | null> {
-    if (building) return null;
-    building = true;
-    ok = null;
-    tool = '';
-    diagnostics = [];
-    clearLog();
-    if (focus) bennuUiStore.showBottom('build');
-    push(module ? `Compiling ${module}…` : `Compiling ${root}…`, 'meta');
-    try {
-      const res = await ipcBuild(root, module);
-      tool = res.tool;
-      ok = res.ok;
-      diagnostics = res.diagnostics;
-      diagnosticsAt = Date.now();
-      push(
-        res.ok
-          ? `Build succeeded (${res.tool}).`
-          : `Build failed (${res.tool}) — ${res.diagnostics.length} problem(s).`,
-        res.ok ? 'meta' : 'err',
-      );
-      return res;
-    } catch (e) {
-      ok = false;
-      push(`Build error: ${e instanceof Error ? e.message : String(e)}`, 'err');
-      return null;
-    } finally {
-      building = false;
-    }
+    // Queued behind an earlier build or validation of THIS project; another project's does not
+    // make it wait. The panel's log and result describe the build that ran last.
+    return locks.run(rootKey(root), async () => {
+      ok = null;
+      tool = '';
+      diagnostics = [];
+      clearLog();
+      if (focus) bennuUiStore.showBottom('build');
+      push(module ? `Compiling ${module}…` : `Compiling ${root}…`, 'meta');
+      try {
+        const res = await ipcBuild(root, module);
+        tool = res.tool;
+        ok = res.ok;
+        diagnostics = res.diagnostics;
+        diagnosticsAt = Date.now();
+        push(
+          res.ok
+            ? `Build succeeded (${res.tool}).`
+            : `Build failed (${res.tool}) — ${res.diagnostics.length} problem(s).`,
+          res.ok ? 'meta' : 'err',
+        );
+        return res;
+      } catch (e) {
+        ok = false;
+        push(`Build error: ${e instanceof Error ? e.message : String(e)}`, 'err');
+        return null;
+      }
+    });
   }
 
   /** Validate the WHOLE project without compiling (the `validate` build type): stream progress,
    *  collect timing stats + diagnostics. Opens the Build dock. No-op while already busy. Shares the
    *  BE single-run guard with the Maven build, so a concurrent start is refused there too. */
   async function validateProject(root: string): Promise<ProjectValidationResult | null> {
-    if (building || validating) return null;
+    // One validation at a time (its progress and result are single), and it takes its project's
+    // lane, so a build of the same project waits for it rather than being refused by the backend.
+    if (validating) return null;
     validating = true;
     validatingRoot = root;
-    validationResult = null;
-    validateProgress = { done: 0, total: 0 };
-    clearLog();
-    bennuDiagnosticsStore.clearProjectDiagnostics();
-    bennuUiStore.showBottom('build');
-    push(`Validating ${root} (no compile)…`, 'meta');
-    try {
-      const res = await ipcValidateProject(root);
-      validationResult = res;
-      // Route the per-file diagnostics to the Problems panel (where problems belong).
-      bennuDiagnosticsStore.setProjectDiagnostics(res.diagnostics);
-      push(
-        `Validated ${res.total_files} file(s) in ${formatMs(res.total_ms)} — ` +
-          `${res.error_count} error(s), ${res.warning_count} warning(s). ` +
-          `avg ${res.avg_ms.toFixed(1)}ms, max ${res.max_ms}ms` +
-          (res.max_file ? ` (${res.max_file.split('/').pop()})` : ''),
-        res.error_count > 0 ? 'err' : 'meta',
-      );
-      return res;
-    } catch (e) {
-      push(`Validation error: ${e instanceof Error ? e.message : String(e)}`, 'err');
-      return null;
-    } finally {
-      validating = false;
-      validateProgress = null;
-    }
+    return locks.run(rootKey(root), async () => {
+      validationResult = null;
+      validateProgress = { done: 0, total: 0 };
+      clearLog();
+      bennuDiagnosticsStore.clearProjectDiagnostics();
+      bennuUiStore.showBottom('build');
+      push(`Validating ${root} (no compile)…`, 'meta');
+      try {
+        const res = await ipcValidateProject(root);
+        validationResult = res;
+        // Route the per-file diagnostics to the Problems panel (where problems belong).
+        bennuDiagnosticsStore.setProjectDiagnostics(res.diagnostics);
+        push(
+          `Validated ${res.total_files} file(s) in ${formatMs(res.total_ms)} — ` +
+            `${res.error_count} error(s), ${res.warning_count} warning(s). ` +
+            `avg ${res.avg_ms.toFixed(1)}ms, max ${res.max_ms}ms` +
+            (res.max_file ? ` (${res.max_file.split('/').pop()})` : ''),
+          res.error_count > 0 ? 'err' : 'meta',
+        );
+        return res;
+      } catch (e) {
+        push(`Validation error: ${e instanceof Error ? e.message : String(e)}`, 'err');
+        return null;
+      } finally {
+        validating = false;
+        validateProgress = null;
+      }
+    });
   }
 
   /** Cancel the running whole-project validation (the Build panel's Cancel while validating). The BE
@@ -704,16 +718,19 @@ function createBennuRunStore() {
   }
 
   async function launch(spec: JvmRunSpec): Promise<void> {
-    // Only a compile in flight refuses a launch, and not as a policy: `bennu_build` takes the
-    // backend's build guard, so a second compile would be refused there anyway. A program already
+    // A launch is never refused for a compile in flight: another project's compile does not
+    // concern it, and an earlier one of THIS project is waited for (see `build`). A program already
     // RUNNING is no reason at all — a server and the client that talks to it are two runs.
-    if (building) return;
     const cls = spec.mainClass.trim();
     if (!cls) return;
 
     // A new tab, not a cleared buffer: the previous run stays readable beside this one.
     const id = openTab(spec, spec.label || cls.split('.').pop() || cls, cls);
-    pushTo(id, 'Compiling…', 'meta');
+    pushTo(
+      id,
+      locks.isBusy(rootKey(spec.root)) ? 'Waiting for the build in progress on this project…' : 'Compiling…',
+      'meta',
+    );
 
     // Only the module being run (and what it is built from) — see `bennu_build`'s `module`.
     const res = await build(spec.root, false, spec.module);
@@ -1198,7 +1215,7 @@ function createBennuRunStore() {
      * genuinely cannot overlap; a running program cannot stop you starting another one, which is
      * the whole point of a console with several tabs. Ask {@link running} for that.
      */
-    get active() { return building || validating; },
+    get active() { return building || (validating && rootKey(validatingRoot) === currentKey()); },
     /** Every run in flight — what the console's tab strip marks live. */
     get liveTabs() { return liveTabs; },
     /** Whether Stop / stdin have an unambiguous target: see `targetTab`. */

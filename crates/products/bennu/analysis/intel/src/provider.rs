@@ -14,6 +14,8 @@ use bennu_index::prelude::SymbolKind;
 use bennu_java::prelude::{AnnotationSite, ElementTarget, TypeResolver};
 
 use crate::import_census::ImportCensus;
+use crate::usage_census::UsageCensus;
+use bennu_query::prelude::ProjectUsage;
 use bennu_proto::prelude::{CompletionItem, Diagnostic};
 
 use bennu_classpath::prelude::ClassSource;
@@ -567,6 +569,10 @@ pub struct NativeJavaProvider {
     /// simple name that resolves to several types, and the only one this index can supply.
     /// Empty for the pre-index provider, and empty is simply "no opinion". See [`ImportCensus`].
     imports: Arc<ImportCensus>,
+    /// What the project calls and what it calls after what. Kept here as well as inside the
+    /// completion resolver (where the ranking reads it) so a rebuilt provider can carry it over.
+    /// Empty is "no opinion". See [`UsageCensus`].
+    usage: Arc<UsageCensus>,
     /// Simple type name → the **annotation types** among its candidates, decided once and kept.
     ///
     /// Deciding costs a bytecode decode per candidate, and the sweep behind an `@` visits names in
@@ -643,6 +649,21 @@ impl NativeJavaProvider {
     /// threaded through both constructions and every test that calls one.
     pub fn with_imports(mut self, census: Arc<ImportCensus>) -> Self {
         self.imports = census;
+        self
+    }
+
+    /// Give the provider the project's usage census — see [`UsageCensus`] — and hand it to the
+    /// completion resolver, which is where the ranking asks for it.
+    ///
+    /// An empty census is not installed: the ranking treats "no census" and "nothing counted" the
+    /// same, and skipping it keeps the per-candidate lookups off the path entirely.
+    pub fn with_usage(mut self, census: Arc<UsageCensus>) -> Self {
+        if !census.is_empty() {
+            if let Some(resolver) = &self.resolver {
+                resolver.set_project_usage(Arc::clone(&census) as Arc<dyn ProjectUsage>);
+            }
+        }
+        self.usage = census;
         self
     }
 
@@ -1209,6 +1230,7 @@ impl NativeJavaProvider {
             // Empty until the caller hands one over — see `with_imports`. Empty is "no opinion",
             // which ranks exactly as the census being switched off does.
             imports: Arc::default(),
+            usage: Arc::default(),
             annotation_memo: RwLock::default(),
             static_members: Arc::default(),
         })
@@ -1260,6 +1282,11 @@ impl NativeJavaProvider {
             for (simple, binary) in project_simple_names {
                 resolver.add_simple_hint(simple, binary);
             }
+            // The habit signals describe the project's sources, which the dependency tier does not
+            // change — the new resolver is handed the same census the old one ranked by.
+            if !self.usage.is_empty() {
+                resolver.set_project_usage(Arc::clone(&self.usage) as Arc<dyn ProjectUsage>);
+            }
             // The walk's JDK-only view, over the same shared tier — see `for_project`.
             let walk = PersistedIndex::open(&blob, &fst).ok().map(|index| {
                 let mut r = IndexResolver::new(index, ClasspathIndex::jdk_only(Arc::clone(&jdk)));
@@ -1280,6 +1307,7 @@ impl NativeJavaProvider {
                 // the dependency tier changes what is on the classpath rather than what the
                 // project imports. Rebuilding it here would mean re-reading every file.
                 imports: Arc::clone(&self.imports),
+                usage: Arc::clone(&self.usage),
                 // NOT carried: the dependency tier adds classes, so a name that had no annotation
                 // among its candidates may have one now. A memo built against the narrower
                 // classpath would answer for a question that is no longer the same one.
@@ -2559,12 +2587,32 @@ impl NativeJavaProvider {
             merged.extend(out);
             out = merged;
         }
+        // `iter`: the loop over the array or iterable in scope. Offered only when there is one, so it
+        // never writes a name that is not there; see `statement_templates`.
+        let statements = crate::statement_templates::completions(
+            &at.file,
+            text,
+            offset,
+            resolver as &dyn TypeResolver,
+            level,
+            naming,
+            case,
+        );
+        if !statements.is_empty() {
+            let mut merged = statements;
+            merged.extend(out);
+            out = merged;
+        }
         let types = self.type_completions(text, offset, census, case);
         // The types a function slot receives lead both orders: in `opt.map(Re|)` the call has
         // already said which type is about to be named, and nothing the name index or the scope
         // knows is as specific. With nothing typed they are the ONLY type names offered — which is
         // what makes Ctrl+Space in `opt.map(|)` open on `ResolvedIdentity`.
-        let functional = self.functional_argument_types(text, offset, resolver, case);
+        let mut functional = self.functional_argument_types(text, offset, resolver, case);
+        // `catch (|` is the same kind of place — the code above has already said which type is
+        // about to be named (what its `try` throws), so those lead too. The two never co-occur: a
+        // catch parameter is not a function slot.
+        functional.extend(bennu_query::prelude::caught_exception_types(text, offset, resolver, case));
         let (_, prefix) = bennu_query::prelude::split_completion_prefix(text, offset);
         if looks_like_a_type_name(&prefix) {
             let mut typed = types;

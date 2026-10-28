@@ -1,5 +1,7 @@
 /**
- * Bennu refactor store — drives the two caret-based refactor surfaces:
+ * Bennu refactor store — drives the caret-based refactor surfaces:
+ *   • **Add parameter**: the dialog opens off the caret context (`addParameterCtx`), previews via
+ *     `bennu_add_parameter_plan` and applies the same edit list a rename would.
  *   • **Rename** (Shift+F6): the editor captures the caret context (file, current
  *     buffer, byte offset, the identifier under the caret) and opens the rename modal
  *     off it. The modal previews via `bennu_rename_plan` and applies on confirm.
@@ -35,6 +37,16 @@ export interface RenameRequest {
   suggestedName?: string;
 }
 
+/** The caret context *Add parameter* is requested against — the method is found from it. */
+export interface AddParameterContext {
+  file: string;
+  source: string;
+  /** Caret UTF-8 byte offset, on the method's declaration or on a call of it. */
+  offset: number;
+  /** The method's name, for the header. */
+  method: string;
+}
+
 /** What the move-target picker is open for. */
 export interface MoveRequest {
   /** The refactoring's id — carries the direction, and goes back with the choice. */
@@ -58,6 +70,9 @@ function createBennuRefactorStore() {
   let renameOpen = $state(false);
   let renameReq = $state<RenameRequest | null>(null);
 
+  // ── Add parameter ───────────────────────────────────────────────────────────
+  let addParameterCtx = $state<AddParameterContext | null>(null);
+
   // ── Find usages ─────────────────────────────────────────────────────────────
   let usagesOpen = $state(false);
   let usagesAnchor = $state<UsagesAnchor | null>(null);
@@ -75,6 +90,11 @@ function createBennuRefactorStore() {
   return {
     get renameOpen() { return renameOpen; },
     get renameReq() { return renameReq; },
+
+    get addParameterCtx() { return addParameterCtx; },
+    /** Open the add-parameter dialog for a caret context. */
+    openAddParameter(ctx: AddParameterContext) { addParameterCtx = ctx; },
+    closeAddParameter() { addParameterCtx = null; },
 
     get usagesOpen() { return usagesOpen; },
     get usagesAnchor() { return usagesAnchor; },

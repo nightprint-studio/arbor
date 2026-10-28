@@ -241,7 +241,7 @@ pub(crate) struct MavenRun {
 /// Spawn `mvn test` for `scope` and register it, without waiting for anything.
 pub(crate) fn start_maven_run(ctx: &BennuState, args: &RunTestsArgs) -> Result<MavenRun, String> {
     // Same lock as the build: two Maven processes on one tree fight over `target/`.
-    let guard = BuildGuard::acquire().ok_or_else(|| BUSY_MSG.to_string())?;
+    let guard = BuildGuard::acquire(&args.root).ok_or_else(|| BUSY_MSG.to_string())?;
 
     let root = PathBuf::from(&args.root);
     // Online, not `-o` — see the module doc.

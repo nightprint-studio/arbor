@@ -17,6 +17,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::dep_record;
 use crate::module_scope;
+use crate::rank::ProjectUsage;
 use bennu_classpath::prelude::MemberIndex as CpMemberIndex;
 use bennu_index::prelude::{PersistedIndex, Symbol, SymbolKind};
 use bennu_java::prelude::{
@@ -58,9 +59,36 @@ pub struct IndexResolver<M: CpMemberIndex> {
     /// filed under per-module alias keys. Read once at construction: when it is `false` (nearly
     /// always) [`scoped_key`](Self::scoped_key) is a branch and nothing more.
     module_aliases: bool,
+    /// What the project does with its members, counted while the index was built — completion's
+    /// ranking asks it. Interior-mutable because the resolver is shared behind an `Arc` the moment
+    /// it is built, while the census falls out of the index build a step later.
+    usage: RwLock<Option<Arc<dyn ProjectUsage>>>,
 }
 
 impl<M: CpMemberIndex> IndexResolver<M> {
+    /// Install the project's usage census — see [`ProjectUsage`]. Replaces any previous one.
+    pub fn set_project_usage(&self, usage: Arc<dyn ProjectUsage>) {
+        match self.usage.write() {
+            Ok(mut slot) => *slot = Some(usage),
+            Err(poisoned) => *poisoned.into_inner() = Some(usage),
+        }
+    }
+
+    /// Builder-style [`set_project_usage`](Self::set_project_usage), for a resolver not yet shared.
+    pub fn with_project_usage(self, usage: Arc<dyn ProjectUsage>) -> Self {
+        self.set_project_usage(usage);
+        self
+    }
+
+    /// The project's usage census, when one was installed. `None` ranks exactly as the signal being
+    /// switched off does.
+    pub fn project_usage(&self) -> Option<Arc<dyn ProjectUsage>> {
+        match self.usage.read() {
+            Ok(slot) => slot.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
     /// The key `binary`'s project record is filed under **for the module being resolved in** — its
     /// own copy's alias when two modules both declare `binary` and a module is in scope
     /// ([`module_scope`]), else `binary` itself.
@@ -122,6 +150,7 @@ impl<M: CpMemberIndex> IndexResolver<M> {
             members_cache: RwLock::new(HashMap::new()),
             project_only: false,
             module_aliases,
+            usage: RwLock::new(None),
         }
     }
 

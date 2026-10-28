@@ -79,7 +79,10 @@
   function hint(link?: LogLink): string {
     if (!link) return '';
     if (link.kind === 'url') return link.url;
-    if (link.kind === 'file') return link.line ? `${link.path}:${link.line}` : link.path;
+    if (link.kind === 'file') {
+      if (link.line) return `${link.path}:${link.line}`;
+      return link.method ? `${link.path} — ${link.method}()` : link.path;
+    }
     const member = link.method ? `${link.class}.${link.method}` : link.class;
     return link.line ? `${member} — line ${link.line}` : member;
   }
@@ -126,6 +129,13 @@
   .lg[data-token='timestamp'] { color: var(--text-disabled); }
   .lg[data-token='thread'] { color: var(--text-muted); }
   .lg[data-token='package'] { color: var(--text-muted); }
+  /* The class a layout's logger column names: the one column that says WHO is talking, so it
+     reads as a name rather than as chrome. MDC values are context for the line, and recede. */
+  .lg[data-token='logger'] { color: var(--accent); }
+  /* An MDC block is context for the line, so it is the one place two hues pair up: the key
+     recedes, the value it names stands out — `tenant=` quiet, `acme` readable. */
+  .lg[data-token='mdckey'] { color: var(--text-muted); }
+  .lg[data-token='mdc'] { color: var(--success); }
   .lg[data-token='exception'] { color: var(--error); font-weight: 600; }
   .lg[data-token='level'] { font-weight: 700; }
   .lg[data-token='url'],

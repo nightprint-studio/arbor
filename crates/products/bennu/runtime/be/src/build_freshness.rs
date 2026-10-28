@@ -24,18 +24,19 @@
 //! generated sources and compiler status wiped first), and which copied resources to remove.
 //!
 //! **Stats, not reads**: sizes and modification times, so assessing a large reactor costs
-//! milliseconds against Maven's seconds. In memory only — see [`forget`] — so a restart is the
-//! moment nothing is trusted, and the first compile of a session always runs Maven.
+//! milliseconds against Maven's seconds. The record is kept between sessions, and checked before it
+//! is believed — see the persistence section; [`forget`] drops it, disk included.
 //!
 //! [`plan`] is pure and unit-tested; the rest is filesystem glue around it.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use bennu_proto::prelude::BuildDiagnostic;
+use serde::{Deserialize, Serialize};
 
 use crate::reactor::{self, ReactorModule};
 
@@ -254,6 +255,9 @@ pub(crate) struct Assessment {
 pub(crate) fn assess(root: &Path, module: Option<&str>) -> Assessment {
     let modules = reactor::load(root);
     let scope = scope_of(&modules, module);
+    // What an earlier session recorded about these modules, where `target/classes` is still
+    // exactly what it left — see the persistence section.
+    adopt_disk_records(root, &root_key(root), &scope);
     let upstream: HashMap<String, Vec<String>> = scope
         .iter()
         .map(|m| (m.clone(), reactor::upstream_of(&modules, m)))
@@ -351,19 +355,26 @@ pub(crate) fn rebuild_all(assessment: &mut Assessment) {
 
 /// Record a successful compile: every module in its scope is now what its inputs were.
 pub(crate) fn record_success(assessment: &Assessment, compiled: bool) {
-    let mut guard = state().lock().unwrap_or_else(|p| p.into_inner());
-    let project = guard.entry(assessment.root.clone()).or_default();
-    for m in &assessment.plan.scope {
-        let Some(inputs) = assessment.current.get(m) else { continue };
-        let ups = assessment.upstream.get(m).map(Vec::as_slice).unwrap_or(&[]);
-        project.modules.insert(
-            m.clone(),
-            CompiledState { inputs: inputs.clone(), upstream: upstream_hash(ups, &assessment.current) },
-        );
-    }
-    if compiled {
-        project.generation += 1;
-    }
+    let root = Path::new(&assessment.root);
+    let on_disk = {
+        let mut guard = state().lock().unwrap_or_else(|p| p.into_inner());
+        let project = guard.entry(assessment.root.clone()).or_default();
+        for m in &assessment.plan.scope {
+            let Some(inputs) = assessment.current.get(m) else { continue };
+            let ups = assessment.upstream.get(m).map(Vec::as_slice).unwrap_or(&[]);
+            project.modules.insert(
+                m.clone(),
+                CompiledState { inputs: inputs.clone(), upstream: upstream_hash(ups, &assessment.current) },
+            );
+            // The output as the compile left it: what a later session compares `target/classes` to.
+            project.outputs.insert(m.clone(), newest_class_mtime(&classes_dir(root, m)));
+        }
+        if compiled {
+            project.generation += 1;
+        }
+        to_disk(project)
+    };
+    save_disk_state(&assessment.root, &on_disk);
 }
 
 /// How many successful compiles that actually ran a compiler this project has had this session —
@@ -380,13 +391,184 @@ pub(crate) fn generation(root: &Path) -> u64 {
 /// Forget everything about a project, so its next compile runs Maven. Called on reindex — the
 /// moment the user has said not to trust what we remember.
 pub(crate) fn forget(root: &Path) {
-    state().lock().unwrap_or_else(|p| p.into_inner()).remove(&root_key(root));
+    let key = root_key(root);
+    state().lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+    // Also what an earlier session wrote: "do not trust what you remember" includes the disk. The
+    // key is marked as read so the file is not picked up again after it is deleted.
+    pending().lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+    read_keys().lock().unwrap_or_else(|p| p.into_inner()).insert(key.clone());
+    let _ = std::fs::remove_file(disk_path(&key));
 }
 
 #[derive(Default)]
 struct ProjectState {
     modules: HashMap<String, CompiledState>,
     generation: u64,
+    /// The newest `.class` of each module when it was recorded — persisted with it, so a later
+    /// session can tell that `target/classes` is still what that compile produced.
+    outputs: HashMap<String, Option<u128>>,
+}
+
+// ── persistence across sessions ─────────────────────────────────────────────────
+//
+// The record used to live in memory only, on the reasoning that a restart is the moment nothing
+// should be trusted. The price was that the first launch of every project in every session ran
+// Maven even with nothing changed — seconds of JVM start-up and pom resolution to conclude "up to
+// date". What makes it safe to remember is that the record is never taken on faith:
+//
+// * the sources and poms are stat'ed again and compared, exactly as within a session — an edit, a
+//   branch switch or a deletion made while the app was closed all show up as a difference;
+// * a module's record is adopted only if the newest `.class` under its `target/classes` is the one
+//   the compile recorded — so a `mvn clean`, a build from a terminal or an IDE writing other
+//   classes into `target/` all make the record void, and the launch compiles.
+//
+// A manual re-index forgets the disk record too (`forget`).
+
+const DISK_VERSION: u32 = 1;
+
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+struct DiskState {
+    version: u32,
+    generation: u64,
+    modules: BTreeMap<String, DiskModule>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct DiskModule {
+    poms: u64,
+    sources: BTreeMap<String, (u64, u64)>,
+    upstream: u64,
+    /// The newest `.class` (ns since the epoch) when it was recorded; `None` for a module with none.
+    output: Option<u64>,
+}
+
+/// Records read from disk and not yet adopted: a module is adopted when a compile that covers it is
+/// assessed, after its output has been checked.
+fn pending() -> &'static Mutex<HashMap<String, DiskState>> {
+    static PENDING: OnceLock<Mutex<HashMap<String, DiskState>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The projects whose file has been read (or deliberately skipped) this session.
+fn read_keys() -> &'static Mutex<HashSet<String>> {
+    static READ: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    READ.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Where a project's record is kept: out of the repository, beside the other bennu data.
+fn disk_path(key: &str) -> PathBuf {
+    arbor_core::prelude::bennu_data_dir()
+        .join("build-state")
+        .join(format!("{:016x}.json", fnv1a(key)))
+}
+
+/// FNV-1a — a file name has to mean the same thing in every session, and `DefaultHasher` makes no
+/// such promise across toolchains.
+pub(crate) fn fnv1a(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
+}
+
+fn to_disk(project: &ProjectState) -> DiskState {
+    DiskState {
+        version: DISK_VERSION,
+        generation: project.generation,
+        modules: project
+            .modules
+            .iter()
+            .map(|(name, compiled)| {
+                let disk = DiskModule {
+                    poms: compiled.inputs.poms,
+                    sources: compiled
+                        .inputs
+                        .sources
+                        .iter()
+                        .map(|(k, (len, mtime))| (k.clone(), (*len, u64::try_from(*mtime).unwrap_or(u64::MAX))))
+                        .collect(),
+                    upstream: compiled.upstream,
+                    output: project
+                        .outputs
+                        .get(name)
+                        .copied()
+                        .flatten()
+                        .map(|t| u64::try_from(t).unwrap_or(u64::MAX)),
+                };
+                (name.clone(), disk)
+            })
+            .collect(),
+    }
+}
+
+fn from_disk(module: &DiskModule) -> CompiledState {
+    CompiledState {
+        inputs: ModuleInputs {
+            poms: module.poms,
+            sources: module
+                .sources
+                .iter()
+                .map(|(k, (len, mtime))| (k.clone(), (*len, u128::from(*mtime))))
+                .collect(),
+        },
+        upstream: module.upstream,
+    }
+}
+
+/// Whether a recorded output stamp is still what `target/classes` holds.
+fn output_still_matches(recorded: Option<u64>, actual: Option<u128>) -> bool {
+    recorded.map(u128::from) == actual
+}
+
+/// Best-effort write: a record that cannot be saved costs the next session one Maven run, never a
+/// failed build. Written to a sibling file and renamed, so a crash cannot leave half a record.
+fn save_disk_state(key: &str, disk: &DiskState) {
+    let path = disk_path(key);
+    let Some(dir) = path.parent() else { return };
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let Ok(json) = serde_json::to_vec(disk) else { return };
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, json).is_ok() && std::fs::rename(&tmp, &path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+fn load_disk_state(key: &str) -> Option<DiskState> {
+    let bytes = std::fs::read(disk_path(key)).ok()?;
+    let disk: DiskState = serde_json::from_slice(&bytes).ok()?;
+    (disk.version == DISK_VERSION).then_some(disk)
+}
+
+/// Bring the modules of `scope` that an earlier session recorded into the live state, for the ones
+/// whose `target/classes` still holds what that compile produced. A module already known this
+/// session is left alone: the live record is newer.
+fn adopt_disk_records(root: &Path, key: &str, scope: &[String]) {
+    {
+        let mut read = read_keys().lock().unwrap_or_else(|p| p.into_inner());
+        if read.insert(key.to_string()) {
+            if let Some(disk) = load_disk_state(key) {
+                pending().lock().unwrap_or_else(|p| p.into_inner()).insert(key.to_string(), disk);
+            }
+        }
+    }
+    let mut waiting = pending().lock().unwrap_or_else(|p| p.into_inner());
+    let Some(disk) = waiting.get_mut(key) else { return };
+    let mut live = state().lock().unwrap_or_else(|p| p.into_inner());
+    let project = live.entry(key.to_string()).or_default();
+    project.generation = project.generation.max(disk.generation);
+    for module in scope {
+        let Some(recorded) = disk.modules.remove(module) else { continue };
+        if project.modules.contains_key(module) {
+            continue;
+        }
+        let actual = newest_class_mtime(&classes_dir(root, module));
+        if output_still_matches(recorded.output, actual) {
+            project.outputs.insert(module.clone(), actual);
+            project.modules.insert(module.clone(), from_disk(&recorded));
+        }
+    }
+    if disk.modules.is_empty() {
+        waiting.remove(key);
+    }
 }
 
 fn state() -> &'static Mutex<HashMap<String, ProjectState>> {
@@ -510,6 +692,72 @@ fn remove_class_files(dir: &Path) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── persistence ─────────────────────────────────────────────────────────────
+
+    fn project_with(module: &str, files: &[(&str, u128)], output: Option<u128>) -> ProjectState {
+        let mut project = ProjectState::default();
+        project.modules.insert(
+            module.to_string(),
+            CompiledState { inputs: inputs(7, files), upstream: 42 },
+        );
+        project.outputs.insert(module.to_string(), output);
+        project.generation = 3;
+        project
+    }
+
+    #[test]
+    fn a_record_survives_the_trip_to_disk_and_back() {
+        let project = project_with("web", &[("java/A.java", 1_700_000_000_123_456_789), ("resources/a.yml", 5)], Some(99));
+        let json = serde_json::to_string(&to_disk(&project)).unwrap();
+        let disk: DiskState = serde_json::from_str(&json).unwrap();
+        assert_eq!(disk.generation, 3);
+        let back = from_disk(&disk.modules["web"]);
+        assert_eq!(back, project.modules["web"]);
+        assert_eq!(disk.modules["web"].output, Some(99));
+    }
+
+    #[test]
+    fn a_module_without_classes_records_no_output() {
+        let project = project_with("parent", &[], None);
+        assert_eq!(to_disk(&project).modules["parent"].output, None);
+    }
+
+    /// A recorded output is trusted only while `target/classes` still holds it.
+    #[test]
+    fn a_changed_or_missing_output_voids_the_record() {
+        assert!(output_still_matches(Some(10), Some(10)));
+        assert!(!output_still_matches(Some(10), Some(11)), "classes written by someone else");
+        assert!(!output_still_matches(Some(10), None), "target/classes was cleaned");
+        assert!(!output_still_matches(None, Some(10)), "classes appeared that the record does not know");
+        assert!(output_still_matches(None, None), "an aggregator with no classes");
+    }
+
+    #[test]
+    fn a_file_name_means_the_same_thing_every_session() {
+        // Pinned values: if the hash ever changes, every persisted record silently stops being found.
+        assert_eq!(fnv1a(""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a("a"), 0xaf63_dc4c_8601_ec8c);
+        assert_ne!(fnv1a("/p/one"), fnv1a("/p/two"));
+    }
+
+    #[test]
+    fn a_record_from_another_format_version_is_ignored() {
+        let mut disk = to_disk(&project_with("web", &[], None));
+        disk.version = DISK_VERSION + 1;
+        let json = serde_json::to_vec(&disk).unwrap();
+        let parsed: DiskState = serde_json::from_slice(&json).unwrap();
+        assert_ne!(parsed.version, DISK_VERSION);
+    }
+
+    #[test]
+    fn a_timestamp_too_big_for_the_file_is_never_mistaken_for_a_match() {
+        let mut project = project_with("web", &[], Some(u128::MAX));
+        project.generation = 0;
+        let disk = to_disk(&project);
+        // Saturated on the way out; the real output can never equal it, so the record is void.
+        assert!(!output_still_matches(disk.modules["web"].output, Some(u128::MAX)));
+    }
 
     fn inputs(poms: u64, files: &[(&str, u128)]) -> ModuleInputs {
         ModuleInputs {

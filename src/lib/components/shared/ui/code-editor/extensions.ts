@@ -44,6 +44,7 @@ import type { LanguageDescriptor, Tree, Node } from './types';
 import { createHighlightPlugin } from './highlight';
 import { createFoldingExtension, foldBlockCommentsOnLoad } from './folding';
 import { emmetKeymap } from './emmet';
+import { hasMultipleCursors, multiCursor, multiCursorKeymap, quietWithMultipleCursors } from './multi-cursor';
 import { intellijEditingKeymap } from './intellij-keymap';
 import { rainbowBrackets } from './rainbow-brackets';
 import { indentGuides } from './indent-guides';
@@ -259,7 +260,7 @@ function completionExtension(
   const autoPopup = prefs?.autoPopup !== false;
   return [
     autocompletion({
-      override: [prefs?.caseSensitive ? caseSensitiveSource(source) : source],
+      override: [quietWithMultipleCursors(prefs?.caseSensitive ? caseSensitiveSource(source) : source)],
       defaultKeymap: false,
       activateOnTyping: autoPopup,
       ...(prefs?.delayMs !== undefined ? { activateOnTypingDelay: Math.max(0, prefs.delayMs) } : {}),
@@ -278,7 +279,7 @@ function completionExtension(
     // not to open the popup by itself must not open it on a dot either.
     autoPopup
       ? EditorView.updateListener.of((u) => {
-          if (!u.docChanged) return;
+          if (!u.docChanged || hasMultipleCursors(u.state)) return;
           let typedDot = false;
           u.changes.iterChanges((_fromA, _toA, _fromB, _toB, inserted) => {
             if (inserted.sliceString(0).endsWith('.')) typedDot = true;
@@ -402,6 +403,9 @@ export function createCodeEditorExtensions(
     // `historyCompartment`.
     historyCompartment.of(history()),
     drawSelection(),
+    // More than one cursor — Alt+click, Alt+Shift+drag, Alt+J. See `multi-cursor.ts` for what
+    // stands down while there are several.
+    multiCursor(),
     indentOnInput(),
     bracketMatching(),
     // Depth-tinted brackets (matching open/close share a hue) so a block reads at a glance —
@@ -557,6 +561,7 @@ export function createCodeEditorExtensions(
       // the list because two of them are keys `defaultKeymap` / `historyKeymap` already
       // bind — delete-line has to beat redo on Windows and delete-to-line-start on a Mac.
       ...intellijEditingKeymap(),
+      ...multiCursorKeymap(),
       // Before the default keymap so Backspace deletes an empty auto-inserted pair.
       ...closeBracketsKeymap,
       ...defaultKeymap, ...historyKeymap, ...lintKeymap, ...foldKeymap,

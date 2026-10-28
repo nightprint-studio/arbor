@@ -16,8 +16,9 @@ pub use crate::plan::{
 
 // The individual transforms, for a caller that wants one rather than the list.
 pub use crate::create::{
-    create_method, declare_local_method, foreign_call_at, local_reference_at, missing_type_at,
-    new_type_source, undeclared_calls, undeclared_references, ForeignCall, LocalCall,
+    create_method, create_method_with, declare_local_method, foreign_call_at, foreign_call_at_with,
+    local_reference_at, missing_type_at, new_type_source, undeclared_calls, undeclared_calls_with,
+    undeclared_references, CallTypes, ForeignCall, LocalCall, NoTypes,
     LocalReference, MissingType,
 };
 pub use crate::extract_method::extract_method;

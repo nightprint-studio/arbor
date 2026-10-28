@@ -227,7 +227,7 @@ fn item_in(file: &str, source: &str, package: Option<&str>, site: &PostfixSite, 
 ///
 /// Two imports that belong at the same line are merged into one insertion: two edits at one offset
 /// would be applied in an order nothing here controls.
-fn import_edits(file: &str, source: &str, package: Option<&str>, imports: &[String]) -> Vec<SourceEdit> {
+pub(crate) fn import_edits(file: &str, source: &str, package: Option<&str>, imports: &[String]) -> Vec<SourceEdit> {
     let mut edits: Vec<SourceEdit> = Vec::new();
     for fqn in imports {
         let Some((owner, _)) = fqn.rsplit_once('.') else { continue };
@@ -256,7 +256,7 @@ fn on_a_header_line(source: &str, dot: usize) -> bool {
     line.starts_with("import ") || line.starts_with("package ")
 }
 
-fn package_of(source: &str) -> Option<String> {
+pub(crate) fn package_of(source: &str) -> Option<String> {
     source
         .lines()
         .map(str::trim)

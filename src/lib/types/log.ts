@@ -25,7 +25,13 @@ export type LogToken =
   | 'exception'
   | 'frame'
   | 'url'
-  | 'path';
+  | 'path'
+  /** The class a project's log layout puts in its logger column. */
+  | 'logger'
+  /** A value in an MDC block (`acme` in `MDC:[tenant=acme]`). */
+  | 'mdc'
+  /** The name of an MDC entry (`tenant` in `MDC:[tenant=acme]`). */
+  | 'mdckey';
 
 /** An ANSI hue the program itself asked for (bright and normal collapse to one case). */
 export type LogColour =
@@ -42,7 +48,7 @@ export type LogColour =
  */
 export type LogLink =
   | { kind: 'source'; class: string; method?: string; file?: string; line?: number }
-  | { kind: 'file'; path: string; line?: number }
+  | { kind: 'file'; path: string; line?: number; method?: string }
   | { kind: 'url'; url: string };
 
 /** One consecutive stretch of a line. Concatenating every `text` reproduces the line. */

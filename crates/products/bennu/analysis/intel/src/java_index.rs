@@ -74,6 +74,10 @@ pub struct ProjectBuild {
     /// here because this is the one place every file is already parsed; on its own it would be a
     /// second full read of the project to answer a question about ordering a popup.
     pub imports: crate::import_census::ImportCensus,
+    /// How often the project calls each method, and what it calls after what — the completion
+    /// ranking's habit signals. Not persisted, for the import census's reason. See
+    /// [`crate::usage_census`].
+    pub usage: crate::usage_census::UsageCensus,
 }
 
 /// Build the whole index from **already-read** `(path, source)` pairs — the single-read
@@ -148,7 +152,22 @@ pub fn build_project_index_from_sources(
         classes,
         type_map: project_types,
         imports,
+        usage: usage_census_of(sources),
     }
+}
+
+/// Count the project's method calls and call sequences across all `sources`, in parallel.
+///
+/// A second parse of every file: the symbol pass above keeps the extracted symbols and not the tree,
+/// and keeping every tree alive for the length of the build would cost far more memory than reading
+/// a file twice costs time. The per-file censuses are folded and finalized (singletons dropped) here.
+pub fn usage_census_of(sources: &[(PathBuf, String)]) -> crate::usage_census::UsageCensus {
+    let per_file = parallel_map(sources, |(_, src)| crate::usage_census::UsageCensus::of_source(src));
+    let mut total = crate::usage_census::UsageCensus::default();
+    for census in per_file {
+        total.merge(census);
+    }
+    total.finalize()
 }
 
 /// A source file whose bytes weren't valid in the project's declared (Maven) encoding — it

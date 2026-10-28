@@ -93,21 +93,38 @@ export function toSnakeCase(name: string): string {
     .toLowerCase();
 }
 
+/** Convert a snake_case / SCREAMING_CASE identifier to camelCase. A name already in
+ *  camelCase is returned as is; leading/trailing underscores and `$` are dropped
+ *  (`_foo_bar` → `fooBar`), and an all-caps segment is lowered (`MAX_SIZE` → `maxSize`). */
+export function toCamelCase(name: string): string {
+  const parts = name.split(/[_\-]+/).filter(Boolean);
+  if (parts.length <= 1 && !/^[_$]/.test(name)) return name;
+  const lowered = (part: string) => (part === part.toUpperCase() ? part.toLowerCase() : part);
+  return parts
+    .map((part, index) => (index === 0 ? lowerFirst(lowered(part)) : upperFirst(lowered(part))))
+    .join('');
+}
+
+function lowerFirst(s: string): string {
+  return s.length ? s[0].toLowerCase() + s.slice(1) : s;
+}
+
 /** Apply the accessor stem casing implied by `naming` to a field name. In
- *  camelCase the stem is `UpperFirst(name)` (→ `getFooBar`); in snake_case the
- *  stem is the snake form with the leading segment upper-cased (→ `get_foo_bar`). */
-function accessorStem(name: string, naming: NamingStyle): string {
+ *  camelCase the stem is `UpperFirst(camel(name))` (→ `getFooBar`, also for a
+ *  `foo_bar` field); in snake_case the stem is the snake form with the leading
+ *  segment upper-cased (→ `get_foo_bar`). */
+export function accessorStem(name: string, naming: NamingStyle): string {
   if (naming === 'snake_case') {
     const snake = toSnakeCase(name);
     return snake ? '_' + snake : snake;
   }
-  return upperFirst(name);
+  return upperFirst(toCamelCase(name));
 }
 
 /** The fluent/record-style accessor identifier for a field (no get/set prefix,
- *  just the field name, snake-cased when requested). */
+ *  just the field name, in the requested naming). */
 function fluentName(name: string, naming: NamingStyle): string {
-  return naming === 'snake_case' ? toSnakeCase(name) : name;
+  return naming === 'snake_case' ? toSnakeCase(name) : toCamelCase(name);
 }
 
 /** A getter reads a boolean with `is` rather than `get` (JavaBeans convention). */

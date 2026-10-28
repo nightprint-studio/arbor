@@ -23,6 +23,9 @@ impl RuleSet {
             .with(FnRule::new("diagnostic", diagnostic_rule))
             .with(FnRule::new("panic", panic_rule))
             .with(FnRule::new("level", level_rule))
+            // Before the timestamp and the rest: its text (`tenant=acme,trace_id=…`) is none of
+            // theirs, and it is the only rule that reads a whole bracketed group.
+            .with(FnRule::new("mdc", mdc_rule))
             .with(FnRule::new("timestamp", timestamp_rule))
             .with(FnRule::new("thread", thread_rule))
             .with(FnRule::new("url", url_rule))
@@ -374,7 +377,8 @@ fn thread_rule(text: &str, at: usize) -> Option<Hit> {
     if inner.is_empty() || inner.len() > 64 {
         return None;
     }
-    if inner.chars().any(|c| c.is_whitespace() || matches!(c, '.' | '/' | '\\' | '[' | ':')) {
+    // `=` is an MDC entry (`[tenant=acme,…]`), which the `mdc` rule reads from just inside the bracket.
+    if inner.chars().any(|c| c.is_whitespace() || matches!(c, '.' | '/' | '\\' | '[' | ':' | '=')) {
         return None;
     }
     // `[42]` is an index, `[x]` is a marker. Neither is a thread.
@@ -382,6 +386,63 @@ fn thread_rule(text: &str, at: usize) -> Option<Hit> {
         return None;
     }
     Some(Hit::one(at, at + close + 1, Token::Thread))
+}
+
+// ── MDC ─────────────────────────────────────────────────────────────────────────
+
+/// The entries of an MDC block: `[tenant=acme,trace_id=abc123,username=mario,delegate=]`.
+///
+/// Asked just after the `[`, because that is where the scanner offers a token start. What marks a
+/// block as MDC and not as prose in brackets is its shape — `key=value` pairs separated by commas,
+/// at least two of them — or the word `MDC` right before it, which is enough for a single pair.
+/// Each key is a [`Token::MdcKey`] and each non-empty value a [`Token::Mdc`]; the `=` and the
+/// commas stay plain so the block still reads as the program wrote it.
+///
+/// This is the layout-free half of what `crate::layout` does by position: a project whose logging
+/// configuration cannot be read still gets its MDC coloured.
+fn mdc_rule(text: &str, at: usize) -> Option<Hit> {
+    let before = &text[..at];
+    if !before.ends_with('[') {
+        return None;
+    }
+    let labelled = before[..before.len() - 1]
+        .trim_end_matches(|c: char| c == ':' || c == ' ')
+        .to_ascii_lowercase()
+        .ends_with("mdc");
+    let close = at + text[at..].find(']')?;
+    let mut parts: Vec<(usize, usize, Token)> = Vec::new();
+    let mut pairs = 0usize;
+    let mut cursor = at;
+    while cursor < close {
+        let entry_end = text[cursor..close].find(',').map_or(close, |i| cursor + i);
+        let entry = &text[cursor..entry_end];
+        let (key, value) = entry.split_once('=')?;
+        if !is_mdc_key(key) {
+            return None;
+        }
+        parts.push((cursor, cursor + key.len(), Token::MdcKey));
+        let value_start = cursor + key.len() + 1;
+        if !value.trim().is_empty() && !value.contains('[') {
+            parts.push((value_start, entry_end, Token::Mdc));
+        }
+        pairs += 1;
+        cursor = entry_end + 1;
+    }
+    if pairs == 0 || (pairs < 2 && !labelled) {
+        return None;
+    }
+    let mut hit = Hit::spanning(close);
+    for (start, end, token) in parts {
+        hit = hit.part(start, end, token, None);
+    }
+    Some(hit)
+}
+
+/// `tenant`, `trace_id`, `X-USERNAME`, `tenant.id`.
+fn is_mdc_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    chars.next().is_some_and(|c| c.is_alphabetic() || c == '_')
+        && chars.all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '-'))
 }
 
 // ── URLs ────────────────────────────────────────────────────────────────────────
@@ -462,7 +523,7 @@ fn path_rule(text: &str, at: usize) -> Option<Hit> {
     if !looks_like_path(path) {
         return None;
     }
-    Some(Hit::linked(at, end, Token::Path, Link::File { path: path.to_string(), line }))
+    Some(Hit::linked(at, end, Token::Path, Link::File { path: path.to_string(), line, method: None }))
 }
 
 /// Whether `s` is shaped like a path rather than like a word that happens to contain a
@@ -575,6 +636,59 @@ mod tests {
         );
     }
 
+    fn mdc_pieces(text: &str) -> Vec<(String, Token)> {
+        let line = interpret(&RuleSet::common(), text);
+        line.spans
+            .iter()
+            .filter(|s| matches!(s.token, Token::Mdc | Token::MdcKey))
+            .map(|s| (line.text[s.start..s.end].to_string(), s.token))
+            .collect()
+    }
+
+    /// The user's own block, found from its shape alone — no layout needed.
+    #[test]
+    fn an_mdc_block_is_read_from_its_shape() {
+        let got = mdc_pieces("x | MDC:[tenant=acme,trace_id=abc123,username=mario,delegate=] | msg");
+        assert_eq!(
+            got,
+            [
+                ("tenant".to_string(), Token::MdcKey),
+                ("acme".to_string(), Token::Mdc),
+                ("trace_id".to_string(), Token::MdcKey),
+                ("abc123".to_string(), Token::Mdc),
+                ("username".to_string(), Token::MdcKey),
+                ("mario".to_string(), Token::Mdc),
+                ("delegate".to_string(), Token::MdcKey),
+            ],
+            "the empty delegate has a key and nothing to colour"
+        );
+    }
+
+    #[test]
+    fn keys_may_carry_dots_and_dashes() {
+        let got = mdc_pieces("[tenant.id=7,X-USERNAME=mario]");
+        assert_eq!(got[0], ("tenant.id".to_string(), Token::MdcKey));
+        assert_eq!(got[2], ("X-USERNAME".to_string(), Token::MdcKey));
+    }
+
+    #[test]
+    fn a_single_pair_needs_the_word_mdc_in_front() {
+        assert!(mdc_pieces("something [id=5] happened").is_empty());
+        assert_eq!(mdc_pieces("MDC:[id=5] happened").len(), 2);
+        assert_eq!(mdc_pieces("mdc [id=5] happened").len(), 2);
+    }
+
+    #[test]
+    fn brackets_that_are_not_key_value_pairs_are_left_alone() {
+        assert!(mdc_pieces("[main] [a=b c] [x=1,y]").is_empty());
+        assert!(mdc_pieces("array[0] = a[i=1]").is_empty());
+    }
+
+    #[test]
+    fn an_unterminated_block_is_declined() {
+        assert!(mdc_pieces("MDC:[tenant=acme,trace_id=abc").is_empty());
+    }
+
     #[test]
     fn a_jdbc_url_is_coloured_but_not_clickable() {
         let line = interpret(&RuleSet::common(), "url=jdbc:postgresql://db:5432/acme");
@@ -587,7 +701,7 @@ mod tests {
         let line = interpret(&RuleSet::common(), "/home/u/src/Foo.java:42: error: bad");
         assert_eq!(
             line.spans[0].link,
-            Some(Link::File { path: "/home/u/src/Foo.java".into(), line: Some(42) })
+            Some(Link::File { path: "/home/u/src/Foo.java".into(), line: Some(42), method: None })
         );
         assert_eq!(&line.text[line.spans[0].start..line.spans[0].end], "/home/u/src/Foo.java:42");
     }
@@ -597,7 +711,7 @@ mod tests {
         let line = interpret(&RuleSet::common(), "wrote C:/build/out/app.jar ok");
         assert_eq!(
             line.spans[0].link,
-            Some(Link::File { path: "C:/build/out/app.jar".into(), line: None })
+            Some(Link::File { path: "C:/build/out/app.jar".into(), line: None, method: None })
         );
     }
 

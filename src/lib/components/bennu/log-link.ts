@@ -20,7 +20,7 @@
 
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { LogLink } from '$lib/types/log';
-import { frameSource } from '$lib/ipc/bennu/nav';
+import { frameSource, methodLine } from '$lib/ipc/bennu/nav';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
 import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
 import { decompiledStore } from '$lib/stores/bennu/decompiled.svelte';
@@ -45,9 +45,13 @@ export async function openLogLink(link: LogLink): Promise<void> {
       return;
     }
     if (link.kind === 'file') {
-      await projectStore.openFile(canon(link.path));
-      // After the open, so the editor exists to be scrolled.
-      if (link.line) bennuUiStore.requestGoto(link.line);
+      const path = canon(link.path);
+      await projectStore.openFile(path);
+      // After the open, so the editor exists to be scrolled. A name that carries a method and
+      // no line (`Order#total`) asks the backend where that method is declared — on the click,
+      // not while streaming, since it parses the file.
+      const line = link.line ?? (link.method ? await methodLine(path, link.method) : null);
+      if (line) bennuUiStore.requestGoto(line);
       return;
     }
     await openLibraryClass(link.class, link.method, link.line);

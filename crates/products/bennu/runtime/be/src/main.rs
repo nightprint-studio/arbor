@@ -35,6 +35,7 @@ mod jobs;
 //
 // The typed product config (`get/set_bennu_config`): the editor's per-project JDK /
 // encoding overrides + defaults, owned out-of-process here.
+mod completion_tuning;
 mod config_cmds;
 // Project model: `bennu_open_project` / `bennu_project_tree` / `bennu_read_file` —
 // pom parse + capability detection + JDK/encoding detection + file tree + decoded
@@ -97,6 +98,9 @@ mod lsp_route;
 // Refactor rename (docs §5 #10-12): `bennu_rename_plan` (preview) / `bennu_rename_apply`
 // (edits) — best-effort, config-aware, off the per-project semantic engine.
 mod rename;
+// Refactor add parameter: `bennu_add_parameter_plan` (preview) and the quick fix on a call that
+// passes one argument too many — planned like a rename, off the same engine.
+mod add_parameter;
 // Find-usages (docs §5 #7): `bennu_references` — the read-only twin of rename, reporting
 // every resolved use site of the symbol under the caret off the same reference index.
 mod references;
@@ -345,6 +349,8 @@ mod repo_config;
 // resolves the frames' classes to project files through the index — the one half of the job
 // a general-purpose log interpreter cannot do.
 mod log;
+mod log_pattern;
+mod run_deps_store;
 // Dependency-classpath sourcing for the index: resolve a Maven project's `~/.m2` dep jars (cached
 // across sessions by pom mtime) into a `ClassSource`, so validation/completion resolve library
 // types (Spring, servlet, …), not just the JDK + project. Non-fatal — degrades to JDK-only.

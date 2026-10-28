@@ -17,6 +17,12 @@
  */
 
 import { getBennuConfig, setBennuConfig } from '$lib/ipc/bennu/config';
+import {
+  SMART_DEFAULTS,
+  smartFromConfig,
+  smartToConfig,
+  type SmartCompletionSettings,
+} from './smart-completion';
 
 /** How the editor turns a Tab press into whitespace. */
 export type IndentStyle = 'spaces' | 'tabs';
@@ -234,6 +240,7 @@ function createSettingsStore() {
   let popupDelayMs = $state(DEFAULTS.popupDelayMs);
   let caseSensitive = $state(DEFAULTS.caseSensitive);
   let importCensus = $state(DEFAULTS.importCensus);
+  let smart = $state<SmartCompletionSettings>({ ...SMART_DEFAULTS });
   let autoImport = $state(DEFAULTS.autoImport);
   // Folding
   let foldingEnabled = $state(DEFAULTS.foldingEnabled);
@@ -333,6 +340,7 @@ function createSettingsStore() {
         completion_delay_ms: popupDelayMs,
         completion_case_sensitive: caseSensitive,
         completion_import_census: importCensus,
+        ...smartToConfig(smart),
         default_encoding: defaultEncoding,
         excluded_dirs: excludedDirList(),
         html_scripts_allowed: htmlScriptsAllowed,
@@ -460,6 +468,12 @@ function createSettingsStore() {
     setCaseSensitive(v: boolean) { caseSensitive = v; void persistConfigBacked(); },
     get importCensus() { return importCensus; },
     setImportCensus(v: boolean) { importCensus = v; void persistConfigBacked(); },
+    /** The smart-suggestions group (name affinity, project usage, chains, ghost text, strength). */
+    get smart(): Readonly<SmartCompletionSettings> { return smart; },
+    setSmart<K extends keyof SmartCompletionSettings>(key: K, value: SmartCompletionSettings[K]) {
+      smart = { ...smart, [key]: value };
+      void persistConfigBacked();
+    },
     get autoImport() { return autoImport; },
     setAutoImport(v: boolean) { autoImport = v; void persistConfigBacked(); },
 
@@ -610,6 +624,7 @@ function createSettingsStore() {
         popupDelayMs = cfg.completion_delay_ms ?? DEFAULTS.popupDelayMs;
         caseSensitive = cfg.completion_case_sensitive ?? DEFAULTS.caseSensitive;
         importCensus = cfg.completion_import_census ?? DEFAULTS.importCensus;
+        smart = smartFromConfig(cfg);
         // An unknown label from a hand-edited config would reach the BE as an encoding nothing
         // can decode with; the Select offers exactly these three.
         defaultEncoding = (SOURCE_ENCODINGS as readonly string[]).includes(cfg.default_encoding)
@@ -702,6 +717,7 @@ function createSettingsStore() {
       popupDelayMs = DEFAULTS.popupDelayMs;
       caseSensitive = DEFAULTS.caseSensitive;
       importCensus = DEFAULTS.importCensus;
+      smart = { ...SMART_DEFAULTS };
       autoImport = DEFAULTS.autoImport;
       foldingEnabled = DEFAULTS.foldingEnabled;
       foldBlockComments = DEFAULTS.foldBlockComments;

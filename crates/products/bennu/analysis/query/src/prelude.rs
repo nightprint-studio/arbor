@@ -19,6 +19,15 @@ pub use crate::functional_types::functional_argument_types;
 // candidate answers the type the position wants, the key every completion list is ordered by first.
 pub use crate::rank::{fits_reference, origin as member_origin, params_fit, Fit, ReferenceShape};
 
+// The smart ranking signals: what the project does with its members, how a name echoes the hole it
+// fills, what a chain has already called, and the user's switches and strength for all of it.
+pub use crate::affinity::name_affinity;
+pub use crate::catch_types::caught_exception_types;
+pub use crate::chain_context::{chain_context, ChainContext};
+pub use crate::hole::hole_name;
+pub use crate::rank::{sequence_points, usage_points, ProjectUsage};
+pub use crate::tuning::{current as completion_tuning, set as set_completion_tuning, Tuning};
+
 // Completion for a BARE identifier — what the lexical scope at the caret binds, the members of
 // the enclosing type, and the static imports. The half of completion that is not after a dot.
 pub use crate::scope_completion::scope_completion;

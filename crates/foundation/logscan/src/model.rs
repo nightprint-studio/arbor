@@ -74,6 +74,13 @@ pub enum Token {
     Url,
     /// A filesystem path, with the `:42` line suffix when it carried one.
     Path,
+    /// The class a log layout's `%logger` / `%class` field names — recognised by position in the
+    /// line, not by shape, so a bare `OrderService` qualifies.
+    Logger,
+    /// A value in an MDC block — `acme` in `MDC:[tenant=acme]`.
+    Mdc,
+    /// The name of an MDC entry — `tenant` in `MDC:[tenant=acme]`.
+    MdcKey,
 }
 
 impl Token {
@@ -95,6 +102,9 @@ impl Token {
             Token::Frame => "frame",
             Token::Url => "url",
             Token::Path => "path",
+            Token::Logger => "logger",
+            Token::Mdc => "mdc",
+            Token::MdcKey => "mdckey",
         }
     }
 }
@@ -158,6 +168,11 @@ pub enum Link {
         path: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         line: Option<u32>,
+        /// The method to land on when the line is not known — a class named in a log
+        /// (`com.acme.Order#total`, a logger) rather than a stack frame. The host resolves it
+        /// against the file it opens.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        method: Option<String>,
     },
     /// An external URL.
     Url { url: String },
@@ -297,7 +312,7 @@ mod tests {
 
     #[test]
     fn a_link_carries_its_kind() {
-        let link = Link::File { path: "/tmp/x.txt".into(), line: Some(4) };
+        let link = Link::File { path: "/tmp/x.txt".into(), line: Some(4), method: None };
         let json = serde_json::to_string(&link).unwrap();
         assert_eq!(json, r#"{"kind":"file","path":"/tmp/x.txt","line":4}"#);
     }

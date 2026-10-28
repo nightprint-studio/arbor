@@ -35,6 +35,8 @@ fn set_bennu_config(_state: &BennuState, config: BennuConfig) -> Result<(), Stri
     // it. Without this the toggle would appear to do nothing until the next project open.
     save(&config)?;
     crate::index_service::refresh_import_census_setting();
+    // Same reasoning for the smart-ranking switches and their strength.
+    crate::completion_tuning::apply_completion_tuning(&config);
     Ok(())
 }
 

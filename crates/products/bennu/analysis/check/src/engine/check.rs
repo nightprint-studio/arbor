@@ -119,6 +119,7 @@ pub fn check_file_in(
     out.extend(crate::switching::switches::switch_selector_errors_nodes(nodes, source));
     out.extend(crate::switching::switches::constant_switch_exhaustiveness_nodes(nodes, source));
     out.extend(crate::decls::duplicates::duplicate_signatures_nodes(nodes, source));
+    out.extend(crate::decls::lombok_ctor::lombok_constructor_clash_nodes(nodes, source));
     out.extend(crate::decls::redeclaration::redeclaration_errors_nodes(nodes, source));
     out.extend(crate::flow::finals::final_reassignment_errors_nodes(nodes, source));
     out.extend(crate::flow::reachable::unreachable_code_nodes(nodes, source));
