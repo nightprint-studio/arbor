@@ -284,7 +284,7 @@ pub(super) fn detail_text(d: &StopDetail) -> String {
     }
     if !d.condition.is_empty() {
         let read = if d.condition_values.is_empty() { String::new() } else { format!(" — it read: {}", d.condition_values) };
-        out.push_str(&format!("\nThe breakpoint's condition `{}` let it through{read}."));
+        out.push_str(&format!("\nThe breakpoint's condition `{}` let it through{read}.", d.condition));
     }
     if let Some(r) = &d.returned {
         if r.method.is_empty() {
