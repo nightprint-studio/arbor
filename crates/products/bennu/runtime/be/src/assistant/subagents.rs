@@ -11,10 +11,11 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use arbor_ipc::prelude::EventSink;
-use bennu_assistant::prelude::{child_card_block, ChildInfo, ChildRegistry};
+use bennu_assistant::prelude::{child_card_block, ChildInfo, ChildRegistry, ChildStatus};
 use bennu_core::prelude::BennuState;
 use serde_json::{json, Value};
 
+use super::agent_store::{self, Record};
 use super::runs;
 use super::session::Session;
 
@@ -100,9 +101,65 @@ pub(super) fn settle_run(run_id: &str) {
     }
 }
 
+/// The agents a conversation had on disk, brought back after a restart. One that was running when the app closed
+/// has no thread to run any more: it is marked stopped, so the list and its card do not show it running forever.
+pub(super) fn hydrate(conversation: &str) {
+    for mut record in agent_store::list(conversation) {
+        if registry().get(&record.info.id).is_some() {
+            continue;
+        }
+        if record.info.status.is_running() {
+            record.info.status = ChildStatus::Stopped;
+            record.info.error = Some("the app was closed while it was running".into());
+            record.info.ended_at.get_or_insert_with(super::now_ms);
+            record.info.waiting = None;
+            agent_store::save(conversation, &record);
+        }
+        if let Some(display) = &record.display {
+            lock(&ENDED).insert(record.info.id.clone(), display.clone());
+        }
+        registry().add(record.info);
+    }
+}
+
+/// Keep an agent on disk as it stands: its record, the thread the modal draws, and the thread the model was sent
+/// (long tool results replaced by a note of what was read).
+pub(super) fn keep(info: &ChildInfo, display: Option<Value>, messages: &[bennu_assistant::prelude::Message]) {
+    agent_store::save(&info.conversation_id, &Record { info: info.clone(), display, messages: bennu_assistant::prelude::slim_for_storage(messages) });
+}
+
+/// A compaction: the agents that have finished are forgotten, in memory and on disk. Those still running stay.
+pub(super) fn discard_ended(conversation: &str) {
+    let running = registry().running_of_conversation(conversation);
+    let gone = registry().remove_finished_of(conversation);
+    {
+        let mut ended = lock(&ENDED);
+        gone.iter().for_each(|id| {
+            ended.remove(id);
+        });
+    }
+    agent_store::delete_all(conversation, &running);
+}
+
+/// A card saved as running, whose agent this process does not have running, is a stopped one.
+pub(super) fn settle_cards(messages: &mut [Value]) {
+    for block in messages.iter_mut().filter_map(|m| m.get_mut("blocks")).filter_map(Value::as_array_mut).flatten() {
+        if block["type"] != "agent" || block["agent"]["status"] != "running" {
+            continue;
+        }
+        let live = block["agent"]["id"].as_str().and_then(|id| registry().get(id)).is_some_and(|c| c.status.is_running());
+        if !live {
+            block["agent"]["status"] = json!("stopped");
+            block["agent"]["error"] = json!("the app was closed while it was running");
+            block["agent"]["waiting"] = Value::Null;
+        }
+    }
+}
+
 /// The conversation was deleted: its agents go with it.
 pub(super) fn forget_conversation(conversation: &str) {
     stop_conversation(conversation);
+    agent_store::delete_all(conversation, &[]);
     let ids: Vec<String> = registry().list(conversation).into_iter().map(|c| c.id).collect();
     {
         let mut ended = lock(&ENDED);
@@ -119,12 +176,19 @@ pub(super) fn forget_conversation(conversation: &str) {
 /// The sub-agents of a conversation, oldest first: what the Agents list shows.
 #[arbor_rpc::handler]
 fn assistant_agents(_ctx: &BennuState, conversation_id: String) -> Result<Value, String> {
+    hydrate(&conversation_id);
     serde_json::to_value(registry().list(&conversation_id)).map_err(|e| e.to_string())
 }
 
 /// One agent and its thread, read-only: live while it runs, as it ended otherwise.
 #[arbor_rpc::handler]
 fn assistant_agent_transcript(_ctx: &BennuState, id: String) -> Result<Value, String> {
+    if registry().get(&id).is_none() {
+        // A card opened after a restart: the agent is on disk, under the conversation it belonged to.
+        if let Some((conversation, _)) = agent_store::find(&id) {
+            hydrate(&conversation);
+        }
+    }
     let info = registry().get(&id).ok_or("there is no such agent any more")?;
     let live = lock(&LIVE).get(&id).cloned();
     let message = match live {
@@ -132,6 +196,21 @@ fn assistant_agent_transcript(_ctx: &BennuState, id: String) -> Result<Value, St
         None => lock(&ENDED).get(&id).cloned(),
     };
     Ok(json!({ "agent": info, "message": message }))
+}
+
+/// Delete a finished agent: its entry in the list and what was kept of its thread. A running one is not deleted;
+/// stop it first. The card it left in the conversation stays, and says its thread is no longer kept.
+#[arbor_rpc::handler]
+fn assistant_agent_delete(_ctx: &BennuState, id: String) -> Result<(), String> {
+    let conversation = match registry().get(&id) {
+        Some(info) if info.status.is_running() => return Err("it is still running: stop it first".into()),
+        Some(info) => info.conversation_id,
+        None => agent_store::find(&id).map(|(c, _)| c).ok_or("there is no such agent any more")?,
+    };
+    registry().remove(&id);
+    lock(&ENDED).remove(&id);
+    agent_store::delete(&conversation, &id);
+    Ok(())
 }
 
 /// Stop one agent. It ends at its next chunk or tool and reports what it had.

@@ -32,7 +32,7 @@ Imber acts only through a fixed set of tools, grouped in families; each family c
 - **Let it change a running Bevy game** (`brp_mutate`, `brp_insert`, `brp_remove`, `brp_spawn`, `brp_despawn`, `brp_set_resource`): off by default, needs the Bevy family on.
 - **Let it change the program it debugs** (`debug_throw`, `debug_force_return`, `debug_drop_frame`, `debug_set_value`): off by default, needs the Debugger family on.
 - **Git** (`corvus_status`, `corvus_diff`, `corvus_log`, `corvus_blame`, `corvus_stage`, `corvus_unstage`, `corvus_commit`): off by default. See below.
-- **Sub-agents** (`spawn_agent`, `await_agents`): off by default; and the peer tools `file_owner` and `request_change` for talking to other conversations about a file. See [Imber › Sub-agents](11-sub-agents.md).
+- **Sub-agents** (`spawn_agent`, `resume_agent`, `await_agents`): off by default; and the peer tools `file_owner` and `request_change` for talking to other conversations about a file. See [Imber › Sub-agents](11-sub-agents.md).
 - **Step plan** (`update_plan`): on by default.
 
 ## Tools that are always there

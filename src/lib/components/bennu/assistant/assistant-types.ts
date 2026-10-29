@@ -199,6 +199,8 @@ export interface AgentCard {
   cost: number;
   startedAt: number;
   endedAt: number | null;
+  /** What it was asked, cut to a line or two. Absent in cards saved before the card carried it. */
+  task?: string;
   /** The first part of what it answered. */
   summary: string;
   /** Why it failed, when it did (a lost connection, a rejected key…). */

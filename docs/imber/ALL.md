@@ -325,7 +325,7 @@ Imber acts only through a fixed set of tools, grouped in families; each family c
 - **Let it change a running Bevy game** (`brp_mutate`, `brp_insert`, `brp_remove`, `brp_spawn`, `brp_despawn`, `brp_set_resource`): off by default, needs the Bevy family on.
 - **Let it change the program it debugs** (`debug_throw`, `debug_force_return`, `debug_drop_frame`, `debug_set_value`): off by default, needs the Debugger family on.
 - **Git** (`corvus_status`, `corvus_diff`, `corvus_log`, `corvus_blame`, `corvus_stage`, `corvus_unstage`, `corvus_commit`): off by default. See below.
-- **Sub-agents** (`spawn_agent`, `await_agents`): off by default; and the peer tools `file_owner` and `request_change` for talking to other conversations about a file. See Imber › Sub-agents.
+- **Sub-agents** (`spawn_agent`, `resume_agent`, `await_agents`): off by default; and the peer tools `file_owner` and `request_change` for talking to other conversations about a file. See Imber › Sub-agents.
 - **Step plan** (`update_plan`): on by default.
 
 ## Tools that are always there
@@ -476,7 +476,11 @@ Reading never asks. The connection itself and the protocol are explained on the 
 
 ## Reading a profiler recording
 
-The project-intelligence family includes `bennu_profile_summary`: a compact summary of the newest recording the Profiler tool window made (the hottest methods with their source lines, the biggest allocation sites and allocated types, lock contention and garbage-collection pauses). Imber uses it to find the method worth optimising and to propose a change. It only reads: it never starts a recording, and with no recording it tells you to make one first. Recording is described on the **Profiler** page.
+The project-intelligence family includes three read-only profiler tools. `bennu_profile_recordings` lists the recordings the Profiler tool window made. `bennu_profile_diff` compares two of them method by method (the share of the run each took before and after, biggest changes first), to check that a change made the code faster. `bennu_profile_summary` is a compact summary of one recording (the newest unless Imber names another): the hottest methods with their source lines, the biggest allocation sites and allocated types, lock contention and garbage-collection pauses. Imber uses it to find the method worth optimising and to propose a change. These three only read: with no recording they tell you to make one first. Recording by hand is described on the **Profiler** page; Imber recording for you is below.
+
+## Recording a running JVM
+
+The **Profile** family (`profile_start`, `profile_stop`) lets Imber record a JVM that is already running on this machine with Flight Recorder, through `jcmd`. **Imber asks at every start**, naming the JVM, because a recording samples a running program (nothing in it is changed, it runs a little slower). Imber names the JVM by process id or by part of its main class; with neither, it gets the list to choose from. One recording per conversation, started in one message and stopped in a later one. `profile_stop` ends the recording, waits until it has been read and saved, and returns its summary; the recording is then in the Profiler window like any other. A recording keeps sampling until it is stopped. Sub-agents never have these tools, and the family can be switched off like any other.
 
 ---
 
@@ -562,7 +566,7 @@ Off by default. **Settings › Imber › New conversations › Sub-agents** turn
 
 ## What an agent can do
 
-- **Read-only by default.** An agent reads and searches on the cheaper side model (Settings › Imber › Cheaper model for side jobs), and up to three run at once. Imber can go on while they work and collects their summaries later (`spawn_agent`, `await_agents`).
+- **Read-only by default.** An agent reads and searches on the cheaper side model (Settings › Imber › Cheaper model for side jobs), and up to three run at once. Imber can go on while they work and collects their summaries later (`spawn_agent`, `resume_agent`, `await_agents`).
 - **Editing** is possible only when the conversation's own edits are applied rather than proposed (Accept edits or Autonomous, with editing on). Then Imber waits for the agent, so only one of them writes at a time, and file reservations apply as for any conversation.
 - **Limits per agent:** 25 steps, one level of agents (an agent cannot start agents), a summary of at most 6,000 characters.
 
@@ -577,9 +581,9 @@ What an agent spends is added to the conversation and counts against the spendin
 ## Seeing them
 
 - Above the thread an *Agents* list shows each agent's state, how long it has run and what it cost.
-- The title opens its thread, read-only and live (*Imber: Open the latest sub-agent's thread…*).
+- The title opens its thread, read-only and live (*Imber: Open the latest sub-agent's thread…*). It reads as a chat between the two: the task Imber (badged *main*) gave it, then the agent's own messages (badged *sub-agent*), a writing mark while it works and, at the end, a line saying it handed its summary back, stopped or failed. The view follows the end of the thread unless you scrolled up.
 - Each agent has a Stop; *Stop all* and *Imber: Stop all sub-agents* stop them together.
-- A card for each stays in the thread with the start of its answer. Agents live as long as the app does; the card stays with the conversation.
+- A card for each stays in the thread: what it was asked, what it may do, its state, time and cost, and the start of its answer. While the agent runs the card's border moves. An agent's record and thread are kept on disk for as long as its conversation keeps them, so the Agents list and an agent's thread still open after a restart; an agent that was running when the app closed shows as stopped. What it read is not copied: the kept thread says *read this file*, not the file. Imber can continue a finished agent with `resume_agent` and a new instruction: it remembers what it concluded and reads again what it needs. The trash button on a finished agent deletes it; compacting the conversation, or deleting it, deletes them all.
 
 ## A hint, not a decision
 

@@ -63,6 +63,7 @@ pub(super) fn release_debug(conversation: &str) {
 pub(super) fn release_debug_matching(root: Option<&str>, reason: &str) {
     debug_keep::release_matching(root, reason);
 }
+mod profile;
 mod screenshot;
 mod skills;
 mod spawn;
@@ -91,6 +92,7 @@ pub(super) fn all_specs() -> Vec<ToolSpec> {
     specs.extend(diagram::specs());
     specs.extend(history::specs());
     specs.extend(live::specs());
+    specs.extend(profile::specs());
     specs.extend(reads::specs());
     specs.extend(screenshot::specs());
     specs.extend(skills::specs());
@@ -638,6 +640,7 @@ impl ToolHost {
             n if debug::is_debug_tool(n) => self.run_debug(n, &call.input),
             n if brp::is_brp_tool(n) => self.run_brp(n, &call.input),
             n if screenshot::is_screenshot_tool(n) => self.run_screenshot(&call.id, n, &call.input),
+            n if profile::is_profile_tool(n) => self.run_profile(n, &call.input),
             "create_file" => self.run_create(&call.input),
             "delete_file" => self.run_delete(&call.input),
             "rename_symbol" => self.run_rename(&call.input),

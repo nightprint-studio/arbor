@@ -460,7 +460,7 @@ pub fn request_step(
 pub fn request_method_exit(client: &Client, thread: Id, exclude: &[&str]) -> Result<i32> {
     let mut w = Writer::new(client.sizes());
     w.u8(crate::event::kind::METHOD_EXIT_WITH_RETURN_VALUE).u8(SuspendPolicy::None.to_byte()).i32(1 + exclude.len() as i32);
-    w.u8(4).object_id(thread); // modifier 4 = ThreadOnly
+    w.u8(3).object_id(thread); // modifier 3 = ThreadOnly (4 is ClassOnly: it takes a type, and the VM refuses a thread)
     for pattern in exclude {
         w.u8(6).string(pattern); // modifier 6 = ClassExclude
     }

@@ -72,6 +72,9 @@ pub use crate::subagent::{
     RequestLimiter, MAX_CHANGE_REQUESTS_PER_RUN, MAX_DEPTH as MAX_SUBAGENT_DEPTH, MAX_PARALLEL_CHILDREN,
 };
 
+// What an agent's thread keeps on disk, and how a kept thread is picked up again.
+pub use crate::agent_context::{continue_with, slim_for_storage};
+
 // The children of a conversation: their record, the registry, the checks on starting one, and the texts around them.
 pub use crate::children::{
     agents_enabled, card_block as child_card_block, child_cap_eur, normalize_agents_flag, child_mode, describe_owner, failure_note as child_failure_note, waiting_text as child_waiting_text, fill_ratio, final_answer, label_prompt, nudge_effort, plan_spawn, report_for_parent, touched_files, ChildInfo,

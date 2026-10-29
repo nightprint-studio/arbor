@@ -9,6 +9,7 @@
 //! events — the message as it stands, usage, questions that need an answer — and ends with `done`. It
 //! lives on its own thread because it waits on the user, and a serve-loop worker is not for waiting.
 
+mod agent_store;
 mod apply;
 #[cfg(test)]
 mod cache_audit;
@@ -706,10 +707,14 @@ fn execute(
     let last_request = requests.last().copied();
     // At the end of a run that went well, a conversation past its share of the window is folded now: the user is
     // between messages, and the requests after this one stop carrying the bulk.
+    let mut compacted = false;
     if error.is_none() && ended == "done" && max_context > 0 {
         let overhead = tokens(&request.system) + tokens(&serde_json::to_string(&request.tools).unwrap_or_default());
         match side_jobs::compact_at_boundary(&session.run_id, &mut conv.transcript, overhead, max_context, &key, &request.model) {
-            Ok(Some(folded)) => session.view().push(json!({ "type": "notice", "level": "info", "text": folded.report })),
+            Ok(Some(folded)) => {
+                compacted = true;
+                session.view().push(json!({ "type": "notice", "level": "info", "text": folded.report }));
+            }
             Ok(None) => {}
             // The conversation is exactly as it was; the next run tries again.
             Err(e) => session.view().push(json!({
@@ -727,6 +732,10 @@ fn execute(
     // Whatever the run opened for itself ends with it, and the thread says so.
     // Agents still going are stopped and given a moment to write their ending into the thread that is saved below.
     subagents::settle_run(&session.run_id);
+    // A compaction folds what the agents were for into the summary: their kept threads go with the older messages.
+    if compacted {
+        subagents::discard_ended(&session.conversation_id);
+    }
     session.expire_grants();
     // A run that drove live processes ends with a card of what it started, sent, asserted and cost.
     let live_card = session.live_log().card(&crate::live::running_names_of(&session.root, Some(&session.conversation_id)), run_usd);
@@ -837,6 +846,9 @@ fn assistant_compact(ctx: &BennuState, args: CompactArgs) -> Result<Value, Strin
     let done = compact::compact(&conv.transcript, &transport, &key, &side, args.instructions.as_deref(), true, &size, 0)
         .map_err(|e| format!("The conversation could not be compacted: {} It was left as it was.", e.friendly()))?;
     conv.transcript = done.transcript;
+    if done.summarized {
+        subagents::discard_ended(&conv.id);
+    }
     let rebuilt = estimate_context("", &[], &conv.transcript);
     // The standing part (instructions and tools) is unchanged by this; only the rest is recounted.
     conv.context = Context { project: rebuilt.project, conversation: rebuilt.conversation, ..conv.context };
@@ -925,6 +937,10 @@ fn assistant_load(_ctx: &BennuState, id: String) -> Result<Value, String> {
     let mut c = serde_json::to_value(store::load_in(&store::dir(), &id)?).map_err(|e| e.to_string())?;
     if let Some(o) = c.as_object_mut() {
         o.remove("transcript");
+        // An agent card saved as running, in a process that no longer has the agent, is not running.
+        if let Some(messages) = o.get_mut("messages").and_then(Value::as_array_mut) {
+            subagents::settle_cards(messages);
+        }
     }
     Ok(c)
 }

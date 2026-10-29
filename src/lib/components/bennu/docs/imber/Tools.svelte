@@ -28,7 +28,7 @@
   <li><strong>Let it change a running Bevy game</strong> (<code>brp_mutate</code>, <code>brp_insert</code>, <code>brp_remove</code>, <code>brp_spawn</code>, <code>brp_despawn</code>, <code>brp_set_resource</code>): off by default, needs the Bevy family on.</li>
   <li><strong>Let it change the program it debugs</strong> (<code>debug_throw</code>, <code>debug_force_return</code>, <code>debug_drop_frame</code>, <code>debug_set_value</code>): off by default, needs the Debugger family on.</li>
   <li><strong>Git</strong> (<code>corvus_status</code>, <code>corvus_diff</code>, <code>corvus_log</code>, <code>corvus_blame</code>, <code>corvus_stage</code>, <code>corvus_unstage</code>, <code>corvus_commit</code>): off by default. See below.</li>
-  <li><strong>Sub-agents</strong> (<code>spawn_agent</code>, <code>await_agents</code>): off by default; and the peer tools <code>file_owner</code> and <code>request_change</code> for talking to other conversations about a file. See Imber › Sub-agents.</li>
+  <li><strong>Sub-agents</strong> (<code>spawn_agent</code>, <code>resume_agent</code>, <code>await_agents</code>): off by default; and the peer tools <code>file_owner</code> and <code>request_change</code> for talking to other conversations about a file. See Imber › Sub-agents.</li>
   <li><strong>Step plan</strong> (<code>update_plan</code>): on by default.</li>
 </ul>
 

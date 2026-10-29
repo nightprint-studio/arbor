@@ -35,9 +35,9 @@
 <h2>Seeing them</h2>
 <ul>
   <li>Above the thread an <em>Agents</em> list shows each agent's state, how long it has run and what it cost.</li>
-  <li>The title opens its thread, read-only and live (<em>Imber: Open the latest sub-agent's thread…</em>).</li>
+  <li>The title opens its thread, read-only and live (<em>Imber: Open the latest sub-agent's thread…</em>). It reads as a chat between the two: the task Imber (badged <em>main</em>) gave it, then the agent's own messages (badged <em>sub-agent</em>), a writing mark while it works and, at the end, a line saying it handed its summary back, stopped or failed. The view follows the end of the thread unless you scrolled up.</li>
   <li>Each agent has a Stop; <em>Stop all</em> and <em>Imber: Stop all sub-agents</em> stop them together.</li>
-  <li>A card for each stays in the thread with the start of its answer. Agents live as long as the app does; the card stays with the conversation.</li>
+  <li>A card for each stays in the thread: what it was asked, what it may do, its state, time and cost, and the start of its answer. While the agent runs the card's border moves. An agent's record and thread are kept on disk for as long as its conversation keeps them, so the Agents list and an agent's thread still open after a restart; an agent that was running when the app closed shows as stopped. What it read is not copied: the kept thread says <em>read this file</em>, not the file. Imber can continue a finished agent with <code>resume_agent</code> and a new instruction: it remembers what it concluded and reads again what it needs. The trash button on a finished agent deletes it; compacting the conversation, or deleting it, deletes them all.</li>
 </ul>
 
 <h2>A hint, not a decision</h2>

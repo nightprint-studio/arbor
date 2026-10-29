@@ -380,9 +380,57 @@ fn finish_session(ctx: &BennuState, session_id: &str) -> Result<(), String> {
 
 fn report(sink: &dyn arbor_ipc::prelude::EventSink, session_id: &str, root: &str, outcome: Result<Profile, String>) {
     match outcome.and_then(|p| store::save(root, &p).map(|_| p)) {
-        Ok(p) => sink.emit(EVT_DONE, json!({ "session_id": session_id, "ok": true, "meta": store::meta_of(&p) })),
-        Err(e) => sink.emit(EVT_DONE, json!({ "session_id": session_id, "ok": false, "error": e })),
+        Ok(p) => {
+            lock(outcomes()).insert(session_id.to_string(), Ok(()));
+            sink.emit(EVT_DONE, json!({ "session_id": session_id, "ok": true, "meta": store::meta_of(&p) }));
+        }
+        Err(e) => {
+            lock(outcomes()).insert(session_id.to_string(), Err(e.clone()));
+            sink.emit(EVT_DONE, json!({ "session_id": session_id, "ok": false, "error": e }));
+        }
     }
+}
+
+/// How each recording's parse ended, for a caller that waits for it instead of listening for the event (the AI
+/// assistant). Small: a session id and a line.
+fn outcomes() -> &'static Mutex<HashMap<String, Result<(), String>>> {
+    static O: OnceLock<Mutex<HashMap<String, Result<(), String>>>> = OnceLock::new();
+    O.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Whether the recording `session_id` has been parsed and saved: `None` while it is still being read.
+pub(crate) fn outcome_of(session_id: &str) -> Option<Result<(), String>> {
+    lock(outcomes()).get(session_id).cloned()
+}
+
+// ── for the assistant's own tools ─────────────────────────────────────────────
+
+/// The JVMs on this machine a recorder can attach to.
+pub(crate) fn running_jvms(root: &str) -> Result<Vec<(u32, String)>, String> {
+    Ok(detect::list_jvms(root)?.into_iter().map(|j| (j.pid, j.name)).collect())
+}
+
+/// Start recording the JVM `pid`: a session and the recorder started inside it. Returns the session id.
+pub(crate) fn start_recording(ctx: &BennuState, root: &str, pid: u32, label: &str) -> Result<String, String> {
+    let prepared = bennu_profile_prepare(ctx, PrepareArgs { root: root.to_string(), lang: "java".into(), label: label.to_string(), pid: Some(pid), samply_path: None, rate_hz: None })?;
+    if let Err(e) = run_jcmd_steps(&prepared.session_id, false) {
+        // Nothing is recording: the session and its scratch folder go.
+        if let Some(s) = lock(sessions()).remove(&prepared.session_id) {
+            let _ = std::fs::remove_dir_all(&s.dir);
+        }
+        return Err(e);
+    }
+    Ok(prepared.session_id)
+}
+
+/// Stop the recording and parse it in the background; `outcome_of` says when it is saved.
+pub(crate) fn stop_recording(ctx: &BennuState, session_id: &str) -> Result<(), String> {
+    bennu_profile_attach_stop(ctx, SessionArgs { session_id: session_id.to_string() })
+}
+
+/// The summary of a saved recording, as `bennu_profile_summary` gives it.
+pub(crate) fn recording_summary(root: &str, id: &str, limit: usize) -> Result<serde_json::Value, String> {
+    summary_of(root, Some(id), limit.clamp(1, 50))
 }
 
 fn parse_session(s: &Session, id: &str, sink: &dyn arbor_ipc::prelude::EventSink) -> Result<Profile, String> {
@@ -713,26 +761,85 @@ pub struct ProfileSummaryArgs {
     /// How many rows each list keeps (default 15, at most 50).
     #[serde(default)]
     pub limit: Option<usize>,
+    /// The recording to summarise, by id (see `bennu_profile_recordings`). Default: the newest.
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
-/// The newest profiler recording of the project, reduced to what explains where time and memory
+/// A recording of the project's profiler, reduced to what explains where time and memory
 /// went: the hottest methods (self and total share of the samples, self milliseconds, the hottest
 /// source lines of each), the biggest allocation sites and allocated types, lock contention and
-/// garbage-collection pauses. Use it to find the method worth optimising and to propose a change;
-/// it measures a run the user already made and starts nothing. Errors when no recording exists.
+/// garbage-collection pauses. The newest one unless `id` names another. Use it to find the method worth
+/// optimising and to propose a change; it measures a run the user already made and starts nothing.
+/// Errors when no recording exists.
 #[arbor_rpc::handler(mcp(
     title = "Profiler recording summary",
     safety = read,
 ))]
 fn bennu_profile_summary(_ctx: &BennuState, args: ProfileSummaryArgs) -> Result<serde_json::Value, String> {
-    latest_summary(&args.root, args.limit.unwrap_or(15).clamp(1, 50))
+    summary_of(&args.root, args.id.as_deref(), args.limit.unwrap_or(15).clamp(1, 50))
 }
 
-/// A compact JSON summary of the newest recording: what the model needs to propose a fix.
+/// Args for [`bennu_profile_recordings`].
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct RecordingsArgs {
+    /// Absolute path to the project root.
+    pub root: String,
+}
+
+/// The profiler recordings the project has, newest first: id, language, label, when it was made, how long it ran
+/// and how many samples it holds. The ids are what `bennu_profile_summary` and `bennu_profile_diff` take. Read-only.
+#[arbor_rpc::handler(mcp(
+    title = "Profiler recordings",
+    safety = read,
+))]
+fn bennu_profile_recordings(_ctx: &BennuState, args: RecordingsArgs) -> Result<serde_json::Value, String> {
+    let list = store::list(&args.root);
+    if list.is_empty() {
+        return Err("There is no profiler recording for this project yet. Ask the user to record one (Profiler tool window).".into());
+    }
+    serde_json::to_value(list).map_err(|e| e.to_string())
+}
+
+/// Args for [`bennu_profile_diff`].
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct ProfileDiffArgs {
+    /// Absolute path to the project root.
+    pub root: String,
+    /// The earlier recording's id (see `bennu_profile_recordings`).
+    pub old: String,
+    /// The later recording's id.
+    pub new: String,
+    /// How many methods to return (default 15, at most 50).
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// What changed between two recordings, method by method: the share of the run each took before and after, the
+/// change in percentage points and the self milliseconds, the biggest changes first. Use it to check that a change
+/// made the code faster (or to find what made it slower) after the user recorded again. Read-only.
+#[arbor_rpc::handler(mcp(
+    title = "Profiler recordings compared",
+    safety = read,
+))]
+fn bennu_profile_diff(_ctx: &BennuState, args: ProfileDiffArgs) -> Result<serde_json::Value, String> {
+    let (old, new) = (store::load(&args.root, &args.old)?, store::load(&args.root, &args.new)?);
+    let changes = compare(&old, &new, args.limit.unwrap_or(15).clamp(1, 50));
+    Ok(json!({
+        "old": store::meta_of(&old),
+        "new": store::meta_of(&new),
+        "changes": changes,
+    }))
+}
+
+/// A compact JSON summary of a recording (the newest when `id` is `None`): what the model needs to propose a fix.
 /// `limit` caps every list.
-fn latest_summary(root: &str, limit: usize) -> Result<serde_json::Value, String> {
-    let meta = store::latest(root, None)
-        .ok_or("There is no profiler recording for this project yet. Ask the user to record one (Profiler tool window).")?;
+fn summary_of(root: &str, id: Option<&str>, limit: usize) -> Result<serde_json::Value, String> {
+    let meta = match id {
+        Some(id) => store::list(root).into_iter().find(|m| m.id == id).ok_or_else(|| format!("There is no recording `{id}`: bennu_profile_recordings lists them."))?,
+        None => store::latest(root, None)
+            .ok_or("There is no profiler recording for this project yet. Ask the user to record one (Profiler tool window).")?,
+    };
     let p = store::load(root, &meta.id)?;
     let total = p.tree.total.max(1) as f64;
     let methods: Vec<_> = p

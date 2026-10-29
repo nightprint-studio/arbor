@@ -154,7 +154,8 @@ impl ToolHost {
             || live::is_live_tool(&call.name)
             || debug::is_debug_tool(&call.name)
             || brp::is_brp_tool(&call.name)
-            || screenshot::is_screenshot_tool(&call.name);
+            || screenshot::is_screenshot_tool(&call.name)
+            || profile::is_profile_tool(&call.name);
         if !known {
             return Gate::Refuse(format!("`{}` is not a tool you have", call.name));
         }

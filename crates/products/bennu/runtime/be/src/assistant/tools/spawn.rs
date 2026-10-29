@@ -16,7 +16,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use bennu_assistant::prelude::{
-    self as assistant, change_request_note, child_card_block, child_cap_eur, child_mode, describe_owner, final_answer, find_model, plan_spawn, report_for_parent, restrict_policy,
+    self as assistant, SpawnPlan, change_request_note, child_card_block, child_cap_eur, child_mode, describe_owner, final_answer, find_model, plan_spawn, report_for_parent, restrict_policy,
     child_failure_note, child_waiting_text, Anthropic, ChildInfo, ChildStatus, ChildTools, Effort, Ended, Outcome, ProviderError, SideJob, SubagentBudget, WorktreeMode, CHILD_MAX_STEPS, MAX_CHANGE_REQUESTS_PER_RUN,
 };
 use bennu_core::prelude::BennuState;
@@ -30,9 +30,10 @@ pub(super) const SPAWN: &str = "spawn_agent";
 pub(super) const AWAIT: &str = "await_agents";
 pub(super) const OWNER: &str = "file_owner";
 pub(super) const REQUEST: &str = "request_change";
+pub(super) const RESUME: &str = "resume_agent";
 
 pub(super) fn is_agent_tool(name: &str) -> bool {
-    matches!(name, SPAWN | AWAIT | OWNER | REQUEST)
+    matches!(name, SPAWN | AWAIT | OWNER | REQUEST | RESUME)
 }
 
 /// What an agent is never given, whatever it was started with: it cannot put questions to the user (its access
@@ -83,6 +84,15 @@ pub(super) fn specs() -> Vec<ToolSpec> {
             },"required":["title","task"]}),
         ),
         spec(
+            RESUME,
+            "Continue a sub-agent that has finished (or was stopped, or was cut off by a restart) with a new instruction, instead of starting over. It picks up its own earlier thread: what it said, decided and concluded is kept; what it read is not kept in full (only a note that it read the file), so it reads again what it needs. Use it when an agent's summary was close and you need a follow-up. Same limits as spawn_agent. Its kept thread is deleted when the conversation is compacted or deleted, or when the user deletes the agent — then start a new one.",
+            json!({"type":"object","properties":{
+                "id":{"type":"string","description":"The agent's id (spawn_agent's answer, or the Agents list)."},
+                "message":{"type":"string","description":"What it should do next, with whatever it needs that its earlier thread does not already say."},
+                "background":{"type":"boolean","description":"Return at once with its id, as for spawn_agent (read-only agents)."}
+            },"required":["id","message"]}),
+        ),
+        spec(
             AWAIT,
             "Wait for background agents and return their summaries. `ids` defaults to every agent you started in the background and have not collected.",
             json!({"type":"object","properties":{"ids":{"type":"array","items":{"type":"string"}}}}),
@@ -101,6 +111,16 @@ pub(super) fn specs() -> Vec<ToolSpec> {
             },"required":["file","description"]}),
         ),
     ]
+}
+
+/// An agent being picked up again: its id, its first task, what it had cost, the thread it is sent and the blocks
+/// the modal had drawn.
+struct Resume {
+    id: String,
+    task: String,
+    started_before: f64,
+    messages: Vec<Message>,
+    blocks: Vec<Value>,
 }
 
 /// What a run needs to start agents: the model and the settings its own requests use.
@@ -139,6 +159,7 @@ impl ToolHost {
             AWAIT => self.run_await(input),
             OWNER => self.run_file_owner(input),
             REQUEST => self.run_request_change(input),
+            RESUME => self.run_resume(input),
             other => Err(format!("`{other}` is not a tool you have")),
         }
     }
@@ -153,16 +174,51 @@ impl ToolHost {
         let running = subagents::registry().running_of_run(&self.session.run_id).len();
         let parent_allows_edits = self.session.policy().allow_edits;
         let plan = plan_spawn(text("title"), text("task"), tools_word, background, running, self.session.mode, parent_allows_edits)?;
+        let effort = input.get("effort").and_then(Value::as_str).and_then(Effort::parse).unwrap_or(Effort::Medium);
+        self.start_child(setup, plan, effort, None)
+    }
 
+    // ── resume_agent ─────────────────────────────────────────────────────────────────────────────
+
+    /// Continue an agent that has ended: its kept thread plus a new instruction. What it read is not kept in full
+    /// (see `agent_store`), so it knows what it had looked at and concluded, and reads again what it needs.
+    fn run_resume(&self, input: &Value) -> Result<String, String> {
+        let setup = self.agents.setup.as_ref().ok_or("sub-agents are switched off for this conversation")?;
+        let id = input.get("id").and_then(Value::as_str).map(str::trim).filter(|i| !i.is_empty()).ok_or("`id` is required: the agent's id, as spawn_agent or the Agents list gave it")?;
+        let message = input.get("message").and_then(Value::as_str).map(str::trim).filter(|m| !m.is_empty()).ok_or("`message` is required: what the agent should do next")?;
+        let background = input.get("background").and_then(Value::as_bool).unwrap_or(false);
+
+        let conversation = &self.session.conversation_id;
+        subagents::hydrate(conversation);
+        let info = subagents::registry().get(id).filter(|c| &c.conversation_id == conversation).ok_or_else(|| format!("`{id}` is not an agent of this conversation (or it was deleted, or the conversation was compacted)"))?;
+        if info.status.is_running() {
+            return Err(format!("`{id}` is still running: collect it with `await_agents`, or stop it first"));
+        }
+        let record = crate::assistant::agent_store::load(conversation, id).ok_or_else(|| format!("what `{id}` had worked out is no longer kept: start a new agent with `spawn_agent`"))?;
+
+        let running = subagents::registry().running_of_run(&self.session.run_id).len();
+        let plan = plan_spawn(&info.title, message, &info.tools, background, running, self.session.mode, self.session.policy().allow_edits)?;
+        let resume = Resume {
+            id: info.id.clone(),
+            task: info.task.clone(),
+            started_before: info.cost,
+            messages: bennu_assistant::prelude::continue_with(record.messages, message),
+            blocks: record.display.as_ref().and_then(|d| d["blocks"].as_array().cloned()).unwrap_or_default(),
+        };
+        self.start_child(setup, plan, Effort::Medium, Some(resume))
+    }
+
+    /// The part `spawn_agent` and `resume_agent` share: start the agent's thread with the messages it is to be sent,
+    /// record it, put its card in this run's message, and wait for it or hand back its id.
+    fn start_child(&self, setup: &AgentSetup, plan: SpawnPlan, effort: Effort, resume: Option<Resume>) -> Result<String, String> {
         let policy = restrict_policy(&self.session.policy(), self.session.mode, plan.tools);
         let (table, _) = models::load();
         let model_id = if plan.tools == ChildTools::Read { side_jobs::side_model(SideJob::Exploration, &setup.model) } else { setup.model.clone() };
         let model = find_model(&table, &model_id).cloned();
-        let effort = input.get("effort").and_then(Value::as_str).and_then(Effort::parse).unwrap_or(Effort::Medium);
         let effort = model.as_ref().and_then(|m| effort.clamp_to(&m.efforts));
         let key = crate::assistant::api_key(&self.session.ctx)?;
 
-        let id = subagents::registry().next_id(&self.session.run_id);
+        let id = resume.as_ref().map_or_else(|| subagents::registry().next_id(&self.session.run_id), |r| r.id.clone());
         let now = crate::assistant::now_ms();
         let mode = child_mode(self.session.mode);
         let read_only = plan.tools == ChildTools::Read;
@@ -172,7 +228,13 @@ impl ToolHost {
             ctx = ctx.with_host_caller(host);
         }
         let cancel = runs::begin(&id);
-        let mut session = Session::new(id.clone(), id.clone(), self.session.root.clone(), mode, std::sync::Arc::new(subagents::NullSink), ctx, cancel, policy, View::new(format!("g{id}"), model_id.clone(), now));
+        let mut view = View::new(format!("g{id}"), model_id.clone(), now);
+        // A resumed agent's thread goes on from where it was: what it did before, then why it is back.
+        if let Some(r) = &resume {
+            r.blocks.iter().for_each(|b| view.push(b.clone()));
+            view.push(json!({ "type": "notice", "level": "info", "text": format!("Resumed by main: {}", plan.task.chars().take(300).collect::<String>()) }));
+        }
+        let mut session = Session::new(id.clone(), id.clone(), self.session.root.clone(), mode, std::sync::Arc::new(subagents::NullSink), ctx, cancel, policy, view);
         session.projects = self.session.projects.clone();
         session.title = self.session.title.clone();
         session.build_isolation = self.session.build_isolation;
@@ -180,10 +242,14 @@ impl ToolHost {
         let session = Arc::new(session);
 
         let system = child_system(&session, setup, read_only);
+        let messages = match &resume {
+            Some(r) => r.messages.clone(),
+            None => vec![Message::user(plan.task.clone())],
+        };
         let request = Request {
             model: model_id.clone(),
             system,
-            messages: vec![Message::user(plan.task.clone())],
+            messages,
             tools: Vec::new(),
             max_tokens: setup.max_tokens,
             effort,
@@ -192,24 +258,31 @@ impl ToolHost {
         let guard = self.guard.as_ref().map(|g| Guard { limits: g.limits, periods: g.periods, session_base: g.session_base, model: model.clone() });
         let (cap_eur, eur_per_usd) = self.guard.as_ref().map_or((child_cap_eur(0.0), 1.0), |g| (child_cap_eur(g.limits.session_eur), g.limits.eur_per_usd));
 
+        let base_cost = resume.as_ref().map_or(0.0, |r| r.started_before);
         let info = ChildInfo {
             id: id.clone(),
             conversation_id: self.session.conversation_id.clone(),
             run_id: self.session.run_id.clone(),
             title: plan.title.clone(),
-            task: plan.task.clone(),
+            task: resume.as_ref().map_or_else(|| plan.task.clone(), |r| r.task.clone()),
             tools: if read_only { "read" } else { "read+edit" }.into(),
             model: model_id.clone(),
             status: ChildStatus::Running,
-            cost: 0.0,
+            cost: base_cost,
             started_at: now,
             ended_at: None,
             summary: None,
             error: None,
             waiting: None,
         };
-        subagents::registry().add(info.clone());
+        if resume.is_some() {
+            subagents::registry().update(&id, |c| *c = info.clone());
+        } else {
+            subagents::registry().add(info.clone());
+        }
         subagents::register_live(&id, Arc::clone(&session));
+        // Kept from the start, so an agent the app is closed on is found again, stopped, and not lost.
+        subagents::keep(&info, Some(session.display_snapshot()), &request.messages);
         self.session.view().push(child_card_block(&info));
         self.session.push_message();
         self.session.emit("agent", json!({ "agent": info }));
@@ -227,6 +300,7 @@ impl ToolHost {
             cap_eur,
             eur_per_usd,
             read_only,
+            base_cost,
             tx,
         };
         std::thread::Builder::new()
@@ -383,6 +457,8 @@ struct Job {
     cap_eur: f64,
     eur_per_usd: f64,
     read_only: bool,
+    /// What the agent had cost before this run of it (it was resumed).
+    base_cost: f64,
     tx: mpsc::Sender<String>,
 }
 
@@ -551,7 +627,7 @@ fn child_ending(outcome: &Outcome, capped: bool, cap_eur: f64) -> (ChildStatus, 
 }
 
 fn run_child(job: Job) {
-    let Job { session, parent, rt, key, request, guard, off, model, cap_eur, eur_per_usd, read_only, tx } = job;
+    let Job { session, parent, rt, key, request, guard, off, model, cap_eur, eur_per_usd, read_only, base_cost, tx } = job;
     let id = session.run_id.clone();
     let _end = ChildEnd { id: id.clone(), parent: Arc::clone(&parent) };
     let host = ChildHost {
@@ -574,7 +650,7 @@ fn run_child(job: Job) {
     let (status, note) = child_ending(&outcome, capped, cap_eur);
     let (answer, requests) = (final_answer(&outcome.messages), outcome.requests);
 
-    let cost = model.as_ref().map_or(0.0, |m| m.cost_of_all(&requests));
+    let cost = base_cost + model.as_ref().map_or(0.0, |m| m.cost_of_all(&requests));
     // The money goes onto the parent's run, at the agent's own prices, where its limits see it.
     for usage in &requests {
         side_jobs::record(&parent.run_id, &model_id, usage);
@@ -591,6 +667,8 @@ fn run_child(job: Job) {
     // The session's last state is kept for the transcript before the card says it is over.
     subagents::end_live(&id);
     if let Some(info) = subagents::registry().get(&id) {
+        // And on disk, for as long as the conversation keeps it: the thread it drew and the thread it was sent.
+        subagents::keep(&info, Some(session.display_snapshot()), &outcome.messages);
         subagents::announce(&parent, &info);
         let _ = tx.send(report_for_parent(&info.title, status, &answer, cost, &note));
     }
@@ -616,14 +694,14 @@ mod tests {
 
     #[test]
     fn the_agent_tools_are_recognised_and_sorted_into_families() {
-        for t in [SPAWN, AWAIT, OWNER, REQUEST] {
+        for t in [SPAWN, AWAIT, OWNER, REQUEST, RESUME] {
             assert!(is_agent_tool(t));
         }
         assert!(!is_agent_tool("edit_file"));
         assert_eq!(super::super::families::family_of(SPAWN), Some(super::super::families::Family::Agents));
         assert_eq!(super::super::families::family_of(REQUEST), Some(super::super::families::Family::Peers));
         let names: Vec<String> = specs().into_iter().map(|s| s.name).collect();
-        assert_eq!(names, [SPAWN, AWAIT, OWNER, REQUEST]);
+        assert_eq!(names, [SPAWN, RESUME, AWAIT, OWNER, REQUEST]);
     }
 
     #[test]
@@ -636,7 +714,7 @@ mod tests {
             let family = family_of(&t.name);
             assert!(matches!(family, None | Some(Family::Read) | Some(Family::Project) | Some(Family::Bevy)), "{} ({family:?}) is offered to a reader", t.name);
         }
-        for must_not in ["edit_file", "edit_files", "create_file", "delete_file", "rename_symbol", "replace_in_files", "structural_replace", "local_history", "bennu_build", "run_start", SPAWN, REQUEST] {
+        for must_not in ["edit_file", "edit_files", "create_file", "delete_file", "rename_symbol", "replace_in_files", "structural_replace", "local_history", "bennu_build", "run_start", SPAWN, REQUEST, RESUME] {
             assert!(!offered.iter().any(|t| t.name == must_not), "{must_not} is offered to a reader");
         }
     }
@@ -646,7 +724,7 @@ mod tests {
         let off = Off::from_ids(&[]).with(&child_off_ids(ChildTools::ReadEdit));
         let offered = offered_specs(false, false, &off, &[]);
         assert!(offered.iter().any(|t| t.name == "edit_file"));
-        for must_not in [SPAWN, AWAIT, OWNER, REQUEST, "run_start", "debug_launch"] {
+        for must_not in [SPAWN, AWAIT, OWNER, REQUEST, RESUME, "run_start", "debug_launch"] {
             assert!(!offered.iter().any(|t| t.name == must_not), "{must_not} is offered to an agent");
         }
     }
@@ -664,7 +742,7 @@ mod tests {
     #[test]
     fn an_agent_never_asks_the_user_nor_starts_agents_whatever_it_can_edit() {
         for read_only in [true, false] {
-            for tool in ["ask_user", "show_diagram", "open_ui", "update_plan", "load_skill", SPAWN, AWAIT, OWNER, REQUEST] {
+            for tool in ["ask_user", "show_diagram", "open_ui", "update_plan", "load_skill", SPAWN, AWAIT, OWNER, REQUEST, RESUME] {
                 assert!(child_refuses(tool, None, read_only).is_some(), "{tool}");
             }
         }

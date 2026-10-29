@@ -1,17 +1,17 @@
 /**
  * The assistant's sub-agents, from the panel's side.
  *
- * The backend keeps the agents in memory (an agent does not outlive the app; the card it left in the thread
- * does), reports each one as an `agent` event when it starts, spends or ends, and serves the list and a
+ * The backend keeps the agents in memory and, for the life of the conversation, on disk (so they survive a restart);
+ * it reports each one as an `agent` event when it starts, spends or ends, and serves the list and a
  * read-only transcript on request. This store holds the list per conversation, the transcript open in the
- * viewer, and the verbs: open, stop one, stop all.
+ * viewer, and the verbs: open, stop one, stop all, delete one.
  *
  * It does not import the assistant store (the panel, which has both, passes the open conversation in).
  */
 
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import {
-  getAgentTranscript, listAgents, onAssistantEvent, stopAgent, stopAllAgents, type AgentTranscript,
+  deleteAgent, getAgentTranscript, listAgents, onAssistantEvent, stopAgent, stopAllAgents, type AgentTranscript,
 } from '$lib/ipc/bennu/assistant';
 import { runningCount, upsertAgent } from '$lib/components/bennu/assistant/assistant-agents';
 import type { AssistantAgent } from '$lib/components/bennu/assistant/assistant-types';
@@ -92,6 +92,17 @@ function createAgentsStore() {
     async stop(id: string) {
       const ok = await stopAgent(id).catch(() => false);
       if (!ok) toastStore.show('That agent is no longer running.', 'info');
+    },
+    /** Delete a finished agent: it leaves the list and what was kept of its thread is removed. Its card in the
+     *  conversation stays, and says its thread is no longer kept. */
+    async remove(id: string, conversationId: string | null) {
+      try {
+        await deleteAgent(id);
+        if (openId === id) this.close();
+        await refresh(conversationId);
+      } catch (e) {
+        toastStore.show(String(e), 'error');
+      }
     },
     async stopAll(conversationId: string | null) {
       if (!conversationId) return;

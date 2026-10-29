@@ -11,7 +11,7 @@
    */
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
-  import { Sparkles, Copy, ChevronRight, FilePen } from 'lucide-svelte';
+  import { Copy, ChevronRight, FilePen } from 'lucide-svelte';
   import AssistantToolRow from './AssistantToolRow.svelte';
   import AssistantProposal from './AssistantProposal.svelte';
   import AssistantCode from './AssistantCode.svelte';
@@ -30,6 +30,7 @@
   import AssistantScreenshot from './AssistantScreenshot.svelte';
   import AssistantAgentCard from './AssistantAgentCard.svelte';
   import AssistantText from './AssistantText.svelte';
+  import AssistantWho from './AssistantWho.svelte';
   import AssistantUserText from './AssistantUserText.svelte';
   import { hasFence, inlineSpans as inline } from './assistant-fences';
   import AssistantDocModal from './AssistantDocModal.svelte';
@@ -42,7 +43,15 @@
     conversationId,
     mode,
     last = false,
-  }: { message: AssistantMessage; conversationId: string; mode: AssistantMode; last?: boolean } = $props();
+    author = null,
+  }: {
+    message: AssistantMessage;
+    conversationId: string;
+    mode: AssistantMode;
+    last?: boolean;
+    /** Names the writer when it is not the assistant itself: a sub-agent's thread, in its own modal. */
+    author?: { name: string; kind: 'imber' | 'agent'; badge?: { label: string; tone: 'info' | 'accent' | 'neutral' } | null; live?: boolean } | null;
+  } = $props();
 
   const store = bennuAssistantStore;
   let docOpen = $state(false);
@@ -100,11 +109,13 @@
     </div>
   {:else}
     <div class="assistant">
-      <div class="who">
-        <span class="avatar" class:asst-live={last && store.running}><Sparkles size={10} /></span>
-        <span class="name">{modelName || 'Imber'}</span>
-        <span class="when">{time}</span>
-      </div>
+      <AssistantWho
+        name={author?.name ?? (modelName || 'Imber')}
+        kind={author?.kind ?? 'imber'}
+        badge={author?.badge ?? null}
+        live={author ? !!author.live : last && store.running}
+        when={time}
+      />
 
       <div class="blocks">
         {#each shown as b, i}
@@ -185,16 +196,6 @@
   }
 
   .assistant { display: flex; flex-direction: column; gap: 7px; }
-  .who { display: flex; align-items: center; gap: 7px; }
-  .avatar {
-    display: flex; align-items: center; justify-content: center;
-    width: 18px; height: 18px; border-radius: 50%;
-    color: var(--text-on-accent);
-    background: linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--info)));
-    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
-  }
-  .name { font-size: var(--font-size-xs); font-weight: 600; color: var(--text-primary); }
-  .when { font-size: var(--font-size-2xs); color: var(--text-muted); }
 
   .blocks { display: flex; flex-direction: column; gap: 8px; padding-left: 25px; }
   /* The answer is the point of the thread, so it is a surface of its own at full contrast — not a grey

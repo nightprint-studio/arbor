@@ -11,7 +11,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::autonomy::AccessMode;
@@ -34,7 +34,7 @@ pub const KEEP_FINISHED: usize = 30;
 pub const DEFAULT_CHILD_CAP_EUR: f64 = 1.0;
 
 /// Where a child is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChildStatus {
     Running,
@@ -52,7 +52,7 @@ impl ChildStatus {
 }
 
 /// One child, as the panel lists it.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChildInfo {
     pub id: String,
@@ -76,8 +76,9 @@ pub struct ChildInfo {
     pub waiting: Option<String>,
 }
 
-/// The children of every conversation, in memory: a child does not outlive the process, and the parent's thread
-/// keeps a card of each (see [`card_block`]).
+/// The children of every conversation, in memory: a running child does not outlive the process. The host also keeps
+/// each child on disk for the life of its conversation (see `agent_store`), and the parent's thread keeps a card of
+/// each (see [`card_block`]).
 #[derive(Default)]
 pub struct ChildRegistry {
     items: Mutex<Vec<ChildInfo>>,
@@ -145,6 +146,23 @@ impl ChildRegistry {
     /// The conversation was deleted: its children go with it.
     pub fn forget_conversation(&self, conversation: &str) {
         self.lock().retain(|c| c.conversation_id != conversation);
+    }
+
+    /// One child is deleted. A running child is not removed (it is stopped first); says whether it was removed.
+    pub fn remove(&self, id: &str) -> bool {
+        let mut items = self.lock();
+        let before = items.len();
+        items.retain(|c| c.id != id || c.status.is_running());
+        items.len() < before
+    }
+
+    /// The finished children of a conversation are dropped (a compaction folds what they were for); the running
+    /// ones stay. Returns the ids removed.
+    pub fn remove_finished_of(&self, conversation: &str) -> Vec<String> {
+        let mut items = self.lock();
+        let gone: Vec<String> = items.iter().filter(|c| c.conversation_id == conversation && !c.status.is_running()).map(|c| c.id.clone()).collect();
+        items.retain(|c| !gone.contains(&c.id));
+        gone
     }
 }
 
@@ -285,6 +303,8 @@ pub fn final_answer(messages: &[Message]) -> String {
 /// The card the parent's thread keeps for a child: compact, and updated in place as the child goes.
 pub fn card_block(info: &ChildInfo) -> Value {
     let brief: String = info.summary.as_deref().unwrap_or("").chars().take(400).collect();
+    // What it was asked, in a line or two: the card says what the agent is for, the whole brief is in its thread.
+    let task: String = info.task.chars().take(240).collect();
     json!({
         "type": "agent",
         "agent": {
@@ -296,6 +316,7 @@ pub fn card_block(info: &ChildInfo) -> Value {
             "cost": info.cost,
             "startedAt": info.started_at,
             "endedAt": info.ended_at,
+            "task": task,
             "summary": brief,
             "error": info.error,
             "waiting": info.waiting,
@@ -581,5 +602,13 @@ mod tests {
         assert_eq!(card["type"], "agent");
         assert_eq!(card["agent"]["status"], "done");
         assert_eq!(card["agent"]["summary"].as_str().unwrap().chars().count(), 400);
+    }
+
+    #[test]
+    fn a_card_says_what_the_agent_was_asked_in_a_line_or_two() {
+        let mut i = info("r1.a1", "c", "r1", ChildStatus::Running);
+        i.task = "t".repeat(900);
+        let card = card_block(&i);
+        assert_eq!(card["agent"]["task"].as_str().unwrap().chars().count(), 240, "the whole brief stays in the agent's thread");
     }
 }

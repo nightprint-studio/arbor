@@ -25,5 +25,10 @@
 
 <h2>Reading a profiler recording</h2>
 <p>
-  The project-intelligence family includes <code>bennu_profile_summary</code>: a compact summary of the newest recording the Profiler tool window made (the hottest methods with their source lines, the biggest allocation sites and allocated types, lock contention and garbage-collection pauses). Imber uses it to find the method worth optimising and to propose a change. It only reads: it never starts a recording, and with no recording it tells you to make one first. Recording is described on the <strong>Profiler</strong> page.
+  The project-intelligence family includes three read-only profiler tools. <code>bennu_profile_recordings</code> lists the recordings the Profiler tool window made. <code>bennu_profile_diff</code> compares two of them method by method (the share of the run each took before and after, biggest changes first), to check that a change made the code faster. <code>bennu_profile_summary</code> is a compact summary of one recording (the newest unless Imber names another): the hottest methods with their source lines, the biggest allocation sites and allocated types, lock contention and garbage-collection pauses. Imber uses it to find the method worth optimising and to propose a change. These three only read: with no recording they tell you to make one first. Recording by hand is described on the <strong>Profiler</strong> page; Imber recording for you is below.
+</p>
+
+<h2>Recording a running JVM</h2>
+<p>
+  The <strong>Profile</strong> family (<code>profile_start</code>, <code>profile_stop</code>) lets Imber record a JVM that is already running on this machine with Flight Recorder, through <code>jcmd</code>. <strong>Imber asks at every start</strong>, naming the JVM, because a recording samples a running program (nothing in it is changed, it runs a little slower). Imber names the JVM by process id or by part of its main class; with neither, it gets the list to choose from. One recording per conversation, started in one message and stopped in a later one. <code>profile_stop</code> ends the recording, waits until it has been read and saved, and returns its summary; the recording is then in the Profiler window like any other. A recording keeps sampling until it is stopped. Sub-agents never have these tools, and the family can be switched off like any other.
 </p>

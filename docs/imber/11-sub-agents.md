@@ -36,9 +36,9 @@ What an agent spends is added to the conversation and counts against the spendin
 ## Seeing them
 
 - Above the thread an *Agents* list shows each agent's state, how long it has run and what it cost.
-- The title opens its thread, read-only and live (*Imber: Open the latest sub-agent's thread…*).
+- The title opens its thread, read-only and live (*Imber: Open the latest sub-agent's thread…*). It reads as a chat between the two: the task Imber (badged *main*) gave it, then the agent's own messages (badged *sub-agent*), a writing mark while it works and, at the end, a line saying it handed its summary back, stopped or failed. The view follows the end of the thread unless you scrolled up.
 - Each agent has a Stop; *Stop all* and *Imber: Stop all sub-agents* stop them together.
-- A card for each stays in the thread with the start of its answer. Agents live as long as the app does; the card stays with the conversation.
+- A card for each stays in the thread: what it was asked, what it may do, its state, time and cost, and the start of its answer. While the agent runs the card's border moves. An agent's record and thread are kept on disk for as long as its conversation keeps them, so the Agents list and an agent's thread still open after a restart; an agent that was running when the app closed shows as stopped. What it read is not copied: the kept thread says *read this file*, not the file. Imber can continue a finished agent with `resume_agent` and a new instruction: it remembers what it concluded and reads again what it needs. The trash button on a finished agent deletes it; compacting the conversation, or deleting it, deletes them all.
 
 ## A hint, not a decision
 

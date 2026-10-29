@@ -40,12 +40,14 @@ pub enum Family {
     Agents,
     /// Talking to the other conversations about a file (`file_owner`, `request_change`). Hidden from sub-agents.
     Peers,
+    /// Recording a running JVM with the profiler (`profile_start`, `profile_stop`). Asks at every start; never an agent's.
+    Profile,
 }
 
 impl Family {
-    pub const ALL: [Family; 15] = [
+    pub const ALL: [Family; 16] = [
         Family::Read, Family::Project, Family::Edit, Family::Refactor, Family::Run, Family::History, Family::Structural, Family::Live, Family::Debug, Family::DebugMutate,
-        Family::Bevy, Family::BevyWrite, Family::Screenshot, Family::Agents, Family::Peers,
+        Family::Bevy, Family::BevyWrite, Family::Screenshot, Family::Agents, Family::Peers, Family::Profile,
     ];
 
     /// The name it has in settings and in the run's arguments.
@@ -66,6 +68,7 @@ impl Family {
             Family::Screenshot => "screenshot",
             Family::Agents => "agents",
             Family::Peers => "peers",
+            Family::Profile => "profile",
         }
     }
 
@@ -92,7 +95,8 @@ pub fn family_of(tool: &str) -> Option<Family> {
         other if super::brp::is_brp_write(other) => Some(Family::BevyWrite),
         other if super::brp::is_brp_read(other) => Some(Family::Bevy),
         other if super::screenshot::is_screenshot_tool(other) => Some(Family::Screenshot),
-        "spawn_agent" | "await_agents" => Some(Family::Agents),
+        other if super::profile::is_profile_tool(other) => Some(Family::Profile),
+        "spawn_agent" | "resume_agent" | "await_agents" => Some(Family::Agents),
         "file_owner" | "request_change" => Some(Family::Peers),
         other if other.starts_with("corvus_") => None,
         // What executes the project's code. By name, not by a word in it: bennu_tests only lists the tests.

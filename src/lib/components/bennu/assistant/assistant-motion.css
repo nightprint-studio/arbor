@@ -94,9 +94,35 @@
 /* A line that has just arrived in the thread. */
 .asst-enter { animation: asst-enter calc(var(--anim-dur-slow, 240ms) * 2) ease-out both; }
 
+/* Three dots that rise in turn: someone is writing. */
+@keyframes asst-dot {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+  40%           { transform: translateY(-3px); opacity: 1; }
+}
+.asst-dots { display: inline-flex; align-items: center; gap: 3px; }
+.asst-dots i {
+  width: 4px; height: 4px; border-radius: 50%; background: var(--accent);
+  animation: asst-dot calc(var(--anim-dur-slow, 240ms) * 5) ease-in-out infinite;
+}
+.asst-dots i:nth-child(2) { animation-delay: calc(var(--anim-dur-slow, 240ms) * 0.6); }
+.asst-dots i:nth-child(3) { animation-delay: calc(var(--anim-dur-slow, 240ms) * 1.2); }
+
+/* A border whose colour travels around while the thing it frames is at work. */
+@keyframes asst-edge {
+  to { background-position: 0 0, 200% 0; }
+}
+.asst-edge {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--bg-elevated), var(--bg-elevated)) padding-box,
+    linear-gradient(100deg, var(--accent), var(--info), var(--accent), var(--info), var(--accent)) border-box;
+  background-size: 100% 100%, 200% 100%;
+  animation: asst-edge calc(var(--anim-dur-slow, 240ms) * 14) linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .asst-shimmer, .asst-live, .asst-caret, .asst-enter,
-  .asst-sweep::after, .asst-orb::before, .asst-orb::after, .asst-ring::before { animation: none; }
+  .asst-sweep::after, .asst-orb::before, .asst-orb::after, .asst-ring::before, .asst-dots i, .asst-edge { animation: none; }
   .asst-shimmer { -webkit-text-fill-color: currentColor; color: var(--text-secondary); background: none; }
   .asst-caret { opacity: 1; }
 }

@@ -42,6 +42,7 @@
 
 pub mod access;
 pub mod agent;
+pub mod agent_context;
 pub mod anthropic;
 pub mod attribution;
 pub mod autonomy;

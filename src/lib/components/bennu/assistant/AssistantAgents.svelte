@@ -8,7 +8,7 @@
    * the header toggles with Enter or Space, the rows are buttons, and the palette has the same verbs.
    */
   import { onDestroy, onMount } from 'svelte';
-  import { Bot, Square, Eye } from 'lucide-svelte';
+  import { Bot, Square, Eye, Trash2 } from 'lucide-svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Collapsible from '$lib/components/shared/ui/Collapsible.svelte';
@@ -69,6 +69,8 @@
           <span class="dim">{formatCost(a.cost)}</span>
           {#if a.status === 'running'}
             <IconButton tooltip="Stop this agent" size={22} variant="danger" onclick={() => void agents.stop(a.id)}><Square size={11} /></IconButton>
+          {:else}
+            <IconButton tooltip="Delete this agent and what was kept of its thread" size={22} onclick={() => void agents.remove(a.id, assistant.activeId)}><Trash2 size={11} /></IconButton>
           {/if}
         {/snippet}
       </RowList>

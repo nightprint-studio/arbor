@@ -273,6 +273,9 @@ export const listAgents = (conversationId: string) => bennu<AssistantAgent[]>('a
 export const getAgentTranscript = (id: string) => bennu<AgentTranscript>('assistant_agent_transcript', { id });
 /** Stop one agent; false when it was not running. */
 export const stopAgent = (id: string) => bennu<boolean>('assistant_agent_stop', { id });
+
+/** Delete a finished agent and what was kept of its thread. Wire: `assistant_agent_delete`. */
+export const deleteAgent = (id: string) => bennu<void>('assistant_agent_delete', { id });
 /** Stop every running agent of a conversation; answers how many. */
 export const stopAllAgents = (conversationId: string) => bennu<number>('assistant_agents_stop_all', { conversation_id: conversationId });
 
