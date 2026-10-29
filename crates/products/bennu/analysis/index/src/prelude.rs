@@ -9,7 +9,8 @@ pub use crate::schema::{Relation, RelationKind, Source, Symbol, SymbolKind};
 
 // Store: the framed-blob writer/reader + fst map opener + format constants/errors.
 pub use crate::store::{
-    open_fst_map, BlobReader, BlobWriter, StoreError, FORMAT_VERSION, MAGIC, RECORD_ALIGN,
+    open_fst_map, write_atomic, BlobReader, BlobWriter, StoreError, FORMAT_VERSION, MAGIC,
+    RECORD_ALIGN,
 };
 
 // Query: the typed index view (exact / prefix / fuzzy) + the serialize helper.

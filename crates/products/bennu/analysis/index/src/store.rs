@@ -21,8 +21,8 @@
 //! an aligned scratch buffer on access, so payload alignment is satisfied there).
 
 use std::fs::File;
-use std::io::{BufWriter, Write};
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use fst::{Map, MapBuilder};
 use memmap2::Mmap;
@@ -157,25 +157,42 @@ impl BlobWriter {
         for dir in [blob_path.parent(), fst_path.parent()].into_iter().flatten() {
             std::fs::create_dir_all(dir).map_err(|e| StoreError::Io(e.to_string()))?;
         }
-        {
-            let mut f =
-                BufWriter::new(File::create(blob_path).map_err(|e| StoreError::Io(e.to_string()))?);
-            f.write_all(&self.blob).map_err(|e| StoreError::Io(e.to_string()))?;
-            f.flush().map_err(|e| StoreError::Io(e.to_string()))?;
-        }
+        write_atomic(blob_path, &self.blob).map_err(|e| StoreError::Io(e.to_string()))?;
 
         self.entries.sort_by(|a, b| a.0.cmp(&b.0));
         self.entries.dedup_by(|a, b| a.0 == b.0);
 
-        let wtr =
-            BufWriter::new(File::create(fst_path).map_err(|e| StoreError::Io(e.to_string()))?);
-        let mut mb = MapBuilder::new(wtr).map_err(|e| StoreError::Fst(e.to_string()))?;
+        // Built in memory so the file only ever appears whole (see [`write_atomic`]).
+        let mut mb = MapBuilder::memory();
         for (name, off) in &self.entries {
             mb.insert(name.as_bytes(), *off).map_err(|e| StoreError::Fst(e.to_string()))?;
         }
-        mb.finish().map_err(|e| StoreError::Fst(e.to_string()))?;
-        Ok(())
+        let fst_bytes = mb.into_inner().map_err(|e| StoreError::Fst(e.to_string()))?;
+        write_atomic(fst_path, &fst_bytes).map_err(|e| StoreError::Io(e.to_string()))
     }
+}
+
+/// Write `bytes` to `path` all-or-nothing: into a sibling `<path>.tmp`, flushed to disk, then
+/// renamed over the target.
+///
+/// A plain `fs::write` truncates the target first, so a crash or kill mid-write leaves a short
+/// file that is still a *valid-looking* one — the blob header check passes on it and the damage
+/// only surfaces later, at the first read past the end. With the rename, a reader sees either the
+/// previous complete file or the new complete one, never a torn one.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut tmp_name = path.as_os_str().to_owned();
+    tmp_name.push(".tmp");
+    let tmp = PathBuf::from(tmp_name);
+    let written = (|| -> std::io::Result<()> {
+        let mut file = File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    })();
+    let outcome = written.and_then(|()| std::fs::rename(&tmp, path));
+    if outcome.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    outcome
 }
 
 // ── Reader ───────────────────────────────────────────────────────────────────
@@ -207,13 +224,17 @@ impl BlobReader {
     }
 
     /// The record bytes at `offset` (the offset of the `len` prefix). Reads the
-    /// `u32` length then returns the `..len` slice. Panics only on an offset outside
-    /// the blob — a corrupt fst pointing off the end is a programmer/format error,
-    /// which the version header exists to prevent.
+    /// `u32` length then returns the `..len` slice. An offset or length that runs past the
+    /// blob (a truncated or corrupt file — the header check cannot see that) yields an EMPTY
+    /// slice, which every caller's `rkyv::access` rejects as an error, so damage costs a
+    /// missing record rather than a panic in the backend.
     pub fn record_bytes(&self, offset: u64) -> &[u8] {
-        let o = offset as usize;
-        let len = u32::from_le_bytes(self.mmap[o..o + 4].try_into().expect("4 bytes")) as usize;
-        &self.mmap[o + 4..o + 4 + len]
+        let Ok(start) = usize::try_from(offset) else { return &[] };
+        let Some(body) = start.checked_add(4) else { return &[] };
+        let Some(prefix) = self.mmap.get(start..body) else { return &[] };
+        let len = u32::from_le_bytes(prefix.try_into().expect("4 bytes")) as usize;
+        let Some(end) = body.checked_add(len) else { return &[] };
+        self.mmap.get(body..end).unwrap_or(&[])
     }
 
     /// The whole mmap. Used by the relation store's run decoder, whose frame is

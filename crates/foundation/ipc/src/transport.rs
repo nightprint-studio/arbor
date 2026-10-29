@@ -133,6 +133,18 @@ fn warn_nonblocking_once() {
 
 /// Read one frame, or `None` at clean EOF (peer closed the stream).
 fn read_frame<R: Read + ?Sized>(r: &mut R) -> io::Result<Option<Frame>> {
+    match read_frame_bytes(r)? {
+        Some(buf) => decode_frame(&buf).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Read one frame's body off the stream, undecoded, or `None` at clean EOF.
+///
+/// Split from [`decode_frame`] because the two fail differently: a short read means the stream is
+/// gone, while a body that will not decode leaves the stream perfectly in step — the length prefix
+/// already said where the next frame starts.
+fn read_frame_bytes<R: Read + ?Sized>(r: &mut R) -> io::Result<Option<Vec<u8>>> {
     let mut len_buf = [0u8; 4];
     if !read_all(r, &mut len_buf)? {
         return Ok(None);
@@ -140,9 +152,37 @@ fn read_frame<R: Read + ?Sized>(r: &mut R) -> io::Result<Option<Frame>> {
     let len = u32::from_le_bytes(len_buf) as usize;
     let mut buf = vec![0u8; len];
     read_all(r, &mut buf)?;
-    let frame =
-        serde_json::from_slice(&buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    Ok(Some(frame))
+    Ok(Some(buf))
+}
+
+fn decode_frame(buf: &[u8]) -> io::Result<Frame> {
+    serde_json::from_slice(buf)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, explain_decode_error(&e, buf.len())))
+}
+
+/// What a frame that will not decode actually did wrong, in words a log reader can act on.
+///
+/// serde_json's own text for the commonest cause is `recursion limit exceeded at line 1 column
+/// 91834` — true, and no help to anyone who has not met the 128-level limit before. A reply that
+/// nests that deep is a design problem in the handler that built it, so say that.
+fn explain_decode_error(e: &serde_json::Error, len: usize) -> String {
+    if e.to_string().contains("recursion limit") {
+        format!(
+            "the message ({len} bytes) nests deeper than serde_json's limit of 128 levels — \
+             the handler should return a flatter or depth-capped structure"
+        )
+    } else {
+        format!("invalid message ({len} bytes): {e}")
+    }
+}
+
+/// The `id` of a `Response` frame whose body would not decode, read straight off its first bytes
+/// (`{"Response":{"id":N,…`) so the caller waiting on it can be told why it gets no answer.
+fn undecodable_response_id(body: &[u8]) -> Option<u64> {
+    const HEAD: &str = "{\"Response\":{\"id\":";
+    let head = String::from_utf8_lossy(&body[..body.len().min(64)]);
+    let digits: String = head.strip_prefix(HEAD)?.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
 }
 
 /// Serialize + write one length-prefixed frame and flush.
@@ -565,7 +605,27 @@ impl ChildClient {
         thread::spawn(move || {
             let mut reader = reader;
             loop {
-                match read_frame(&mut reader) {
+                // A frame that arrives whole but will not decode (serde_json refuses more than 128
+                // levels of nesting, which a deep flame graph exceeds) used to end this loop, and with
+                // it the backend: the shell took it for a dead process, detached it and killed it. The
+                // length prefix keeps the stream in step, so fail just that call and carry on.
+                let next = match read_frame_bytes(&mut reader) {
+                    Ok(Some(body)) => match decode_frame(&body) {
+                        Ok(frame) => Ok(Some(frame)),
+                        Err(e) => {
+                            eprintln!("arbor-ipc: a frame from {program} could not be decoded: {e}");
+                            if let Some(id) = undecodable_response_id(&body) {
+                                if let Some(tx) = pending.lock().expect("pending poisoned").remove(&id) {
+                                    let _ = tx.send(Err(format!("the reply from {program} could not be decoded: {e}")));
+                                }
+                            }
+                            continue;
+                        }
+                    },
+                    Ok(None) => Ok(None),
+                    Err(e) => Err(e),
+                };
+                match next {
                     Ok(Some(Frame::Response { id, result })) => {
                         if let Some(tx) = pending.lock().expect("pending poisoned").remove(&id) {
                             let _ = tx.send(result);
@@ -769,6 +829,22 @@ mod tests {
     use std::sync::Condvar;
 
     use serde_json::json;
+
+    #[test]
+    fn an_undecodable_response_still_names_its_caller() {
+        let body = br#"{"Response":{"id":42,"result":{"Ok":[[[[["#;
+        assert_eq!(undecodable_response_id(body), Some(42));
+        assert_eq!(undecodable_response_id(br#"{"Event":{"topic":"x"}}"#), None);
+    }
+
+    #[test]
+    fn a_too_deep_frame_is_explained_not_quoted() {
+        let deep = format!("{}{}", "[".repeat(200), "]".repeat(200));
+        let err = serde_json::from_str::<serde_json::Value>(&deep).unwrap_err();
+        let text = explain_decode_error(&err, deep.len());
+        assert!(text.contains("128 levels"), "{text}");
+        assert!(!text.contains("column"), "{text}");
+    }
 
     /// A blocking in-memory byte pipe (the test stand-in for one direction of a
     /// process's stdio): `Write` appends + notifies; `Read` blocks until bytes

@@ -200,7 +200,7 @@ pub fn save(path: &Path, cache: &DiagCache) {
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
-            if let Err(e) = std::fs::write(path, bytes) {
+            if let Err(e) = bennu_index::prelude::write_atomic(path, &bytes) {
                 eprintln!(
                     "bennu-be: diagnostic cache write failed ({}): {e}",
                     path.display()

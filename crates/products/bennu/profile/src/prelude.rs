@@ -1,6 +1,6 @@
 //! Canonical entry point for `bennu-profile`'s public API.
 
-pub use crate::builder::{FlameNode, FlameOptions, RawFrame, TreeBuilder, DEFAULT_MAX_NODES};
+pub use crate::builder::{FlameNode, FlameOptions, RawFrame, TreeBuilder, DEFAULT_MAX_DEPTH, DEFAULT_MAX_NODES};
 pub use crate::compare::{compare, MethodDelta};
 pub use crate::cpuprofile::{add_cpuprofile, url_to_path, CpuProfileResult};
 pub use crate::duration::duration_ms;

@@ -1171,7 +1171,10 @@ impl IndexService {
         let root_str = root.to_string();
         // The reverse channel for the analysis warm-up's tracked job (registered inside the thread).
         let host = self.host();
+        // Kept outside the build so a panic inside it can still be reported to the user.
+        let (panic_slot, panic_sink) = (Arc::clone(&slot), Arc::clone(&sink));
         std::thread::spawn(move || {
+            let build = move || {
             // Armed before anything can fail: from here on, every way out of this thread closes the
             // indexing card — the early `return` two lines down included. See [`BuildCard`].
             let mut card = BuildCard {
@@ -1433,6 +1436,17 @@ impl IndexService {
             // Diagnostic (idle-CPU investigation): confirms the build thread reaches its end and
             // exits. If bennu-be still burns CPU after this line logs, the spinner is NOT this thread.
             eprintln!("bennu-be: index build thread exiting for {}", root_path.display());
+            };
+            // A panic in the build (a damaged cache, an odd source file) used to end this thread in
+            // silence: the card closed, but the user was never told the project had no index. The
+            // panic hook has already logged the stack by the time we get here.
+            if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(build)) {
+                report_build_failure(
+                    &panic_slot,
+                    &panic_sink,
+                    &format!("the build crashed ({}) — try Rebuild index", panic_message(panic.as_ref())),
+                );
+            }
         });
     }
 
@@ -4492,6 +4506,15 @@ pub(crate) fn finish_bennu_job(
 
 /// Mark `slot`'s build as having installed no provider, and say so once. Only the placeholder is
 /// marked failed: a stage that already went live keeps answering, so it is not a failure of the index.
+/// The text of a caught panic payload (`&str` or `String`; anything else has no readable message).
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "no message".to_string())
+}
+
 fn report_build_failure(slot: &Arc<ProjectSlot>, sink: &Arc<dyn EventSink>, what: &str) {
     let _ = slot.provider_stage.compare_exchange(stage::BUILDING, stage::FAILED, Ordering::Relaxed, Ordering::Relaxed);
     let name = slot.root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();

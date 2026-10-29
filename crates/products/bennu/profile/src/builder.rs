@@ -275,11 +275,21 @@ pub struct FlameOptions {
     /// Subtrees lighter than this fraction of the total are folded into their parent's self.
     pub min_fraction: f64,
     pub max_nodes: usize,
+    /// Frames deeper than this are folded into their parent's self time.
+    ///
+    /// Every level costs two levels of JSON (the node and its `children` array) and the wire
+    /// refuses more than 128 in total, so a recursive parser's 70-frame stack made the reply
+    /// undecodable. 50 keeps it near 100 with the envelope, and nobody reads a flame graph that
+    /// deep anyway.
+    pub max_depth: usize,
 }
+
+/// See [`FlameOptions::max_depth`].
+pub const DEFAULT_MAX_DEPTH: usize = 50;
 
 impl Default for FlameOptions {
     fn default() -> Self {
-        FlameOptions { merge_threads: true, min_fraction: 0.0005, max_nodes: 25_000 }
+        FlameOptions { merge_threads: true, min_fraction: 0.0005, max_nodes: 25_000, max_depth: DEFAULT_MAX_DEPTH }
     }
 }
 
@@ -316,23 +326,25 @@ impl CallTree {
                 if self.frames[n.frame as usize].kind == FrameKind::Thread {
                     top.self_value += n.self_w;
                     for &c in &n.children {
-                        merge_into(&mut merged, self.flame_node(c, floor, &mut budget));
+                        merge_into(&mut merged, self.flame_node(c, floor, &mut budget, opt.max_depth));
                     }
                 } else {
-                    merge_into(&mut merged, self.flame_node(tn, floor, &mut budget));
+                    merge_into(&mut merged, self.flame_node(tn, floor, &mut budget, opt.max_depth));
                 }
             }
             top.children = merged;
         } else {
             for tn in thread_nodes {
-                top.children.push(self.flame_node(tn, floor, &mut budget));
+                top.children.push(self.flame_node(tn, floor, &mut budget, opt.max_depth));
             }
         }
         top.value = top.self_value + top.children.iter().map(|c| c.value).sum::<u64>();
         top
     }
 
-    fn flame_node(&self, n: u32, floor: u64, budget: &mut usize) -> FlameNode {
+    /// `levels_left` counts this node: at 1 it is the last one drawn and its subtree is folded
+    /// into its own self time (see [`FlameOptions::max_depth`]).
+    fn flame_node(&self, n: u32, floor: u64, budget: &mut usize, levels_left: usize) -> FlameNode {
         let node = &self.nodes[n as usize];
         let fr = &self.frames[node.frame as usize];
         *budget = budget.saturating_sub(1);
@@ -350,11 +362,11 @@ impl CallTree {
         kids.sort_by(|a, b| self.nodes[*b as usize].total.cmp(&self.nodes[*a as usize].total));
         for c in kids {
             let cn = &self.nodes[c as usize];
-            if cn.total < floor || *budget == 0 {
+            if cn.total < floor || *budget == 0 || levels_left <= 1 {
                 out.self_value += cn.total;
                 continue;
             }
-            out.children.push(self.flame_node(c, floor, budget));
+            out.children.push(self.flame_node(c, floor, budget, levels_left - 1));
         }
         out
     }
@@ -424,5 +436,21 @@ mod tests {
         assert_eq!(main.children[0].value, 10000);
         let only_t1 = t.flame(Some("t1"), FlameOptions::default());
         assert_eq!(only_t1.value, 9000);
+    }
+
+    #[test]
+    fn a_deep_stack_is_cut_at_max_depth_without_losing_weight() {
+        let names: Vec<String> = (0..200).map(|i| format!("f{i}")).collect();
+        let frames: Vec<RawFrame> = names.iter().map(|n| m("A", n)).collect();
+        let mut b = TreeBuilder::default();
+        b.add_stack(Some("t"), &frames, 7);
+        let f = b.finish().flame(None, FlameOptions::default());
+        let (mut depth, mut node) = (0, &f);
+        while let Some(child) = node.children.first() {
+            depth += 1;
+            node = child;
+        }
+        assert_eq!(depth, DEFAULT_MAX_DEPTH);
+        assert_eq!(f.value, 7, "the folded frames' weight stays in the tree");
     }
 }

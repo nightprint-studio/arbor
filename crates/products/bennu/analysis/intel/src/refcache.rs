@@ -171,7 +171,7 @@ pub fn load(path: &Path) -> Option<RefCache> {
 pub fn save(path: &Path, cache: &RefCache) {
     match serde_json::to_vec(cache) {
         Ok(bytes) => {
-            if let Err(e) = std::fs::write(path, bytes) {
+            if let Err(e) = bennu_index::prelude::write_atomic(path, &bytes) {
                 eprintln!("bennu-be: ref cache write failed ({}): {e}", path.display());
             }
         }
