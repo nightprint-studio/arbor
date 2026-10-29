@@ -135,14 +135,15 @@
 
   function handleItem(item: MenuItem) {
     if (item.disabled || item.separator) return;
-    onSelect(item.id);
+    // Close first: a pick may open the next menu (Imber's submenu actions), and closing after it would shut that one.
     onClose();
+    onSelect(item.id);
   }
 
   function handleAction(action: MenuAction) {
     if (action.disabled) return;
-    onSelect(action.id);
     onClose();
+    onSelect(action.id);
   }
 
   // ── Keyboard navigation ─────────────────────────────────────────────────────
