@@ -1573,6 +1573,15 @@ pub fn ensure_corvus_be(app: &AppHandle) {
     }
 }
 
+/// Point a backend's stderr at `arbor/logs/<program>-be.log`. Launched from the desktop its stderr went nowhere,
+/// so a panic or a failed allocation ended as "backend … is not running" with no reason; now the reason is in
+/// that file. A log that cannot be opened leaves the backend as it was.
+fn log_backend_stderr(cmd: &mut std::process::Command, program: &str) {
+    if let Some(file) = arbor_core::prelude::open_backend_log(program) {
+        cmd.stderr(file);
+    }
+}
+
 fn spawn_corvus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)> {
     use crate::process_ext::NoWindowExt;
 
@@ -1588,6 +1597,7 @@ fn spawn_corvus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String
 
     let mut cmd = std::process::Command::new(&bin);
     cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+    log_backend_stderr(&mut cmd, "corvus");
 
     let app_for_events = app.clone();
     let app_for_host = app.clone();
@@ -1688,6 +1698,7 @@ fn spawn_merula_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String
 
     let mut cmd = std::process::Command::new(&bin);
     cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+    log_backend_stderr(&mut cmd, "merula");
 
     let app_for_events = app.clone();
     let app_for_host = app.clone();
@@ -1797,6 +1808,7 @@ fn spawn_sitta_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
 
     let mut cmd = std::process::Command::new(&bin);
     cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+    log_backend_stderr(&mut cmd, "sitta");
 
     let app_for_events = app.clone();
     let app_for_host = app.clone();
@@ -1901,6 +1913,7 @@ fn spawn_tyto_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)
 
     let mut cmd = std::process::Command::new(&bin);
     cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+    log_backend_stderr(&mut cmd, "tyto");
 
     let app_for_events = app.clone();
     let app_for_host = app.clone();
@@ -1976,6 +1989,7 @@ fn spawn_voice_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
     };
     let mut cmd = std::process::Command::new(&bin);
     cmd.no_window();
+    log_backend_stderr(&mut cmd, "voice");
 
     let app_for_events = app.clone();
     let app_for_host = app.clone();
@@ -2109,6 +2123,7 @@ fn spawn_bennu_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
 
     let mut cmd = std::process::Command::new(&bin);
     cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+    log_backend_stderr(&mut cmd, "bennu");
 
     let app_for_events = app.clone();
     let app_for_host = app.clone();
@@ -2201,6 +2216,7 @@ fn spawn_picus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
 
     let mut cmd = std::process::Command::new(&bin);
     cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+    log_backend_stderr(&mut cmd, "picus");
 
     let app_for_events = app.clone();
     let app_for_host = app.clone();
@@ -2294,6 +2310,7 @@ fn spawn_garrulus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<Stri
 
     let mut cmd = std::process::Command::new(&bin);
     cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+    log_backend_stderr(&mut cmd, "garrulus");
 
     let app_for_events = app.clone();
     let app_for_host = app.clone();

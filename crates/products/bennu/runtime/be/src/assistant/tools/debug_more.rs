@@ -11,7 +11,7 @@
 use super::*;
 use crate::debug::mutate::Mutation;
 
-const NAVIGATION: [&str; 2] = ["debug_run_to", "debug_break_on_exception"];
+const NAVIGATION: [&str; 3] = ["debug_run_to", "debug_break_on_exception", "debug_select_thread"];
 const MUTATE: [&str; 4] = ["debug_throw", "debug_force_return", "debug_drop_frame", "debug_set_value"];
 
 /// What the assistant's changes are filed under in the per-conversation approvals.
@@ -49,6 +49,11 @@ pub(super) fn specs() -> Vec<ToolSpec> {
                 "uncaught":{"type":"boolean"},
                 "remove":{"type":"boolean"}
             }}),
+        ),
+        spec(
+            "debug_select_thread",
+            "Switch to another thread that is stopped. When several threads are stopped at once (a breakpoint with \"suspend only its thread\", or two threads hitting breakpoints together) you look at one at a time: the stop report lists the others under \"also stopped\". This makes `thread` (its id, its name or part of its name) the one debug_stack, debug_variables, debug_evaluate, debug_step and debug_resume work on, and returns its stack.",
+            json!({"type":"object","properties":{"thread":{"type":"string"}},"required":["thread"]}),
         ),
         spec(
             "debug_throw",
@@ -121,12 +126,19 @@ impl ToolHost {
         match tool {
             "debug_run_to" => self.debug_run_to(input),
             "debug_break_on_exception" => self.debug_break_on_exception(input),
+            "debug_select_thread" => self.debug_select_thread(input),
             t if is_mutate_tool(t) => self.debug_mutate(t, input),
             other => Err(format!("`{other}` is not a debug tool")),
         }
     }
 
     // ── Navigation ───────────────────────────────────────────────────────────────────────────────
+
+    fn debug_select_thread(&self, input: &Value) -> Result<String, String> {
+        let (backend, _) = self.stopped()?;
+        let pause = backend.select_thread(str_arg(input, "thread")?)?;
+        Ok(format!("now looking at thread `{}`.\n{}", pause.thread_name, text::stack_text(&pause, 8)))
+    }
 
     fn debug_run_to(&self, input: &Value) -> Result<String, String> {
         let path = self.resolve(str_arg(input, "file")?);
@@ -135,7 +147,7 @@ impl ToolHost {
             return Err(format!("`{}` is not a Java file", path.display()));
         }
         let source = std::fs::read_to_string(&path).map_err(|e| format!("could not read the file: {e}"))?;
-        text::source_line(&source, line)?;
+        let line = text::source_line(&source, line)?.line;
         let secs = text::wait_seconds(input.get("timeout_s").and_then(Value::as_u64), DEFAULT_WAIT_S, MAX_WAIT_S);
         self.held()?;
 

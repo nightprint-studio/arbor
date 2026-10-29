@@ -5,7 +5,7 @@
 //! never reaches a provider's servers. Kept apart from the tools so the rules can be tested without a
 //! JVM.
 
-use bennu_proto::prelude::{DebugPause, DebugValue, StackFrame};
+use bennu_proto::prelude::{DebugPause, DebugValue, StackFrame, StopDetail};
 
 use crate::debug_path::{self, Step};
 
@@ -115,26 +115,131 @@ pub(super) fn check_frame(frame: usize, count: usize) -> Result<(), String> {
 /// A source line, shown back to the model so it can see what it put a breakpoint on.
 #[derive(Debug)]
 pub(super) struct SourceLine {
+    /// The line the breakpoint belongs on: the one asked for, or the next one that holds code.
+    pub line: u32,
     pub text: String,
-    /// Set when the line holds no code, so the breakpoint will bind to the next line that does.
-    pub warning: Option<String>,
+    /// The line that was asked for, when it held no code and `line` is the one after it.
+    pub moved_from: Option<u32>,
 }
 
-/// Line `line` of `source`, trimmed and cut, with a warning when it cannot hold a breakpoint.
+/// How far past a line with no code the next one is looked for.
+const MAX_SLIDE_LINES: usize = 8;
+
+/// Line `line` of `source`, or — when it holds no code — the first of the next few that does.
+///
+/// The debugger would slide a breakpoint on a blank line or a lone brace on its own, but only once the class
+/// is loaded, and the model is not told where it went: it believes the value it asked for is the one read. So
+/// the slide is decided here, from the text, and said in the answer. The test is textual (a comment, a brace,
+/// an annotation, a type or method header, a `case` label) and not the compiler's line table, so the running
+/// program stays the authority on where it really stops.
 pub(super) fn source_line(source: &str, line: u32) -> Result<SourceLine, String> {
-    let total = source.lines().count();
-    let Some(raw) = source.lines().nth((line as usize).saturating_sub(1)) else {
-        return Err(format!("the file has {total} lines; there is no line {line}"));
+    let rows: Vec<&str> = source.lines().collect();
+    let from = (line as usize).saturating_sub(1);
+    if line == 0 || from >= rows.len() {
+        return Err(format!("the file has {} lines; there is no line {line}", rows.len()));
+    }
+    let code = code_flags(&rows);
+    let Some(at) = (from..rows.len().min(from + 1 + MAX_SLIDE_LINES)).find(|&i| code[i]) else {
+        return Err(format!("line {line} holds no code (a comment, blank line, annotation, brace or declaration) and neither do the {MAX_SLIDE_LINES} lines after it, so nothing was set. Read the file and pick a line with a statement."));
     };
-    let trimmed = raw.trim();
-    let no_code = trimmed.is_empty()
-        || trimmed.starts_with("//")
-        || trimmed.starts_with("/*")
-        || trimmed.starts_with('*')
-        || trimmed.starts_with('@')
-        || matches!(trimmed, "{" | "}" | "};");
-    let warning = no_code.then(|| format!("line {line} holds no code (a comment, blank line, annotation or lone brace): the debugger will bind to the next line that has code. Prefer a line with a statement."));
-    Ok(SourceLine { text: clip(trimmed, MAX_VALUE_CHARS), warning })
+    Ok(SourceLine { line: at as u32 + 1, text: clip(rows[at].trim(), MAX_VALUE_CHARS), moved_from: (at != from).then_some(line) })
+}
+
+/// For each row: whether the debugger can stop on it.
+fn code_flags(rows: &[&str]) -> Vec<bool> {
+    let mut in_block = false;
+    rows.iter().map(|row| holds_code(&strip_comments(row, &mut in_block))).collect()
+}
+
+/// `row` without comments. `in_block` carries a `/* ... */` that spans rows. String and char literals are
+/// skipped over, so a `//` inside a URL is not a comment.
+fn strip_comments(row: &str, in_block: &mut bool) -> String {
+    let chars: Vec<char> = row.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        if *in_block {
+            if c == '*' && next == Some('/') {
+                *in_block = false;
+                i += 1;
+            }
+        } else if c == '/' && next == Some('*') {
+            *in_block = true;
+            i += 1;
+        } else if c == '/' && next == Some('/') {
+            break;
+        } else if c == '"' || c == '\'' {
+            out.push(c);
+            i += 1;
+            while i < chars.len() && chars[i] != c {
+                if chars[i] == '\\' {
+                    out.push(chars[i]);
+                    i += 1;
+                }
+                if let Some(&ch) = chars.get(i) {
+                    out.push(ch);
+                }
+                i += 1;
+            }
+            if i < chars.len() {
+                out.push(c);
+            }
+        } else {
+            out.push(c);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Words that start a statement, so a line opening with one is code and not a method header.
+const STATEMENT_WORDS: [&str; 15] = ["return", "new", "throw", "if", "for", "while", "switch", "catch", "synchronized", "assert", "yield", "else", "case", "do", "try"];
+/// Lines that open a block and carry no code of their own.
+const BARE_OPENERS: [&str; 6] = ["try", "do", "else", "finally", "static", "default"];
+
+/// Whether a line, comments already removed, can hold a breakpoint.
+fn holds_code(stripped: &str) -> bool {
+    let text = stripped.trim();
+    // Only closers and separators: `}`, `};`, `});`.
+    if text.chars().all(|c| matches!(c, '{' | '}' | '(' | ')' | ';' | ',' | ' ' | '\t')) {
+        return false;
+    }
+    if text.starts_with('@') {
+        return false;
+    }
+    // `} else {` has no code; `} catch (E e) {` does (it stores the exception).
+    let text = text.trim_start_matches('}').trim_start();
+    let squeezed: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let head = squeezed.trim_end_matches('{').trim();
+    if BARE_OPENERS.contains(&head) || head == "default:" || head == "else" {
+        return false;
+    }
+    // `case X:` / `default:` labels of an old-style switch.
+    if (text.starts_with("case ") || text.starts_with("default")) && squeezed.ends_with(':') {
+        return false;
+    }
+    !is_declaration_header(&squeezed)
+}
+
+/// A type or method header that opens its body on the same line: `public class A {`, `int total(int a) {`.
+fn is_declaration_header(text: &str) -> bool {
+    if !text.ends_with('{') {
+        return false;
+    }
+    let before_paren = text.split(['(', '{']).next().unwrap_or("");
+    let words: Vec<&str> = before_paren.split_whitespace().collect();
+    if words.iter().any(|w| matches!(*w, "class" | "interface" | "enum" | "record" | "@interface")) {
+        return true;
+    }
+    // A method or constructor: modifiers/type and a name before the parenthesis, nothing that makes it a
+    // statement (an assignment, a call on a receiver, a keyword).
+    text.contains('(')
+        && words.len() >= 2
+        && !before_paren.contains(['=', '.'])
+        && !before_paren.contains("->")
+        && !words.iter().any(|w| STATEMENT_WORDS.contains(w))
 }
 
 // ── Stack ────────────────────────────────────────────────────────────────────────────────────────
@@ -159,7 +264,41 @@ pub(super) fn stop_summary(p: &DebugPause) -> String {
         (other, _) => format!("a {other} was hit"),
     };
     let thread = if p.thread_name.is_empty() { String::new() } else { format!(" on thread `{}`", p.thread_name) };
-    format!("The program is STOPPED (suspended): {why}{thread}.")
+    let mut out = format!("The program is STOPPED (suspended): {why}{thread}.");
+    out.push_str(&detail_text(&p.detail));
+    out
+}
+
+/// What the stop adds to where it is: new or leftover, the condition and what it read, what the last method
+/// returned, the other stopped threads.
+pub(super) fn detail_text(d: &StopDetail) -> String {
+    let mut out = String::new();
+    match d.origin.as_str() {
+        "fresh" => out.push_str("\nA NEW stop: a breakpoint or exception reached just now."),
+        "step" => out.push_str("\nA step finished (not a new breakpoint)."),
+        "residual" => out.push_str("\nA LEFTOVER stop: it was hit while another stop was still being looked at, and waited its turn."),
+        _ => {}
+    }
+    if d.suspends == "thread" {
+        out.push_str("\nOnly this thread is suspended; the others are running.");
+    }
+    if !d.condition.is_empty() {
+        let read = if d.condition_values.is_empty() { String::new() } else { format!(" — it read: {}", d.condition_values) };
+        out.push_str(&format!("\nThe breakpoint's condition `{}` let it through{read}."));
+    }
+    if let Some(r) = &d.returned {
+        if r.method.is_empty() {
+            out.push_str(&format!("\nReturn value: {}.", r.value));
+        } else {
+            let ty = if r.type_name.is_empty() { String::new() } else { format!(": {}", r.type_name) };
+            out.push_str(&format!("\nThe method the step left, `{}`, returned{ty} = {}.", r.method, clip(&r.value, MAX_VALUE_CHARS)));
+        }
+    }
+    if !d.also_stopped.is_empty() {
+        let others: Vec<String> = d.also_stopped.iter().map(|t| format!("`{}` ({}, {})", t.thread_name, t.reason, t.location)).collect();
+        out.push_str(&format!("\nAlso stopped, waiting: {}. debug_select_thread switches to one; debug_resume moves on to the next.", others.join("; ")));
+    }
+    out
 }
 
 /// The stop and its frames, at most `max_frames`, with the project's source file of the first frame
@@ -207,13 +346,37 @@ pub(super) fn rows_text(rows: &[DebugValue]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bennu_proto::prelude::{ReturnedValue, StoppedThread};
+
+    #[test]
+    fn a_stop_says_if_it_is_new_what_let_it_through_and_who_else_waits() {
+        let d = StopDetail {
+            origin: "residual".into(),
+            suspends: "thread".into(),
+            condition: "total > 100".into(),
+            condition_values: "total = 250".into(),
+            returned: Some(ReturnedValue { method: "com.acme.A.price".into(), type_name: "int".into(), value: "7".into() }),
+            also_stopped: vec![StoppedThread { thread: "2".into(), thread_name: "worker-2".into(), reason: "breakpoint".into(), location: "A.java:9".into() }],
+        };
+        let text = detail_text(&d);
+        assert!(text.contains("LEFTOVER"), "{text}");
+        assert!(text.contains("Only this thread is suspended"), "{text}");
+        assert!(text.contains("`total > 100` let it through — it read: total = 250"), "{text}");
+        assert!(text.contains("`com.acme.A.price`, returned: int = 7"), "{text}");
+        assert!(text.contains("`worker-2` (breakpoint, A.java:9)"), "{text}");
+        assert!(detail_text(&StopDetail { origin: "fresh".into(), ..StopDetail::default() }).contains("NEW"));
+        assert!(detail_text(&StopDetail { origin: "step".into(), ..StopDetail::default() }).contains("not a new breakpoint"));
+        assert_eq!(detail_text(&StopDetail::default()), "", "an engine that says nothing adds nothing");
+        let unread = StopDetail { returned: Some(ReturnedValue { method: String::new(), type_name: String::new(), value: "no method returned during the step".into() }), ..StopDetail::default() };
+        assert!(detail_text(&unread).contains("Return value: no method returned"));
+    }
 
     fn frame(index: u32, class: &str, method: &str, line: Option<u32>, file: Option<&str>, project: bool) -> StackFrame {
         StackFrame { index, class: class.into(), method: method.into(), name: String::new(), line, file: file.map(Into::into), project }
     }
 
     fn pause(reason: &str, exception: Option<&str>, frames: Vec<StackFrame>) -> DebugPause {
-        DebugPause { session_id: "s".into(), thread: "1".into(), thread_name: "main".into(), reason: reason.into(), exception: exception.map(Into::into), frames }
+        DebugPause { session_id: "s".into(), thread: "1".into(), thread_name: "main".into(), reason: reason.into(), exception: exception.map(Into::into), frames, detail: Default::default() }
     }
 
     fn row(name: &str, ty: &str, value: &str, object: bool) -> DebugValue {
@@ -310,14 +473,30 @@ mod tests {
     }
 
     #[test]
-    fn a_breakpoint_line_is_echoed_and_a_line_without_code_is_flagged() {
+    fn a_line_with_code_is_kept_and_one_without_slides_to_the_next() {
         let src = "class A {\n    // note\n    int f() {\n        return 1;\n    }\n}\n";
         let code = source_line(src, 4).unwrap();
-        assert_eq!(code.text, "return 1;");
-        assert!(code.warning.is_none());
-        assert!(source_line(src, 2).unwrap().warning.unwrap().contains("no code"));
-        assert!(source_line(src, 5).unwrap().warning.is_some(), "a lone brace");
+        assert_eq!((code.line, code.text.as_str(), code.moved_from), (4, "return 1;", None));
+        let comment = source_line(src, 2).unwrap();
+        assert_eq!((comment.line, comment.moved_from), (4, Some(2)), "a comment and a method header slide to the statement");
+        assert!(source_line(src, 5).unwrap_err().contains("holds no code"), "a lone brace with nothing after it");
         assert!(source_line(src, 99).unwrap_err().contains("6 lines"));
+    }
+
+    #[test]
+    fn what_holds_no_code_is_told_from_what_does() {
+        for none in ["", "{", "}", "});", "// c", "/* c */", "@Override", "public class A {", "static {", "} else {", "} finally {", "case 1:", "default:", "public int total(int a) throws IOException {", "private Order(String id) {"] {
+            assert!(!holds_code(&strip_comments(none, &mut false)), "{none:?}");
+        }
+        for code in ["return 1;", "int a = 0;", "if (a > 0) {", "} else if (b) {", "} catch (Exception e) {", "for (int i = 0; i < n; i++) {", "list.forEach(x -> {", "Foo f = new Foo() {", "synchronized (lock) {", "String u = \"http://x\"; // note", "int[] a = {"] {
+            assert!(holds_code(&strip_comments(code, &mut false)), "{code:?}");
+        }
+    }
+
+    #[test]
+    fn a_block_comment_spanning_rows_holds_no_code() {
+        let src = "class A {\n  /*\n   * x = 1;\n   */\n  int a = 1;\n}\n";
+        assert_eq!(source_line(src, 3).unwrap().line, 5);
     }
 
     #[test]

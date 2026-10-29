@@ -38,6 +38,7 @@ mod brp;
 mod debug;
 mod debug_bp;
 mod debug_capture;
+mod debug_consoles;
 mod debug_keep;
 mod debug_launch;
 mod debug_text;

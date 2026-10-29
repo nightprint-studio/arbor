@@ -14,20 +14,32 @@
     <tr><td>Set, list, remove breakpoints and logpoints</td><td><code>debug_set_breakpoint</code>, <code>debug_list_breakpoints</code>, <code>debug_remove_breakpoint</code></td><td>No</td></tr>
     <tr><td>Start a session</td><td><code>debug_launch</code> (builds and runs a main class), <code>debug_attach</code> (to a JVM on 127.0.0.1)</td><td>Every time</td></tr>
     <tr><td>Wait and look</td><td><code>debug_wait_stop</code>, <code>debug_stack</code>, <code>debug_variables</code>, <code>debug_evaluate</code>, <code>debug_output</code></td><td>No</td></tr>
-    <tr><td>Move</td><td><code>debug_step</code> (several steps at once), <code>debug_resume</code>, <code>debug_run_to</code> (like Run to Cursor), <code>debug_break_on_exception</code></td><td>No</td></tr>
+    <tr><td>Move</td><td><code>debug_step</code> (several steps at once), <code>debug_resume</code>, <code>debug_run_to</code> (like Run to Cursor), <code>debug_break_on_exception</code>, <code>debug_select_thread</code></td><td>No</td></tr>
     <tr><td>Let go</td><td><code>debug_detach</code></td><td>No</td></tr>
   </tbody>
 </table>
 
 <h2>Its breakpoints are visible and yours</h2>
 <p>
-  Breakpoints Imber sets are saved in the project's breakpoints, drawn with a sparkle in the gutter and badged <em>Imber</em> in the Breakpoints list (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F8</kbd>). You can disable or delete them like any other. It never changes or removes one you set, and holds at most 20. A logpoint can say "only when <code>total &gt; 100</code>" through a condition and a pass count, and can ask for values to be captured at the stop.
+  Breakpoints Imber sets are saved in the project's breakpoints, drawn with a sparkle in the gutter and badged <em>Imber</em> in the Breakpoints list (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F8</kbd>). You can disable or delete them like any other. It never changes or removes one you set, and holds at most 20. A logpoint can say "only when <code>total &gt; 100</code>" through a condition and a pass count, and can ask for values to be captured at the stop. A line that holds no code (a comment, a brace, an annotation, a declaration) is moved to the next line that does, and Imber is told which line it ended on.
 </p>
 
 <h2>Reading values cannot change anything</h2>
 <p>
   Values are read as <em>paths</em> (<code>order.customer.name</code>, <code>items[2].price</code>) through fields and array slots. Method calls, constructors, assignments and <code>++</code> are refused before they reach the program, with or without approval. Variables named like secrets (password, token, secret, apiKey, credential…) are masked. Results are capped: frames, variables and long values are cut and say so.
 </p>
+<p>
+  Nothing is ever run in the program, so <code>toString()</code> is never called. Instead, the common JDK types are read from their fields: a <code>BigDecimal</code> reads as <code>123.45</code>, dates and times (<code>LocalDate</code>, <code>OffsetDateTime</code>, <code>Instant</code>, <code>java.util.Date</code>…) as ISO text, enums as their name, boxes and <code>Optional</code> as their content, and lists, maps and sets as <code>ArrayList(size=3)</code>. Any other object reads as <code>Type@id</code> and is opened with a longer path.
+</p>
+
+<h2>Several threads, and why a stop happened</h2>
+<p>
+  Each stop says whether it is <em>new</em> (a breakpoint reached now), <em>a step</em>, or <em>leftover</em> (hit while another stop was still open), and which condition let it through with the values it read. A breakpoint Imber sets with <code>suspend: "thread"</code> stops only its own thread; when several threads are stopped the report lists the others, <code>debug_select_thread</code> switches between them, and <code>debug_step</code> and <code>debug_resume</code> accept a <code>thread</code>. Resuming moves on to the next waiting stop. <code>debug_step</code> skips a record's accessors, and with <code>return_value</code> it also reports what the method it left returned. Removing a breakpoint resumes the threads parked on it, never the stop in front of you.
+</p>
+
+<h2>Reading the program's output</h2>
+<p>
+  Each launch keeps what the program prints under its session id, and <code>debug_output</code> reads it also after the program has exited. Without an id it reads the program <em>this conversation</em> launched last, so another conversation starting its own debug run never changes what Imber reads; the id that <code>debug_launch</code> printed selects a specific one. The last eight launches are kept.
 
 <h2>The session belongs to the conversation</h2>
 <p>

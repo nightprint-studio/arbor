@@ -35,7 +35,7 @@ import { focusWindow } from '$lib/ipc/window';
 import { bennuUiStore } from './ui.svelte';
 import { isLibraryBreakpointAt, outerClass } from '$lib/components/bennu/library-breakpoints';
 import {
-  getDebugConfig, setDebugConfig, debugResume, debugStep, debugDetach, debugMute,
+  getDebugConfig, setDebugConfig, debugResume, debugStep, debugSelectThread, debugDetach, debugMute,
   debugVariables, debugExpand, debugWatch, debugDump,
 } from '$lib/ipc/bennu/debug';
 import type {
@@ -448,6 +448,18 @@ function createBennuDebugStore() {
       void persist(root);
     },
 
+    /** Suspend only the thread that hit the breakpoint, not the whole program. Takes effect on the
+     *  next launch of a program, and at once for a running one (the set is reinstalled). */
+    setBreakpointSuspendThread(root: string, file: string, line: number, threadOnly: boolean): void {
+      const key = bpKey(file, line);
+      patch(root, {
+        breakpoints: configOf(root).breakpoints.map((b) =>
+          bpKey(b.file, b.line) === key ? { ...b, suspend_thread_only: threadOnly } : b,
+        ),
+      });
+      void persist(root);
+    },
+
     /** Keep a breakpoint but stop stopping at it — the alternative to deleting one you will
      *  want back in ten minutes. */
     setBreakpointEnabled(root: string, file: string, line: number, enabled: boolean): void {
@@ -650,6 +662,17 @@ function createBennuDebugStore() {
       }
     },
 
+    /** Look at another stopped thread: the frames, variables, steps and resume follow it. */
+    async selectThread(thread: string): Promise<void> {
+      const s = viewed;
+      if (!s) return;
+      try {
+        await debugSelectThread(s.id, thread);
+      } catch (e) {
+        patchSession(s.id, { message: clean(e) });
+      }
+    },
+
     /** Mute or unmute this session's breakpoints. Optimistic: the button flips at once and
      *  reverts if the backend refuses, because a toggle that waits for a round trip to move
      *  reads as broken. */
@@ -665,11 +688,12 @@ function createBennuDebugStore() {
       }
     },
 
-    async step(depth: StepDepth): Promise<void> {
+    /** `returnValue`: the stop also says what the method the step left returned. */
+    async step(depth: StepDepth, returnValue = false): Promise<void> {
       const s = viewed;
       if (!s || s.status !== 'paused') return;
       try {
-        await debugStep(s.id, depth);
+        await debugStep(s.id, depth, returnValue);
       } catch (e) {
         patchSession(s.id, { message: clean(e) });
       }

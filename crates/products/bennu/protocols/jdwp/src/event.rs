@@ -8,7 +8,7 @@
 //! [`Event::Other`] with its kind, because dropping an event silently is how a client ends up
 //! waiting forever for a VM that already answered.
 
-use crate::codec::{Id, IdSizes, Location, Reader, Tag};
+use crate::codec::{Id, IdSizes, Location, Reader, Tag, Value};
 use crate::error::Result;
 
 /// What the VM does to the program when an event fires. Requested per event; echoed on the
@@ -50,6 +50,7 @@ pub mod kind {
     pub const THREAD_START: u8 = 6;
     pub const THREAD_DEATH: u8 = 7;
     pub const CLASS_PREPARE: u8 = 8;
+    pub const METHOD_EXIT_WITH_RETURN_VALUE: u8 = 42;
     pub const VM_START: u8 = 90;
     pub const VM_DEATH: u8 = 99;
 }
@@ -78,6 +79,9 @@ pub enum Event {
     ClassPrepare { request: i32, thread: Id, signature: String },
     ThreadStart { request: i32, thread: Id },
     ThreadDeath { request: i32, thread: Id },
+    /// A method returned, with what it returned (`MethodExitWithReturnValue`). Only requested around a step that
+    /// asked to see it: the VM sends one for every method that exits.
+    MethodExit { request: i32, thread: Id, location: Location, value: Value },
     /// A kind this crate does not decode. Carried rather than dropped: the request id is
     /// enough to know whose it was, and the suspend policy still applies to the VM whether or
     /// not we understood the event.
@@ -97,6 +101,7 @@ impl Event {
             | Event::ClassPrepare { request, .. }
             | Event::ThreadStart { request, .. }
             | Event::ThreadDeath { request, .. }
+            | Event::MethodExit { request, .. }
             | Event::Other { request, .. } => *request,
         }
     }
@@ -110,6 +115,7 @@ impl Event {
             | Event::Exception { thread, .. }
             | Event::ClassPrepare { thread, .. }
             | Event::ThreadStart { thread, .. }
+            | Event::MethodExit { thread, .. }
             | Event::ThreadDeath { thread, .. } => Some(*thread),
             _ => None,
         }
@@ -120,6 +126,7 @@ impl Event {
         match self {
             Event::Breakpoint { location, .. }
             | Event::Step { location, .. }
+            | Event::MethodExit { location, .. }
             | Event::Exception { location, .. } => Some(*location),
             _ => None,
         }
@@ -181,6 +188,9 @@ pub fn parse_composite(data: &[u8], sizes: IdSizes) -> Result<Composite> {
             }
             kind::THREAD_START => Event::ThreadStart { request, thread: r.object_id()? },
             kind::THREAD_DEATH => Event::ThreadDeath { request, thread: r.object_id()? },
+            kind::METHOD_EXIT_WITH_RETURN_VALUE => {
+                Event::MethodExit { request, thread: r.object_id()?, location: r.location()?, value: r.value()? }
+            }
             other => {
                 // Its payload is an unknown length, so nothing after it can be located.
                 events.push(Event::Other { request, kind: other });
@@ -259,6 +269,16 @@ mod tests {
         w.u8(41).i32(5); // METHOD_ENTRY — not decoded here
         let c = parse_composite(&w.into_bytes(), sizes()).unwrap();
         assert_eq!(c.events, vec![Event::Other { request: 5, kind: 41 }]);
+    }
+
+    #[test]
+    fn a_method_exit_carries_the_value_it_returned() {
+        let mut w = Writer::new(sizes());
+        w.u8(SuspendPolicy::None.to_byte()).i32(1);
+        w.u8(kind::METHOD_EXIT_WITH_RETURN_VALUE).i32(9).object_id(4).location(location()).value(&Value::Int(42));
+        let c = parse_composite(&w.into_bytes(), sizes()).unwrap();
+        assert_eq!(c.events[0], Event::MethodExit { request: 9, thread: 4, location: location(), value: Value::Int(42) });
+        assert_eq!(c.events[0].thread(), Some(4));
     }
 
     #[test]

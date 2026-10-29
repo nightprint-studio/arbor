@@ -349,6 +349,8 @@ mod debug_library;
 // watches (which are paths — `order.customer.name` — and deliberately not an expression
 // language). Split from `debug` because the session lifecycle and the value tree are two jobs.
 mod debug_value;
+// JDK value types (BigDecimal, dates, enums, collections) read from their fields, since a row never calls `toString()`.
+mod debug_known;
 // The grammar of a watch, shared by both debuggers: a path — `order.customer.name`, `items[2]`,
 // `*head` — and a refusal by name for anything else. The walk differs per protocol, the shape of
 // what the user typed does not.

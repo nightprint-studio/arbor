@@ -286,6 +286,13 @@
                     />
                   </span>
                 </div>
+                <label class="bm-thread" use:tooltip={'A stop suspends only the thread that hit it: the others keep running and can stop too'}>
+                  <Toggle
+                    checked={!!bp.suspend_thread_only}
+                    onchange={(v) => bennuDebugStore.setBreakpointSuspendThread(root, bp.file, bp.line, v)}
+                  />
+                  <span>Suspend only this thread</span>
+                </label>
                 <!-- The bind note, when there is nothing wrong with the condition — the error
                      takes the field's own red border instead, which is where you are looking. -->
                 {#if note && !note.bad}<span class="bm-note">{note.text}</span>{/if}
@@ -435,6 +442,11 @@
   .bm-every {
     display: inline-flex; align-items: center; gap: 4px;
     flex: 0 0 auto;
+    font-size: var(--font-size-2xs); color: var(--text-muted);
+  }
+
+  .bm-thread {
+    display: inline-flex; align-items: center; gap: 6px;
     font-size: var(--font-size-2xs); color: var(--text-muted);
   }
 

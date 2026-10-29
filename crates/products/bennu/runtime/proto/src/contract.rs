@@ -1544,6 +1544,11 @@ pub struct Breakpoint {
     /// a watch. Empty = nothing extra.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capture: Vec<String>,
+    /// Suspend only the thread that hit it, not the whole program. The default (every thread) is what a
+    /// breakpoint usually wants; this one is for a request handler that must not freeze the others, and lets
+    /// several threads be stopped at once, each its own stop to look at.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub suspend_thread_only: bool,
 }
 
 impl Default for Breakpoint {
@@ -1558,6 +1563,7 @@ impl Default for Breakpoint {
             by_assistant: false,
             log_message: String::new(),
             capture: Vec::new(),
+            suspend_thread_only: false,
         }
     }
 }
@@ -1741,4 +1747,46 @@ pub struct DebugPause {
     /// The throwable's type, when `reason` is `exception`.
     pub exception: Option<String>,
     pub frames: Vec<StackFrame>,
+    /// Why this stop and not another: new or leftover, the condition that let it through, what the last method
+    /// returned. Empty for an engine that does not say (`#[serde(default)]`: a DAP stop never sets it).
+    #[serde(default)]
+    pub detail: StopDetail,
+}
+
+/// What is known about a stop besides where it is.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StopDetail {
+    /// `fresh` (a breakpoint or throw reached now) · `step` (a step finished) · `residual` (hit while another
+    /// stop was still being looked at, so it waited its turn). Empty = unknown.
+    pub origin: String,
+    /// `all` (every thread is suspended) · `thread` (only this one is). Empty = unknown.
+    pub suspends: String,
+    /// The condition that let a breakpoint stop, as written, and what it read when it did (`total = 250`).
+    /// Both empty for a breakpoint without a condition.
+    pub condition: String,
+    pub condition_values: String,
+    /// What the method the step just left returned, when the step was asked to read it.
+    pub returned: Option<ReturnedValue>,
+    /// The other threads that are stopped too and can be switched to.
+    pub also_stopped: Vec<StoppedThread>,
+}
+
+/// The value a method returned.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReturnedValue {
+    /// `com.acme.OrderService.total`
+    pub method: String,
+    pub type_name: String,
+    pub value: String,
+}
+
+/// A thread that is stopped but is not the one being looked at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoppedThread {
+    pub thread: String,
+    pub thread_name: String,
+    pub reason: String,
+    /// `OrderService.java:42`, or the method when there is no line.
+    pub location: String,
 }

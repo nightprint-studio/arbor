@@ -44,6 +44,7 @@ use serde_json::{json, Value};
 
 use super::debug_bp::{self, Removal, Set, MAX_LOG_MESSAGE_CHARS};
 use super::debug_capture::{Capture, TeeSink};
+use super::debug_consoles::{self, Console};
 use super::debug_launch;
 use super::debug_text::{self as text, MAX_STACK_FRAMES};
 use super::{spec, Session, ToolHost};
@@ -104,9 +105,10 @@ fn base_specs() -> Vec<ToolSpec> {
             "Set a breakpoint at a line of a Java file, saved in the project's breakpoints: the user sees it in the editor gutter marked as set by the assistant and in the Breakpoints list, and can disable or delete it. Setting the same line again updates it. It never replaces a breakpoint the user set. `condition` is a watch path compared with a literal (`total > 100`, `name == \"bob\"`). `log_message` makes it a logpoint: it prints the message, with `{path}` placeholders such as `{order.id}`, to the run console and does NOT stop the program. Takes effect at once in a running debug session, otherwise at the next debug launch.",
             json!({"type":"object","properties":{
                 "file":{"type":"string","description":"The Java file."},
-                "line":{"type":"integer","description":"1-based line. A line with no code binds to the next one that has."},
+                "line":{"type":"integer","description":"1-based line. One with no code (a comment, a brace, a declaration) is moved to the next that has, and the answer says which line it ended on."},
                 "condition":{"type":"string"},
                 "log_message":{"type":"string","description":"Print this instead of stopping."},
+                "suspend":{"type":"string","enum":["all","thread"],"description":"What a stop suspends: every thread (default) or only the thread that hit it, which lets the others run and be stopped too. Use `thread` for a request handler that must not freeze the rest."},
                 "capture":{"type":"array","items":{"type":"string"},"description":"Read-only paths (`order.id`, `items[0].price`, at most 10) that Bennu reads at the moment of each stop and hands you with it — even if you are not waiting. Same rules as debug_evaluate; secrets are masked."}
             },"required":["file","line"]}),
         ),
@@ -170,12 +172,17 @@ fn base_specs() -> Vec<ToolSpec> {
         spec(
             "debug_step",
             "Step the stopped program one line — `over` the call on it, `into` it (library and framework code is skipped), or `out` of the method — then wait for it to stop again and return where it is. `count` (default 1, at most 20) repeats the step and returns where it ends up; it stops early if something else stops the program (a breakpoint, an exception) or it ends.",
-            json!({"type":"object","properties":{"kind":{"type":"string","enum":["over","into","out"]},"count":{"type":"integer"}},"required":["kind"]}),
+            json!({"type":"object","properties":{
+                "kind":{"type":"string","enum":["over","into","out"]},
+                "count":{"type":"integer"},
+                "return_value":{"type":"boolean","description":"Also report what the method the step leaves returned (the last method that returned during the step). Slows a step over heavy code, so ask only when you need the value."},
+                "thread":{"type":"string","description":"Step this stopped thread (id or name) instead of the one you are looking at."}
+            },"required":["kind"]}),
         ),
         spec(
             "debug_resume",
-            "Let the stopped program run on, and return at once. Use debug_wait_stop for the next stop.",
-            json!({"type":"object","properties":{}}),
+            "Let the stopped program run on, and return at once. Use debug_wait_stop for the next stop. If other threads are stopped too, resuming moves on to the next of them (it becomes the stop you look at) — the answer says so.",
+            json!({"type":"object","properties":{"thread":{"type":"string","description":"Resume this stopped thread (id or name) instead of the one you are looking at."}}}),
         ),
         spec(
             "debug_detach",
@@ -184,8 +191,9 @@ fn base_specs() -> Vec<ToolSpec> {
         ),
         spec(
             "debug_output",
-            "What the program you launched has printed (stdout and stderr, `[err]` marks stderr): the newest `tail` lines (default 40, at most 200), or only those after `since` (the `next_since` of a previous call). Also says whether it has exited.",
+            "What a program launched under the debugger has printed (stdout and stderr, `[err]` marks stderr): the newest `tail` lines (default 40, at most 200), or only those after `since` (the `next_since` of a previous call). Also says whether it has exited. Works after the session has closed. Without `session` it reads the console of the program YOU last launched, never another conversation's; give the `session` id that debug_launch printed to read a specific one.",
             json!({"type":"object","properties":{
+                "session":{"type":"string","description":"The console id debug_launch gave you. Default: the program you launched last."},
                 "tail":{"type":"integer"},
                 "since":{"type":"integer"}
             }}),
@@ -412,7 +420,7 @@ impl ToolHost {
             "debug_variables" => self.debug_variables(input),
             "debug_evaluate" => self.debug_evaluate(input),
             "debug_step" => self.debug_step(input),
-            "debug_resume" => self.debug_resume(),
+            "debug_resume" => self.debug_resume(input),
             "debug_detach" => self.debug_detach(),
             "debug_output" => self.debug_output(input),
             other if more::is_extra_tool(other) => self.run_debug_more(other, input),
@@ -446,6 +454,7 @@ impl ToolHost {
     /// Close the books on a session whose program is gone, and describe how it ended.
     fn session_ended(&self, capture: Option<&Capture>) -> String {
         let hold = lock(&self.debug.hold).take();
+        let console = hold.as_ref().filter(|h| h.capture.is_some()).map(|h| h.session_id.clone());
         if let (Some(hold), Some(past)) = (hold, lock(&self.debug.past).as_ref()) {
             // Nothing to detach from; this only makes sure a program that is somehow still alive is stopped.
             release_session(&hold, &past.sink);
@@ -453,6 +462,9 @@ impl ToolHost {
         let mut out = format!("The program has ended{}. The debug session is closed.", text::exit_text(capture.and_then(Capture::exit)));
         if let Some(c) = capture {
             out.push_str(&self.fresh_output(c, FRESH_OUTPUT_LINES));
+        }
+        if let Some(id) = console {
+            out.push_str(&format!("\nThe whole output stays readable: debug_output (console `{id}`)."));
         }
         out.push_str("\nYour breakpoints are still set: launch again with debug_launch, or remove them.");
         out
@@ -501,6 +513,8 @@ impl ToolHost {
         }
         let source = std::fs::read_to_string(&path).map_err(|e| format!("could not read the file: {e}"))?;
         let at = text::source_line(&source, line)?;
+        // The line asked for may hold no code; what is set, shown and reported from here on is the one that does.
+        let line = at.line;
         let condition = input.get("condition").and_then(Value::as_str).unwrap_or("").trim().to_string();
         if let Err(why) = crate::debug_cond::parse(&condition) {
             return Err(format!("the condition is not valid, so nothing was set: {why}"));
@@ -510,10 +524,15 @@ impl ToolHost {
             return Err(format!("`log_message` is at most {MAX_LOG_MESSAGE_CHARS} characters"));
         }
         let capture = capture_arg(input)?;
+        let thread_only = match input.get("suspend").and_then(Value::as_str) {
+            None | Some("all") => false,
+            Some("thread") => true,
+            Some(other) => return Err(format!("`suspend` is `all` or `thread`, not `{other}`")),
+        };
 
         let root = self.root_of(&path);
         let mut cfg: DebugConfig = crate::repo_config::load(&root, "debug");
-        let outcome = debug_bp::set(&mut cfg, &shown, line, &condition, &log_message, &capture)?;
+        let outcome = debug_bp::set_with(&mut cfg, &shown, line, &condition, &log_message, &capture, thread_only)?;
         let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         if outcome == Set::UserOwns {
             return Ok(format!("{name}:{line} already has a breakpoint set by the user; it was left exactly as it is, and it will stop the program there."));
@@ -523,12 +542,14 @@ impl ToolHost {
 
         let verb = if outcome == Set::Added { "set" } else { "updated" };
         let mut out = format!("breakpoint {verb} at {name}:{line}: `{}`", at.text);
-        if let Some(note) = at.warning {
-            out.push_str(&format!("\nNote: {note}"));
+        if let Some(asked) = at.moved_from {
+            out.push_str(&format!("\nNote: line {asked} holds no code (a comment, blank line, annotation, brace or declaration), so it was set on line {line}, the next one that does. Read the file first and pick a line with a statement."));
         }
         out.push_str("\nThe user sees it in the gutter (marked as set by the assistant) and can disable or delete it.");
         if !log_message.is_empty() {
             out.push_str(" It is a logpoint: it prints and does not stop.");
+        } else if thread_only {
+            out.push_str(" A stop suspends only the thread that hit it: the others keep running and can stop too (debug_select_thread switches between them).");
         }
         if !capture.is_empty() {
             out.push_str(&format!(" At each stop Bennu reads {} and hands you the values, so you do not have to ask.", capture.join(", ")));
@@ -553,6 +574,15 @@ impl ToolHost {
         Ok(debug_bp::list_text(&cfg, &states))
     }
 
+    /// Threads that were stopped on a breakpoint just removed and were let go, if the session says any were.
+    fn released_note(&self) -> String {
+        let backend = lock(&self.debug.hold).as_ref().and_then(|h| debug_backend::get(&h.session_id).ok());
+        match backend.map(|b| b.take_released()) {
+            Some(n) if n > 0 => format!(" {n} thread(s) that were stopped on it were resumed."),
+            _ => String::new(),
+        }
+    }
+
     fn debug_remove(&self, input: &Value) -> Result<String, String> {
         let root = self.session.root.clone();
         let mut cfg: DebugConfig = crate::repo_config::load(&root, "debug");
@@ -562,7 +592,7 @@ impl ToolHost {
                 apply_config(&root, &cfg)?;
                 self.notify_breakpoints_changed(&root);
             }
-            return Ok(format!("removed {n} breakpoint(s) you had set. The user's were left alone."));
+            return Ok(format!("removed {n} breakpoint(s) you had set. The user's were left alone.{}", self.released_note()));
         }
         let path = self.resolve(str_arg(input, "file")?);
         let line = line_arg(input)?;
@@ -573,7 +603,7 @@ impl ToolHost {
             Removal::Removed => {
                 apply_config(&root, &cfg)?;
                 self.notify_breakpoints_changed(&root);
-                Ok(format!("breakpoint at line {line} removed."))
+                Ok(format!("breakpoint at line {line} removed.{}", self.released_note()))
             }
             Removal::NotFound => Err("there is no breakpoint there (debug_list_breakpoints shows them)".into()),
             Removal::UserOwns => Err("that breakpoint is the user's, so it was left alone".into()),
@@ -611,6 +641,8 @@ impl ToolHost {
 
         // Held from here on: if anything below fails or the run is cancelled, the program is stopped with the run.
         self.open_session(Hold { session_id: run_id.clone(), launched: true, capture: Some(Arc::clone(&capture)), label: plan.label.clone(), lease: self.new_lease() }, root.clone());
+        // Its output is kept under the run id, past the end of the session and apart from other conversations' runs.
+        debug_consoles::register(Console { session_id: run_id.clone(), conversation: self.session.conversation_id.clone(), label: plan.label.clone(), capture: Arc::clone(&capture) });
         // So the Run console shows it like any launch the user made, and the Debug panel follows it.
         self.session.sink.emit("arbor://bennu/assistant-run", json!({
             "run_id": run_id, "root": root, "label": plan.label, "main_class": plan.main_class,
@@ -638,7 +670,7 @@ impl ToolHost {
         };
         let held_note = if plan.suspend { "It is held at startup until the breakpoints are installed, then runs." } else { "It is already running: a breakpoint on code that has run is missed." };
         Ok(format!(
-            "launched `{}` under the debugger{} (build: {}). {held_note}\nCall debug_wait_stop to wait for a breakpoint; debug_output shows what it prints.",
+            "launched `{}` under the debugger{} (build: {}). {held_note}\nConsole id: `{run_id}` — debug_output reads it, even after the program has exited. Call debug_wait_stop to wait for a breakpoint.",
             plan.label,
             if vm.is_empty() { String::new() } else { format!(" ({vm})") },
             built.tool
@@ -675,6 +707,7 @@ impl ToolHost {
         let mut out = format!("debug session closed: {}.", if done.is_empty() { "the program had already gone".to_string() } else { done.join(", ") });
         if let Some(c) = &hold.capture {
             out.push_str(&self.fresh_output(c, FRESH_OUTPUT_LINES));
+            out.push_str(&format!("\nThe whole output stays readable: debug_output (console `{}`).", hold.session_id));
         }
         out.push_str("\nYour breakpoints stay set for another launch until the run ends; debug_remove_breakpoint (all) takes them down.");
         Ok(out)
@@ -760,9 +793,15 @@ impl ToolHost {
             return Err("`kind` is over, into or out".into());
         }
         let count = input.get("count").and_then(Value::as_u64).unwrap_or(1).clamp(1, MAX_STEP_COUNT) as usize;
+        self.pick_thread(input)?;
+        let want_return = input.get("return_value").and_then(Value::as_bool).unwrap_or(false);
         let mut taken = 0;
         loop {
             let (backend, _) = self.stopped()?;
+            // Only the last step of a count has a value worth reading.
+            if want_return && taken + 1 == count {
+                backend.want_return_value()?;
+            }
             backend.step(Step::parse(kind))?;
             match self.wait_for_stop(STEP_WAIT) {
                 Wait::Stopped(p) => {
@@ -788,10 +827,22 @@ impl ToolHost {
         id.map(|id| crate::assistant::stop_watch::take_values(&id)).filter(|v| !v.is_empty()).map(|v| format!("\n{}", v.trim_end())).unwrap_or_default()
     }
 
-    fn debug_resume(&self) -> Result<String, String> {
+    fn debug_resume(&self, input: &Value) -> Result<String, String> {
+        self.pick_thread(input)?;
         let (backend, _) = self.stopped()?;
         backend.resume()?;
-        Ok("resumed: the program is RUNNING. Call debug_wait_stop for the next stop.".into())
+        match backend.paused() {
+            // Another thread was waiting: it is the stop now, already suspended, so the program is not running.
+            Some(next) => Ok(format!("resumed. Another thread was stopped too, and it is the stop now:\n{}", text::stack_text(&next, 8))),
+            None => Ok("resumed: the program is RUNNING. Call debug_wait_stop for the next stop.".into()),
+        }
+    }
+
+    /// `thread` on a tool: make that stopped thread the one the tool acts on.
+    fn pick_thread(&self, input: &Value) -> Result<(), String> {
+        let Some(which) = input.get("thread").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()) else { return Ok(()) };
+        let (backend, _) = self.stopped()?;
+        backend.select_thread(which).map(|_| ())
     }
 
     // ── Reading values ───────────────────────────────────────────────────────────────────────────
@@ -832,13 +883,8 @@ impl ToolHost {
     // ── Output ───────────────────────────────────────────────────────────────────────────────────
 
     fn debug_output(&self, input: &Value) -> Result<String, String> {
-        let capture = {
-            let hold = lock(&self.debug.hold);
-            match hold.as_ref() {
-                Some(h) => h.capture.clone().ok_or("the program was attached to, not launched here, so its output is not available")?,
-                None => return Err("no debug session is open".into()),
-            }
-        };
+        let console = self.console_for(input.get("session").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()))?;
+        let capture = &console.capture;
         let tail = input.get("tail").and_then(Value::as_u64).map(|t| t as usize).unwrap_or(40).clamp(1, 200);
         let since = input.get("since").and_then(Value::as_u64).unwrap_or(0);
         let (lines, last) = capture.read(since, tail);
@@ -847,8 +893,24 @@ impl ToolHost {
             Some(code) => format!("exited{}", text::exit_text(Some(code))),
             None => "still running".to_string(),
         };
+        let whose = if console.conversation == self.session.conversation_id { "" } else { ", launched by another conversation" };
         let body = lines.iter().map(|(seq, l)| format!("#{seq} {l}")).collect::<Vec<_>>().join("\n");
-        Ok(format!("{} line(s), the program is {state}; next_since={last}\n{body}", lines.len()))
+        Ok(format!("console `{}` ({}{whose}): {} line(s), the program is {state}; next_since={last}\n{body}", console.session_id, console.label, lines.len()))
+    }
+
+    /// The console to read: the one asked for by id, else the program this session holds, else the latest this
+    /// conversation launched. Never "the newest in the process" — that would be another agent's.
+    fn console_for(&self, asked: Option<&str>) -> Result<Console, String> {
+        if let Some(id) = asked {
+            return debug_consoles::find(id).ok_or_else(|| format!("no console `{id}`; {}", debug_consoles::list_text()));
+        }
+        let open = lock(&self.debug.hold).as_ref().map(|h| (h.session_id.clone(), h.capture.is_some()));
+        match open {
+            Some((_, false)) => Err("the program was attached to, not launched here, so its output is not available".into()),
+            Some((id, true)) => debug_consoles::find(&id).ok_or_else(|| "this session's console is no longer kept".to_string()),
+            None => debug_consoles::latest_of(&self.session.conversation_id)
+                .ok_or_else(|| format!("this conversation has not launched a program yet; {}", debug_consoles::list_text())),
+        }
     }
 }
 

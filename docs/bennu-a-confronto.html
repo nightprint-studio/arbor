@@ -221,7 +221,7 @@
 
 <header class="masthead">
   <div class="wrap">
-    <div class="eyebrow">Sesta stesura · solo l'editor · 20 ottobre 2026 · aggiornata il 28 ottobre</div>
+    <div class="eyebrow">Sesta stesura · solo l'editor · 20 ottobre 2026 · aggiornata il 29 ottobre</div>
     <h1>Bennu a confronto</h1>
     <p class="standfirst">
       Bennu contro IntelliJ IDEA Ultimate e Community, Eclipse, VS Code con il Java pack e NetBeans:
@@ -245,6 +245,7 @@
     <a href="#framework">Framework</a>
     <a href="#build">Build e debug</a>
     <a href="#editor">Editor</a>
+    <a href="#assistente">Assistente AI</a>
     <a href="#rust">Rust e Bevy</a>
     <a href="#spring-tools">Spring Tools</a>
     <a href="#salito">Cosa è salito</a>
@@ -256,6 +257,17 @@
 <section id="breve">
   <div class="wrap">
     <h2>In breve <span class="kicker">tre righe</span></h2>
+    <div class="callout green">
+      <b>Aggiornamento del 29 ottobre: Bennu ha un assistente dentro, Imber, e la riga «Assistente AI» sale da 1 a 3.</b>
+      <p>Imber è un agente a strumenti che lavora sul progetto aperto: legge con l'indice di Bennu (usi, simboli, bean, endpoint, problemi), modifica con anteprima o applicando,
+        rinomina e aggiunge parametri con il motore di refactoring invece che per testo, compila e fa girare i test, fa partire e guarda i servizi, debugga, può avviare sotto-agenti,
+        lavora su una copia isolata del progetto e si ferma a un tetto di spesa in euro. Una sezione nuova, <a href="#assistente">Assistente AI</a>, lo mette accanto a quello degli altri.</p>
+      <ul>
+        <li><b>Assistente AI 1 → 3</b>, non di più: manca la completion AI mentre si scrive, parla solo con i modelli di Anthropic, e gli strumenti di refactoring che offre sono due (rename, aggiungi parametro) contro i molti che Bennu ha.</li>
+        <li><b>Totale 172 su 280, sempre il 61%</b>: la riga è nuova, quindi sulle righe di prima non cambia nulla (138 su 180, 77%).</li>
+        <li><b>Non provato in questa stesura</b>: il maintainer lo usa, ma non ho riverificato sul prodotto installato il comportamento dei sotto-agenti né i costi; le colonne degli altri vengono da una ricerca web, non da prove (vedi la sezione).</li>
+      </ul>
+    </div>
     <div class="callout green">
       <b>Aggiornamento del 28 ottobre, in serata: provato anche questo, una riga sale, nove entrano, e due assenze cadono.</b>
       <p>Il maintainer ha provato il lavoro del pomeriggio, e questa stesura lo conta come provato: i suggerimenti intelligenti del completamento (affinità col nome, abitudini del
@@ -886,7 +898,7 @@
         <tr class="chg"><td>Client HTTP: file <code>.http</code> con variabili, esecuzione dal gutter <span class="tag new">28 ott</span><small class="why">Bennu ha il pannello degli endpoint, non un client.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c n">✗</td></tr>
         <tr class="chg"><td>Docker e Kubernetes: compose, immagini, container, cluster <span class="tag new">28 ott</span><small class="why">Bennu colora il Dockerfile e nient'altro.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr class="chg"><td>Sviluppo remoto: SSH, dev container, WSL <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
-        <tr class="chg"><td>Assistente AI dentro l'editor: chat, completion <span class="tag new">28 ott</span><small class="why">Bennu si lascia pilotare da un agente esterno (tool MCP); non ne ha uno dentro.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
+        <tr class="chg"><td>Assistente AI dentro l'editor: chat, completion <span class="tag new">28 ott</span><small class="why">Chat e agente ci sono (Imber, 29 ottobre); la completion AI mentre scrivi no. Si lascia pilotare anche da un agente esterno (tool MCP).</small></td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr class="chg"><td>Sincronizzazione delle impostazioni fra macchine <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c n">✗</td></tr>
         <tr class="chg"><td>Iniezione di linguaggio nelle stringhe oltre a SQL e JPQL: JSON, regex, HTML <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
         <tr class="chg"><td>Diagramma delle entità e finestra Persistence per JPA <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c n">✗</td><td class="c p">◐</td></tr>
@@ -902,6 +914,44 @@
     </table></div>
   </div>
 </section>
+
+<section id="assistente">
+  <div class="wrap">
+    <h2>Assistente AI <span class="kicker">Imber contro quello degli altri</span></h2>
+    <p>Imber è l'assistente di Bennu. Il confronto giusto non è con le sue funzioni una per una, ma con la forma: un <b>agente a strumenti</b> che lavora sul progetto,
+      non un completatore. In questo senso è più vicino a Junie e all'agent mode di Copilot che al suggerimento in linea.</p>
+    <div class="callout">
+      <b>Come leggere le colonne degli altri.</b>
+      <p>Quella di Bennu è letta dal sorgente (<code>crates/products/bennu/assistant</code> e <code>runtime/be/src/assistant</code>). Quelle degli altri vengono da una ricerca web del 29 ottobre,
+        quasi tutta su siti secondari, e <b>non da prove su un'installazione</b>. Dove non ho trovato niente di affidabile c'è «?», che non è uno zero: vuol dire «non so». Per Eclipse e NetBeans
+        l'assistente non è nativo: sono plugin di terzi o il plugin di Copilot.</p>
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th>Funzione</th><th class="own">Imber (Bennu)</th><th>JetBrains<small>AI Assistant + Junie</small></th><th>Copilot<small>VS Code</small></th><th>Eclipse</th><th>NetBeans</th></tr></thead>
+      <tbody>
+        <tr><td>Chat e agente che legge e modifica i file del progetto</td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr><td>Completion AI mentre scrivi<small class="why">È il buco più visibile di Imber: oggi suggerisce solo l'editor, con le regole sue.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr><td>Sotto-agenti con contesto pulito, in parallelo<small class="why">Imber: fino a 3 insieme, un solo livello, ognuno con il suo tetto (1 € di base), restituisce solo un riassunto; uno solo scrive alla volta. JetBrains: un agente che usa due modelli, nessuna orchestrazione trovata.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr><td>Strumenti semantici del progetto invece del solo testo<small class="why">Usi, simboli, bean, endpoint, problemi, ricerca strutturale; rename e aggiungi parametro con l'indice, che distingue una referenza da un'omonimia.</small></td><td class="c own y">✓</td><td class="c p">?</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Compila, fa girare i test, avvia i servizi e li debugga<small class="why">Anche un gioco Bevy in esecuzione, via BRP. In modalità Manuale chiede prima di ogni build.</small></td><td class="c own y">✓</td><td class="c p">?</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Tre modi di lavorare: proponi, applica, autonomo<small class="why">Percorso consentito per cartella, fuori dal quale chiede; cancellare chiede sempre; ogni file cancellato si recupera da Local History.</small></td><td class="c own y">✓</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">?</td><td class="c n">✗</td></tr>
+        <tr><td>Copia isolata del progetto per la run, e annulla<small class="why">Il lavoro dell'agente non tocca i tuoi file finché non lo accetti.</small></td><td class="c own y">✓</td><td class="c p">?</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Tetto di spesa in euro, per conversazione, giorno, settimana, mese<small class="why">Con la chiave tua, a prezzi API. Gli altri hanno una quota di crediti o di richieste premium, non un tetto in valuta.</small></td><td class="c own y">✓</td><td class="c p">◐</td><td class="c p">◐</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+        <tr><td>Scelta del modello</td><td class="c own p">◐</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
+        <tr><td>Risparmio di token: file già letti ridotti a una riga o a un diff, risultati lunghi a riassunto</td><td class="c own y">✓</td><td class="c p">?</td><td class="c p">?</td><td class="c n">✗</td><td class="c n">✗</td></tr>
+      </tbody>
+    </table></div>
+    <p class="fine">◐ in «Scelta del modello» per Imber: tre modelli Anthropic con il livello di sforzo, e nient'altro. Nessuna riga qui pesa nei totali della scheda: il peso sta nella riga unica «Assistente AI nell'editor».</p>
+    <div class="callout blue">
+      <b>Dove Imber è davanti, e dove è dietro.</b>
+      <p><b>Davanti</b> dove conta l'editor: lavora con l'indice di Bennu e non con il grep, quindi su Java (e su Struts, Spring, MyBatis) vede cose che un agente generico non vede; il costo è tenuto sotto
+        controllo da cima a fondo, con la cache del prompt, i risultati riassunti e un tetto in euro; e le sue regole di permesso sono quelle del prodotto, non un dialogo che si clicca per inerzia.
+        <b>Dietro</b> in tre punti: nessuna completion AI mentre scrivi; un solo fornitore di modelli; e di tutto il refactoring che Bennu sa fare l'agente ne vede due (rename e aggiungi parametro) — sposta,
+        estrai, inline restano fuori dalla sua portata, quindi un lavoro strutturale grosso torna a essere fatto con edit di testo.</p>
+    </div>
+  </div>
+</section>
+
 <section id="rust">
   <div class="wrap">
     <h2>Rust e Bevy <span class="kicker">un confronto che prima non c'era</span></h2>
@@ -1056,6 +1106,7 @@
     <h2>Prossimi passi <span class="kicker">in ordine di ritorno</span></h2>
     <p>L'ordine è il punto: ogni voce è messa dove sta per quanto sposta rispetto a quanto costa.</p>
     <ol class="next">
+      <li><div><b>Dare a Imber i refactoring che Bennu già ha</b><span>Sposta, estrai e inline sono nel motore ma non negli strumenti dell'agente: è il passo più corto per un lavoro strutturale grosso fatto bene. Subito dopo, la completion AI e un secondo fornitore di modelli.</span></div></li>
       <li><div><b>«Apri in Picus» dalla finestra Database</b><span>Il passo piccolo che separa il 4 dal 5 della riga Database: struttura, query e dati restano in Picus, ma a un clic e sulla stessa connessione.</span></div></li>
       <li><div><b>Editor affiancati: orizzontale e lo stesso file in due pannelli</b><span>Il primo taglio c'è dal 28 ottobre, con i tab ricordati al riavvio. Mancano le due cose che lo separano da quello di IntelliJ.</span></div></li>
             <li><div><b>Far girare i test sul lavoro del 20 ottobre</b><span>Il pannello Changes con il diff accanto è la voce che ha mosso la UI/UX: se non regge, l'asse torna a 8.0. L'uso quotidiano lo sta già mettendo alla prova.</span></div></li>
@@ -1081,7 +1132,8 @@
       maintainer sulla UI/UX. Le assenze — Change Signature, Introduce Parameter, estrai interfaccia, Gradle, hot-swap delle
       classi, coverage, bookmark, macro, informazioni dall'app Spring viva — sono state cercate nel sorgente. Le colonne degli altri IDE,
       RustRover e Spring Tools compresi, vengono da conoscenza generale delle versioni rilasciate e non sono state riverificate su
-      un'installazione. Le matrici non sono esaustive: l'assenza di una riga non è un giudizio.</p>
+      un'installazione. Fa eccezione la sezione «Assistente AI»: le colonne degli altri vengono da una ricerca web del 29 ottobre su fonti per lo più secondarie
+      (blog e recensioni, non le pagine dei fornitori), e «?» vuol dire che non ho trovato niente di affidabile. Le matrici non sono esaustive: l'assenza di una riga non è un giudizio.</p>
     <p>Stesure precedenti: <code>docs/arbor-a-confronto.html</code> (2 settembre, tutta la suite), la scheda
       «Bennu Against the Field» (9 settembre), la quarta stesura (11 settembre) e la quinta (15 settembre), nella storia git del file.
       Il confronto con Corvus non è stato rifatto: secondo il maintainer, dall'ultima valutazione non ha avuto altro che correzioni,
@@ -1165,7 +1217,7 @@
       ['Client HTTP e prove di API', 'File .http con variabili ed esecuzione dal gutter. Bennu ha il pannello degli endpoint, non un client.', null, 0, 5, 0, 1, 4, 1, 0.5, 2],
       ['Docker e Kubernetes', 'Dockerfile colorato in Bennu; niente compose, immagini, container né cluster come in IntelliJ Ultimate e VS Code.', null, 1, 5, 1, 3, 5, 3, 0.5, 2],
       ['Sviluppo remoto (SSH, dev container, WSL)', 'Il progetto sta su un\'altra macchina o in un container e l\'editor ci lavora sopra. Bennu apre cartelle locali.', null, 0, 4, 3, 2, 5, 2, 0.5, 1],
-      ['Assistente AI nell\'editor', 'Chat e completion integrate. Bennu si lascia pilotare da un agente (i tool MCP) ma non ne ha uno dentro.', null, 1, 5, 4, 3, 5, 1, 1, 2],
+      ['Assistente AI nell\'editor', 'Imber: agente con gli strumenti di Bennu (indice, rename, build, test, debug, servizi), sotto-agenti, copia isolata, tetto di spesa. Manca la completion AI mentre scrivi e parla solo con i modelli di Anthropic. Dettaglio nella sezione «Assistente AI».', null, 3, 5, 4, 3, 5, 1, 1, 2],
       ['Sincronizzazione delle impostazioni', 'Le preferenze seguono l\'utente fra macchine. Bennu tiene i suoi file di configurazione per profilo, in locale.', null, 0, 4, 4, 1, 5, 1, 0.5, 0.5],
       ['Maturità', '9.698 test Rust e 333 frontend dichiarati (un conteggio statico, non una esecuzione: quelli del 28 ottobre non sono stati lanciati), due corpora misurati; un utente solo, che però ora lo usa ogni giorno.', 2, 2, 5, 5, 4, 4, 3, 2, 2],
     ]],

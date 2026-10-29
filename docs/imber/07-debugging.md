@@ -20,16 +20,26 @@ The debugger itself is described on the **Debugging** and **Frames, values and w
 | Set, list, remove breakpoints and logpoints | `debug_set_breakpoint`, `debug_list_breakpoints`, `debug_remove_breakpoint` | No |
 | Start a session | `debug_launch` (builds and runs a main class), `debug_attach` (to a JVM on 127.0.0.1) | Every time |
 | Wait and look | `debug_wait_stop`, `debug_stack`, `debug_variables`, `debug_evaluate`, `debug_output` | No |
-| Move | `debug_step` (several steps at once), `debug_resume`, `debug_run_to` (like Run to Cursor), `debug_break_on_exception` | No |
+| Move | `debug_step` (several steps at once), `debug_resume`, `debug_run_to` (like Run to Cursor), `debug_break_on_exception`, `debug_select_thread` | No |
 | Let go | `debug_detach` | No |
 
 ## Its breakpoints are visible and yours
 
-Breakpoints Imber sets are saved in the project's breakpoints, drawn with a sparkle in the gutter and badged *Imber* in the Breakpoints list (`Ctrl+Shift+F8`). You can disable or delete them like any other. It never changes or removes one you set, and holds at most 20. A logpoint can say "only when `total > 100`" through a condition and a pass count, and can ask for values to be captured at the stop.
+Breakpoints Imber sets are saved in the project's breakpoints, drawn with a sparkle in the gutter and badged *Imber* in the Breakpoints list (`Ctrl+Shift+F8`). You can disable or delete them like any other. It never changes or removes one you set, and holds at most 20. A logpoint can say "only when `total > 100`" through a condition and a pass count, and can ask for values to be captured at the stop. A line that holds no code (a comment, a brace, an annotation, a declaration) is moved to the next line that does, and Imber is told which line it ended on.
 
 ## Reading values cannot change anything
 
 Values are read as *paths* (`order.customer.name`, `items[2].price`) through fields and array slots. Method calls, constructors, assignments and `++` are refused before they reach the program, with or without approval. Variables named like secrets (password, token, secret, apiKey, credential…) are masked. Results are capped: frames, variables and long values are cut and say so.
+
+Nothing is ever run in the program, so `toString()` is never called. Instead, the common JDK types are read from their fields: a `BigDecimal` reads as `123.45`, dates and times (`LocalDate`, `OffsetDateTime`, `Instant`, `java.util.Date`…) as ISO text, enums as their name, boxes and `Optional` as their content, and lists, maps and sets as `ArrayList(size=3)`. Any other object reads as `Type@id` and is opened with a longer path.
+
+## Several threads, and why a stop happened
+
+Each stop says whether it is *new* (a breakpoint reached now), *a step*, or *leftover* (hit while another stop was still open), and which condition let it through with the values it read. A breakpoint Imber sets with `suspend: "thread"` stops only its own thread; when several threads are stopped the report lists the others, `debug_select_thread` switches between them, and `debug_step` and `debug_resume` accept a `thread`. Resuming moves on to the next waiting stop. `debug_step` skips a record's accessors, and with `return_value` it also reports what the method it left returned. Removing a breakpoint resumes the threads parked on it, never the stop in front of you.
+
+## Reading the program's output
+
+Each launch keeps what the program prints under its session id, and `debug_output` reads it also after the program has exited. Without an id it reads the program *this conversation* launched last, so another conversation starting its own debug run never changes what Imber reads; the id that `debug_launch` printed selects a specific one. The last eight launches are kept.
 
 ## The session belongs to the conversation
 

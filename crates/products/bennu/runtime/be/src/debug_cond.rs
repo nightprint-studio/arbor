@@ -534,6 +534,64 @@ pub(crate) fn holds(
     }
 }
 
+/// What the paths a condition mentions read in this frame — `total = 250, limit = 100` — for the stop the
+/// condition let through, so a stop it should not have allowed is visible at once. A path that cannot be read
+/// says why in place of its value.
+pub(crate) fn describe_values(session: &Session, thread: Id, frame: &Frame, cond: &Cond) -> String {
+    let mut paths: Vec<&Vec<Step>> = Vec::new();
+    collect_paths(cond, &mut paths);
+    let mut seen: Vec<String> = Vec::new();
+    let mut items: Vec<String> = Vec::new();
+    for steps in paths {
+        let text = path_text(steps);
+        if seen.contains(&text) {
+            continue;
+        }
+        let value = crate::debug_value::render_steps(session, thread, frame, steps).unwrap_or_else(|why| format!("<{why}>"));
+        items.push(format!("{text} = {value}"));
+        seen.push(text);
+    }
+    items.join(", ")
+}
+
+fn collect_paths<'a>(cond: &'a Cond, out: &mut Vec<&'a Vec<Step>>) {
+    fn push<'a>(operand: &'a Operand, out: &mut Vec<&'a Vec<Step>>) {
+        if let Operand::Path(steps) = operand {
+            out.push(steps);
+        }
+    }
+    match cond {
+        Cond::Compare(a, _, b) => {
+            push(a, out);
+            push(b, out);
+        }
+        Cond::Truth(o) => push(o, out),
+        Cond::Not(inner) => collect_paths(inner, out),
+        Cond::And(a, b) | Cond::Or(a, b) => {
+            collect_paths(a, out);
+            collect_paths(b, out);
+        }
+    }
+}
+
+/// `order.items[0].price`: a path as it was written.
+fn path_text(steps: &[Step]) -> String {
+    let mut out = String::new();
+    for step in steps {
+        match step {
+            Step::Field(name) => {
+                if !out.is_empty() {
+                    out.push('.');
+                }
+                out.push_str(name);
+            }
+            Step::Index(i) => out.push_str(&format!("[{i}]")),
+            Step::Deref => out.push('*'),
+        }
+    }
+    out
+}
+
 /// One side's value: read out of the frame, or the literal as written.
 fn read(
     session: &Session,
@@ -657,6 +715,15 @@ fn ordered(ordering: std::cmp::Ordering, op: Op) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_paths_of_a_condition_are_listed_once_each_as_written() {
+        let cond = parse("order.total > 100 && order.items[0].qty != 0 || order.total < 5").unwrap().unwrap();
+        let mut paths = Vec::new();
+        collect_paths(&cond, &mut paths);
+        let texts: Vec<String> = paths.iter().map(|p| path_text(p)).collect();
+        assert_eq!(texts, vec!["order.total", "order.items[0].qty", "order.total"], "duplicates are dropped later, by the caller");
+    }
 
     fn path(name: &str) -> Operand {
         Operand::Path(debug_path::parse(name, debug_path::JAVA).expect("a path"))

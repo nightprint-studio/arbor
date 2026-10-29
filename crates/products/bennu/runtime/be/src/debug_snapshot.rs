@@ -78,7 +78,7 @@ mod tests {
     }
 
     fn pause(frames: Vec<StackFrame>) -> DebugPause {
-        DebugPause { session_id: "s".into(), thread: "1".into(), thread_name: "main".into(), reason: "breakpoint".into(), exception: None, frames }
+        DebugPause { session_id: "s".into(), thread: "1".into(), thread_name: "main".into(), reason: "breakpoint".into(), exception: None, frames, detail: Default::default() }
     }
 
     #[test]

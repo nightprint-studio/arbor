@@ -316,7 +316,7 @@ Imber acts only through a fixed set of tools, grouped in families; each family c
 | **Local History** | `local_history` | List a file's revisions, show a diff, list deleted files, restore one. |
 | **Build, run and test** | `bennu_build`, `bennu_test_run`, `bennu_cargo_run`, `bennu_npm_run_script`, run configurations, launching a program | Anything that executes the project. See Imber › Permissions and modes for when each asks. |
 | **Live services** | `run_start`, `run_status`, `run_logs`, `run_stop`, `wait_ready`, `list_recipes`, `run_recipe`, `http_request`, `trace_request`, `timeline`, `list_scenarios`, `run_scenario`, `save_scenario`, `console_logs`, `tail_file`, `wait_log`, `log_facets`, `log_record` | Start the project's services, read their logs, call them over localhost, follow one request through every log, run scenarios. See Imber › Running and observing. |
-| **Debugger** | `debug_set_breakpoint`, `debug_list_breakpoints`, `debug_remove_breakpoint`, `debug_launch`, `debug_attach`, `debug_wait_stop`, `debug_stack`, `debug_variables`, `debug_evaluate`, `debug_step`, `debug_resume`, `debug_detach`, `debug_output`, `debug_run_to`, `debug_break_on_exception` | Debug a Java program. See Imber › Debugging with Imber. |
+| **Debugger** | `debug_set_breakpoint`, `debug_list_breakpoints`, `debug_remove_breakpoint`, `debug_launch`, `debug_attach`, `debug_wait_stop`, `debug_stack`, `debug_variables`, `debug_evaluate`, `debug_step`, `debug_resume`, `debug_detach`, `debug_output`, `debug_run_to`, `debug_break_on_exception`, `debug_select_thread` | Debug a Java program. See Imber › Debugging with Imber. |
 | **Look into a running Bevy game** | `brp_connect`, `brp_query`, `brp_get`, `brp_resources`, `brp_get_resource`, `brp_types` | Read entities, components, resources and types over the Bevy Remote Protocol. Only for projects with a `Cargo.toml`. See Imber › Bevy games and the profiler. |
 | **Screenshots of a page** | `screenshot_page`, `page_diagnostics` | Look at a front end on localhost. See Imber › Screenshots and diagrams. |
 
@@ -423,7 +423,7 @@ The debugger itself is described on the **Debugging** and **Frames, values and w
 | Set, list, remove breakpoints and logpoints | `debug_set_breakpoint`, `debug_list_breakpoints`, `debug_remove_breakpoint` | No |
 | Start a session | `debug_launch` (builds and runs a main class), `debug_attach` (to a JVM on 127.0.0.1) | Every time |
 | Wait and look | `debug_wait_stop`, `debug_stack`, `debug_variables`, `debug_evaluate`, `debug_output` | No |
-| Move | `debug_step` (several steps at once), `debug_resume`, `debug_run_to` (like Run to Cursor), `debug_break_on_exception` | No |
+| Move | `debug_step` (several steps at once), `debug_resume`, `debug_run_to` (like Run to Cursor), `debug_break_on_exception`, `debug_select_thread` | No |
 | Let go | `debug_detach` | No |
 
 ## Its breakpoints are visible and yours

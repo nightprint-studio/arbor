@@ -452,6 +452,32 @@ pub fn request_step(
     Reader::new(&data, client.sizes()).i32()
 }
 
+/// `EventRequest.Set` for **method exits with their return value** on `thread`, never suspending.
+///
+/// The VM sends one event for every method that returns on that thread, so this is asked for only around one
+/// step and cleared at its end; `exclude` keeps the framework's methods out of the flood, the same patterns the
+/// step skips. The last event before the step lands is the method the step just left.
+pub fn request_method_exit(client: &Client, thread: Id, exclude: &[&str]) -> Result<i32> {
+    let mut w = Writer::new(client.sizes());
+    w.u8(crate::event::kind::METHOD_EXIT_WITH_RETURN_VALUE).u8(SuspendPolicy::None.to_byte()).i32(1 + exclude.len() as i32);
+    w.u8(4).object_id(thread); // modifier 4 = ThreadOnly
+    for pattern in exclude {
+        w.u8(6).string(pattern); // modifier 6 = ClassExclude
+    }
+    let data = client.send(EVENT_REQUEST, 1, w.into_bytes(), "EventRequest.Set (method exit)")?;
+    Reader::new(&data, client.sizes()).i32()
+}
+
+/// `Method.Bytecodes` — the method's code, to tell a getter from a method that does something.
+pub fn method_bytecodes(client: &Client, class: Id, method: Id) -> Result<Vec<u8>> {
+    let mut w = Writer::new(client.sizes());
+    w.reference_type_id(class).method_id(method);
+    let data = client.send(METHOD, 3, w.into_bytes(), "Method.Bytecodes")?;
+    let mut r = Reader::new(&data, client.sizes());
+    let count = r.i32()?.max(0);
+    (0..count).map(|_| r.u8()).collect()
+}
+
 /// `EventRequest.Clear` — stop asking for this event. `kind` must be the one it was set with.
 pub fn clear_event(client: &Client, kind: u8, request: i32) -> Result<()> {
     let mut w = Writer::new(client.sizes());

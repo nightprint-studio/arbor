@@ -25,6 +25,7 @@
 //! See `docs/crate-refactor.md` for the full split plan.
 
 pub mod app_ctx;
+pub mod crash_log;
 pub mod error;
 pub mod http;
 pub mod paths;

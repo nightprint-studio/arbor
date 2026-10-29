@@ -53,13 +53,13 @@ use bennu_core::prelude::BennuState;
 use bennu_jdwp::prelude::{
     class_name, class_signature, classes_by_signature, clear_event, dispose, fields, frames,
     kind, line_table, location_of_line, methods, nested_types, object_type, request_class_prepare,
-    request_exception, request_step, resume_thread, resume_vm, set_breakpoint, thread_name,
+    request_exception, request_step, resume_thread, resume_vm, set_breakpoint, superclass, thread_name,
     type_signature, variable_table, version, Client, Composite, Event, Field, Frame, Id,
-    LineEntry, Local, Location, Method, StepDepth, SuspendPolicy,
+    LineEntry, Local, Location, Method, StepDepth, SuspendPolicy, Value,
 };
 use bennu_proto::prelude::{
     Breakpoint, BreakpointStatus, DebugConfig, DebugDump, DebugPause, DebugStatus, DebugValue,
-    ExceptionBreakpoint, StackFrame,
+    ExceptionBreakpoint, StackFrame, StopDetail,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -69,6 +69,9 @@ use crate::index_service::IndexService;
 // Works on the session's private state, so it lives under this module (see its own docs).
 #[path = "debug_mutate.rs"]
 pub(crate) mod mutate;
+// Several stops at once, stepping past getters, return values: more of the same private state.
+#[path = "debug_stops.rs"]
+mod stops;
 
 // ── event topics (the wire contract for the FE) ────────────────────────────────
 
@@ -381,6 +384,19 @@ impl crate::debug_backend::DebugBackend for Session {
         self.statuses()
     }
 
+    fn select_thread(&self, thread: &str) -> Result<DebugPause, String> {
+        self.select_stop(thread)
+    }
+
+    fn want_return_value(&self) -> Result<(), String> {
+        self.arm_return_value();
+        Ok(())
+    }
+
+    fn take_released(&self) -> u32 {
+        Session::take_released(self)
+    }
+
     fn mutate(&self, op: &mutate::Mutation) -> Result<mutate::Mutated, String> {
         Session::mutate(self, op)
     }
@@ -480,12 +496,19 @@ fn new_bp(at: Breakpoint, views: &Path) -> Bp {
 /// Where a suspended thread is. Frame ids are valid **only** while it stays suspended —
 /// resuming invalidates every one the VM handed out, which is why they are dropped wholesale
 /// rather than refreshed.
+#[derive(Clone)]
 struct Paused {
     thread: Id,
     frames: Vec<Frame>,
     /// The stop as it was announced — what a caller that was not listening for the event (the AI
     /// assistant, which waits by polling) reads to see the same frames the panel shows.
     pause: DebugPause,
+    /// What the VM did to the program for this stop. It decides how the thread is let go (`resume_vm` for
+    /// every thread, `resume_thread` for this one) and what its steps suspend.
+    policy: SuspendPolicy,
+    /// The breakpoint (file, configured line) behind the stop, so removing that breakpoint can let the
+    /// thread go.
+    bp: Option<(String, u32)>,
 }
 
 #[derive(Default)]
@@ -505,6 +528,26 @@ struct Mutable {
     /// will want back in a minute — which is why this clears the VM's requests and leaves the
     /// model exactly as it is.
     muted: bool,
+    /// Stops that are not the one being looked at: a second thread that hit a breakpoint while the first
+    /// was still stopped, in the order they arrived. See [`stops`].
+    parked: Vec<Paused>,
+    /// Events that suspended every thread and have not been matched by a resume. The VM counts them: one
+    /// `resume_vm` undoes one, so a session that resumed once too few leaves the program frozen.
+    suspends: u32,
+    /// Event requests of breakpoints that were removed; an event still in flight for one is let go.
+    removed: Vec<i32>,
+    /// Threads let go by removing the breakpoint they were stopped on, since the caller last asked.
+    released: u32,
+    /// The next step also reads what the method it leaves returned.
+    arm_return: bool,
+    /// A step reading return values: its request, the thread, and the last method that returned on it.
+    probe: Option<stops::ReturnProbe>,
+    /// Why no return value came with the last step, when one was asked for.
+    probe_note: String,
+    /// How the step in flight goes, to know whether landing in a getter is a reason to keep going.
+    step_depth: Option<StepDepth>,
+    /// A getter was stepped out of: the next step event is the caller, from where it steps in again.
+    pending_into: bool,
 }
 
 /// What the VM already told us, so it is not asked twice. A stack of forty frames in a
@@ -516,6 +559,8 @@ pub(crate) struct Cache {
     lines: HashMap<(Id, Id), Vec<LineEntry>>,
     variables: HashMap<(Id, Id), Vec<Local>>,
     fields: HashMap<Id, Vec<Field>>,
+    /// Whether a method is a record's accessor, so its code is read once.
+    accessors: HashMap<(Id, Id), bool>,
 }
 
 pub(crate) struct Session {
@@ -605,35 +650,40 @@ impl Session {
                 let _ = resume_thread(&self.client, thread);
             }
             Event::Breakpoint { request, thread, .. } => {
+                self.note_suspended(policy);
                 // A condition and a pass count are both checked HERE, after the VM has already
                 // stopped, because that is the only place the frame they talk about exists. When
                 // they do not hold the program is let go without anyone ever being told it
                 // stopped — which is also why a condition on a hot line costs what it costs.
-                if !self.should_stop(request, thread) {
-                    let _ = resume_vm(&self.client);
+                let verdict = self.should_stop(request, thread);
+                if !verdict.stop {
+                    let _ = self.release(thread, policy);
                     return;
                 }
                 // A logpoint prints and lets the program go: nobody is told it stopped.
                 if let Some((at, message)) = self.logpoint_of(request) {
                     self.print_logpoint(thread, &at, &message);
-                    let _ = resume_vm(&self.client);
+                    let _ = self.release(thread, policy);
                     return;
                 }
-                self.on_stop(thread, "breakpoint", None, self.capture_of(request));
+                self.on_stop(thread, "breakpoint", None, self.capture_of(request), verdict.into_ctx(policy));
             }
             Event::Step { thread, location, .. } => {
+                self.note_suspended(policy);
                 self.clear_step();
-                // A step that landed in generated code has arrived nowhere: keep going rather
-                // than stopping the reader in front of a proxy they cannot see.
-                if self.is_opaque(location) && self.step_again(thread) {
+                // A step that landed in generated code, or in a record's getter, has arrived nowhere:
+                // keep going rather than stopping the reader in front of code they did not ask about.
+                if self.continue_past(thread, location, policy) {
                     return;
                 }
-                self.on_stop(thread, "step", None, Vec::new());
+                self.on_stop(thread, "step", None, Vec::new(), stops::StopCtx::of(policy));
             }
             Event::Exception { thread, exception, .. } => {
+                self.note_suspended(policy);
                 let name = self.type_name_of(exception.1);
-                self.on_stop(thread, "exception", name, Vec::new());
+                self.on_stop(thread, "exception", name, Vec::new(), stops::StopCtx::of(policy));
             }
+            Event::MethodExit { request, thread, location, value } => self.note_return(request, thread, location, value),
             Event::ThreadStart { .. } | Event::ThreadDeath { .. } | Event::Other { .. } => {}
         }
     }
@@ -655,9 +705,13 @@ impl Session {
     /// see it is to be standing there, and silently continuing would turn a typo into a breakpoint
     /// that never fires and never explains itself. The reason is recorded on the breakpoint, so the
     /// gutter and the Breakpoints window say why the stop happened.
-    fn should_stop(&self, request: i32, thread: Id) -> bool {
-        let Some((index, cond, every)) = ({
+    fn should_stop(&self, request: i32, thread: Id) -> stops::Verdict {
+        let found = {
             let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            // A hit already on its way when its breakpoint was removed: nobody wants it any more.
+            if state.removed.contains(&request) {
+                return stops::Verdict::skip();
+            }
             state
                 .breakpoints
                 .iter()
@@ -666,19 +720,28 @@ impl Session {
                 })
                 .map(|i| {
                     let bp = &state.breakpoints[i];
-                    (i, bp.condition.clone(), bp.at.hit_count)
+                    (i, bp.condition.clone(), bp.at.hit_count, (bp.at.file.clone(), bp.at.line), bp.at.condition.trim().to_string())
                 })
-        }) else {
+        };
+        let Some((index, cond, every, key, written)) = found else {
             // A request nothing claims — the set was edited between the hit and this lock. Stop:
             // the alternative silently swallows a breakpoint over a race.
-            return true;
+            return stops::Verdict { stop: true, bp: None, condition: String::new(), condition_values: String::new() };
         };
+        let mut condition_values = String::new();
         if let Some(cond) = cond {
-            if !self.condition_holds(index, thread, &cond) {
-                return false;
+            let (hit, unanswered) = self.condition_holds(index, thread, &cond);
+            if !hit {
+                return stops::Verdict::skip();
             }
+            // Said with the stop, so a stop the condition should not have allowed shows at once.
+            condition_values = match unanswered {
+                Some(why) => format!("could not be evaluated ({why}), so it stopped anyway"),
+                None => self.condition_values(thread, &cond),
+            };
         }
-        self.count_hit(index, every)
+        let stop = self.count_hit(index, every);
+        stops::Verdict { stop, bp: Some(key), condition: written, condition_values }
     }
 
     /// The `(file:line, message)` of the logpoint behind `request`, when that breakpoint is one.
@@ -708,21 +771,31 @@ impl Session {
     /// Evaluate one breakpoint's condition in frame 0 of the stopped thread — the frame its line is
     /// in. Read directly rather than through `Paused`, which is only set once a stop has been
     /// announced: publishing a pause and taking it back is a state the panel would briefly render.
-    fn condition_holds(&self, index: usize, thread: Id, cond: &crate::debug_cond::Cond) -> bool {
+    ///
+    /// `(whether it holds, why it could not be answered)`: a condition that could not be answered stops.
+    fn condition_holds(&self, index: usize, thread: Id, cond: &crate::debug_cond::Cond) -> (bool, Option<String>) {
         let Some(frame) = frames(&self.client, thread).ok().and_then(|f| f.into_iter().next())
         else {
             self.note_condition(index, "condition skipped — the stopped thread has no frame");
-            return true;
+            return (true, Some("the stopped thread has no frame".to_string()));
         };
         match crate::debug_cond::holds(self, thread, &frame, cond) {
             Ok(hit) => {
                 self.note_condition(index, "");
-                hit
+                (hit, None)
             }
             Err(why) => {
                 self.note_condition(index, &format!("stopped anyway — {why}"));
-                true
+                (true, Some(why))
             }
+        }
+    }
+
+    /// What the paths of a condition read just now (`total = 250`), for the stop it let through.
+    fn condition_values(&self, thread: Id, cond: &crate::debug_cond::Cond) -> String {
+        match frames(&self.client, thread).ok().and_then(|f| f.into_iter().next()) {
+            Some(frame) => crate::debug_cond::describe_values(self, thread, &frame, cond),
+            None => String::new(),
         }
     }
 
@@ -768,33 +841,10 @@ impl Session {
         arbor_logscan::prelude::is_synthetic(&class) || self.line_of(at).is_none()
     }
 
-    /// Continue a step that landed nowhere. `false` when the budget is spent — the caller then
-    /// stops where it is, because a debugger that never comes back is worse than one that stops
-    /// somewhere unhelpful.
-    ///
-    /// Always **into**: the point is to get out of generated code and into the method that was
-    /// meant, and the frames it is passing through are exactly the ones a step-over would have
-    /// returned from empty-handed.
-    fn step_again(&self, thread: Id) -> bool {
-        {
-            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-            if state.skips >= MAX_STEP_SKIPS {
-                state.skips = 0;
-                return false;
-            }
-            state.skips += 1;
-        }
-        let Ok(request) =
-            request_step(&self.client, thread, StepDepth::Into, &self.exclude_refs(), SuspendPolicy::All)
-        else {
-            return false;
-        };
-        self.state.lock().unwrap_or_else(|p| p.into_inner()).step = Some(request);
-        resume_vm(&self.client).is_ok()
-    }
-
     /// The program stopped: read the stack while it is still suspended, then say so.
-    fn on_stop(&self, thread: Id, reason: &str, exception: Option<String>, captures: Vec<String>) {
+    ///
+    /// A stop that arrives while another is being looked at does not replace it: it waits (see [`stops`]).
+    fn on_stop(&self, thread: Id, reason: &str, exception: Option<String>, captures: Vec<String>, ctx: stops::StopCtx) {
         self.state.lock().unwrap_or_else(|p| p.into_inner()).skips = 0;
         let stack = frames(&self.client, thread).unwrap_or_default();
         let cut: Vec<Frame> = stack.into_iter().take(MAX_FRAMES).collect();
@@ -805,6 +855,13 @@ impl Session {
             .collect();
         let thread_name = thread_name(&self.client, thread).unwrap_or_default();
 
+        let detail = StopDetail {
+            suspends: if ctx.policy == SuspendPolicy::All { "all" } else { "thread" }.to_string(),
+            condition: ctx.condition,
+            condition_values: ctx.condition_values,
+            returned: if reason == "step" { self.finish_return_probe() } else { None },
+            ..StopDetail::default()
+        };
         let payload = DebugPause {
             session_id: self.id.clone(),
             thread: thread.to_string(),
@@ -812,18 +869,32 @@ impl Session {
             reason: reason.to_string(),
             exception,
             frames: described,
+            detail,
         };
         // Stored last, and briefly: the round trips above must not happen under the lock a
         // handler needs to answer "what are the variables here".
-        self.state.lock().unwrap_or_else(|p| p.into_inner()).paused =
-            Some(Paused { thread, frames: cut, pause: payload.clone() });
-        self.sink.emit(EVT_DEBUG_PAUSED, serde_json::to_value(payload).unwrap_or(json!({})));
-        emit_status(&self.sink, &self.id, "paused", "", "");
-        // The hit counts moved, and a stop is the one moment they are worth publishing: they are
-        // read while the program is standing still, and emitting on every rejected hit of a hot
-        // line would be the slowest thing in the debugger.
-        self.emit_breakpoints();
-        self.notify_assistant(thread, reason, &captures);
+        let placed = self.place_stop(Paused { thread, frames: cut, pause: payload, policy: ctx.policy, bp: ctx.bp });
+        match placed {
+            stops::Placed::Current(shown) => {
+                self.sink.emit(EVT_DEBUG_PAUSED, serde_json::to_value(&shown).unwrap_or(json!({})));
+                emit_status(&self.sink, &self.id, "paused", "", "");
+                // The hit counts moved, and a stop is the one moment they are worth publishing: they are
+                // read while the program is standing still, and emitting on every rejected hit of a hot
+                // line would be the slowest thing in the debugger.
+                self.emit_breakpoints();
+                self.notify_assistant(thread, reason, &captures);
+            }
+            // Another stop is on screen; say that this one is waiting behind it.
+            stops::Placed::Parked(current) => {
+                if let Some(current) = current {
+                    self.sink.emit(EVT_DEBUG_PAUSED, serde_json::to_value(&current).unwrap_or(json!({})));
+                }
+                self.emit_breakpoints();
+            }
+            stops::Placed::Dropped(stop) => {
+                let _ = self.release(stop.thread, stop.policy);
+            }
+        }
     }
 
     /// When an AI assistant conversation owns this session, read what it will want to know about the stop —
@@ -1023,6 +1094,8 @@ impl Session {
         }
         self.install_all();
         self.emit_breakpoints();
+        // What was stopped on a breakpoint that is gone has nothing left to wait for.
+        self.forget_removed(&old);
     }
 
     fn install_all(&self) {
@@ -1128,7 +1201,8 @@ impl Session {
                 let _ = clear_event(&self.client, request_kind, request);
             }
             for (location, _) in candidates.iter().filter(|(_, l)| *l == line) {
-                if let Ok(request) = set_breakpoint(&self.client, *location, SuspendPolicy::All) {
+                let policy = if at.suspend_thread_only { SuspendPolicy::EventThread } else { SuspendPolicy::All };
+                if let Ok(request) = set_breakpoint(&self.client, *location, policy) {
                     requests.push((kind::BREAKPOINT, request));
                 }
             }
@@ -1326,30 +1400,14 @@ impl Session {
 
     // ── running on ─────────────────────────────────────────────────────────────
 
-    /// Let the program go. Every stop suspends the whole VM (see the module doc), so this is
-    /// always `resume_vm` — and never sent when nothing is suspended, which would drive some
-    /// thread's suspend count below zero.
+    /// Let the current stop go, and show the next one if another thread is waiting. Never sent when nothing
+    /// is stopped, which would drive some thread's suspend count below zero.
     fn resume(&self) -> Result<(), String> {
-        let was = self.state.lock().unwrap_or_else(|p| p.into_inner()).paused.take();
-        if was.is_none() {
-            return Ok(());
-        }
-        resume_vm(&self.client).map_err(|e| e.to_string())?;
-        emit_status(&self.sink, &self.id, "running", "", "");
-        Ok(())
+        self.advance(true)
     }
 
     fn step(&self, depth: StepDepth) -> Result<(), String> {
-        let thread = {
-            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-            state.paused.as_ref().map(|p| p.thread)
-        };
-        let Some(thread) = thread else { return Err("the program is not stopped".to_string()) };
-        self.clear_step();
-        let request = request_step(&self.client, thread, depth, &self.exclude_refs(), SuspendPolicy::All)
-            .map_err(|e| e.to_string())?;
-        self.state.lock().unwrap_or_else(|p| p.into_inner()).step = Some(request);
-        self.resume()
+        self.step_current(depth)
     }
 
     /// Drop the in-flight step request. A step request that outlives its event makes the *next*
@@ -1525,6 +1583,17 @@ pub struct StepArgs {
     pub session_id: String,
     /// `into` · `over` · `out`.
     pub depth: String,
+    /// Also read what the method the step leaves returned.
+    #[serde(default)]
+    pub return_value: bool,
+}
+
+/// Args for [`bennu_debug_select_thread`].
+#[derive(Deserialize)]
+pub struct SelectThreadArgs {
+    pub session_id: String,
+    /// The thread's id (as the stop reported it) or its name.
+    pub thread: String,
 }
 
 /// Let the program run on.
@@ -1538,7 +1607,17 @@ fn bennu_debug_resume(_ctx: &BennuState, args: SessionArgs) -> Result<(), String
 #[arbor_rpc::handler]
 fn bennu_debug_step(_ctx: &BennuState, args: StepArgs) -> Result<(), String> {
     let step = crate::debug_backend::Step::parse(&args.depth);
-    crate::debug_backend::get(&args.session_id)?.step(step)
+    let backend = crate::debug_backend::get(&args.session_id)?;
+    if args.return_value {
+        backend.want_return_value()?;
+    }
+    backend.step(step)
+}
+
+/// Look at another stopped thread: it becomes the one stepped and resumed.
+#[arbor_rpc::handler]
+fn bennu_debug_select_thread(_ctx: &BennuState, args: SelectThreadArgs) -> Result<DebugPause, String> {
+    crate::debug_backend::get(&args.session_id)?.select_thread(&args.thread)
 }
 
 /// Args for [`bennu_debug_mute`].

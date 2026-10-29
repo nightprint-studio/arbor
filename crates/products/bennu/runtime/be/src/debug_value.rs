@@ -19,6 +19,10 @@
 //! the consequences; here an object renders as `Order@1f3c` with its real fields underneath,
 //! which is always true and never has a side effect.
 //!
+//! The exception is the JDK types whose whole state is a few primitive fields — `BigDecimal`, the
+//! `java.time` classes, enums, boxes, collections (their size): [`crate::debug_known`] computes what
+//! `toString()` would have said from those fields, reading and never calling.
+//!
 //! ## Watches are paths, not Java
 //!
 //! A watch expression is `name`, `name.field.field`, or `name[3]` — resolved here by reading fields
@@ -35,6 +39,7 @@ use bennu_jdwp::prelude::{
 use bennu_proto::prelude::DebugValue;
 
 use crate::debug::{simple_name, Session, MAX_ELEMENTS};
+use crate::debug_known::{self, Heap};
 use crate::debug_path::{self, Step};
 
 /// Past this many characters a string is shown cut. A log line's worth is plenty to recognise
@@ -235,6 +240,32 @@ pub(crate) fn render_path(
     Ok(describe(session, expression, "watch", None, value).value)
 }
 
+/// A parsed path read in a named frame, as the text a row would show.
+pub(crate) fn render_steps(session: &Session, thread: Id, at: &Frame, steps: &[Step]) -> Result<String, String> {
+    let value = walk_path(session, thread, at, steps)?;
+    Ok(describe(session, "", "watch", None, value).value)
+}
+
+/// A value a method returned, as a row.
+pub(crate) fn returned_row(session: &Session, value: Value) -> DebugValue {
+    let mut row = describe(session, "return", "return", None, value);
+    if row.type_name.is_empty() {
+        row.type_name = match value {
+            Value::Boolean(_) => "boolean",
+            Value::Byte(_) => "byte",
+            Value::Char(_) => "char",
+            Value::Short(_) => "short",
+            Value::Int(_) => "int",
+            Value::Long(_) => "long",
+            Value::Float(_) => "float",
+            Value::Double(_) => "double",
+            _ => "",
+        }
+        .to_string();
+    }
+    row
+}
+
 /// The first segment: a local of the frame, else a field of its receiver — which is how
 /// watching a bare field name works inside an instance method.
 fn root_value(session: &Session, thread: Id, at: &Frame, name: &str) -> Result<Value, String> {
@@ -374,11 +405,71 @@ fn render(session: &Session, value: Value) -> (String, Option<Id>) {
             (text, Some(id))
         }
         Value::Object { id, .. } => {
+            if let Some(known) = debug_known::render_known(&SessionHeap(session), id, 0) {
+                return (known, Some(id));
+            }
             let name = session.type_name_of(id).unwrap_or_else(|| "Object".to_string());
             // The handle in the label, because two rows showing `Order@1f3c` are the same
             // object and two showing different numbers are not — which is the question a
             // variables panel is asked most often after "what is in it".
             (format!("{name}@{id:x}"), Some(id))
+        }
+    }
+}
+
+/// The heap of a stopped program, as [`debug_known`] reads it: fields and arrays, nothing run.
+struct SessionHeap<'a>(&'a Session);
+
+impl Heap for SessionHeap<'_> {
+    fn class_of(&self, id: Id) -> Option<String> {
+        let class = object_type(&self.0.client, id).ok()?;
+        Some(self.0.class_name_of(class.id))
+    }
+
+    fn is_a(&self, id: Id, class: &str) -> bool {
+        let Ok(mut current) = object_type(&self.0.client, id).map(|t| t.id) else { return false };
+        for _ in 0..MAX_SUPERS {
+            if current == 0 {
+                return false;
+            }
+            if self.0.class_name_of(current) == class {
+                return true;
+            }
+            current = superclass(&self.0.client, current).unwrap_or(0);
+        }
+        false
+    }
+
+    fn field(&self, id: Id, name: &str) -> Option<Value> {
+        follow(self.0, Value::Object { tag: Tag::Object, id }, &Step::Field(name.to_string())).ok()
+    }
+
+    fn string(&self, id: Id) -> Option<String> {
+        string_value(&self.0.client, id).ok()
+    }
+
+    fn ints(&self, id: Id, max: usize) -> Option<Vec<i64>> {
+        let length = array_length(&self.0.client, id).ok()?;
+        if length < 0 || length as usize > max {
+            return None;
+        }
+        let values = array_values(&self.0.client, id, 0, length).ok()?;
+        values
+            .into_iter()
+            .map(|v| match v {
+                Value::Int(i) => Some(i64::from(i)),
+                Value::Byte(b) => Some(i64::from(b)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn show(&self, value: Value, depth: u8) -> String {
+        match value {
+            Value::Object { id, .. } if id != 0 => {
+                debug_known::render_known(self, id, depth).unwrap_or_else(|| render(self.0, value).0)
+            }
+            other => render(self.0, other).0,
         }
     }
 }

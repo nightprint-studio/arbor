@@ -37,6 +37,11 @@ pub(super) enum Set {
 
 /// Set (or update) the assistant's breakpoint at `file:line`.
 pub(super) fn set(cfg: &mut DebugConfig, file: &str, line: u32, condition: &str, log_message: &str, capture: &[String]) -> Result<Set, String> {
+    set_with(cfg, file, line, condition, log_message, capture, false)
+}
+
+/// [`set`], saying whether a stop suspends only the thread that hit the breakpoint.
+pub(super) fn set_with(cfg: &mut DebugConfig, file: &str, line: u32, condition: &str, log_message: &str, capture: &[String], thread_only: bool) -> Result<Set, String> {
     if let Some(existing) = cfg.breakpoints.iter_mut().find(|b| same_place(b, file, line)) {
         if !existing.by_assistant {
             return Ok(Set::UserOwns);
@@ -44,6 +49,7 @@ pub(super) fn set(cfg: &mut DebugConfig, file: &str, line: u32, condition: &str,
         existing.condition = condition.trim().to_string();
         existing.log_message = log_message.trim().to_string();
         existing.capture = capture.to_vec();
+        existing.suspend_thread_only = thread_only;
         existing.enabled = true;
         return Ok(Set::Updated);
     }
@@ -57,6 +63,7 @@ pub(super) fn set(cfg: &mut DebugConfig, file: &str, line: u32, condition: &str,
         log_message: log_message.trim().to_string(),
         capture: capture.to_vec(),
         by_assistant: true,
+        suspend_thread_only: thread_only,
         ..Breakpoint::default()
     });
     Ok(Set::Added)

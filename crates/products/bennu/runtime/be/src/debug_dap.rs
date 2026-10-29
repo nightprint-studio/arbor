@@ -447,6 +447,7 @@ impl SessionHandler for Events {
             reason: reason.to_string(),
             exception: detail.clone(),
             frames: dto,
+            detail: Default::default(),
         };
         self.sink.emit(EVT_DEBUG_PAUSED, serde_json::to_value(payload).unwrap_or(json!({})));
         session.emit_status("paused", &detail.unwrap_or_default());

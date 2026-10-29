@@ -35,7 +35,9 @@ pub struct BackendIo {
 impl BackendIo {
     /// Build the four pieces over the process's real stdout.
     pub fn new() -> Self {
-        // stdout carries frames; logs go to stderr.
+        // stdout carries frames; logs go to stderr — which the shell points at this backend's log file, so
+        // a panic leaves its place and its stack there instead of vanishing.
+        arbor_core::prelude::install_panic_hook();
         let stdout: SharedWriter = Arc::new(Mutex::new(io::stdout()));
         // Egress: a frame sink writing onto the same stdout the serve loop uses.
         let sink: Arc<dyn EventSink> = Arc::new(FrameEventSink::new(Arc::clone(&stdout)));

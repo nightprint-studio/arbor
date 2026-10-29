@@ -119,6 +119,22 @@ pub trait DebugBackend: Send + Sync {
         Vec::new()
     }
 
+    /// Make another stopped thread the one being looked at, stepped and resumed. Only a debugger that can hold
+    /// several stops at once (the JVM one) can.
+    fn select_thread(&self, _thread: &str) -> Result<bennu_proto::prelude::DebugPause, String> {
+        Err("this debugger has one stop at a time".into())
+    }
+
+    /// Make the next step also read the value of the method it leaves.
+    fn want_return_value(&self) -> Result<(), String> {
+        Err("this debugger cannot read return values".into())
+    }
+
+    /// How many threads were let go because the breakpoint they were stopped on was removed, since the last call.
+    fn take_released(&self) -> u32 {
+        0
+    }
+
     /// Change the stopped program (throw, return early, drop a frame, write a value). Only the JVM backend can; the
     /// caller is the AI assistant, behind its own switch and approval.
     fn mutate(&self, _op: &crate::debug::mutate::Mutation) -> Result<crate::debug::mutate::Mutated, String> {

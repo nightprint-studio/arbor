@@ -226,6 +226,12 @@ pub fn detach_if_current(program: &str, gen: u64, reason: &str) -> bool {
     match removed {
         Some(oop) => {
             tracing::info!("split_broker::detach_if_current({program}) gen={gen} removed (reason={reason})");
+            // Leave it in the backend's own log too: a panic or a failed allocation wrote its message there just
+            // before, and a kill from outside (out of memory) leaves only this line to say when.
+            arbor_core::prelude::note_backend_log(
+                program,
+                &format!("the connection to {program}-be closed (gen={gen}, reason={reason}): it exited or was killed; if no panic precedes this line, it was killed from outside"),
+            );
             std::thread::spawn(move || drop(oop));
             true
         }

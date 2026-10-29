@@ -22,6 +22,16 @@
   import type { StackFrameDto } from '$lib/types/bennu/debug';
 
   const frames = $derived(bennuDebugStore.frames);
+  const detail = $derived(bennuDebugStore.stopped?.detail);
+  const originLabel = $derived(
+    detail?.origin === 'residual'
+      ? 'Leftover stop: hit while another was open'
+      : detail?.origin === 'step'
+        ? 'A step finished'
+        : detail?.origin === 'fresh'
+          ? 'New breakpoint'
+          : '',
+  );
   const collapsing = $derived(bennuSettingsStore.collapseLibraryFrames);
 
   /** One rendered row: a frame, or a run of consecutive library frames folded into one. */
@@ -151,6 +161,40 @@
       <PanelLeftClose size={12} />
     </button>
   </div>
+  {#if detail && (originLabel || detail.condition || detail.returned || detail.also_stopped.length)}
+    <!-- Why this stop and not another: what makes it new or leftover, the condition that let it
+         through with what it read, what the last method returned, and the threads that wait. -->
+    <div class="df-why">
+      {#if originLabel}
+        <span class="df-why-row" class:residual={detail.origin === 'residual'}>{originLabel}{detail.suspends === 'thread' ? ' · this thread only' : ''}</span>
+      {/if}
+      {#if detail.condition}
+        <span class="df-why-row" use:tooltip={`Condition: ${detail.condition}`}>
+          when <code>{detail.condition}</code>{detail.condition_values ? ' → ' : ''}<code>{detail.condition_values}</code>
+        </span>
+      {/if}
+      {#if detail.returned}
+        <span class="df-why-row">
+          {#if detail.returned.method}
+            ↩ <code>{detail.returned.method.split('.').slice(-2).join('.')}</code> → <code>{detail.returned.value}</code>
+          {:else}
+            ↩ {detail.returned.value}
+          {/if}
+        </span>
+      {/if}
+      {#each detail.also_stopped as other (other.thread)}
+        <button
+          class="df-other"
+          type="button"
+          use:tooltip={`Switch to this stopped thread (${other.reason})`}
+          onclick={() => void bennuDebugStore.selectThread(other.thread)}
+        >
+          <span class="df-other-name">{other.thread_name}</span>
+          <span class="df-other-at">{other.location}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
   <div class="df-scroll">
     {#each rows as row (row.kind === 'run' ? `run-${row.id}` : `f-${row.frame.index}`)}
       {#if row.kind === 'frame'}
@@ -207,6 +251,23 @@
   }
   .df-toggle:hover { background: var(--bg-hover); color: var(--text-primary); }
   .df-toggle.on { color: var(--accent); }
+
+  .df-why {
+    display: flex; flex-direction: column; gap: 2px; flex-shrink: 0;
+    padding: 4px 10px; font-size: 11px; color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .df-why-row { overflow-wrap: anywhere; }
+  .df-why-row.residual { color: var(--warning); }
+  .df-why code { font-family: var(--font-code); font-size: 10.5px; color: var(--text-primary); }
+  .df-other {
+    display: flex; align-items: baseline; gap: 6px; min-width: 0;
+    padding: 1px 4px; border: 0; border-radius: var(--radius-sm); background: none;
+    color: var(--text-secondary); font-size: 11px; text-align: left; cursor: pointer;
+  }
+  .df-other:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .df-other-name { font-family: var(--font-code); }
+  .df-other-at { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .df-scroll { flex: 1; overflow: auto; min-height: 0; padding: 2px 0; }
 

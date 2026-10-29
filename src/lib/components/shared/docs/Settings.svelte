@@ -260,6 +260,13 @@
   Switching to a tab resets its idle timer and moves it to the top of the recency list immediately.
 </p>
 
+<h2>When a backend stops</h2>
+<p>
+  Each product runs its own backend process (Bennu, Corvus, Sitta, Merula, Tyto, Picus, Garrulus, Voice). If one stops, the app says that its backend "is not running" and, until you reopen that product's window, its calls fail.
+  What the backend printed when it died is kept in <code>logs/&lt;product&gt;-be.log</code> inside Arbor's config folder: a panic with its time, thread, place and stack, a failed allocation, and a line from Arbor with the time the connection closed.
+  A closing line with nothing before it means the process was killed from outside, typically the system running out of memory. The file is started fresh past 2 MB, keeping the previous one as <code>.log.1</code>.
+</p>
+
 <h2>Access — Git &amp; Integrations</h2>
 
 <p>

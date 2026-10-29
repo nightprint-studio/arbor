@@ -13,6 +13,9 @@ pub use crate::http::{
     client, client_builder, download_client, download_client_builder,
     DEFAULT_TIMEOUT, DOWNLOAD_CONNECT_TIMEOUT, DOWNLOAD_IDLE_TIMEOUT, USER_AGENT,
 };
+pub use crate::crash_log::{
+    arbor_logs_dir, backend_log_path, install_panic_hook, note as note_backend_log, open_backend_log, utc_stamp,
+};
 pub use crate::paths::{
     arbor_cache_dir, arbor_config_dir, arbor_config_path, arbor_data_dir, arbor_global_data_dir,
     bennu_config_dir, bennu_config_path, bennu_data_dir, merula_config_dir, merula_config_path,

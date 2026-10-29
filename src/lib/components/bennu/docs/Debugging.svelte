@@ -136,6 +136,24 @@
   the adapter and put back on unmute. Either way the list is untouched.
 </p>
 
+<h3>Several threads stopped at once</h3>
+<p>
+  A breakpoint stops the whole program by default. Turn on <strong>Suspend only this thread</strong> in the Breakpoints list and a hit stops just the thread that reached it: the others keep running and can stop too, each as a stop of its own.
+  The stop you are looking at is one; the others are listed under the frames and a click switches to one, after which the frames, variables, steps and resume follow it. Resume lets the current stop go and moves on to the next waiting one.
+  A stop that was hit while another was still open is labelled <em>Leftover stop</em>, so it is not taken for a new breakpoint. Removing a breakpoint resumes the threads that were parked on it, but never the stop you are looking at.
+  While the whole program is suspended and more stops are waiting, a step is refused until they are done, because nothing can run.
+</p>
+
+<h3>Why it stopped</h3>
+<p>
+  Above the frames the stop says whether it is a new breakpoint, a step or a leftover, and, when the breakpoint has a condition, the condition and what it read (<code>total = 250</code>), so a stop the condition should not have allowed shows at once. A condition that could not be evaluated says so and stops anyway.
+</p>
+
+<h3>Stepping</h3>
+<p>
+  <em>Step into</em> does not stop in a record's accessor (<code>id() {'{'} return id; {'}'}</code>): it steps out and goes on, the way it already passes through library code. A step can also read <strong>what the method it leaves returned</strong> — the last method that returned during the step — shown with the stop; it costs time on a step over heavy code, so it is asked for, not on by default, and needs a VM that supports it.
+</p>
+
 <h2>Conditions, and stopping every Nth time</h2>
 <p>
   Right-click a breakpoint → <em>Add condition…</em>, or use the breakpoint list, where each has a condition field and a pass count. A breakpoint with either is drawn ringed — a
@@ -188,7 +206,7 @@
   A breakpoint with a <strong>log message</strong> does not stop the program: each hit prints the message to the run console and the program goes on. It is how to watch a line in a loop or a
   request handler without freezing it. The message is plain text with <code>{'{'}path{'}'}</code> placeholders — <code>order {'{'}order.id{'}'} has {'{'}items[0].qty{'}'} lines</code> — read from the frame the way a
   watch is read (a name, <code>.field</code>, <code>[0]</code>), and <code>{'{{'}</code> / <code>{'}}'}</code> are literal braces. A placeholder that cannot be read prints the reason in its place rather than
-  nothing. A condition and a pass count apply first, so a logpoint can say "only when <code>total &gt; 100</code>". Imber can set them too (below); the breakpoint list marks them <em>logpoint</em>.
+  nothing. Common JDK types print as values — a <code>BigDecimal</code> as <code>123.45</code>, a date as ISO text, an enum as its name, a list as <code>ArrayList(size=3)</code> — and any other object as <code>Type@id</code>; use a longer path to print one of its fields. A condition and a pass count apply first, so a logpoint can say "only when <code>total &gt; 100</code>". Imber can set them too (below); the breakpoint list marks them <em>logpoint</em>.
 </p>
 
 <h2>Imber debugging</h2>

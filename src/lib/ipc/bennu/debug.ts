@@ -12,6 +12,7 @@ import { bennu } from '../rpc';
 import type {
   DebugConfigDto,
   DebugDumpDto,
+  DebugPauseDto,
   DebugValueDto,
   StepDepth,
 } from '$lib/types/bennu/debug';
@@ -59,8 +60,14 @@ export function debugResume(sessionId: string): Promise<void> {
 
 /** One step, at line granularity, passing straight through the JDK and other people's
  *  frameworks. Wire: `bennu_debug_step` — `StepArgs { session_id, depth }`. */
-export function debugStep(sessionId: string, depth: StepDepth): Promise<void> {
-  return bennu('bennu_debug_step', { args: { session_id: sessionId, depth } });
+export function debugStep(sessionId: string, depth: StepDepth, returnValue = false): Promise<void> {
+  return bennu('bennu_debug_step', { args: { session_id: sessionId, depth, return_value: returnValue } });
+}
+
+/** Look at another stopped thread: it becomes the one stepped and resumed.
+ *  Wire: `bennu_debug_select_thread` — `{ session_id, thread }`. */
+export function debugSelectThread(sessionId: string, thread: string): Promise<DebugPauseDto> {
+  return bennu('bennu_debug_select_thread', { args: { session_id: sessionId, thread } });
 }
 
 /** Detach: the program keeps running, unsuspended, with no debugger attached. Deliberately

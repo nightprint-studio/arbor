@@ -39,6 +39,8 @@ export interface BreakpointDto {
   log_message?: string;
   /** Paths the assistant asked to have read at hit time (captured with the stop). */
   capture?: string[];
+  /** A stop suspends only the thread that hit the breakpoint, not the whole program. */
+  suspend_thread_only?: boolean;
 }
 
 /** A breakpoint on a **throw** rather than on a line.
@@ -172,6 +174,25 @@ export interface DebugPauseDto {
   /** The throwable's type, when `reason` is `exception`. */
   exception: string | null;
   frames: StackFrameDto[];
+  /** Why this stop and not another. Absent from an engine that does not say. */
+  detail?: StopDetailDto;
+}
+
+/** What is known about a stop besides where it is. */
+export interface StopDetailDto {
+  /** `fresh` (a breakpoint or throw reached now) · `step` · `residual` (hit while another stop was
+   *  still being looked at, so it waited its turn). */
+  origin: '' | 'fresh' | 'step' | 'residual';
+  /** `all` (every thread is suspended) · `thread` (only this one). */
+  suspends: '' | 'all' | 'thread';
+  /** The condition that let the breakpoint stop, and what it read (`total = 250`). */
+  condition: string;
+  condition_values: string;
+  /** What the method the step left returned, when the step was asked to read it. An empty `method`
+   *  carries the reason there is no value in `value`. */
+  returned: { method: string; type_name: string; value: string } | null;
+  /** The other threads that are stopped and can be switched to. */
+  also_stopped: { thread: string; thread_name: string; reason: string; location: string }[];
 }
 
 /** The breakpoint-verification broadcast. */
