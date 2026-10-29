@@ -81,7 +81,7 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Right rail</div>
-    <div class="fc-desc">Maven or Cargo, the test catalogue, the parse and model Trees, and — on a translation bundle — the i18n panel.</div>
+    <div class="fc-desc">Maven and Cargo — each there when any project of the workspace has one, whatever the open file — the test catalogue, the parse and model Trees, and — on a translation bundle — the i18n panel.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Bottom dock</div>

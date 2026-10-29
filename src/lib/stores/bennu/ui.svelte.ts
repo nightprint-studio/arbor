@@ -51,6 +51,9 @@ export type LeftPanel = 'project' | 'structure' | 'dependencies' | `plugin:${str
  *  else — from the palette, and from its shortcut. */
 export type RightPanel =
   | 'maven' | 'cargo' | 'tests' | 'ast' | 'i18n'
+  /** The assistant — chat and agent. A design preview for now; offered on every project, since it
+   *  needs nothing from one. */
+  | 'assistant'
   /** The database tool window — entities and native queries checked against a Picus connection.
    *  Offered only when Picus is installed. */
   | 'picus'
@@ -171,6 +174,8 @@ function createBennuUiStore() {
   // A modal rather than a panel: it is a thing you go and do, with a wide answer, and it does not
   // belong open beside the editor the way a tool window does.
   let ssrOpen = $state(false);
+  // New Project wizard (Ctrl+Shift+P) — pick a generator, fill its form, get a project on disk.
+  let newProjectOpen = $state(false);
   // Go-to navigator — one overlay over classes / files / symbols; the shortcut that opened it
   // picks the starting tab (Ctrl+N = class, Ctrl+Shift+N = file, Ctrl+Shift+Y = symbol).
   let navOpen = $state(false);
@@ -286,6 +291,7 @@ function createBennuUiStore() {
     /** The breakpoint the list should focus, when it was opened from one. */
     get breakpointsFocus() { return breakpointsFocus; },
     get ssrOpen() { return ssrOpen; },
+    get newProjectOpen() { return newProjectOpen; },
     get navOpen()      { return navOpen; },
     get navMode()      { return navMode; },
     /** Query to pre-fill the Find-in-project field with (from a selection), or ''. */
@@ -403,6 +409,8 @@ function createBennuUiStore() {
     closeBreakpoints()   { breakpointsOpen = false; breakpointsFocus = null; },
     openSsr()            { ssrOpen = true; },
     closeSsr()           { ssrOpen = false; },
+    openNewProject()     { newProjectOpen = true; },
+    closeNewProject()    { newProjectOpen = false; },
     /** Open the Go-to navigator on `mode`'s tab, optionally pre-filling the query (e.g. the
      *  editor selection). Every tab is reachable with Tab once it is open. */
     openNav(mode: NavMode, initial = '') { navMode = mode; navInitial = initial; navOpen = true; },

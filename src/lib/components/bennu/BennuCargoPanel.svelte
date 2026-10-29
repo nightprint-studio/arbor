@@ -14,6 +14,13 @@
    * 3. **what is wrong with it** — a crate under the root that `members` does not cover, and a
    *    toolchain missing the component a command needs. Both are silent failures otherwise.
    *
+   * ## Which Cargo project
+   *
+   * The window shows the Cargo modules of the whole workspace — a Rust crate at a project's root, or
+   * one in a subfolder of a Node project (Tauri's `src-tauri`). With more than one, a module tree
+   * on top picks which one the commands act on; with one there is no selector at all. Everything
+   * below talks to the module's own folder, so a Tauri project works like a Rust one.
+   *
    * Everything comes from `bennu_cargo_workspace`, which reads manifests and the filesystem rather
    * than running `cargo metadata` — so the panel opens instantly, and opens on a workspace that has
    * never been built.
@@ -28,18 +35,22 @@
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import BennuCargoCrateSection from './BennuCargoCrateSection.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
+  import BennuModuleTree from './BennuModuleTree.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuCargoStore } from '$lib/stores/bennu/cargo.svelte';
   import { dependenciesStore } from '$lib/stores/bennu/dependencies.svelte';
+  import { moduleFocusStore } from '$lib/stores/bennu/module-focus.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { emptyInvocation, hasComponent } from '$lib/ipc/bennu/cargo';
 
   let filter = $state('');
 
-  const root = $derived(projectStore.project?.root ?? null);
-  const isCargo = $derived(projectStore.isCargo);
+  // The folder of the Cargo module the commands act on — the project root for a Rust project.
+  const target = $derived(moduleFocusStore.targetFor('Cargo'));
+  const root = $derived(target?.toolRoot ?? null);
+  const isCargo = $derived(!!target);
   const workspace = $derived(bennuCargoStore.workspace);
   const toolchain = $derived(bennuCargoStore.toolchain);
 
@@ -102,7 +113,8 @@
   function refresh() {
     if (!root) return;
     void bennuCargoStore.load(root, true);
-    void dependenciesStore.load(root, true);
+    const depsRoot = moduleFocusStore.targetFor('Maven', 'Cargo')?.toolRoot;
+    if (depsRoot) void dependenciesStore.load(depsRoot, true);
   }
 
   function openRootManifest() {
@@ -151,10 +163,9 @@
   {/snippet}
 
   {#if !root}
-    <EmptyState message="Open a project to see its crates." />
-  {:else if !isCargo}
-    <EmptyState message="This is not a Cargo project — the Maven tool window has its goals." />
+    <EmptyState message={projectStore.project ? 'No Cargo project in this workspace.' : 'Open a project to see its crates.'} />
   {:else if bennuCargoStore.error}
+    <div class="cg-scroll"><BennuModuleTree kinds={['Cargo']} ariaLabel="Cargo projects" /></div>
     <div class="cg-notice">
       <Alert variant="error" compact text={bennuCargoStore.error} />
     </div>
@@ -162,6 +173,7 @@
     <div class="cg-loading"><Spinner size={16} /><span>Reading the workspace…</span></div>
   {:else if workspace}
     <div class="cg-body">
+      <BennuModuleTree kinds={['Cargo']} ariaLabel="Cargo projects" />
       {#if toolchain?.version}
         <p class="cg-toolchain" use:tooltip={toolchain.toolchain || 'The active toolchain'}>
           {toolchain.version}
@@ -276,6 +288,8 @@
   /* Body rhythm mirrors the Maven and Dependencies tools: SidebarSection owns the group header and
      the indent guideline, so the body keeps no horizontal padding. */
   .cg-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0 8px; }
+  /* The selector alone, for the states that have no body to scroll in (an error). */
+  .cg-scroll { max-height: 40%; overflow-y: auto; }
   .cg-toolbar { display: flex; align-items: center; gap: 4px; padding-right: 4px; }
   .cg-toolbar > :global(:first-child) { flex: 1; min-width: 0; }
   .cg-notice { padding: 6px 8px 2px; }

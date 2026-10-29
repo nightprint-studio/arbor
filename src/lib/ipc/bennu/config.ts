@@ -9,6 +9,45 @@
 
 import { bennu } from '../rpc';
 
+/** Mirrors the BE `AssistantConfig` — what a new assistant conversation starts with. No key: that lives
+ *  in the credential vault. */
+/** Mirrors the BE `LimitsConfig` — spending limits in euros; 0 switches one off. */
+export interface BennuAssistantLimits {
+  session_eur: number;
+  day_eur: number;
+  week_eur: number;
+  month_eur: number;
+  /** Euros per dollar: prices are in dollars. */
+  eur_per_usd: number;
+  warn_percent: number;
+}
+
+export interface BennuAssistantConfig {
+  model: string;
+  effort: string;
+  mode: string;
+  scope: string;
+  max_context: number;
+  allow_edits: boolean;
+  allow_temp: boolean;
+  extra_folders: string[];
+  limits: BennuAssistantLimits;
+  /** Chat only: no tools, no access to files. */
+  chat_only: boolean;
+  /** Read CLAUDE.md / AGENTS.md into the instructions. */
+  use_instructions: boolean;
+  /** Let the assistant use git. Off by default. */
+  git_enabled: boolean;
+  /** Hide authors behind made-up ids in git results. */
+  hide_authors: boolean;
+  /** Keep a visible step plan for multi-step work. */
+  plan_enabled: boolean;
+  /** Open projects one conversation may work across. */
+  max_projects: number;
+  /** Tool families switched off. */
+  tool_families_off: string[];
+}
+
 /** Mirrors the BE `BennuConfig` (snake_case, field-for-field). */
 export interface BennuConfig {
   /** Fallback text encoding when a project declares none. */
@@ -20,6 +59,8 @@ export interface BennuConfig {
   /** Indent with hard tab characters rather than spaces. Paired with `indent_width`, which
    *  stays the display width of one level either way. */
   indent_with_tabs: boolean;
+  /** The assistant's defaults. */
+  assistant: BennuAssistantConfig;
   /** Wrap long lines to the viewport instead of scrolling sideways. */
   word_wrap: boolean;
   /** Render spaces and tabs as visible glyphs. */

@@ -42,6 +42,7 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import IconButton from '$lib/components/shared/ui/IconButton.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
+  import BennuModuleTree from './BennuModuleTree.svelte';
   import DependencyRow from './dependencies/DependencyRow.svelte';
   import DependencyConflicts from './dependencies/DependencyConflicts.svelte';
   import { buildTreeIndex, childrenOf, introducers } from './dependencies/dependency-tree';
@@ -52,6 +53,7 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { buildUnitDir, openBuildUnitMenu } from './build-unit-menu';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
+  import { moduleFocusStore } from '$lib/stores/bennu/module-focus.svelte';
   import { dependenciesStore, vulnFor } from '$lib/stores/bennu/dependencies.svelte';
   import {
     coordOf,
@@ -60,7 +62,13 @@
 
   let filter = $state('');
 
-  const root = $derived(projectStore.project?.root ?? null);
+  // The module the report describes: a Maven or Cargo module anywhere in the workspace (the project
+  // root for a plain Maven / Cargo project). A module tree picks it when there are several.
+  const target = $derived(moduleFocusStore.targetFor('Maven', 'Cargo'));
+  const root = $derived(target?.toolRoot ?? null);
+  // A primitive on purpose: `target` is a fresh object whenever the active file changes, and an
+  // effect that read it would re-read the report on every tab switch.
+  const targetKind = $derived(target?.kind ?? null);
   const report = $derived(dependenciesStore.report);
   /** Which build tool this report describes — what decides the words, not the layout. */
   const ecosystem = $derived(report?.ecosystem ?? '');
@@ -85,7 +93,7 @@
   $effect(() => {
     const path = root;
     const busyIndexing = bennuIndexStore.indexing;
-    const cargo = projectStore.isCargo;
+    const cargo = targetKind === 'Cargo';
     if (!path) {
       dependenciesStore.reset();
       return;
@@ -219,6 +227,7 @@
   {#if !root}
     <EmptyState message="Open a project to see its dependencies." />
   {:else if dependenciesStore.error}
+    <div class="dep-scroll"><BennuModuleTree kinds={['Maven', 'Cargo']} ariaLabel="Projects" /></div>
     <div class="dep-notice">
       <Alert variant="error" compact text={dependenciesStore.error} />
     </div>
@@ -226,6 +235,7 @@
     <div class="dep-loading"><Spinner size={16} /><span>Reading the project's manifests…</span></div>
   {:else if report}
     <div class="dep-body">
+      <BennuModuleTree kinds={['Maven', 'Cargo']} ariaLabel="Projects" />
       {#if report.unreadable.length > 0}
         <div class="dep-notice">
           <Alert variant="warning" compact>
@@ -413,6 +423,8 @@
   .dep-toolbar { display: flex; align-items: center; gap: 4px; padding-right: 4px; }
   .dep-toolbar > :global(:first-child) { flex: 1; min-width: 0; }
   .dep-notice { padding: 6px 8px 2px; }
+  /* The selector alone, for the states that have no body to scroll in (an error). */
+  .dep-scroll { max-height: 40%; overflow-y: auto; }
   .dep-notice-act { display: flex; justify-content: flex-end; padding-top: 6px; }
   .dep-loading {
     display: flex; align-items: center; gap: 8px;

@@ -21,13 +21,14 @@
     ServerCog, Cog, Languages, Network, Gamepad2, Search, Coffee, FileCode2, Bug, History,
     FileText, Compass, ListTree, Sparkles, ShieldCheck, Wrench, Download, Package, Braces,
     Database, Layers, Palette, Flame, ScrollText, FileType2, SlidersHorizontal, ArrowLeftRight,
-    ListChecks,
+    ListChecks, FolderPlus,
   } from 'lucide-svelte';
   import DocsShell, { type DocsNavItem, type DocsNavGroup } from '$lib/components/shared/DocsShell.svelte';
 
   import GettingStarted    from './docs/GettingStarted.svelte';
   // Projects
   import Projects          from './docs/Projects.svelte';
+  import NewProject        from './docs/NewProject.svelte';
   import ProjectTree       from './docs/ProjectTree.svelte';
   import Jdk               from './docs/Jdk.svelte';
   import Dependencies      from './docs/Dependencies.svelte';
@@ -42,6 +43,7 @@
   import Structure         from './docs/Structure.svelte';
   import Completion        from './docs/Completion.svelte';
   import Refactoring       from './docs/Refactoring.svelte';
+  import Assistant         from './docs/Assistant.svelte';
   import Validation        from './docs/Validation.svelte';
   import LocalHistory      from './docs/LocalHistory.svelte';
   import FileTypes         from './docs/FileTypes.svelte';
@@ -103,6 +105,7 @@
   const navGroups: DocsNavGroup[] = [
     { id: 'projects', label: 'Projects', icon: Boxes, items: [
       { id: 'projects',     label: 'Projects',         icon: FolderGit2 },
+      { id: 'new-project',  label: 'New Project',      icon: FolderPlus },
       { id: 'project-tree', label: 'The project tree', icon: ListTree   },
       { id: 'jdk',          label: 'The JDK',          icon: Coffee     },
       { id: 'maven',        label: 'The Maven window', icon: Play      },
@@ -121,6 +124,7 @@
       { id: 'template-language',  label: 'The template language', icon: Braces   },
       { id: 'template-reference', label: 'Template reference',    icon: BookOpen },
       { id: 'refactoring',   label: 'Refactoring & intentions', icon: Wrench     },
+      { id: 'assistant',     label: 'Assistant (preview)',      icon: Sparkles    },
       { id: 'validation',    label: 'Validation & problems',   icon: ShieldCheck },
       { id: 'local-history', label: 'Local history',           icon: History     },
       { id: 'tool-config',   label: 'Tool configuration files', icon: SlidersHorizontal },
@@ -176,6 +180,7 @@
   const sections = {
     'getting-started':   GettingStarted,
     'projects':          Projects,
+    'new-project':       NewProject,
     'project-tree':      ProjectTree,
     'jdk':               Jdk,
     'maven':             Maven,
@@ -189,6 +194,7 @@
     'structure':         Structure,
     'completion':        Completion,
     'refactoring':       Refactoring,
+    'assistant':         Assistant,
     'validation':        Validation,
     'local-history':     LocalHistory,
     'tool-config':       ToolConfig,

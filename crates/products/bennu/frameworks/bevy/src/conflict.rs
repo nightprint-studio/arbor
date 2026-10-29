@@ -22,7 +22,7 @@
 //! of the two a pair is, from the ordering it could see, and says `unordered` only in the sense of
 //! "no ordering appears in this project's own `add_systems` calls".
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::model::{Access, AccessKind, Filter, SystemDecl};
 
@@ -76,19 +76,56 @@ pub struct Conflict {
     pub ordering: Ordering,
 }
 
-/// Pairs known to be ordered, keyed by the two system names in sorted order.
+/// What the project says about system order.
+///
+/// Two kinds of fact, kept apart because they close differently:
+///
+/// * **Directed edges** (`.before` / `.after` / `.chain()`): `a → b` means `a` runs first. These
+///   are transitive — `a → b` and `b → c` order `a` against `c` even though nothing names the pair
+///   — so [`contains`](Self::contains) follows paths. Direction matters: `a → b` and `c → b` leave
+///   `a` and `c` unordered, and an undirected closure would have merged them.
+/// * **Undirected pairs** (`.ambiguous_with`, [`add`](Self::add)): a statement about exactly that
+///   pair, which says nothing about anyone else.
 #[derive(Debug, Default)]
-pub struct OrderIndex(HashSet<(String, String)>);
+pub struct OrderIndex {
+    pairs: HashSet<(String, String)>,
+    next: HashMap<String, Vec<String>>,
+}
 
 impl OrderIndex {
+    /// Record that `a` and `b` are ordered (or declared not to matter), direction unknown.
     pub fn add(&mut self, a: &str, b: &str) {
         if a != b {
-            self.0.insert(key(a, b));
+            self.pairs.insert(key(a, b));
+        }
+    }
+
+    /// Record that `first` runs before `later`.
+    pub fn add_edge(&mut self, first: &str, later: &str) {
+        if first != later {
+            self.next.entry(first.to_string()).or_default().push(later.to_string());
         }
     }
 
     pub fn contains(&self, a: &str, b: &str) -> bool {
-        self.0.contains(&key(a, b))
+        self.pairs.contains(&key(a, b)) || self.reaches(a, b) || self.reaches(b, a)
+    }
+
+    /// Whether a chain of `before` edges leads from `from` to `to`.
+    fn reaches(&self, from: &str, to: &str) -> bool {
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut stack = vec![from];
+        while let Some(at) = stack.pop() {
+            for n in self.next.get(at).into_iter().flatten() {
+                if n == to {
+                    return true;
+                }
+                if seen.insert(n.as_str()) {
+                    stack.push(n.as_str());
+                }
+            }
+        }
+        false
     }
 }
 
@@ -167,6 +204,13 @@ pub fn skipped_schedules(systems: &[SystemDecl]) -> Vec<String> {
 /// * An **exclusive** system is never accused. It contends with everything in its schedule by
 ///   construction; that is what taking `&mut World` means, not an oversight to report on every peer.
 ///
+/// * A system behind a **run condition** is never accused. `run_if(in_state(A))` against
+///   `run_if(in_state(B))` is the ordinary way to make two writers exclusive in time, and this crate
+///   cannot evaluate a condition — so it takes the cautious side for any of them.
+/// * A pair that contends **only through a message buffer**, one side reading and the other
+///   writing, is not accused: a reader running a frame late is how messages are meant to flow, and
+///   it is the pattern of nearly every event in a project.
+///
 /// What is left is the case the tooling exists for: two ordinary systems, in one schedule, wanting
 /// the same data, with nothing anywhere in the project saying which goes first.
 pub fn warnable(c: &Conflict, systems: &[SystemDecl]) -> bool {
@@ -174,7 +218,18 @@ pub fn warnable(c: &Conflict, systems: &[SystemDecl]) -> bool {
         return false;
     }
     let (Some(a), Some(b)) = (systems.get(c.a), systems.get(c.b)) else { return false };
-    !a.exclusive && !b.exclusive && a.sets.is_empty() && b.sets.is_empty()
+    if a.exclusive || b.exclusive || !a.sets.is_empty() || !b.sets.is_empty() {
+        return false;
+    }
+    if a.conditional || b.conditional {
+        return false;
+    }
+    !c.reasons.iter().all(is_message_handoff)
+}
+
+/// A reader meeting a writer of the same `Messages<T>` buffer.
+fn is_message_handoff(r: &Reason) -> bool {
+    r.target.starts_with("Messages<") && r.kind == "read/write"
 }
 
 fn ordering_of(a: &SystemDecl, b: &SystemDecl, order: &OrderIndex) -> Ordering {
@@ -252,7 +307,7 @@ fn disjoint(a: &[Filter], b: &[Filter]) -> bool {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{detect, disjoint, OrderIndex, Ordering};
+    use super::{detect, disjoint, warnable, OrderIndex, Ordering};
     use crate::model::{Access, AccessKind, Filter, SystemDecl};
 
     fn sys(name: &str, schedule: &str, accesses: Vec<Access>) -> SystemDecl {
@@ -265,6 +320,7 @@ mod tests {
             exclusive: false,
             schedules: vec![schedule.to_string()],
             sets: Vec::new(),
+            conditional: false,
         }
     }
 
@@ -338,6 +394,58 @@ mod tests {
         let found = detect(&systems, &order);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].ordering, Ordering::Explicit);
+    }
+
+    #[test]
+    fn before_edges_are_transitive_but_a_fan_in_orders_nothing() {
+        let mut chain = OrderIndex::default();
+        chain.add_edge("a", "b");
+        chain.add_edge("b", "c");
+        assert!(chain.contains("a", "c") && chain.contains("c", "a"));
+
+        let mut fan_in = OrderIndex::default();
+        fan_in.add_edge("a", "b");
+        fan_in.add_edge("c", "b");
+        assert!(!fan_in.contains("a", "c"), "both run before b; nothing says which is first");
+    }
+
+    #[test]
+    fn a_cyclic_ordering_terminates() {
+        let mut order = OrderIndex::default();
+        order.add_edge("a", "b");
+        order.add_edge("b", "a");
+        assert!(!order.contains("a", "z"));
+    }
+
+    #[test]
+    fn a_system_behind_a_run_condition_is_never_warned_about() {
+        let mut systems = vec![
+            sys("a", "Update", vec![access("Score", AccessKind::ResourceWrite, vec![])]),
+            sys("b", "Update", vec![access("Score", AccessKind::ResourceWrite, vec![])]),
+        ];
+        let found = detect(&systems, &OrderIndex::default());
+        assert!(warnable(&found[0], &systems));
+        systems[1].conditional = true;
+        assert!(!warnable(&found[0], &systems));
+    }
+
+    #[test]
+    fn a_message_reader_and_writer_are_not_warned_but_two_writers_are() {
+        let msg = |kind| access("Messages<Hit>", kind, vec![]);
+        let handoff = vec![
+            sys("w", "Update", vec![msg(AccessKind::ResourceWrite)]),
+            sys("r", "Update", vec![msg(AccessKind::ResourceRead)]),
+        ];
+        let found = detect(&handoff, &OrderIndex::default());
+        assert_eq!(found.len(), 1);
+        assert!(!warnable(&found[0], &handoff));
+
+        let writers = vec![
+            sys("w1", "Update", vec![msg(AccessKind::ResourceWrite)]),
+            sys("w2", "Update", vec![msg(AccessKind::ResourceWrite)]),
+        ];
+        let found = detect(&writers, &OrderIndex::default());
+        assert!(warnable(&found[0], &writers));
     }
 
     #[test]

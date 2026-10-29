@@ -23,12 +23,13 @@
     <tr><td><kbd>Alt</kbd> + <kbd>1</kbd></td><td><strong>Project</strong> — files</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>2</kbd></td><td><strong>Structure</strong> — symbols</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>N</kbd></td><td><strong>Dependencies</strong> — by module, or by crate on a Cargo project</td></tr>
-    <tr><td><kbd>Alt</kbd> + <kbd>8</kbd></td><td>The <strong>build tool</strong> window, right rail — Maven's goals on Java, Cargo's crates and commands on Rust</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>8</kbd></td><td>The <strong>build tool</strong> window, right rail — Maven's goals on Java, Cargo's crates and commands on Rust; the open project's own kind when the workspace has both</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>5</kbd></td><td><strong>Tests</strong> — the catalogue, right rail</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>9</kbd></td><td><strong>Trees</strong> — the parse and the declaration model, right rail; Java and JSP, since both views read Bennu's own engines</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd></td><td><strong>i18n</strong> — the fulcrum translation under the caret, rendered. Only on a translation bundle, so there is no rail button</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>0</kbd></td><td><strong>Build</strong>, bottom dock</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>R</kbd></td><td><strong>Run</strong> — the launched program's console, and the debugger when it is one</td></tr>
+    <tr><td><kbd>Alt</kbd> + <kbd>A</kbd></td><td><strong>Assistant</strong> — the chat and agent panel, right rail</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>6</kbd></td><td><strong>Problems</strong></td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>7</kbd></td><td><strong>TODO</strong></td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>3</kbd></td><td><strong>Forms</strong> — JSP form analysis</td></tr>
@@ -36,6 +37,7 @@
     <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd></td><td>The <strong>module graph</strong> window; inside it <kbd>Alt</kbd> + <kbd>S</kbd> isolates the selected module's world. <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd> is <em>Switch window</em>, bound everywhere</td></tr>
     <tr><td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>U</kbd></td><td><strong>Download dependencies</strong> the poms need and the local repository lacks, then rebuild the index — a background job, Maven only</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd></td><td><strong>Structural search &amp; replace</strong></td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd></td><td><strong>New Project</strong> — the wizard that creates a Maven, Gradle, Spring, Quarkus, web, Cargo or Node project. Inside it <kbd>Ctrl</kbd> + <kbd>Enter</kbd> creates and <kbd>Ctrl</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd> switch the project type</td></tr>
   </tbody>
 </table>
 

@@ -17,6 +17,13 @@
      */
     wideControl?: boolean;
     /**
+     * Put the control on its own line under the title and description, at the row's full width.
+     *
+     * For a control that is itself a row of wide choices (cards, a segment with sentences): beside the
+     * label it either overflows the row or squeezes the label away.
+     */
+    stacked?: boolean;
+    /**
      * A small glyph for the row, rendered in a tinted square at its left edge.
      *
      * It also switches the row to the **compact** layout: icon · label over
@@ -31,7 +38,7 @@
     children: Snippet;
   }
 
-  let { label, description, wideControl = false, icon, children }: Props = $props();
+  let { label, description, wideControl = false, stacked = false, icon, children }: Props = $props();
 </script>
 
 {#if icon}
@@ -47,6 +54,12 @@
       {@render children()}
     </div>
   </div>
+{:else if stacked}
+<div class="fr-row">
+  <span class="fr-title fr-title-stacked">{label}</span>
+  {#if description}<p class="fr-desc">{description}</p>{/if}
+  <div class="fr-stack">{@render children()}</div>
+</div>
 {:else}
 <div class="fr-row">
   <!-- Header: label on the left, control on the right.
@@ -109,6 +122,9 @@
   /* …and the title stops competing for it: without this the two split the row
      evenly and a one-word label reserves half of it. */
   .fr-header.fr-wide-header .fr-title { flex: 0 1 auto; }
+
+  .fr-title-stacked { flex: none; }
+  .fr-stack { display: flex; min-width: 0; margin-top: 2px; }
 
   .fr-desc {
     margin: 0;

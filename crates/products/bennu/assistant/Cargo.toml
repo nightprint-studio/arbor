@@ -1,0 +1,12 @@
+[package]
+name         = "bennu-assistant"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The assistant's pure core: a provider interface with Anthropic behind it, the neutral conversation and stream-event model, the effort levels, and the access policy that decides what a tool may touch. No network, no filesystem — a transport and the tools are plugged in from outside, so every rule here is testable."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }

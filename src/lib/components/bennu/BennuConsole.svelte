@@ -34,6 +34,9 @@
   import type { RunLogLine } from '$lib/stores/bennu/run.svelte';
   import { openLogLink } from './log-link';
   import { copyToClipboard } from '$lib/utils/clipboard';
+  import { Sparkles } from 'lucide-svelte';
+  import { findStackTraces, tracePrompt } from './assistant/assistant-trace';
+  import { askAssistant } from './assistant/assistant-launch';
 
   /** A SQL statement in the log was pressed: copy it, and say so — the click has no other visible effect. */
   function copySql(sql: string) {
@@ -54,6 +57,14 @@
   /** The virtualiser takes plain strings; the interpreted line is looked up by index in the
    *  row snippet, so nothing is copied but the text. */
   const texts = $derived(lines.map((l) => l.text));
+
+  // The stack traces in the buffer, by the line each starts on: that line gets the assistant's button.
+  const traces = $derived(new Map(findStackTraces(texts).map((t) => [t.head, t])));
+
+  function askAboutTrace(index: number) {
+    const trace = traces.get(index);
+    if (trace) void askAssistant(tracePrompt(texts, trace));
+  }
 
   /**
    * Follow the tail only while the reader is AT the bottom — scrolling up to read something
@@ -122,7 +133,7 @@
         level={l.level}
         onopen={openLogLink}
         onsql={copySql}
-      />{/if}
+      />{#if traces.has(index)}<button type="button" class="bc-ai" title="Ask the assistant to find the cause and fix it" onclick={() => askAboutTrace(index)}><Sparkles size={10} />Fix with the assistant</button>{/if}{/if}
   {/snippet}
 </VirtualTextView>
 
@@ -141,6 +152,17 @@
 
   /* The viewport. The rows are rendered by VirtualTextView, so their own rules are `:global`
      through the class it puts on them — `rowClass` exists for exactly this. */
+  /* The assistant's button, at the end of the line that starts a trace. Quiet until the row is hovered, so a
+     console full of traces is not a wall of buttons. */
+  .bc-ai {
+    display: inline-flex; align-items: center; gap: 5px; margin-left: 12px; padding: 0 7px;
+    font-family: var(--font-ui); font-size: 10px; line-height: 16px;
+    color: var(--accent); background: var(--accent-subtle);
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: var(--radius-sm);
+    cursor: pointer; opacity: 0.55; transition: opacity var(--transition-fast);
+  }
+  :global(.vtv.bc .vtv-row:hover) .bc-ai, .bc-ai:focus-visible { opacity: 1; }
+  .bc-ai:hover { background: var(--accent); color: var(--text-on-accent); }
   .bc-caret {
     color: var(--accent);
     margin-right: 6px;

@@ -19,6 +19,7 @@ pub use crate::jdk::{detect as detect_jdk, module_level};
 pub use crate::model::{
     file_stamp, open_project, read_file, rename_path, write_file, OpenOptions,
 };
+pub use crate::modules::{modules_of, Module, MAX_MODULES, SCAN_DEPTH};
 pub use crate::pom::{parse as parse_pom, Pom};
 pub use crate::tree::{
     build as build_tree, is_noise_dir as is_tree_noise_dir, MAX_NODES as TREE_MAX_NODES,

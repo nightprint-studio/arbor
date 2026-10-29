@@ -1255,6 +1255,65 @@ fn host_dispatch(
         return Ok(serde_json::Value::Null);
     }
 
+    // ── Assistant provider key ─────────────────────────────────────────────────────
+    //
+    // The key sits in the assistant's own vault and is handed to  only here, at the moment
+    // a run makes a request — it is never part of a config the backend reads, and the page that sets
+    // it talks to the shell directly. The provider id is validated, so this door names one account.
+    if method == "__assistant_key" {
+        let provider: String = serde_json::from_value(params)
+            .map_err(|e| format!("__assistant_key: invalid provider id: {e}"))?;
+        let ok = !provider.is_empty()
+            && provider.len() <= 32
+            && provider.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if !ok {
+            return Err("__assistant_key: invalid provider id".to_string());
+        }
+        let key = crate::auth::credential_store::get_assistant_key(&provider)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        return Ok(serde_json::json!(key));
+    }
+
+    // ── Assistant git tools ─────────────────────────────────────────────────────────
+    //
+    // Corvus already serves git as tools (status, diff, log, blame, stage, commit…) for AI clients. The
+    // assistant in `bennu-be` reaches them through the shell, which is the only process that talks to every
+    // backend — and only the ones listed here: the relay is an allowlist, not a door to Corvus. `push` is
+    // deliberately absent: publishing is not something the assistant does.
+    if method == "__assistant_git_tools" || method == "__assistant_git" {
+        const ALLOWED: [&str; 7] = [
+            "corvus_status", "corvus_diff", "corvus_log", "corvus_blame", "corvus_stage", "corvus_unstage", "corvus_commit",
+        ];
+        // The same rule as every other path into a backend: starting one parks on a synchronous channel.
+        ensure_corvus_be(app);
+        let state = app.state::<AppState>();
+        if method == "__assistant_git_tools" {
+            let all = dispatch_rpc(state.inner(), "corvus", arbor_be::TOOLS_METHOD, serde_json::Value::Null)
+                .map_err(|e| e.to_string())?;
+            let kept: Vec<serde_json::Value> = all
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter(|t| t.get("method").and_then(|m| m.as_str()).is_some_and(|m| ALLOWED.contains(&m)))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+            return Ok(serde_json::Value::Array(kept));
+        }
+        let name = params
+            .get("method")
+            .and_then(|m| m.as_str())
+            .ok_or_else(|| "__assistant_git: missing method".to_string())?
+            .to_string();
+        if !ALLOWED.contains(&name.as_str()) {
+            return Err(format!("__assistant_git: `{name}` is not one of the git tools the assistant may call"));
+        }
+        let args = params.get("args").cloned().unwrap_or(serde_json::Value::Null);
+        return dispatch_rpc(state.inner(), "corvus", &name, serde_json::json!({ "args": args })).map_err(|e| e.to_string());
+    }
+
     // ── Garrulus sync remote ──────────────────────────────────────────────────
     //
     // Minting the repository a vault will sync to. `garrulus-be` owns neither the

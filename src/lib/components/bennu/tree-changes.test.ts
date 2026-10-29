@@ -43,6 +43,8 @@ describe('manifestChanged', () => {
   it('sees a manifest at any depth, and assumes one when the list is incomplete', () => {
     expect(manifestChanged(payload({ paths: ['core/pom.xml'] }))).toBe(true);
     expect(manifestChanged(payload({ paths: ['crates/a/Cargo.toml'] }))).toBe(true);
+    expect(manifestChanged(payload({ paths: ['src-tauri/Cargo.toml'] }))).toBe(true);
+    expect(manifestChanged(payload({ paths: ['web/package.json'] }))).toBe(true);
     expect(manifestChanged(payload({ paths: ['src/Main.java'] }))).toBe(false);
     expect(manifestChanged(payload({ rescan: true }))).toBe(true);
   });

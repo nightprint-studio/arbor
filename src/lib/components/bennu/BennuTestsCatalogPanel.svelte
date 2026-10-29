@@ -35,12 +35,15 @@
   import { testIcon } from './test-icon';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { activeTestRoot } from '$lib/stores/bennu/test-runner.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuTestStore, baseMethodName } from '$lib/stores/bennu/tests.svelte';
   import type { DiscoveredTest } from '$lib/types/bennu';
 
   const store = bennuTestStore;
-  const root = $derived(projectStore.project?.root ?? '');
+  // The project root — or the build module's folder when the project's own build tool lives in a
+  // subfolder (a Tauri app's `src-tauri`).
+  const root = $derived(activeTestRoot() ?? '');
 
   /** How the list is ordered. Each is a question someone actually arrives with. */
   type Sort = 'name' | 'package' | 'module' | 'framework' | 'size';

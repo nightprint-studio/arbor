@@ -225,6 +225,14 @@ tokio      = { workspace = true }
 # the shared `arbor_core::prelude::client()` defaults; the workspace `reqwest` is here only
 # for the `reqwest::Client` type in the download helper signature. No new external crate.
 reqwest    = { workspace = true }
+# The assistant: its pure core (provider, loop, access policy) is a workspace crate; `regex` is the
+# workspace pin already used elsewhere — here for the assistant's text-search tool (grep, in Rust).
+bennu-assistant = { path = "../../assistant" }
+regex      = { workspace = true }
+# New Project: a downloaded project skeleton is extracted with `unzip_limited` (zip-slip guard,
+# entry/size caps). A workspace-internal crate that already owns the `zip` dependency — Bennu does
+# not take `zip` itself.
+arbor-fs   = { path = "../../../../foundation/fs" }
 
 # `setrlimit(RLIMIT_NOFILE)` at start-up — see `fd_limit.rs`. macOS hands a GUI app a soft limit
 # of 256 open files, and a project with 150 dependency jars holds every one of them open for the

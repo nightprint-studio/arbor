@@ -9,11 +9,11 @@
  */
 
 import type { IconComponent } from '$lib/types/icon';
-import { projectStore } from '$lib/stores/bennu/project.svelte';
+import { testsAreCargo } from '$lib/stores/bennu/test-runner.svelte';
 import JUnitIcon from './JUnitIcon.svelte';
 import RustTestIcon from './RustTestIcon.svelte';
 
 /** Il marchio dei test del progetto aperto. */
 export function testIcon(): IconComponent {
-  return (projectStore.isCargo ? RustTestIcon : JUnitIcon) as unknown as IconComponent;
+  return (testsAreCargo() ? RustTestIcon : JUnitIcon) as unknown as IconComponent;
 }

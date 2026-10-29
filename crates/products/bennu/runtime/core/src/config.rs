@@ -58,6 +58,8 @@ pub struct BennuConfig {
     pub highlight_current_line: bool,
     /// Install code folding at all — the gutter arrows and the fold commands. `true` by default.
     pub folding_enabled: bool,
+    /// What a new assistant conversation starts with, and how far it may reach.
+    pub assistant: AssistantConfig,
     /// Collapse a file's block comments when it opens. `false` by default. Needs `folding_enabled`;
     /// an opening state rather than a rule, so nothing re-folds what the reader unfolds.
     pub fold_block_comments: bool,
@@ -419,6 +421,27 @@ pub struct BennuConfig {
     /// A table: it stays at the end with the others.
     #[serde(default)]
     pub onboarding: OnboardingConfig,
+    /// **New Project** — what the wizard remembers between runs. See [`NewProjectConfig`].
+    ///
+    /// A table: it stays at the end with the others.
+    #[serde(default)]
+    pub new_project: NewProjectConfig,
+}
+
+/// What the New Project wizard remembers, so the common case is "type a name, Ctrl+Enter".
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct NewProjectConfig {
+    /// The folder the last project was created in.
+    pub last_location: String,
+    /// The generator id the wizard opens on.
+    pub last_generator: String,
+    /// Whether "Create Git repository" was left on. Unset (`None`) reads as on.
+    pub git_init: Option<bool>,
+    /// Package-manager choice for the Node generators (`npm` / `pnpm` / `yarn`).
+    pub package_manager: String,
+    /// Group id / package prefix of the last Java project, offered as the next default.
+    pub last_group: String,
 }
 
 /// Whether the user has been through Bennu's welcome tour.
@@ -679,6 +702,97 @@ fn debug_clone() -> Vec<String> {
     vec!["Debug".to_string(), "Clone".to_string()]
 }
 
+/// The assistant's defaults — chosen in Settings › Assistant, and changeable per conversation from the
+/// composer. The API key is **not** here: it lives in the credential vault, never in a config file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AssistantConfig {
+    /// Model id, e.g. `claude-opus-5-5`.
+    pub model: String,
+    /// `low` … `max`; ignored by a model with no effort setting.
+    pub effort: String,
+    /// `manual` (edits are proposed for review) or `auto` (applied as made).
+    pub mode: String,
+    /// `file`, `project`, `workspace` or `disk` — how far it may reach without asking.
+    pub scope: String,
+    /// The largest context window it may use, in tokens.
+    pub max_context: u32,
+    pub allow_edits: bool,
+    /// May use the system Temp folders as scratch space.
+    pub allow_temp: bool,
+    /// Folders it may work in besides the project, in any scope.
+    pub extra_folders: Vec<String>,
+    /// How much it may spend.
+    pub limits: LimitsConfig,
+    /// A conversation with no tools at all: it cannot read, search or change anything, only talk.
+    pub chat_only: bool,
+    /// Read the project's `CLAUDE.md` / `AGENTS.md` (and the user's own instructions file) into the
+    /// assistant's instructions.
+    pub use_instructions: bool,
+    /// Let the assistant use git — status, diff, log, blame, stage, commit. Off until the user turns it on:
+    /// it sends commit messages and author names to the provider, and commit changes the repository.
+    pub git_enabled: bool,
+    /// With git on: replace the people in git results (authors, addresses) with made-up ids before the model
+    /// sees them, and turn the ids back into names for the user. On by default.
+    pub hide_authors: bool,
+    /// Let the assistant keep a visible step plan (with a percentage) for work of several steps. On by
+    /// default; off removes the tool and the instruction, which also saves their tokens.
+    pub plan_enabled: bool,
+    /// How many open projects one conversation may work across (the one the user is in included), when the
+    /// reach is the workspace. Each is a line in the instructions and a place a search may go.
+    pub max_projects: u32,
+    /// Tool families switched off (`read`, `project`, `edit`, `refactor`, `run`, `history`, `structural`): not
+    /// offered to the model, so it cannot call them and their definitions cost nothing.
+    pub tool_families_off: Vec<String>,
+}
+
+/// Spending limits, in euros; `0` switches one off. Prices are in dollars, so `eur_per_usd` is the rate
+/// they are converted at — kept by hand, because a rate that moved on its own would move the limits.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LimitsConfig {
+    /// Per conversation.
+    pub session_eur: f64,
+    pub day_eur: f64,
+    pub week_eur: f64,
+    pub month_eur: f64,
+    /// Euros per dollar.
+    pub eur_per_usd: f64,
+    /// From this share of a limit, in percent, the meter warns.
+    pub warn_percent: f64,
+}
+
+impl Default for LimitsConfig {
+    // On by default, at amounts that a normal day does not reach: the brakes are for the day something
+    // loops, and nobody turns them on after that day.
+    fn default() -> Self {
+        Self { session_eur: 5.0, day_eur: 10.0, week_eur: 0.0, month_eur: 50.0, eur_per_usd: 0.92, warn_percent: 80.0 }
+    }
+}
+
+impl Default for AssistantConfig {
+    fn default() -> Self {
+        Self {
+            model: "claude-opus-5-5".to_string(),
+            effort: "high".to_string(),
+            mode: "manual".to_string(),
+            scope: "project".to_string(),
+            max_context: 200_000,
+            allow_edits: true,
+            allow_temp: true,
+            extra_folders: Vec::new(),
+            limits: LimitsConfig::default(),
+            chat_only: false,
+            use_instructions: true,
+            git_enabled: false,
+            hide_authors: true,
+            plan_enabled: true,
+            max_projects: 6,
+            tool_families_off: Vec::new(),
+        }
+    }
+}
+
 /// The default error style — the one a binary reaches for.
 fn anyhow() -> String {
     "anyhow".to_string()
@@ -696,6 +810,7 @@ impl Default for BennuConfig {
             show_line_numbers: true,
             highlight_current_line: true,
             folding_enabled: true,
+            assistant: AssistantConfig::default(),
             fold_block_comments: false,
             completion_auto_popup: true,
             completion_delay_ms: 150,
@@ -773,6 +888,7 @@ impl Default for BennuConfig {
             cargo: CargoConfig::default(),
             maven: MavenConfig::default(),
             onboarding: OnboardingConfig::default(),
+            new_project: NewProjectConfig::default(),
         }
     }
 }

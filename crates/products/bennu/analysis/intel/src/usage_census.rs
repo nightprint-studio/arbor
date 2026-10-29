@@ -71,6 +71,14 @@ impl UsageCensus {
         census
     }
 
+    /// Count one file whose tree the caller already holds — the same census as
+    /// [`of_source`](Self::of_source), without parsing the file again.
+    pub fn of_tree(root: Node, source: &[u8]) -> Self {
+        let mut census = Self::default();
+        census.collect(root, source);
+        census
+    }
+
     /// Fold another census into this one — how per-file results become the project's.
     pub fn merge(&mut self, other: UsageCensus) {
         for (name, n) in other.uses {

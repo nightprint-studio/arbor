@@ -20,6 +20,8 @@
     Layers, Zap, Bookmark, Archive, Pencil, Search,
     // The gutter's ▶ and the two other things pressing it might have meant.
     Play, Bug, SlidersHorizontal, Beaker,
+    // The ✦ on a doc comment.
+    Sparkles,
   } from 'lucide-svelte';
   import { bennuDtoLabStore } from '$lib/stores/bennu/dtolab.svelte';
   import { tick, untrack } from 'svelte';
@@ -177,6 +179,15 @@
   import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
   import { bennuHierarchyStore } from '$lib/stores/bennu/hierarchy.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
+  import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
+  import { declarationOnLine, docLanguageOf, docTargets, type DocTarget } from './assistant/doc-comments';
+  import {
+    actionPrompt, actionsFor as assistantActionsFor, askDraft, lineOfByte, lineOfOffset,
+    type ActionContext, type ActionId as AssistantActionId,
+  } from './assistant/assistant-actions';
+  import { actionsFor, docPrompt, type DocActionId } from './assistant/doc-actions';
+  import { askAssistant, draftInAssistant } from './assistant/assistant-launch';
+  import { WRITING_ACTIONS, writingDraft, writingPrompt, type WritingActionId } from './assistant/assistant-writing';
   import { bennuNavStore, type NavPlace } from '$lib/stores/bennu/nav-history.svelte';
   import { NavFlow } from './nav-flow';
   import { lineEditsOf } from './nav-ring';
@@ -437,6 +448,8 @@
 
   // ── Caret position (footer, via the UI store) ────────────────────────────────
   let caretLine = $state(1);
+  /** The line a selection starts on, or `null` with no selection — where the assistant's mark goes. */
+  let selectionStartLine = $state<number | null>(null);
   let caretCol = $state(1);
   /** The document `caretLine`/`caretCol` belong to — the editor that REPORTED them, which during a
    *  tab switch is not yet the active file. Plain `let`: only read inside closures. */
@@ -553,6 +566,9 @@
 
   function onCaret(line: number, col: number, info?: { key?: string; user: boolean }) {
     caretLine = line; caretCol = col;
+    // The assistant's mark sits where a selection starts, not where it ends (where the caret is).
+    const sel = editorComp?.selectionRange();
+    selectionStartLine = sel && !sel.empty ? lineOfOffset(editorComp?.getValue() ?? '', sel.from) : null;
     caretFile = info?.key ?? activePath ?? null;
     if (paneFocused) bennuUiStore.setCaret(line, col);
     templateCaret = { line, col };
@@ -2409,6 +2425,134 @@
       : [...blocks].reverse().find((b) => b.fromLine < here) ?? blocks[blocks.length - 1];
     editorComp?.scrollToLineCol(ahead.fromLine, 1);
     if (changePopup) changePopup = { block: ahead, x: changePopup.x, y: changePopup.y };
+  }
+
+  // ── The ✦ on a comment ────────────────────────────────────────────────────────
+  //
+  // A button on every doc comment — and, under the caret, on a declaration that has none — that opens
+  // the ways the assistant can help with it. The request carries the file, the lines and the
+  // declaration, so nobody types a class and a method name into a chat. Java and Rust only: the two
+  // languages with a doc-comment convention the assistant is told.
+  const docLanguage = $derived(docLanguageOf(activePath));
+  const docTargetList = $derived.by<DocTarget[]>(() => {
+    if (!docLanguage || !activePath || isDecompiledView) return [];
+    return docTargets(projectStore.sourceOf(activePath), docLanguage, caretLine);
+  });
+  // The assistant's chip: a small button by the caret, only while it has something to offer — the caret is
+  // inside a doc comment, or text is selected. It is not in the gutter, where it competed with the run,
+  // test and bean marks and was missing whenever one of them took the line.
+  const chipComment = $derived(
+    docTargetList.find((t) => t.kind === 'comment' && caretLine >= t.line && caretLine <= t.endLine) ?? null,
+  );
+  let chipTick = $state(0);
+  let askChip = $state<{ x: number; y: number } | null>(null);
+  $effect(() => {
+    const on = !!activePath && !isDecompiledView && !isMarkdownTab && (chipComment !== null || selectionStartLine !== null);
+    void caretLine; void chipTick;
+    if (!on) { askChip = null; return; }
+    const at = editorComp?.coordsAtCaret();
+    askChip = at && at.y > 0 ? { x: at.x, y: at.y } : null;
+  });
+  // Scrolling moves the caret on screen without moving it in the text: look again.
+  $effect(() => {
+    const again = () => { chipTick++; };
+    window.addEventListener('scroll', again, true);
+    return () => window.removeEventListener('scroll', again, true);
+  });
+
+  function onChipClick(event: MouseEvent) {
+    if (chipComment) onDocGutterClick(chipComment, event);
+    else showAssistantMenu(event.clientX, event.clientY + 14);
+  }
+
+  /** What the assistant is being asked about, read from the editor now. */
+  function assistantContext(): ActionContext | null {
+    const file = activePath;
+    if (!file) return null;
+    const source = projectStore.sourceOf(file);
+    const sel = editorComp?.selectionRange();
+    const selection = sel && !sel.empty ? source.slice(sel.from, sel.to) : null;
+    const fromLine = sel && !sel.empty ? lineOfOffset(source, sel.from) : caretLine;
+    const toLine = sel && !sel.empty ? lineOfOffset(source, sel.to) : caretLine;
+    const root = projectStore.project?.root;
+    const shown = root && file.startsWith(root) ? file.slice(root.length).replace(/^[\\/]+/, '').replace(/\\/g, '/') : file;
+    const problems = bennuDiagnosticsStore.activeFileDiagnostics
+      .filter((d) => d.severity === 'error' || d.severity === 'warning')
+      .filter((d) => lineOfByte(source, d.start) <= toLine && lineOfByte(source, Math.max(d.start, d.end - 1)) >= fromLine)
+      .map((d) => ({ severity: d.severity, message: d.message }));
+    const lang = docLanguage;
+    return {
+      file: shown, language: lang, fromLine, toLine, selection,
+      lineText: source.split(/\r?\n/)[fromLine - 1] ?? '',
+      problems,
+      declaration: lang && !selection ? declarationOnLine(source, lang, fromLine) : null,
+      undocumented: docTargetList.some((t) => t.kind === 'undocumented' && t.line === fromLine),
+    };
+  }
+
+  async function runAssistantAction(id: AssistantActionId, c: ActionContext) {
+    if (id === 'ask') {
+      await draftInAssistant(askDraft(c));
+      return;
+    }
+    // Documentation has a richer request (the language's convention), built when the declaration is known.
+    const doc = id === 'document' && docLanguage ? docTargetList.find((t) => t.kind === 'undocumented' && t.line === c.fromLine) : null;
+    const prompt = doc && docLanguage ? docPrompt('write', doc, c.file, docLanguage) : actionPrompt(id, c);
+    await askAssistant(prompt);
+  }
+
+  function showAssistantMenu(x: number, y: number) {
+    const c = assistantContext();
+    if (!c) return;
+    const items: MenuItem[] = assistantActionsFor(c).map((a) => ({ id: a.id, label: a.label, icon: Sparkles }));
+    bennuContextMenuStore.show(x, y, items, (id) => void runAssistantAction(id as AssistantActionId, c));
+  }
+
+  // ── The assistant on a passage of Markdown ───────────────────────────────────────────────────────
+  //
+  // Select prose in a README and a small button appears at the end of the selection; it offers to improve,
+  // shorten, expand, fix or translate the passage. The assistant makes the change as an exact edit of the
+  // file, so it arrives as a proposal like any other.
+  let mdSelection = $state<{ text: string; x: number; y: number } | null>(null);
+  // A selection belongs to the document it was made in.
+  $effect(() => { void activePath; mdSelection = null; });
+
+  function showWritingMenu(x: number, y: number) {
+    const selection = mdSelection;
+    const file = activePath;
+    if (!selection || !file) return;
+    const root = projectStore.project?.root;
+    const shown = root && file.startsWith(root) ? file.slice(root.length).replace(/^[\\/]+/, '').replace(/\\/g, '/') : file;
+    const ctx = { file: shown, text: selection.text };
+    const items: MenuItem[] = WRITING_ACTIONS.map((a) => ({ id: a.id, label: a.label, icon: Sparkles }));
+    bennuContextMenuStore.show(x, y, items, (id) => {
+      const action = id as WritingActionId;
+      if (action === 'ask') void draftInAssistant(writingDraft(ctx));
+      else void askAssistant(writingPrompt(action, ctx));
+    });
+  }
+
+  /** Ask the assistant about where the caret is — what the margin mark does, from the keyboard and the palette. */
+  export function askAssistantHere() {
+    const at = editorComp?.coordsAtByteOffset(editorComp.caretByteOffset());
+    showAssistantMenu(at?.x ?? 200, (at?.y ?? 200) + 18);
+  }
+
+  function onDocGutterClick(target: DocTarget, event: MouseEvent) {
+    const file = activePath;
+    const lang = docLanguage;
+    if (!file || !lang) return;
+    const actions = actionsFor(target);
+    const items: MenuItem[] = actions.map((a) => ({ id: a.id, label: a.label, icon: Sparkles }));
+    bennuContextMenuStore.show(event.clientX, event.clientY, items, (id) => {
+      void askAboutDocs(id as DocActionId, target, file, lang);
+    });
+  }
+
+  async function askAboutDocs(action: DocActionId, target: DocTarget, file: string, lang: 'java' | 'rust') {
+    const root = projectStore.project?.root;
+    const shown = root && file.startsWith(root) ? file.slice(root.length).replace(/^[\\/]+/, '').replace(/\\/g, '/') : file;
+    await askAssistant(docPrompt(action, target, shown, lang));
   }
 
   const allGutterMarks = $derived([
@@ -5238,7 +5382,17 @@
         onOpenLink={openMarkdownLink}
         fileIndex={projectFileIndex}
         onFindInFiles={(q) => bennuUiStore.openFind(q)}
+        onSelection={(s) => (mdSelection = s)}
       />
+      {#if mdSelection}
+        <!-- Mouse-down is kept from the editor so pressing the button does not collapse the selection it is about. -->
+        <button
+          type="button" class="md-ai" style="left: {mdSelection.x + 6}px; top: {mdSelection.y + 4}px"
+          title="Ask the assistant about this passage"
+          onmousedown={(e) => e.preventDefault()}
+          onclick={(e) => showWritingMenu(e.clientX, e.clientY + 14)}
+        ><Sparkles size={11} /></button>
+      {/if}
     </div>
   {:else if activePath}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -5301,6 +5455,15 @@
           onLensPress={(key) => void onLensPress(key)}
         />
       {/key}
+      {#if askChip}
+        <!-- Mouse-down is kept from the editor so pressing the chip does not move the caret or drop the selection. -->
+        <button
+          type="button" class="ask-chip" style="left: {askChip.x + 12}px; top: {askChip.y - 28}px"
+          title={chipComment ? 'Improve, check or translate this comment' : 'Ask the assistant about this'}
+          onmousedown={(e) => e.preventDefault()}
+          onclick={onChipClick}
+        ><Sparkles size={11} /><span>Assistant</span></button>
+      {/if}
       {#if htmlPreviewing && !htmlFullscreen}
         <!-- Beside the source, not instead of it: a page is edited and looked at in the same
              breath, and a preview that replaced the buffer would make every fix a round trip
@@ -5990,7 +6153,8 @@
   :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-repository),
   :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-bean),
   :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject),
-  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject-library) {
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject-library),
+  :global(.code-editor .cm-host-gutter-icon.cm-doc-gutter) {
     --jump: var(--syntax-function, #ffc66d);
     width: 16px; height: 15px; margin: 2px 1px 0;
     box-sizing: border-box;
@@ -6001,6 +6165,9 @@
     border: 1px solid color-mix(in srgb, var(--jump) 45%, transparent);
   }
   :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-repository) { --jump: var(--syntax-field, #9876aa); }
+  /* The assistant's ✦ on a comment: the accent, quieter than a navigation mark until hovered. */
+  :global(.code-editor .cm-host-gutter-icon.cm-doc-gutter) { --jump: var(--accent); opacity: 0.75; }
+  :global(.code-editor .cm-host-gutter-icon.cm-doc-gutter:hover) { opacity: 1; }
   /* Spring: a bean is green (as in the Spring tool window), an injection point blue. */
   :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-bean) { --jump: var(--success); }
   :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject) { --jump: var(--info); }
@@ -6013,7 +6180,8 @@
   :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-repository:hover),
   :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-bean:hover),
   :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject:hover),
-  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject-library:hover) {
+  :global(.code-editor .cm-host-gutter-icon.cm-fw-gutter-inject-library:hover),
+  :global(.code-editor .cm-host-gutter-icon.cm-doc-gutter:hover) {
     color: var(--bg-base);
     background: var(--jump);
     border-color: var(--jump);
@@ -6060,4 +6228,32 @@
     background: color-mix(in srgb, var(--accent) 30%, transparent);
     box-shadow: inset 3px 0 0 var(--accent);
   }
+  /* The assistant's button at the end of a selection in a Markdown document. Fixed to the viewport, at
+     the coordinates the editor reports for the end of the selection. */
+  .md-ai {
+    position: fixed; z-index: 50;
+    display: grid; place-items: center; width: 22px; height: 22px; padding: 0;
+    color: var(--text-on-accent); background: linear-gradient(140deg, var(--accent), var(--info));
+    border: none; border-radius: 7px; cursor: pointer;
+    box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+  .md-ai:hover { filter: brightness(1.12); }
+  /* The assistant's chip by the caret: it pops in from the caret's side, then settles; the label opens on hover. */
+  .ask-chip {
+    position: fixed; z-index: 50;
+    display: inline-flex; align-items: center; gap: 0; height: 22px; padding: 0 6px;
+    color: var(--text-on-accent); background: linear-gradient(140deg, var(--accent), var(--info));
+    border: none; border-radius: 11px; cursor: pointer;
+    box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 40%, transparent);
+    transform-origin: left bottom;
+    animation: ask-chip-in calc(var(--anim-dur-slow, 200ms) * 1.2) cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+  .ask-chip span {
+    max-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--font-size-2xs); font-weight: 600;
+    transition: max-width var(--anim-dur-base, 160ms) ease, margin var(--anim-dur-base, 160ms) ease;
+  }
+  .ask-chip:hover span, .ask-chip:focus-visible span { max-width: 70px; margin-left: 5px; }
+  .ask-chip:hover { filter: brightness(1.12); }
+  @keyframes ask-chip-in { from { opacity: 0; transform: translateY(6px) scale(0.6); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .ask-chip { animation: none; } }
 </style>

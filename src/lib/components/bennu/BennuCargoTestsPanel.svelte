@@ -30,12 +30,15 @@
   import RustTestIcon from './RustTestIcon.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { activeTestRoot } from '$lib/stores/bennu/test-runner.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuCargoTestStore } from '$lib/stores/bennu/cargo-tests.svelte';
   import { formatDuration, type TestRow } from '$lib/stores/bennu/test-tree';
 
   const store = bennuCargoTestStore;
-  const root = $derived(projectStore.project?.root ?? '');
+  // The project root — or the build module's folder when the project's own build tool lives in a
+  // subfolder (a Tauri app's `src-tauri`).
+  const root = $derived(activeTestRoot() ?? '');
   const rows = $derived(store.rows);
 
   let filter = $state('');

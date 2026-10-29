@@ -12,6 +12,10 @@
 <p class="doc-lead">
   The libraries a project pulls in — listed, searchable and, with sources, readable in the same editor as your own code.
 </p>
+<p>
+  The panel describes one Maven or Cargo project at a time. When the workspace has several (a Rust crate in a Node project's subfolder, two
+  projects side by side), a tree of them tops the panel and picks which; with one there is nothing to pick.
+</p>
 
 <h2>How the classpath is found</h2>
 <p>

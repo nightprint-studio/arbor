@@ -131,7 +131,7 @@ impl FrameworkExtension for BevyExtension {
             // shader declares differently from the Rust that fills it. Nothing about the ECS.
             "wgsl" => editor::shader_diagnostics(&model, ctx.path, ctx.source),
             "rs" => {
-                let mut out = editor::diagnostics(&model, ctx.source);
+                let mut out = editor::diagnostics(&model, ctx.path, ctx.source);
                 out.extend(editor::shader_diagnostics(&model, ctx.path, ctx.source));
                 out
             }
@@ -450,7 +450,7 @@ pub fn plugin(app: &mut App) { app.add_systems(Update, (to_menu, to_page)); }
         let diags = ext.diagnostics(&FileCtx { path: &path, source: LOOSE });
         assert_eq!(diags.len(), 2, "{diags:?}");
         assert!(diags.iter().all(|d| d.code == "bevy.unordered-conflict"));
-        assert!(diags.iter().all(|d| d.severity == "warning"));
+        assert!(diags.iter().all(|d| d.severity == "info"));
         // The span is the system's own name, taken from the buffer in front of the user.
         for d in &diags {
             let named = &LOOSE[d.start..d.end];

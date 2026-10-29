@@ -10,8 +10,9 @@
 import type { TreeChange, TreeChanged } from '$lib/ipc/bennu/tree-watch';
 import type { TreeNode } from '$lib/types/bennu';
 
-/** The files a project model is parsed from. */
-const MANIFESTS = ['pom.xml', 'Cargo.toml'];
+/** The files a project model is parsed from — and the ones that decide which build tools the project carries
+ *  (`bennu_project_modules`: Maven, Gradle, Cargo, Node). */
+const MANIFESTS = ['pom.xml', 'Cargo.toml', 'package.json', 'build.gradle', 'build.gradle.kts'];
 
 /** Items named in a notice before it says "and N more". */
 const LISTED = 3;

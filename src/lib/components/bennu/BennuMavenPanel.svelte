@@ -13,6 +13,13 @@
    * would apply to. Each module gets its own section (`BennuMavenModuleSection`), root first, and
    * a phase runs in **that module's directory**. See that file for what a row does.
    *
+   * ## Which Maven project
+   *
+   * The window shows the Maven modules of the whole workspace — a reactor at a project's root, or one
+   * in a subfolder of a project that is something else first. With more than one, a module tree on
+   * top picks the one the goals run in; with one there is no selector. A single project is exactly
+   * what it was: its root is the folder everything below talks to.
+   *
    * ## What the toolbar owns
    *
    * The three things that used to live in the Dependencies panel's header are here, because all
@@ -39,6 +46,7 @@
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
+  import BennuModuleTree from './BennuModuleTree.svelte';
   import BennuMavenModuleSection from './BennuMavenModuleSection.svelte';
   import { mavenKeys } from './tree-expansion';
   import { treeExpansionStore } from '$lib/stores/bennu/tree-expansion.svelte';
@@ -48,20 +56,22 @@
   import { bennuMavenStore } from '$lib/stores/bennu/maven.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { dependenciesStore } from '$lib/stores/bennu/dependencies.svelte';
+  import { moduleFocusStore } from '$lib/stores/bennu/module-focus.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { mavenDownload, mavenDownloadSources, mavenReload } from '$lib/ipc/bennu/deps';
 
   let filter = $state('');
 
-  const root = $derived(projectStore.project?.root ?? null);
-  const isCargo = $derived(projectStore.isCargo);
+  // The folder of the Maven module the goals run in — the project root for a plain Maven project.
+  const target = $derived(moduleFocusStore.targetFor('Maven'));
+  const root = $derived(target?.toolRoot ?? null);
   const model = $derived(bennuMavenStore.model);
 
   // Read on open and whenever the project changes. Poms only — no Maven, no network — so this
   // costs a few file reads and needs no watcher: the ⟳ is there for the pom you just edited.
   $effect(() => {
     const path = root;
-    if (!path || isCargo) {
+    if (!path) {
       bennuMavenStore.reset();
       return;
     }
@@ -117,7 +127,8 @@
   function refresh() {
     if (!root) return;
     void bennuMavenStore.load(root, true);
-    void dependenciesStore.load(root, true);
+    const depsRoot = moduleFocusStore.targetFor('Maven', 'Cargo')?.toolRoot;
+    if (depsRoot) void dependenciesStore.load(depsRoot, true);
   }
 
   /**
@@ -144,7 +155,8 @@
       label: 'Re-resolve dependencies & rebuild index',
       subtitle: 'Drops the cached classpath, re-reads the repository, reindexes',
       icon: RotateCw,
-      onclick: () => void runAction('Re-resolve', mavenReload),
+      // The index belongs to the PROJECT, not to the module a goal runs in.
+      onclick: () => void runAction('Re-resolve', () => mavenReload(target?.root ?? root ?? '')),
     },
     {
       kind: 'item',
@@ -180,7 +192,7 @@
   <!-- Declared unconditionally and gated inside: a snippet is a prop, and a prop wrapped in an
        `{#if}` is a prop the component may never be handed. -->
   {#snippet toolbar()}
-    {#if root && !isCargo}
+    {#if root}
       <div class="mv-toolbar">
         <BennuFilterBar bind:query={filter} placeholder="Filter modules…" />
         <!-- The toggle that is flipped several times an hour, and the only one worth a place in
@@ -227,10 +239,9 @@
   {/snippet}
 
   {#if !root}
-    <EmptyState message="Open a project to see its Maven goals." />
-  {:else if isCargo}
-    <EmptyState message="This is a Cargo project — the Cargo tool window has its commands." />
+    <EmptyState message={projectStore.project ? 'No Maven project in this workspace.' : 'Open a project to see its Maven goals.'} />
   {:else if bennuMavenStore.error}
+    <div class="mv-scroll"><BennuModuleTree kinds={['Maven']} ariaLabel="Maven projects" /></div>
     <div class="mv-notice">
       <Alert variant="error" compact text={bennuMavenStore.error} />
     </div>
@@ -238,6 +249,7 @@
     <div class="mv-loading"><Spinner size={16} /><span>Reading the project's poms…</span></div>
   {:else if model}
     <div class="mv-body">
+      <BennuModuleTree kinds={['Maven']} ariaLabel="Maven projects" />
       {#if !bennuMavenStore.hasLauncher}
         <div class="mv-notice">
           <Alert variant="warning" compact>
@@ -312,6 +324,8 @@
   /* Body rhythm mirrors the Cargo and Dependencies tools: SidebarSection owns the group header and
      the indent guideline, so the body keeps no horizontal padding. */
   .mv-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0 8px; }
+  /* The selector alone, for the states that have no body to scroll in (an error). */
+  .mv-scroll { max-height: 40%; overflow-y: auto; }
   .mv-toolbar { display: flex; align-items: center; gap: 4px; padding-right: 4px; }
   .mv-toolbar > :global(:first-child) { flex: 1; min-width: 0; }
   .mv-notice { padding: 6px 8px 2px; }

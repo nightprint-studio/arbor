@@ -26,6 +26,7 @@ pub mod error;
 pub mod ignored;
 pub mod jdk;
 pub mod model;
+pub mod modules;
 pub mod pom;
 pub mod prelude;
 pub mod tree;

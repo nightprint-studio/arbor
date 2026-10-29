@@ -13,12 +13,14 @@
 //! It is the same division `bennu-jpa` makes for the same reason.
 
 use bennu_ext::prelude::{ExtGutterMark, ExtTarget};
-use bennu_proto::prelude::Diagnostic;
+use std::path::Path;
+
+use bennu_proto::prelude::{severity, Diagnostic};
 
 use bennu_complete::prelude::line_number;
 
 use crate::conflict::warnable;
-use crate::items::scan_file;
+use crate::items::{scan_file, RawFn};
 use crate::mask::mask;
 use bennu_wgsl::prelude::{
     scan_bindings as scan_wgsl_bindings, scan_symbols as scan_wgsl, WgslSymbolKind,
@@ -85,48 +87,120 @@ fn touch_summary(total: usize, writers: usize, filters: usize) -> String {
     parts.join(" · ")
 }
 
-/// One warning per system in this buffer that contends with another and is ordered against it by
-/// nothing.
+/// One note per system in this buffer that contends with others and is ordered against none of
+/// them.
 ///
 /// **Only the unordered pairs.** A conflict is not a defect — two systems that want the same data
-/// and say in which order is exactly how an ECS is written, and squiggling those would put a
-/// permanent mark under half the systems in the project. What is worth interrupting for is the
-/// pair where the order was never stated: it is decided by the schedule, it can change when an
-/// unrelated system is added, and it is invisible until the day it is wrong. The full list, ordered
-/// pairs included, stays in the Access conflicts panel.
-pub fn diagnostics(model: &BevyModel, source: &str) -> Vec<Diagnostic> {
+/// and say in which order is exactly how an ECS is written. What is worth mentioning is the pair
+/// where the order was never stated: it is decided by the schedule, it can change when an unrelated
+/// system is added, and it is invisible until the day it is wrong. The full list, ordered pairs
+/// included, stays in the Access conflicts panel.
+///
+/// **One note per system, at `info`.** Read/write contention without a declared order is the normal
+/// state of nearly every Bevy project, and often intended; a `warning` per peer put a wall of
+/// squiggles under working code. So the peers are folded into one line on the system's name, at the
+/// level that informs without alarming.
+///
+/// **Matched to the buffer by file and position, not by name.** `model.systems` for this file are
+/// paired with the buffer's functions of the same name by nearest offset: the model's offsets may
+/// be a few lines stale, but a same-named function in another module, or an `impl` method called
+/// like a system, sits much further away than that — and one that is not a system in the model
+/// claims nothing.
+pub fn diagnostics(model: &BevyModel, path: &Path, source: &str) -> Vec<Diagnostic> {
     let scanned = scan_file(&mask(source));
     let mut out = Vec::new();
-    for f in &scanned.fns {
-        for c in &model.conflicts {
-            if !warnable(c, &model.systems) {
-                continue;
-            }
-            let (a, b) = (&model.systems[c.a], &model.systems[c.b]);
-            let other = if a.name == f.name {
-                b
-            } else if b.name == f.name {
-                a
-            } else {
-                continue;
-            };
-            let targets: Vec<&str> = c.reasons.iter().map(|r| r.target.as_str()).collect();
-            out.push(Diagnostic {
-                message: format!(
-                    "`{}` contends over {} in {}, and nothing in this project orders the two — \
-                     they run in whichever order the schedule picks",
-                    other.name,
-                    targets.join(", "),
-                    c.schedule,
-                ),
-                severity: "warning".to_string(),
-                code: "bevy.unordered-conflict".to_string(),
-                start: f.offset,
-                end: f.offset + f.name.len(),
-            });
+    for (index, system) in model.systems.iter().enumerate() {
+        if !same_file(&system.file, path) {
+            continue;
+        }
+        let Some(f) = nearest_fn(&scanned.fns, system) else { continue };
+        let findings = unordered_findings(model, index);
+        if findings.peers.is_empty() {
+            continue;
+        }
+        out.push(Diagnostic {
+            message: findings.message(),
+            severity: severity::INFO.to_string(),
+            code: "bevy.unordered-conflict".to_string(),
+            start: f.offset,
+            end: f.offset + f.name.len(),
+        });
+    }
+    out.sort_by_key(|d| d.start);
+    out
+}
+
+/// Whether two paths name one file, tolerating the separator the host happened to use.
+fn same_file(a: &Path, b: &Path) -> bool {
+    let norm = |p: &Path| p.to_string_lossy().replace('\\', "/");
+    norm(a) == norm(b)
+}
+
+/// The buffer's function that `system` is — the same-named one closest to where the model saw it.
+fn nearest_fn<'a>(fns: &'a [RawFn], system: &SystemDecl) -> Option<&'a RawFn> {
+    let distance = |f: &RawFn| f.offset.abs_diff(system.offset);
+    fns.iter().filter(|f| f.name == system.name).min_by_key(|f| distance(f))
+}
+
+/// Everything the unordered, warnable conflicts say about one system.
+struct Findings {
+    name: String,
+    /// Distinct peers, in the order first met.
+    peers: Vec<String>,
+    /// Distinct contended types, in the order first met.
+    targets: Vec<String>,
+    schedules: Vec<String>,
+}
+
+/// How many names a note spells out before it says `…`.
+const NAMED_PEERS: usize = 3;
+
+impl Findings {
+    fn message(&self) -> String {
+        let shown = self.peers.iter().take(NAMED_PEERS).cloned().collect::<Vec<_>>().join(", ");
+        let more = if self.peers.len() > NAMED_PEERS { "…" } else { "" };
+        let n = self.peers.len();
+        format!(
+            "`{}` contends with {n} unordered system{} ({shown}{more}) over {} in {} — nothing in \
+             this project orders them, so they run in whichever order the schedule picks",
+            self.name,
+            if n == 1 { "" } else { "s" },
+            self.targets.join(", "),
+            self.schedules.join(", "),
+        )
+    }
+}
+
+fn unordered_findings(model: &BevyModel, index: usize) -> Findings {
+    let mut f = Findings {
+        name: model.systems[index].name.clone(),
+        peers: Vec::new(),
+        targets: Vec::new(),
+        schedules: Vec::new(),
+    };
+    let push = |list: &mut Vec<String>, item: &str| {
+        if !list.iter().any(|x| x == item) {
+            list.push(item.to_string());
+        }
+    };
+    for c in &model.conflicts {
+        if !warnable(c, &model.systems) {
+            continue;
+        }
+        let peer = if c.a == index {
+            c.b
+        } else if c.b == index {
+            c.a
+        } else {
+            continue;
+        };
+        push(&mut f.peers, &model.systems[peer].name);
+        push(&mut f.schedules, &c.schedule);
+        for r in &c.reasons {
+            push(&mut f.targets, &r.target);
         }
     }
-    out
+    f
 }
 
 // ── materials and their shaders ──────────────────────────────────────────────────
@@ -620,5 +694,196 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
         // In a `.rs` there is no fallback: the Java-stack resolvers below this one have their
         // own answers, and inventing a jump here would take the caret somewhere unrelated.
         assert!(from_rs(caret(RUST, "use bevy", 0)).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod unordered_tests {
+    use std::path::{Path, PathBuf};
+
+    use bennu_ext::prelude::ScannedFile;
+
+    use crate::build::build;
+    use crate::model::BevyModel;
+
+    use super::diagnostics;
+
+    const PATH: &str = "/p/src/m.rs";
+
+    fn model_of(src: &str) -> BevyModel {
+        build(&[ScannedFile { path: PathBuf::from(PATH), text: src.to_string() }], &[])
+    }
+
+    /// Where each flagged system's name starts, in buffer order.
+    fn flagged(src: &str) -> Vec<usize> {
+        flagged_with_messages(src).into_iter().map(|(at, _)| at).collect()
+    }
+
+    fn flagged_with_messages(src: &str) -> Vec<(usize, String)> {
+        diagnostics(&model_of(src), Path::new(PATH), src)
+            .into_iter()
+            .map(|d| (d.start, d.message))
+            .collect()
+    }
+
+    fn at(src: &str, needle: &str) -> usize {
+        src.find(needle).unwrap_or_else(|| panic!("`{needle}` not in source"))
+    }
+
+    // -- must warn ---------------------------------------------------------------
+
+    #[test]
+    fn warns_on_a_component_write_against_a_read_with_no_order() {
+        let src = "fn a(mut q: Query<&mut Transform>) {}\nfn b(q: Query<&Transform>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a, b)); }";
+        assert_eq!(flagged(src), vec![at(src, "a(mut"), at(src, "b(q")]);
+    }
+
+    #[test]
+    fn warns_on_two_unordered_writers_of_one_resource() {
+        let src = "fn a(mut s: ResMut<Score>) {}\nfn b(mut s: ResMut<Score>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a, b)); }";
+        assert_eq!(flagged(src).len(), 2);
+    }
+
+    #[test]
+    fn a_fan_in_leaves_the_two_sources_unordered() {
+        // a and c both run before b; nothing says which of the two goes first.
+        let src = "fn a(mut s: ResMut<Score>) {}\nfn b() {}\nfn c(mut s: ResMut<Score>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a.before(b), c.before(b), b)); }";
+        assert_eq!(flagged(src), vec![at(src, "a(mut"), at(src, "c(mut")]);
+    }
+
+    #[test]
+    fn one_note_per_system_folds_all_its_peers() {
+        let src = "fn a(mut s: ResMut<Score>) {}\nfn b(mut s: ResMut<Score>) {}\n\
+                   fn c(mut s: ResMut<Score>) {}\nfn d(mut s: ResMut<Score>) {}\n\
+                   fn e(mut s: ResMut<Score>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a, b, c, d, e)); }";
+        let found = flagged_with_messages(src);
+        assert_eq!(found.len(), 5, "five systems, five notes - not one per pair");
+        let m = &found[0].1;
+        assert!(m.contains("4 unordered systems (b, c, d…)"), "{m}");
+        assert!(m.contains("Score") && m.contains("Update"), "{m}");
+    }
+
+    #[test]
+    fn the_note_is_informational_not_a_warning() {
+        let src = "fn a(mut s: ResMut<Score>) {}\nfn b(s: Res<Score>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a, b)); }";
+        let d = diagnostics(&model_of(src), Path::new(PATH), src);
+        assert!(!d.is_empty() && d.iter().all(|d| d.severity == "info"));
+    }
+
+    // -- must not warn -----------------------------------------------------------
+
+    #[test]
+    fn with_and_without_the_same_marker_do_not_contend() {
+        let src = "fn a(mut q: Query<&mut Health, With<Enemy>>) {}\n\
+                   fn b(mut q: Query<&mut Health, Without<Enemy>>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a, b)); }";
+        assert!(flagged(src).is_empty());
+    }
+
+    #[test]
+    fn a_borrowed_component_implies_with_so_a_without_on_it_is_disjoint() {
+        // Literal shape: nothing is shared at all.
+        let src = "fn a(mut q: Query<&mut A>) {}\nfn b(mut q: Query<&mut B, Without<A>>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a, b)); }";
+        assert!(flagged(src).is_empty());
+        // Shared `B`: the first query only matches entities that have `A`, the second only ones
+        // that do not - Bevy accepts that, so it is not a contention.
+        let src = "fn a(mut q: Query<(&mut A, &mut B)>) {}\n\
+                   fn b(mut q: Query<&mut B, Without<A>>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a, b)); }";
+        assert!(flagged(src).is_empty());
+        // An optional borrow requires nothing, so the same pair does contend.
+        let src = "fn a(mut q: Query<(Option<&mut A>, &mut B)>) {}\n\
+                   fn b(mut q: Query<&mut B, Without<A>>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a, b)); }";
+        assert_eq!(flagged(src).len(), 2);
+    }
+
+    #[test]
+    fn a_change_filter_read_carries_its_querys_filters() {
+        let src = "fn a(mut q: Query<&mut Health, With<Enemy>>) {}\n\
+                   fn b(q: Query<&Name, (Changed<Health>, Without<Enemy>)>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a, b)); }";
+        assert!(flagged(src).is_empty());
+    }
+
+    #[test]
+    fn transitive_before_edges_order_the_ends() {
+        let src = "fn a(mut s: ResMut<Score>) {}\nfn b() {}\nfn c(mut s: ResMut<Score>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a.before(b), b.before(c), c)); }";
+        assert!(flagged(src).is_empty());
+    }
+
+    #[test]
+    fn a_chain_and_an_after_both_order() {
+        let src = "fn a(mut s: ResMut<Score>) {}\nfn b() {}\nfn c(mut s: ResMut<Score>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a, b, c).chain()); }";
+        assert!(flagged(src).is_empty());
+        let src = "fn a(mut s: ResMut<Score>) {}\nfn b() {}\nfn c(mut s: ResMut<Score>) {}\n\
+                   fn p(app: &mut App) {\n app.add_systems(Update, (b, c.after(b)));\n\
+                   app.add_systems(Update, a.before(b));\n}";
+        assert!(flagged(src).is_empty());
+    }
+
+    #[test]
+    fn run_conditions_silence_the_pair() {
+        let src = "fn a(mut s: ResMut<Score>) {}\nfn b(mut s: ResMut<Score>) {}\n\
+                   fn p(app: &mut App) {\n\
+                   app.add_systems(Update, a.run_if(in_state(S::A)));\n\
+                   app.add_systems(Update, b.run_if(in_state(S::B)));\n}";
+        assert!(flagged(src).is_empty());
+        // A condition on the whole tuple counts too.
+        let src = "fn a(mut s: ResMut<Score>) {}\nfn b(mut s: ResMut<Score>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a, b).run_if(playing)); }";
+        assert!(flagged(src).is_empty());
+    }
+
+    #[test]
+    fn a_message_writer_and_reader_are_a_handoff_not_a_race() {
+        let src = "fn w(mut e: EventWriter<Hit>) {}\nfn r(mut e: EventReader<Hit>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (w, r)); }";
+        assert!(flagged(src).is_empty());
+        // Two writers of the same buffer still interleave their messages in an unstated order.
+        let src = "fn w(mut e: EventWriter<Hit>) {}\nfn v(mut e: EventWriter<Hit>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (w, v)); }";
+        assert_eq!(flagged(src).len(), 2);
+    }
+
+    #[test]
+    fn findings_attach_to_the_right_function_among_same_named_ones() {
+        let src = "\
+mod first { pub fn tick(mut s: ResMut<Score>) {} }
+mod second { pub fn tick(q: Query<&Health>) {} }
+struct Thing;
+impl Thing { fn bump(&self, n: u32) {} }
+fn bump(mut s: ResMut<Score>) {}
+#[cfg(test)]
+mod tests {
+    fn t1(mut s: ResMut<Score>) {}
+    fn t2(s: Res<Score>) {}
+    #[test]
+    fn it_runs() { App::new().add_systems(Update, (t1, t2)); }
+}
+fn p(app: &mut App) { app.add_systems(Update, (tick, bump)); }";
+        let model = model_of(src);
+        assert!(
+            model.systems.iter().all(|s| s.name != "t1" && s.name != "t2"),
+            "test-only systems are not part of the schedule"
+        );
+        let found = flagged(src);
+        // `first::tick` and the free `bump` - not `second::tick`, not the `impl` method.
+        assert_eq!(found, vec![at(src, "tick(mut"), at(src, "bump(mut")], "{found:?}");
+    }
+
+    #[test]
+    fn a_buffer_for_another_file_gets_nothing() {
+        let src = "fn a(mut s: ResMut<Score>) {}\nfn b(mut s: ResMut<Score>) {}\n\
+                   fn p(app: &mut App) { app.add_systems(Update, (a, b)); }";
+        assert!(diagnostics(&model_of(src), Path::new("/p/src/other.rs"), src).is_empty());
     }
 }

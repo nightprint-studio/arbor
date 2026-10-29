@@ -123,6 +123,10 @@ macro_rules! invoke_handlers {
             $crate::commands::picus_commands::picus_store_secret,
             $crate::commands::picus_commands::picus_delete_secret,
             $crate::commands::picus_commands::picus_has_secret,
+            // The assistant's provider key, in its own vault; never reaches a backend until a request.
+            $crate::commands::assistant_commands::assistant_store_key,
+            $crate::commands::assistant_commands::assistant_delete_key,
+            $crate::commands::assistant_commands::assistant_has_key,
             // Cross-product recents (Canopy's list) + the "open this project"
             // intent a product's shell pulls as it mounts.
             $crate::commands::mcp_commands::get_mcp_config,

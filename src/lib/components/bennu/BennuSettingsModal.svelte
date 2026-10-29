@@ -48,6 +48,7 @@
   import BennuEditorSettings from './settings/BennuEditorSettings.svelte';
   import BennuFilesSettings from './settings/BennuFilesSettings.svelte';
   import BennuCompletionSettings from './settings/BennuCompletionSettings.svelte';
+  import BennuAssistantSettings from './settings/BennuAssistantSettings.svelte';
   import BennuFoldingSettings from './settings/BennuFoldingSettings.svelte';
   import BennuJavaSettings from './settings/BennuJavaSettings.svelte';
   import BennuJavaStyleSettings from './settings/BennuJavaStyleSettings.svelte';
@@ -155,6 +156,11 @@
         id: p.id, label: p.label, icon: TEMPLATE_KIND_ICONS[p.kind],
       })) },
     ] },
+    // The assistant is its own group: its key and its limits are not an editor setting, and a page of
+    // its own is where the question "what can it touch?" gets a complete answer.
+    { label: 'Assistant', items: [
+      { id: 'assistant', label: 'Assistant', icon: Sparkles },
+    ] },
     { label: 'Languages & Frameworks', items: [
       // The languages and the frameworks are told apart by colour rather than by reading four labels
       // — the one group where a row stands for a thing rather than for a setting.
@@ -233,6 +239,8 @@
         <BennuFilesSettings />
       {:else if active === 'completion'}
         <BennuCompletionSettings />
+      {:else if active === 'assistant'}
+        <BennuAssistantSettings />
       {:else if active === 'folding'}
         <BennuFoldingSettings />
       {:else if active === 'naming'}

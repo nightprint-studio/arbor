@@ -19,6 +19,7 @@
     "backends:dev": "cargo build -p corvus-be -p merula-be -p sitta-be -p tyto-be -p bennu-be -p picus-be -p garrulus-be",
     "backends:release": "cargo build --release -p corvus-be -p merula-be -p sitta-be -p tyto-be -p bennu-be -p picus-be -p garrulus-be",
     "backends:stage": "node scripts/stage-backends.mjs",
+    "help-index": "node scripts/build-help-index.mjs",
     "sign:mac": "node scripts/sign-macos.mjs",
     "tauri:dev": "yarn backends:dev && tauri dev",
     "tauri:dev:signed": "yarn backends:dev && cargo build -p arbor && yarn sign:mac && tauri dev",

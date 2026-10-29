@@ -15,15 +15,14 @@
     RotateCw, Square, Trash2,
   } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import { projectStore } from '$lib/stores/bennu/project.svelte';
-  import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
+  import { activeTestRoot, activeTestStore, testsAreCargo } from '$lib/stores/bennu/test-runner.svelte';
   import { bennuCargoTestStore } from '$lib/stores/bennu/cargo-tests.svelte';
 
   const store = $derived(activeTestStore());
-  const root = $derived(projectStore.project?.root ?? '');
+  const root = $derived(activeTestRoot() ?? '');
   /** `#[ignore]` is cargo's, and so is the only way to override it (`--include-ignored`). There is
    *  no Maven equivalent worth a button: a `@Disabled` test cannot be run without editing it. */
-  const cargo = $derived(projectStore.isCargo);
+  const cargo = $derived(testsAreCargo());
 </script>
 
 {#if store.running}

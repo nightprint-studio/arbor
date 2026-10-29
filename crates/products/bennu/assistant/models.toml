@@ -1,0 +1,96 @@
+# The models the assistant offers, and what they cost.
+#
+# Prices are US dollars per million tokens, from Anthropic's pricing page:
+#   https://platform.claude.com/docs/en/about-claude/pricing
+# They change, and a new model appears now and then — which is why this is a file and not code.
+#
+# To override or add a model, put entries of the same shape in
+#     <bennu config dir>/assistant-models.toml
+# (Settings › Assistant › "Create a price file" writes a copy of this one to start from). An entry
+# with the id of a model below REPLACES it whole; any other id is added to the list.
+#
+#   id             the API model id
+#   name, tagline  what the picker shows
+#   context_max    the largest window the model accepts, in tokens
+#   efforts        the effort levels it accepts; empty for a model with no such setting
+#
+#   [model.price]  the base rates
+#     input, output     $/MTok
+#     cache_read        reading the prompt cache (default 0.1 x input)
+#     cache_write_5m    writing the 5-minute cache, which is the one the assistant uses (default 1.25 x input)
+#     cache_write_1h    writing the 1-hour cache (default 2 x input)
+#
+#   [model.long_prompt]  optional: rates for a request whose prompt is longer than `over_tokens`
+#     (prompt = input + cache reads + cache writes). Same fields as [model.price], plus over_tokens.
+
+[[model]]
+id = "claude-fable-5-1"
+name = "Fable 5.1"
+tagline = "Hardest reasoning, longest tasks"
+context_max = 1000000
+efforts = ["low", "medium", "high", "xhigh", "max"]
+[model.price]
+input = 10.0
+output = 50.0
+cache_read = 0.25
+cache_write_5m = 12.5
+cache_write_1h = 20.0
+
+[[model]]
+id = "claude-opus-5-5"
+name = "Opus 5.5"
+tagline = "Best all-round for code"
+context_max = 1000000
+efforts = ["low", "medium", "high", "xhigh", "max"]
+[model.price]
+input = 4.0
+output = 20.0
+cache_read = 0.20
+cache_write_5m = 5.0
+cache_write_1h = 8.0
+
+[[model]]
+id = "claude-sonnet-5-5"
+name = "Sonnet 5.5"
+tagline = "Fast, for everyday edits"
+context_max = 1000000
+efforts = ["low", "medium", "high", "xhigh", "max"]
+[model.price]
+input = 2.0
+output = 10.0
+cache_read = 0.10
+cache_write_5m = 2.5
+cache_write_1h = 4.0
+
+[[model]]
+id = "claude-haiku-5-5"
+name = "Haiku 5.5"
+tagline = "Fastest and cheapest, for quick questions"
+context_max = 1000000
+efforts = ["low", "medium", "high", "xhigh", "max"]
+[model.price]
+input = 0.10
+output = 0.50
+cache_read = 0.01
+cache_write_5m = 0.125
+cache_write_1h = 0.20
+[model.long_prompt]
+over_tokens = 100000
+input = 0.50
+output = 2.50
+cache_read = 0.05
+cache_write_5m = 0.625
+cache_write_1h = 1.0
+
+[[model]]
+id = "claude-haiku-4-5"
+name = "Haiku 4.5"
+tagline = "Previous generation; no effort setting"
+context_max = 200000
+efforts = []
+[model.price]
+input = 1.0
+output = 5.0
+cache_read = 0.10
+cache_write_5m = 1.25
+cache_write_1h = 2.0

@@ -30,6 +30,7 @@
   import Tree from '$lib/components/shared/ui/Tree.svelte';
   import type { RowSnippetCtx, TreeController } from '$lib/components/shared/ui/Tree.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import Button from '$lib/components/shared/ui/Button.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
   import BennuNewFileModal from './BennuNewFileModal.svelte';
@@ -1129,6 +1130,10 @@
   {:else}
     <div class="bs-empty">
       <EmptyState message="No project open." />
+      <Button variant="primary" size="sm" tooltip={{ content: 'Create a new project', shortcut: 'Ctrl+Shift+P' }} onclick={() => bennuUiStore.openNewProject()}>
+        {#snippet iconStart()}<FolderPlus size={14} />{/snippet}
+        New project…
+      </Button>
       <button class="bs-empty-action" type="button" onclick={() => (pickerOpen = true)}>
         <FolderOpen size={14} /> Open project…
       </button>

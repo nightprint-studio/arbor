@@ -203,6 +203,7 @@
 
   const hamburgerMenu = $derived<DropdownItem[]>([
     { kind: 'separator', label: 'Project' },
+    { kind: 'item', id: 'newproject', label: 'New project…', icon: FolderPlus, shortcut: 'Ctrl+Shift+P', onclick: () => bennuUiStore.openNewProject() },
     { kind: 'item', id: 'open',  label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+O', onclick: () => openPicker('open') },
     { kind: 'item', id: 'addproj', label: 'Add project to workspace…', icon: FolderPlus, disabled: !hasProject, onclick: () => openPicker('add') },
     // MOCK — remove the "Load demo project" entry when bennu-be serves real data.

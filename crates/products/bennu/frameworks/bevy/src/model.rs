@@ -204,6 +204,10 @@ pub struct SystemDecl {
     pub schedules: Vec<String>,
     /// The sets it was put in with `.in_set(…)`.
     pub sets: Vec<String>,
+    /// Some registration of it carries a `.run_if(…)`. Two systems behind run conditions may well
+    /// never be live in the same frame (`in_state(A)` vs `in_state(B)`), which this crate cannot
+    /// evaluate — so a conditional system is never accused of contending, whatever it touches.
+    pub conditional: bool,
 }
 
 impl SystemDecl {

@@ -89,8 +89,13 @@ pub fn build_project_index_from_sources(
     index_dir: &Path,
 ) -> ProjectBuild {
     // Parse every file (in parallel across a bounded pool). Order is preserved so the
-    // persist order stays deterministic.
-    let parsed: Vec<(PathBuf, FileSymbols)> = parse_sources_parallel(sources);
+    // persist order stays deterministic. The usage census is counted off the SAME tree as the symbols
+    // (see [`parse_sources_parallel`]) instead of parsing every file a second time afterwards.
+    let (parsed, censuses): (Vec<(PathBuf, FileSymbols)>, Vec<crate::usage_census::UsageCensus>) =
+        parse_sources_parallel(sources)
+            .into_iter()
+            .map(|(path, symbols, census)| ((path, symbols), census))
+            .unzip();
 
     // First pass: every declared simple name → binary name, so a same-project type
     // reference resolves at ingest time (before the type's own file is processed). Also the FULL,
@@ -152,7 +157,7 @@ pub fn build_project_index_from_sources(
         classes,
         type_map: project_types,
         imports,
-        usage: usage_census_of(sources),
+        usage: fold_usage_census(censuses),
     }
 }
 
@@ -162,7 +167,14 @@ pub fn build_project_index_from_sources(
 /// and keeping every tree alive for the length of the build would cost far more memory than reading
 /// a file twice costs time. The per-file censuses are folded and finalized (singletons dropped) here.
 pub fn usage_census_of(sources: &[(PathBuf, String)]) -> crate::usage_census::UsageCensus {
-    let per_file = parallel_map(sources, |(_, src)| crate::usage_census::UsageCensus::of_source(src));
+    fold_usage_census(parallel_map(sources, |(_, src)| crate::usage_census::UsageCensus::of_source(src)))
+}
+
+/// Fold per-file censuses into the project's and drop the singletons — the one place that decides
+/// how the parts become the whole, whichever way the parts were counted.
+fn fold_usage_census(
+    per_file: impl IntoIterator<Item = crate::usage_census::UsageCensus>,
+) -> crate::usage_census::UsageCensus {
     let mut total = crate::usage_census::UsageCensus::default();
     for census in per_file {
         total.merge(census);
@@ -260,8 +272,22 @@ pub fn read_source_for_index(path: &Path, encoding: &EncodingPlan) -> Option<Ind
 }
 
 /// Parse `sources` in parallel across a bounded std-thread pool, preserving order.
-fn parse_sources_parallel(sources: &[(PathBuf, String)]) -> Vec<(PathBuf, FileSymbols)> {
-    parallel_map(sources, |(p, src)| (p.clone(), extract_symbols(src)))
+///
+/// Each file is parsed ONCE and both the symbols and the usage census are read off that tree, which
+/// is dropped before the worker moves on — so the census no longer costs a second full parse of the
+/// project, and no tree outlives its file.
+fn parse_sources_parallel(
+    sources: &[(PathBuf, String)],
+) -> Vec<(PathBuf, FileSymbols, crate::usage_census::UsageCensus)> {
+    parallel_map(sources, |(p, src)| {
+        let Some(tree) = bennu_java::prelude::parse_java(src) else {
+            return (p.clone(), FileSymbols::default(), Default::default());
+        };
+        let root = tree.root_node();
+        let symbols = bennu_java::prelude::extract_symbols_from_root(&root, src);
+        let census = crate::usage_census::UsageCensus::of_tree(root, src.as_bytes());
+        (p.clone(), symbols, census)
+    })
 }
 
 /// Map `f` over `items` across at most `available_parallelism` worker threads, returning

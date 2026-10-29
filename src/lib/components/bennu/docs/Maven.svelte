@@ -10,8 +10,22 @@
 <h1>The Maven tool window</h1>
 
 <p class="doc-lead">
-  The project's own poms, as things to run. <kbd>Alt</kbd> + <kbd>8</kbd> opens it, in the rail slot Cargo takes on a
-  Rust project: a project is one or the other, and the key means "the build tool" either way.
+  The project's own poms, as things to run. <kbd>Alt</kbd> + <kbd>8</kbd> opens it. Its rail button is there whenever the
+  workspace has a Maven project, and sits beside Cargo's when it also has a Rust one — the key opens the tool of the
+  open project's own kind.
+</p>
+
+<h2>Several Maven projects</h2>
+<p>
+  The window lists the Maven projects of the <strong>whole workspace</strong>, not only the project on screen: a Rust crate in a
+  subfolder of a Node project (a Tauri app's <code>src-tauri</code>) is a Maven project like any other, and so is one in
+  another project of the workspace. With more than one, a small tree at the top — grouped by project when the workspace has
+  several — picks the one the commands act on. Pick a row with <kbd>Enter</kbd> or a click; pick it again to let go. With
+  nothing picked the window follows the file you are editing; with a single Maven project there is no tree at all.
+</p>
+<p>
+  The same rule applies to the palette: a command that acts on one Maven project runs straight away when a row is picked or the
+  open file belongs to one, and otherwise asks which, in a list you can filter by typing.
 </p>
 
 <h2>One section per module</h2>

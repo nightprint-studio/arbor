@@ -21,7 +21,8 @@
 use std::collections::{HashMap, HashSet};
 
 use bennu_java::prelude::{
-    extract_symbols_from_root, infer_receiver_type_at, FileSymbols, TypeRef as JTypeRef,
+    extract_symbols_from_root, infer_receiver_type_at, infer_receiver_type_cached, FileSymbols, InferCache,
+    TypeRef as JTypeRef,
     TypeResolver,
 };
 use serde::{Deserialize, Serialize};
@@ -803,6 +804,19 @@ struct FileWalker<'a> {
     /// independently of what the built index knows. The fallback half of
     /// [`field_owner`](Self::field_owner).
     file_fields: HashMap<String, std::collections::HashSet<String>>,
+    /// Receiver-type inference memo for THIS file. Every `obj.member` site asks the same scope and
+    /// hierarchy questions (which locals are in scope, which methods a type reaches), and a fresh
+    /// cache per site re-answered them each time: the reference walk went quadratic per file. One
+    /// walker is one file on one thread, and the cache is keyed by position over the file's fixed
+    /// tree, so sharing it changes no answer — it only stops recomputing them.
+    infer_cache: InferCache,
+    /// What each body scope of this file binds — see [`ScopeBindings`].
+    scope_bindings: ScopeBindings,
+    /// [`enclosing_type_binary`] answers, by the type scope they were asked from — see
+    /// [`FileWalker::enclosing_type_binary`].
+    type_binaries: std::cell::RefCell<HashMap<usize, Option<String>>>,
+    /// Whether the file has any `import static` — set by [`walk`](Self::walk).
+    has_static_imports: bool,
 }
 
 impl<'a> FileWalker<'a> {
@@ -836,6 +850,10 @@ impl<'a> FileWalker<'a> {
             local_names: std::collections::HashSet::new(),
             field_owners: HashMap::new(),
             file_fields: HashMap::new(),
+            infer_cache: InferCache::new(),
+            scope_bindings: ScopeBindings::new(LangLevel(0)),
+            type_binaries: Default::default(),
+            has_static_imports: false,
         }
     }
 
@@ -868,6 +886,7 @@ impl<'a> FileWalker<'a> {
         // The file's imports, for the whole walk: they are what turns a bare `SharedService`
         // into `com/acme/SharedService` when the class lives in a dependency.
         self.imports = symbols.imports.clone();
+        self.has_static_imports = self.imports.iter().any(|i| i.static_);
         self.file_types = file_type_map(symbols);
         self.package = symbols.package.clone();
         self.local_names = collect_bound_names(root, self.bytes);
@@ -935,8 +954,8 @@ impl<'a> FileWalker<'a> {
             return;
         };
         self.resolved += 1;
-        let usage = self.usage_at(&name_node);
         if self.records_owner(&owner) {
+            let usage = self.usage_at(&name_node);
             self.edges.push((DeclKey::Method { owner, name }, usage));
         }
     }
@@ -1052,8 +1071,8 @@ impl<'a> FileWalker<'a> {
                 }
             }
         };
-        let usage = self.usage_at(&name_node);
         if self.records_owner(&owner) {
+            let usage = self.usage_at(&name_node);
             self.edges.push((DeclKey::Method { owner, name }, usage));
         }
     }
@@ -1088,8 +1107,8 @@ impl<'a> FileWalker<'a> {
             return;
         };
         self.resolved += 1;
-        let usage = self.usage_at(&field_node);
         if self.records_owner(&owner) {
+            let usage = self.usage_at(&field_node);
             self.edges.push((DeclKey::Field { owner, name }, usage));
         }
     }
@@ -1115,9 +1134,7 @@ impl<'a> FileWalker<'a> {
         // Cheapest question first: this runs on every qualified access in the project, and the
         // overwhelming majority of qualifiers are variables. A hashed miss on the local names, then
         // a name lookup, and only for a name that really is a type do we pay for the scope walk.
-        if self.local_names.contains(&text)
-            && find_local_binding(obj, self.bytes, &text, LangLevel(0)).is_some()
-        {
+        if self.local_names.contains(&text) && self.is_local(obj, &text) {
             return;
         }
         let Some(binary) = self.resolve_type_simple(&text) else {
@@ -1130,8 +1147,8 @@ impl<'a> FileWalker<'a> {
                 return;
             }
         }
-        let usage = self.usage_at(obj);
         if self.records_owner(&binary) {
+            let usage = self.usage_at(obj);
             self.edges.push((DeclKey::Type { binary }, usage));
         }
     }
@@ -1167,14 +1184,12 @@ impl<'a> FileWalker<'a> {
         // A local or parameter of the same name shadows the field. `classify_caret` refuses to
         // classify those at all, so indexing them here would file a local's reads under a field
         // nobody touched.
-        if self.local_names.contains(&name)
-            && find_local_binding(node, self.bytes, &name, LangLevel(0)).is_some()
-        {
+        if self.local_names.contains(&name) && self.is_local(node, &name) {
             return;
         }
         self.resolved += 1;
-        let usage = self.usage_at(node);
         if self.records_owner(&owner) {
+            let usage = self.usage_at(node);
             self.edges.push((DeclKey::Field { owner, name }, usage));
         }
     }
@@ -1210,8 +1225,8 @@ impl<'a> FileWalker<'a> {
         if let Some(owner) = self.field_owners.get(binary).and_then(|t| t.get(name)) {
             return Some(owner.clone());
         }
-        let declared = enclosing_type_simple(node, self.bytes)
-            .and_then(|simple| self.file_fields.get(&simple))
+        let declared = enclosing_type_simple_str(node, self.bytes)
+            .and_then(|simple| self.file_fields.get(simple))
             .is_some_and(|fields| fields.contains(name));
         if declared {
             return Some(binary.to_string());
@@ -1221,6 +1236,11 @@ impl<'a> FileWalker<'a> {
         // METHOD path already asked this question (see `enclosing_owner`); the field path did not,
         // so those uses were filed under nobody and a rename of the field left every one of them
         // behind — in test sources, where one fixture is star-imported by half a dozen classes.
+        // Asked of every identifier that is not a field — nearly all of them — and a file with no
+        // `import static` can only answer no, so skip building the target list to find that out.
+        if !self.has_static_imports {
+            return None;
+        }
         static_import_owner(self.resolver, &self.imports, name, MemberSort::Field, None)
     }
 
@@ -1290,9 +1310,14 @@ impl<'a> FileWalker<'a> {
         symbols: &FileSymbols,
     ) -> Option<String> {
         // Reuse the file's already-parsed tree + symbols — NOT a per-call-site re-parse.
-        if let Some(recv) =
-            infer_receiver_type_at(root, self.source, symbols, dot_off, self.resolver)
-        {
+        if let Some(recv) = infer_receiver_type_cached(
+            root,
+            self.source,
+            symbols,
+            dot_off,
+            self.resolver,
+            &self.infer_cache,
+        ) {
             if let Some(owner) = self.declaring_owner(&recv.binary_name, member, sort) {
                 return Some(owner);
             }
@@ -1458,8 +1483,19 @@ impl<'a> FileWalker<'a> {
     /// class, a file the index has not reached — the copy gave up and the query did not, so a
     /// member's own-class uses were filed under a key nothing ever looked up. Two spellings of
     /// one question is how an index and the query that reads it drift apart silently.
+    ///
+    /// Memoized by the nearest type scope above `node`. The answer is a function of that scope alone —
+    /// the climb from `node` up to it neither pushes onto the chain nor returns — and the walk asks it
+    /// for every identifier in the file, each time re-climbing the tree, re-reading the package line
+    /// and rebuilding the same strings.
     fn enclosing_type_binary(&self, node: &Node) -> Option<String> {
-        enclosing_type_binary(node, self.bytes, self.project_types)
+        let scope = type_scope_of(node)?;
+        if let Some(known) = self.type_binaries.borrow().get(&scope.id()) {
+            return known.clone();
+        }
+        let binary = enclosing_type_binary(&scope, self.bytes, self.project_types);
+        self.type_binaries.borrow_mut().insert(scope.id(), binary.clone());
+        binary
     }
 
     /// The binary name a type EXPRESSION denotes — see [`bennu_java::prelude::resolve_written_type`],
@@ -1537,6 +1573,14 @@ impl<'a> FileWalker<'a> {
             .copied()
             .unwrap_or(self.source.len());
         self.source[start..end].trim().to_string()
+    }
+
+    /// Whether `name`, written at `at`, is bound by a local, parameter or pattern in scope there.
+    fn is_local(&self, at: &Node, name: &str) -> bool {
+        find_local_binding_with(at, self.bytes, name, LangLevel(0), &|scope| {
+            self.scope_bindings.find(scope, self.bytes, name)
+        })
+        .is_some()
     }
 
     fn node_text(&self, node: &Node) -> Option<String> {
@@ -2116,6 +2160,35 @@ fn static_import_owner(
     None
 }
 
+/// Whether `kind` declares a type. One list for [`enclosing_type_binary`] and [`type_scope_of`], so
+/// the climb that finds the scope and the climb that names it stop at the same nodes.
+fn declares_type(kind: &str) -> bool {
+    matches!(
+        kind,
+        "class_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            // A record and an `@interface` declare types like any other. Missing them here sent
+            // every member declared in one to the type ABOVE it — or to nothing at all for a
+            // top-level record.
+            | "record_declaration"
+            | "annotation_type_declaration"
+    )
+}
+
+/// The nearest node at or above `node` that [`enclosing_type_binary`] stops at: an anonymous class
+/// body or a type declaration. Everything below it is irrelevant to the answer.
+fn type_scope_of<'t>(node: &Node<'t>) -> Option<Node<'t>> {
+    let mut cur = Some(*node);
+    while let Some(n) = cur {
+        if bennu_java::prelude::is_anonymous_body(&n) || declares_type(n.kind()) {
+            return Some(n);
+        }
+        cur = n.parent();
+    }
+    None
+}
+
 fn enclosing_type_binary(
     node: &Node,
     bytes: &[u8],
@@ -2147,17 +2220,7 @@ fn enclosing_type_binary(
                 }
             }
         }
-        if matches!(
-            n.kind(),
-            "class_declaration"
-                | "interface_declaration"
-                | "enum_declaration"
-                // A record and an `@interface` declare types like any other. Missing them here sent
-                // every member declared in one to the type ABOVE it — or to nothing at all for a
-                // top-level record.
-                | "record_declaration"
-                | "annotation_type_declaration"
-        ) {
+        if declares_type(n.kind()) {
             let name = n
                 .child_by_field_name("name")?
                 .utf8_text(bytes)
@@ -2336,17 +2399,19 @@ fn is_bound_name(node: &Node) -> bool {
 /// two always speak about one type — it is the binary form of exactly this name that a bare
 /// field's key is built from.
 fn enclosing_type_simple(node: &Node, bytes: &[u8]) -> Option<String> {
+    enclosing_type_simple_str(node, bytes).map(str::to_string)
+}
+
+/// [`enclosing_type_simple`] borrowed from the source, for the callers that only compare or look up
+/// by it and so have no need of an owned copy per identifier.
+fn enclosing_type_simple_str<'b>(node: &Node, bytes: &'b [u8]) -> Option<&'b str> {
     let mut cur = Some(*node);
     while let Some(n) = cur {
         if matches!(
             n.kind(),
             "class_declaration" | "interface_declaration" | "enum_declaration"
         ) {
-            return n
-                .child_by_field_name("name")?
-                .utf8_text(bytes)
-                .ok()
-                .map(str::to_string);
+            return n.child_by_field_name("name")?.utf8_text(bytes).ok();
         }
         cur = n.parent();
     }
@@ -2521,6 +2586,19 @@ fn find_local_binding(
     name: &str,
     level: LangLevel,
 ) -> Option<(usize, usize)> {
+    find_local_binding_with(ident, bytes, name, level, &|scope| find_local_decl(scope, bytes, name, level))
+}
+
+/// [`find_local_binding`] with the "does this body scope bind `name`" question answered by the
+/// caller — so a walk that asks it thousands of times per file can answer from a table instead of
+/// re-scanning the same block for every site (see [`ScopeBindings`]).
+fn find_local_binding_with(
+    ident: &Node,
+    bytes: &[u8],
+    name: &str,
+    level: LangLevel,
+    decl_in: &dyn Fn(&Node) -> Option<(usize, usize)>,
+) -> Option<(usize, usize)> {
     let mut cur = ident.parent();
     while let Some(n) = cur {
         if matches!(
@@ -2547,7 +2625,7 @@ fn find_local_binding(
                 | "catch_clause"
                 | "try_with_resources_statement"
         ) {
-            if let Some(d) = find_local_decl(&n, bytes, name, level) {
+            if let Some(d) = decl_in(&n) {
                 return Some(d);
             }
         }
@@ -2619,6 +2697,26 @@ fn find_local_decl(
     name: &str,
     level: LangLevel,
 ) -> Option<(usize, usize)> {
+    let mut found = None;
+    visit_local_decls(node, bytes, level, &mut |bound, span| {
+        if bound == name {
+            found = Some(span);
+            return true;
+        }
+        false
+    });
+    found
+}
+
+/// Every name a body scope binds, in the order [`find_local_decl`] meets them, handed to `visit` with
+/// its span; `visit` returns `true` to stop. The one traversal behind both the single-name search
+/// and the per-scope table, so the two cannot disagree about what binds.
+fn visit_local_decls(
+    node: &Node,
+    bytes: &[u8],
+    level: LangLevel,
+    visit: &mut dyn FnMut(&str, (usize, usize)) -> bool,
+) {
     let mut stack: Vec<Node> = vec![*node];
     while let Some(n) = stack.pop() {
         let mut cw = n.walk();
@@ -2672,12 +2770,49 @@ fn find_local_decl(
             _ => None,
         };
         if let Some(nm) = bound {
-            if nm.utf8_text(bytes).ok() == Some(name) {
-                return Some((nm.start_byte(), nm.end_byte()));
+            if let Ok(bound_name) = nm.utf8_text(bytes) {
+                if visit(bound_name, (nm.start_byte(), nm.end_byte())) {
+                    return;
+                }
             }
         }
     }
-    None
+}
+
+/// Per-file table of what each body scope binds: `scope node → (name → first binding span)`.
+///
+/// [`find_local_binding`] answers "is this name a local here" by scanning the whole enclosing block
+/// for a declaration of it. The reference walk asks that for every qualified access (`conn.close()`)
+/// and every bare identifier that is also a field name, so a method with a few hundred of them
+/// re-scanned the same block a few hundred times — most of the walk's time on a call-heavy project.
+/// A scope is scanned once, here, and every later question is a hash probe.
+///
+/// The table keeps the FIRST binding of a name in [`visit_local_decls`] order, which is exactly what
+/// [`find_local_decl`] returns, so the answers are the same ones. Keyed by node id, so it lives and
+/// dies with the one parse tree it was filled from.
+struct ScopeBindings {
+    level: LangLevel,
+    by_scope: std::cell::RefCell<HashMap<usize, HashMap<String, (usize, usize)>>>,
+}
+
+impl ScopeBindings {
+    fn new(level: LangLevel) -> Self {
+        Self { level, by_scope: Default::default() }
+    }
+
+    /// What [`find_local_decl`] would return for `name` in `scope`.
+    fn find(&self, scope: &Node, bytes: &[u8], name: &str) -> Option<(usize, usize)> {
+        let mut scopes = self.by_scope.borrow_mut();
+        let table = scopes.entry(scope.id()).or_insert_with(|| {
+            let mut table = HashMap::new();
+            visit_local_decls(scope, bytes, self.level, &mut |bound, span| {
+                table.entry(bound.to_string()).or_insert(span);
+                false
+            });
+            table
+        });
+        table.get(name).copied()
+    }
 }
 
 /// The smallest named node the caret at `offset` sits on — the identifier to classify.

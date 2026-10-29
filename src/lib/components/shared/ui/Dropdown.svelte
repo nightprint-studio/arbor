@@ -63,8 +63,8 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { tick, onMount } from 'svelte';
-  import { fly, slide } from 'svelte/transition';
-  import { cubicOut } from 'svelte/easing';
+  import { slide } from 'svelte/transition';
+  import { menuReveal, motionFor } from '$lib/utils/menu-motion';
   import { Search, ChevronDown, ChevronRight, Check, Loader } from 'lucide-svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   // NOTE: Kbd lives in shared/internal/ because its `action=` mode reaches
@@ -852,7 +852,7 @@
   {@const isDeepest = openPath.length === pathDepth + 1}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="dd-menu dd-fixed dd-flyout"
+    class="dd-menu dd-fixed dd-flyout dd-stagger"
     data-dd-flyout
     style={flyoutStyle(entry.id)}
     role="menu"
@@ -860,7 +860,7 @@
     use:registerFlyoutPanel={isDeepest}
     onmouseenter={cancelHoverClose}
     onmouseleave={() => hoverCloseSubmenu(pathDepth)}
-    transition:fly={{ x: -4, duration: animStore.dFast, easing: cubicOut }}
+    transition:menuReveal={{ origin: 'top left', from: [-8, 0], scale: 0.96, duration: animStore.dBase }}
   >
     <div class="dd-list">
       {#each entry.items as child, ci (child.kind === 'group' ? `g:${child.id}` : child.kind === 'item' ? `i:${child.id}` : child.kind === 'submenu' ? `m:${child.id}` : `s:${ci}`)}
@@ -932,17 +932,13 @@
   {#if open}
     <div
       class="dd-menu"
+      class:dd-stagger={!searchable}
       class:dd-fixed={position === 'fixed'}
       class:dd-up={direction === 'up' && position === 'absolute'}
       style="{position === 'fixed' ? menuStyle : ''}{width && position !== 'fixed' ? `width:${width};` : ''}{position === 'fixed' && !menuStyle ? 'visibility:hidden;' : ''}"
       bind:this={menuEl}
       role="menu"
-      transition:fly={{
-        x: direction === 'right' ? -4 : direction === 'left' ? 4 : 0,
-        y: direction === 'up'    ?  4 : direction === 'down' ? -4 : 0,
-        duration: animStore.dFast,
-        easing: cubicOut,
-      }}
+      transition:menuReveal={motionFor(direction, animStore.dBase)}
     >
       {#if searchable && !loading}
         <div class="dd-search">
@@ -1016,6 +1012,17 @@
   }
   .dd-menu.dd-fixed { position: fixed; top: auto; left: auto; }
   .dd-menu.dd-up    { top: auto; bottom: calc(100% + 4px); }
+
+  /* The rows arrive one after another, a few ms apart — the menu reads as unfolding, not as appearing.
+     Only the first rows are staggered; a long list would otherwise take a while to finish. */
+  .dd-stagger .dd-list > :global(*) { animation: dd-row-in var(--anim-dur-base, 160ms) cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .dd-stagger .dd-list > :global(:nth-child(2)) { animation-delay: calc(var(--anim-dur-fast, 100ms) * 0.2); }
+  .dd-stagger .dd-list > :global(:nth-child(3)) { animation-delay: calc(var(--anim-dur-fast, 100ms) * 0.4); }
+  .dd-stagger .dd-list > :global(:nth-child(4)) { animation-delay: calc(var(--anim-dur-fast, 100ms) * 0.6); }
+  .dd-stagger .dd-list > :global(:nth-child(5)) { animation-delay: calc(var(--anim-dur-fast, 100ms) * 0.8); }
+  .dd-stagger .dd-list > :global(:nth-child(n + 6)) { animation-delay: var(--anim-dur-fast, 100ms); }
+  @keyframes dd-row-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .dd-stagger .dd-list > :global(*) { animation: none; } }
   /* Flyout panels stack above the parent menu and share its surface. */
   .dd-flyout { z-index: calc(var(--z-menu) + 1); min-width: 0; }
 

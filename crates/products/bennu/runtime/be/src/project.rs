@@ -696,6 +696,22 @@ impl bennu_spring::prelude::ClassNameSource for ProjectClassNames {
     }
 }
 
+/// Args for [`bennu_project_modules`].
+#[derive(Deserialize)]
+pub struct ModulesArgs {
+    pub root: String,
+}
+
+/// Every build manifest of the project at `root` — Maven, Gradle, Cargo, Node — each with its folder.
+///
+/// A project is often more than one thing (a Tauri app is a Node project with a Cargo project in
+/// `src-tauri`), so the activity bar, the tool windows and the assistant ask this rather than guess a
+/// single kind from the root. Cheap: a few directory listings, three levels deep at most.
+#[arbor_rpc::handler]
+fn bennu_project_modules(_ctx: &BennuState, args: ModulesArgs) -> Result<Vec<bennu_project::prelude::Module>, String> {
+    Ok(bennu_project::prelude::modules_of(Path::new(&args.root)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

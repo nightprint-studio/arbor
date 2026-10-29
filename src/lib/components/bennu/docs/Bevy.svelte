@@ -70,10 +70,13 @@
 <p>
   An exclusive system — one taking <code>&amp;mut World</code> — contends with everything in its schedule, and gets one row saying so rather than one per component.
 </p>
-<Callout variant="warning" title="Not a bug list — except the unordered pairs">
-  Only an <code>unordered</code> pair is also warned about in the editor, on the name of each system: marking the ordered ones would put a permanent squiggle under half the
-  systems. A system in a <strong>set</strong> is never accused — a set's ordering is declared by <code>configure_sets</code>, which Bennu does not read — nor is an
-  <strong>exclusive</strong> one, contending with everything by construction. Both still appear in the panel.
+<Callout variant="info" title="Not a bug list — a note on the unordered ones">
+  Only an <code>unordered</code> pair is also mentioned in the editor, as a single informational note on the name of each system that lists its peers (<em>contends with 3 unordered
+  systems (a, b, c) over Score</em>). Contention without a declared order is the normal state of most Bevy projects, so it is never a warning. Ordering is followed transitively —
+  <code>a.before(b)</code> plus <code>b.before(c)</code> orders <code>a</code> against <code>c</code> — and <code>.after</code> and <code>.chain()</code> count the same way.
+  The note is left out when Bennu cannot stand behind it: a system in a <strong>set</strong> (a set's ordering is declared by <code>configure_sets</code>, which Bennu does not
+  read), an <strong>exclusive</strong> one, a system registered with a <code>.run_if(…)</code>, and a pair that only meets through a message buffer, one side writing and the other
+  reading. All of them still appear in the panel.
 </Callout>
 
 <h2>In the editor</h2>
@@ -126,10 +129,18 @@
 <dl class="meta-grid">
   <dt>A conflict stays true</dt>
   <dd>Two systems contending over <code>Score</code> contend however many systems a plugin adds — so the report is short of pairs rather than full of invented ones.</dd>
+  <dt>Disjoint queries are not conflicts</dt>
+  <dd>
+    <code>With</code> and <code>Without</code> on the same component keep two queries apart, and so does a plain <code>&amp;T</code> / <code>&amp;mut T</code> / <code>Mut&lt;T&gt;</code> /
+    <code>Ref&lt;T&gt;</code> in the query data, which requires <code>T</code> just as <code>With&lt;T&gt;</code> does — <code>Query&lt;(&amp;mut A, &amp;mut B)&gt;</code> never overlaps
+    <code>Query&lt;&amp;mut B, Without&lt;A&gt;&gt;</code>. An <code>Or&lt;…&gt;</code> filter makes no claim at all.
+  </dd>
+  <dt>Run conditions and tests are not read as a schedule</dt>
+  <dd>Whether a <code>.run_if(…)</code> is true cannot be known from the source, so a conditional system is never accused. Code under <code>#[cfg(test)]</code>, <code>#[test]</code> functions and <code>mod tests</code> is skipped, so an <code>App</code> built inside a test does not invent pairs.</dd>
   <dt>Parallelism is never claimed</dt>
   <dd>"These two run at the same time" cannot be shown from part of a schedule: one unseen system writing the same component would refute it.</dd>
   <dt>No ordering graph</dt>
-  <dd>Most of an app's ordering lives in plugins, so a picture from this project's <code>add_systems</code> calls would be a fragment presented as a whole. Ordering appears only as the tag on a conflict row.</dd>
+  <dd>Most of an app's ordering lives in plugins, so a picture from this project's <code>add_systems</code> calls would be a fragment presented as a whole. Ordering appears only as the tag on a conflict row. Systems are matched to the open file by name and position, so a same-named function in another module, or a method called like a system, does not collect another system's note.</dd>
   <dt>Names are not resolved</dt>
   <dd><code>Health</code> is matched by name, so two <code>Health</code> types in two modules look like one — though generic arguments are kept, so <code>NextState&lt;GameState&gt;</code> and <code>NextState&lt;MenuPage&gt;</code> stay apart. Every row shows its parameter, so a wrong one can be recognised.</dd>
   <dt>Registration is read literally</dt>

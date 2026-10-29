@@ -137,7 +137,7 @@
   .radio-group.nowrap { flex-wrap: nowrap; flex: none; }
   .block { width: 100%; }
   .block.app-segment .seg-btn,
-  .block.app-card    .card-opt { flex: 1; }
+  .block.app-card    .card-opt { flex: 1 1 0; min-width: 0; }
 
   /* ---- Segment ---- */
   .app-segment { gap: 2px; }

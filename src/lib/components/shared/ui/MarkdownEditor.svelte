@@ -71,6 +71,12 @@
     fileIndex?: () => string[];
     /** Hand the find widget's query to a project-wide search. Omitted → no "Find in files" button. */
     onFindInFiles?: (query: string) => void;
+    /**
+     * The selection changed. `null` when it is empty; otherwise the selected text and where its end is on
+     * screen (viewport pixels), for a host that floats something beside it. Text longer than 20 000
+     * characters is cut — this is for acting on a passage, not for copying a document.
+     */
+    onSelection?: (selection: { text: string; x: number; y: number } | null) => void;
   }
 
   let {
@@ -85,6 +91,7 @@
     onOpenLink,
     fileIndex,
     onFindInFiles,
+    onSelection,
   }: Props = $props();
 
   let hostEl = $state<HTMLDivElement | undefined>(undefined);
@@ -127,6 +134,19 @@
           ),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChange?.(u.state.doc.toString(), key);
+            if (u.selectionSet && onSelection) {
+              const range = u.state.selection.main;
+              if (range.empty) {
+                onSelection(null);
+              } else {
+                const selected = u.state.doc.sliceString(range.from, Math.min(range.to, range.from + 20_000));
+                // Layout is read after the update, not during it.
+                u.view.requestMeasure({
+                  read: (v) => v.coordsAtPos(range.to),
+                  write: (at) => onSelection(at ? { text: selected, x: at.right, y: at.bottom } : null),
+                });
+              }
+            }
             if ((u.docChanged || u.selectionSet) && onCaret) {
               const head = u.state.selection.main.head;
               const line = u.state.doc.lineAt(head);

@@ -16,6 +16,7 @@
  */
 
 import { projectStore } from './project.svelte';
+import { moduleFocusStore } from './module-focus.svelte';
 import { bennuTestStore } from './tests.svelte';
 import { bennuCargoTestStore } from './cargo-tests.svelte';
 import type { TestTreeStore } from './test-tree';
@@ -29,7 +30,7 @@ import type { TestTreeStore } from './test-tree';
  * name or a Rust case ref — it imports that store directly and guards on the kind itself.
  */
 export function activeTestStore(): TestTreeStore {
-  return projectStore.isCargo
+  return testsAreCargo()
     ? (bennuCargoTestStore as unknown as TestTreeStore)
     : (bennuTestStore as unknown as TestTreeStore);
 }
@@ -37,5 +38,18 @@ export function activeTestStore(): TestTreeStore {
 /** Whether the open project's tests are run by cargo — for the few places that must know (the
  *  ignored-tests toggle exists only there, and the Java catalogue's columns say `class`). */
 export function testsAreCargo(): boolean {
-  return projectStore.isCargo;
+  if (projectStore.isCargo) return true;
+  // A project that is neither Maven nor Cargo at its root (a Tauri app is Node-first) can still carry
+  // one in a subfolder; then the module the tests resolve to decides. Maven and Cargo roots keep
+  // deciding by their own kind, exactly as before modules existed.
+  return projectStore.isPlain && moduleFocusStore.targetFor('Maven', 'Cargo')?.kind === 'Cargo';
+}
+
+/**
+ * The folder the tests run in: the project root, except for a project whose build tool lives in a
+ * subfolder (see {@link testsAreCargo}) — then that module's folder. `null` with nothing to run.
+ */
+export function activeTestRoot(): string | null {
+  if (!projectStore.isPlain) return projectStore.project?.root ?? null;
+  return moduleFocusStore.targetFor('Maven', 'Cargo')?.toolRoot ?? null;
 }

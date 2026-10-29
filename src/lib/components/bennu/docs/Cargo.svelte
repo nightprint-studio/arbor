@@ -17,8 +17,21 @@
 
 <h2>The Cargo tool window</h2>
 <p>
-  <kbd>Alt</kbd> + <kbd>8</kbd> opens it, in the rail slot Maven takes on a Java project: a project is one or the other, and the key means "the build tool"
-  either way.
+  <kbd>Alt</kbd> + <kbd>8</kbd> opens it on a Rust project. Its rail button is there whenever the workspace has a Cargo project — at a project's root
+  or in a subfolder, as in a Tauri app — and sits beside Maven's when it also has a Java one.
+</p>
+
+<h2>Several Cargo projects</h2>
+<p>
+  The window lists the Cargo projects of the <strong>whole workspace</strong>, not only the project on screen: a Rust crate in a
+  subfolder of a Node project (a Tauri app's <code>src-tauri</code>) is a Cargo project like any other, and so is one in
+  another project of the workspace. With more than one, a small tree at the top — grouped by project when the workspace has
+  several — picks the one the commands act on. Pick a row with <kbd>Enter</kbd> or a click; pick it again to let go. With
+  nothing picked the window follows the file you are editing; with a single Cargo project there is no tree at all.
+</p>
+<p>
+  The same rule applies to the palette: a command that acts on one Cargo project runs straight away when a row is picked or the
+  open file belongs to one, and otherwise asks which, in a list you can filter by typing.
 </p>
 <p>
   The first group is the <strong>whole workspace</strong> — every command aimed at every crate, <code>--workspace</code>. Under it, one group per crate,

@@ -266,7 +266,8 @@
         <li><b>Editor affiancati 0 → 3</b>: due pannelli con i loro tab, un tab si sposta trascinandolo, il divisore si ridimensiona. Non 4: solo verticale e un file per pannello.</li>
         <li><b>Il multi-caret non è più un'assenza</b>: una delle tre cose che tenevano la UI/UX a 8.5 cade (restano i bookmark e il diff come vista nell'editor). L'asse non si muove.</li>
         <li><b>Nove righe nuove</b>: cursori multipli (3), log di esecuzione (4), terminale integrato (4, c'era già e mancava dalla scheda), firma dei metodi (2) e cinque dove Bennu ha 0: segnalibri,
-          macro, contesti e attività, file scratch, modalità senza distrazioni. Totale 170 su 285, il 60%; sulle righe di prima non cambia nulla (138 su 180, 77%).</li>
+          macro, contesti e attività, file scratch, modalità senza distrazioni. Totale 170 su 280, il 61%; sulle righe di prima non cambia nulla (138 su 180, 77%).</li>
+        <li><b>Tolta la collaborazione dal vivo</b>: senza un servizio via Internet — relay, inviti, cifratura — una collaborazione fra persone non ha senso per un prodotto con un utente solo, e JetBrains stessa dismette Code With Me (Q1 2027). La riga esce dalla scheda, che torna a 56 aree.</li>
         <li><b>Non si muovono</b>: Completion (già 5), Refactoring (4: aggiungi parametro non basta contro Change Signature intero), Errori di compilazione (4), Funziona davvero (7.0: il codice di oggi è nuovo e
           «funziona davvero» è la misura che si sposta quando una settimana passa senza difetti nelle basi).</li>
       </ul>
@@ -516,16 +517,16 @@
 </section>
 <section id="scheda">
   <div class="wrap">
-    <h2>La scheda <span class="kicker">57 aree · 6 editor · da 0 a 5</span></h2>
-    <p>Le 35 aree del 15 settembre, la sicurezza delle dipendenze, e dal 28 ottobre ventuno righe nuove: dodici al mattino — otto delle quali sono cose che
+    <h2>La scheda <span class="kicker">56 aree · 6 editor · da 0 a 5</span></h2>
+    <p>Le 35 aree del 15 settembre, la sicurezza delle dipendenze, e dal 28 ottobre venti righe nuove: undici al mattino (una dodicesima, la collaborazione dal vivo, è stata tolta in serata) — sette delle quali sono cose che
       altri editor hanno e Bennu no (voto 0 o 1) — e nove in serata, di cui cinque dove Bennu non ha niente (segnalibri, macro, contesti, scratch, senza distrazioni). Sotto il voto di Bennu trovi quello del 15 settembre quando è cambiato; «nuova» marca la riga che allora non c'era.</p>
 
     <div class="callout blue">
       <b>Sulle stesse 35 righe del 15 settembre: da 128 a 135 su 175, dal 73% al 77%.</b>
       <p>Sette punti da sei righe. <b>Errori di compilazione</b> da 3 a 4 e <b>Local history</b> da 4 a 5 (come prima); <b>Ergonomia dell'editor</b> da 3 a 4;
         <b>MyBatis</b> da 3 a 5, <b>Database</b> da 3 a 4 e <b>Trova utilizzi e gerarchie</b> da 4 a 5 sono del 28 ottobre e le spiega la sezione «Cosa è salito».
-        Con le righe nuove la scheda ha 57 aree e 285 punti: Bennu ne prende 170, il 60% (al mattino erano 154 su 240, il 64%). La percentuale <b>scende</b> perché la scheda è cresciuta
-        con funzioni che Bennu non ha — client HTTP, Docker, sviluppo remoto, collaborazione, assistente AI, sincronizzazione, procedura guidata per un nuovo progetto,
+        Con le righe nuove la scheda ha 56 aree e 280 punti: Bennu ne prende 170, il 61% (al mattino erano 154 su 240, il 64%). La percentuale <b>scende</b> perché la scheda è cresciuta
+        con funzioni che Bennu non ha — client HTTP, Docker, sviluppo remoto, assistente AI, sincronizzazione, procedura guidata per un nuovo progetto,
         segnalibri, macro, contesti, scratch, modalità senza distrazioni — e non perché Bennu sia peggiorato: in serata sono saliti l'editor affiancato (0 → 3) e,
         fra le righe nuove, i cursori multipli, i log e il terminale.</p>
     </div>
@@ -539,9 +540,9 @@
     <div class="tw"><table id="board" class="board"><caption class="fine" style="caption-side:bottom;text-align:left;padding:10px 12px">Totali, subtotali e percentuali sono calcolati dalla pagina sulle righe che vedi, non scritti a mano.</caption></table></div>
 
     <div class="callout">
-      <b>Senza pesi: sulle 35 righe di allora Bennu supera IntelliJ Community di tredici punti; sulle 57 di oggi è a ventisette punti sotto.</b>
+      <b>Senza pesi: sulle 35 righe di allora Bennu supera IntelliJ Community di tredici punti; sulle 56 di oggi è a ventitré punti sotto.</b>
       <p>Il 15 settembre erano sei, poi dodici, ora tredici sulle righe di allora. Community continua a prendere i suoi punti sul Java di tutti i giorni: refactoring,
-        debugger, coverage, Gradle — e ora anche sulle righe nuove che Bennu non ha, dove Community ha spesso 3, 4 o 5 (segnalibri, scratch, split, collaborazione,
+        debugger, coverage, Gradle — e ora anche sulle righe nuove che Bennu non ha, dove Community ha spesso 3, 4 o 5 (segnalibri, scratch, split,
         sincronizzazione, assistente AI). Bennu li prende dove Community ha zero — Struts e JSP, Jakarta EE, i controlli sui framework, gli encoding,
         il database. È un risultato onesto: aggiungere righe che mancano <em>deve</em> abbassare il totale. La sezione successiva
         pesa le righe, perché due strumenti con totali vicini e poche righe in comune dicono poco.</p>
@@ -570,10 +571,10 @@
     </div>
     <div class="callout blue">
       <b>Cosa dicono.</b>
-      <p>Per il monolite legacy Bennu resta secondo: 71% contro l'86% di Ultimate e il 67% di Community. Per il servizio Spring Boot resta terzo, al 62%,
-        dietro Ultimate (91%) e Community (70%). Le percentuali sono più basse di quelle del 26 ottobre (80% e 73%) per una ragione sola: le ventuno righe
+      <p>Per il monolite legacy Bennu resta secondo: 72% contro l'86% di Ultimate e il 67% di Community. Per il servizio Spring Boot resta terzo, al 63%,
+        dietro Ultimate (91%) e Community (70%). Le percentuali sono più basse di quelle del 26 ottobre (80% e 73%) per una ragione sola: le venti righe
         nuove, in buona parte a 0 o 1 per Bennu, pesano nelle due squadre — soprattutto l'assistente AI, il client HTTP e Docker nel servizio nuovo. Le nove di serata
-        pesano poco (da 0,5 a 2 ciascuna) e portano il monolite dal 75% al 71% e il servizio dal 64% al 62%.
+        pesano poco (da 0,5 a 2 ciascuna) e portano il monolite dal 75% al 72% e il servizio dal 65% al 63%.
         Sulle 36 righe di prima, con i voti di oggi, il monolite è all'82% e il servizio al 75%: <b>Bennu è migliorato, la scheda è diventata più severa</b>.</p>
       <p>Il dato utile è lo stesso di allora: le funzioni sui framework non spostano più la distanza da Ultimate, perché su
         quelle Bennu è già davanti. La spostano le righe generaliste a zero o a tre — Change Signature, debugger, coverage —
@@ -885,7 +886,6 @@
         <tr class="chg"><td>Client HTTP: file <code>.http</code> con variabili, esecuzione dal gutter <span class="tag new">28 ott</span><small class="why">Bennu ha il pannello degli endpoint, non un client.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c n">✗</td></tr>
         <tr class="chg"><td>Docker e Kubernetes: compose, immagini, container, cluster <span class="tag new">28 ott</span><small class="why">Bennu colora il Dockerfile e nient'altro.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr class="chg"><td>Sviluppo remoto: SSH, dev container, WSL <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
-        <tr class="chg"><td>Collaborazione dal vivo nello stesso file <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c n">✗</td></tr>
         <tr class="chg"><td>Assistente AI dentro l'editor: chat, completion <span class="tag new">28 ott</span><small class="why">Bennu si lascia pilotare da un agente esterno (tool MCP); non ne ha uno dentro.</small></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c p">◐</td></tr>
         <tr class="chg"><td>Sincronizzazione delle impostazioni fra macchine <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c y">✓</td><td class="c n">✗</td></tr>
         <tr class="chg"><td>Iniezione di linguaggio nelle stringhe oltre a SQL e JPQL: JSON, regex, HTML <span class="tag new">28 ott</span></td><td class="c own n">✗</td><td class="c y">✓</td><td class="c p">◐</td><td class="c n">✗</td></tr>
@@ -981,7 +981,7 @@
         <tr><td><b>Link e pattern nei log</b></td><td class="n2">nuova · 4</td><td><code>crates/foundation/logscan</code> (<code>layout.rs</code>) e <code>runtime/be/src/log_pattern.rs</code>: il pattern letto dalla configurazione del progetto.</td></tr>
         <tr><td><b>Terminale integrato</b></td><td class="n2">nuova · 4</td><td><code>BennuTerminalView.svelte</code>, già nel dock: la riga mancava dalla scheda, non da Bennu.</td></tr>
         <tr><td><b>Righe nuove</b></td><td class="n2">+9 aree</td><td>Nove righe aggiunte più tardi il 28 ottobre: tre dove Bennu ha qualcosa (cursori multipli, log, terminale), una a metà (firma dei metodi) e cinque dove non ha niente (segnalibri, macro, contesti, scratch, senza distrazioni). I voti degli altri IDE vengono da conoscenza generale delle versioni rilasciate, come per le altre.</td></tr>
-        <tr><td><b>Righe nuove del mattino</b></td><td class="n2">+12 aree</td><td>Dodici righe che il confronto non aveva, otto delle quali con Bennu a 0 o 1 (split, nuovo progetto, client HTTP, Docker, sviluppo remoto, collaborazione, assistente AI, sincronizzazione). I voti degli altri IDE vengono da conoscenza generale e non sono stati riverificati su un'installazione; chi lo conosce meglio può correggerli nel sorgente della pagina.</td></tr>
+        <tr><td><b>Righe nuove del mattino</b></td><td class="n2">+11 aree</td><td>Dodici righe che il confronto non aveva (undici dopo che la collaborazione dal vivo è stata tolta in serata), sette delle quali con Bennu a 0 o 1 (split, nuovo progetto, client HTTP, Docker, sviluppo remoto, assistente AI, sincronizzazione). I voti degli altri IDE vengono da conoscenza generale e non sono stati riverificati su un'installazione; chi lo conosce meglio può correggerli nel sorgente della pagina.</td></tr>
         <tr><td><b>Assi</b></td><td class="n2">+0.5 × 2</td><td>UI/UX: gutter, blame, cronologia, Changes con il diff accanto, barra Trova/Sostituisci. «Funziona davvero» da 6.5 a 7.0, con la riserva scritta nell'asse. Gli altri quattro assi non si muovono.</td></tr>
       </tbody>
     </table></div>
@@ -1165,7 +1165,6 @@
       ['Client HTTP e prove di API', 'File .http con variabili ed esecuzione dal gutter. Bennu ha il pannello degli endpoint, non un client.', null, 0, 5, 0, 1, 4, 1, 0.5, 2],
       ['Docker e Kubernetes', 'Dockerfile colorato in Bennu; niente compose, immagini, container né cluster come in IntelliJ Ultimate e VS Code.', null, 1, 5, 1, 3, 5, 3, 0.5, 2],
       ['Sviluppo remoto (SSH, dev container, WSL)', 'Il progetto sta su un\'altra macchina o in un container e l\'editor ci lavora sopra. Bennu apre cartelle locali.', null, 0, 4, 3, 2, 5, 2, 0.5, 1],
-      ['Collaborazione dal vivo', 'Code With Me, Live Share: più persone nello stesso file. Assente in Bennu.', null, 0, 4, 4, 1, 5, 1, 0.5, 0.5],
       ['Assistente AI nell\'editor', 'Chat e completion integrate. Bennu si lascia pilotare da un agente (i tool MCP) ma non ne ha uno dentro.', null, 1, 5, 4, 3, 5, 1, 1, 2],
       ['Sincronizzazione delle impostazioni', 'Le preferenze seguono l\'utente fra macchine. Bennu tiene i suoi file di configurazione per profilo, in locale.', null, 0, 4, 4, 1, 5, 1, 0.5, 0.5],
       ['Maturità', '9.698 test Rust e 333 frontend dichiarati (un conteggio statico, non una esecuzione: quelli del 28 ottobre non sono stati lanciati), due corpora misurati; un utente solo, che però ora lo usa ogni giorno.', 2, 2, 5, 5, 4, 4, 3, 2, 2],

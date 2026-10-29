@@ -1,0 +1,123 @@
+/*
+ * The assistant's motion, in one place.
+ *
+ * Each effect says something true about the run: a glow on the avatar while it is writing, a shimmer on the
+ * words while it is working, a sweep along the top while a run is open, a caret where the text is arriving,
+ * a ring around Stop while there is something to stop. Nothing loops without a run behind it.
+ *
+ * Durations are built from `--anim-dur-slow`, the app's animation-speed setting: Fast and Slow scale them,
+ * and with animations switched off the variable is 0ms, which turns every one of these into a still frame.
+ * `prefers-reduced-motion` does the same. No `backdrop-filter` anywhere: on WebView2 it keeps the compositor
+ * busy and throttles child processes.
+ */
+
+@keyframes asst-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+@keyframes asst-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+@keyframes asst-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  50%      { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+
+@keyframes asst-ripple {
+  0%   { transform: scale(0.6); opacity: 0.7; }
+  100% { transform: scale(2.1); opacity: 0; }
+}
+
+@keyframes asst-caret {
+  0%, 49%  { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+@keyframes asst-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes asst-enter {
+  from { opacity: 0; transform: translateY(4px); background-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Words that are being worked on: a highlight travelling through the text. */
+.asst-shimmer {
+  background: linear-gradient(100deg, var(--text-muted) 30%, var(--text-primary) 45%, var(--accent) 50%, var(--text-primary) 55%, var(--text-muted) 70%);
+  background-size: 300% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  animation: asst-shimmer calc(var(--anim-dur-slow, 240ms) * 7) linear infinite;
+}
+
+/* A thin bar that sweeps along an edge while a run is open. */
+.asst-sweep { position: relative; height: 2px; overflow: hidden; background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.asst-sweep::after {
+  content: ''; position: absolute; inset: 0 auto 0 0; width: 30%;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--info), transparent);
+  animation: asst-sweep calc(var(--anim-dur-slow, 240ms) * 6) cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* The avatar of the message being written. */
+.asst-live { animation: asst-pulse calc(var(--anim-dur-slow, 240ms) * 6) ease-out infinite; }
+
+/* An orb with a ripple: the "it is thinking" mark. */
+.asst-orb { position: relative; width: 10px; height: 10px; border-radius: 50%; background: linear-gradient(140deg, var(--accent), var(--info)); flex-shrink: 0; }
+.asst-orb::before, .asst-orb::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  border: 1px solid var(--accent);
+  animation: asst-ripple calc(var(--anim-dur-slow, 240ms) * 7) ease-out infinite;
+}
+.asst-orb::after { animation-delay: calc(var(--anim-dur-slow, 240ms) * 3.5); }
+
+/* Where text is arriving. */
+.asst-caret {
+  display: inline-block; width: 7px; height: 1em; margin-left: 2px; vertical-align: text-bottom;
+  border-radius: 1px; background: var(--accent);
+  animation: asst-caret calc(var(--anim-dur-slow, 240ms) * 4) steps(1) infinite;
+}
+
+/* A ring that turns around the Stop button. */
+.asst-ring { position: relative; display: inline-flex; border-radius: 50%; }
+.asst-ring::before {
+  content: ''; position: absolute; inset: -3px; border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 55%, var(--accent) 85%, var(--info) 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
+  animation: asst-spin calc(var(--anim-dur-slow, 240ms) * 5) linear infinite;
+}
+
+/* A line that has just arrived in the thread. */
+.asst-enter { animation: asst-enter calc(var(--anim-dur-slow, 240ms) * 2) ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .asst-shimmer, .asst-live, .asst-caret, .asst-enter,
+  .asst-sweep::after, .asst-orb::before, .asst-orb::after, .asst-ring::before { animation: none; }
+  .asst-shimmer { -webkit-text-fill-color: currentColor; color: var(--text-secondary); background: none; }
+  .asst-caret { opacity: 1; }
+}
+
+/* The home screen: a slow drift for the aurora, a breath for the halo, a rise for the cards. */
+@keyframes asst-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(46px, 38px, 0) scale(1.18); }
+}
+
+@keyframes asst-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.05); }
+  to   { transform: translate3d(-52px, 30px, 0) scale(0.9); }
+}
+
+@keyframes asst-breathe {
+  0%, 100% { transform: scale(0.92); opacity: 0.7; }
+  50%      { transform: scale(1.12); opacity: 1; }
+}
+
+@keyframes asst-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}

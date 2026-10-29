@@ -42,11 +42,17 @@ pub struct Registration {
     pub schedule: String,
     /// The systems named directly in the tuple — not the ones named inside `.after(…)`.
     pub systems: Vec<String>,
-    /// Systems named in an ordering combinator (`.before` / `.after`), whichever direction: the
-    /// pair is ordered either way, and which way round is a question this crate does not ask.
+    /// Systems named in `.ambiguous_with(…)`: the author has said the pair's order does not
+    /// matter, which is as good as ordering it for the purpose of not being accused. Undirected.
     pub ordered_with: Vec<String>,
+    /// `(first, later)` pairs from `.before` / `.after`. Directed, because a chain of them
+    /// (`a.before(b)`, `b.before(c)`) orders `a` against `c` and a fan-in (`a.before(b)`,
+    /// `c.before(b)`) orders nothing between `a` and `c` — see [`crate::conflict::OrderIndex`].
+    pub edges: Vec<(String, String)>,
     /// Sets the call put its systems in.
     pub sets: Vec<String>,
+    /// Systems that carry a `.run_if(…)` — their own, or one on the whole tuple.
+    pub conditional: Vec<String>,
     /// The tuple was `.chain()`ed — every system in it is ordered against every other.
     pub chained: bool,
 }
@@ -114,7 +120,7 @@ pub struct RawInsert {
 const MODIFIERS: &[&str] = &["pub", "async", "unsafe", "const", "extern", "default", "static"];
 
 /// Keywords that take the attributes with them: whatever follows is not a type or a function.
-const CONSUMERS: &[&str] = &["mod", "use", "trait", "let", "type", "macro_rules", "match", "if"];
+const CONSUMERS: &[&str] = &["use", "trait", "let", "type", "macro_rules", "match", "if"];
 
 /// Walk `masked` — the output of [`crate::mask::mask`], never the raw source.
 pub fn scan_file(masked: &str) -> FileScan {
@@ -150,11 +156,28 @@ pub fn scan_file(masked: &str) -> FileScan {
                 attrs.clear();
             }
             "fn" => {
-                i = read_fn(masked, after, &mut out);
+                i = if is_test_only(&attrs) {
+                    skip_item_body(masked, after)
+                } else {
+                    read_fn(masked, after, &mut out)
+                };
                 attrs.clear();
             }
             "impl" => {
-                i = read_impl(masked, after, &mut out);
+                i = if is_test_only(&attrs) {
+                    skip_item_body(masked, after)
+                } else {
+                    read_impl(masked, after, &mut out)
+                };
+                attrs.clear();
+            }
+            "mod" => {
+                let name = ident_at(masked, skip_ws(b, after)).map(|(n, _)| n).unwrap_or_default();
+                i = if is_test_only(&attrs) || name == "tests" || name == "test" {
+                    skip_item_body(masked, after)
+                } else {
+                    after
+                };
                 attrs.clear();
             }
             "add_systems" => {
@@ -180,6 +203,36 @@ pub fn scan_file(masked: &str) -> FileScan {
         }
     }
     out
+}
+
+/// Whether an attribute run marks an item as compiled for tests only: `#[test]`, `#[tokio::test]`,
+/// `#[cfg(test)]`, `#[cfg(all(test, …))]`. A test builds its own `App` with a handful of systems
+/// and asserts on the outcome; reading those as part of the game's schedule would invent pairs of
+/// systems that never share a frame. `cfg(not(test))` is the opposite and stays.
+fn is_test_only(attrs: &[String]) -> bool {
+    attrs.iter().any(|a| {
+        let a: String = a.split_whitespace().collect();
+        a == "test"
+            || a.ends_with("::test")
+            || (a.starts_with("cfg(") && a.contains("test") && !a.contains("not("))
+    })
+}
+
+/// Past an item the walk has decided to ignore: its `{ … }` body, or the `;` of a bodiless one.
+/// A `;` met first (a `mod tests;` declaration, a trait method) ends the item.
+fn skip_item_body(src: &str, from: usize) -> usize {
+    let b = src.as_bytes();
+    let mut i = from;
+    while i < b.len() {
+        match b[i] {
+            b';' => return i + 1,
+            b'{' => return matching(b, i).map_or(b.len(), |c| c + 1),
+            // Parameter lists and generics may hold `;` (array types) — skip them whole.
+            b'(' | b'[' => i = matching(b, i).map_or(b.len(), |c| c + 1),
+            _ => i += 1,
+        }
+    }
+    b.len()
 }
 
 /// After `struct` / `enum`: the name, then the body if it carries field types worth keeping.
@@ -460,9 +513,15 @@ fn systems_in(expr: &str) -> Registration {
         schedule: String::new(),
         systems: Vec::new(),
         ordered_with: Vec::new(),
+        edges: Vec::new(),
         sets: Vec::new(),
+        conditional: Vec::new(),
         chained: false,
     };
+    // The system a method chain is hanging off: `a.before(b).run_if(c)` is about `a`, whereas
+    // `(a, b).run_if(c)` — where the method follows a closing paren — is about everything read so
+    // far. Anything that is not whitespace or a method call ends the chain.
+    let mut subject: Option<String> = None;
     let mut i = 0usize;
     while i < b.len() {
         if b[i] == b'.' {
@@ -476,21 +535,39 @@ fn systems_in(expr: &str) -> Registration {
                 (Some(&b'('), Some(close)) => (&expr[k + 1..close], close + 1),
                 _ => ("", after),
             };
+            let subjects: Vec<String> = match &subject {
+                Some(s) => vec![s.clone()],
+                None => reg.systems.clone(),
+            };
             match method.as_str() {
                 "chain" | "chain_ignore_deferred" => reg.chained = true,
-                "before" | "after" | "before_ignore_deferred" | "after_ignore_deferred"
-                | "ambiguous_with" => reg.ordered_with.extend(plain_paths(inner)),
+                "before" | "before_ignore_deferred" => {
+                    for s in &subjects {
+                        reg.edges.extend(plain_paths(inner).into_iter().map(|o| (s.clone(), o)));
+                    }
+                }
+                "after" | "after_ignore_deferred" => {
+                    for s in &subjects {
+                        reg.edges.extend(plain_paths(inner).into_iter().map(|o| (o, s.clone())));
+                    }
+                }
+                "ambiguous_with" => reg.ordered_with.extend(plain_paths(inner)),
                 "in_set" => reg.sets.extend(plain_paths(inner)),
+                "run_if" | "distributive_run_if" => reg.conditional.extend(subjects),
                 _ => {}
             }
             i = next;
             continue;
         }
         if !is_ident_start(b[i]) {
+            if !b[i].is_ascii_whitespace() {
+                subject = None;
+            }
             i += 1;
             continue;
         }
         let (name, next) = read_path(expr, i);
+        subject = name.clone();
         if let Some(n) = name {
             reg.systems.push(n);
         }

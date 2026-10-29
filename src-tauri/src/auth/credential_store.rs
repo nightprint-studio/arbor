@@ -46,7 +46,7 @@
 //! that one. It is an error now — see [`read_vault_from_store`].
 
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::sync::Mutex;
 
 use keyring::Entry;
 
@@ -56,6 +56,9 @@ use crate::error::{AppError, Result};
 const SERVICE: &str = "Arbor";
 /// The vault's first item: `Arbor` / `credentials`.
 const VAULT_ACCOUNT: &str = "credentials";
+/// The assistant vault's head: `Arbor` / `credentials.assistant`. Its pieces are
+/// `credentials.assistant.1`, `.2`, … — never `credentials.N`, which belong to the default vault.
+const ASSISTANT_VAULT_ACCOUNT: &str = "credentials.assistant";
 
 /// Marker that turns the head item into a pointer at N pieces instead of the vault
 /// itself. A JSON object starts with `{`, so this can never be mistaken for one —
@@ -77,9 +80,10 @@ const CHUNK_MARKER: &str = "ARBOR-CHUNKED:";
 /// item's other fields.
 const CHUNK_UNITS: usize = 1100;
 
-/// The account holding piece `i` (0 is the head, which is the marker itself).
-fn chunk_account(i: usize) -> String {
-    format!("{VAULT_ACCOUNT}.{i}")
+/// The account holding piece `i` of the vault whose head is `head` (0 is the head, which is the
+/// marker itself). The head's name is the vault's identity, so two vaults never share a piece.
+fn chunk_account(head: &str, i: usize) -> String {
+    format!("{head}.{i}")
 }
 
 /// Does this string fit in one keychain item?
@@ -130,14 +134,38 @@ fn read_head(text: String) -> Head {
     }
 }
 
-/// How many pieces the vault was last stored in, so a shrinking vault cleans up after
-/// itself instead of leaving secrets behind in items nothing points at any more.
+/// One named vault: a head item in the OS store, the pieces it may spill into, and the in-memory
+/// mirror that is the in-process source of truth.
 ///
-/// Only ever touched by [`read_vault_from_store`] and [`write_vault_to_store`], both of
-/// which run with the [`VAULT`] lock already held — so the order is always VAULT then
-/// this one, never the reverse, and there is no second path to invert it. It is a
-/// `Mutex` rather than a plain `static mut` for safety, not for the locking.
-static CHUNKS_ON_DISK: Mutex<usize> = Mutex::new(0);
+/// There are two. The default one holds everything Arbor has always kept (provider tokens, PATs,
+/// plugin credentials). The **assistant** vault holds the AI provider's key on its own, because that
+/// key is long and the default vault is already close to its ceiling — a second, independent item
+/// means a long key can never push a git token out, and neither can a failed write of one corrupt
+/// the other. A vault is recognised by its head account alone; one that was never written simply
+/// reads as empty, so introducing a new one needs no migration.
+struct Vault {
+    /// The head account (`credentials`, `credentials.assistant`).
+    head: &'static str,
+    /// `None` until the first access, `Some(map)` once loaded.
+    map: Mutex<Option<HashMap<String, String>>>,
+    /// How many pieces the vault was last stored in, so a shrinking vault cleans up after itself
+    /// instead of leaving secrets behind in items nothing points at any more.
+    ///
+    /// Only ever touched by [`Vault::load`] and [`Vault::store`], both of which run with `map`
+    /// already locked — so the order is always map then this, never the reverse, and there is no
+    /// second path to invert it.
+    chunks_on_disk: Mutex<usize>,
+}
+
+impl Vault {
+    const fn new(head: &'static str) -> Self {
+        Self { head, map: Mutex::new(None), chunks_on_disk: Mutex::new(0) }
+    }
+
+    fn set_chunks(&self, n: usize) {
+        *self.chunks_on_disk.lock().unwrap_or_else(|p| p.into_inner()) = n;
+    }
+}
 
 fn entry_for(account: &str) -> Result<Entry> {
     Entry::new(SERVICE, account).map_err(|e| AppError::AuthFailed(e.to_string()))
@@ -153,13 +181,14 @@ fn read_item(account: &str) -> Result<Option<String>> {
 
 // ── In-memory vault ────────────────────────────────────────────────────────────
 
-/// In-memory mirror of the vault. `None` until the first access, `Some(map)`
-/// once loaded — the map is the in-process source of truth (the shell is the
+/// The default vault. Its in-memory mirror is the in-process source of truth (the shell is the
 /// sole writer, so we never reload). Keys are credential "accounts"
 /// (`github.com/arbor`, a bare host, `github.com/arbor-refresh`, Jira keys, …);
 /// values are the raw secrets (`get_for_host` stores/parses `"user\tpass"`).
-static VAULT: LazyLock<Mutex<Option<HashMap<String, String>>>> =
-    LazyLock::new(|| Mutex::new(None));
+static VAULT: Vault = Vault::new(VAULT_ACCOUNT);
+
+/// The assistant's vault: the AI provider's key, kept apart (see [`Vault`]). Keys are provider ids.
+static ASSISTANT_VAULT: Vault = Vault::new(ASSISTANT_VAULT_ACCOUNT);
 
 /// Read + reassemble the vault from the OS store.
 ///
@@ -172,13 +201,13 @@ static VAULT: LazyLock<Mutex<Option<HashMap<String, String>>>> =
 /// "start empty" meant the next credential saved anywhere in the app would overwrite
 /// the item with just itself and delete every other secret in it. Refusing to load is
 /// recoverable — re-auth, or fix the item — and silently deleting everything is not.
-fn read_vault_from_store() -> Result<HashMap<String, String>> {
+fn read_vault_from_store(vault: &Vault) -> Result<HashMap<String, String>> {
     // A missing item and a blank one are the same thing: nothing is stored, and nothing
     // can be lost by starting from an empty map. Only a non-blank item that will not
     // parse is the dangerous case the doc above is about.
-    let head = read_item(VAULT_ACCOUNT)?.unwrap_or_default();
+    let head = read_item(vault.head)?.unwrap_or_default();
     if head.trim().is_empty() {
-        *CHUNKS_ON_DISK.lock().unwrap_or_else(|p| p.into_inner()) = 0;
+        vault.set_chunks(0);
         return Ok(HashMap::new());
     }
 
@@ -187,7 +216,7 @@ fn read_vault_from_store() -> Result<HashMap<String, String>> {
         Head::Chunked(count) => {
             let mut joined = String::new();
             for i in 1..=count {
-                let account = chunk_account(i);
+                let account = chunk_account(vault.head, i);
                 let piece = read_item(&account)?.ok_or_else(|| {
                     AppError::AuthFailed(format!(
                         "the credential vault is stored in {count} parts and `{account}` is \
@@ -207,7 +236,7 @@ fn read_vault_from_store() -> Result<HashMap<String, String>> {
              until it can be parsed."
         ))
     })?;
-    *CHUNKS_ON_DISK.lock().unwrap_or_else(|p| p.into_inner()) = chunks;
+    vault.set_chunks(chunks);
     Ok(map)
 }
 
@@ -221,12 +250,12 @@ fn read_vault_from_store() -> Result<HashMap<String, String>> {
 ///
 /// Stale pieces from a larger previous write are deleted, so a vault that shrinks does
 /// not leave secrets sitting in items nothing points at.
-fn write_vault_to_store(map: &HashMap<String, String>) -> Result<()> {
+fn write_vault_to_store(vault: &Vault, map: &HashMap<String, String>) -> Result<()> {
     let json = serde_json::to_string(map).map_err(|e| AppError::AuthFailed(e.to_string()))?;
-    let previous = *CHUNKS_ON_DISK.lock().unwrap_or_else(|p| p.into_inner());
+    let previous = *vault.chunks_on_disk.lock().unwrap_or_else(|p| p.into_inner());
 
     let written = if fits(&json) {
-        entry_for(VAULT_ACCOUNT)?
+        entry_for(vault.head)?
             .set_password(&json)
             .map_err(|e| AppError::AuthFailed(e.to_string()))?;
         0
@@ -237,11 +266,11 @@ fn write_vault_to_store(map: &HashMap<String, String>) -> Result<()> {
         // fine. The other order would leave a head pointing at pieces that do not
         // exist yet.
         for (i, piece) in pieces.iter().enumerate() {
-            entry_for(&chunk_account(i + 1))?
+            entry_for(&chunk_account(vault.head, i + 1))?
                 .set_password(piece)
                 .map_err(|e| AppError::AuthFailed(e.to_string()))?;
         }
-        entry_for(VAULT_ACCOUNT)?
+        entry_for(vault.head)?
             .set_password(&format!("{CHUNK_MARKER}{}", pieces.len()))
             .map_err(|e| AppError::AuthFailed(e.to_string()))?;
         pieces.len()
@@ -250,21 +279,26 @@ fn write_vault_to_store(map: &HashMap<String, String>) -> Result<()> {
     for i in (written + 1)..=previous {
         // Best effort: a leftover that will not delete is untidy, not incorrect, and
         // failing the whole write over it would be worse than leaving it.
-        let _ = entry_for(&chunk_account(i)).and_then(|e| {
+        let _ = entry_for(&chunk_account(vault.head, i)).and_then(|e| {
             e.delete_credential().map_err(|err| AppError::AuthFailed(err.to_string()))
         });
     }
-    *CHUNKS_ON_DISK.lock().unwrap_or_else(|p| p.into_inner()) = written;
+    vault.set_chunks(written);
     Ok(())
 }
 
-/// Look up one account in the vault, loading it from the store on first use.
-fn read_vault(key: &str) -> Result<Option<String>> {
-    let mut guard = VAULT.lock().unwrap_or_else(|p| p.into_inner());
+/// Look up one account in `vault`, loading it from the store on first use.
+fn read_from(vault: &Vault, key: &str) -> Result<Option<String>> {
+    let mut guard = vault.map.lock().unwrap_or_else(|p| p.into_inner());
     if guard.is_none() {
-        *guard = Some(read_vault_from_store()?);
+        *guard = Some(read_vault_from_store(vault)?);
     }
     Ok(guard.as_ref().expect("vault loaded above").get(key).cloned())
+}
+
+/// Look up one account in the default vault.
+fn read_vault(key: &str) -> Result<Option<String>> {
+    read_from(&VAULT, key)
 }
 
 /// Mutate the vault (loading it on first use) and persist the result. The whole
@@ -280,16 +314,43 @@ fn read_vault(key: &str) -> Result<Option<String>> {
 /// Now a failed write leaves the mirror exactly as the store has it. The caller's
 /// error is then the whole truth: the secret is not saved, and nothing in the process
 /// will pretend otherwise.
-fn mutate_vault(f: impl FnOnce(&mut HashMap<String, String>)) -> Result<()> {
-    let mut guard = VAULT.lock().unwrap_or_else(|p| p.into_inner());
+fn mutate(vault: &Vault, f: impl FnOnce(&mut HashMap<String, String>)) -> Result<()> {
+    let mut guard = vault.map.lock().unwrap_or_else(|p| p.into_inner());
     if guard.is_none() {
-        *guard = Some(read_vault_from_store()?);
+        *guard = Some(read_vault_from_store(vault)?);
     }
     let mut next = guard.as_ref().expect("vault loaded above").clone();
     f(&mut next);
-    write_vault_to_store(&next)?;
+    write_vault_to_store(vault, &next)?;
     *guard = Some(next);
     Ok(())
+}
+
+fn mutate_vault(f: impl FnOnce(&mut HashMap<String, String>)) -> Result<()> {
+    mutate(&VAULT, f)
+}
+
+// ── The assistant's key — its own vault ────────────────────────────────────────
+
+/// Keep `secret` as the assistant's key for `provider` (`anthropic`, …).
+pub fn save_assistant_key(provider: &str, secret: &str) -> Result<()> {
+    let (provider, secret) = (provider.to_string(), secret.trim().to_string());
+    mutate(&ASSISTANT_VAULT, move |m| {
+        m.insert(provider, secret);
+    })
+}
+
+/// The assistant's key for `provider`, if one is stored.
+pub fn get_assistant_key(provider: &str) -> Result<Option<String>> {
+    read_from(&ASSISTANT_VAULT, provider)
+}
+
+/// Forget the assistant's key for `provider`.
+pub fn delete_assistant_key(provider: &str) -> Result<()> {
+    let provider = provider.to_string();
+    mutate(&ASSISTANT_VAULT, move |m| {
+        m.remove(&provider);
+    })
 }
 
 // ── Per-account credential (OAuth tokens, refresh tokens, Jira/Linear keys) ─────
@@ -417,7 +478,7 @@ mod tests {
     // never touch the OS keychain — the parsing / priority logic is exercised
     // without a live store. Each test uses unique keys to stay parallel-safe.
     fn seed(pairs: &[(&str, &str)]) {
-        let mut g = VAULT.lock().unwrap_or_else(|p| p.into_inner());
+        let mut g = VAULT.map.lock().unwrap_or_else(|p| p.into_inner());
         let m = g.get_or_insert_with(HashMap::new);
         for (k, v) in pairs {
             m.insert((*k).to_string(), (*v).to_string());
@@ -490,6 +551,31 @@ mod tests {
         assert!(pieces.len() > 1);
         assert!(pieces.iter().all(|p| fits(p)));
         assert_eq!(pieces.concat(), json);
+    }
+
+    // ── Named vaults ──
+
+    #[test]
+    fn two_vaults_never_share_a_piece() {
+        // `credentials.1` is the default vault's first piece; the assistant's must be elsewhere.
+        assert_eq!(chunk_account(VAULT_ACCOUNT, 1), "credentials.1");
+        assert_eq!(chunk_account(ASSISTANT_VAULT_ACCOUNT, 1), "credentials.assistant.1");
+        for i in 0..50 {
+            assert_ne!(chunk_account(VAULT_ACCOUNT, i), chunk_account(ASSISTANT_VAULT_ACCOUNT, i));
+            assert_ne!(chunk_account(VAULT_ACCOUNT, i), ASSISTANT_VAULT_ACCOUNT);
+        }
+    }
+
+    #[test]
+    fn the_assistant_vault_is_separate_from_the_default_one() {
+        // Seed only the assistant vault's mirror: nothing leaks into the default vault's lookups.
+        {
+            let mut g = ASSISTANT_VAULT.map.lock().unwrap_or_else(|p| p.into_inner());
+            g.get_or_insert_with(HashMap::new).insert("anthropic-test".into(), "sk-ant-test".into());
+        }
+        assert_eq!(get_assistant_key("anthropic-test").unwrap().as_deref(), Some("sk-ant-test"));
+        seed(&[]);
+        assert_eq!(get("anthropic-test", "").unwrap(), None);
     }
 
     #[test]

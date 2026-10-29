@@ -32,6 +32,9 @@ single `use arbor_fs::prelude::*;`). Operations are grouped by verb-domain:
   empty), backed by `trash::os_limited` (Windows/Linux) or `~/.Trash` (macOS).
 - **`zip`** — compress several sources into one archive; extract with zip-slip
   sanitisation.
+- **`unzip_limited`** — extract an archive you do not trust (a download): a
+  hostile name or a symlink fails the run, entry-count/size caps are enforced
+  while inflating, optional shared-root strip.
 - **`roots`** — quick-access roots (user dirs + drives + WSL distros) and
   per-drive storage usage (Overview dashboard).
 - **`size`** — recursive directory size + multi-selection totals.

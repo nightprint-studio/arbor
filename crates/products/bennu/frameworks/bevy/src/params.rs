@@ -136,11 +136,7 @@ fn collect(
         // The data / filter pair. `Single` and `Populated` are the same shape with a different
         // emptiness rule, which is a run condition rather than an access.
         "Query" | "Populated" | "Single" => {
-            if let Some(data) = args.first() {
-                let filters = args.get(1).map(|f| filters_of(f, param, out)).unwrap_or_default();
-                let opaque = args.get(1).is_some_and(|f| f.contains("Or<") || f.contains("Or <"));
-                query_data(data, param, &filters, opaque, out);
-            }
+            query_param(args.first().copied(), args.get(1).copied(), param, out);
         }
         "Res" | "NonSend" => resource(args.last(), param, AccessKind::ResourceRead, out),
         "ResMut" | "NonSendMut" => resource(args.last(), param, AccessKind::ResourceWrite, out),
@@ -214,11 +210,7 @@ fn wrapped(effect: wrappers::Effect, args: &[&str], param: &str, out: &mut Param
             resource(first.map(messages).as_ref(), param, AccessKind::ResourceWrite, out);
         }
         Effect::QueryLike => {
-            if let Some(data) = first {
-                let filters = args.get(1).map(|f| filters_of(f, param, out)).unwrap_or_default();
-                let opaque = args.get(1).is_some_and(|f| f.contains("Or<"));
-                query_data(data, param, &filters, opaque, out);
-            }
+            query_param(first, args.get(1).copied(), param, out);
         }
     }
 }
@@ -247,6 +239,59 @@ fn resource(
         opaque_filter: false,
         param: param.to_string(),
     });
+}
+
+/// A whole `Query<D, F>`: the data it reads or writes, qualified by everything the query itself
+/// says about which entities it matches.
+///
+/// Two things beyond the explicit `F` narrow a query, and both are read here so every access of the
+/// query carries them:
+///
+/// * a non-`Option` `&T` / `&mut T` / `Mut<T>` / `Ref<T>` in `D` **requires** `T`. Bevy treats it as
+///   an implicit `With<T>`, so `Query<(&mut A, &mut B)>` is disjoint from
+///   `Query<&mut B, Without<A>>` — not conflicting, however alike the `B` accesses look.
+/// * `Added<T>` / `Changed<T>` read `T`'s ticks, and that read belongs to this query: it is subject
+///   to the same filters and to the same `Or<…>` opacity as the data, not a free-floating read.
+fn query_param(data: Option<&str>, filter: Option<&str>, param: &str, out: &mut ParamOutcome) {
+    let Some(data) = data else { return };
+    let (mut filters, ticked) = filter.map(filters_of).unwrap_or_default();
+    let opaque = filter.is_some_and(|f| f.contains("Or<") || f.contains("Or <"));
+    for required in required_by(data) {
+        let with = Filter::With(required);
+        if !filters.contains(&with) {
+            filters.push(with);
+        }
+    }
+    query_data(data, param, &filters, opaque, out);
+    for target in ticked {
+        out.accesses.push(Access {
+            target,
+            kind: AccessKind::ComponentRead,
+            filters: filters.clone(),
+            opaque_filter: opaque,
+            param: param.to_string(),
+        });
+    }
+}
+
+/// The components a query's data cannot be matched without: its top-level, non-optional borrows.
+fn required_by(data: &str) -> Vec<String> {
+    tuple_parts(data)
+        .iter()
+        .filter_map(|part| {
+            let part = part.trim();
+            if let Some(rest) = part.strip_prefix('&') {
+                let rest = strip_lifetime(rest);
+                return Some(type_key(rest.strip_prefix("mut ").unwrap_or(rest)));
+            }
+            let (head, args) = head_and_args(part);
+            match head.as_str() {
+                "Mut" | "Ref" => args.iter().find(|a| !is_lifetime(a)).map(|a| type_key(a)),
+                _ => None,
+            }
+        })
+        .filter(|t| !t.is_empty())
+        .collect()
 }
 
 /// The `D` of a `Query<D, F>`: every component it reads or writes.
@@ -297,10 +342,11 @@ fn query_data(
     }
 }
 
-/// The `F` of a `Query<D, F>` — and the reads that hide in it: `Changed<T>` and `Added<T>` are
-/// filters that consult `T`'s change ticks, which is a read.
-fn filters_of(filter: &str, param: &str, out: &mut ParamOutcome) -> Vec<Filter> {
+/// The `F` of a `Query<D, F>`, and the components whose change ticks it consults: `Changed<T>` and
+/// `Added<T>` are filters that read `T`, which [`query_param`] turns into an access.
+fn filters_of(filter: &str) -> (Vec<Filter>, Vec<String>) {
     let mut filters = Vec::new();
+    let mut ticked = Vec::new();
     for part in tuple_parts(filter) {
         let (head, args) = head_and_args(part.trim());
         let arg = args.first().map(|a| type_key(a)).unwrap_or_default();
@@ -310,17 +356,11 @@ fn filters_of(filter: &str, param: &str, out: &mut ParamOutcome) -> Vec<Filter> 
         match head.as_str() {
             "With" => filters.push(Filter::With(arg)),
             "Without" => filters.push(Filter::Without(arg)),
-            "Added" | "Changed" => out.accesses.push(Access {
-                target: arg,
-                kind: AccessKind::ComponentRead,
-                filters: Vec::new(),
-                opaque_filter: false,
-                param: param.to_string(),
-            }),
+            "Added" | "Changed" => ticked.push(arg),
             _ => {}
         }
     }
-    filters
+    (filters, ticked)
 }
 
 // ── Type-expression mechanics ────────────────────────────────────────────────

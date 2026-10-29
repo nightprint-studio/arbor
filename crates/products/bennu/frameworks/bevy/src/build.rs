@@ -84,22 +84,7 @@ pub fn build(sources: &[ScannedFile], shaders: &[ScannedFile]) -> BevyModel {
     collect_systems(&scans, &custom, &registrations, &mut model);
     collect_inserts(&scans, &mut model);
 
-    let mut order = OrderIndex::default();
-    for (_, scan) in &scans {
-        for reg in &scan.registrations {
-            for name in &reg.systems {
-                for other in &reg.ordered_with {
-                    order.add(name, other);
-                }
-                if reg.chained {
-                    for peer in &reg.systems {
-                        order.add(name, peer);
-                    }
-                }
-            }
-        }
-    }
-    model.conflicts = conflict::detect(&model.systems, &order);
+    model.conflicts = conflict::detect(&model.systems, &order_index(&scans));
 
     // Last, because it needs both halves: the materials collected above and the shaders the host
     // walked. A shader outside an `assets/` directory is skipped rather than matched by name —
@@ -115,6 +100,33 @@ pub fn build(sources: &[ScannedFile], shaders: &[ScannedFile]) -> BevyModel {
         .collect();
     model.shaders = crate::shader_link::link(&model.materials, &model.uniforms, &files);
     model
+}
+
+/// What every `add_systems` call said about order, as one index.
+///
+/// `.chain()` is a run of edges in the order the tuple lists the systems; `.before` / `.after` are
+/// single edges. Closing them transitively is [`OrderIndex`]'s job, so that `a.before(b)` plus
+/// `b.before(c)` is not reported as an unordered `a`/`c`.
+fn order_index(scans: &[(&ScannedFile, FileScan)]) -> OrderIndex {
+    let mut order = OrderIndex::default();
+    for (_, scan) in scans {
+        for reg in &scan.registrations {
+            for (first, later) in &reg.edges {
+                order.add_edge(first, later);
+            }
+            if reg.chained {
+                for pair in reg.systems.windows(2) {
+                    order.add_edge(&pair[0], &pair[1]);
+                }
+            }
+            for name in &reg.systems {
+                for other in &reg.ordered_with {
+                    order.add(name, other);
+                }
+            }
+        }
+    }
+    order
 }
 
 /// Every site that puts a declaration into the world, with the function it happens in.
@@ -247,6 +259,8 @@ fn collect_materials(sources: &[ScannedFile], masked: &[String], model: &mut Bev
 struct Registered {
     schedules: Vec<String>,
     sets: Vec<String>,
+    /// Any registration of it had a `.run_if(…)`.
+    conditional: bool,
 }
 
 fn index_registrations(scans: &[(&ScannedFile, FileScan)]) -> HashMap<String, Registered> {
@@ -263,6 +277,7 @@ fn index_registrations(scans: &[(&ScannedFile, FileScan)]) -> HashMap<String, Re
                         entry.sets.push(set.clone());
                     }
                 }
+                entry.conditional |= reg.conditional.contains(name);
             }
         }
     }
@@ -323,6 +338,7 @@ fn collect_systems(
                 exclusive,
                 schedules: registered.map(|r| r.schedules.clone()).unwrap_or_default(),
                 sets: registered.map(|r| r.sets.clone()).unwrap_or_default(),
+                conditional: registered.is_some_and(|r| r.conditional),
             });
         }
     }

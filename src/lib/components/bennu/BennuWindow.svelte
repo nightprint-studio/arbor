@@ -25,9 +25,11 @@
     TerminalSquare, Hammer, 
     Library, Play, ListTodo, 
     TextCursorInput, Beaker, Bug, Braces, 
-    Cog, GitBranch, Database,
+    Cog, GitBranch, Database, Sparkles,
   } from 'lucide-svelte';
   import BennuPicusPanel from './picus/BennuPicusPanel.svelte';
+  import BennuAssistantPanel from './assistant/BennuAssistantPanel.svelte';
+  import { openUi, type UiHost } from './assistant/assistant-ui-targets';
   import { bennuPicusStore } from '$lib/stores/bennu/picus.svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -132,6 +134,7 @@
   import BennuRunConfigModal from './BennuRunConfigModal.svelte';
   import BennuBreakpointsModal from './BennuBreakpointsModal.svelte';
   import BennuSsrModal from './BennuSsrModal.svelte';
+  import BennuNewProjectModal from './new-project/BennuNewProjectModal.svelte';
   import BennuNamingFixModal from './BennuNamingFixModal.svelte';
   import { bennuNamingStore } from '$lib/stores/bennu/naming.svelte';
   import BennuRenameModal from './BennuRenameModal.svelte';
@@ -188,7 +191,11 @@
   import { listen } from '@tauri-apps/api/event';
   import { bennuTestStore } from '$lib/stores/bennu/tests.svelte';
   import { bennuCargoTestStore } from '$lib/stores/bennu/cargo-tests.svelte';
-  import { activeTestStore } from '$lib/stores/bennu/test-runner.svelte';
+  import { activeTestRoot, activeTestStore, testsAreCargo } from '$lib/stores/bennu/test-runner.svelte';
+  import { moduleFocusStore } from '$lib/stores/bennu/module-focus.svelte';
+  import { moduleChoice, type ModuleRef } from './project-modules';
+  import type { ModuleKind } from '$lib/ipc/bennu/modules';
+  import BennuModulePicker from './BennuModulePicker.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { projectHealthStore } from '$lib/stores/bennu/project-health.svelte';
   import { fileOwnerStore } from '$lib/stores/bennu/file-owner.svelte';
@@ -211,6 +218,7 @@
   import { discoverCargoTests } from '$lib/ipc/bennu/cargo-tests';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { bennuDtoLabStore } from '$lib/stores/bennu/dtolab.svelte';
+  import { bennuAssistantStore } from '$lib/stores/bennu/assistant.svelte';
 
   // Which file the editor is on, announced to the plugins as `bennu:file_opened`.
   //
@@ -560,9 +568,13 @@
   // because three other surfaces want it before that panel is ever opened: the run-configuration
   // editor's crate and target pickers, ▶ looking for the sole binary, and the palette. Cheap — it
   // reads manifests, never `cargo metadata`.
+  //
+  // Of the Cargo MODULE the tool windows act on — the project root for a Rust project, `src-tauri`
+  // for a Tauri one. A string derived on purpose: the target object is rebuilt on every tab switch.
+  const cargoRoot = $derived(moduleFocusStore.targetFor('Cargo')?.toolRoot ?? null);
   $effect(() => {
-    const root = projectStore.project?.root ?? null;
-    if (root && projectStore.isCargo) {
+    const root = cargoRoot;
+    if (root) {
       void bennuCargoStore.load(root);
     } else {
       bennuCargoStore.reset();
@@ -594,6 +606,26 @@
     if (busyIndexing) return;
     return afterPaint(() => void bennuDiagnosticsStore.refresh(root), 250);
   });
+
+  // ── Module-scoped palette commands ───────────────────────────────────────────
+  /** The picker asking "which module?" for a palette command, while it is open. */
+  let modulePick = $state<{ title: string; modules: readonly ModuleRef[]; act: (m: ModuleRef) => void } | null>(null);
+
+  /**
+   * Run `act` on a module of the given ecosystems: straight away when only one applies (a single
+   * module, a pinned one, or the one holding the active file), else after the user picks from a
+   * filterable list. Nothing happens when the workspace has none.
+   */
+  function withModule(kinds: ModuleKind[], title: string, act: (m: ModuleRef) => void) {
+    const choice = moduleChoice({
+      refs: projectStore.modulesOf(...kinds),
+      selectedId: moduleFocusStore.selectedId,
+      activeFile: projectStore.activeFilePath,
+      activeRoot: projectStore.project?.root,
+    });
+    if (choice.ask) modulePick = { title, modules: choice.modules, act };
+    else if (choice.module) act(choice.module);
+  }
 
   // ── Build / Run triggers (mirror the titlebar; shared by keybindings + palette) ─
   /** Ctrl+F9 / palette Build — runs the preferred build type (Maven compile or validation). */
@@ -644,7 +676,7 @@
   // ── Tests ─────────────────────────────────────────────────────────────────────
   /** Run every test in the project (Ctrl+Shift+F5 / palette). */
   function triggerRunAllTests() {
-    const root = projectStore.project?.root;
+    const root = activeTestRoot();
     if (root) void activeTestStore().runAll(root);
   }
 
@@ -687,11 +719,11 @@
    * the whole class runs.
    */
   async function triggerRunTestAtCaret() {
-    const root = projectStore.project?.root;
+    const root = activeTestRoot();
     const file = projectStore.activeFilePath;
     if (!root || !file) return;
     const line = editor?.getCaretLine() ?? 1;
-    if (projectStore.isCargo) {
+    if (testsAreCargo()) {
       await runRustTestAtCaret(root, file, line);
       return;
     }
@@ -720,7 +752,7 @@
   const activeFileHasTests = $derived.by(() => {
     const file = projectStore.activeFilePath;
     if (!file) return false;
-    return projectStore.isCargo
+    return testsAreCargo()
       ? bennuCargoTestStore.testsInFile(file).length > 0
       : bennuTestStore.classesInFile(file).length > 0;
   });
@@ -745,6 +777,7 @@
     showCallHierarchy: () => void;
     showTypeHierarchy: () => void;
     expandMacro: () => void;
+    askAssistantHere: () => void;
     insertAtCursor: (text: string) => void;
     getSelectedText: () => string;
     checkMojibake: () => void;
@@ -778,6 +811,9 @@
 
   // The DTO Lab reads the caret and writes into an open test file through the editor. Bound once:
   // both closures read `editor` when called, so a remounted editor is picked up without re-binding.
+  // The assistant sends the text selected in the editor along with the message.
+  bennuAssistantStore.bindEditor({ selectedText: () => editor?.getSelectedText() ?? '' });
+  bennuAssistantStore.bindUiOpener((target, query) => openUi(bennuUiStore as unknown as UiHost, target, query));
   bennuDtoLabStore.bindEditor({
     caretContext: () => editor?.caretContext() ?? null,
     applyEdits: (edits) => editor?.applyGeneratedEdits(edits),
@@ -955,7 +991,19 @@
   const javaTools = $derived(!projectStore.isCargo && !projectStore.isPlain);
   // Build tool, Tests and Dependencies exist for Maven and Cargo roots only: a plain folder
   // (Node/Angular…) has no manifest behind them, so their rail buttons would open empty panels.
-  const hasProjectTooling = $derived(!projectStore.isPlain);
+  //
+  // Which build tools the WORKSPACE carries, not what the active project's primary kind is: a Tauri
+  // project is Node-first and has a Cargo module in `src-tauri`, and a workspace may hold a Rust
+  // project beside a Java one. Answered from the project and manifest sets only — never the active
+  // file or tab — so a button does not come and go as you edit. With no project open the Maven chrome
+  // keeps its disabled shape, as it always has.
+  const hasMaven = $derived(!projectStore.project || projectStore.hasModule('Maven'));
+  const hasCargo = $derived(projectStore.hasModule('Cargo'));
+  const hasProjectTooling = $derived(hasMaven || hasCargo);
+  /** What Alt+8 opens: the primary kind's tool when the workspace has it, else whichever exists. */
+  const buildToolKey = $derived<'maven' | 'cargo'>(
+    projectStore.isCargo && hasCargo ? 'cargo' : hasMaven ? 'maven' : 'cargo',
+  );
   /** Picus ships with this install (see `bennuPicusStore.probe`). */
   const picusTools = $derived(bennuPicusStore.available);
   // Each project has its own database: switching project drops the previous one's connection from
@@ -1035,9 +1083,11 @@
    * A Cargo workspace does discover too, and does not wait: the Java semantic index is not
    * building on one, so there is nothing to race.
    */
+  const testsRoot = $derived(activeTestRoot());
+  const testsCargo = $derived(testsAreCargo());
   $effect(() => {
-    const root = projectStore.project?.root ?? null;
-    const cargo = projectStore.isCargo;
+    const root = testsRoot;
+    const cargo = testsCargo;
     const busyIndexing = bennuIndexStore.indexing;
     if (!root || projectStore.isDemo || (!cargo && busyIndexing)) return;
     // The walk parses every source file: the heaviest thing a switch starts, so it goes last.
@@ -1218,17 +1268,20 @@
     { id: 'terminal', tooltip: 'Terminal', shortcut: 'Alt+F12', icon: TerminalSquare, active: bennuUiStore.bottomPanel === 'terminal', onclick: () => bennuUiStore.toggleBottom('terminal') },
     ...pluginRail('left', 'bottom'),
   ]);
-  /** The build tool's own window — Maven's goals or Cargo's crates. One slot, because a project is
-   *  one or the other, and Alt+8 means "the build tool" either way. */
-  const buildToolRail = $derived<ActivityRailButton>(
-    projectStore.isCargo
-      ? { id: 'cargo', tooltip: 'Cargo — the crates, and what you can run on them', shortcut: 'Alt+8', icon: Cog, active: bennuUiStore.rightPanel === 'cargo', onclick: () => bennuUiStore.toggleRight('cargo') }
-      : { id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: MavenIcon, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') },
-  );
+  /** The build tools' own windows — one button per ecosystem the workspace carries. Alt+8 means "the
+   *  build tool" and goes to the primary kind's (see {@link buildToolKey}). */
+  const buildToolRails = $derived<ActivityRailButton[]>([
+    ...(hasMaven
+      ? [{ id: 'maven', tooltip: 'Maven', shortcut: buildToolKey === 'maven' ? 'Alt+8' : undefined, icon: MavenIcon, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') }]
+      : []),
+    ...(hasCargo
+      ? [{ id: 'cargo', tooltip: 'Cargo — the crates, and what you can run on them', shortcut: buildToolKey === 'cargo' ? 'Alt+8' : undefined, icon: Cog, active: bennuUiStore.rightPanel === 'cargo', onclick: () => bennuUiStore.toggleRight('cargo') }]
+      : []),
+  ]);
   const rightTopRaw = $derived<ActivityRailButton[]>([
     ...(hasProjectTooling
       ? [
-          buildToolRail,
+          ...buildToolRails,
           // The CATALOGUE of tests, not the runs — those are tabs of the Run console. Present on both
           // ecosystems: a Cargo workspace enumerates its `#[test]`s exactly as a Maven project does, and
           // the panel behind this button is the per-ecosystem one.
@@ -1259,6 +1312,9 @@
     ...(javaTools && picusTools
       ? [{ id: 'picus', tooltip: 'Database — check entities and native queries against a Picus connection', shortcut: 'Alt+D', icon: Database, active: bennuUiStore.rightPanel === 'picus', onclick: () => bennuUiStore.toggleRight('picus') }]
       : []),
+    // The assistant. A design preview for now — it needs nothing from the project, so it is offered
+    // wherever the right dock is.
+    { id: 'assistant', tooltip: 'Assistant — chat and agent', shortcut: 'Alt+A', icon: Sparkles, active: bennuUiStore.rightPanel === 'assistant', onclick: () => bennuUiStore.toggleRight('assistant') },
     ...pluginRail('right', 'top'),
   ]);
   // Forms drives the BOTTOM dock (wide, horizontal data), not a side panel — its toggle sits
@@ -1312,6 +1368,8 @@
   // A panel left open from the previous project would then have no toggle anywhere. Close those.
   $effect(() => {
     const java = javaTools;
+    const maven = hasMaven;
+    const cargo = hasCargo;
     const tooling = hasProjectTooling;
     const jsp = jspTools;
     const dtoLab = dtoLabTools;
@@ -1326,7 +1384,14 @@
         // `i18n` is in both branches and needs no capability gate: it has no rail icon to lose, and
         // whether it applies is a question about the open FILE rather than about the project — a
         // fulcrum content tree can sit in a Maven repo as easily as in a Cargo one.
-        right: java ? ['maven', 'tests', 'ast', 'i18n', ...(picus ? ['picus' as const] : [])] : tooling ? ['cargo', 'tests', 'i18n'] : ['i18n'],
+        right: [
+          'i18n', 'assistant',
+          ...(maven ? ['maven' as const] : []),
+          ...(cargo ? ['cargo' as const] : []),
+          ...(tooling ? ['tests' as const] : []),
+          ...(java ? ['ast' as const] : []),
+          ...(java && picus ? ['picus' as const] : []),
+        ],
         bottom: [
           // `hierarchy` survives every switch: it is opened by an action about the caret rather than
           // by a rail button, so there is no icon that could disappear from under it, and its own
@@ -1370,7 +1435,8 @@
   // rendered document) is the kind of thing 200px cannot show, or the plugin would have
   // written a list.
   const wideRight  = $derived(
-    bennuUiStore.rightPanel === 'i18n' || activePluginView !== null || rightPluginPanel !== null,
+    bennuUiStore.rightPanel === 'i18n' || bennuUiStore.rightPanel === 'assistant'
+      || activePluginView !== null || rightPluginPanel !== null,
   );
   const showBottom = $derived(bennuUiStore.bottomPanel !== null);
   // A job's output was opened from the (shared) Jobs overlay — the shared uiStore drives it, exactly
@@ -1658,6 +1724,10 @@
         action: () => run(() => void editor?.optimizeImportsInBuffer()), when: isJava },
       // What a macro expands to. Recursive — the server has no single-step form — and read-only,
       // because what comes back is text rather than a file it knows.
+      // The assistant's margin mark, from the keyboard: what it offers depends on the selection, a problem
+      // on the line, or the declaration the caret is on.
+      { id: 'assistant-here', title: 'Ask the assistant about this…', icon: 'Sparkles',
+        action: () => run(() => editor?.askAssistantHere()), when: !!path },
       { id: 'expandmacro', title: 'Expand macro', icon: 'Wand2', shortcut: 'Alt+Shift+M',
         action: () => run(() => editor?.expandMacro()), when: isLspFile(path) },
       { id: 'lsp-restart', title: 'Restart language server', icon: 'RotateCw',
@@ -1738,7 +1808,7 @@
       { id: 'i18npanel', title: 'Toggle i18n panel', icon: 'Languages', shortcut: 'Alt+Shift+I',
         action: () => run(() => bennuUiStore.toggleRight('i18n')), when: isI18nBundle(path) },
       { id: 'runpanel',  title: 'Toggle Run',       icon: 'Play',        shortcut: 'Alt+R', action: () => run(() => bennuUiStore.toggleBottom('run')), when: true },
-      { id: 'tests',     title: 'Toggle Tests',     icon: 'JUnit',       shortcut: 'Alt+5', action: () => run(() => bennuUiStore.toggleRight('tests')), when: javaTools },
+      { id: 'tests',     title: 'Toggle Tests',     icon: 'JUnit',       shortcut: 'Alt+5', action: () => run(() => bennuUiStore.toggleRight('tests')), when: hasProjectTooling },
       { id: 'problems',  title: 'Toggle Problems',  icon: 'AlertTriangle',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
       { id: 'todos',     title: 'Toggle TODO',      icon: 'ListTodo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
       { id: 'changes',   title: 'Git: show changes', icon: 'GitBranch', shortcut: 'Alt+Shift+C', action: () => run(() => bennuUiStore.toggleBottom('changes')), when: bennuGitStatusStore.inRepo },
@@ -1747,12 +1817,14 @@
       // panel toggles — and in the palette, because it is opened exactly when something is
       // wrong and the hamburger is one more thing to remember.
       { id: 'pluginlogs', title: 'Toggle Plugin Logs', icon: 'ScrollText',    action: () => run(() => bennuUiStore.togglePluginLogs()), when: true },
-      { id: 'maven',     title: 'Toggle Maven',     icon: 'Maven',       shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: javaTools },
+      { id: 'maven',     title: 'Toggle Maven',     icon: 'Maven',       shortcut: buildToolKey === 'maven' ? 'Alt+8' : undefined, action: () => run(() => bennuUiStore.toggleRight('maven')), when: hasMaven },
       { id: 'picus',     title: 'Toggle Database (Picus)', icon: 'Database', shortcut: 'Alt+D', action: () => run(() => bennuUiStore.toggleRight('picus')), when: javaTools && picusTools },
-      { id: 'cargo',     title: 'Toggle Cargo',    icon: 'Cog',         shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('cargo')), when: projectStore.isCargo },
+      { id: 'cargo',     title: 'Toggle Cargo',    icon: 'Cog',         shortcut: buildToolKey === 'cargo' ? 'Alt+8' : undefined, action: () => run(() => bennuUiStore.toggleRight('cargo')), when: hasCargo },
       // Runs the real `cargo add`. In the View section beside the Cargo window because that is where
       // it is otherwise reached from, and gated on the ecosystem: there is nothing to add to a pom.
-      { id: 'cargoadd',  title: 'Add dependency… (cargo add)', icon: 'Library', action: () => run(() => bennuUiStore.openCargoAdd()), when: projectStore.isCargo },
+      { id: 'cargoadd',  title: 'Add dependency… (cargo add)', icon: 'Library',
+        action: () => run(() => withModule(['Cargo'], 'Add dependency', (m) => { moduleFocusStore.select(m.id); bennuUiStore.openCargoAdd(); })), when: hasCargo },
+      { id: 'assistant', title: 'Toggle Assistant', icon: 'Sparkles', shortcut: 'Alt+A', action: () => run(() => bennuUiStore.toggleRight('assistant')), when: true },
       { id: 'ast',       title: 'Toggle Trees — syntax and model', icon: 'Braces',    shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('ast')), when: javaTools },
       { id: 'ssr',       title: 'Structural search / replace…', icon: 'Search', shortcut: 'Ctrl+Shift+M', action: () => run(() => bennuUiStore.openSsr()), when: javaTools },
       // The framework catalogs. Palette-only by design (see `framework-catalogs.ts`) and gated
@@ -1856,16 +1928,16 @@
         title: `Cargo: ${c.label} the workspace`,
         icon: 'Cog',
         action: () =>
-          run(() => {
-            const root = projectStore.project?.root;
-            if (!root) return;
-            void bennuRunStore.runCargoCommand(
-              root,
-              { ...emptyCargoInvocation(c.id), workspace: true },
-              `${c.id} workspace`,
-            );
-          }),
-        when: idle && projectStore.isCargo,
+          run(() =>
+            withModule(['Cargo'], `Cargo: ${c.label}`, (m) => {
+              moduleFocusStore.select(m.id);
+              void bennuRunStore.runCargoCommand(
+                m.toolRoot,
+                { ...emptyCargoInvocation(c.id), workspace: true },
+                `${c.id} workspace`,
+              );
+            })),
+        when: idle && hasCargo,
       })),
       // Tests. Every one of these is also a button in the panel — but the panel has to be
       // open to press one, and the point of the palette is to reach a verb from wherever you
@@ -1905,6 +1977,7 @@
           }))
       : [];
     const appItems = [
+      { id: 'newproject', title: 'New Project…', icon: 'FolderPlus', shortcut: 'Ctrl+Shift+P', action: () => run(() => bennuUiStore.openNewProject()), when: true },
       { id: 'workspaces', title: 'Manage workspaces…', icon: 'FolderTree', action: () => run(() => bennuUiStore.openWorkspaceManager()), when: true },
       { id: 'newworkspace', title: 'New workspace…', icon: 'FolderTree',
         action: () => run(async () => { await workspacesStore.create('New workspace'); bennuUiStore.openWorkspaceManager(); }), when: true },
@@ -2285,6 +2358,9 @@
       e.preventDefault(); bennuUiStore.openSsr(); return;
     }
 
+    // New Project wizard (Ctrl+Shift+P) — available with or without a project open.
+    if (mod && e.shiftKey && !e.altKey && isKey(e, 'p')) { e.preventDefault(); bennuUiStore.openNewProject(); return; }
+
     // Workspace manager (Ctrl+Shift+W) — create / switch / manage named workspaces.
     if (mod && e.shiftKey && !e.altKey && isKey(e, 'w')) { e.preventDefault(); bennuUiStore.openWorkspaceManager(); return; }
 
@@ -2433,7 +2509,7 @@
       if (isKey(e, '6')) { e.preventDefault(); bennuUiStore.toggleBottom('problems'); return; }
       // Tests (Alt+5) — the CATALOGUE, on the right rail. A test RUN is a tab of the Run
       // console; this is where you go to start one. Java-only, like its rail icon.
-      if (isKey(e, '5') && javaTools) { e.preventDefault(); bennuUiStore.toggleRight('tests'); return; }
+      if (isKey(e, '5') && hasProjectTooling) { e.preventDefault(); bennuUiStore.toggleRight('tests'); return; }
       if (isKey(e, '7')) { e.preventDefault(); bennuUiStore.toggleBottom('todos'); return; }
       if (isKey(e, '0')) { e.preventDefault(); bennuUiStore.toggleBottom('build'); return; }
       // Both ecosystems, matching their rail icons: the Dependencies panel answers for a Cargo
@@ -2442,6 +2518,8 @@
       // The Run console. A letter and not a digit because IntelliJ's Alt+4 is already Endpoints
       // here, and moving an existing tool's shortcut to make room would cost more than it buys.
       if (isKey(e, 'r')) { e.preventDefault(); bennuUiStore.toggleBottom('run'); return; }
+      // The assistant — a letter for the same reason as Run: the digits are taken.
+      if (isKey(e, 'a')) { e.preventDefault(); bennuUiStore.toggleRight('assistant'); return; }
       // The Java-only tools. Gated on `javaTools` for the same reason their rail icons and
       // palette entries are: on a Cargo project the shortcut would open a panel that can
       // only be empty, and whose toggle is nowhere on screen to close it again.
@@ -2459,7 +2537,7 @@
       // because a Cargo project has one too.
       if (isKey(e, '8') && hasProjectTooling) {
         e.preventDefault();
-        bennuUiStore.toggleRight(projectStore.isCargo ? 'cargo' : 'maven');
+        bennuUiStore.toggleRight(buildToolKey);
         return;
       }
       /*
@@ -2642,7 +2720,7 @@
             <!-- The catalogue is per-ecosystem: a Rust test is identified by crate + target +
                  module + name, which is four levels the Java panel has no columns for. -->
             {#if bennuUiStore.rightPanel === 'tests'}
-              {#if projectStore.isCargo}<BennuCargoTestsPanel />{:else}<BennuTestsCatalogPanel />{/if}
+              {#if testsCargo}<BennuCargoTestsPanel />{:else}<BennuTestsCatalogPanel />{/if}
             {/if}
             {#if bennuUiStore.rightPanel === 'ast'}
               <SyntaxTreePanel
@@ -2661,6 +2739,7 @@
             <!-- Mounted only while shown: it brings Picus's backend up and reads a schema, which is
                  work for someone looking at it. -->
             {#if bennuUiStore.rightPanel === 'picus' && picusTools}<BennuPicusPanel />{/if}
+            {#if bennuUiStore.rightPanel === 'assistant'}<BennuAssistantPanel />{/if}
             <!-- A plugin's own view, mounted with the FULL form renderer — so an `embed`
                  viewport, a split layout and live parameter fields all work here exactly as
                  they do in a modal, minus the modal. -->
@@ -2736,6 +2815,10 @@
 
 {#if bennuUiStore.ssrOpen}
   <BennuSsrModal onClose={() => bennuUiStore.closeSsr()} />
+{/if}
+
+{#if bennuUiStore.newProjectOpen}
+  <BennuNewProjectModal onClose={() => bennuUiStore.closeNewProject()} />
 {/if}
 
 <!-- Open from the moment the fix is asked for, not from the moment it finishes: on a real project
@@ -2896,10 +2979,20 @@
 
 <!-- Mounted by the window rather than by the Cargo panel: it is reachable from the palette, and the
      panel it is launched from need not be open for that. -->
-{#if bennuUiStore.cargoAddOpen && projectStore.project && projectStore.isCargo}
+{#if bennuUiStore.cargoAddOpen && cargoRoot}
   <BennuCargoAddModal
-    root={projectStore.project.root}
+    root={cargoRoot}
     onClose={() => bennuUiStore.closeCargoAdd()}
+  />
+{/if}
+
+<!-- Which module a palette command acts on, when more than one could (see `withModule`). -->
+{#if modulePick}
+  <BennuModulePicker
+    title={modulePick.title}
+    modules={modulePick.modules}
+    onPick={(m) => { const act = modulePick?.act; modulePick = null; act?.(m); }}
+    onClose={() => (modulePick = null)}
   />
 {/if}
 

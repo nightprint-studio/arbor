@@ -51,6 +51,9 @@ mod memory_report;
 // `project` because it is fed by the same write paths: a save, a rename, a change
 // detected on disk.
 mod history;
+// The built-in AI assistant: its HTTP transport, the tools backed by Bennu's own handlers, the
+// conversations on disk and the run each message starts. The loop and the rules are `bennu-assistant`.
+mod assistant;
 // Deleting project files, and taking it back — the two halves of one operation, built on
 // the history that makes the second half possible.
 mod file_ops;
@@ -190,6 +193,9 @@ mod new_folder;
 // roots AND the parent's `<modules>` — the last of which is what separates a module from a
 // directory that looks like one.
 mod new_module;
+// The New Project wizard: generators (Maven/Gradle/web apps, Spring, Quarkus, Cargo, Node CLIs), the
+// staged run behind Create, and the allow-listed network behind the remote ones.
+mod new_project;
 // Copy/paste in the project tree: `bennu_paste_plan` (where each file would land, and what is in
 // the way) + `bennu_paste_files`. A Java file has its `package` rewritten to where it lands — and,
 // when the copy leaves its old package behind, the neighbours it referred to by simple name become

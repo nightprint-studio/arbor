@@ -32,4 +32,5 @@ pub mod read;
 pub mod roots;
 pub mod size;
 pub mod trash;
+pub mod unzip_limited;
 pub mod zip;

@@ -189,21 +189,98 @@ export function renderInlineMarkdown(s: string): string {
   return inline(s);
 }
 
+/** What an inline code span names, so a view can colour it the way the editor colours that thing. */
+export type InlineCodeKind = 'annotation' | 'call' | 'type' | 'const' | 'path' | 'number' | 'keyword' | 'ident' | 'other';
+
+const KEYWORDS = new Set([
+  'public', 'private', 'protected', 'static', 'final', 'abstract', 'void', 'class', 'interface', 'enum', 'record',
+  'extends', 'implements', 'return', 'new', 'throws', 'import', 'package', 'fn', 'pub', 'let', 'mut', 'impl', 'struct',
+  'trait', 'async', 'await', 'const', 'use', 'mod', 'self', 'this', 'super', 'null', 'true', 'false',
+  'int', 'long', 'short', 'byte', 'char', 'float', 'double', 'boolean', 'bool', 'String', 'str',
+]);
+
+/**
+ * Classify the text of an inline code span by the shape of what it names. A guess from the text alone —
+ * it never fails, it only declines: anything that is not clearly one thing is `other` and keeps the plain
+ * look, which is better than a wrong colour.
+ */
+export function inlineCodeKind(code: string): InlineCodeKind {
+  const t = code.trim();
+  if (!t || /\s/.test(t.replace(/\(.*\)$/, ''))) return /^@\w/.test(t) ? 'annotation' : 'other';
+  if (/^@[\w.$]+/.test(t)) return 'annotation';
+  if (/\.(java|xml|rs|ts|js|svelte|toml|json|ya?ml|properties|md|html|jsp|sql|kt|gradle|css|lua)$/i.test(t) || /[\\/]/.test(t)) return 'path';
+  if (/^[\w$.]*\w\(.*\)?$/.test(t)) return 'call';
+  if (/^-?\d[\d_.]*[fFlLdD]?$/.test(t)) return 'number';
+  if (KEYWORDS.has(t)) return 'keyword';
+  if (/^[A-Z][A-Z0-9_]{2,}$/.test(t) || /\.[A-Z][A-Z0-9_]{2,}$/.test(t)) return 'const';
+  if (/^[A-Z][\w$]*(<.*>)?(\.[A-Za-z_$][\w$]*)*$/.test(t)) return 'type';
+  if (/^[a-z_$][\w$]*(\.[a-z_$][\w$]*)*$/.test(t)) return 'ident';
+  return 'other';
+}
+
 function inline(s: string): string {
   const inlineCodes: string[] = [];
   // Pull inline-code segments out first — they must NOT be touched by the
   // emoji-shortcode pass (`:foo:` inside backticks should stay literal).
   s = s.replace(/`([^`]+)`/g, (_m, c) => {
-    inlineCodes.push(`<code class="md-inline-code">${esc(c)}</code>`);
+    inlineCodes.push(`<code class="md-inline-code md-ic-${inlineCodeKind(c)}">${esc(c)}</code>`);
     return `\x00IC${inlineCodes.length - 1}\x00`;
   });
   s = replaceEmojiShortcodes(s);
   s = esc(s);
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  s = s.replace(/~~([^~]+)~~/g, '<s>$1</s>');
   s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, '<span class="md-link">$1</span>');
   s = s.replace(/\x00IC(\d+)\x00/g, (_m, i) => inlineCodes[parseInt(i)]);
   return s;
+}
+
+/** One GFM table row split into its cells. Leading and trailing pipes are optional. */
+function tableCells(row: string): string[] {
+  let r = row.trim();
+  if (r.startsWith('|')) r = r.slice(1);
+  if (r.endsWith('|')) r = r.slice(0, -1);
+  return r.split('|').map((c) => c.trim());
+}
+
+/** `| --- | :---: |` — the line under a table's header. */
+const TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+
+/**
+ * Replace each GFM table in `lines` with a placeholder line and push its HTML to `tables`. A table is a
+ * row with at least one pipe, then a rule line, then rows until a line without a pipe.
+ */
+function extractTables(lines: string[], tables: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const head = lines[i];
+    if (head.includes('|') && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1]) && lines[i + 1].includes('-')) {
+      const heads = tableCells(head);
+      const aligns = tableCells(lines[i + 1]).map((c) =>
+        c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : '');
+      let j = i + 2;
+      const rows: string[][] = [];
+      while (j < lines.length && lines[j].includes('|') && lines[j].trim() !== '') {
+        rows.push(tableCells(lines[j]));
+        j++;
+      }
+      const cell = (tag: 'th' | 'td', text: string, n: number) =>
+        `<${tag}${aligns[n] ? ` style="text-align:${aligns[n]}"` : ''}>${inline(text)}</${tag}>`;
+      const html =
+        '<div class="md-table-wrap"><table class="md-table"><thead><tr>' +
+        heads.map((h, n) => cell('th', h, n)).join('') +
+        '</tr></thead><tbody>' +
+        rows.map((r) => '<tr>' + heads.map((_, n) => cell('td', r[n] ?? '', n)).join('') + '</tr>').join('') +
+        '</tbody></table></div>';
+      tables.push(html);
+      out.push(`\x00TBL${tables.length - 1}\x00`);
+      i = j - 1;
+    } else {
+      out.push(head);
+    }
+  }
+  return out;
 }
 
 export function renderMarkdown(md: string): string {
@@ -224,7 +301,7 @@ export function renderMarkdown(md: string): string {
       highlighted = esc(trimmed);
     }
     codeBlocks.push(
-      `<pre class="md-pre language-${effectiveLang || 'text'}"><code class="md-code">${highlighted}</code></pre>`,
+      `<pre class="md-pre language-${effectiveLang || 'text'}" data-lang="${effectiveLang}"><code class="md-code">${highlighted}</code></pre>`,
     );
     return `\x00BLK${codeBlocks.length - 1}\x00`;
   });
@@ -249,7 +326,8 @@ export function renderMarkdown(md: string): string {
   const htmlTags: string[] = [];
   text = extractAllowedTags(text, htmlTags);
 
-  const lines = text.split('\n');
+  const tables: string[] = [];
+  const lines = extractTables(text.split('\n'), tables);
   const out: string[] = [];
   let inUl = false, inOl = false;
 
@@ -262,18 +340,22 @@ export function renderMarkdown(md: string): string {
     const blkM = rawLine.match(/^\x00BLK(\d+)\x00$/);
     if (blkM) { closeList(); out.push(codeBlocks[parseInt(blkM[1])]); continue; }
 
-    const hM = rawLine.match(/^(#{1,3})\s+(.*)/);
-    if (hM) { closeList(); const lvl = hM[1].length; out.push(`<h${lvl} class="md-h${lvl}">${inline(hM[2])}</h${lvl}>`); continue; }
+    const tblM = rawLine.match(/^\x00TBL(\d+)\x00$/);
+    if (tblM) { closeList(); out.push(tables[parseInt(tblM[1])]); continue; }
+
+    const hM = rawLine.match(/^(#{1,6})\s+(.*)/);
+    if (hM) { closeList(); const lvl = hM[1].length; out.push(`<h${lvl} class="md-h${Math.min(lvl, 3)}">${inline(hM[2])}</h${lvl}>`); continue; }
 
     const bqM = rawLine.match(/^>\s?(.*)/);
     if (bqM) { closeList(); out.push(`<blockquote class="md-bq">${inline(bqM[1])}</blockquote>`); continue; }
 
     if (/^[-*_]{3,}$/.test(rawLine.trim())) { closeList(); out.push('<hr class="md-hr" />'); continue; }
 
-    const ulM = rawLine.match(/^[-*]\s+(.*)/);
+    // An indented item stays in the same list — nesting is flattened rather than shown as plain text.
+    const ulM = rawLine.match(/^\s*[-*]\s+(.*)/);
     if (ulM) { if (inOl) { out.push('</ol>'); inOl = false; } if (!inUl) { out.push('<ul class="md-ul">'); inUl = true; } out.push(`<li>${inline(ulM[1])}</li>`); continue; }
 
-    const olM = rawLine.match(/^\d+\.\s+(.*)/);
+    const olM = rawLine.match(/^\s*\d+[.)]\s+(.*)/);
     if (olM) { if (inUl) { out.push('</ul>'); inUl = false; } if (!inOl) { out.push('<ol class="md-ol">'); inOl = true; } out.push(`<li>${inline(olM[1])}</li>`); continue; }
 
     closeList();

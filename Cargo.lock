@@ -949,6 +949,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bennu-assistant"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bennu-be"
 version = "0.3.0"
 dependencies = [
@@ -956,6 +964,7 @@ dependencies = [
  "arbor-core",
  "arbor-exe-icon",
  "arbor-feedback",
+ "arbor-fs",
  "arbor-history",
  "arbor-ipc",
  "arbor-logscan",
@@ -967,6 +976,7 @@ dependencies = [
  "arbor-syntax",
  "base64 0.22.1",
  "bennu-assertj",
+ "bennu-assistant",
  "bennu-bevy",
  "bennu-cargo",
  "bennu-check",
@@ -1016,6 +1026,7 @@ dependencies = [
  "bennu-xml",
  "libc",
  "notify",
+ "regex",
  "reqwest 0.12.28",
  "schemars 1.2.1",
  "serde",

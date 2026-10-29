@@ -30,6 +30,10 @@ import {
   isExternallyModifiedError,
   projectDiagnostics as ipcProjectDiagnostics,
 } from '$lib/ipc/bennu';
+import { projectModules, type ProjectModule } from '$lib/ipc/bennu/modules';
+import {
+  hasEcosystem, modulesFromKind, moduleOfFile, moduleRefs, ofKinds, type ModuleRef,
+} from '$lib/components/bennu/project-modules';
 // Splicing byte-offset edits into a source string — shared with the rename-preview apply, which is
 // where it started.
 import { applyByteEditsChecked } from '$lib/components/bennu/rename-apply';
@@ -200,6 +204,12 @@ function createProjectStore() {
   const sessions = new Map<string, StashedSession>();
   // The workspace member roots (canonical), in switch order. Always includes the active root.
   let workspaceRoots = $state<string[]>([]);
+  // Every build manifest of every workspace project (`bennu_project_modules`), keyed by root. What the
+  // rail and the tool windows read — NOT `project.kind`, which stays the single primary kind that
+  // drives the Java index. A root with no entry yet is represented by its primary kind alone (see
+  // `modulesOfRoot`), so the rail does not flicker while the answer is in flight.
+  let modulesByRoot = $state<Record<string, ProjectModule[]>>({});
+  const moduleLoadSeq = new Map<string, number>();
 
   // Live re-index — one pending debounce timer per edited path. On each edit we
   // reset the path's timer; when it fires we hand the BE the current full text via
@@ -659,7 +669,51 @@ function createProjectStore() {
     workspaceRoots = [...workspaceRoots, root];
     rememberRecent(root);
     loadTreeInto(root);
+    loadModules(root);
     return root;
+  }
+
+  /** The modules of `root`: what the backend said, else what its primary kind implies. */
+  function modulesOfRoot(root: string): readonly ProjectModule[] {
+    const known = modulesByRoot[root];
+    if (known) return known;
+    const info = root === project?.root ? project : sessions.get(root)?.info;
+    return modulesFromKind(info?.kind);
+  }
+
+  /** Every workspace module, flattened. */
+  function allModuleRefs(): ModuleRef[] {
+    // The active project counts even when it is not a workspace member (the demo project is not).
+    const roots = project && !workspaceRoots.includes(project.root) ? [...workspaceRoots, project.root] : workspaceRoots;
+    const byRoot: Record<string, readonly ProjectModule[]> = {};
+    for (const r of roots) byRoot[r] = modulesOfRoot(r);
+    return moduleRefs(roots, byRoot);
+  }
+
+  /** Read `root`'s module list in the background. A failure keeps what is there (or the primary-kind
+   *  fallback): a missing answer must not take tools off the rail. Latest request per root wins. */
+  function loadModules(root: string) {
+    if (isDemo) return;
+    const seq = (moduleLoadSeq.get(root) ?? 0) + 1;
+    moduleLoadSeq.set(root, seq);
+    void projectModules(root).then(
+      (mods) => {
+        if (moduleLoadSeq.get(root) !== seq || !workspaceRoots.includes(root)) return;
+        modulesByRoot = { ...modulesByRoot, [root]: mods };
+      },
+      () => { /* keep the fallback */ },
+    );
+  }
+
+  function forgetModules(root?: string) {
+    if (root === undefined) {
+      modulesByRoot = {};
+      moduleLoadSeq.clear();
+      return;
+    }
+    const { [root]: _gone, ...rest } = modulesByRoot;
+    modulesByRoot = rest;
+    moduleLoadSeq.delete(root);
   }
 
   /** Latest tree request per root — see `loadTreeInto`. */
@@ -1076,6 +1130,26 @@ function createProjectStore() {
     },
     /** True when the workspace holds more than one project (drives showing the switcher UI). */
     get hasWorkspace(): boolean { return workspaceRoots.length > 1; },
+    // ── Build modules ─────────────────────────────────────────────────────────────
+    // The build tools the WORKSPACE carries, independent of the primary `kind`: a Tauri project is
+    // `plain` by kind and still has a Cargo module in `src-tauri`. Rail visibility reads these, so it
+    // is stable — it follows the set of projects and manifests, never the active file or tab.
+    /** Every module of every workspace project, flattened in workspace order. */
+    get workspaceModules(): ModuleRef[] { return allModuleRefs(); },
+    /** Whether any workspace project carries `kind` (Maven, Cargo…). */
+    hasModule(kind: ProjectModule['kind']): boolean { return hasEcosystem(allModuleRefs(), kind); },
+    /** The workspace's modules of the given ecosystems. */
+    modulesOf(...kinds: ProjectModule['kind'][]): ModuleRef[] { return ofKinds(allModuleRefs(), kinds); },
+    /** The module `path` is in, across the whole workspace. */
+    moduleOfFile(path: string | null | undefined): ModuleRef | undefined {
+      return moduleOfFile(allModuleRefs(), path ? canonPath(path) : path);
+    },
+    /** Display name of the workspace project rooted at `root`. */
+    projectNameOf(root: string): string {
+      const info = root === project?.root ? project : sessions.get(root)?.info;
+      return info?.name ?? (root.split('/').pop() || root);
+    },
+
     /** Every open project root. Read by the filesystem watcher, which wants the whole set rather
      *  than one root at a time — see `bennu_watch_roots`. */
     get workspaceRoots(): string[] { return workspaceRoots; },
@@ -1131,7 +1205,9 @@ function createProjectStore() {
         applyProject(info, null, false); // resets the flat state + source cache
         sessions.clear();                // a fresh workspace: drop the previous members
         workspaceRoots = [project!.root];
+        forgetModules();
         loadTreeInto(project!.root);
+        loadModules(project!.root);
         persistWorkspace();
       } catch (err) {
         // MOCK — bennu-be not attached: fall back to the demo so opening the
@@ -1162,6 +1238,7 @@ function createProjectStore() {
       workspaceRoots = [...workspaceRoots, root];
       rememberRecent(root);
       loadTreeInto(root);
+      loadModules(root);
       persistWorkspace();
       return true;
     },
@@ -1221,6 +1298,7 @@ function createProjectStore() {
       const wasActive = project?.root === root;
       sessions.delete(root);
       workspaceRoots = workspaceRoots.filter((r) => r !== root);
+      forgetModules(root);
       // And what its language servers were reporting. The Problems panel groups server
       // diagnostics by root and shows every group it holds, so without this a closed project kept
       // contributing its problems to the one still open — a `cargo check` from a Rust workspace
@@ -1288,6 +1366,9 @@ function createProjectStore() {
       if (isDemo) return;
       const canon = canonPath(root);
       if (project?.root !== canon && !sessions.has(canon)) return;
+      // A manifest appeared, vanished or moved: the module list changes with it (a `src-tauri` added
+      // to a Node project puts Cargo on the rail), and it does not depend on the pom parsing.
+      loadModules(canon);
       let info: ProjectInfo;
       try {
         info = await ipcProjectInfo(canon);
@@ -1314,6 +1395,7 @@ function createProjectStore() {
     clearAll() {
       sessions.clear();
       workspaceRoots = [];
+      forgetModules();
       project = null;
       tree = null;
       panes = emptyPanes;
@@ -1333,6 +1415,7 @@ function createProjectStore() {
     async loadWorkspace(projects: ProjectSession[], active: string) {
       sessions.clear();
       workspaceRoots = [];
+      forgetModules();
       project = null;
       tree = null;
       panes = emptyPanes;

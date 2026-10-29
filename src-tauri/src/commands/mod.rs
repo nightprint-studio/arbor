@@ -14,3 +14,4 @@ pub mod marketplace_commands;
 pub mod recents_commands;
 pub mod mcp_commands;
 pub mod picus_commands;
+pub mod assistant_commands;
